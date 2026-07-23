@@ -211,6 +211,37 @@ section("#26 docs capture mode");
   ok("#26 capture-mode.js NOT bundled into SCORM export", src("src/export.js").indexOf("capture-mode") === -1);
 })();
 
+// ---- #27: docs capture scene DSL — pure schema/validation core ------------------------
+// The scene is data; validateScene is the shared gate the runner and this test both use so
+// a malformed scene fails loudly. (The puppeteer-driven capture itself is browser-verified.)
+section("#27 docs capture scene DSL");
+(function () {
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  ok("#27 still budget is ~200KB", dc.STILL_BUDGET === 200 * 1024);
+  ok("#27 step vocabulary is the fixed set", JSON.stringify(dc.STEP_VERBS) === JSON.stringify(["goto", "select", "hover", "click", "type", "wait", "shoot"]));
+  // a valid still scene passes
+  var good = { id: "s1", covers: ["editor-workspace"], kind: "still", viewport: { width: 1440, height: 900, dpr: 2 }, theme: "dark", steps: [{ do: "wait", ms: 300 }, { do: "shoot", out: "s1.webp" }] };
+  ok("#27 valid scene passes", dc.validateScene(good).ok === true);
+  // missing id / covers / steps / shoot each fail
+  ok("#27 requires id", dc.validateScene({ covers: ["x"], steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 requires non-empty covers (staleness #30)", dc.validateScene({ id: "s", covers: [], steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 requires at least one shoot", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "wait", ms: 1 }] }).ok === false);
+  ok("#27 shoot out must end .webp", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "shoot", out: "a.png" }] }).ok === false);
+  ok("#27 unknown verb fails", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "teleport" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 click/goto need a target", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "click" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 type needs target + text", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "type", target: "#x" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 motion kind rejected until #28", dc.validateScene({ id: "s", covers: ["x"], kind: "motion", steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
+  // resolveOut confines output to docs/assets (no traversal)
+  ok("#27 resolveOut strips path traversal", dc.resolveOut("/repo/docs/assets", "../../evil.webp") === path.join("/repo/docs/assets", "evil.webp"));
+  // the shipped scene is valid and uses the synthetic demo (never real content)
+  var shipped = JSON.parse(src("docs/scenes/structure-panel.json"));
+  ok("#27 shipped structure-panel scene is valid", dc.validateScene(shipped).ok === true);
+  ok("#27 runner loads SAMPLE_DOC only (export-control)", src("tools/docs-capture.js").indexOf("window.SAMPLE_DOC") !== -1 && src("tools/docs-capture.js").indexOf("localStorage") === -1);
+  // the shipped still figure is wired into the guide + the committed asset exists
+  ok("#27 USER-GUIDE references the committed still", src("docs/USER-GUIDE.md").indexOf("docs/assets/structure-panel.webp") !== -1);
+  ok("#27 committed still exists + within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/structure-panel.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
+})();
+
 // ---- #91: docs anti-drift gate — the User Guide must document every palette block ----
 // "Code is truth, docs drift." The block palette (LIBRARY, editor.js) is the single source of
 // truth for what a user can add. This gate extracts every top-level LIBRARY block and asserts

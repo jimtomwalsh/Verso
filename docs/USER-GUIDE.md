@@ -44,6 +44,8 @@ editing — but do keep JSON backups (see §12) since the data lives only in thi
 └───────────┴─────────────────────────────────────────┴─────────────┘
 ```
 
+![The left panel: the Structure outliner (chapters and pages) above the Blocks palette.](docs/assets/structure-panel.webp "The left panel — Structure outliner on top, Blocks palette below.")
+
 - **Toolbar (top).** Light/dark toggle, save status, **Undo/Redo**, **Fit all**, **Comment
   mode**, **Demo (preview)**, and the **Import & Export** menu (CSV import / SCORM export /
   JSON backup). Document tabs sit on the left — you can have several courses open.

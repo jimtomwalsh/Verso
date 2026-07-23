@@ -23,6 +23,13 @@ truth), unlike hand-authored motion which rots silently.
   scene in the same session (hash-ratchet/CI regeneration deliberately deferred).
 - Popout is environment-adaptive: new-tab standalone page in browsers; full-window in-app
   promotion in the WKWebView shell (which swallows `window.open` — see #81).
+- Capture runner (#27): `tools/docs-capture.js` reads a declarative scene (JSON header +
+  step-list) and drives the real editor via Puppeteer in capture mode on `window.SAMPLE_DOC`
+  (synthetic demo only), emitting a budget-checked still WebP to `docs/assets/`. Determinism
+  has a real constraint: the live zoomed-out canvas page-previews are async-scaled and NOT
+  byte-stable, so scenes `clip` to stable editor chrome (panel/palette/toolbar/inspector), not
+  the whole canvas. The runner is a dev tool (needs Puppeteer via NODE_PATH), never shipped in
+  the app; its pure scene-schema core is unit-tested in `tests/run.js`.
 - Capture mode (#26): `src/capture-mode.js` self-activates on `?capture=1` or a preset
   `window.__captureMode` and installs a deterministic clock (monotonic from a fixed epoch),
   a seeded RNG (mulberry32 over `Math.random`), a freeze stylesheet (transitions/animations

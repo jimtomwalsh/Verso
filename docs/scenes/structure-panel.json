@@ -1,0 +1,11 @@
+{
+  "id": "structure-panel",
+  "covers": ["editor-left-panel", "pages-outliner", "block-palette", "src/editor.js#LIBRARY"],
+  "kind": "still",
+  "viewport": { "width": 1440, "height": 900, "dpr": 2 },
+  "theme": "dark",
+  "steps": [
+    { "do": "wait", "ms": 500 },
+    { "do": "shoot", "out": "structure-panel.webp", "clip": { "x": 0, "y": 0, "width": 292, "height": 900 } }
+  ]
+}
