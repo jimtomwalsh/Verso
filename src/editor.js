@@ -2816,8 +2816,13 @@
         body.innerHTML = mdToHtml(md);
         // #25 graceful missing-asset: a broken figure image drops to a caption-only
         // placeholder rather than a broken-image glyph (kept out of the pure renderer).
+        // #28 reduced-motion: a motion figure (animated WebP) carries a poster still in
+        // data-poster; when the reader prefers reduced motion, show the still instead.
+        var reduce = false;
+        try { reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
         var figs = body.querySelectorAll("figure.doc-figure > img.doc-figure__img");
         Array.prototype.forEach.call(figs, function (img) {
+          if (reduce && img.getAttribute("data-poster")) { img.src = img.getAttribute("data-poster"); }
           img.addEventListener("error", function () {
             var fig = img.parentNode; if (fig) fig.classList.add("doc-figure--missing");
           });

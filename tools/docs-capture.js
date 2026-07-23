@@ -30,11 +30,13 @@ var path = require("path");
 // Size budgets (ADR 0004): a still stays lean so the docs panel opens fast and the repo
 // doesn't bloat. Motion (#28) gets its own larger budget.
 var STILL_BUDGET = 200 * 1024; // ~200 KB
+var MOTION_BUDGET = 500 * 1024; // ~500 KB (animated WebP, #28)
 
 // The scene step vocabulary. goto/select/click resolve a CSS target and click it; hover
-// hovers; type types text into a target; wait pauses; shoot screenshots to a WebP.
-var STEP_VERBS = ["goto", "select", "hover", "click", "type", "wait", "shoot"];
-var SCENE_KINDS = ["still"]; // "motion" arrives with #28
+// hovers; type types text into a target; wait pauses; shoot screenshots a still WebP;
+// shootMotion (#28) captures a sequence of frames -> one animated WebP + a poster still.
+var STEP_VERBS = ["goto", "select", "hover", "click", "type", "wait", "shoot", "shootMotion"];
+var SCENE_KINDS = ["still", "motion"]; // motion arrived with #28
 
 function isPlainObject(v) { return v && typeof v === "object" && !Array.isArray(v); }
 
@@ -53,16 +55,28 @@ function validateScene(scene) {
   }
   if (scene.theme != null && scene.theme !== "dark" && scene.theme !== "light") errors.push("scene.theme must be 'dark' or 'light'");
   if (!Array.isArray(scene.steps) || scene.steps.length === 0) { errors.push("scene.steps (non-empty array) is required"); return { ok: false, errors: errors }; }
-  var shoots = 0;
+  var stills = 0, motions = 0;
   scene.steps.forEach(function (st, i) {
     if (!isPlainObject(st) || typeof st.do !== "string") { errors.push("step[" + i + "] must be { do: <verb>, ... }"); return; }
     if (STEP_VERBS.indexOf(st.do) === -1) { errors.push("step[" + i + "] unknown verb '" + st.do + "' (expected " + STEP_VERBS.join("/") + ")"); return; }
     if (st.do === "wait" && !(st.ms >= 0)) errors.push("step[" + i + "] wait needs ms>=0");
     if ((st.do === "goto" || st.do === "select" || st.do === "hover" || st.do === "click") && !st.target) errors.push("step[" + i + "] " + st.do + " needs a target selector");
     if (st.do === "type" && (!st.target || typeof st.text !== "string")) errors.push("step[" + i + "] type needs target + text");
-    if (st.do === "shoot") { shoots++; if (!st.out || !/\.webp$/.test(st.out)) errors.push("step[" + i + "] shoot needs out ending in .webp"); }
+    if (st.do === "shoot") { stills++; if (!st.out || !/\.webp$/.test(st.out)) errors.push("step[" + i + "] shoot needs out ending in .webp"); }
+    if (st.do === "shootMotion") {
+      motions++;
+      if (!st.out || !/\.webp$/.test(st.out)) errors.push("step[" + i + "] shootMotion needs out ending in .webp");
+      if (!st.poster || !/\.webp$/.test(st.poster)) errors.push("step[" + i + "] shootMotion needs a poster still ending in .webp (reduced-motion fallback)");
+      if (!Array.isArray(st.frames) || st.frames.length < 2) errors.push("step[" + i + "] shootMotion needs frames[] (>=2)");
+      else st.frames.forEach(function (fr, j) {
+        if (!isPlainObject(fr) || !(fr.duration > 0)) errors.push("step[" + i + "] frame[" + j + "] needs duration>0 (ms)");
+        if (fr.before != null && !Array.isArray(fr.before)) errors.push("step[" + i + "] frame[" + j + "] before must be an array of steps");
+      });
+    }
   });
-  if (shoots === 0) errors.push("scene needs at least one shoot step");
+  if (kind === "motion" && motions === 0) errors.push("a motion scene needs at least one shootMotion step");
+  if (kind === "still" && motions > 0) errors.push("a still scene cannot contain shootMotion (set kind: 'motion')");
+  if (stills === 0 && motions === 0) errors.push("scene needs at least one shoot or shootMotion step");
   return { ok: errors.length === 0, errors: errors };
 }
 
@@ -75,6 +89,7 @@ function resolveOut(assetsDir, out) {
 
 module.exports = {
   STILL_BUDGET: STILL_BUDGET,
+  MOTION_BUDGET: MOTION_BUDGET,
   STEP_VERBS: STEP_VERBS,
   SCENE_KINDS: SCENE_KINDS,
   validateScene: validateScene,
@@ -100,6 +115,7 @@ if (require.main === module) {
     var puppeteer;
     try { puppeteer = require("puppeteer"); }
     catch (e) { console.error("puppeteer not found (cd $SCRATCH && npm i puppeteer; run with NODE_PATH=$SCRATCH/node_modules)"); process.exit(1); }
+    var webpAnim = require("./webp-anim.js"); // #28 animated-WebP muxer (dependency-free)
 
     var vp = scene.viewport || { width: 1440, height: 900, dpr: 2 };
     var browser = await puppeteer.launch({ headless: true, protocolTimeout: 180000, args: ["--no-sandbox", "--force-color-profile=srgb", "--hide-scrollbars"] });
@@ -112,7 +128,24 @@ if (require.main === module) {
     pg.on("pageerror", function (e) { pageErrors.push(e.message); });
 
     await pg.goto(URL, { waitUntil: "domcontentloaded", timeout: 20000 });
-    await sleep(2200); // boot + mount + fonts
+    await sleep(1500); // initial boot
+
+    // Start every capture from an IDENTICAL clean state: clear persisted UI prefs (outliner
+    // collapse, panel folds, palette view, theme pref, ...) then reload. Without this, a
+    // toggle driven inside one scene persists and flips the NEXT run's starting state, so an
+    // unchanged scene would not reproduce byte-identically. (Course data lives in IndexedDB /
+    // file storage, not these prefs; the demo doc is set in-memory below regardless.)
+    await pg.evaluate(async function () {
+      try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
+      try {
+        if (indexedDB.databases) {
+          var dbs = await indexedDB.databases();
+          await Promise.all(dbs.map(function (d) { return new Promise(function (r) { var q = indexedDB.deleteDatabase(d.name); q.onsuccess = q.onerror = q.onblocked = function () { r(); }; }); }));
+        }
+      } catch (e) {}
+    });
+    await pg.reload({ waitUntil: "domcontentloaded", timeout: 20000 });
+    await sleep(2200); // re-boot + mount + fonts
 
     // Load the SYNTHETIC demo doc ONLY (export-control). Never touch the stored doc.
     var loaded = await pg.evaluate(function (themeName) {
@@ -124,35 +157,46 @@ if (require.main === module) {
     if (!loaded.ok) { console.error("scene load failed: " + loaded.why); await browser.close(); process.exit(1); }
     await settle(pg); // fonts + frames barrier so the post-setDoc paint is fully settled
 
+    var dpr = vp.dpr || 2;
     var written = [];
     for (var i = 0; i < scene.steps.length; i++) {
       var st = scene.steps[i];
-      if (st.do === "wait") { await sleep(st.ms || 0); continue; }
-      if (st.do === "hover") { try { await pg.hover(st.target); } catch (e) { console.warn("hover miss: " + st.target); } continue; }
-      if (st.do === "type") { try { await pg.type(st.target, st.text, { delay: 0 }); } catch (e) { console.warn("type miss: " + st.target); } continue; }
-      if (st.do === "goto" || st.do === "select" || st.do === "click") {
-        try { await pg.click(st.target); } catch (e) { console.warn(st.do + " miss: " + st.target); }
-        continue;
-      }
+      if (["wait", "hover", "type", "goto", "select", "click"].indexOf(st.do) !== -1) { await runInteractive(pg, st); continue; }
+
       if (st.do === "shoot") {
         await settle(pg);
+        var clip = await resolveClip(pg, st.clip);
         var outPath = resolveOut(ASSETS, st.out);
-        var clip = null;
-        if (st.clip && typeof st.clip === "object") {
-          // explicit rect { x, y, width, height } — stable, layout-independent
-          clip = { x: st.clip.x, y: st.clip.y, width: st.clip.width, height: st.clip.height };
-        } else if (st.clip) {
-          // CSS selector -> crop to that element's box (rounded to whole px for determinism)
-          try { clip = await pg.$eval(st.clip, function (el) { var r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }; }); }
-          catch (e) { console.warn("clip miss (full-page): " + st.clip); }
-        }
-        var shotOpts = { path: outPath, type: "webp", quality: 90, captureBeyondViewport: false, optimizeForSpeed: false };
-        if (clip) shotOpts.clip = clip;
-        await pg.screenshot(shotOpts);
+        await pg.screenshot(shotOpts(clip, outPath));
         var bytes = fs.statSync(outPath).size;
-        var overBudget = bytes > STILL_BUDGET;
-        written.push({ out: outPath, bytes: bytes, overBudget: overBudget });
-        console.log((overBudget ? "OVER-BUDGET " : "ok ") + path.relative(ROOT, outPath) + " " + (bytes / 1024).toFixed(1) + "KB (budget " + (STILL_BUDGET / 1024) + "KB)");
+        report(written, outPath, bytes, STILL_BUDGET, "still");
+      }
+
+      if (st.do === "shootMotion") {
+        // Capture each frame: run its before-steps, settle, grab a WebP buffer. Motion under
+        // capture mode comes from discrete STATE changes between frames (animations are
+        // frozen), so each frame is itself deterministic -> the muxed WebP reproduces exactly.
+        var buffers = [], durations = [], mclip = null;
+        for (var fi = 0; fi < st.frames.length; fi++) {
+          var fr = st.frames[fi];
+          if (Array.isArray(fr.before)) { for (var bi = 0; bi < fr.before.length; bi++) await runInteractive(pg, fr.before[bi]); }
+          await settle(pg);
+          if (fi === 0) mclip = await resolveClip(pg, st.clip); // clip fixed by the first frame
+          var buf = await pg.screenshot(shotOpts(mclip, null)); // no path -> returns a Buffer
+          buffers.push(Buffer.from(buf));
+          durations.push(fr.duration | 0);
+        }
+        // poster still = the first frame (reduced-motion fallback via the #25 {poster=} slot)
+        var posterPath = resolveOut(ASSETS, st.poster);
+        fs.writeFileSync(posterPath, buffers[0]);
+        report(written, posterPath, fs.statSync(posterPath).size, STILL_BUDGET, "poster");
+        // mux the frames into one animated WebP
+        var w = mclip ? Math.round(mclip.width * dpr) : Math.round(vp.width * dpr);
+        var hpx = mclip ? Math.round(mclip.height * dpr) : Math.round(vp.height * dpr);
+        var anim = webpAnim.muxAnimatedWebP({ width: w, height: hpx, loopCount: st.loop || 0, frames: buffers.map(function (b, k) { return { webp: b, duration: durations[k] }; }) });
+        var motionPath = resolveOut(ASSETS, st.out);
+        fs.writeFileSync(motionPath, anim);
+        report(written, motionPath, anim.length, MOTION_BUDGET, "motion(" + buffers.length + "f)");
       }
     }
 
@@ -160,8 +204,37 @@ if (require.main === module) {
     if (pageErrors.length) console.warn("page errors:\n  " + pageErrors.join("\n  "));
     var over = written.filter(function (w) { return w.overBudget; });
     if (!written.length) { console.error("scene produced no output"); process.exit(1); }
-    console.log("scene '" + scene.id + "': " + written.length + " still(s) written to docs/assets/");
+    console.log("scene '" + scene.id + "': " + written.length + " asset(s) written to docs/assets/");
     process.exit(over.length ? 1 : 0);
+
+    // ---- CLI helpers ----
+    function shotOpts(clip, outPath) {
+      var o = { type: "webp", quality: 90, captureBeyondViewport: false, optimizeForSpeed: false };
+      if (outPath) o.path = outPath;
+      if (clip) o.clip = clip;
+      return o;
+    }
+    async function resolveClip(pg, spec) {
+      if (spec && typeof spec === "object") return { x: spec.x, y: spec.y, width: spec.width, height: spec.height };
+      if (spec) {
+        try { return await pg.$eval(spec, function (el) { var r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) }; }); }
+        catch (e) { console.warn("clip miss (full-page): " + spec); }
+      }
+      return null;
+    }
+    function report(list, outPath, bytes, budget, label) {
+      var over = bytes > budget;
+      list.push({ out: outPath, bytes: bytes, overBudget: over });
+      console.log((over ? "OVER-BUDGET " : "ok ") + path.relative(ROOT, outPath) + " " + (bytes / 1024).toFixed(1) + "KB [" + label + ", budget " + (budget / 1024) + "KB]");
+    }
+    async function runInteractive(pg, st) {
+      if (st.do === "wait") { await sleep(st.ms || 0); return; }
+      if (st.do === "hover") { try { await pg.hover(st.target); } catch (e) { console.warn("hover miss: " + st.target); } return; }
+      if (st.do === "type") { try { await pg.type(st.target, st.text, { delay: 0 }); } catch (e) { console.warn("type miss: " + st.target); } return; }
+      if (st.do === "goto" || st.do === "select" || st.do === "click") {
+        try { await pg.click(st.target); } catch (e) { console.warn(st.do + " miss: " + st.target); }
+      }
+    }
   })();
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }

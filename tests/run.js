@@ -218,7 +218,7 @@ section("#27 docs capture scene DSL");
 (function () {
   var dc = require(path.join(ROOT, "tools/docs-capture.js"));
   ok("#27 still budget is ~200KB", dc.STILL_BUDGET === 200 * 1024);
-  ok("#27 step vocabulary is the fixed set", JSON.stringify(dc.STEP_VERBS) === JSON.stringify(["goto", "select", "hover", "click", "type", "wait", "shoot"]));
+  ok("#27 step vocabulary is the fixed set", JSON.stringify(dc.STEP_VERBS) === JSON.stringify(["goto", "select", "hover", "click", "type", "wait", "shoot", "shootMotion"]));
   // a valid still scene passes
   var good = { id: "s1", covers: ["editor-workspace"], kind: "still", viewport: { width: 1440, height: 900, dpr: 2 }, theme: "dark", steps: [{ do: "wait", ms: 300 }, { do: "shoot", out: "s1.webp" }] };
   ok("#27 valid scene passes", dc.validateScene(good).ok === true);
@@ -230,16 +230,77 @@ section("#27 docs capture scene DSL");
   ok("#27 unknown verb fails", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "teleport" }, { do: "shoot", out: "a.webp" }] }).ok === false);
   ok("#27 click/goto need a target", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "click" }, { do: "shoot", out: "a.webp" }] }).ok === false);
   ok("#27 type needs target + text", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "type", target: "#x" }, { do: "shoot", out: "a.webp" }] }).ok === false);
-  ok("#27 motion kind rejected until #28", dc.validateScene({ id: "s", covers: ["x"], kind: "motion", steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 a motion scene needs a shootMotion step (a plain shoot is not enough)", dc.validateScene({ id: "s", covers: ["x"], kind: "motion", steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
   // resolveOut confines output to docs/assets (no traversal)
   ok("#27 resolveOut strips path traversal", dc.resolveOut("/repo/docs/assets", "../../evil.webp") === path.join("/repo/docs/assets", "evil.webp"));
   // the shipped scene is valid and uses the synthetic demo (never real content)
   var shipped = JSON.parse(src("docs/scenes/structure-panel.json"));
   ok("#27 shipped structure-panel scene is valid", dc.validateScene(shipped).ok === true);
-  ok("#27 runner loads SAMPLE_DOC only (export-control)", src("tools/docs-capture.js").indexOf("window.SAMPLE_DOC") !== -1 && src("tools/docs-capture.js").indexOf("localStorage") === -1);
+  ok("#27 runner loads SAMPLE_DOC only, never reads a stored doc (export-control)", src("tools/docs-capture.js").indexOf("window.SAMPLE_DOC") !== -1 && src("tools/docs-capture.js").indexOf("localStorage.getItem") === -1 && src("tools/docs-capture.js").indexOf("getDoc()") === -1);
   // the shipped still figure is wired into the guide + the committed asset exists
   ok("#27 USER-GUIDE references the committed still", src("docs/USER-GUIDE.md").indexOf("docs/assets/structure-panel.webp") !== -1);
   ok("#27 committed still exists + within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/structure-panel.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
+})();
+
+// ---- #28: animated-WebP muxer + motion scenes -----------------------------------------
+// The muxer assembles Chrome-native per-frame WebP bitstreams into one animated WebP. It is
+// deterministic (same frames in -> same bytes out), backing the no-op-commit promise.
+section("#28 animated-WebP muxer + motion");
+(function () {
+  var wa = require(path.join(ROOT, "tools/webp-anim.js"));
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  // read two committed stills as frame inputs (real Chrome WebP buffers)
+  function readBuf(rel) { return fs.readFileSync(path.join(ROOT, rel)); }
+  function parseChunks(buf) {
+    var out = [], off = 12;
+    while (off + 8 <= buf.length) { var f = buf.toString("latin1", off, off + 4); var s = buf.readUInt32LE(off + 4); out.push({ fourcc: f, size: s }); off += 8 + s + (s & 1); }
+    return out;
+  }
+  var A = readBuf("docs/assets/structure-panel.webp");
+  // parseWebP extracts the image chunk(s) from a Chrome WebP
+  var parsed = wa.parseWebP(A);
+  ok("#28 parseWebP extracts image bytes", parsed.imageBytes && parsed.imageBytes.length > 0);
+  ok("#28 parseWebP rejects non-WEBP", (function () { try { wa.parseWebP(Buffer.from("not a webp")); return false; } catch (e) { return true; } })());
+  // mux two frames -> valid animated WebP container
+  var anim = wa.muxAnimatedWebP({ width: 100, height: 60, loopCount: 0, frames: [{ webp: A, duration: 800 }, { webp: A, duration: 400 }] });
+  ok("#28 muxed buffer is RIFF/WEBP", anim.toString("latin1", 0, 4) === "RIFF" && anim.toString("latin1", 8, 12) === "WEBP");
+  var ch = parseChunks(anim);
+  ok("#28 has VP8X (extended) first", ch[0].fourcc === "VP8X" && ch[0].size === 10);
+  ok("#28 VP8X animation flag set", (anim[12 + 8] & 0x02) === 0x02); // first payload byte of VP8X
+  ok("#28 has ANIM chunk", ch[1].fourcc === "ANIM");
+  ok("#28 one ANMF per frame", ch.filter(function (c) { return c.fourcc === "ANMF"; }).length === 2);
+  // canvas dims encoded as width-1/height-1 (24-bit LE) in VP8X payload bytes 4..9
+  var vp8xOff = 12 + 8;
+  var cw = (anim[vp8xOff + 4] | (anim[vp8xOff + 5] << 8) | (anim[vp8xOff + 6] << 16)) + 1;
+  var chh = (anim[vp8xOff + 7] | (anim[vp8xOff + 8] << 8) | (anim[vp8xOff + 9] << 16)) + 1;
+  ok("#28 VP8X canvas size = requested", cw === 100 && chh === 60);
+  // RIFF size field = filesize - 8
+  ok("#28 RIFF size field correct", anim.readUInt32LE(4) === anim.length - 8);
+  // determinism: same frames -> identical bytes
+  var anim2 = wa.muxAnimatedWebP({ width: 100, height: 60, loopCount: 0, frames: [{ webp: A, duration: 800 }, { webp: A, duration: 400 }] });
+  ok("#28 muxer deterministic (byte-identical)", Buffer.compare(anim, anim2) === 0);
+  // budget + shootMotion schema
+  ok("#28 motion budget ~500KB", dc.MOTION_BUDGET === 500 * 1024);
+  ok("#28 shootMotion is in the vocabulary", dc.STEP_VERBS.indexOf("shootMotion") !== -1);
+  var goodMotion = { id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", poster: "m-still.webp", frames: [{ duration: 800 }, { before: [{ do: "click", target: "#x" }], duration: 800 }] }] };
+  ok("#28 valid motion scene passes", dc.validateScene(goodMotion).ok === true);
+  ok("#28 shootMotion needs a poster (reduced-motion)", dc.validateScene({ id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", frames: [{ duration: 1 }, { duration: 1 }] }] }).ok === false);
+  ok("#28 shootMotion needs >=2 frames", dc.validateScene({ id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", poster: "p.webp", frames: [{ duration: 1 }] }] }).ok === false);
+  ok("#28 shootMotion frame needs duration>0", dc.validateScene({ id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", poster: "p.webp", frames: [{ duration: 0 }, { duration: 1 }] }] }).ok === false);
+  // shipped motion scene + committed assets
+  var mscene = JSON.parse(src("docs/scenes/outliner-navigate.json"));
+  ok("#28 shipped outliner-navigate motion scene valid", dc.validateScene(mscene).ok === true);
+  ok("#28 committed motion within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/outliner-navigate.webp")).size <= dc.MOTION_BUDGET; } catch (e) { return false; } })());
+  ok("#28 committed poster within still budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/outliner-navigate-still.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
+  ok("#28 committed motion is a real animated WebP (VP8X+ANIM+2 ANMF)", (function () { try { var m = readBuf("docs/assets/outliner-navigate.webp"); var c = parseChunks(m); return c[0].fourcc === "VP8X" && c.some(function (x) { return x.fourcc === "ANIM"; }) && c.filter(function (x) { return x.fourcc === "ANMF"; }).length === 2; } catch (e) { return false; } })());
+  ok("#28 USER-GUIDE references the motion figure + poster", src("docs/USER-GUIDE.md").indexOf("docs/assets/outliner-navigate.webp") !== -1 && src("docs/USER-GUIDE.md").indexOf("poster=docs/assets/outliner-navigate-still.webp") !== -1);
+  ok("#28 webp-anim.js logged in THIRD-PARTY-NOTICES audit", src("THIRD-PARTY-NOTICES.md").indexOf("tools/webp-anim.js") !== -1);
+})();
+
+// WIRING: reduced-motion swaps a motion figure to its poster still (impure docs-panel wiring)
+(function () {
+  var ed = src("src/editor.js");
+  ok("#28 openHelpModal swaps to poster under prefers-reduced-motion", /prefers-reduced-motion[\s\S]{0,220}data-poster[\s\S]{0,80}img\.src\s*=\s*img\.getAttribute\("data-poster"\)/.test(ed) || /reduce\s*&&\s*img\.getAttribute\("data-poster"\)[\s\S]{0,60}img\.src/.test(ed));
 })();
 
 // ---- #91: docs anti-drift gate — the User Guide must document every palette block ----

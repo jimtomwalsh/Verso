@@ -30,6 +30,15 @@ truth), unlike hand-authored motion which rots silently.
   byte-stable, so scenes `clip` to stable editor chrome (panel/palette/toolbar/inspector), not
   the whole canvas. The runner is a dev tool (needs Puppeteer via NODE_PATH), never shipped in
   the app; its pure scene-schema core is unit-tested in `tests/run.js`.
+- Motion (#28): `tools/webp-anim.js` is an ORIGINAL animated-WebP **muxer** (VP8X/ANIM/ANMF
+  from the public WebP container spec), not a vendored VP8 encoder — a real encoder was too
+  heavy for the no-build/air-gap stack (the same reason the vendored GIF codec is unsuitable).
+  The runner's `shootMotion` step captures a sequence of frames (motion = discrete state
+  changes between frames, since animations are frozen) and muxes Chrome-native per-frame WebP
+  bitstreams into one budget-checked (~500KB) animated WebP plus a poster still; under
+  `prefers-reduced-motion` the docs reader shows the poster (the #25 `{poster=}` slot). For
+  byte-identical re-runs the runner also resets persisted UI prefs (localStorage + IndexedDB)
+  before each capture, so a stateful toggle driven in one scene can't flip the next run's start.
 - Capture mode (#26): `src/capture-mode.js` self-activates on `?capture=1` or a preset
   `window.__captureMode` and installs a deterministic clock (monotonic from a fixed epoch),
   a seeded RNG (mulberry32 over `Math.random`), a freeze stylesheet (transitions/animations

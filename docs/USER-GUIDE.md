@@ -79,6 +79,8 @@ editing — but do keep JSON backups (see §12) since the data lives only in thi
 
 ## 4. Pages & chapters
 
+![Clicking a page in the Structure outliner selects it and jumps the canvas to it.](docs/assets/outliner-navigate.webp "Click a page in the outliner to jump to it — the selection moves from one page to the next."){poster=docs/assets/outliner-navigate-still.webp}
+
 - **Add a page:** the **+** in the Structure header (adds after the selected page). New pages
   are blank.
 - **Rename / reorder / move:** drag pages and chapters in the Structure outliner. Play-order
