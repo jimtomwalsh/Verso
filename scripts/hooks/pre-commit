@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pre-commit hygiene gate. Blocks a commit that would introduce customer/proprietary
+# content, the removed assistant/translation code, personal paths, secrets, external CDN
+# loads, or course-content files. Enable once with: scripts/install-hooks.sh
+#
+# Runs against the whole tracked tree (the scanner reads `git ls-files`), so it catches
+# both staged additions and anything already tracked.
+node scripts/check-hygiene.js
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo ""
+  echo "Commit blocked by the hygiene gate (see above)."
+  echo "Fix the flagged content, or if this is a legitimate false positive, adjust"
+  echo "scripts/check-hygiene.js in a separate, reviewed commit."
+  exit 1
+fi
+exit 0
