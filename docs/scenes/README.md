@@ -30,8 +30,30 @@ size budget (~200 KB for stills).
 }
 ```
 
-`covers` is the list of source surfaces the scene illustrates; #30 uses it to detect which
-scenes a code change makes stale.
+### `covers` — the source surfaces a scene illustrates (staleness)
+
+`covers` lists what the scene depends on. Two kinds of entry:
+
+- **File surfaces** — a repo path, optionally with an `#anchor`: `"src/editor.js"`,
+  `"editor.css"`, `"src/editor.js#LIBRARY"`. These drive **staleness**.
+- **Human tags** — a readable name for the surface: `"block-palette"`, `"pages-outliner"`.
+  Documentation only; they never trigger a file match.
+
+Every scene should list at least one file surface so a code change can map to it.
+
+### Re-capturing after a UI change (same-session docs-alignment)
+
+When you change editor chrome, list the scenes your diff touches and re-run them so the
+committed figures don't drift (the same rule the repo applies to `USER-GUIDE.md`):
+
+```
+node tools/docs-capture.js --stale src/editor.js editor.css
+```
+
+It prints each scene whose `covers` matches a changed file, with the command to re-run it.
+An unchanged scene re-captures to byte-identical bytes (a no-op commit), so re-running a
+scene that didn't actually change costs nothing. Hash-ratchet / CI auto-regeneration is
+**deliberately deferred** (ADR 0004) — this is a procedural aid, not a gate.
 
 ## Step vocabulary
 

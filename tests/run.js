@@ -381,6 +381,51 @@ section("#29 annotation overlay");
   ok("#29 USER-GUIDE references both annotated figures", src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-structure.webp") !== -1 && src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-navigate.webp") !== -1);
 })();
 
+// ---- #30: staleness coverage mapping --------------------------------------------------
+// A scene's covers lists the src surfaces it illustrates; --stale maps a diff -> scenes to
+// re-run so the same-session docs-alignment rule can be applied (procedural, not a CI gate).
+section("#30 staleness coverage");
+(function () {
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  // file surfaces vs human tags
+  ok("#30 file surfaces recognised", dc.isFileSurface("src/editor.js") && dc.isFileSurface("editor.css") && dc.isFileSurface("src/editor.js#LIBRARY"));
+  ok("#30 human tags are not file surfaces", !dc.isFileSurface("block-palette") && !dc.isFileSurface("pages-outliner"));
+  // matching: exact, suffix (absolute path), and the #anchor is stripped
+  ok("#30 exact file match", dc.coverMatchesFile("src/editor.js", "src/editor.js"));
+  ok("#30 absolute-path suffix match", dc.coverMatchesFile("src/editor.js", "/Users/x/verso/src/editor.js"));
+  ok("#30 anchor stripped before match", dc.coverMatchesFile("src/editor.js#LIBRARY", "src/editor.js"));
+  ok("#30 human tag never matches a file", !dc.coverMatchesFile("block-palette", "src/editor.js"));
+  ok("#30 unrelated file does not match", !dc.coverMatchesFile("editor.css", "src/render.js"));
+  // staleScenes over a synthetic scene set
+  var scenes = [
+    { id: "a", covers: ["src/editor.js", "editor.css", "pages-outliner"] },
+    { id: "b", covers: ["src/capture-mode.js", "annotation-overlay"] },
+    { id: "c", covers: ["only-a-tag"] }
+  ];
+  var s1 = dc.staleScenes(scenes, ["editor.css"]);
+  ok("#30 editor.css -> only scene a", s1.length === 1 && s1[0].id === "a" && s1[0].matched[0] === "editor.css");
+  var s2 = dc.staleScenes(scenes, ["src/editor.js", "src/capture-mode.js"]);
+  ok("#30 two files -> scenes a + b", s2.map(function (x) { return x.id; }).sort().join(",") === "a,b");
+  var s3 = dc.staleScenes(scenes, ["src/render.js"]);
+  ok("#30 course-output file -> no scenes (chrome only)", s3.length === 0);
+  var s4 = dc.staleScenes(scenes, ["some-other.js"]);
+  ok("#30 unrelated change -> no scenes", s4.length === 0);
+  // every shipped scene has covers with >= 1 file surface (so staleness can map to it)
+  var files = fs.readdirSync(path.join(ROOT, "docs/scenes")).filter(function (f) { return /\.json$/.test(f); });
+  ok("#30 shipped scenes exist", files.length >= 2);
+  var allHaveFileSurface = files.every(function (f) {
+    var sc = JSON.parse(src("docs/scenes/" + f));
+    return (sc.covers || []).some(function (c) { return dc.isFileSurface(c); });
+  });
+  ok("#30 every shipped scene covers >= 1 file surface", allHaveFileSurface);
+  // real coverage: an editor.css change re-runs every shipped scene
+  var real = fs.readdirSync(path.join(ROOT, "docs/scenes")).filter(function (f) { return /\.json$/.test(f); }).map(function (f) { return JSON.parse(src("docs/scenes/" + f)); });
+  ok("#30 editor.css change maps to all shipped scenes", dc.staleScenes(real, ["editor.css"]).length === real.length);
+  // documented: the staleness aid is referenced in the scene README + ADR (deferral noted)
+  ok("#30 scene README documents --stale + covers schema", /--stale/.test(src("docs/scenes/README.md")) && /covers/.test(src("docs/scenes/README.md")));
+  ok("#30 hash-ratchet/CI regeneration noted as deferred", /defer/i.test(src("docs/adr/0004-user-docs-markdown-single-source-runtime-reader.md")));
+})();
+
 // ---- #91: docs anti-drift gate — the User Guide must document every palette block ----
 // "Code is truth, docs drift." The block palette (LIBRARY, editor.js) is the single source of
 // truth for what a user can add. This gate extracts every top-level LIBRARY block and asserts

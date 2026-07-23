@@ -20,7 +20,11 @@ truth), unlike hand-authored motion which rots silently.
 - Capture scenes must use a synthetic demo doc only — real course content is
   export-controlled and never enters the repo.
 - Staleness is procedural, not automated: a UI change touching a covered scene re-runs that
-  scene in the same session (hash-ratchet/CI regeneration deliberately deferred).
+  scene in the same session (hash-ratchet/CI regeneration deliberately deferred). Each scene's
+  `covers` lists the src surfaces it illustrates (file surfaces + human tags); `node
+  tools/docs-capture.js --stale <changed-files>` (#30) lists which scenes a diff touches so the
+  same-session docs-alignment rule can be applied. An unchanged scene re-captures byte-identical,
+  so re-running one that didn't change is a free no-op.
 - Popout is environment-adaptive: new-tab standalone page in browsers; full-window in-app
   promotion in the WKWebView shell (which swallows `window.open` — see #81).
 - Capture runner (#27): `tools/docs-capture.js` reads a declarative scene (JSON header +

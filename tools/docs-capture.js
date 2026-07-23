@@ -92,26 +92,74 @@ function resolveOut(assetsDir, out) {
   return path.join(assetsDir, base);
 }
 
+// ---- #30 staleness coverage --------------------------------------------------------------
+// A scene's `covers` lists the src surfaces it illustrates: FILE surfaces (a repo path, or
+// path#anchor, e.g. "src/editor.js" / "editor.css") and/or human tags ("block-palette").
+// File surfaces drive staleness — `--stale <changed-files>` lists which scenes a diff touches,
+// so the same-session docs-alignment rule can be applied (re-run a touched scene). Hash-ratchet
+// / CI auto-regeneration is deliberately deferred (ADR 0004): this is a procedural aid, not a gate.
+function norm(p) { return String(p).replace(/^\.\//, "").replace(/^\/+/, ""); }
+function coverFile(cover) { return norm(String(cover).split("#")[0]); }
+function isFileSurface(cover) { var f = coverFile(cover); return /\.(js|css|html|json)$/.test(f) || f.indexOf("/") !== -1; }
+function coverMatchesFile(cover, changed) {
+  if (!isFileSurface(cover)) return false; // human tags never match a file path
+  var cf = coverFile(cover), f = norm(changed);
+  return cf === f || f.endsWith("/" + cf) || cf.endsWith("/" + f) || f.endsWith(cf) || cf.endsWith(f);
+}
+// scenes: [{ id, covers, _file? }], changedFiles: string[] -> [{ id, matched:[changedFile...] }]
+function staleScenes(scenes, changedFiles) {
+  var out = [];
+  (scenes || []).forEach(function (sc) {
+    var covers = (sc && sc.covers) || [];
+    var matched = (changedFiles || []).filter(function (f) {
+      return covers.some(function (c) { return coverMatchesFile(c, f); });
+    });
+    if (matched.length) out.push({ id: sc.id, file: sc._file, matched: matched });
+  });
+  return out;
+}
+
 module.exports = {
   STILL_BUDGET: STILL_BUDGET,
   MOTION_BUDGET: MOTION_BUDGET,
   STEP_VERBS: STEP_VERBS,
   SCENE_KINDS: SCENE_KINDS,
   validateScene: validateScene,
-  resolveOut: resolveOut
+  resolveOut: resolveOut,
+  staleScenes: staleScenes,
+  coverMatchesFile: coverMatchesFile,
+  isFileSurface: isFileSurface
 };
 
 // ---- CLI (puppeteer only loaded here) ----------------------------------------------------
 if (require.main === module) {
   (async function main() {
     var args = process.argv.slice(2);
+    var ROOT = path.resolve(__dirname, "..");
+    var SCENES = path.join(ROOT, "docs", "scenes");
+    var ASSETS = path.join(ROOT, "docs", "assets");
+
+    // #30 --stale <changed-files...>: list which committed scenes a code change touches (so a
+    // UI change to a covered surface can be re-captured in the same session). No puppeteer.
+    var staleIdx = args.indexOf("--stale");
+    if (staleIdx !== -1) {
+      var changed = args.slice(staleIdx + 1).filter(function (a) { return !a.startsWith("--"); });
+      if (!changed.length) { console.error("usage: node tools/docs-capture.js --stale <changed-file> [more...]"); process.exit(2); }
+      var scenes = fs.readdirSync(SCENES).filter(function (f) { return /\.json$/.test(f); }).map(function (f) {
+        var sc = JSON.parse(fs.readFileSync(path.join(SCENES, f), "utf8")); sc._file = "docs/scenes/" + f; return sc;
+      });
+      var stale = staleScenes(scenes, changed);
+      if (!stale.length) { console.log("no scenes cover " + changed.join(", ") + " — nothing to re-capture."); process.exit(0); }
+      console.log(stale.length + " scene(s) to re-run for [" + changed.join(", ") + "]:");
+      stale.forEach(function (s) { console.log("  " + s.file + "  (covers: " + s.matched.join(", ") + ")\n    -> node tools/docs-capture.js " + s.file); });
+      process.exit(0);
+    }
+
     var scenePath = args.find(function (a) { return !a.startsWith("--"); });
     var urlIdx = args.indexOf("--url");
     var URL = urlIdx !== -1 ? args[urlIdx + 1] : "http://localhost:8123/index.html";
-    if (!scenePath) { console.error("usage: node tools/docs-capture.js <scene.json> [--url <app>]"); process.exit(2); }
+    if (!scenePath) { console.error("usage: node tools/docs-capture.js <scene.json> [--url <app>]  |  --stale <changed-files>"); process.exit(2); }
 
-    var ROOT = path.resolve(__dirname, "..");
-    var ASSETS = path.join(ROOT, "docs", "assets");
     var scene = JSON.parse(fs.readFileSync(path.resolve(scenePath), "utf8"));
     var v = validateScene(scene);
     if (!v.ok) { console.error("INVALID scene " + scenePath + ":\n  - " + v.errors.join("\n  - ")); process.exit(2); }

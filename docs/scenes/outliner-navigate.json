@@ -1,20 +1,51 @@
 {
   "id": "outliner-navigate",
-  "covers": ["editor-left-panel", "pages-outliner", "page-navigation"],
+  "covers": [
+    "src/editor.js",
+    "editor.css",
+    "pages-outliner",
+    "page-navigation"
+  ],
   "kind": "motion",
-  "viewport": { "width": 1440, "height": 900, "dpr": 2 },
+  "viewport": {
+    "width": 1440,
+    "height": 900,
+    "dpr": 2
+  },
   "theme": "dark",
   "steps": [
-    { "do": "wait", "ms": 500 },
+    {
+      "do": "wait",
+      "ms": 500
+    },
     {
       "do": "shootMotion",
       "out": "outliner-navigate.webp",
       "poster": "outliner-navigate-still.webp",
-      "clip": { "x": 0, "y": 44, "width": 292, "height": 360 },
+      "clip": {
+        "x": 0,
+        "y": 44,
+        "width": 292,
+        "height": 360
+      },
       "loop": 0,
       "frames": [
-        { "duration": 1400 },
-        { "before": [ { "do": "click", "target": "::-p-text(2.1 Common Hazards)" }, { "do": "wait", "ms": 250 } ], "duration": 1800 }
+        {
+          "duration": 1400
+        },
+        {
+          "before": [
+            {
+              "do": "click",
+              "target": "::-p-text(2.1 Common Hazards)"
+            },
+            {
+              "do": "wait",
+              "ms": 250
+            }
+          ],
+          "duration": 1800
+        }
       ]
     }
   ]
