@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verso — eLearning authoring tool</title>
+
+  <!-- All editor fonts (Inter + JetBrains Mono + Exo 2) are vendored locally and
+       @font-face'd in editor.css, so the editor makes NO external network calls
+       and renders fully offline / air-gapped. -->
+  <link rel="stylesheet" href="editor.css">
+  <link rel="stylesheet" href="src/course.css">
+</head>
+<body>
+  <!-- ==================== top toolbar ==================== -->
+  <header class="toolbar">
+    <div class="toolbar__group toolbar__group--left" style="flex: 1 1 auto; align-self: stretch; align-items: flex-end; padding-top: 6px;">
+      <span class="toolbar__brand" aria-hidden="true">Verso<span class="toolbar__brand-dot">.</span></span>
+      <button class="tool toolbar__home" id="home-btn" data-lucide="layout-grid" title="Home — all courses"></button>
+      <div class="toolbar-tabs" id="toolbar-tabs"></div>
+    </div>
+
+    <div class="toolbar__group toolbar__group--right">
+      <!-- #92c: the desktop/tablet/mobile breakpoint switch moved behind the Preview
+           chevron (see #preview-bp-btn below) to declutter the top bar. -->
+      <!-- Icon-only tools: glyphs are hydrated from the Lucide Icon accessor
+           (src/icons.js) at boot via Editor.mountTopBar(); markup stays svg-free
+           so the DS conformance gate holds. data-lucide names the glyph. -->
+      <!-- NNN: light/dark AUTHORING palette toggle (quick switch/test) -->
+      <!-- #89: recents (save-menu), Help and Export relocated to the left rail. -->
+      <button class="tool" id="mode-toggle" data-lucide="moon" title="Toggle light / dark palette"></button>
+      <span class="toolbar__divider"></span>
+      <!-- #92: hidden by default; only the data-loss FAIL state renders text here. -->
+      <div class="save-state save-state--saved" id="save-state" role="status" aria-live="polite" hidden></div>
+      <!-- #92b storage-health dot: green healthy / amber getting full / red near-quota or
+           a save failure. Click opens a popover (backend, quota %, course weight). Replaces
+           the "Saved" text + the standalone course-weight readout. -->
+      <button class="storage-dot storage-dot--ok" id="storage-dot" title="Storage healthy — click for details" aria-label="Storage health"></button>
+      <!-- #86: find, zoom, grid and comment relocated to the floating canvas overlay bar.
+           #92: undo/redo removed (Cmd/Ctrl+Z / Shift+Z); the null-guarded wiring no-ops. -->
+      <span class="toolbar__divider"></span>
+      <!-- DS action-priority: Preview (Demo) is the single accent-blue PRIMARY;
+           built into a vds-btn primary by Editor.mountTopBar(). #92c: the chevron
+           opens the device-breakpoint menu (desktop/tablet/mobile) that used to be
+           the standalone bp-switch group. -->
+      <div class="preview-cluster">
+        <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
+        <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview device size"></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== workspace ==================== -->
+  <main class="workspace">
+    <!-- #89 left icon rail: top nav-tab glyphs swap the
+         adjacent left panel; bottom pinned glyphs are global actions relocated off the
+         top bar (Export / Help / Settings / recents). Glyphs hydrated in mountTopBar. -->
+    <nav class="left-rail" id="left-rail" aria-label="Editor rail">
+      <div class="left-rail__group left-rail__nav">
+        <button class="rail-btn rail-tab is-active" id="rail-tab-document" data-rail-tab="document" data-lucide="panel-left" title="Document" aria-label="Document"></button>
+        <!-- #116 Copy Editor v1 (1/4): opens the full-screen copy-editing view (an
+             alternate canvas over the layout canvas; you are in one view at a time). -->
+        <button class="rail-btn" id="copy-editor-btn" data-lucide="file-text" title="Copy editor" aria-label="Copy editor"></button>
+      </div>
+      <div class="left-rail__group left-rail__actions">
+        <!-- Data / export pipeline mounts Export (glyph) + ⋯ overflow here. -->
+        <div class="left-rail__pipeline" id="pipeline-actions"></div>
+        <button class="rail-btn" id="help-btn" data-lucide="help-circle" title="User guide"></button>
+        <button class="rail-btn" id="rail-settings-btn" data-lucide="settings" title="Settings"></button>
+        <button class="rail-btn" id="save-menu-btn" data-lucide="history" title="Recent courses & file actions"></button>
+      </div>
+    </nav>
+
+    <!-- left: layers / pages / components -->
+    <aside class="panel panel--left">
+      <!-- SS: Structure + Blocks are STACKED (both visible), each collapsible, with
+           a draggable horizontal split between them (wired in wireLeftPanes). -->
+      <div class="lpane lpane--structure" id="lpane-structure">
+        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Structure</span></div>
+        <div class="lpane__body" id="tab-structure">
+          <div class="panel-section">
+            <div class="panel-section__title panel-section__title--sticky" style="display: flex; align-items: center; justify-content: space-between;">
+              <span>Pages</span>
+              <span style="display: flex; align-items: center; gap: 4px;">
+                <button class="outliner-add-btn" id="collapse-tree-btn" title="Collapse all pages to chapters"></button>
+                <button class="outliner-add-btn" id="add-chapter-btn" title="Add chapter"></button>
+                <button class="outliner-add-btn" id="add-page-btn" title="Add page after selected">+</button>
+              </span>
+            </div>
+            <div id="pages-list"></div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-section__title">Components</div>
+            <div id="components-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="lpane-split" id="lpane-split"></div>
+      <div class="lpane lpane--blocks" id="lpane-blocks">
+        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Blocks</span></div>
+        <div class="lpane__body" id="tab-assets">
+          <div class="panel-section">
+            <div class="panel-section__title panel-section__title--row">
+              <span>Insert</span>
+              <span id="palette-view-toggle" class="palette-view-toggle"></span>
+            </div>
+            <div id="assets-list"></div>
+            <div class="insp-hint">Click to add to the focused page, or drag into the Structure panel / a canvas page.</div>
+          </div>
+        </div>
+      </div>
+      <div class="panel-resizer" id="resizer-left"></div>
+    </aside>
+
+    <!-- center: infinite canvas (world built by editor.js) -->
+    <section class="canvas" id="canvas-viewport"></section>
+
+    <!-- #86 floating canvas overlay bar: a persistent,
+         always-visible bottom-centre bar of CANVAS tools (grid / find & replace /
+         comment / zoom). Lives in .workspace (not #canvas-viewport, which editor.js
+         clears on rebuild); centred over the canvas column. Glyphs hydrated in mountTopBar. -->
+    <div class="canvas-overlay-bar" id="canvas-overlay" aria-label="Canvas tools">
+      <div class="canvas-overlay-bar__inner">
+        <button class="tool" id="grid-toggle" data-lucide="grid-2x2" title="Alignment grid (off)"></button>
+        <button class="tool" id="style-audit-toggle" data-lucide="type" title="Highlight text blocks with no theme style"></button>
+        <button class="tool" id="find-btn" data-lucide="search" title="Find &amp; replace (Cmd/Ctrl+F)"></button>
+        <button class="tool" id="comment-toggle" data-lucide="message-square" title="Comment mode (C) — drop review notes"></button>
+        <span class="canvas-overlay-bar__sep"></span>
+        <div class="zoom" id="zoom-fit" data-lucide="chevron-down" title="Fit all pages">
+          <span id="zoom-level">100%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- right: design / properties -->
+    <aside class="panel panel--right">
+      <div class="panel-tabs" id="right-ptabs">
+        <button class="ptab is-active" data-ptab="design" title="Design — properties inspector">Design</button>
+        <button class="ptab" data-ptab="interact" title="Interact — author click actions and locks">Interact</button>
+        <!-- #92c: the Settings cog moved to the left rail (rail-settings-btn); removed here
+             to end the duplication. -->
+      </div>
+      <div class="panel-resizer" id="resizer-right"></div>
+      <div class="panel-scroll">
+        <div class="panel-section" id="inspector"></div>
+        <details class="panel-section" id="model-details">
+          <summary class="panel-section__title" style="cursor: pointer; outline: none; list-style: none; display: flex; align-items: center; gap: 6px; user-select: none;">
+            <span class="disc__caret"></span>
+            Document model · live
+          </summary>
+          <pre id="model-json" style="margin-top: 8px;"></pre>
+        </details>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ==================== demo mode (fullscreen learner simulation) ==================== -->
+  <div id="demo" class="demo" hidden>
+    <div class="demo__bar">
+      <div class="bp-switch" id="demo-bp">
+        <button class="bp-btn bp-btn--text is-active" data-bp="auto" title="Responsive — fills the window, breakpoint follows width">Auto</button>
+        <button class="bp-btn" data-bp="desktop" title="Desktop">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="9.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7 17h6M10 13.5V17" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        </button>
+        <button class="bp-btn" data-bp="tablet" title="Tablet">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="2.5" width="11" height="15" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9 15h2" stroke="currentColor" stroke-width="1.4"/></svg>
+        </button>
+        <button class="bp-btn" data-bp="mobile" title="Mobile">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="2.5" width="8" height="15" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9 15h2" stroke="currentColor" stroke-width="1.4"/></svg>
+        </button>
+      </div>
+      <div class="demo__nav">
+        <button class="demo__navbtn" id="demo-prev" title="Previous (←)">‹</button>
+        <span class="demo__title" id="demo-title"></span>
+        <button class="demo__navbtn" id="demo-next" title="Next (→)">›</button>
+      </div>
+      <button class="demo__exit" id="demo-comment" title="Comment mode (C) — drop review notes on the preview">◲ Comment</button>
+      <button class="demo__exit" id="demo-fs" title="Toggle browser fullscreen">⤢ Fullscreen</button>
+      <button class="demo__exit" id="demo-exit" title="Exit (Esc)">Exit ✕</button>
+    </div>
+    <div class="demo__stage" id="demo-stage">
+      <div class="demo__scaler" id="demo-scaler">
+        <div class="demo__device" id="demo-device"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== copy editor (fullscreen alternate copy-editing view) ====================
+       #116 Copy Editor v1 (1/4): the SHELL only. A full-screen alternate canvas over the layout
+       canvas (same enter/exit pattern as Demo) — one view at a time. Word count + copy-editing
+       tools land in slice 4; the document copy renders into #copyedit-doc in slices 2-4. Verso UI
+       only — render.js / course.css / SCORM export are untouched (pure-render invariant held: no
+       course copy is rendered here yet). -->
+  <div id="copy-editor" class="copyedit" hidden>
+    <div class="copyedit__bar">
+      <span class="copyedit__title">Copy editor</span>
+      <!-- toolbar area: word count + copy tools mount here in slice 4 -->
+      <div class="copyedit__tools" id="copyedit-tools"></div>
+      <button class="copyedit__exit" id="copyedit-exit" title="Close (Esc)">Close ✕</button>
+    </div>
+    <div class="copyedit__stage" id="copyedit-stage">
+      <div class="copyedit__doc" id="copyedit-doc"></div>
+    </div>
+  </div>
+
+  <script src="src/theme.js"></script>
+  <script src="src/components.js"></script>
+  <script src="src/render.js"></script>
+  <script src="src/runtime.js"></script>
+  <script src="src/quiz-runtime.js"></script>
+  <script src="src/model.js"></script>
+  <!-- Icon accessor (Lucide, bundled offline) — chrome only; must precede editor.js -->
+  <script src="src/icons.js"></script>
+  <!-- DS canonical control set (issue #10) — chrome only; must precede editor.js so switchEl can drop in onto VersoUI.Switch -->
+  <script src="src/ui-kit.js"></script>
+  <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
+  <script src="src/store-native.js"></script>
+  <!-- #69 clobber-proof cutover: defines window.Migration (save-suppression guard + backup builder + migrate-then-flip core) so editor.js's save choke points can be neutered across a backend switch and Editor.migrateToFileBackend can drive the guarded cutover. Must precede editor.js. -->
+  <script src="src/migration.js"></script>
+  <!-- Spellchecker (P0) — chrome only. Bloom-filter dictionary + pure checker; editor.js
+       marks misspellings via the CSS Custom Highlight API (no DOM/doc mutation, never in
+       the SCORM export). Dict precedes the checker; both precede editor.js. -->
+  <script src="src/spellcheck-dict.js"></script>
+  <script src="src/spellcheck.js"></script>
+  <script src="src/editor.js"></script>
+  <!-- Data / export pipeline — load AFTER editor.js so window.Editor exists -->
+  <script src="src/persist.js"></script>
+  <script src="src/csv.js"></script>
+  <script src="src/gif-codec.js"></script>
+  <script src="src/media-optim.js"></script>
+  <script src="src/export.js"></script>
+  <script src="src/verso-format.js"></script>
+  <script src="src/schema.js"></script>
+</body>
+</html>

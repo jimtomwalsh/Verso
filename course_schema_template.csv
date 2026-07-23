@@ -1,0 +1,68 @@
+Page,Location,Path,Field,Type,Value
+,meta,meta.title,title,string,COURSE TITLE
+,meta,meta.code,code,string,DRO-XXX-E-000
+,chrome > header,chrome.header.on,on,boolean,true
+,chrome > header,chrome.header.title,title,string,Header title
+,chrome > header,chrome.header.subtitle,subtitle,string,Header subtitle
+,chrome > header,chrome.header.logo,logo,null,
+,chrome > footer,chrome.footer.on,on,boolean,true
+,chrome > footer,chrome.footer.text,text,string,Export-control / footer warning text.
+Course Menu,pages > Course Menu,pages.0.id,id,string,menu
+Course Menu,pages > Course Menu,pages.0.name,name,string,Course Menu
+Course Menu,pages > Course Menu > blocks > heading,pages.0.blocks.0.type,type,string,heading
+Course Menu,pages > Course Menu > blocks > heading,pages.0.blocks.0.text,text,string,Course title shown on the menu
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card),pages.0.blocks.1.type,type,string,componentGrid
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card),pages.0.blocks.1.component,component,string,chapter-card
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card),pages.0.blocks.1.className,className,string,card-grid
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 1 title,pages.0.blocks.1.instances.0.status,status,string,complete
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 1 title > action,pages.0.blocks.1.instances.0.action.goto,goto,string,ch01
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 1 title > slots,pages.0.blocks.1.instances.0.slots.number,number,string,01
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 1 title > slots,pages.0.blocks.1.instances.0.slots.title,title,string,Chapter 1 title
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 1 title > slots,pages.0.blocks.1.instances.0.slots.objective,objective,string,One-line 'I can...' objective for chapter 1.
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 2 title,pages.0.blocks.1.instances.1.status,status,string,incomplete
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 2 title > action,pages.0.blocks.1.instances.1.action.goto,goto,string,ch02
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 2 title > slots,pages.0.blocks.1.instances.1.slots.number,number,string,02
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 2 title > slots,pages.0.blocks.1.instances.1.slots.title,title,string,Chapter 2 title
+Course Menu,pages > Course Menu > blocks > componentGrid (chapter-card) > instances > Chapter 2 title > slots,pages.0.blocks.1.instances.1.slots.objective,objective,string,One-line 'I can...' objective for chapter 2.
+01 Chapter One,pages > 01 Chapter One,pages.1.id,id,string,ch01
+01 Chapter One,pages > 01 Chapter One,pages.1.name,name,string,01 Chapter One
+01 Chapter One,pages > 01 Chapter One > blocks > heading,pages.1.blocks.0.type,type,string,heading
+01 Chapter One,pages > 01 Chapter One > blocks > heading,pages.1.blocks.0.text,text,string,Chapter heading (H1)
+01 Chapter One,pages > 01 Chapter One > blocks > subheading,pages.1.blocks.1.type,type,string,subheading
+01 Chapter One,pages > 01 Chapter One > blocks > subheading,pages.1.blocks.1.text,text,string,Section subheading (H2)
+01 Chapter One,pages > 01 Chapter One > blocks > paragraph,pages.1.blocks.2.type,type,string,paragraph
+01 Chapter One,pages > 01 Chapter One > blocks > paragraph,pages.1.blocks.2.text,text,string,A normal body paragraph. Map Confluence body text to this.
+01 Chapter One,pages > 01 Chapter One > blocks > note,pages.1.blocks.3.type,type,string,note
+01 Chapter One,pages > 01 Chapter One > blocks > note,pages.1.blocks.3.text,text,string,A callout / info box. Map Confluence panels or admonitions to this.
+01 Chapter One,pages > 01 Chapter One > blocks > quote,pages.1.blocks.4.type,type,string,quote
+01 Chapter One,pages > 01 Chapter One > blocks > quote,pages.1.blocks.4.text,text,string,A pull-quote or blockquote.
+01 Chapter One,pages > 01 Chapter One > blocks > list,pages.1.blocks.5.type,type,string,list
+01 Chapter One,pages > 01 Chapter One > blocks > list,pages.1.blocks.5.text,text,string,<li>First bullet</li><li>Second bullet</li><li>Third bullet</li>
+01 Chapter One,pages > 01 Chapter One > blocks > divider,pages.1.blocks.6.type,type,string,divider
+01 Chapter One,pages > 01 Chapter One > blocks > image,pages.1.blocks.7.type,type,string,image
+01 Chapter One,pages > 01 Chapter One > blocks > image,pages.1.blocks.7.src,src,string,assets/images/example.png
+01 Chapter One,pages > 01 Chapter One > blocks > image,pages.1.blocks.7.alt,alt,string,Describe the image for accessibility
+01 Chapter One,pages > 01 Chapter One > blocks > image,pages.1.blocks.7.maxWidth,maxWidth,number,640
+01 Chapter One,pages > 01 Chapter One > blocks > webEmbed,pages.1.blocks.8.type,type,string,webEmbed
+01 Chapter One,pages > 01 Chapter One > blocks > webEmbed,pages.1.blocks.8.url,url,string,https://vimeo.com/76979871
+01 Chapter One,pages > 01 Chapter One > blocks > htmlEmbed,pages.1.blocks.9.type,type,string,htmlEmbed
+01 Chapter One,pages > 01 Chapter One > blocks > htmlEmbed,pages.1.blocks.9.src,src,string,assets/interactions/example.html
+01 Chapter One,pages > 01 Chapter One > blocks > htmlEmbed,pages.1.blocks.9.fitWidth,fitWidth,number,880
+01 Chapter One,pages > 01 Chapter One > blocks > htmlEmbed,pages.1.blocks.9.height,height,number,560
+01 Chapter One,pages > 01 Chapter One > blocks > checkbox,pages.1.blocks.10.type,type,string,checkbox
+01 Chapter One,pages > 01 Chapter One > blocks > checkbox,pages.1.blocks.10.label,label,string,I acknowledge I have read this section.
+01 Chapter One,pages > 01 Chapter One > blocks > checkbox,pages.1.blocks.10.checked,checked,boolean,false
+01 Chapter One,pages > 01 Chapter One > blocks > spacer,pages.1.blocks.11.type,type,string,spacer
+01 Chapter One,pages > 01 Chapter One > blocks > spacer,pages.1.blocks.11.height,height,number,40
+01 Chapter One,pages > 01 Chapter One > blocks > navButton,pages.1.blocks.12.type,type,string,navButton
+01 Chapter One,pages > 01 Chapter One > blocks > navButton,pages.1.blocks.12.text,text,string,Next: Chapter Two
+01 Chapter One,pages > 01 Chapter One > blocks > navButton > action,pages.1.blocks.12.action.goto,goto,string,ch02
+02 Chapter Two,pages > 02 Chapter Two,pages.2.id,id,string,ch02
+02 Chapter Two,pages > 02 Chapter Two,pages.2.name,name,string,02 Chapter Two
+02 Chapter Two,pages > 02 Chapter Two > blocks > heading,pages.2.blocks.0.type,type,string,heading
+02 Chapter Two,pages > 02 Chapter Two > blocks > heading,pages.2.blocks.0.text,text,string,Chapter 2 heading
+02 Chapter Two,pages > 02 Chapter Two > blocks > paragraph,pages.2.blocks.1.type,type,string,paragraph
+02 Chapter Two,pages > 02 Chapter Two > blocks > paragraph,pages.2.blocks.1.text,text,string,Chapter 2 body.
+02 Chapter Two,pages > 02 Chapter Two > blocks > navButton,pages.2.blocks.2.type,type,string,navButton
+02 Chapter Two,pages > 02 Chapter Two > blocks > navButton,pages.2.blocks.2.text,text,string,Back to menu
+02 Chapter Two,pages > 02 Chapter Two > blocks > navButton > action,pages.2.blocks.2.action.goto,goto,string,menu

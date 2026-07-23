@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verso Viewer — Review</title>
+<!-- DEV build: references the repo sources. A distributable Viewer inlines these
+     (V3 bundling) so a reviewer can open it with no repo. -->
+<link rel="stylesheet" href="../src/course.css">
+<style>
+  :root { --vg-bg:#15171c; --vg-panel:#1e2128; --vg-line:#333842; --vg-text:#e6e6e6; --vg-dim:#9aa2ad; --vg-accent:#0d99ff; }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--vg-bg); color:var(--vg-text); font:14px/1.5 system-ui, sans-serif; display:flex; flex-direction:column; }
+  .vg-bar { flex:0 0 auto; display:flex; gap:10px; align-items:center; padding:8px 14px; background:var(--vg-panel); border-bottom:1px solid var(--vg-line); z-index:60; }
+  .vg-bar h1 { font-size:14px; margin:0 8px 0 0; font-weight:600; letter-spacing:.02em; }
+  .vg-bar .vg-spacer { flex:1; }
+  .vg-btn { background:var(--vg-line); color:var(--vg-text); border:1px solid var(--vg-line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+  .vg-btn:hover { background:#3a4049; } .vg-btn:disabled { opacity:.4; cursor:default; }
+  .vg-btn.is-active, .vg-btn--primary { background:var(--vg-accent); border-color:var(--vg-accent); color:#fff; }
+  .vg-btn--ghost { background:none; border-color:transparent; color:var(--vg-dim); } /* optional/advanced controls */
+  .vg-btn--ghost:hover { background:var(--vg-line); color:var(--vg-text); }
+  .vg-name { background:#12141a; color:var(--vg-text); border:1px solid var(--vg-line); border-radius:6px; padding:5px 8px; font:inherit; width:150px; }
+  .vg-meta { color:var(--vg-dim); font-size:12px; }
+  /* reviewer onboarding guide (empty state) */
+  .vg-guide { text-align:left; max-width:460px; margin:18px auto 0; line-height:1.85; padding-left:22px; }
+  .vg-empty strong { color:var(--vg-text); }
+  .vg-empty code { background:#12141a; padding:1px 5px; border-radius:4px; }
+  /* the learner "device" — one page at a time, responsive, exactly as a learner sees it */
+  .vg-stage { flex:1 1 auto; position:relative; overflow:auto; padding-top:25px; }
+  .vg-stage.is-comment { cursor:crosshair; }
+  #vg-course { position:relative; min-height:100%; }
+  /* Freeze learner interactions while commenting via the capture-phase mousedown/click
+     handlers below (they preventDefault + stopPropagation) — NOT pointer-events:none,
+     which would retarget every click to #vg-course and break comment hit-testing.
+     user-select:none just stops stray text selection on the crosshair drag. */
+  #vg-course.is-comment .course-root { user-select:none; }
+  .vg-empty { color:var(--vg-dim); text-align:center; padding:80px 20px; }
+  .vg-navbar { flex:0 0 auto; display:flex; gap:12px; align-items:center; justify-content:center; padding:7px; background:var(--vg-panel); border-top:1px solid var(--vg-line); }
+  .vg-navbar .vg-meta { min-width:120px; text-align:center; }
+  /* pins + popover */
+  .vg-pin { position:absolute; width:20px; height:20px; transform:translate(-50%,-50%); border-radius:50% 50% 50% 3px;
+    background:#f5a623; border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.4); cursor:pointer; display:flex; align-items:center; justify-content:center; color:#fff; font:700 12px/1 sans-serif; z-index:40; }
+  .vg-pin.is-done { background:var(--vg-accent); opacity:.72; }
+  .vg-pin.is-open { outline:2px solid var(--vg-accent); outline-offset:2px; }
+  .vg-pop { position:absolute; z-index:41; width:230px; background:var(--vg-panel); border:1px solid var(--vg-line); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); padding:9px; display:flex; flex-direction:column; gap:7px; }
+  .vg-pop textarea { width:100%; box-sizing:border-box; resize:vertical; min-height:46px; font:inherit; background:#12141a; color:var(--vg-text); border:1px solid var(--vg-line); border-radius:5px; padding:5px; }
+  .vg-pop__row { display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--vg-dim); }
+  .vg-pop__del { background:none; border:none; color:#ff6b6b; cursor:pointer; font-size:12px; }
+  .vg-thread { display:flex; flex-direction:column; gap:5px; border-top:1px solid var(--vg-line); padding-top:6px; }
+  .vg-reply { font-size:12px; } .vg-dot { display:inline-block; width:9px; height:9px; border-radius:50%; vertical-align:middle; margin-right:5px; }
+  .vg-toast { position:fixed; bottom:56px; left:50%; transform:translateX(-50%); background:#0d99ff; color:#fff; padding:9px 16px; border-radius:8px; z-index:100; box-shadow:0 4px 16px rgba(0,0,0,.4); }
+</style>
+</head>
+<body>
+<div class="vg-bar">
+  <h1>Verso Viewer</h1>
+  <button class="vg-btn vg-btn--primary" id="vg-open">Open snapshot…</button>
+  <span class="vg-meta" id="vg-info">No snapshot loaded</span>
+  <span class="vg-spacer"></span>
+  <input class="vg-name" id="vg-name" placeholder="Your name" title="Stamped on your comments">
+  <button class="vg-btn" id="vg-comment" title="Toggle comment mode (C)">Comment (C)</button>
+  <button class="vg-btn vg-btn--primary" id="vg-submit" title="Downloads your review file to send back">Submit review</button>
+  <button class="vg-btn vg-btn--ghost" id="vg-folder" title="Optional / advanced: load and save into a shared folder instead of sending files (Edge/Chrome, opened locally)">Folder…</button>
+</div>
+<div class="vg-stage" id="vg-stage">
+  <div class="vg-empty" id="vg-empty">
+    <p><strong>To review this course:</strong></p>
+    <ol class="vg-guide">
+      <li>Click <strong>Open snapshot…</strong> and pick the course file you were sent (<code>.versopub.json</code>).</li>
+      <li>Type <strong>your name</strong>, click <strong>Comment (C)</strong>, then click anywhere on the content to leave a note. Use <strong>Prev / Next</strong> to move through pages.</li>
+      <li>Click <strong>Submit review</strong> — a file downloads. <strong>Send that file back</strong> to the course author.</li>
+    </ol>
+  </div>
+  <div id="vg-course"></div>
+</div>
+<div class="vg-navbar" id="vg-navbar" hidden>
+  <button class="vg-btn" id="vg-prev">‹ Prev</button>
+  <span class="vg-meta" id="vg-pageinfo"></span>
+  <button class="vg-btn" id="vg-next">Next ›</button>
+</div>
+
+<script src="../src/theme.js"></script>
+<script src="../src/components.js"></script>
+<script src="../src/render.js"></script>
+<script src="../src/runtime.js"></script>
+<script src="../src/quiz-runtime.js"></script>
+<script>
+(function () {
+  "use strict";
+  var stage = document.getElementById("vg-stage");
+  var course = document.getElementById("vg-course");
+  var empty = document.getElementById("vg-empty");
+  var info = document.getElementById("vg-info");
+  var nameIn = document.getElementById("vg-name");
+  var btnComment = document.getElementById("vg-comment");
+  var navbar = document.getElementById("vg-navbar");
+  var pageInfo = document.getElementById("vg-pageinfo");
+  var COLOURS = ["#f5a623","#4d7cad","#e0563f","#2ea36b","#9b59b6","#e91e8c","#0d99ff","#d4a017"];
+
+  var state = { snap:null, doc:null, pageIndex:0, comments:[], commentMode:false, openId:null, editing:null, dirHandle:null, runtime:null };
+
+  // ---- identity ----------------------------------------------------------
+  function colourForName(n){ var x=0; n=n||""; for(var i=0;i<n.length;i++) x=(x*31+n.charCodeAt(i))>>>0; return COLOURS[x%COLOURS.length]; }
+  function identity(){ var n=(nameIn.value||"").trim()||"Reviewer"; return { name:n, colour:colourForName(n) }; }
+  try { nameIn.value = localStorage.getItem("verso.viewer.name") || ""; } catch(e){}
+  nameIn.addEventListener("change", function(){ try{ localStorage.setItem("verso.viewer.name", nameIn.value); }catch(e){} });
+  function rnd(){ return Math.random().toString(36).slice(2,8); }
+  function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  // ---- load + render ONE page (learner experience) ----------------------
+  function loadSnapshot(snap){
+    state.snap = snap; state.doc = snap.doc || snap; state.comments = []; state.pageIndex = 0;
+    info.textContent = (snap.course||"course") + " · v" + (snap.version||"?");
+    empty.style.display = "none"; navbar.hidden = false;
+    setPage(0);
+  }
+  function navAdapter(){
+    return {
+      count: function(){ return state.doc.pages.length; },
+      pageIds: function(){ return state.doc.pages.map(function(p){ return p.id; }); },
+      currentPageId: function(){ var p=state.doc.pages[state.pageIndex]; return p?p.id:null; },
+      goto: function(id){ var i=pageIndexById(id); if(i<0) return false; if(i!==state.pageIndex) setPage(i); return true; },
+      next: function(){ setPage(Math.min(state.pageIndex+1, state.doc.pages.length-1)); },
+      prev: function(){ setPage(Math.max(state.pageIndex-1, 0)); }
+    };
+  }
+  function pageIndexById(id){ for(var i=0;i<state.doc.pages.length;i++) if(state.doc.pages[i].id===id) return i; return -1; }
+
+  function setPage(i){
+    state.pageIndex = i;
+    closePopover();
+    if (state.runtime && state.runtime.destroy) { try { state.runtime.destroy(); } catch(e){} }
+    course.innerHTML = "";
+    var doc = state.doc, page = doc.pages[i];
+    var theme = window.THEMES ? window.THEMES.dark : null;
+    if (window.chaptersToNavSections) window.__navSections = window.chaptersToNavSections(doc);
+    window.__docStyles = doc.styles || null;
+    window.__contentMaxWidth = doc.contentMaxWidth || null;
+    window.__gatedProgression = doc.gatedProgression || null;
+    var root = window.renderPage(page, theme, window.resolveHeaderFooter(doc, page));
+    root.setAttribute("data-env", "runtime");
+    root.setAttribute("data-mode", "dark");
+    root.style.setProperty("--vp-h", stage.clientHeight + "px");
+    // stamp cids on the read-only DOM for comment hit-testing (render doesn't emit them)
+    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block"), function(n){ if(n.__block && n.__block.cid) n.setAttribute("data-cid", n.__block.cid); });
+    course.appendChild(root);
+    // run the real course: quizzes + interactions/nav/gates, exactly as a learner gets
+    if (window.QuizRuntime) window.QuizRuntime.init(root);
+    if (window.CourseRuntime) state.runtime = window.CourseRuntime.create({ root:root, interactions:window.buildInteractionMap(doc), nav:navAdapter() });
+    pageInfo.textContent = "Page " + (i+1) + " of " + doc.pages.length + " · " + (page.name||"");
+    document.getElementById("vg-prev").disabled = i<=0;
+    document.getElementById("vg-next").disabled = i>=doc.pages.length-1;
+    course.classList.toggle("is-comment", state.commentMode);
+    renderPins();
+  }
+  document.getElementById("vg-prev").addEventListener("click", function(){ navAdapter().prev(); });
+  document.getElementById("vg-next").addEventListener("click", function(){ navAdapter().next(); });
+
+  // ---- 3-tier anchor (block > page) against the CURRENT page -------------
+  function clamp01(n){ return n<0?0:n>1?1:n; }
+  function anchorFromPoint(x, y, target){
+    var b = target.closest ? target.closest(".canvas-block[data-cid]") : null;
+    if (b){ var r=b.getBoundingClientRect(); return { blockId:b.getAttribute("data-cid"), dx:clamp01((x-r.left)/(r.width||1)), dy:clamp01((y-r.top)/(r.height||1)) }; }
+    var p = target.closest ? target.closest(".page[data-page-id]") : null;
+    if (p){ var pr=p.getBoundingClientRect(); return { pageId:p.getAttribute("data-page-id"), x:clamp01((x-pr.left)/(pr.width||1)), y:clamp01((y-pr.top)/(pr.height||1)) }; }
+    return null;
+  }
+  function anchorToPos(a){
+    var cr = course.getBoundingClientRect();
+    if (a.blockId){ var n=course.querySelector('.canvas-block[data-cid="'+a.blockId+'"]'); if(!n) return null; var r=n.getBoundingClientRect(); return { x:r.left-cr.left+(a.dx||0)*r.width, y:r.top-cr.top+(a.dy||0)*r.height }; }
+    if (a.pageId){ var pe=course.querySelector('.page[data-page-id="'+a.pageId+'"]'); if(!pe) return null; var pr=pe.getBoundingClientRect(); return { x:pr.left-cr.left+(a.x||0)*pr.width, y:pr.top-cr.top+(a.y||0)*pr.height }; }
+    return null; // comment lives on another page -> not shown here
+  }
+  // which page a comment is anchored to (for the off-page counter)
+  function commentPageIndex(c){
+    var a=c.anchor;
+    if (a.pageId){ return pageIndexById(a.pageId); }
+    if (a.blockId){ for(var i=0;i<state.doc.pages.length;i++){ var found=false; (function walk(bs){ (bs||[]).forEach(function(b){ if(!b) return; if(b.cid===a.blockId) found=true; if(b.children)walk(b.children); if(b.columns)b.columns.forEach(walk); if(b.items)b.items.forEach(function(it){if(it&&it.children)walk(it.children);}); }); })(state.doc.pages[i].blocks); if(found) return i; } }
+    return -1;
+  }
+
+  // ---- pins + popover ----------------------------------------------------
+  function renderPins(){
+    Array.prototype.forEach.call(course.querySelectorAll(".vg-pin"), function(n){ n.remove(); });
+    var pop = course.querySelector(".vg-pop");
+    var offPage = 0;
+    state.comments.forEach(function(c){
+      var pos = anchorToPos(c.anchor);
+      if(!pos){ if(!c.done) offPage++; return; }
+      var pin = document.createElement("div");
+      pin.className = "vg-pin" + (c.done?" is-done":"") + (c.id===state.openId?" is-open":"");
+      pin.style.left = pos.x+"px"; pin.style.top = pos.y+"px";
+      if (c.colour && !c.done) pin.style.background = c.colour;
+      pin.textContent = c.done ? "✓" : "";
+      pin.title = (c.author?c.author+": ":"") + (c.body||"(empty)");
+      pin.addEventListener("mousedown", function(e){ e.stopPropagation(); e.preventDefault(); openPopover(c); });
+      course.insertBefore(pin, pop || null);
+    });
+    if (pop){ var oc=state.comments.filter(function(c){return c.id===state.openId;})[0]; var p=oc&&anchorToPos(oc.anchor); if(p){ pop.style.left=(p.x+16)+"px"; pop.style.top=p.y+"px"; } else closePopover(); }
+    var total = state.comments.length;
+    document.getElementById("vg-info").textContent = (state.snap.course||"course")+" · v"+(state.snap.version||"?")+(total? " · "+total+" comment"+(total>1?"s":"")+(offPage?" ("+offPage+" on other pages)":""):"");
+  }
+  function closePopover(){
+    var p = course.querySelector(".vg-pop"); if(p) p.remove();
+    if (state.editing && !(state.editing.body||"").trim() && !(state.editing.replies||[]).length){ var i=state.comments.indexOf(state.editing); if(i!==-1) state.comments.splice(i,1); }
+    state.editing = null; state.openId = null;
+  }
+  function openPopover(c){
+    closePopover(); state.openId = c.id; state.editing = c;
+    var pos = anchorToPos(c.anchor); if(!pos){ renderPins(); return; }
+    var pop = document.createElement("div"); pop.className="vg-pop";
+    pop.style.left=(pos.x+16)+"px"; pop.style.top=pos.y+"px";
+    pop.addEventListener("mousedown", function(e){ e.stopPropagation(); });
+    if (c.author){ var au=document.createElement("div"); au.className="vg-pop__row"; au.innerHTML='<span class="vg-dot" style="background:'+(c.colour||"#888")+'"></span>'+esc(c.author); pop.appendChild(au); }
+    var ta=document.createElement("textarea"); ta.value=c.body||""; ta.placeholder="Note on this content / interaction / pacing…"; ta.rows=3;
+    ta.addEventListener("input", function(){ c.body=ta.value; });
+    ta.addEventListener("keydown", function(e){ if(e.key==="Escape"){ e.preventDefault(); e.stopPropagation(); closePopover(); renderPins(); } });
+    pop.appendChild(ta);
+    var row=document.createElement("div"); row.className="vg-pop__row";
+    var lab=document.createElement("label"); var box=document.createElement("input"); box.type="checkbox"; box.checked=!!c.done;
+    box.addEventListener("change", function(){ c.done=box.checked; renderPins(); });
+    lab.appendChild(box); lab.appendChild(document.createTextNode(" Resolved"));
+    var del=document.createElement("button"); del.className="vg-pop__del"; del.textContent="Delete";
+    del.addEventListener("click", function(){ var i=state.comments.indexOf(c); if(i!==-1) state.comments.splice(i,1); state.editing=null; closePopover(); renderPins(); });
+    row.appendChild(lab); row.appendChild(del); pop.appendChild(row);
+    var th=document.createElement("div"); th.className="vg-thread";
+    (c.replies||[]).forEach(function(rp){ var l=document.createElement("div"); l.className="vg-reply"; l.innerHTML='<span class="vg-dot" style="background:'+(rp.colour||"#888")+'"></span>'+esc((rp.author?rp.author+": ":"")+(rp.body||"")); th.appendChild(l); });
+    var ri=document.createElement("textarea"); ri.rows=1; ri.placeholder="Reply…"; ri.addEventListener("mousedown",function(e){e.stopPropagation();});
+    var rb=document.createElement("button"); rb.className="vg-btn"; rb.textContent="Reply"; rb.style.fontSize="12px";
+    rb.addEventListener("click", function(){ var v=(ri.value||"").trim(); if(!v) return; var id=identity(); c.replies=c.replies||[]; c.replies.push({ id:"rp_"+rnd(), body:v, author:id.name, colour:id.colour, createdAt:Date.now() }); openPopover(c); renderPins(); });
+    th.appendChild(ri); th.appendChild(rb); pop.appendChild(th);
+    course.appendChild(pop); renderPins();
+    setTimeout(function(){ try{ ta.focus(); }catch(e){} }, 0);
+  }
+
+  // ---- drop (comment mode; capture-phase so it beats the runtime) --------
+  course.addEventListener("mousedown", function(e){
+    if (!state.commentMode || e.button!==0) return;
+    if (e.target.closest(".vg-pin, .vg-pop")) return;
+    e.preventDefault(); e.stopPropagation();
+    if (state.openId){ closePopover(); renderPins(); return; } // positive exit
+    var a = anchorFromPoint(e.clientX, e.clientY, e.target); if(!a) return;
+    var id = identity();
+    var c = { id:"cm_"+rnd(), anchor:a, body:"", done:false, author:id.name, colour:id.colour, createdAt:Date.now(), replies:[] };
+    state.comments.push(c); openPopover(c);
+  }, true);
+  course.addEventListener("click", function(e){ if(state.commentMode){ e.preventDefault(); e.stopPropagation(); } }, true);
+  stage.addEventListener("scroll", renderPins, true);
+  window.addEventListener("resize", renderPins);
+
+  // ---- comment mode ------------------------------------------------------
+  function setCommentMode(on){ state.commentMode=!!on; stage.classList.toggle("is-comment", state.commentMode); course.classList.toggle("is-comment", state.commentMode); btnComment.classList.toggle("is-active", state.commentMode); if(!on) closePopover(); renderPins(); }
+  btnComment.addEventListener("click", function(){ setCommentMode(!state.commentMode); });
+  window.addEventListener("keydown", function(e){
+    var t=e.target.tagName;
+    if ((e.key==="c"||e.key==="C") && !e.metaKey && !e.ctrlKey && t!=="TEXTAREA" && t!=="INPUT"){ setCommentMode(!state.commentMode); }
+    else if (e.key==="Escape"){ if(state.openId){ closePopover(); renderPins(); } else if(state.commentMode) setCommentMode(false); }
+    else if (t!=="TEXTAREA" && t!=="INPUT" && !state.commentMode){ if(e.key==="ArrowRight") navAdapter().next(); else if(e.key==="ArrowLeft") navAdapter().prev(); }
+  });
+
+  // ---- open snapshot (file) ---------------------------------------------
+  document.getElementById("vg-open").addEventListener("click", function(){
+    var inp=document.createElement("input"); inp.type="file"; inp.accept=".json,application/json";
+    inp.addEventListener("change", function(){ var f=inp.files&&inp.files[0]; if(!f) return; var r=new FileReader(); r.onload=function(){ try{ loadSnapshot(JSON.parse(r.result)); }catch(e){ alert("Bad snapshot: "+e.message); } }; r.readAsText(f); });
+    inp.click();
+  });
+
+  // ---- submit review (sidecar; save-to-folder or download) --------------
+  function buildSidecar(){ var id=identity(); return { type:"verso-comments", version:1, exportedBy:id.name, course:(state.snap&&state.snap.course)||null, forVersion:(state.snap&&state.snap.version)||null, exportedAt:Date.now(), comments:state.comments }; }
+  document.getElementById("vg-submit").addEventListener("click", async function(){
+    if (!state.comments.length){ toast("No comments to submit."); return; }
+    closePopover(); renderPins();
+    var payload = JSON.stringify(buildSidecar(), null, 2);
+    var fname = "review-" + ((state.snap&&state.snap.course)||"course") + "-" + identity().name.replace(/[^\w.-]+/g,"_") + ".json";
+    if (state.dirHandle){
+      try { var fh=await state.dirHandle.getFileHandle(fname,{create:true}); var w=await fh.createWritable(); await w.write(payload); await w.close(); toast("Saved "+fname+" to the review folder."); return; }
+      catch(err){ /* fall through */ }
+    }
+    var blob=new Blob([payload],{type:"application/json"}); var a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=fname; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000); toast("Downloaded "+fname+" — send this file back to the course author.");
+  });
+
+  // ---- choose folder (library + save target) ----------------------------
+  document.getElementById("vg-folder").addEventListener("click", async function(){
+    if (!window.showDirectoryPicker){ toast("Folder access needs Edge/Chrome, opened locally."); return; }
+    try {
+      var dir=await window.showDirectoryPicker(); state.dirHandle=dir;
+      var snaps=[]; for await (var entry of dir.values()){ if(entry.kind==="file" && /\.versopub\.json$/i.test(entry.name)) snaps.push(entry); }
+      if(!snaps.length){ toast("No .versopub.json snapshots in that folder."); return; }
+      var file=await snaps[0].getFile(); loadSnapshot(JSON.parse(await file.text()));
+      toast("Loaded "+snaps[0].name+" · "+snaps.length+" snapshot(s)");
+    } catch(err){ if(err && err.name!=="AbortError") toast("Folder error: "+err.message); }
+  });
+
+  function toast(msg){ var t=document.createElement("div"); t.className="vg-toast"; t.textContent=msg; document.body.appendChild(t); setTimeout(function(){ t.remove(); }, 2600); }
+  window.__viewer = { loadSnapshot:loadSnapshot, state:state, setPage:setPage, setCommentMode:setCommentMode, buildSidecar:buildSidecar, anchorFromPoint:anchorFromPoint, navAdapter:navAdapter };
+})();
+</script>
+</body>
+</html>

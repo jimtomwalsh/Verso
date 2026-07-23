@@ -1,0 +1,11 @@
+Verso
+Copyright 2026 James Walsh
+
+This product is licensed under the Apache License, Version 2.0 (see the LICENSE file).
+
+This product bundles third-party components under their own licenses. See
+THIRD-PARTY-NOTICES.md for the full list and license texts, including:
+
+  - omggif (MIT) — GIF reader/writer
+  - Lucide (ISC) — icon set
+  - Inter, JetBrains Mono, Exo 2 (SIL Open Font License 1.1) — fonts

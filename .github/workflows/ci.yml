@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Regression suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The suite is pure Node (no dependencies) and syntax-checks every src/*.js
+      # itself, then exercises the extracted pure cores. Exits non-zero on any
+      # FAIL, which fails the job.
+      - name: node tests/run.js
+        run: node tests/run.js

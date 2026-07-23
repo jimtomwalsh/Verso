@@ -1,0 +1,33 @@
+/* ============================================================
+   Verso — Effects: radius, borders, shadows, motion
+   Radii stay small and shadows soft. Floating surfaces
+   (menus, modals) get a crisp 1px border + a low, wide shadow.
+   ============================================================ */
+
+:root {
+  /* Corner radius — small */
+  --radius-xs: 2px;   /* inputs, segments, chips */
+  --radius-sm: 4px;   /* buttons, control groups */
+  --radius-md: 6px;   /* cards, popovers */
+  --radius-lg: 8px;   /* modals */
+  --radius-full: 999px;
+
+  /* Border widths */
+  --border-1: 1px;
+  --border-2: 2px;    /* focus ring / selected frame */
+
+  /* Elevation — dark UI leans on borders + low shadow */
+  --shadow-popover: 0 2px 5px rgba(0,0,0,0.28), 0 0 0 1px var(--border-subtle);
+  --shadow-menu:    0 4px 12px rgba(0,0,0,0.36), 0 0 0 1px var(--border-subtle);
+  --shadow-modal:   0 12px 40px rgba(0,0,0,0.50), 0 0 0 1px var(--border-subtle);
+  --shadow-focus:   0 0 0 2px var(--surface-panel), 0 0 0 3px var(--border-focus);
+  --shadow-selected: inset 0 0 0 1px var(--accent);
+
+  /* Motion — quick, functional; long enough to read, never bouncy */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* @kind other */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1); /* @kind other */
+  --dur-instant: 80ms; /* @kind other */
+  --dur-fast: 120ms; /* @kind other */
+  --dur-base: 180ms; /* @kind other */
+  --dur-slow: 240ms; /* @kind other */
+}

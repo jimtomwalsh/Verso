@@ -1,0 +1,42 @@
+/* ============================================================
+   Verso — Spacing & sizing tokens
+   Tight, professional density. The panel grid is 8px; control
+   heights are the load-bearing numbers (rows are ~32, inputs 24).
+   ============================================================ */
+
+:root {
+  /* Space scale */
+  --space-0:  0px;
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  10px;
+  --space-6:  12px;
+  --space-8:  16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-16: 32px;
+
+  /* Control heights (the density anchors) */
+  --control-sm: 20px;   /* dense chips, mini icon buttons */
+  --control-md: 24px;   /* DEFAULT — inputs, segments, selects */
+  --control-lg: 32px;   /* rows, primary buttons, toolbar height */
+
+  /* Icon sizes */
+  --icon-sm: 12px;
+  --icon-md: 16px;   /* default UI glyph */
+  --icon-lg: 20px;
+  --icon-xl: 24px;
+
+  /* Structural dimensions */
+  --panel-left-width:  248px;
+  --panel-right-width: 264px;
+  --toolbar-height:    40px;
+  --tabbar-height:     36px;
+  --row-height:        28px;   /* inspector row */
+  --section-pad:       8px;    /* panel section horizontal pad */
+
+  /* Hit target minimum */
+  --hit-min: 24px;
+}

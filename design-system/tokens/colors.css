@@ -1,0 +1,144 @@
+/* ============================================================
+   Verso — Color tokens
+   Dark is the primary editor theme . Light theme
+   is a scoped override. Base ramp first, semantic aliases after.
+   ============================================================ */
+
+:root {
+  /* ---- Neutral ramp (dark-first) ------------------------- */
+  --gray-1000: #171717;  /* deepest — canvas void */
+  --gray-950:  #1e1e1e;  /* app / panel base */
+  --gray-900:  #262626;  /* raised panel */
+  --gray-850:  #2c2c2c;  /* input / control base */
+  --gray-800:  #363636;  /* hover / selected control */
+  --gray-750:  #444444;  /* active / pressed */
+  --gray-700:  #525252;  /* strong border */
+  --gray-600:  #6b6b6b;  /* disabled ink */
+  --gray-500:  #808080;  /* placeholder / tertiary ink */
+  --gray-400:  #a3a3a3;  /* secondary ink / idle icon */
+  --gray-300:  #b3b3b3;  /* secondary ink (label) */
+  --gray-200:  #cfcfcf;
+  --gray-100:  #e6e6e6;  /* primary ink */
+  --gray-050:  #f5f5f5;
+  --white:     #ffffff;
+  --black:     #000000;
+
+  /* Alpha neutrals — for borders/hovers that sit on any surface */
+  --alpha-hover:    rgba(255, 255, 255, 0.06);
+  --alpha-active:   rgba(255, 255, 255, 0.10);
+  --alpha-border:   rgba(255, 255, 255, 0.10);
+  --alpha-border-strong: rgba(255, 255, 255, 0.16);
+  --alpha-scrim:    rgba(0, 0, 0, 0.50);
+
+  /* ---- Brand / accent ------------------------------------ */
+  --blue-500:  #0d99ff;  /* primary — Verso azure */
+  --blue-600:  #007be5;  /* hover */
+  --blue-700:  #005bb5;  /* pressed */
+  --blue-100:  #b3ddff;
+  --blue-tint: rgba(13, 153, 255, 0.16); /* selection wash */
+
+  /* Semantic status */
+  --green-500: #14ae5c;  /* success / quiz-correct (brand green) */
+  --green-600: #0f9350;
+  --green-tint: rgba(20, 174, 92, 0.16);
+  --red-500:   #f24822;  /* error / quiz-incorrect / destructive */
+  --red-600:   #d63a18;
+  --red-tint:  rgba(242, 72, 34, 0.16);
+  --yellow-500:#ffcd29;  /* warning */
+  --purple-500:#9747ff;  /* components / instances  */
+  --teal-500:  #0e9384;  /* software-version axis (distinct from the variant/instances purple) */
+
+  /* ---- Preview-axis cues (editor chrome only; never ship to a learner) ------
+     Each selectable content axis previews in its OWN hue so a composed preview
+     (variant + version at once) reads without collision. Variant ~= the
+     instances purple; version = teal. */
+  --preview-variant: #8e44ad;      /* product-variant read-only preview (existing) */
+  --preview-version: var(--teal-500); /* software-version read-only preview (#206) */
+  --preview-version-wash: rgba(14, 147, 132, 0.18);
+
+  /* Authoring cue — the neon-pink "unfilled slot" marker.
+     Canvas-only affordance; never ships to a learner. */
+  --placeholder-pink: #ff2d9b;
+  --placeholder-pink-tint: rgba(255, 45, 155, 0.22);
+
+  /* ============================================================
+     SEMANTIC ALIASES (dark theme — default)
+     Reference these in components, not the raw ramp.
+     ============================================================ */
+
+  /* Surfaces */
+  --surface-canvas:   var(--gray-1000);  /* the infinite board */
+  --surface-app:      var(--gray-950);   /* toolbar / chrome base */
+  --surface-panel:    var(--gray-950);   /* left + right panels */
+  --surface-raised:   var(--gray-900);   /* menus, popovers, modals */
+  --surface-input:    var(--gray-850);   /* text fields, selects */
+  --surface-hover:    var(--alpha-hover);
+  --surface-active:   var(--alpha-active);
+  --surface-selected: var(--blue-tint);
+
+  /* Ink */
+  --text-primary:   var(--gray-100);
+  --text-secondary: var(--gray-300);
+  --text-tertiary:  var(--gray-500);
+  --text-disabled:  var(--gray-600);
+  --text-on-accent: var(--white);
+  --text-link:      var(--blue-500);
+
+  /* Icons */
+  --icon-idle:     var(--gray-400);
+  --icon-strong:   var(--gray-100);
+  --icon-on-accent: var(--white);
+
+  /* Borders */
+  --border-subtle: var(--alpha-border);
+  --border-strong: var(--alpha-border-strong);
+  --border-input:  var(--gray-750);
+  --border-focus:  var(--blue-500);
+
+  /* Accent roles */
+  --accent:          var(--blue-500);
+  --accent-hover:    var(--blue-600);
+  --accent-pressed:  var(--blue-700);
+  --accent-quiet:    var(--blue-tint);
+  --success:         var(--green-500);
+  --danger:          var(--red-500);
+  --danger-hover:    var(--red-600);
+  --warning:         var(--yellow-500);
+  --component:       var(--purple-500);
+}
+
+/* ============================================================
+   LIGHT THEME — scoped override (learner light mode / light UI)
+   ============================================================ */
+[data-theme="light"],
+.theme-light {
+  --surface-canvas:   #e5e5e5;
+  --surface-app:      #ffffff;
+  --surface-panel:    #ffffff;
+  --surface-raised:   #ffffff;
+  --surface-input:    #f5f5f5;
+  --surface-hover:    rgba(0, 0, 0, 0.05);
+  --surface-active:   rgba(0, 0, 0, 0.08);
+  --surface-selected: rgba(13, 153, 255, 0.12);
+
+  --text-primary:   #1e1e1e;
+  --text-secondary: #4d4d4d;
+  --text-tertiary:  #8c8c8c;
+  --text-disabled:  #b3b3b3;
+  --text-on-accent: #ffffff;
+  --text-link:      #007be5;
+
+  --icon-idle:      #6b6b6b;
+  --icon-strong:    #1e1e1e;
+  --icon-on-accent: #ffffff;
+
+  --border-subtle:  rgba(0, 0, 0, 0.08);
+  --border-strong:  rgba(0, 0, 0, 0.14);
+  --border-input:   #d9d9d9;
+  --border-focus:   #0d99ff;
+
+  --accent:         #0d99ff;
+  --accent-hover:   #007be5;
+  --accent-pressed: #005bb5;
+  --accent-quiet:   rgba(13, 153, 255, 0.12);
+}

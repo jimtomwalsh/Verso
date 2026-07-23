@@ -1,0 +1,2048 @@
+/*
+ * Course component styles. Reads ONLY theme tokens (var(--color-*), var(--font-*),
+ * var(--space-*), var(--size-*)) set on .course-root by applyTheme() — never
+ * hardcoded values. Ships INSIDE the SCORM package unchanged, so the course looks
+ * identical in the editor and in the exported output.
+ *
+ * Dark theme matching the real Captivate course. The chapter-card style-swap
+ * (.is-complete vs .is-incomplete) recolours the accent purely through tokens —
+ * this is the M3 per-instance style override made visible.
+ */
+
+.course-root {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  background: var(--color-bg);
+}
+
+/* Light/dark crossfade (§1 P3). The learner mode toggle flips data-mode and swaps
+   the --color-* tokens instantly; the interactive accents (nav pill/buttons, cards)
+   already ease via their own transitions, but the big reading surfaces (root bg +
+   text) hard-cut. Ease those. Scoped to [data-mode] PRESENT so the no-JS default
+   does not animate on first paint -- only a real toggle fades. Tokens/CSS only,
+   ships in the SCORM package.
+   NB: data-mode lands on DIFFERENT elements per surface -- on .course-root in the
+   editor canvas, but on <html>/<body> in preview + export (render.js apply()) -- so
+   we match BOTH self ([data-mode] on the root) AND ancestor ([data-mode] .page). */
+.course-root[data-mode],
+[data-mode] .course-root,
+[data-mode] .page,
+[data-mode] .page-title,
+[data-mode] .body-copy,
+[data-mode] .body-note,
+[data-mode] .body-list {
+  /* global-motion: author duration via --motion-mode-fade (doc.motion.modeMs), default 300ms.
+     Scoped to [data-mode] present so the no-JS first paint / initial stamp does not animate. */
+  transition: background-color var(--motion-mode-fade, 300ms) ease, color var(--motion-mode-fade, 300ms) ease, border-color var(--motion-mode-fade, 300ms) ease;
+}
+/* Recoloured inline SVGs (glossary / image block / hotspot base / logo) paint via
+   fill/stroke = var(--color-*); those props are NOT on the text elements above and svg
+   nodes aren't in that selector list, so they snap while the page bg eases. Transition
+   fill/stroke on svg content under a themed root off the SAME --motion-mode-fade var so
+   vector art fades in lock-step with the background. Only var-driven fills actually
+   change on a toggle, so a fixed brand colour never animates. */
+.course-root[data-mode] svg, [data-mode] svg,
+.course-root[data-mode] svg *, [data-mode] svg * {
+  transition: fill var(--motion-mode-fade, 300ms) ease, stroke var(--motion-mode-fade, 300ms) ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .course-root[data-mode] svg, [data-mode] svg,
+  .course-root[data-mode] svg *, [data-mode] svg * { transition: none; }
+  .course-root[data-mode],
+  [data-mode] .course-root,
+  [data-mode] .page,
+  [data-mode] .page-title,
+  [data-mode] .body-copy,
+  [data-mode] .body-note,
+  [data-mode] .body-list { transition: none; }
+}
+
+/* Per-mode author TEXT colour (colorField "Per-mode" tab, via applyTextStyle). The node
+   carries --tc-light / --tc-dark; --tc-c resolves to the current mode's value (light default,
+   dark override) so it switches live with the learner's toggle. Ships in SCORM. */
+[style*="--tc-light"] { --tc-c: var(--tc-light); }
+.course-root[data-mode="dark"] [style*="--tc-light"] { --tc-c: var(--tc-dark); }
+
+.page {
+  width: 100%;
+  /* optional master content-width cap (doc.contentMaxWidth -> --page-max-width);
+     none = full width. margin auto centres the capped column. */
+  max-width: var(--page-max-width, none);
+  margin: 0 auto;
+  box-sizing: border-box;
+  /* master page padding — side % gives the 80%-centred content the project uses;
+     driven per breakpoint by the editor's layout config (applyLayoutVars). */
+  padding: var(--page-pad-y, 56px) var(--page-pad-x, 10%);
+}
+
+.page-title {
+  margin: 0 0 var(--space-lg);
+  font-family: var(--font-heading);
+  font-size: var(--size-page-title);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--color-ink);
+}
+
+.body-copy {
+  /* RRRR: no silent max-width cap -- paragraphs fill the page content box and
+     share the same left/right edge as headings, notes, lists, images and embeds
+     (which are all full-width). A readability line-length limit becomes an opt-in
+     per-block control (typography workstream), not a default that misaligns text. */
+  margin: 0 0 var(--space-md);
+  font-size: 17px;
+  line-height: 1.6;
+  /* Primary body text = full ink, matching .body-list + headings (was ink-soft, which
+     made paragraphs render a shade lighter than lists = the body-text colour mismatch).
+     A text style's own colour still overrides this (inline node colour beats the class). */
+  color: var(--color-ink);
+}
+
+/* Inline hyperlinks authored in text (external URL, new tab). Theme-token colour so
+   it reads in BOTH light + dark; excludes the .nav-button/.course-nav__btn links which
+   carry their own button styling. Ships in the SCORM package. */
+.page a:not(.nav-button):not(.course-nav__btn) {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.page a:not(.nav-button):not(.course-nav__btn):hover { text-decoration-thickness: 2px; }
+
+.body-note {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-left: 2px solid var(--color-accent);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-muted);
+}
+/* Callout is a DIV (see render.js note block): the accent spans the full height even when
+   the note holds several paragraphs / a list. Collapse the outer margins of nested blocks
+   so the copy sits flush inside the padding instead of double-spacing. */
+.body-note > :first-child { margin-top: 0; }
+.body-note > :last-child { margin-bottom: 0; }
+
+/* branded header — global header/footer, full-bleed (course-root child); its own side
+   padding matches the page content padding */
+.course-header {
+  display: flex; align-items: center; gap: 22px;
+  /* III: header/footer uses its OWN --headerfooter-pad-x (not --page-pad-x), so squeezing a
+     page's content width no longer narrows the header/footer. Same 10% default,
+     but decoupled; set --headerfooter-pad-x (or the header/footer padX override) for full-bleed. */
+  padding: 16px var(--headerfooter-pad-x, 10%);
+  border-bottom: 2px solid var(--color-rule);
+}
+/* JJJ: opt-in pinned header (position:sticky). Keeps the header + any learner mode
+   toggle reachable on scroll. Background so scrolling content can't show through.
+   In the editor canvas (no scroll container) sticky degrades to normal flow. */
+.course-header--pinned {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--color-bg);
+  transition: transform 0.25s ease;
+}
+/* JJJ: runtime.js toggles .is-hidden on scroll-down (reveals on scroll-up/hover). */
+.course-header--pinned.is-hidden { transform: translateY(-100%); }
+@media (prefers-reduced-motion: reduce) {
+  .course-header--pinned { transition: none; }
+  .course-header--pinned.is-hidden { transform: none; } /* never hide when reduced motion */
+}
+.course-header__brand { display: flex; align-items: center; gap: 9px; color: var(--color-ink); }
+.course-header__logo { width: 24px; height: 24px; color: var(--color-accent); }
+.course-header__img { height: 30px; width: auto; max-width: 260px; display: block; }
+/* auto-tint: force a mono logo to a CONTRASTING silhouette per mode — dark in
+   light mode, white in dark mode. brightness(0) collapses any source colour to a
+   solid black shape (keeping transparency), which the dark rule then inverts to
+   white. Works for a black OR a white source SVG (invert alone only fixed a dark
+   one); "Original" opts out to keep brand colour. */
+.course-header__img--auto { filter: brightness(0); }
+.course-root[data-mode="dark"] .course-header__img--auto { filter: brightness(0) invert(1); }
+@media (prefers-color-scheme: dark) {
+  .course-root:not([data-mode]) .course-header__img--auto { filter: brightness(0) invert(1); }
+}
+.course-header__word { font-family: var(--font-heading); font-size: 15px; font-weight: 600; letter-spacing: 0.14em; }
+.course-header__word b { font-weight: 800; }
+.course-header__crumb {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-heading); font-weight: 700; font-size: 14px; color: var(--color-ink-soft);
+}
+.course-header__sep { color: var(--color-muted); font-weight: 400; }
+/* Item X — trailing region of author-added header/footer children (e.g. the mode toggle).
+   margin-left:auto parks it at the far end of the header row; inert when empty. */
+.course-header__extra { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.course-footer__extra { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+
+/* Item X — learner light/dark toggle control. Token-driven so it tracks the theme
+   in both modes; ships inside the SCORM package. */
+.mode-toggle {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--color-ink-soft); background: transparent;
+  border: 1px solid var(--color-hair); border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; line-height: 1; white-space: nowrap;
+}
+.mode-toggle:hover { border-color: var(--color-accent); color: var(--color-accent); }
+/* Icon variant: a single glyph = the mode you'd switch TO (moon in light, sun in
+   dark). Both glyphs render; only the opposing one shows per .course-root[data-mode]. */
+.mode-toggle--icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+}
+.mode-toggle__glyph { align-items: center; justify-content: center; }
+.mode-toggle__glyph svg { width: 19px; height: 19px; display: block; }  /* §1 P2: +~20% (was 16px); tap target stays 34x30 */
+/* DEFAULT (light, and any context) = show the moon (switch-to-dark). No ancestor
+   requirement, so a glyph always renders even if the toggle isn't under a
+   themed .course-root (e.g. some preview wrappers). */
+.mode-toggle__to-dark { display: inline-flex; }
+.mode-toggle__to-light { display: none; }
+/* dark mode: swap to the sun (switch-to-light) */
+.course-root[data-mode="dark"] .mode-toggle__to-dark { display: none; }
+.course-root[data-mode="dark"] .mode-toggle__to-light { display: inline-flex; }
+/* no-JS export fallback: follow OS preference until the runtime stamps data-mode */
+@media (prefers-color-scheme: dark) {
+  .course-root:not([data-mode]) .mode-toggle__to-dark { display: none; }
+  .course-root:not([data-mode]) .mode-toggle__to-light { display: inline-flex; }
+}
+
+/* ---- Global motion (doc.motion): chapter-change fade -------------------------------------
+   The light/dark fade lives in the [data-mode] transition block above (configurable via the
+   same --motion-mode-fade var). Here: the runtime adds .is-chapter-enter to the incoming page
+   box when its chapter id differs from the outgoing page -> a slightly-slower opacity fade-in
+   (--motion-chapter-fade, default 450ms). Disabled for prefers-reduced-motion users. */
+@media (prefers-reduced-motion: no-preference) {
+  .scorm-page.is-chapter-enter,
+  .course-root.is-chapter-enter {
+    animation: motion-chapter-enter var(--motion-chapter-fade, 450ms) ease both;
+  }
+}
+@keyframes motion-chapter-enter { from { opacity: 0; } to { opacity: 1; } }
+
+/* Item FF — learner footer navigation bar (prev / progress / next). Token-driven,
+   ships inside the SCORM package. Full-width row inside the footer __extra region. */
+.course-footer__extra:has(.course-nav) { display: block; }
+.course-nav {
+  /* MMM: 3-col grid with FIXED column assignments so the progress bar is truly
+     centred regardless of whether prev/next are present (prev/next/bar are each
+     optional). A flex + margin-left:auto grouped prev+bar to the left. */
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; width: 100%;
+  font-family: var(--font-heading);
+  position: relative; /* anchor for the floating interaction-gate reminder */
+}
+.course-nav__prev { grid-column: 1; justify-self: start; }
+.course-nav__progress { grid-column: 2; justify-self: center; }
+.course-nav__next { grid-column: 3; justify-self: end; }
+/* Default nav-button look (James): white outline + white text, FILL = the page
+   background so it feels subtle/blended; hover lifts to a "white feel". These are the
+   defaults an author can override per course (courseNav appearance controls). Tokens
+   -> tracks light/dark ("white" = --color-ink, which is light in dark mode). */
+.course-nav__btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+  /* author-overridable via the courseNav "Button appearance" controls (--nav-btn-*);
+     the fallbacks ARE James's default (white outline + text, background-colour fill). */
+  color: var(--nav-btn-text, var(--color-ink));
+  background: var(--nav-btn-fill, var(--color-bg));
+  border: 1px solid var(--nav-btn-border, var(--color-ink-soft));
+  border-radius: var(--button-radius, 8px);
+  padding: 8px 14px; cursor: pointer; line-height: 1; white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.course-nav__btn:hover {
+  border-color: var(--nav-btn-hover, var(--color-ink));
+  color: var(--nav-btn-hover, var(--color-ink));
+  background: var(--color-surface);
+}
+.course-nav__btn[disabled], .course-nav__btn[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+/* Interaction-gated Next: greyed like disabled, but STILL CLICKABLE (pointer-events:auto
+   overrides the aria-disabled rule above) so the runtime can intercept the click and remind
+   the learner instead of giving dead, unexplained feedback — the reason page-gating never
+   stuck. The shake reuses the chapter-jump nudge keyframe. */
+.course-nav__next.is-nav-gated { opacity: 0.45; cursor: not-allowed; pointer-events: auto; }
+.course-nav__next.is-nav-gated:hover { border-color: var(--nav-btn-border, var(--color-ink-soft)); color: var(--nav-btn-text, var(--color-ink)); background: var(--nav-btn-fill, var(--color-bg)); }
+.course-nav__next.is-nudge { animation: nav-jump-nudge 0.38s ease; }
+/* Floating reminder above the footer pill (absolute -> out of the 3-col grid flow). */
+.course-nav__gate-hint {
+  position: absolute; bottom: calc(100% + 10px); right: 0;
+  display: inline-flex; align-items: center; gap: 8px; max-width: 340px;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--color-surface); color: var(--color-ink);
+  border: 1px solid var(--color-ink-soft);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-body, inherit); font-size: 13px; font-weight: 500; line-height: 1.35;
+  z-index: 5;
+}
+.course-nav__gate-hint[hidden] { display: none; }
+.course-nav__gate-hint-icon {
+  flex: 0 0 auto; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--color-warning, var(--color-accent)); color: var(--color-bg);
+  font-weight: 700; font-size: 12px; line-height: 1;
+}
+.course-nav__gate-hint.is-flash { animation: gate-hint-flash 0.9s ease; }
+@keyframes gate-hint-flash { 0%, 100% { transform: translateY(0); } 20% { transform: translateY(-4px); } 45% { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .course-nav__next.is-nudge, .course-nav__gate-hint.is-flash { animation: none; } }
+.course-nav__arrow { display: inline-flex; }
+.course-nav__arrow svg { width: 16px; height: 16px; display: block; }
+
+.course-nav__progress {
+  position: relative; flex: 1 1 auto; margin: 0 auto;
+  /* author width: an explicit width FORCES the pill wider/narrower (it's a centred grid item
+     sized to its content by default) — not just a max-width cap. Blank var = auto (content
+     width, capped at 460). Height FORCES the pill height; border-box counts the padding INSIDE
+     the height (so a small value slims the pill instead of stacking on top of the padding).
+     Blank = auto (content height). --pill-pad-y lets a slim pill drop its own vertical padding. */
+  box-sizing: border-box;
+  width: var(--nav-pill-width, auto); max-width: var(--nav-pill-width, 460px);
+  /* HEIGHT via min-height (never a forced height): the pill grows to fit its content so the
+     content can NEVER overflow + get bottom-anchored (that was the "bar drops after images/
+     fonts finish loading + the layout settles" bug). Slimness comes from --pill-scale shrinking
+     the CONTENT (icons/title/bar/pad) below the target, so a small min-height is achievable
+     while everything still fits + stays grid-centred. Blank = auto (natural content height). */
+  min-height: var(--nav-pill-height, auto);
+  /* symmetric 3-track grid: equal-width side slots (the two icons) keep the progress
+     bar TRULY centred in the pill with equal spacing to each icon — even when one icon
+     (mode-toggle / glossary) is absent, its empty slot still reserves --pill-side. */
+  display: grid; grid-template-columns: var(--pill-side, 34px) minmax(110px, 1fr) var(--pill-side, 34px);
+  align-items: center; gap: 12px;
+  cursor: pointer; padding: calc(4px * var(--pill-scale, 1)) 0;
+  /* author-controllable drop shadow (single source for editor + runtime + export); render
+     composes --nav-pill-shadow from offset/blur/spread/colour+opacity, or 'none' when off. */
+  box-shadow: var(--nav-pill-shadow, 0 10px 30px rgba(0, 0, 0, 0.35));
+}
+/* §1 P2: the chapter TITLE sits above the bar and the two are a GROUP, centred as one unit
+   on the pill's vertical midline (title on top via DOM order, both in a centred column). */
+/* --pill-scale (set by render from the author's pill Height; default 1) shrinks the height-
+   driving dimensions so the pill CONTENTS resize + stay centred as the pill slims — the bar
+   keeps its 100% width (only its height scales), so a slim pill stays full-width + centred. */
+.course-nav__progress-main { grid-column: 2; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(7px * var(--pill-scale, 1)); min-width: 0; }
+.course-nav__mode { grid-column: 1; justify-self: center; transform: translateX(calc(-1 * var(--pill-glyph-nudge, 0px))); }  /* light/dark glyph — pill LEFT slot; nudge pushes it toward the edge */
+/* no box around the glyphs in the pill — just the bare icon (border/bg none). */
+.course-nav__mode.mode-toggle { width: calc(34px * var(--pill-scale, 1)); height: calc(30px * var(--pill-scale, 1)); padding: 0; border: none; background: transparent; }
+.course-nav__mode svg { width: calc(19px * var(--pill-scale, 1)); height: calc(19px * var(--pill-scale, 1)); }  /* glyph scales with the pill */
+/* shared pill hover colour: author's --nav-btn-hover drives EVERY pill object (prev/next + glyphs). */
+.course-nav__mode.mode-toggle:hover { color: var(--nav-btn-hover, var(--color-accent)); }
+.course-nav__bar {
+  width: 100%; height: calc(6px * var(--pill-scale, 1)); border-radius: 999px;
+  background: var(--nav-bar-track, var(--color-surface-alt)); overflow: hidden;  /* author-overridable groove */
+}
+.course-nav__fill {
+  height: 100%; width: 0; border-radius: 999px;
+  background: var(--nav-bar-fill, var(--color-accent)); transition: width 0.35s ease;  /* author-overridable fill */
+}
+.course-nav__label {
+  white-space: nowrap;
+  /* line-height:1 pins the label's box height to its font-size so a web-font swap (fallback ->
+     Exo 2, ~1-2s after load) can't grow the label's line-box, which was growing the title+bar
+     group and shoving the bar to the bottom of the pill (demo baked the post-load state). */
+  font-size: calc(11px * var(--pill-scale, 1)); line-height: 1; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+/* hover BRIGHTENS the current-chapter label to ink (white in dark), never orange —
+   the pill is persistent chrome, so orange stays reserved for the "you are here" ring
+   marker inside the open chapter list, not a hover state. */
+.course-nav__progress:hover .course-nav__label { color: var(--color-ink); }
+
+/* chapter-jump modal — anchored popover above the bar */
+/* Per-mode DEFAULT surface for the floating nav (pill + chapter-jump modal): dark
+   #2a2a2a / light #ffffff, so the nav matches the page it's on (mirrors card-reveal's
+   --cr-card-fill pattern). The author's --nav-pill-fill override still wins on the pill.
+   No data-mode stamped (no-JS export pre-runtime) -> the final #2a2a2a fallback. */
+.course-root[data-mode="dark"] { --nav-surface-default: #2a2a2a; }
+.course-root[data-mode="light"] { --nav-surface-default: #ffffff; }
+.course-nav__modal[hidden] { display: none; }
+.course-nav__modal {
+  /* SPAN the pill width (left:0/right:0 on this absolute child of .course-nav__progress) so
+     the menu matches the pill's width + centre by construction — chapters get room to sit on
+     one line, and the menu tracks any author pill width automatically. */
+  position: absolute; bottom: calc(100% + 10px); left: 0; right: 0;
+  z-index: 20; overflow: hidden;
+  background: var(--nav-surface-default, #2a2a2a); border: 1px solid var(--color-hair);
+  border-radius: var(--radius-card); padding: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.course-nav__modal-title {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--color-ink-faint, var(--color-ink-soft)); padding: 12px 34px 8px 12px;  /* right pad clears the × */
+}
+/* top-right close box (mirrors the outside-click dismiss). */
+.course-nav__modal-close {
+  position: absolute; top: 6px; right: 6px; width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--color-ink-soft);
+  border-radius: var(--radius-sm, 2px); cursor: pointer; line-height: 1;
+  transition: background 0.12s, color 0.12s;
+}
+.course-nav__modal-close:hover { background: var(--color-surface); color: var(--color-ink); }
+.course-nav__modal-close svg { width: 15px; height: 15px; display: block; }
+/* rows carry their own padding — no extra gap; the LIST scrolls (not the modal) so the ×
+   + title stay pinned. */
+.course-nav__modal-list { display: flex; flex-direction: column; gap: 0; max-height: 54vh; overflow-y: auto; }
+
+/* §1 glossary: a button in the footer pill + a centred abbreviations overlay. */
+.course-nav__glossary {
+  font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--color-ink); background: transparent;
+  border: 1px solid var(--color-ink-soft); border-radius: 999px;
+  padding: 5px 12px; cursor: pointer; white-space: nowrap; line-height: 1;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.course-nav__glossary:hover { border-color: var(--color-ink); background: var(--color-surface); }
+/* icon variant: a circular/rounded glyph button in the pill's RIGHT slot, sized +
+   styled to match the mode-toggle glyph on the LEFT (symmetric pill). */
+.course-nav__glossary { grid-column: 3; justify-self: center; transform: translateX(var(--pill-glyph-nudge, 0px)); }  /* nudge pushes it toward the RIGHT edge */
+.course-nav__glossary--icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 30px; padding: 0;
+  color: var(--color-ink-soft); background: transparent; border: none;  /* no box — bare glyph */
+}
+.course-nav__glossary--icon:hover { color: var(--nav-btn-hover, var(--color-accent)); background: transparent; }
+.course-nav__glossary--icon svg { width: calc(20px * var(--pill-scale, 1)); height: calc(20px * var(--pill-scale, 1)); display: block; }  /* scales with the pill (§1 P2 base 20px) */
+/* §1 glossary: an anchored term/definition popover above the pill, right-aligned to it
+   (mirrors the chapter modal + the redesign's glossary card). Same per-mode surface as
+   the chapter modal. Ships in SCORM; runtime.js owns open/close + the live filter. */
+.glossary-pop[hidden] { display: none; }
+.glossary-pop {
+  /* match the chapter menu exactly: SPAN + centre on the pill width (left:0/right:0 on this
+     absolute child of .course-nav__progress), same size + position as the menu. */
+  position: absolute; bottom: calc(100% + 12px); left: 0; right: 0; z-index: 30;
+  max-height: 62vh;
+  display: flex; flex-direction: column;
+  background: var(--nav-surface-default, #2a2a2a); border: 1px solid var(--color-hair);
+  border-radius: var(--radius-card); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden; animation: nav-pop-rise 0.2s cubic-bezier(0, 0, 0.2, 1);
+}
+@keyframes nav-pop-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .glossary-pop { animation: none; } }
+.glossary-pop__title {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 500; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--color-ink-soft); padding: 16px 20px 10px;
+}
+.glossary-pop__search {
+  display: flex; align-items: center; gap: 8px; margin: 0 20px 4px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--color-hair);
+}
+.glossary-pop__search-icon { flex: 0 0 auto; width: 15px; height: 15px; color: var(--color-ink-soft); display: block; }
+.glossary-pop__input {
+  flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none;
+  color: var(--color-ink); font-family: var(--font-body, inherit); font-size: 14px; padding: 2px 0;
+}
+.glossary-pop__input::placeholder { color: var(--color-ink-soft); }
+.glossary-pop__list { overflow-y: auto; padding: 4px 20px 16px; }
+.glossary-pop__row { padding: 12px 0; border-top: 1px solid var(--color-hair); }
+.glossary-pop__row:first-child { border-top: none; }
+.glossary-pop__row[hidden] { display: none; }
+.glossary-pop__term {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--color-ink); margin-bottom: 4px;
+}
+.glossary-pop__def { font-family: var(--font-body, inherit); font-size: 14px; line-height: 1.5; color: var(--color-ink-soft); }
+.glossary-pop__empty[hidden] { display: none; }
+.glossary-pop__empty { font-family: var(--font-body, inherit); font-size: 14px; color: var(--color-ink-soft); padding: 4px 20px 16px; }
+
+/* Image lightbox (learner aid): click any image to zoom it into a near-fullscreen
+   overlay with its caption. The zoom cursor only shows once the runtime has bound the
+   click (.is-lightbox-bound) -- never while editing on the authoring canvas. Ships in SCORM. */
+.block-image--zoomable.is-lightbox-bound { cursor: zoom-in; }
+.image-lightbox[hidden] { display: none; }
+.image-lightbox {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center; padding: 4vmin;
+}
+.image-lightbox__backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.82); }
+.image-lightbox__card {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  max-width: 92vw; max-height: 92vh;
+}
+.image-lightbox__stage {
+  display: flex; align-items: center; justify-content: center;
+  max-width: 92vw; max-height: 82vh; overflow: hidden;
+}
+.image-lightbox__media { max-width: 92vw; max-height: 82vh; width: auto; height: auto; object-fit: contain; }
+.image-lightbox__cap {
+  color: #fff; font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+  text-align: center; max-width: 60ch;
+}
+.image-lightbox__cap[hidden] { display: none; }
+.image-lightbox__close {
+  position: absolute; top: -40px; right: -4px; width: 34px; height: 34px;
+  border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.14); color: #fff;
+  font-size: 24px; line-height: 1; cursor: pointer;
+}
+.image-lightbox__close:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* §64 chapter summary: a purpose-built bulleted list on the native quiz's completion
+   panel (kc-done). It only shows after the KC is passed (the kc-done panel is itself
+   pass-gated). Left-aligned dot points read better than the centred pass message.
+   An empty summary is hidden at runtime so the section never shows blank. */
+.kc-done__summary-wrap { margin-top: 22px; text-align: left; }
+.kc-done__summary-label {
+  font-family: var(--font-heading); font-weight: 600; font-size: 11px;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent); margin-bottom: 10px;
+}
+.kc-done__summary {
+  margin: 0; padding-left: 1.4em; font-family: var(--font-body);
+  font-size: 15px; line-height: 1.6; color: var(--color-ink-soft);
+}
+.kc-done__summary li { margin: 5px 0; }
+/* Hide the summary when it has no non-empty bullet: covers a truly empty <ul> AND the
+   render-seeded <ul><li></li></ul> (one blank bullet the editor needs as a caret target). */
+.course-root[data-env="runtime"] .kc-done__summary-wrap:has(.kc-done__summary:not(:has(li:not(:empty)))) { display: none; }
+/* DS redesign: chapter rows read as a title list with a hollow "you are here" ring
+   marker. ORANGE DISCIPLINE — the accent appears ONLY on the current chapter (ring +
+   inner dot); every other marker is a ghost ring. The title uses the display face
+   (Exo 2) at 14px so the popover reads like the redesign's chapter list. */
+.course-nav__jump {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left;
+  font-family: var(--font-heading); font-size: 14px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.3;
+  color: var(--color-ink);
+  background: transparent; border: 0; border-radius: var(--radius-sm, 2px);
+  padding: 9px 10px; cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.course-nav__jump:hover { background: var(--color-surface); }
+/* current chapter TITLE stays ink (white in dark) — NOT orange; the orange lives only on
+   the ring marker below (the "you are here" locator). Weight lifts it instead of colour. */
+.course-nav__jump.is-current { color: var(--color-ink); font-weight: 600; }
+.course-nav__jump-dot {
+  flex: 0 0 auto; margin-top: 3px; width: 13px; height: 13px; border-radius: 50%;
+  border: 1.5px solid var(--color-ink-soft); background: transparent; box-sizing: border-box;
+}
+/* current: orange ring + a 5px orange inner dot (drawn with a radial fill). */
+.course-nav__jump.is-current .course-nav__jump-dot {
+  border-color: var(--color-accent);
+  background: radial-gradient(circle at center, var(--color-accent) 0 2.5px, transparent 2.6px);
+}
+/* done: a subtle FILLED ink marker — completion affordance kept, but ink (not orange)
+   so the accent stays reserved for the current crux. */
+.course-nav__jump.is-done .course-nav__jump-dot { background: var(--color-ink-soft); border-color: var(--color-ink-soft); }
+/* C: a LOCKED (not-yet-unlocked) chapter is greyed + not clickable; a blocked tap shakes */
+.course-nav__jump.is-locked { opacity: 0.4; cursor: not-allowed; }
+.course-nav__jump.is-locked:hover { background: transparent; }
+.course-nav__jump.is-nudge { animation: nav-jump-nudge 0.38s ease; }
+@keyframes nav-jump-nudge { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+@media (prefers-reduced-motion: reduce) { .course-nav__jump.is-nudge { animation: none; } }
+.course-nav__jump-label { flex: 1 1 auto; }
+
+/* mobile: hide arrow labels, keep icons */
+.course-root[data-bp="mobile"] .course-nav__btn-label { display: none; }
+/* icons-only nav (author toggle): drop the Back/Next words, keep just the chevrons */
+.course-nav--icons .course-nav__btn-label { display: none; }
+.course-nav--icons .course-nav__btn { padding: 8px 10px; gap: 0; }
+
+/* Runtime float: at RUNTIME (learner preview + export) the CENTRE pill (progress /
+   chapter menu) FLOATS at the bottom, always visible over the content — position:fixed
+   (export has no transform -> true viewport centre-bottom; the demo preview contains it
+   via .demo__device transform). The authoring CANVAS has NO data-env, so the pill stays
+   INLINE in the footer grid (no float, so it can NOT slide on the zoomed canvas — the
+   earlier slide was the base sticky, now removed). */
+.course-root[data-env="runtime"] .course-nav__progress {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  z-index: 50; pointer-events: auto;
+  /* the floating pill gets a real surface (author-styleable via --nav-pill-* vars). */
+  /* §1: author opacity — surface only (color-mix keeps the text/glyphs/bar/modal crisp),
+     mirrors the card-reveal --cr-cover pattern. Default 100% = fully opaque (unchanged). */
+  background: color-mix(in srgb, var(--nav-pill-fill, var(--nav-surface-default, #2a2a2a)) var(--nav-pill-opacity, 100%), transparent);
+  /* §1: author LAYER BLUR — frosts the content BEHIND the pill (pairs with a translucent
+     opacity for a real glass look). Default 0 = no blur (unchanged). */
+  -webkit-backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  border: var(--nav-pill-border-width, 1px) solid var(--nav-pill-border, var(--color-hair));
+  border-radius: var(--nav-pill-radius, 4px);
+  padding: calc(8px * var(--pill-scale, 1)) 18px; min-width: min(300px, var(--nav-pill-width, 300px)); /* author width below 300 still applies */
+  /* box-shadow now lives on the base .course-nav__progress rule (author var) so it's WYSIWYG
+     across editor + runtime + export; the hardcoded one here was removed. */
+}
+/* Opt-in: also PIN prev/next to the bottom gutters (else they sit inline at the page
+   end and appear as the learner scrolls down, per CCCC). Author toggle -> .course-nav--pin. */
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__prev,
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__next {
+  position: fixed; bottom: 16px; z-index: 50; pointer-events: auto;
+}
+/* #169b: FIXED-px gutters (was 5%) so the pinned corners read identically in EVERY course —
+   position:fixed anchors to the viewport, so a fixed px inset ignores the page's side padding /
+   content-width entirely (the 5% scaled with viewport width and looked "inset" on wide screens,
+   diverging course-to-course). Matches the reference corner-flush look. Mobile hugs tighter. */
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__prev { left: 24px; }
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__next { right: 24px; }
+.course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__prev { left: 12px; }
+.course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__next { right: 12px; }
+/* When the nav is pinned, prev/next are lifted OUT of the bar to fixed viewport corners,
+   but the interaction-gate reminder is absolute-anchored to the .course-nav bar (up in the
+   page flow) -- so it detached from the button and rendered at the bar instead of above the
+   pinned Next. Pin it to the same corner, just above the Next button (16px bottom inset +
+   ~34px button height + 10px gap). Mobile hugs the 12px gutter like the button. */
+.course-root[data-env="runtime"] .course-nav--pin .course-nav__gate-hint {
+  position: fixed; left: auto; top: auto; right: 24px; bottom: calc(16px + 34px + 10px); z-index: 51;
+}
+.course-root[data-env="runtime"][data-bp="mobile"] .course-nav--pin .course-nav__gate-hint { right: 12px; }
+
+/* CCCC(2): scroll-gate the Next button. runtime.js stamps .rt-gated on each
+   course-root when the gate is active; the editor canvas never runs the runtime,
+   so its Next always shows. Next is hidden until the page is scrolled to the
+   bottom (or already fits the viewport) -> the box gains .is-scroll-done. Kept in
+   layout (visibility, not display) so the 3-col nav grid doesn't reflow. */
+.course-nav__next { transition: opacity 0.3s ease; }
+.course-root.rt-gated:not(.is-scroll-done) .course-nav__next {
+  visibility: hidden; opacity: 0; pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) { .course-nav__next { transition: none; } }
+
+/* ---- Guided tour (learner coach-marks) ---------------------------------------
+   Opt-in per courseNav block (block.tour.on). render.js appends one .course-tour
+   marker as a child of each footer control; it stays hidden until runtime.js adds
+   .is-tour-live on the .course-nav (on the trigger page), so the author canvas is
+   untouched and demo == export. Ported from the Menu-tour specimen; colours are
+   THEME TOKENS (accent) so it tracks light/dark + the course palette. */
+.course-nav__prev, .course-nav__next, .course-nav__mode, .course-nav__glossary { position: relative; }
+/* issue 204: the inline (non-pinned) prev/next sit at z-index auto, so a block's
+   positioned overlay (e.g. a hotspot popover, z-index 3) hoists above them and blocks the
+   click. Lift them clear of any block content (max block z-index is ~4). The floating pill
+   is already z-index 50 and the pinned prev/next rule (z-index 50) out-specifies this. */
+.course-nav__prev, .course-nav__next { z-index: 6; }
+/* The marker is a ZERO-SIZE anchor point 14px above the control; the dot, connector
+   and label all position off it (bottom = above, centred on its x). Zero size means a
+   wide label can never spill the anchor into the click target, and the runtime shifts
+   the label horizontally via --tour-shift so it always renders inside the frame. */
+.course-tour {
+  position: absolute; left: 50%; bottom: calc(100% + 14px); transform: translateX(-50%);
+  width: 0; height: 0; pointer-events: none; z-index: 60; visibility: hidden;
+}
+.course-nav.is-tour-live .course-tour { visibility: visible; }
+/* dot: pulsing beacon, its bottom at the anchor (14px above the control -> clear of the
+   click target). 20px so it pulls attention to the helper, not the menu item. */
+.course-tour__dot {
+  position: absolute; bottom: 0; left: 0; width: 20px; height: 20px;
+  transform: translate(-50%, 0) scale(0); opacity: 0; cursor: pointer; pointer-events: none;
+}
+.course-nav.is-tour-live .course-tour__dot { pointer-events: auto; animation: tour-pop .5s cubic-bezier(.34,1.56,.64,1) forwards; }
+.course-tour__core {
+  position: absolute; inset: 5px; border-radius: 50%; background: var(--color-accent);
+  transition: background .3s ease, box-shadow .3s ease;
+}
+.course-tour__ring {
+  position: absolute; inset: 0; border: 2px solid var(--color-accent); border-radius: 50%;
+  opacity: 0;
+}
+.course-nav.is-tour-live .course-tour__ring { animation: tour-ping 2.8s ease-out infinite; }
+.course-tour__dot.is-hot .course-tour__core, .course-tour__dot.is-open .course-tour__core {
+  background: color-mix(in srgb, var(--color-accent) 72%, white);
+  box-shadow: 0 0 11px color-mix(in srgb, var(--color-accent) 75%, transparent);
+}
+.course-tour__dot.is-hot .course-tour__ring { border-color: color-mix(in srgb, var(--color-accent) 72%, white); }
+.course-tour__dot.is-visited .course-tour__ring { animation: none; opacity: 0; }
+/* connector: a short stub drawn upward from the dot when the label opens */
+.course-tour__conn {
+  position: absolute; left: 0; bottom: 24px; height: 16px; width: 2px;
+  background: var(--color-accent); transform: translateX(-50%) scaleY(0); transform-origin: bottom center;
+  opacity: 0; transition: background .3s ease, box-shadow .3s ease;
+}
+.course-tour__conn.is-open { animation: tour-draw .7s cubic-bezier(.5,0,.2,1) forwards; }
+.course-tour__conn.is-hot { box-shadow: 0 0 5px color-mix(in srgb, var(--color-accent) 60%, transparent); }
+/* label: the text box, sitting just above the callout. Solid LMS surface (mirrors the
+   chapter modal + glossary popover), LEFT-aligned, Exo title / body copy. --tour-shift
+   (set by runtime.js) slides it horizontally so it always stays inside the frame. */
+.course-tour__label {
+  position: absolute; bottom: 40px; left: 0; width: min(300px, 78vw);
+  transform: translateX(calc(-50% + var(--tour-shift, 0px))); pointer-events: none; text-align: left;
+  /* Closed = OUT of layout. The 300px box is anchored at left:0 of its control; on a
+     right-gutter control (Next/glossary) it would otherwise spill past the page edge and
+     add a CONSTANT horizontal-scroll gutter on every tour page (opacity:0 alone still
+     lays out + overflows). runtime.js opens it on click and clampTourLabel then sets
+     --tour-shift so the OPEN box stays inside the frame. */
+  display: none;
+}
+.course-tour__label.is-open { display: block; pointer-events: auto; }
+.course-tour__inner {
+  display: block; padding: 13px 16px; text-align: left;
+  background: var(--nav-surface-default, var(--color-bg));
+  border: 1px solid var(--color-hair); border-radius: var(--radius-card);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  opacity: 0; transform: translateY(8px);
+  transition: border-color .3s ease;
+}
+.course-tour__label.is-open .course-tour__inner { animation: tour-rise .55s ease forwards; }
+.course-tour__label.is-hot .course-tour__inner { border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-hair)); }
+.course-tour__title {
+  display: block; font-family: var(--font-heading); font-weight: 700; font-size: 16px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-ink);
+  margin-bottom: 5px; transition: color .3s ease;
+}
+.course-tour__label.is-hot .course-tour__title { color: var(--color-accent); }
+.course-tour__desc { display: block; font-family: var(--font-body); font-size: 14px; line-height: 1.5; color: var(--color-ink-soft); text-wrap: pretty; }
+@keyframes tour-pop  { to { transform: translate(-50%, 0) scale(1); opacity: 1; } }
+@keyframes tour-ping { 0% { transform: scale(.5); opacity: 0; } 18% { opacity: .55; } 70%, 100% { transform: scale(2.1); opacity: 0; } }
+@keyframes tour-draw { to { transform: translateX(-50%) scaleY(1); opacity: 1; } }
+@keyframes tour-rise { to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .course-nav.is-tour-live .course-tour__dot { animation: none; opacity: 1; transform: translate(-50%, 0) scale(1); }
+  .course-nav.is-tour-live .course-tour__ring { animation: none; }
+  .course-tour__conn.is-open { animation: none; transform: translateX(-50%) scaleY(1); opacity: 1; }
+  .course-tour__label.is-open .course-tour__inner { animation: none; opacity: 1; transform: none; }
+}
+
+/* disclaimer footer — global header/footer, full-bleed */
+.course-footer {
+  padding: 14px var(--headerfooter-pad-x, 10%); /* III: decoupled from page width */
+  /* INLINE at the page bottom in ALL contexts (canvas, preview, export) so the author
+     sees EXACTLY what ships (one-to-one) and it NEVER slides on the zoomed canvas.
+     Was position:sticky (CCCC) -> stuck to the canvas viewport under the world zoom
+     transform and slid over the page. Transparent + no border -> the nav sits as pills
+     over the page bottom, no solid bar. prev/next fall in the side gutters via the
+     full-width .course-nav grid below; progress is a centred pill. CCCC's scroll-gated
+     Next still applies (Next is revealed at the page bottom, where it now lives). */
+  position: static; background: transparent; border-top: none;
+}
+.course-footer__text {
+  margin: 0; max-width: 900px;
+  font-size: 11px; line-height: 1.45; letter-spacing: 0.01em; color: var(--color-muted);
+}
+
+/* III: header/footer use their OWN per-breakpoint padding, independent of the page */
+.course-root[data-bp="tablet"] .course-header, .course-root[data-bp="tablet"] .course-footer { padding-left: var(--headerfooter-pad-x-tablet, 6%); padding-right: var(--headerfooter-pad-x-tablet, 6%); }
+.course-root[data-bp="mobile"] .course-header, .course-root[data-bp="mobile"] .course-footer { padding-left: var(--headerfooter-pad-x-mobile, 5%); padding-right: var(--headerfooter-pad-x-mobile, 5%); }
+
+/* Footer nav = an inline pill layout at the page bottom, IDENTICAL in canvas, preview
+   and export (no position:fixed/sticky -> can't slide on the zoomed canvas; the author
+   sees exactly what ships). The full-width .course-nav grid (1fr auto 1fr) already
+   detaches prev/next into the side gutters with progress centred; here progress is a
+   rounded pill. The prev/next buttons are styled by .course-nav__btn (author-overridable
+   fill/border/text/hover). The mode-toggle, if the author placed one in the footer
+   chrome, sits centred beneath the nav. `data-env="runtime"` is retained on the export/
+   preview roots but no longer drives footer POSITION (kept for the theme/env hooks). */
+.course-nav__progress {
+  /* §1: author opacity — surface only (color-mix keeps the text/glyphs/bar/modal crisp),
+     mirrors the card-reveal --cr-cover pattern. Default 100% = fully opaque (unchanged). */
+  background: color-mix(in srgb, var(--nav-pill-fill, var(--nav-surface-default, #2a2a2a)) var(--nav-pill-opacity, 100%), transparent);
+  /* §1: author LAYER BLUR — frosts the content BEHIND the pill (pairs with a translucent
+     opacity for a real glass look). Default 0 = no blur (unchanged). */
+  -webkit-backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  backdrop-filter: blur(var(--nav-pill-blur, 0px));
+  border: var(--nav-pill-border-width, 1px) solid var(--nav-pill-border, var(--color-hair));
+  border-radius: var(--nav-pill-radius, 4px); padding: calc(6px * var(--pill-scale, 1)) 16px;
+}
+.course-footer__extra { justify-content: center; }
+
+/* TTTT: Card Reveal grid — responsive cards under a frosted "Hold to reveal" cover
+   that clears on hover / focus (pure CSS, air-gap clean). Aligned to the "Assessment
+   Tiles" reference (references/card-reveal-reference-assessment-tiles.html): gradient
+   card, faint technical-grid texture, auto-numbered index, title + rule, strong frost.
+   Tokens only -> ships in SCORM, tracks light/dark; author cardBox overrides the look. */
+.card-reveal { display: grid; grid-template-columns: repeat(var(--cr-cols, 3), 1fr); gap: var(--cr-gap, 24px); }
+/* per-mode card fill: switches on the learner light/dark toggle (via the course-root
+   data-mode), so an author's custom colour still adapts. Defaults: dark #2a2a2a / light
+   #ffffff; author overrides --cr-fill-dark / --cr-fill-light per mode. */
+.course-root[data-mode="dark"] .card-reveal { --cr-card-fill: var(--cr-fill-dark, #2a2a2a); }
+.course-root[data-mode="light"] .card-reveal { --cr-card-fill: var(--cr-fill-light, #ffffff); }
+.card-reveal__card {
+  position: relative; overflow: hidden; isolation: isolate; min-height: var(--cr-card-h, 320px); outline: none;
+  border: 1px solid var(--color-hair);
+  background: var(--cr-card-fill, #2a2a2a);
+  transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+/* faint surface texture inside each card (reference signature). Pattern is author-
+   selected via data-pattern on the .card-reveal root (default = grid) and its colour
+   via --tex-color (default = the theme hairline); dots / none variants below. */
+.card-reveal__card::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.card-reveal[data-pattern="dots"] .card-reveal__card::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px);
+  background-size: 22px 22px;
+}
+.card-reveal[data-pattern="none"] .card-reveal__card::before { display: none; }
+.card-reveal__card:hover, .card-reveal__card:focus-within {
+  transform: translateY(-2px); border-color: var(--color-ink-soft);
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.5);
+}
+/* auto-numbered index, top-left, kept above the frost so it always shows */
+.card-reveal__index {
+  position: absolute; top: 22px; left: 24px; z-index: 3;
+  font-family: var(--font-heading); font-weight: 700; font-size: 13px; letter-spacing: 0.15em;
+  color: var(--color-muted);
+}
+.card-reveal__content {
+  /* #178: no z-index — see .card-deck__content. A stacking context here defeats a child
+     image's mix-blend-mode (blends against a transparent group backdrop, not the card). */
+  position: relative; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; padding: 26px;
+}
+/* reserve top clearance for the auto-index ONLY when it's shown (a numbered card);
+   otherwise content flows from the top edge and fills the tile like a normal block. */
+.card-reveal__card:has(.card-reveal__index) .card-reveal__content { padding-top: 60px; }
+/* title -> rule -> body typographic rhythm (matches the reference card body) */
+.card-reveal__content .page-title { font-size: 20px; line-height: 1.15; margin: 0; }
+.card-reveal__content .page-title::after {
+  content: ""; display: block; width: 34px; height: 2px;
+  background: var(--color-ink-soft); margin: 14px 0 16px;
+}
+.card-reveal__content .body-copy { font-size: 14px; line-height: 1.6; color: var(--color-ink-soft); margin: 0; }
+.card-reveal__card-empty { color: var(--color-muted); font-size: 12px; }
+
+/* Card Deck — a paged "carousel" of full-frame cards. One card shown at a time at
+   runtime (‹ › paging + counter); the editor shows every card stacked so each body is a
+   drop target. Tokens only -> ships in SCORM, tracks light/dark; author cardBox overrides. */
+.course-root[data-mode="dark"] .card-deck { --cd-card-fill: var(--cd-fill-dark, #1c1c1c); }
+.course-root[data-mode="light"] .card-deck { --cd-card-fill: var(--cd-fill-light, #ffffff); }
+.card-deck { display: flex; flex-direction: column; gap: 24px; }
+.card-deck__card {
+  position: relative; isolation: isolate; box-sizing: border-box;
+  display: flex; flex-direction: column; min-height: 420px; padding: 40px 44px;
+  border: 1px solid var(--color-hair); border-radius: 14px;
+  background: var(--cd-card-fill, #1c1c1c);
+}
+/* faint surface texture (shared shape with card-reveal): grid (default) | dots | none */
+.card-deck__card::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.4; border-radius: inherit;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.card-deck[data-pattern="dots"] .card-deck__card::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px); background-size: 22px 22px;
+}
+.card-deck[data-pattern="none"] .card-deck__card::before { display: none; }
+/* meta line: CARD NN / TT  +  optional section label */
+.card-deck__meta {
+  position: relative; z-index: 1; display: flex; align-items: baseline; gap: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+}
+.card-deck__meta-card, .card-deck__meta-num { color: var(--color-accent); font-weight: 600; }
+.card-deck__meta-sep, .card-deck__meta-total { color: var(--color-muted); }
+.card-deck__meta-label { color: var(--color-muted); margin-left: 6px; }
+/* #178: NO z-index here — a z-index on the content wrapper makes it a stacking context, which
+   traps a child image's mix-blend-mode against a transparent backdrop (blend silently defeated
+   inside cards). position:relative alone keeps it above the ::before texture (tree order) AND
+   as the containing block, while letting a blended image composite against the card surface. */
+.card-deck__content { position: relative; flex: 1 1 auto; padding: 22px 0 0; }
+.card-deck__card-empty { color: var(--color-muted); font-size: 12px; }
+/* footer: counter (bottom-left) + ‹ › nav (bottom-right) */
+.card-deck__footer {
+  position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between;
+  margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--color-hair);
+}
+.card-deck__count {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px;
+  letter-spacing: 0.1em; color: var(--color-muted);
+}
+.card-deck__nav { display: flex; gap: 10px; }
+.card-deck__nav-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px;
+  border: 1px solid var(--color-ink-soft); border-radius: 8px; background: transparent;
+  color: var(--color-ink); cursor: pointer; transition: border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+.card-deck__nav-btn:hover { border-color: var(--color-ink); }
+.card-deck__nav-btn:disabled { opacity: 0.32; cursor: default; }
+.card-deck__nav-btn .course-nav__arrow { width: 18px; height: 18px; display: block; }
+.card-deck__nav-btn .course-nav__arrow svg { width: 100%; height: 100%; }
+.card-deck__empty { color: var(--color-muted); font-size: 13px; padding: 20px; border: 1px dashed var(--color-hair); border-radius: 12px; }
+/* runtime paging: once armed (demo/export), show only the active card. The editor never
+   arms the deck, so every card stays visible and droppable on the canvas. */
+.card-deck.is-armed .card-deck__card { display: none; }
+.card-deck.is-armed .card-deck__card.is-active { display: flex; }
+.card-reveal__cover {
+  position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;
+  /* SEMI-TRANSPARENT fill so the backdrop-blur actually reads (an opaque fill defeats it —
+     the tease is that there's something blurred behind the frost). Author-tunable colour +
+     opacity + blur via the --cr-cover-* vars (default = the theme surface at ~48%). */
+  background: color-mix(in srgb, var(--cr-cover-color, var(--cr-card-fill, #2a2a2a)) var(--cr-cover-opacity, 48%), transparent);
+  backdrop-filter: blur(var(--cr-cover-blur, 16px)) saturate(110%); -webkit-backdrop-filter: blur(var(--cr-cover-blur, 16px)) saturate(110%);
+  transition: opacity 0.55s cubic-bezier(.4, .05, .2, 1); cursor: pointer;
+}
+.card-reveal__cover::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px var(--color-hair); }
+.card-reveal__hint {
+  font-family: var(--font-heading); font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--color-muted);
+}
+/* reveal on hover (desktop), focus (keyboard/tap -> tabindex), or runtime .is-revealed */
+.card-reveal__card:hover .card-reveal__cover,
+.card-reveal__card:focus-within .card-reveal__cover,
+.card-reveal__card.is-revealed .card-reveal__cover { opacity: 0; pointer-events: none; }
+
+/* ---- Flip mode: click flips the card in 3D (front cover face <-> content back face).
+   Reuses the runtime .is-revealed toggle. Additive overrides keyed on data-reveal-style
+   so reveal/off are untouched. prefers-reduced-motion removes the animation. ---- */
+.card-reveal[data-reveal-style="flip"] { perspective: 1400px; }
+.card-reveal[data-reveal-style="flip"] .card-reveal__card {
+  /* isolation:auto is REQUIRED, not just overflow: the base card's isolation:isolate
+     is a grouping property that forces used transform-style to FLAT, which kills
+     preserve-3d and with it ALL backface culling — every face (and the index) then
+     paints by z-index and the flipped card shows the front's content mirrored. */
+  overflow: visible; isolation: auto; background: transparent; border: none; cursor: pointer;
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(.4, .05, .2, 1);
+}
+.card-reveal[data-reveal-style="flip"] .card-reveal__card::before { display: none; } /* texture lives on the faces */
+.card-reveal[data-reveal-style="flip"] .card-reveal__card.is-revealed { transform: rotateY(180deg); }
+/* both faces fill the card, opaque, and hide their own backface */
+.card-reveal[data-reveal-style="flip"] .card-reveal__cover,
+.card-reveal[data-reveal-style="flip"] .card-reveal__content {
+  position: absolute; inset: 0; box-sizing: border-box; overflow: hidden;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: var(--cr-card-fill, #2a2a2a); border: 1px solid var(--color-hair); border-radius: inherit;
+}
+/* front = cover: opaque (no frost/blur), always shown on the front (out-specifies the reveal fade) */
+.card-reveal[data-reveal-style="flip"] .card-reveal__card .card-reveal__cover {
+  z-index: 2; opacity: 1; pointer-events: auto;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+/* Side 1 (item.front): authored blocks on the flip FRONT face. Fills the cover and
+   mirrors the back face's content layout/typography so both sides read as one card.
+   Only ever rendered in flip mode, so reveal/off styling is untouched.
+   NO position/z-index here: a stacking context inside the backface-hidden cover gets
+   composited separately (Chrome/WebKit) and ESCAPES the backface cull — the front
+   content then paints mirrored over the back face when the card flips. */
+.card-reveal__front {
+  width: 100%; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; padding: 26px; text-align: left;
+}
+/* Belt-and-braces for the same compositing quirk: authored face content is arbitrary
+   blocks (images, frames, editor-decorated nodes), any of which may layer-promote and
+   escape the parent face's cull — so cull every face descendant explicitly. Accumulated
+   transforms make this correct on both sides: front subtree faces away exactly when the
+   card is flipped, back subtree exactly when it isn't. */
+.card-reveal[data-reveal-style="flip"] .card-reveal__cover *,
+.card-reveal[data-reveal-style="flip"] .card-reveal__content * {
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+}
+.card-reveal__card:has(.card-reveal__index) .card-reveal__front { padding-top: 60px; }
+.card-reveal__front .page-title { font-size: 20px; line-height: 1.15; margin: 0; }
+.card-reveal__front .page-title::after {
+  content: ""; display: block; width: 34px; height: 2px;
+  background: var(--color-ink-soft); margin: 14px 0 16px;
+}
+.card-reveal__front .body-copy { font-size: 14px; line-height: 1.6; color: var(--color-ink-soft); margin: 0; }
+/* back = content: pre-rotated so it reads only once the card is flipped */
+.card-reveal[data-reveal-style="flip"] .card-reveal__content { transform: rotateY(180deg); }
+.card-reveal[data-reveal-style="flip"] .card-reveal__index { backface-visibility: hidden; z-index: 3; }
+@media (prefers-reduced-motion: reduce) {
+  .card-reveal[data-reveal-style="flip"] .card-reveal__card { transition: none; }
+}
+.course-root[data-bp="tablet"] .card-reveal { grid-template-columns: repeat(2, 1fr); }
+.course-root[data-bp="mobile"] .card-reveal { grid-template-columns: 1fr; }
+@media (prefers-reduced-motion: reduce) { .card-reveal__card, .card-reveal__cover { transition: none; } }
+
+.card-grid {
+  display: grid;
+  /* --grid-cols / --grid-gap are set inline by render.js from the block's
+     Columns / Gap fields; the responsive rules below still override at
+     tablet/mobile (more specific selector wins). */
+  grid-template-columns: repeat(var(--grid-cols, 2), 1fr);
+  gap: var(--grid-gap, var(--space-md));
+}
+
+.chapter-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-hair);
+  border-top: 3px solid var(--color-muted);
+  border-radius: var(--radius-card);
+}
+
+/* style-swap: completed chapters take the green accent (matches the COMPLETE
+   menu-card SVG); incomplete stay muted grey. Colour comes only from tokens. */
+.chapter-card.is-complete { border-top-color: var(--color-success); }
+.chapter-card.is-incomplete { border-top-color: var(--color-muted); }
+
+.chapter-card__num {
+  font-family: var(--font-heading);
+  font-size: var(--size-card-num);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--color-muted);
+}
+.chapter-card.is-complete .chapter-card__num { color: var(--color-success); }
+
+.chapter-card__title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: var(--size-card-title);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.chapter-card__rule {
+  width: 44px;
+  height: 2px;
+  background: var(--color-hair);
+}
+
+.chapter-card__obj {
+  margin: 0;
+  font-size: var(--size-card-body);
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+
+/* nav button — the flagship Actions control; a real navigation control in the
+   shipped course. Accent-filled, token-driven; the chevron is a pure-CSS
+   affordance so it never pollutes the editable label text. */
+/* KK: the button LOOK is the theme buttonStyle bundle (--button-*), consumed as
+   defaults here; per-block overrides (applyButtonStyle inline styles) still win.
+   Each var carries a fallback = the prior hardcoded value, so a course with no
+   button tokens (older persisted theme) renders identically. */
+.nav-button {
+  display: inline-flex; align-items: center; gap: 8px;
+  /* TT: hug the label. inline-flex in a stretch-aligning flex column (fill pages,
+     layout-column) otherwise gets align-self:stretch -> full width. flex-start
+     keeps it label-width; the --block opt-in (width:100%) still overrides. */
+  align-self: flex-start;
+  margin: 0 0 var(--space-md);
+  padding: var(--button-pad-y, 12px) var(--button-pad-x, 22px);
+  font-family: var(--font-heading); font-size: var(--button-font-size, 15px); font-weight: var(--button-font-weight, 600);
+  letter-spacing: 0.02em;
+  color: var(--button-fg, #14150f); background: var(--button-bg, var(--color-accent));
+  border: var(--button-border-width, 0) solid var(--button-border-color, transparent);
+  border-radius: var(--button-radius, 8px); text-decoration: none; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease;
+}
+.nav-button::after { content: "\203A"; font-size: 18px; line-height: 1; margin-top: -2px; }
+/* KK: hover-state colour is the buttonStyle bundle's --button-hover-*, falling
+   back to the base fill/text so an unstyled button just brightens as before.
+   Empty hover tokens resolve to the fallback; a per-block override sets the var
+   inline on the node (applyButtonStyle) and wins here. */
+.nav-button:hover {
+  filter: brightness(1.06);
+  background: var(--button-hover-bg, var(--button-bg, var(--color-accent)));
+  color: var(--button-hover-fg, var(--button-fg, #14150f));
+}
+.nav-button--block { display: flex; width: 100%; justify-content: center; }
+
+.block-unknown {
+  padding: var(--space-md);
+  border: 1px dashed var(--color-muted);
+  color: var(--color-muted);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}
+
+/* ==================== embed blocks (M7) ==================== */
+.embed { margin: 0 0 var(--space-md); }
+.embed__cap {
+  margin-bottom: var(--space-xs);
+  font-family: var(--font-heading); font-size: 13px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent);
+}
+/* embeds render exactly as authored — NO imposed border/radius. Optional border
+   + corner radius are per-embed params (set inline by render from the block). */
+.embed__fit { width: 100%; overflow: hidden; }
+/* §174: align in plain page flow — a SIZED top-level block (fit-width image/embed)
+   centres / right-aligns, not only inside a flex group. Full-width blocks are
+   unaffected (margin auto no-ops at 100% width); the embed centres its scaled iframe
+   via the fit runtime, this handles images + other intrinsically-narrow blocks. */
+.page > [data-align="center"]:not([data-embed]) { margin-inline: auto; }
+.page > [data-align="end"]:not([data-embed]) { margin-left: auto; margin-right: 0; }
+.embed--html .embed__iframe {
+  display: block; width: 100%; border: 0; background: var(--color-surface);
+}
+.embed--web .embed__video {
+  display: block; width: 100%; border: 0; background: #000;
+}
+/* §176/§180: managed letterbox fill on EVERY web embed. Fills any space around the
+   media with the THEME background (tracks light/dark; overridden inline by author
+   embedBg) so no unmanaged white bands on any provider. Background ONLY — no sizing:
+   a generic (non-video) embed keeps its full-width iframe + authored height. */
+.embed--filled { background: var(--color-bg); }
+/* Video embeds (Vimeo / YouTube / self-hosted) ONLY: the media is sized 16:9 (render
+   sets aspect-ratio + width:auto) so it FILLS its frame with no player letterbox; the
+   wrapper centres it — so the old black bars become the page colour + the video floats
+   on it. §180: these sizing rules are gated on .embed--video, which render adds ONLY to
+   real media — a generic form embed (e.g. Microsoft Forms) never receives it, so it is
+   no longer collapsed to width:auto/contain. */
+.embed--video { display: flex; align-items: center; justify-content: center; }
+.embed--video .embed__video { width: auto; max-width: 100%; background: var(--color-bg); object-fit: contain; }
+.embed__empty-hint {
+  display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  padding: var(--space-lg);
+  background: repeating-linear-gradient(45deg, var(--color-surface), var(--color-surface) 12px, var(--color-surface-alt) 12px, var(--color-surface-alt) 24px);
+  border: 1px dashed var(--color-hair); border-radius: var(--radius-card);
+}
+.embed__empty-title {
+  font-family: var(--font-heading); font-size: 14px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent);
+}
+.embed__empty-sub { font-size: 13px; color: var(--color-muted); }
+.embed--empty .embed__iframe {
+  min-height: 200px;
+  background: repeating-linear-gradient(45deg, var(--color-surface), var(--color-surface) 10px, var(--color-surface-alt) 10px, var(--color-surface-alt) 20px);
+}
+.embed--web .embed__web-card {
+  display: flex; align-items: center; gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface); border: 1px solid var(--color-hair);
+  border-radius: var(--radius-card);
+}
+.embed__play {
+  flex: 0 0 auto; width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-accent); color: #1b1c1e; font-size: 18px;
+}
+.embed__meta { min-width: 0; }
+.embed__provider {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.08em; color: var(--color-ink);
+}
+.embed__url { font-size: 13px; color: var(--color-ink-soft); word-break: break-all; }
+.embed__note { margin-top: 2px; font-size: 12px; font-style: italic; color: var(--color-muted); }
+
+/* ==================== responsive breakpoints (M6) ====================
+   Explicit, Captivate-style — keyed off data-bp on the course root (set by the
+   editor per active breakpoint; set by width thresholds at export). Base rules
+   above are desktop; these override for tablet + mobile. */
+
+.course-root[data-bp="tablet"] .page { padding-left: var(--page-pad-x-tablet, 6%); padding-right: var(--page-pad-x-tablet, 6%); padding-top: 40px; padding-bottom: 40px; }
+.course-root[data-bp="tablet"] .page-title { font-size: 28px; }
+.course-root[data-bp="tablet"] .card-grid { gap: var(--space-sm); }
+.course-root[data-bp="tablet"] .chapter-card { padding: var(--space-md); }
+.course-root[data-bp="tablet"] .body-copy { font-size: 16px; }
+
+.course-root[data-bp="mobile"] .page { padding-left: var(--page-pad-x-mobile, 5%); padding-right: var(--page-pad-x-mobile, 5%); padding-top: 32px; padding-bottom: 32px; }
+.course-root[data-bp="mobile"] .page-title { font-size: 24px; margin-bottom: var(--space-md); }
+.course-root[data-bp="mobile"] .card-grid { grid-template-columns: 1fr; gap: var(--space-sm); }
+.course-root[data-bp="mobile"] .chapter-card { padding: var(--space-md); }
+.course-root[data-bp="mobile"] .chapter-card__title { font-size: 19px; }
+.course-root[data-bp="mobile"] .body-copy { font-size: 15px; }
+
+/* Layout Columns System */
+.layout-columns {
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+  width: 100%;
+}
+.layout-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* GG: 0 by default -> block Space top/bottom margins drive spacing (render.js
+     sets an inline gap only when block.rowGap is authored). */
+  gap: 0;
+  min-width: 0;
+}
+.course-root[data-bp="mobile"] .layout-columns {
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---- primitive blocks (Text / Media / Layout library) -------------------- */
+.page-subtitle {
+  font-family: var(--font-heading);
+  font-size: calc(var(--size-page-title) * 0.62);
+  font-weight: 600;
+  color: var(--color-ink);
+  margin: 0 0 var(--space-sm);
+}
+.body-quote {
+  border-left: 3px solid var(--color-accent);
+  margin: var(--space-sm) 0;
+  padding: var(--space-xs) var(--space-md);
+  color: var(--color-ink-soft);
+  font-style: italic;
+}
+/* Bullet lists — ONE look everywhere text is typed. A rich text field may BE a <ul>
+   (the list block) or CONTAIN an inline <ul>/<ol> (made from the shared Text panel, like
+   bold); both render identically. Base + nesting apply to any content list; the author's
+   marker style/colour/size ride on data-list-marker stamped on the field node. */
+.body-list, .body-copy ul, .body-copy ol, .kc-done__summary ul, .kc-done__summary ol {
+  margin: var(--space-sm) 0; padding-left: 1.4em; color: var(--color-ink); line-height: 1.55;
+}
+.body-list li, .body-copy li, .kc-done__summary li { margin: 0.2em 0; }
+/* nested Tab-indented levels get distinct markers so the hierarchy reads */
+.body-list ul, .body-copy ul ul, .body-copy ol ul, .kc-done__summary ul ul { list-style-type: circle; padding-left: 1.4em; margin: 0.2em 0; }
+.body-list ul ul, .body-copy ul ul ul { list-style-type: square; }
+/* marker colour rides on the native ::marker for any list (field or inline) */
+.body-list li::marker, [data-list-marker] li::marker { color: var(--li-marker-color, currentColor); }
+/* author marker style: data-list-marker on the FIELD node styles its list items — whether
+   the field IS a <ul> (its own li's) or CONTAINS a list (descendant li's). Native types: */
+[data-list-marker="disc"] li { list-style-type: disc; }
+[data-list-marker="circle"] li { list-style-type: circle; }
+[data-list-marker="square"] li { list-style-type: square; }
+[data-list-marker="decimal"] li { list-style-type: decimal; }
+[data-list-marker="lower-alpha"] li { list-style-type: lower-alpha; }
+[data-list-marker="lower-roman"] li { list-style-type: lower-roman; }
+[data-list-marker="none"] li { list-style: none; }
+/* custom-glyph markers: no native marker; a ::before glyph gives full char + colour +
+   size control with a hanging indent so wrapped lines align under the text. */
+[data-list-marker="dash"] li,
+[data-list-marker="arrow"] li,
+[data-list-marker="check"] li,
+[data-list-marker="custom"] li { list-style: none; position: relative; padding-left: 1.4em; }
+[data-list-marker="dash"] li::before,
+[data-list-marker="arrow"] li::before,
+[data-list-marker="check"] li::before,
+[data-list-marker="custom"] li::before {
+  position: absolute; left: 0; color: var(--li-marker-color, currentColor);
+  font-size: var(--li-marker-size, 1em);
+}
+[data-list-marker="dash"] li::before { content: "\2013"; }
+[data-list-marker="arrow"] li::before { content: "\25B8"; }
+[data-list-marker="check"] li::before { content: "\2713"; }
+[data-list-marker="custom"] li::before { content: var(--li-marker, "\2022"); }
+/* #90: native table block. On-token only (borders --color-hair, header --color-surface,
+   zebra --color-surface-alt, text --color-ink) so it tracks light/dark + theme edits.
+   The scroll wrapper keeps a wide table from breaking the page width on mobile (#79). */
+.table-block { margin: var(--space-sm) 0; }
+.table-block__scroll { overflow-x: auto; max-width: 100%; }
+.table-block__table {
+  border-collapse: collapse;
+  width: 100%;
+  --table-cell-pad: 10px;
+  color: var(--color-ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.table-block__cell {
+  padding: var(--table-cell-pad);
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--color-hair);
+}
+.table-block__table[data-borders="rows"] .table-block__cell { border-left: 0; border-right: 0; }
+.table-block__table[data-borders="none"] .table-block__cell { border: 0; }
+.table-block__table th.table-block__cell {
+  font-weight: 700;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+.table-block__table[data-zebra] tr:nth-child(even) td.table-block__cell {
+  background: var(--color-surface-alt);
+}
+.table-block__cell > :first-child { margin-top: 0; }
+.table-block__cell > :last-child { margin-bottom: 0; }
+.block-divider { padding: var(--space-sm) 0; }
+.block-divider__line { border: 0; border-top: 1px solid var(--color-hair); margin: 0; }
+.block-spacer { width: 100%; }
+/* hidden blocks/instances are dropped from the shipped page + demo; the editor
+   re-shows them dimmed on the canvas (editor.css) so they stay reachable. */
+[data-hidden] { display: none; }
+/* auto spacer: a flex spring that eats leftover height on a filled page. */
+.block-spacer--auto { flex: 1 1 0; min-height: 0; height: auto; }
+
+/* Fill layout — only applied when a page contains an auto spacer (gated by
+   render.js). --vp-h is set per-frame by the editor to the device height; in the
+   shipped SCORM course no one sets it, so it falls back to the real viewport. */
+.course-root--fill { display: flex; flex-direction: column; min-height: var(--vp-h, 100vh); }
+/* Auto vertical spacing: the filled page centres its content vertically by
+   default (short pages sit in the middle; long pages just flow). A manual
+   auto-spacer (flex:1) still overrides. page.vAlign="distribute" spreads blocks. */
+.course-root--fill .page--fill { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; }
+.course-root--fill .page--fill[data-valign="distribute"] { justify-content: space-between; }
+.block-image { margin: var(--space-sm) 0; text-align: center; }
+.block-image__img { max-width: 100%; height: auto; border-radius: var(--img-radius, var(--radius-card)); mix-blend-mode: var(--img-blend, normal); }
+/* Item Y — per-asset light/dark contrast (own dimension, not the CSV variant axis) */
+/* opt-in auto-tint: recolour a mono image/SVG to contrast the bg in dark (mirrors the logo) */
+.course-root[data-mode="dark"] .block-image__img--auto { filter: invert(1); }
+/* per-mode raster sources: show the source matching the active mode (default = light) */
+.block-image__img--light, .block-image__img--dark { display: inline-block; }
+.block-image__img--dark { display: none; }
+.course-root[data-mode="dark"] .block-image__img--light { display: none; }
+.course-root[data-mode="dark"] .block-image__img--dark { display: inline-block; }
+/* no-JS export fallback: follow the OS preference until the runtime stamps data-mode */
+@media (prefers-color-scheme: dark) {
+  .course-root:not([data-mode]) .block-image__img--light { display: none; }
+  .course-root:not([data-mode]) .block-image__img--dark { display: inline-block; }
+}
+.block-image--empty {
+  border: 1px dashed var(--color-hair);
+  border-radius: var(--radius-card);
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--color-muted);
+}
+.block-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-sm) 0;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+}
+.block-frame__empty {
+  color: var(--color-muted);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-md);
+}
+
+/* Build-time visibility aid: unfilled image / HTML-interaction slots glare NEON PINK on
+   the authoring canvas so they can't be missed. Scoped to .course-root:not([data-env]) =
+   the authoring canvas ONLY (demo + export both stamp data-env="runtime", export.js:371),
+   so a placeholder NEVER ships hot-pink in a course and never shows in preview. */
+.course-root:not([data-env]) .block-image--empty,
+.course-root:not([data-env]) .embed__empty-hint,
+.course-root:not([data-env]) .embed--empty .embed__iframe {
+  border: 2px dashed #ff2bd6;
+  background: repeating-linear-gradient(45deg, rgba(255, 43, 214, 0.10), rgba(255, 43, 214, 0.10) 12px, rgba(255, 43, 214, 0.22) 12px, rgba(255, 43, 214, 0.22) 24px);
+}
+.course-root:not([data-env]) .block-image--empty,
+.course-root:not([data-env]) .embed__empty-title,
+.course-root:not([data-env]) .embed__empty-sub,
+.course-root:not([data-env]) .block-frame__empty { color: #ff2bd6; }
+
+/* Group: invisible container — keeps children's exact layout (no box) */
+.block-group { display: contents; }
+.block-group__empty { color: var(--color-muted); font-style: italic; padding: var(--space-sm) 0; }
+
+/* #94: empty-column drop slot — a targetable placeholder for a fresh Columns block's
+   empty columns. Muted in a shipped course (columns get filled before ship), but glares
+   as a dashed drop zone on the authoring canvas only (same aid as empty image/frame). */
+.layout-column__empty {
+  color: var(--color-muted);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-md);
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.course-root:not([data-env]) .layout-column__empty {
+  border: 2px dashed #ff2bd6;
+  color: #ff2bd6;
+  background: repeating-linear-gradient(45deg, rgba(255, 43, 214, 0.10), rgba(255, 43, 214, 0.10) 12px, rgba(255, 43, 214, 0.22) 12px, rgba(255, 43, 214, 0.22) 24px);
+}
+
+/* ==================== quiz block (knowledge check) ==================== */
+/* Matches the reference knowledge-check: sharp panels, letter pills, chip-into-
+   blank, animated progress + feedback. Colours come only from theme tokens, so
+   restyling the quiz = switching/adjusting the theme. Ships in the SCORM package.
+   Author view (all panels visible) is the base; quiz-runtime.js adds .quiz--play
+   and steps through one panel at a time. */
+.kc { color: var(--color-ink); }
+.kc-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.kc-kicker { font-family: var(--font-heading); font-weight: 600; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent); }
+.kc-counter { font-family: var(--font-heading); font-weight: 500; font-size: 12px; color: var(--color-muted); }
+.kc-title { font-family: var(--font-heading); font-weight: 700; font-size: 22px; letter-spacing: -0.2px; margin: 2px 0 20px; color: var(--color-ink); }
+.kc-progress { display: flex; gap: 6px; margin-bottom: 24px; }
+.kc-seg { flex: 1; height: 3px; border-radius: 2px; background: var(--color-hair); overflow: hidden; }
+.kc-seg i { display: block; height: 100%; width: 0; background: var(--color-accent); transition: width 0.4s cubic-bezier(0.4, 0.05, 0.2, 1); }
+.kc-seg.done i, .kc-seg.active i { width: 100%; }
+.kc-seg.active i { transition-delay: 0.05s; }
+
+.kc-panel { background: var(--color-surface); border: 1px solid var(--color-hair); border-radius: 2px; padding: 30px 30px 26px; margin-bottom: 14px; }
+.kc-method { font-family: var(--font-heading); font-weight: 500; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 10px; }
+.kc-qtext { font-size: 17px; line-height: 1.5; color: var(--color-ink); margin: 0 0 22px; }
+.kc-intro__body { font-size: 15px; line-height: 1.6; color: var(--color-ink-soft); margin: 0 0 20px; }
+
+/* multiple choice — tap-select letter pills */
+.kc-pills { display: flex; flex-direction: column; gap: 10px; }
+.kc-pill {
+  display: flex; align-items: center; gap: 12px; text-align: left; width: 100%;
+  font-family: var(--font-body); font-size: 14.5px; color: var(--color-ink-soft);
+  background: var(--color-surface-alt); border: 1px solid var(--color-hair); border-radius: 2px;
+  padding: 13px 16px; cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+.kc-pill__letter { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--color-muted); display: flex; align-items: center; justify-content: center; font-family: var(--font-heading); font-weight: 700; font-size: 12px; color: var(--color-muted); }
+.kc-pill__text { flex: 1 1 auto; }
+.quiz--play .kc-pill:hover:not(:disabled) { border-color: var(--color-muted); }
+.quiz--play .kc-pill:disabled { cursor: default; }
+.quiz--play .kc-pill.faded { opacity: 0.4; }
+/* Correct answer = brand GREEN (--color-success), not the amber accent. Incorrect stays
+   --color-danger; the quiz progress bar (.kc-seg) keeps the accent. Author can retheme. */
+.kc-pill.correct { border-color: var(--color-success); background: color-mix(in srgb, var(--color-success) 12%, transparent); color: var(--color-ink); }
+.kc-pill.correct .kc-pill__letter { border-color: var(--color-success); color: var(--color-success); }
+.kc-pill.incorrect { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); color: var(--color-ink); }
+.kc-pill.incorrect .kc-pill__letter { border-color: var(--color-danger); color: var(--color-danger); }
+
+/* fill in the blank — chip into blank slot */
+.kc-sentence { font-size: 17px; line-height: 1.7; color: var(--color-ink); margin: 0 0 22px; }
+.kc-blank { display: inline-flex; align-items: center; justify-content: center; min-width: 180px; padding: 2px 12px; margin: 0 2px; border-bottom: 2px dashed var(--color-muted); color: var(--color-muted); font-family: var(--font-heading); font-size: 13px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; vertical-align: baseline; transition: border-color 0.25s ease, color 0.2s ease; }
+.kc-blank.filled { border-bottom-style: solid; border-color: var(--color-accent); color: var(--color-ink); font-family: var(--font-body); font-size: 17px; text-transform: none; font-weight: 400; letter-spacing: normal; }
+.kc-blank.wrong { border-color: var(--color-danger); }
+.kc-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.kc-chip { font-family: var(--font-body); font-size: 13.5px; color: var(--color-ink-soft); background: var(--color-surface-alt); border: 1px solid var(--color-hair); border-radius: 2px; padding: 10px 14px; cursor: pointer; transition: border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease; }
+.quiz--play .kc-chip:hover:not(:disabled) { border-color: var(--color-muted); }
+.quiz--play .kc-chip:disabled { cursor: default; }
+.kc-chip.wrong-flash { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
+.kc-chip.used { opacity: 0.3; pointer-events: none; }
+
+/* feedback — animated expand; author-editable text lives in .kc-fb-holder */
+.kc-fb-holder { display: none; }
+.kc-feedback { display: flex; align-items: flex-start; gap: 12px; max-height: 0; opacity: 0; overflow: hidden; transition: max-height 0.35s ease, opacity 0.3s ease, margin 0.35s ease; }
+.kc-feedback.show { max-height: 300px; opacity: 1; margin-top: 20px; }
+.kc-fb-icon { flex: none; width: 22px; height: 22px; border-radius: 50%; margin-top: 1px; display: flex; align-items: center; justify-content: center; }
+.kc-fb-icon.good { border: 1.5px solid var(--color-success); color: var(--color-success); }
+.kc-fb-icon.bad { border: 1.5px solid var(--color-danger); color: var(--color-danger); }
+.kc-fb-icon svg { width: 11px; height: 11px; }
+.kc-fb-text { font-size: 14px; line-height: 1.6; color: var(--color-ink-soft); padding-top: 1px; }
+.kc-fb-text strong { color: var(--color-ink); }
+
+.kc-actions { display: flex; justify-content: flex-end; margin-top: 22px; align-items: center; }
+/* Quiz CTA buttons use the SAME theme buttonStyle bundle (--button-*) as the course's
+   .nav-button / "Continue" buttons, so they match everywhere + follow the author's
+   button theme. Fallbacks = the course button defaults. */
+.kc-next, .kc-start, .kc-retry {
+  font-family: var(--font-heading); font-weight: var(--button-font-weight, 600);
+  font-size: var(--button-font-size, 15px); letter-spacing: 0.02em;
+  color: var(--button-fg, #14150f); background: var(--button-bg, var(--color-accent));
+  border: var(--button-border-width, 0) solid var(--button-border-color, transparent);
+  border-radius: var(--button-radius, 8px);
+  padding: var(--button-pad-y, 12px) var(--button-pad-x, 22px); cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease;
+}
+.kc-next:hover, .kc-start:hover, .kc-retry:hover {
+  filter: brightness(1.06);
+  background: var(--button-hover-bg, var(--button-bg, var(--color-accent)));
+  color: var(--button-hover-fg, var(--button-fg, #14150f));
+}
+.quiz--play .kc-next { opacity: 0; transform: translateY(4px); transition: opacity 0.3s ease, transform 0.3s ease; pointer-events: none; }
+.quiz--play .kc-next.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+/* completion */
+.kc-done { text-align: center; }
+.kc-done__badge { width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 50%; border: 2px solid var(--color-success); color: var(--color-success); display: flex; align-items: center; justify-content: center; }
+.kc-done__badge svg { width: 22px; height: 22px; }
+.kc-done__title { font-family: var(--font-heading); font-weight: 700; font-size: 20px; margin: 0 0 8px; color: var(--color-ink); }
+.kc-done__body { font-size: 14.5px; color: var(--color-ink-soft); line-height: 1.6; margin: 0 auto; max-width: 420px; }
+.kc-retry { margin-top: 18px; } /* look shared with .kc-next/.kc-start above (button bundle) */
+.quiz-empty { color: var(--color-muted); font-style: italic; padding: var(--space-md) 0; }
+
+/* course-completion / exit splash (#111) — a branded terminal screen shipped inside the
+   SCORM package so the learner sees this on Exit, not the LMS default. Token-only, same
+   family as .kc-done. Hidden until the runtime reveals it (.is-shown) on the Exit action. */
+/* the splash is wrapped in a .course-root (for token/data-mode context); neutralise
+   the page padding/width so the splash owns its own full-viewport layout. */
+.course-end-host { padding: 0; margin: 0; max-width: none; width: 100%; min-height: 0; display: block; }
+.course-end {
+  display: none;                      /* revealed as flex by .is-shown on Exit */
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 8vh 24px;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  /* the only atmospheric flourish: a faint amber top-wash */
+  background-image: radial-gradient(120% 60% at 50% -10%, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 60%);
+}
+.course-end.is-shown { display: flex; }
+.course-end__panel {
+  width: 100%; max-width: 520px; text-align: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-hair);
+  border-radius: 2px;                 /* flat 2px radii, house style */
+  padding: 44px 40px 36px;
+}
+.course-end__badge {
+  width: 68px; height: 68px; margin: 0 auto 22px;
+  color: var(--color-success);
+}
+.course-end__badge svg { width: 68px; height: 68px; display: block; }
+.course-end__badge-ring { opacity: 0.35; }
+.course-end__badge-check {
+  stroke-dasharray: 22; stroke-dashoffset: 22;
+  animation: course-end-check 0.55s ease 0.15s forwards;
+}
+@keyframes course-end-check { to { stroke-dashoffset: 0; } }
+.course-end__eyebrow {
+  font-family: var(--font-heading); font-weight: 700;
+  font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-accent); margin-bottom: 12px;
+}
+.course-end__title {
+  font-family: var(--font-heading); font-weight: 700;
+  font-size: 26px; line-height: 1.2; margin: 0 0 12px; color: var(--color-ink);
+}
+.course-end__body {
+  font-size: 15px; line-height: 1.65; color: var(--color-ink-soft);
+  margin: 0 auto; max-width: 420px;
+}
+.course-end__meta {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  margin: 26px 0 4px;
+}
+.course-end__chip {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 16px; min-width: 120px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-hair); border-radius: 2px;
+}
+.course-end__chip:empty, .course-end__chip[data-end-empty="1"] { display: none; }
+.course-end__chip-label {
+  font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+.course-end__chip-val {
+  font-family: var(--font-heading); font-weight: 700; font-size: 17px;
+  color: var(--color-ink); font-variant-numeric: tabular-nums;
+}
+.course-end__foot {
+  margin-top: 24px; padding-top: 18px;
+  border-top: 1px solid var(--color-hair);
+  font-size: 12.5px; color: var(--color-ink-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .course-end__badge-check { animation: none; stroke-dashoffset: 0; }
+}
+
+/* card sort — tap a card, tap a group (no drag lib; touch + keyboard friendly) */
+.kc-sort { display: flex; flex-direction: column; gap: 16px; }
+.kc-sort__pool { display: flex; flex-wrap: wrap; gap: 10px; min-height: 44px; }
+.kc-card { font-family: var(--font-body); font-size: 13.5px; color: var(--color-ink-soft); background: var(--color-surface-alt); border: 1px solid var(--color-hair); border-radius: 2px; padding: 10px 14px; cursor: pointer; transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease; }
+.quiz--play .kc-card:hover:not(:disabled) { border-color: var(--color-muted); }
+.kc-card.picked { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-ink); }
+.kc-card.placed { border-color: var(--color-accent); color: var(--color-ink); cursor: default; }
+.kc-card.wrong { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
+.kc-sort__cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.kc-cat { border: 1px solid var(--color-hair); border-radius: 2px; padding: 12px; min-height: 96px; transition: border-color 0.18s ease; }
+.quiz--play .kc-cat { cursor: pointer; }
+.quiz--play .kc-cat:hover { border-color: var(--color-muted); }
+.kc-cat.wrong { border-color: var(--color-danger); }
+.kc-cat__label { font-family: var(--font-heading); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); margin-bottom: 10px; }
+.kc-cat__drop { display: flex; flex-direction: column; gap: 8px; }
+
+/* ---- interaction system ---------------------------- */
+/* Acknowledge / Checkbox: shipped course content, token-driven. */
+.block-checkbox { display: flex; align-items: flex-start; gap: var(--space-sm); font-family: var(--font-body); font-size: 15px; line-height: 1.5; color: var(--color-ink); cursor: pointer; }
+.block-checkbox__input { width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--color-accent); cursor: pointer; }
+.block-checkbox__input:disabled { cursor: not-allowed; }
+.block-checkbox__label { flex: 1 1 auto; }
+
+/* Reactive gate — locked visual state (the runtime toggles .is-locked live). */
+.is-locked { opacity: 0.45; pointer-events: none; filter: saturate(0.6); transition: opacity 0.2s ease; }
+.block-gate-hint { margin-top: var(--space-xs); font-family: var(--font-body); font-size: 12.5px; font-style: italic; color: var(--color-muted); }
+.is-locked .block-gate-hint { pointer-events: none; }
+
+/* ---- image hotspots -------------------------------------------------------- */
+/* Base image with clickable "i" markers; each marker owns an anchored popover.
+   Ships in SCORM; open/close + positioning driven by runtime.js. Tokens only. */
+.block-hotspot { width: 100%; }
+/* #146: stage spans the full page width so a popover can open into the margin beside a
+   narrower, centred image; the image + its markers live in .hotspot-frame. overflow is
+   visible so a margin popover is not clipped. */
+.hotspot-stage { position: relative; display: block; line-height: 0; overflow: visible; }
+/* the sized, centred image area — markers anchor to THIS (=the image), not the stage.
+   --hotspot-img-width defaults to 100% (frame == stage; no behaviour change). */
+.hotspot-frame { position: relative; display: block; max-width: var(--hotspot-img-width, 100%); margin-inline: auto; line-height: 0; }
+.hotspot-image { display: block; width: 100%; height: auto; border-radius: var(--radius-card); mix-blend-mode: var(--img-blend, normal); } /* #178: base-image blend (--img-blend from the frame) */
+.hotspot-stage__empty {
+  line-height: normal; text-align: center; padding: 40px 24px;
+  border: 1px dashed var(--color-hair); border-radius: var(--radius-card); background: var(--color-surface);
+}
+
+/* marker = an italic "i" info badge; --hotspot-color / --hotspot-size are per-block overrides */
+.hotspot-marker {
+  --hotspot-color: var(--color-accent);
+  --hotspot-size: 34px;
+  position: absolute; transform: translate(-50%, -50%);
+  width: var(--hotspot-size); height: var(--hotspot-size); padding: 0;
+  border: none; border-radius: 50%; cursor: pointer;
+  background: var(--hotspot-color); color: var(--color-bg);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease; z-index: 2;
+}
+.hotspot-marker__glyph {
+  font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700;
+  font-size: calc(var(--hotspot-size) * 0.5); line-height: 1;
+}
+/* #224 QA: a loop trigger shows a stacked-cards glyph (a set of screen states), not the "i" */
+.hotspot-marker__glyph--loop { display: inline-flex; align-items: center; justify-content: center; font-style: normal; }
+.hotspot-marker__glyph--loop svg { width: calc(var(--hotspot-size) * 0.58); height: calc(var(--hotspot-size) * 0.58); display: block; }
+.hotspot-marker::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid var(--hotspot-color); opacity: 0.7;
+  animation: hotspot-pulse 2.2s ease-out infinite;
+}
+.hotspot-marker:hover, .hotspot-marker:focus-visible {
+  transform: translate(-50%, -50%) scale(1.12); outline: none; box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+}
+.hotspot-marker.is-active { transform: translate(-50%, -50%) scale(1.12); }
+.hotspot-marker.is-active::before { animation: none; opacity: 0; }
+/* viewed: turned this colour (default success/green) once the learner opens it; the
+   pulse stops so attention stays on the not-yet-viewed markers. */
+.hotspot-marker.is-viewed { background: var(--hotspot-viewed, var(--color-success)); }
+.hotspot-marker.is-viewed::before { animation: none; opacity: 0; }
+@keyframes hotspot-pulse {
+  0% { transform: scale(1); opacity: 0.7; }
+  70% { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .hotspot-marker::before { animation: none; } }
+
+/* custom marker: an uploaded (animated) SVG replaces the badge. Strip the circle
+   chrome + pulse ring so the artwork shows as-authored, sized by --hotspot-size.
+   Viewed -> force every shape to the viewed colour (green) so "done" reads the same
+   as the default marker; presentation-attr fills yield to CSS, inline styles need
+   the !important. */
+.hotspot-marker--custom {
+  background: none; border-radius: 0; box-shadow: none; color: inherit;
+  overflow: visible;
+  /* halo/shadow tint tracks the theme background token, so it darkens in dark mode
+     and lightens in light mode (marker separates against the current course bg). */
+  --hs-shadow: color-mix(in srgb, var(--color-bg, #000) 70%, transparent);
+}
+/* Lift off a busy/neon background: a soft halo BEHIND the artwork (in the bg-token
+   colour, so it reads as the page showing through and separates the marker) that
+   gently pulses to draw the eye. z-index -1 -> behind the SVG/iframe, above the image. */
+.hotspot-marker--custom::before {
+  content: ""; display: block; position: absolute; inset: -18%;
+  border-radius: 50%; z-index: -1; border: none; opacity: 1;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--color-bg, #000) 62%, transparent),
+    color-mix(in srgb, var(--color-bg, #000) 32%, transparent) 55%,
+    transparent 78%);
+  animation: hotspot-marker-glow 2.4s ease-in-out infinite;
+}
+@keyframes hotspot-marker-glow {
+  0%, 100% { transform: scale(0.86); opacity: 0.65; }
+  50%      { transform: scale(1.12); opacity: 1; }
+}
+/* crisp dark lift that follows the artwork's own alpha shape (not a box) */
+.hotspot-marker__svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 2px 5px var(--hs-shadow, rgba(0, 0, 0, 0.6))); }
+/* no card on hover/focus for custom markers -> preserves the "clicking the object" feel */
+.hotspot-marker--custom:hover, .hotspot-marker--custom:focus-visible { box-shadow: none; }
+.hotspot-marker--custom.is-active::before { animation: hotspot-marker-glow 2.4s ease-in-out infinite; opacity: 1; }
+.hotspot-marker--custom.is-viewed { background: none; }
+/* only the KEY (saturated) paints turn green on completion; white/grey/black stay.
+   render tags them .hs-key-fill / .hs-key-stroke (markerSvgNode). */
+.hotspot-marker--custom.is-viewed .hs-key-fill { fill: var(--hotspot-viewed, var(--color-success)) !important; }
+.hotspot-marker--custom.is-viewed .hs-key-stroke { stroke: var(--hotspot-viewed, var(--color-success)) !important; }
+@media (prefers-reduced-motion: reduce) { .hotspot-marker--custom::before { animation: none; } }
+
+/* HTML-animation marker: a self-contained motion (animated SVG + its own CSS) in a
+   sandboxed srcdoc iframe. pointer-events:none so the click still lands on the
+   button. Viewed -> a green tint (a colourful animation can't flatten to one fill
+   the way a lone SVG can, so a hue tint signals "done" while the motion keeps
+   running). CSS-only + keyed off the existing is-viewed class -> no runtime change. */
+.hotspot-marker--embed { overflow: visible; } /* let the halo + drop-shadow show */
+.hotspot-marker__frame {
+  width: 100%; height: 100%; border: 0; display: block;
+  background: transparent; pointer-events: none;
+  filter: drop-shadow(0 2px 5px var(--hs-shadow, rgba(0, 0, 0, 0.6))); /* bg-token lift */
+}
+/* viewed(green) is applied INSIDE the frame by runtime tintMarkerViewed() flipping the
+   animation's accent vars -> only the key colour turns green, neutrals stay. The frame
+   keeps its drop-shadow (base rule above), no hue filter over the whole animation. */
+@media (prefers-reduced-motion: reduce) { .hotspot-marker__frame { /* inner CSS honours its own reduce query */ } }
+
+/* anchored popover: hidden until opened; runtime positions it + toggles .is-open */
+.hotspot-popover {
+  position: absolute; z-index: 3; width: min(300px, 78%);
+  background: var(--color-surface); color: var(--color-ink);
+  border: 1px solid var(--color-hair); border-radius: var(--radius-card);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4); padding: var(--space-md); line-height: normal;
+  opacity: 0; transform: scale(0.94); transform-origin: center left;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.hotspot-popover[data-side="left"] { transform-origin: center right; }
+.hotspot-popover.is-open { opacity: 1; transform: scale(1); }
+.hotspot-popover__content > * { margin-top: 0; }
+.hotspot-popover__content > * + * { margin-top: var(--space-sm); }
+.hotspot-popover__close {
+  position: absolute; top: 6px; right: 6px; width: 26px; height: 26px;
+  border: none; border-radius: 50%; background: transparent; color: var(--color-ink-soft);
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.hotspot-popover__close:hover { background: var(--color-surface-alt); color: var(--color-ink); }
+.hotspot-popover::after {
+  content: ""; position: absolute; top: 50%; width: 12px; height: 12px;
+  background: var(--pop-bg, var(--color-surface)); border: 1px solid var(--pop-border, var(--color-hair));
+  transform: translateY(-50%) rotate(45deg);
+}
+.hotspot-popover[data-side="right"]::after { left: -7px; border-right: none; border-top: none; }
+.hotspot-popover[data-side="left"]::after { right: -7px; border-left: none; border-bottom: none; }
+/* top/bottom placement: arrow on the horizontal centre instead of the vertical one */
+.hotspot-popover[data-side="top"] { transform-origin: center bottom; }
+.hotspot-popover[data-side="bottom"] { transform-origin: center top; }
+.hotspot-popover[data-side="top"]::after,
+.hotspot-popover[data-side="bottom"]::after { top: auto; left: 50%; transform: translateX(-50%) rotate(45deg); }
+.hotspot-popover[data-side="top"]::after { bottom: -7px; border-top: none; border-left: none; }
+.hotspot-popover[data-side="bottom"]::after { top: -7px; border-bottom: none; border-right: none; }
+/* centre overlay: card floats in the middle of the image, no pointer arrow */
+.hotspot-popover[data-side="center"] { transform-origin: center center; }
+.hotspot-popover[data-side="center"]::after { display: none; }
+
+/* Screen graph (#216): each non-entry Screen is a hidden PANEL (its visual + its
+   own markers) stacked over the base image; the runtime swaps one in on navigate.
+   The panel fills the frame; its visual is contained inside it (markers position
+   against the panel = against the frame, so %-coords match the base image). */
+.hotspot-screen {
+  position: absolute; inset: 0; z-index: 1; overflow: hidden;
+  border-radius: var(--radius-card); background: var(--color-surface);
+  animation: hotspot-screen-in 0.22s ease;
+}
+.hotspot-screen__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* Screen video (#217): a screen recording. As the ENTRY base it sizes the frame like
+   the base image; inside a sub-screen PANEL it fills the panel like .hotspot-screen__img.
+   Playback (autoplay-muted on enter / loop / play-once freeze / replay / reduced-motion)
+   is driven by runtime.js -- render emits a static, non-autoplaying <video>. */
+.hotspot-frame > .hotspot-video { display: block; width: 100%; height: auto; border-radius: var(--radius-card); }
+.hotspot-screen > .hotspot-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* the Play / Replay affordance (runtime-created): a centred pill over the video. Shown
+   after a play-once video ends, or as the reduced-motion play affordance. */
+.hotspot-video-btn {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 3;
+  font-family: inherit; font-weight: 600; font-size: 14px; letter-spacing: 0.02em; line-height: 1;
+  color: var(--color-ink); background: var(--color-bg);
+  border: 1px solid var(--color-ink-soft); border-radius: 999px;
+  padding: 10px 20px; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.hotspot-video-btn::before { content: "\25B6  "; } /* play triangle */
+.hotspot-video-btn:hover { border-color: var(--color-ink); background: var(--color-surface); }
+@keyframes hotspot-screen-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .hotspot-screen { animation: none; } }
+/* While a sub-screen is open (runtime toggles this) the ENTRY markers (direct
+   children of the frame) are hidden — except the one just clicked (.is-active),
+   which stays visible above the panel as a "you are here" cue in a one-level tour
+   (marker z-index 3 > panel z-index 1). A sub-screen's OWN markers live inside its
+   panel (not direct frame children), so they show for onward navigation. */
+.hotspot-stage.is-screen-open .hotspot-frame > .hotspot-marker:not(.is-active) { display: none; }
+.hotspot-stage.is-screen-open .hotspot-marker.is-active { z-index: 3; }
+/* #204: the stage is NOT its own stacking context (kept so #178 page-blend on the
+   base image works), so the screen/back/counter overlays (z-index 1-4) hoist into the
+   nearest stacking context and painted OVER the footer nav pill, glossary + nav buttons
+   -- learners couldn't reach the chrome with a screen open. Isolate the stage ONLY while
+   a screen is open: its 1-4 layers stay local to the block, and the base image (which
+   the opaque screen swap hides) is not blended in this state, so #178 is unaffected. */
+.hotspot-stage.is-screen-open { isolation: isolate; }
+/* Back + Home sit together, floated top-left of the image. Both match the standard
+   course/nav button (white outline + text, bg fill, hover to surface); Back retraces
+   one step (chevron), Home (deep tours only) jumps to the entry screen (house). */
+.hotspot-nav { position: absolute; top: 12px; left: 12px; z-index: 4; display: flex; gap: 8px; }
+.hotspot-back, .hotspot-home {
+  font-family: inherit; font-weight: 600; font-size: 13px; letter-spacing: 0.02em; line-height: 1;
+  color: var(--color-ink); background: var(--color-bg);
+  border: 1px solid var(--color-ink-soft); border-radius: var(--button-radius, 8px);
+  padding: 8px 14px 8px 12px; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.hotspot-back::before { content: "\2039  "; }
+.hotspot-home::before { content: "\2302  "; }
+.hotspot-back:hover, .hotspot-home:hover { border-color: var(--color-ink); color: var(--color-ink); background: var(--color-surface); }
+/* "X of N viewed" progress pill, top-right of the stage (opposite the Back button). */
+.hotspot-counter {
+  position: absolute; top: 12px; right: 12px; z-index: 4;
+  font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; line-height: 1;
+  color: var(--color-ink-soft); background: var(--color-bg);
+  border: 1px solid var(--color-ink-soft); border-radius: 999px;
+  padding: 5px 11px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+.hotspot-counter.is-complete { color: var(--color-success, var(--color-ink)); border-color: var(--color-success, var(--color-ink-soft)); }
+
+/* Loop MODAL (#224 T6 QA): entering a loop opens a contained dialog over a dimmed backdrop
+   that isolates the loop's screens + Prev/Next as a distinct sub-mode, so the loop reads as a
+   separate thing from the tour's own Back/Home/hotspots (which are suppressed while it's open).
+   Scoped to the .hotspot-stage (a modal WITHIN the interaction, not the whole viewport). The
+   current member's real .hotspot-screen panel is relocated into __stage by the runtime. */
+.hotspot-loop-modal {
+  position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; padding: 0;
+  container-type: size; /* so the screen can be capped to the modal (block) size, not the viewport */
+}
+.hotspot-loop-modal[hidden] { display: none; }
+.hotspot-loop-modal__backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62); cursor: pointer; }
+.hotspot-loop-modal__card {
+  position: relative; z-index: 1; display: flex; flex-direction: column; gap: 12px;
+  /* HUG the content (up to 95% of the hotspot window) so there's no letterbox whitespace --
+     the card sizes to the state screen + header + nav, capped at 95%. #224 QA. */
+  max-width: 95%; max-height: 95%; width: auto; height: auto;
+  background: var(--color-bg); color: var(--color-ink);
+  border: 1px solid var(--color-ink-soft); border-radius: calc(var(--button-radius, 8px) + 4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); padding: 16px;
+}
+.hotspot-loop-modal__head { display: flex; align-items: center; gap: 10px; }
+.hotspot-loop-modal__title { flex: 1 1 auto; min-width: 0; font-family: var(--font-heading, inherit); font-size: 15px; font-weight: 700; letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hotspot-loop-modal__pos { flex: none; font-family: var(--font-heading, inherit); font-size: 12px; font-weight: 600; color: var(--color-ink-soft); }
+.hotspot-loop-modal__close {
+  flex: none; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 22px; line-height: 1; color: var(--color-ink-soft); background: none; border: none; border-radius: 999px; cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.hotspot-loop-modal__close:hover { color: var(--color-ink); background: var(--color-surface); }
+/* #224 QA: once every state in the loop has been seen, the close (x) lights up + pulses to
+   signal "you've viewed them all -- you can close". */
+.hotspot-loop-modal.is-loop-complete .hotspot-loop-modal__close {
+  color: var(--color-on-accent, var(--color-bg)); background: var(--color-accent, var(--color-ink));
+  animation: hotspot-loop-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .hotspot-loop-modal.is-loop-complete .hotspot-loop-modal__close { animation: none; } }
+/* stage HUGS the screen (flex:0 1 auto -> no stretch), so the card wraps the image with no
+   letterbox; the screen is capped at the card width + ~82vh tall so it stays large but on-screen. */
+.hotspot-loop-modal__stage { position: relative; flex: 0 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; background: var(--color-surface); border-radius: 6px; overflow: hidden; }
+.hotspot-loop-modal__stage .hotspot-screen { position: static; inset: auto; width: auto; height: auto; max-width: 100%; max-height: 100%; z-index: auto; overflow: visible; background: none; display: block; }
+/* the screen scales to fit the ~95% card in BOTH axes (no crop, no letterbox): capped to the
+   modal size minus the card chrome. cq units (relative to the modal) with a vh/vw fallback. */
+.hotspot-loop-modal__stage .hotspot-screen__img,
+.hotspot-loop-modal__stage .hotspot-screen > .hotspot-video {
+  position: static; inset: auto; display: block; width: auto; height: auto; object-fit: contain;
+  max-width: 88vw; max-height: 74vh;
+  max-width: calc(95cqw - 40px); max-height: calc(95cqh - 132px);
+}
+.hotspot-loop-modal__nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hotspot-loop-modal__btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-heading, inherit); font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--nav-btn-text, var(--color-ink)); background: var(--nav-btn-fill, var(--color-bg));
+  border: 1px solid var(--nav-btn-border, var(--color-ink-soft)); border-radius: var(--button-radius, 8px);
+  padding: 8px 16px; cursor: pointer; line-height: 1; white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.hotspot-loop-modal__btn:hover { border-color: var(--nav-btn-hover, var(--color-ink)); color: var(--nav-btn-hover, var(--color-ink)); background: var(--color-surface); }
+.hotspot-loop-modal__btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; animation: none; }
+.hotspot-loop-modal__arrow { font-size: 18px; line-height: 1; }
+/* subtle pulse invites the learner to step through the states */
+@keyframes hotspot-loop-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+.hotspot-loop-modal__next:not(:disabled) { animation: hotspot-loop-pulse 1.9s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .hotspot-loop-modal__next { animation: none; } }
+/* while a loop is open, suppress the tour's own chrome behind the dim (clears the nav order) */
+.hotspot-stage.is-loop-open .hotspot-nav,
+.hotspot-stage.is-loop-open .hotspot-counter,
+.hotspot-stage.is-loop-open .hotspot-trail { display: none; }
+
+/* Navigation trail (#218): an author-optional breadcrumb of the screens the learner
+   walked, below the image. Each crumb is a real <button> (keyboard-operable) that jumps
+   back along the path; the current screen is aria-current + non-interactive. */
+.hotspot-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin-top: 10px; line-height: normal; }
+.hotspot-trail__crumb {
+  font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--color-ink-soft); background: none; border: none; padding: 4px 6px; cursor: pointer;
+  border-radius: var(--button-radius, 8px); transition: color 0.15s, background 0.15s;
+}
+.hotspot-trail__crumb:hover, .hotspot-trail__crumb:focus-visible { color: var(--color-ink); background: var(--color-surface); }
+.hotspot-trail__crumb[aria-current="step"] { color: var(--color-ink); cursor: default; }
+.hotspot-trail__crumb + .hotspot-trail__crumb::before { content: "\203A"; margin-right: 4px; color: var(--color-ink-soft); }
+
+/* ---- Accordion / Tabs block (data-accordion) -------------------------------
+   render.js emits the AUTHOR view (all panels visible); runtime.js bindAccordion
+   collapses + wires it in demo + export. Panels stay visible by default so the
+   editor canvas (which does not run runtime.js) shows content open for editing,
+   and a JS-off shipped course degrades to all-content-shown. Tokens only.
+   Styled to the Card-Reveal visual standard: same per-mode solid fill (dark #2a2a2a
+   / light #fff), a faint selectable surface pattern (grid / dots / none) whose colour
+   the author can override, hover-lift + shadow, and a hairline rule between header and
+   panel (echoing the card title rule). All token-driven so it ships in SCORM and
+   tracks light/dark. */
+.acc { display: flex; flex-direction: column; gap: 10px; margin: var(--space-sm) 0; }
+/* per-mode fill, mirroring the card-reveal cards: switches on the learner light/dark
+   toggle so text stays readable in both themes. Defaults dark #2a2a2a / light #fff;
+   the --acc-fill-* layer is reserved for a future author fill control (like cards). */
+.course-root[data-mode="dark"] .acc { --acc-fill: var(--acc-fill-dark, #2a2a2a); }
+.course-root[data-mode="light"] .acc { --acc-fill: var(--acc-fill-light, #ffffff); }
+.acc__item {
+  position: relative; isolation: isolate; overflow: hidden;
+  border: 1px solid var(--color-hair); border-radius: var(--radius-card);
+  background: var(--acc-fill, #2a2a2a);
+  transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+/* faint surface texture (card-reveal signature); behind header/panel. The pattern is
+   author-selected via data-pattern on the .acc root (default = grid) and its colour
+   via --tex-color (default = the theme hairline). Dots / none variants are below. */
+.acc__item::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+/* hover only (no focus-within — accordion panels hold editable text, and a lift
+   on focus would shift the canvas under the author's cursor while typing) */
+.acc__item:hover {
+  transform: translateY(-2px); border-color: var(--color-ink-soft);
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.5);
+}
+.acc__header {
+  position: relative; z-index: 1;
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 16px 18px; cursor: pointer; text-align: left; border: none;
+  font-family: var(--font-heading); font-weight: 700; font-size: 16px;
+  color: var(--color-ink); background: transparent;
+}
+.acc__title { flex: 1; }
+.acc__chev { flex: none; width: 16px; height: 16px; color: var(--color-accent); transition: transform 0.18s ease; }
+.acc__header[aria-expanded="true"] .acc__chev { transform: rotate(180deg); }
+/* rule-divider between header and open panel (echoes the card's title rule) */
+.acc__panel {
+  position: relative; z-index: 1; padding: 14px 18px 18px; font-family: var(--font-body);
+  border-top: 1px solid var(--color-hair);
+}
+.acc__panel[hidden], .acc__item[hidden] { display: none; }
+
+/* tabs variant — single card treatment (no grid): the whole block is one gradient
+   card with the tab strip on top and the panel body inside. */
+.acc--tabs {
+  gap: 0; position: relative; isolation: isolate; overflow: hidden;
+  border: 1px solid var(--color-hair); border-radius: var(--radius-card);
+  background: var(--acc-fill, #2a2a2a);
+  transition: transform 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+.acc--tabs::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.acc--tabs:hover {
+  transform: translateY(-2px); border-color: var(--color-ink-soft);
+  box-shadow: 0 24px 48px -20px rgba(0, 0, 0, 0.5);
+}
+.acc__tabs {
+  position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 2px;
+  padding: 0 10px; border-bottom: 1px solid var(--color-hair);
+}
+.acc__tab {
+  padding: 12px 16px; cursor: pointer; border: none; background: none; margin-bottom: -1px;
+  font-family: var(--font-heading); font-weight: 700; font-size: 15px;
+  color: var(--color-ink-soft); border-bottom: 2px solid transparent;
+}
+.acc__tab:hover { color: var(--color-ink); }
+.acc__tab.is-active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+.acc__body { position: relative; z-index: 1; }
+.acc--tabs .acc__panel { padding: 16px 18px; border-top: none; }
+@media (prefers-reduced-motion: reduce) {
+  .acc__chev { transition: none; }
+  .acc__item, .acc--tabs { transition: none; }
+}
+/* surface pattern variants (shared shape with card-reveal): dots swaps the grid for a
+   fine dotted field; none clears it. data-pattern is stamped on the .acc root by render. */
+.acc[data-pattern="dots"] .acc__item::before,
+.acc--tabs[data-pattern="dots"]::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px);
+  background-size: 22px 22px;
+}
+.acc[data-pattern="none"] .acc__item::before,
+.acc--tabs[data-pattern="none"]::before { display: none; }
+
+/* FLAGSHIP "Sequence" block — process / timeline in one. Slice 1: Numbered · Vertical ·
+   Static. Token-driven (no bespoke colour): connector = hairline, node surface = card fill,
+   marker text = accent. Orientation/reveal/appearance land in later slices; the layout here
+   is the vertical spine + numbered nodes + rich per-step body (item.children). */
+.seq {
+  --seq-marker: 34px; --seq-gap: 22px;
+  display: flex; flex-direction: column; gap: var(--seq-gap);
+  margin: var(--space-sm) 0; position: relative; isolation: isolate; font-family: var(--font-body);
+}
+/* Surface texture (slice 4) — shared signature with accordion / card-reveal. Author-selected
+   via data-pattern (default grid) + --tex-color; sits behind the steps, which are lifted above.
+   Applies over any author fill from the universal appearance panel (applyBlockAppearance). */
+.seq::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5;
+  border-radius: inherit;
+  background-image:
+    linear-gradient(var(--tex-color, var(--color-hair)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--tex-color, var(--color-hair)) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.seq[data-pattern="dots"]::before {
+  background-image: radial-gradient(var(--tex-color, var(--color-hair)) 1.5px, transparent 1.6px);
+  background-size: 22px 22px;
+}
+.seq[data-pattern="none"]::before { display: none; }
+.seq > .seq__step, .seq > .seq__wizard { position: relative; z-index: 1; }
+.course-root[data-mode="dark"] .seq { --seq-node: var(--seq-node-dark, #2a2a2a); }
+.course-root[data-mode="light"] .seq { --seq-node: var(--seq-node-light, #ffffff); }
+.seq__step {
+  position: relative; display: grid;
+  grid-template-columns: var(--seq-marker) 1fr; column-gap: 18px; align-items: start;
+}
+/* connector line runs down the marker rail, behind the nodes, joining each step to the next */
+.seq__step:not(:last-child)::before {
+  content: ""; position: absolute; z-index: 0;
+  left: calc(var(--seq-marker) / 2); transform: translateX(-1px);
+  top: var(--seq-marker); bottom: calc(-1 * var(--seq-gap)); width: 2px;
+  background: var(--seq-connector, var(--color-hair));
+}
+.seq__marker {
+  position: relative; z-index: 1;
+  width: var(--seq-marker); height: var(--seq-marker); border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-heading); font-weight: 700; font-size: 15px; line-height: 1;
+  color: var(--seq-node-text, var(--color-accent));
+  background: var(--seq-node, #2a2a2a);
+  border: 2px solid var(--seq-connector, var(--color-hair));
+}
+/* Plain spine: no number/date label, just a small node dot centred on the rail. An icon
+   marker keeps the full node size, so the dot shrink only applies to non-icon plain markers. */
+.seq[data-seq-spine="plain"] .seq__marker:not(.seq__marker--icon) {
+  width: 12px; height: 12px; margin: calc((var(--seq-marker) - 12px) / 2);
+  border-width: 0; background: var(--seq-connector, var(--color-hair));
+  color: transparent;
+}
+/* Icon marker (slice 5): the per-step icon fills the node; keep the circle border + surface.
+   An inlined SVG recolours to a token (mono -> ink); a raster icon is contained. */
+.seq__marker--icon { padding: 0; overflow: hidden; }
+.seq__marker--icon svg, .seq__marker--icon .seq__icon-img {
+  width: 62%; height: 62%; display: block;
+}
+.seq__marker--icon .seq__icon-img { object-fit: contain; }
+/* Date caption beside an icon in Dated spine (the icon took the marker slot) */
+.seq__date {
+  font-family: var(--font-heading); font-weight: 700; font-size: 13px;
+  color: var(--color-accent); letter-spacing: 0.02em; margin-bottom: 4px;
+}
+.seq__body { min-width: 0; padding-bottom: 2px; }
+.seq__title {
+  font-family: var(--font-heading); font-weight: 700; font-size: 16px;
+  color: var(--color-ink); margin-bottom: 8px;
+}
+.seq__content > * { margin-top: 0; }
+.seq__empty, .seq__step-empty {
+  color: var(--color-muted); font-style: italic; font-size: 13px;
+}
+/* Horizontal orientation (slice 2): steps flow left-to-right, fit/wrap — NOT a sideways
+   filmstrip (overflow-x is reachability only). Marker sits above a centred body; the
+   connector runs horizontally from each marker to the next. Too-long sequence -> vertical. */
+.seq[data-seq-orient="horizontal"] {
+  flex-direction: row; flex-wrap: wrap; align-items: flex-start;
+  gap: var(--seq-gap); overflow-x: auto;
+}
+.seq[data-seq-orient="horizontal"] .seq__step {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  flex: 1 1 160px; min-width: 150px; row-gap: 12px;
+}
+.seq[data-seq-orient="horizontal"] .seq__step:not(:last-child)::before {
+  top: calc(var(--seq-marker) / 2); transform: translateY(-1px);
+  left: 50%; right: auto; bottom: auto;
+  width: calc(100% + var(--seq-gap)); height: 2px;
+}
+.seq[data-seq-orient="horizontal"] .seq__body { min-width: 0; width: 100%; }
+
+/* Reveal engine (slice 3). Behaviour is DOM-bound in runtime.js (bindSequence); CSS owns the
+   visuals. All hiding is class-driven by the runtime, never a bare selector — so the EDITOR
+   canvas (which never runs the runtime) always shows every step. */
+/* Scroll: the runtime ARMS the block (.is-armed) then reveals each step (.is-in) on viewport
+   entry; the passed step's connector fills with the accent (progress-fill along the spine).
+   Hiding is gated on .is-armed (runtime-only) so the editor canvas always shows every step. */
+.seq.is-armed .seq__step {
+  opacity: 0; transform: translateY(14px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.seq.is-armed[data-seq-orient="horizontal"] .seq__step { transform: translateY(0) scale(0.96); }
+.seq.is-armed .seq__step.is-in { opacity: 1; transform: none; }
+.seq.is-armed .seq__step:not(:last-child)::before { transition: background 0.5s ease; }
+.seq.is-armed .seq__step.is-in:not(:last-child)::before { background: var(--seq-fill, var(--color-accent)); }
+/* Click wizard: the runtime hides steps after the active index (.is-future); the ‹ counter ›
+   control shows only in click mode. */
+.seq__wizard { display: none; }
+.seq[data-seq-reveal="click"] .seq__wizard {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  margin-top: 20px; font-family: var(--font-heading);
+}
+.seq[data-seq-reveal="click"] .seq__step.is-future { display: none; }
+.seq__wizard-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 999px; cursor: pointer;
+  color: var(--color-ink); background: var(--color-bg);
+  border: 1px solid var(--color-ink-soft);
+  transition: border-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+.seq__wizard-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.seq__wizard-btn:disabled { opacity: 0.35; cursor: default; }
+.seq__wizard-btn .course-nav__arrow { width: 18px; height: 18px; }
+.seq__counter { color: var(--color-muted); font-weight: 700; font-size: 14px; min-width: 48px; text-align: center; }
+@media (prefers-reduced-motion: reduce) {
+  .seq__step { transition: none; }
+  /* reduced motion: never hold a step hidden waiting on a reveal (runtime already skips arming,
+     this is belt-and-braces if a block is armed) — show them all statically */
+  .seq.is-armed .seq__step { opacity: 1; transform: none; transition: none; }
+  .seq.is-armed .seq__step:not(:last-child)::before { transition: none; }
+}

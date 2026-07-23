@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verso UI kit</title>
+  <link rel="icon" href="data:,">
+
+  <!-- The real editor chrome styles + course tokens. The gallery renders the
+       ACTUAL canonical primitives from src/editor.js (window.__kit) — no copied
+       markup — so a change to a primitive shows here without editing this page. -->
+  <link rel="stylesheet" href="editor.css">
+  <link rel="stylesheet" href="src/course.css">
+  <style>
+    /* editor.css locks the app shell to `body { height:100vh; overflow:hidden }`
+       (fixed full-screen editor). The gallery is a normal scrolling document, so
+       override that here — otherwise the page is clipped and can't scroll. */
+    html { height: auto; }
+    body { margin: 0; height: auto; min-height: 100vh; overflow-y: auto; display: block;
+      background: var(--ui-bg, #1e1e1e); color: var(--ui-text, #e6e6e6);
+      font-family: Inter, system-ui, sans-serif; }
+    .kit__top { padding: 22px 28px 8px; }
+    .kit__top h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+    .kit__top p { margin: 0; max-width: 640px; font-size: 12px; line-height: 1.5;
+      color: var(--ui-text-dim, #9b9b9b); }
+    .kit__top code { color: var(--ui-text, #e6e6e6); }
+    .kit__stage { display: flex; gap: 28px; align-items: flex-start; padding: 16px 28px 60px; }
+    /* the showcase panel mirrors the real right inspector panel */
+    .kit__panel { width: 300px; flex: 0 0 auto; background: var(--ui-chrome, #2c2c2c);
+      border: 1px solid var(--ui-line, #444); border-radius: 8px; overflow: hidden; }
+    .kit__panel .panel-scroll { padding: 4px 0; }
+    .kit__panel #inspector { padding: 10px 14px 18px; }
+    .kit__legend { flex: 1 1 auto; max-width: 420px; font-size: 12px; line-height: 1.6;
+      color: var(--ui-text-dim, #9b9b9b); }
+    .kit__legend h2 { font-size: 12px; text-transform: none; letter-spacing: 0;
+      color: var(--ui-text, #e6e6e6); margin: 0 0 8px; }
+    .kit__legend ul { margin: 0; padding-left: 18px; }
+    .kit__legend li { margin-bottom: 5px; }
+    /* group divider inside the showcase */
+    .kit-group { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--ui-hair, #3a3a3a); }
+    .kit-group:first-child { margin-top: 4px; padding-top: 0; border-top: 0; }
+    .kit-group__name { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--ui-text-faint, #7a7a7a); margin: 0 0 8px; }
+    .kit-group__note { font-size: 11px; color: var(--ui-text-faint, #7a7a7a); margin: 6px 0 0; }
+    /* GLYPHS grid */
+    .kit-glyphs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 6px; }
+    .kit-glyph { display: flex; flex-direction: column; align-items: center; gap: 4px;
+      padding: 8px 4px; background: var(--ui-raise, #383838); border-radius: 5px; }
+    .kit-glyph__mark { width: 16px; height: 16px; color: var(--ui-text, #e6e6e6);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+    .kit-glyph__mark svg { width: 16px; height: 16px; }
+    .kit-glyph__name { font-size: 9px; color: var(--ui-text-faint, #7a7a7a); text-align: center;
+      word-break: break-word; line-height: 1.2; }
+    .kit-error { color: var(--ui-danger, #ff6b6b); font-size: 11px; padding: 6px 0; }
+  </style>
+</head>
+<body>
+  <header class="kit__top">
+    <h1>Verso UI kit</h1>
+    <p>Live canonical control primitives, rendered from the real editor source
+      (<code>src/editor.js</code> &rarr; <code>window.__kit</code>) — not copied markup.
+      Change a primitive and it changes here. Editor chrome is dark-only by design
+      (<code>UX-STYLE-GUIDE.md &sect;2</code>).</p>
+  </header>
+  <main class="kit__stage">
+    <aside class="panel panel--right kit__panel">
+      <div class="panel-scroll">
+        <div class="panel-section" id="inspector"></div>
+      </div>
+    </aside>
+    <div class="kit__legend">
+      <h2>What this is</h2>
+      <ul>
+        <li>The single source of truth for every editor control. Compose panels from
+          these — never hand-roll markup that duplicates one.</li>
+        <li>Each primitive is shown in a representative state. Interactions are live but
+          write to nothing (the gallery has no document).</li>
+        <li>New in the kit as later tickets land: the collapsed-optional row (ticket&nbsp;2)
+          and the repeated-item row (ticket&nbsp;3).</li>
+      </ul>
+    </div>
+  </main>
+
+  <!-- Hidden stubs for the few DOM elements editor.js wires unconditionally at load
+       (canvas / zoom / demo device). The #inspector it binds to is the visible
+       gallery panel above. Everything else editor.js touches is inside the gated boot. -->
+  <div style="display:none" aria-hidden="true">
+    <div id="canvas-viewport"></div>
+    <div id="zoom-fit"></div>
+    <div id="demo-device"></div>
+  </div>
+
+  <!-- kit mode: define the primitives, skip the editor boot. Same script chain as
+       index.html up through editor.js (editor.js reads globals from these at load,
+       e.g. window.SAMPLE_DOC / THEMES); the __KIT_MODE flag gates only editor.js's
+       boot (no doc load, mount, fonts, storage/backup). -->
+  <script>window.__KIT_MODE = true;</script>
+  <script src="src/theme.js"></script>
+  <script src="src/components.js"></script>
+  <script src="src/model.js"></script>
+  <script src="src/icons.js"></script>
+  <script src="src/editor.js"></script>
+  <script src="kit-gallery.js"></script>
+</body>
+</html>

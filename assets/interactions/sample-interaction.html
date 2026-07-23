@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sample Interaction</title>
+<style>
+  /* Palette declared as CSS custom properties so the tool's "Interaction colours"
+     picker can detect + re-theme them. Neutral demo content only. */
+  :root {
+    --bg: #1b1c1e;
+    --surface: #26282b;
+    --accent: #4d8dff;
+    --ink: #f4f5f6;
+    --muted: #a7adb5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; gap: 20px; text-align: center; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: 0.01em; }
+  p.sub { margin: 0; color: var(--muted); font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%; max-width: 720px; }
+  .card { background: var(--surface); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px; cursor: pointer; transition: transform .15s ease, border-color .15s ease; }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .card__num { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--accent); }
+  .card__title { font-size: 15px; font-weight: 600; margin: 6px 0 0; }
+  .card__body { font-size: 13px; color: var(--muted); margin-top: 10px; max-height: 0; overflow: hidden; transition: max-height .2s ease; }
+  .card.is-open .card__body { max-height: 120px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Tap each card to reveal a tip</h1>
+    <p class="sub">A neutral sample interaction shipped with the authoring tool.</p>
+    <div class="cards">
+      <div class="card" tabindex="0"><div class="card__num">01</div><div class="card__title">Look</div><div class="card__body">Scan your area before you start.</div></div>
+      <div class="card" tabindex="0"><div class="card__num">02</div><div class="card__title">Think</div><div class="card__body">Consider what could go wrong.</div></div>
+      <div class="card" tabindex="0"><div class="card__num">03</div><div class="card__title">Act</div><div class="card__body">Take a safe, simple next step.</div></div>
+    </div>
+  </div>
+  <script>
+    document.querySelectorAll('.card').forEach(function (c) {
+      function toggle() { c.classList.toggle('is-open'); }
+      c.addEventListener('click', toggle);
+      c.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
+  </script>
+</body>
+</html>

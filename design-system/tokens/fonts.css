@@ -1,0 +1,12 @@
+/* ============================================================
+   Verso — Webfonts
+   Inter  → editor UI chrome (workhorse)
+   Exo 2  → Verso's bundled brand/display + course content face
+   JetBrains Mono → code / HTML-interaction fields
+   Loaded from Google Fonts CDN for the design-system preview.
+   NOTE: the shipped Verso app EMBEDS these binaries (air-gap
+   requirement) — swap these @imports for local @font-face when
+   integrating into the offline build.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Exo+2:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');

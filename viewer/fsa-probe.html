@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verso Viewer — File System Access probe</title>
+<style>
+  body { font:15px/1.6 system-ui, sans-serif; max-width:640px; margin:40px auto; padding:0 20px; color:#1b1e24; background:#f6f7f9; }
+  h1 { font-size:20px; } h2 { font-size:15px; margin-top:26px; }
+  button { font:inherit; padding:8px 14px; border-radius:7px; border:1px solid #c3c8d0; background:#fff; cursor:pointer; margin:4px 6px 4px 0; }
+  button:hover { background:#eef1f5; }
+  .row { padding:6px 0; border-bottom:1px solid #e5e8ec; }
+  .ok { color:#1a7f45; font-weight:600; } .no { color:#c0392b; font-weight:600; }
+  code { background:#eceef2; padding:1px 5px; border-radius:4px; }
+  pre { background:#12141a; color:#d6d9de; padding:12px; border-radius:8px; overflow:auto; font-size:12px; }
+  .hint { color:#5a6472; font-size:13px; }
+</style>
+</head>
+<body>
+<h1>Verso Viewer — capability probe</h1>
+<p class="hint">This tells us whether the "save straight to a shared folder" Viewer path
+works in <em>your</em> environment. Open this file the way a reviewer would, then run the two tests.
+The whole Viewer design (folder library + save-to-folder) depends on these passing.</p>
+
+<div class="row">How this opened: <span id="how"></span></div>
+<div class="row">Secure context (needed for File System Access): <span id="secure"></span></div>
+<div class="row"><code>showDirectoryPicker</code> present: <span id="dirPresent"></span></div>
+<div class="row"><code>showSaveFilePicker</code> present: <span id="savePresent"></span></div>
+
+<h2>Test 1 — pick a folder, write a file, read it back</h2>
+<p class="hint">Choose (or make) a throwaway folder. We create <code>verso-probe.txt</code>, write, then re-read it.</p>
+<button id="t1">Run folder round-trip test</button>
+<div class="row" id="t1out">Not run.</div>
+
+<h2>Test 2 — Save As a file</h2>
+<button id="t2">Run Save-As test</button>
+<div class="row" id="t2out">Not run.</div>
+
+<h2>Report</h2>
+<pre id="report">—</pre>
+<button id="copy">Copy report</button>
+
+<script>
+(function(){
+  var report = {};
+  function set(id, ok, txt){ var el=document.getElementById(id); el.innerHTML='<span class="'+(ok?"ok":"no")+'">'+(ok?"YES":"NO")+'</span> '+(txt||""); report[id]=ok; dump(); }
+  function dump(){ document.getElementById("report").textContent = JSON.stringify(report, null, 2); }
+
+  report.href = location.href;
+  report.protocol = location.protocol;
+  document.getElementById("how").textContent = location.protocol + " (" + (location.protocol==="file:"?"opened as a local file":location.protocol.replace(":","")) + ")";
+  var secure = window.isSecureContext;
+  set("secure", !!secure, secure ? "" : "— file:// may or may not count; localhost does. If NO, the pickers will likely be blocked.");
+  set("dirPresent", !!window.showDirectoryPicker);
+  set("savePresent", !!window.showSaveFilePicker);
+
+  document.getElementById("t1").addEventListener("click", async function(){
+    var out = document.getElementById("t1out");
+    if (!window.showDirectoryPicker){ out.innerHTML='<span class="no">NO</span> showDirectoryPicker not available in this browser/open-mode.'; report.t1="no-api"; dump(); return; }
+    try {
+      var dir = await window.showDirectoryPicker();
+      var fh = await dir.getFileHandle("verso-probe.txt", { create:true });
+      var w = await fh.createWritable(); var stamp="verso probe "+Date.now(); await w.write(stamp); await w.close();
+      var rf = await fh.getFile(); var back = await rf.text();
+      var ok = back===stamp;
+      out.innerHTML = (ok?'<span class="ok">YES</span> wrote + read back OK ('+dir.name+').':'<span class="no">NO</span> readback mismatch.');
+      report.t1 = ok ? "ok" : "readback-mismatch"; dump();
+    } catch(err){ out.innerHTML='<span class="no">NO</span> '+err.name+": "+err.message; report.t1 = err.name+": "+err.message; dump(); }
+  });
+
+  document.getElementById("t2").addEventListener("click", async function(){
+    var out = document.getElementById("t2out");
+    if (!window.showSaveFilePicker){ out.innerHTML='<span class="no">NO</span> showSaveFilePicker not available.'; report.t2="no-api"; dump(); return; }
+    try {
+      var fh = await window.showSaveFilePicker({ suggestedName:"verso-probe.json", types:[{description:"JSON",accept:{"application/json":[".json"]}}] });
+      var w = await fh.createWritable(); await w.write('{"probe":true}'); await w.close();
+      out.innerHTML='<span class="ok">YES</span> saved via Save-As.'; report.t2="ok"; dump();
+    } catch(err){ out.innerHTML='<span class="no">NO</span> '+err.name+": "+err.message; report.t2 = err.name+": "+err.message; dump(); }
+  });
+
+  document.getElementById("copy").addEventListener("click", function(){ navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(report,null,2)); });
+  dump();
+})();
+</script>
+</body>
+</html>

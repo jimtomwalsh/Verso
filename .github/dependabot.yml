@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # The application itself has NO third-party runtime dependencies (no npm/node_modules).
+  # This keeps the GitHub Actions used by CI up to date and security-patched.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"

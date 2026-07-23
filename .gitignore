@@ -1,0 +1,43 @@
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# --- Local tooling / skills (installed locally, not versioned) ---
+.claude/
+
+# --- dependencies / logs ---
+node_modules/
+*.log
+
+# --- build artifacts (regenerated; don't version) ---
+desktop/Verso.app/
+export/build/
+
+# =====================================================================
+# COURSE CONTENT — keep local, never commit
+# Real course snapshots, packages and assets are the author's data and
+# should stay out of the repo. For a demo, add a scrubbed sample, not real content.
+# =====================================================================
+*.versopub.json
+*.scorm
+*_SCORM.zip
+*.zip
+
+# Real course data (CSV source + generators). The bundled template
+# (course_schema_template.csv) is safe and NOT matched here.
+course-*.csv
+course-*.json
+
+# dev scratch / diagnostics at root
+_diag-*.html
+__*.html
+
+# Repro/debug screenshots may capture course content — keep them out of the repo.
+references/
+
+# Local review/comment exchange sidecars
+review-*.json
+verso-comments*.json
