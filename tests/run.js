@@ -170,6 +170,25 @@ section("#8 docs reader (TOC + search)");
   ok("#8 CSS: search converges to the ring-wrapper focus-within pattern", /\.docs-search:focus-within\s*\{[^}]*var\(--accent\)/.test(src("editor.css")));
 })();
 
+// ---- #8 docs auto-maintenance — the drift checker tool (code is truth) -----------------
+// tools/docs-maintain.js introspects the block palette and verifies the guide documents each
+// block. This is the runnable, author-facing form of the #91 anti-drift gate; the test shares
+// its pure core so there is ONE coverage rule, and proves the drift-bite.
+section("#8 docs auto-maintenance");
+(function () {
+  var dm = require(path.join(ROOT, "tools/docs-maintain.js"));
+  var ed = src("src/editor.js"), guide = src("docs/USER-GUIDE.md");
+  var blocks = dm.extractLibrary(ed);
+  ok("#8 maintain: parses the block palette from source (>= 20)", blocks.length >= 20 && blocks.every(function (b) { return b.group && b.label; }));
+  var cov = dm.blockCoverage(ed, guide);
+  ok("#8 maintain: every palette block is documented (no drift)"
+    + (cov.undocumented.length ? " -- MISSING: " + cov.undocumented.map(function (b) { return b.label; }).join(" | ") : ""), cov.undocumented.length === 0);
+  ok("#8 maintain: coverage groups the inventory by category", Object.keys(cov.groups).length >= 3);
+  // the checker BITES: a hypothetical undocumented block is caught
+  ok("#8 maintain: drift-bite — an undocumented block fails coverage", dm.isDocumented("Zorptron 9000", guide) === false);
+  ok("#8 maintain: core-label rule strips a trailing qualifier", dm.coreLabel("Card (container)") === "Card");
+})();
+
 // ---- #26: docs capture mode — deterministic clock + RNG, freeze, off-by-default -------
 // Two captures of the same scene must be byte-identical: the flag installs a monotonic
 // clock and a seeded RNG so timestamp-/random-suffixed ids reproduce across runs.

@@ -57,6 +57,20 @@ node --check src/<file>.js
 - Headless tests miss *wiring* — browser-verify your change: boot the app, check the editor
   render **and** a real `SCORMExport.buildPackage(...)`, not just green unit tests.
 
+## Keep the docs in sync (code is truth)
+
+The in-app User Guide (`docs/USER-GUIDE.md`) must track the feature set — if a change adds or
+alters something an author sees or does, update the guide in the same change. Two tools help:
+
+```bash
+node tools/docs-maintain.js            # fail if a palette block is undocumented (--report to list)
+node tools/docs-capture.js --stale src/editor.js editor.css   # which figure scenes a diff touches
+```
+
+`docs-maintain` catches missing block docs (the same coverage the suite enforces); `docs-capture
+--stale` lists the illustration scenes to re-run when you change a surface they cover (see
+`docs/scenes/README.md`). An unchanged scene re-captures byte-identically, so re-running is safe.
+
 ## Repository hygiene gate
 
 This repo enforces a hygiene gate that hard-fails (in CI and, if installed, at commit time)
