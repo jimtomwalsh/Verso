@@ -8,6 +8,11 @@ Thumbs.db
 # --- Local tooling / skills (installed locally, not versioned) ---
 .claude/
 
+# --- AI-assist local config — keep AI-development footprint out of this public repo ---
+# Guidance for local AI tooling lives in CLAUDE.local.md and is never committed.
+CLAUDE.md
+CLAUDE.local.md
+
 # --- dependencies / logs ---
 node_modules/
 *.log

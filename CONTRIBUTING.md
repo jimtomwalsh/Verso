@@ -57,6 +57,22 @@ node --check src/<file>.js
 - Headless tests miss *wiring* — browser-verify your change: boot the app, check the editor
   render **and** a real `SCORMExport.buildPackage(...)`, not just green unit tests.
 
+## Repository hygiene gate
+
+This repo enforces a hygiene gate that hard-fails (in CI and, if installed, at commit time)
+if a change introduces: customer/proprietary content, personal filesystem paths, secrets,
+external CDN `<script>` loads in shipping HTML, new third-party runtime dependencies, or
+committed course-content files. The gate is `scripts/check-hygiene.js`; it also runs as a
+section of `node tests/run.js`, which CI requires to pass.
+
+Enable the local pre-commit hook once per clone:
+
+```bash
+scripts/install-hooks.sh        # sets core.hooksPath -> scripts/hooks
+```
+
+Sample content must be neutral and invented — never real course material.
+
 ## Pull requests
 
 1. Branch from `main`.

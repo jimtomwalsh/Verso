@@ -6943,6 +6943,18 @@ section("#215 hotspot unified screen-graph");
     loops: [{ id: "loopA", screens: ["s1"] }] })).indexOf("hotspot-loop-modal") < 0);
 })();
 
+// ---- Repository hygiene gate (HARD FAIL) ---------------------------------
+// Keeps the public repo free of customer/proprietary content, the removed in-app
+// assistant/translation code, personal paths, secrets, external CDN loads, and
+// committed course content. Delegates to the standalone scanner so the same check
+// runs in CI (here) and in the pre-commit hook. See scripts/check-hygiene.js.
+section("repository hygiene gate (HARD FAIL)");
+(function () {
+  var r = cp.spawnSync(process.execPath, [path.join(ROOT, "scripts/check-hygiene.js")], { encoding: "utf8" });
+  if (r.status !== 0 && r.stderr) console.error(r.stderr.replace(/^/gm, "  "));
+  ok("repo hygiene: no proprietary/assistant/secret/CDN/course-content violations", r.status === 0);
+})();
+
 // ---- report (await any async sections first) -----------------------------
 Promise.all(__async).then(function () {
   console.log("\n=== regression suite: " + (total - failed) + "/" + total + (warnings ? " (" + warnings + " warn)" : "") + " ===");
