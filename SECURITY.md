@@ -7,8 +7,7 @@ issue for them.
 
 - Preferred: use GitHub's **private vulnerability reporting** (the "Report a
   vulnerability" button under this repository's **Security** tab).
-- Alternatively, contact the maintainer privately. *(Maintainer: set a security contact
-  address here before publishing.)*
+- Alternatively, contact the maintainer privately.
 
 Please include steps to reproduce, affected version/commit, and impact. We aim to
 acknowledge reports within a reasonable time and will keep you updated on remediation.
