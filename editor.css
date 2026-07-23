@@ -1849,15 +1849,20 @@ details[open] .disc__caret {
   vertical-align: top;
 }
 .help-doc th { background: rgba(255, 255, 255, 0.04); color: var(--text-primary); font-weight: 600; }
-/* #25 figure directive: committed docs/assets/ still (or motion #28) with a caption. */
-.help-doc .doc-figure { margin: 14px 0; }
+/* #25 figure directive: a committed docs/assets/ still (or motion #28) with a caption.
+   Figures are framed, centred, and capped to a modest reference width — a screenshot reads as
+   an inline reference, never a full-bleed wall, and is never upscaled past its natural size. */
+.help-doc .doc-figure {
+  margin: 20px auto; max-width: 380px; text-align: center;
+}
 .help-doc .doc-figure__img {
-  display: block; max-width: 100%; height: auto;
-  border: 1px solid var(--border-subtle); border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  display: block; max-width: 100%; height: auto; margin: 0 auto;
+  border: 1px solid var(--border-subtle); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.30);
+  background: var(--surface-canvas);
 }
 .help-doc .doc-figure__cap {
-  margin-top: 6px; font-size: 11.5px; line-height: 1.45;
+  margin: 9px auto 0; font-size: 11.5px; line-height: 1.45; max-width: 320px;
   color: var(--text-tertiary); text-align: center;
 }
 /* missing asset: hide the broken glyph, keep the caption as the placeholder */

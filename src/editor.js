@@ -2718,6 +2718,12 @@
     // vendored parser). src/poster are docs/assets/ paths; missing assets degrade to alt
     // text (see openHelpModal's onerror wiring). group order: alt, src, caption, attrs.
     var FIG_RE = /^!\[([^\]]*)\]\(\s*([^)\s"]+)(?:\s+"([^"]*)")?\s*\)(?:\{([^}]*)\})?\s*$/;
+    // a line that begins a new block — a list item's lazy continuation stops here.
+    function isBlockStart(s) {
+      return /^\s*```/.test(s) || /^#{1,6}\s+/.test(s) || /^\s*>\s?/.test(s)
+        || /^\s*[-*]\s+/.test(s) || /^\s*\d+\.\s+/.test(s)
+        || /^---+\s*$/.test(s) || /^\*\*\*+\s*$/.test(s) || FIG_RE.test(s);
+    }
     function figHtml(m) {
       var alt = m[1] || "", srcPath = m[2] || "", caption = m[3] || "", attrs = m[4] || "";
       var pm = attrs.match(/poster\s*=\s*([^\s}]+)/);
@@ -2777,15 +2783,23 @@
         out.push("<blockquote>" + mdToHtml(qb.join("\n")) + "</blockquote>");
         continue;
       }
-      if (/^\s*[-*]\s+/.test(line)) { // unordered list
+      if (/^\s*[-*]\s+/.test(line)) { // unordered list (with lazy continuation of wrapped lines)
         var ul = [];
-        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { ul.push("<li>" + inline(lines[i].replace(/^\s*[-*]\s+/, "")) + "</li>"); i++; }
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+          var uitem = lines[i].replace(/^\s*[-*]\s+/, ""); i++;
+          while (i < lines.length && lines[i].trim() !== "" && !isBlockStart(lines[i])) { uitem += " " + lines[i].trim(); i++; }
+          ul.push("<li>" + inline(uitem) + "</li>");
+        }
         out.push("<ul>" + ul.join("") + "</ul>");
         continue;
       }
-      if (/^\s*\d+\.\s+/.test(line)) { // ordered list
+      if (/^\s*\d+\.\s+/.test(line)) { // ordered list (with lazy continuation of wrapped lines)
         var ol = [];
-        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { ol.push("<li>" + inline(lines[i].replace(/^\s*\d+\.\s+/, "")) + "</li>"); i++; }
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          var oitem = lines[i].replace(/^\s*\d+\.\s+/, ""); i++;
+          while (i < lines.length && lines[i].trim() !== "" && !isBlockStart(lines[i])) { oitem += " " + lines[i].trim(); i++; }
+          ol.push("<li>" + inline(oitem) + "</li>");
+        }
         out.push("<ol>" + ol.join("") + "</ol>");
         continue;
       }

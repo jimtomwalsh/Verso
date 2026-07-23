@@ -106,6 +106,10 @@ section("#81 Help markdown renderer");
   ok("inline code", md("use `x` here").indexOf("<code>x</code>") !== -1);
   ok("unordered list", md("- a\n- b") === "<ul><li>a</li><li>b</li></ul>");
   ok("ordered list", md("1. a\n2. b") === "<ol><li>a</li><li>b</li></ol>");
+  // #8 lazy continuation: a wrapped bullet joins into one item so inline spans don't break
+  ok("#8 wrapped bullet joins (bold not split)", md("- a **Comment\n  mode** b").indexOf("<li>a <strong>Comment mode</strong> b</li>") !== -1);
+  ok("#8 continuation stops at next bullet", md("- one\n  wrapped\n- two") === "<ul><li>one wrapped</li><li>two</li></ul>");
+  ok("#8 continuation stops at a blank line", md("- one\n\npara").indexOf("<li>one</li></ul>") !== -1 && md("- one\n\npara").indexOf("<p>para</p>") !== -1);
   ok("horizontal rule", md("---") === "<hr>");
   ok("blockquote wraps", md("> hi").indexOf("<blockquote>") === 0);
   // HTML in the source is escaped (defensive — trusted content, still no injection)
