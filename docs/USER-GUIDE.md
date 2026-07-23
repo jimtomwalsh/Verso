@@ -44,6 +44,8 @@ editing — but do keep JSON backups (see §12) since the data lives only in thi
 └───────────┴─────────────────────────────────────────┴─────────────┘
 ```
 
+![The left panel: the Structure outliner (chapters and pages) above the Blocks palette.](docs/assets/structure-panel.webp "The left panel — Structure outliner on top, Blocks palette below.")
+
 - **Toolbar (top).** Light/dark toggle, save status, **Undo/Redo**, **Fit all**, **Comment
   mode**, **Demo (preview)**, and the **Import & Export** menu (CSV import / SCORM export /
   JSON backup). Document tabs sit on the left — you can have several courses open.
@@ -63,9 +65,13 @@ editing — but do keep JSON backups (see §12) since the data lives only in thi
 
 ## 3. Core concepts
 
+![The three structural levels in the Structure panel: chapters (1) contain pages (2), and blocks (3) are inserted from the palette.](docs/assets/annotated-structure.webp "Chapters (1) contain pages (2); blocks (3) come from the palette below.")
+
 - **Document = one course.** Held in the browser; shown as a tab.
 - **Chapters → Pages → Blocks.** A course is chapters; each chapter has pages; each page
   holds blocks. The learner moves page-to-page; chapters drive the nav/progress.
+
+![The highlighted page is the active one; clicking another page moves the highlight and jumps to it.](docs/assets/annotated-navigate.webp "The highlight follows the active page as you click through the outliner."){poster=docs/assets/annotated-navigate-still.webp}
 - **Blocks** are the content units (heading, paragraph, image, quiz, card grid…). Some
   blocks are **containers** (Card, Columns, Card Reveal, Accordion) that hold child blocks.
 - **Document settings vs block settings.** The inspector shows **document-wide** settings
@@ -76,6 +82,8 @@ editing — but do keep JSON backups (see §12) since the data lives only in thi
 ---
 
 ## 4. Pages & chapters
+
+![Clicking a page in the Structure outliner selects it and jumps the canvas to it.](docs/assets/outliner-navigate.webp "Click a page in the outliner to jump to it — the selection moves from one page to the next."){poster=docs/assets/outliner-navigate-still.webp}
 
 - **Add a page:** the **+** in the Structure header (adds after the selected page). New pages
   are blank.

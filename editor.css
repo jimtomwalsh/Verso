@@ -1803,6 +1803,53 @@ details[open] .disc__caret {
   vertical-align: top;
 }
 .help-doc th { background: rgba(255, 255, 255, 0.04); color: var(--text-primary); font-weight: 600; }
+/* #25 figure directive: committed docs/assets/ still (or motion #28) with a caption. */
+.help-doc .doc-figure { margin: 14px 0; }
+.help-doc .doc-figure__img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--border-subtle); border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.help-doc .doc-figure__cap {
+  margin-top: 6px; font-size: 11.5px; line-height: 1.45;
+  color: var(--text-tertiary); text-align: center;
+}
+/* missing asset: hide the broken glyph, keep the caption as the placeholder */
+.help-doc .doc-figure--missing .doc-figure__img { display: none; }
+.help-doc .doc-figure--missing .doc-figure__cap::before {
+  content: "\26AF\00A0"; color: var(--text-tertiary);
+}
+
+/* #29 docs capture annotation overlay (capture-ONLY; never in course output).
+   A body-level layer drawn over the editor for docs figures: highlight ring, numbered
+   callout chip, pointer arrow. DS-token styled (var(--accent)) so it inherits the theme. */
+#capture-annotate-layer {
+  position: fixed; inset: 0; z-index: 900; pointer-events: none;
+}
+.capture-annot { position: fixed; pointer-events: none; }
+/* mirrors the canonical selection ring (.is-selected, editor.css) — accent border +
+   accent-quiet halo — with an added drop shadow for figure legibility over the canvas. */
+.capture-annot--ring {
+  border: 2px solid var(--accent); border-radius: var(--radius-sm, 4px);
+  box-shadow: 0 0 0 4px var(--accent-quiet), 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+/* mirrors the .variant-preview-badge floating pill, sized as a numbered badge. */
+.capture-annot--chip {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  transform: translate(-50%, -50%);
+  background: var(--accent); color: #fff;
+  font: 700 12px/1 "Inter", system-ui, sans-serif; letter-spacing: 0.01em;
+  border-radius: var(--radius-full, 999px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.capture-annot--pointer { color: var(--accent); }
+.capture-annot--pointer svg {
+  width: 24px; height: 24px; display: block;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+}
+.capture-annot--pointer-right svg { transform: rotate(180deg); }
+.capture-annot--pointer-top svg { transform: rotate(90deg); }
+.capture-annot--pointer-bottom svg { transform: rotate(-90deg); }
 /* calm inner scrollbar for tall modals */
 .modal-box::-webkit-scrollbar { width: 10px; }
 .modal-box::-webkit-scrollbar-thumb {

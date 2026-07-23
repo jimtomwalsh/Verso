@@ -1,0 +1,64 @@
+{
+  "id": "annotated-structure",
+  "covers": [
+    "src/editor.js",
+    "editor.css",
+    "src/capture-mode.js",
+    "pages-outliner",
+    "block-palette",
+    "annotation-overlay"
+  ],
+  "kind": "still",
+  "viewport": {
+    "width": 1440,
+    "height": 900,
+    "dpr": 2
+  },
+  "theme": "dark",
+  "steps": [
+    {
+      "do": "wait",
+      "ms": 500
+    },
+    {
+      "do": "highlight",
+      "target": ".tree-chapter"
+    },
+    {
+      "do": "callout",
+      "target": ".tree-chapter",
+      "n": 1,
+      "side": "tr"
+    },
+    {
+      "do": "highlight",
+      "target": ".tree-page"
+    },
+    {
+      "do": "callout",
+      "target": ".tree-page",
+      "n": 2,
+      "side": "tr"
+    },
+    {
+      "do": "highlight",
+      "target": ".vds-tile"
+    },
+    {
+      "do": "callout",
+      "target": ".vds-tile",
+      "n": 3,
+      "side": "tr"
+    },
+    {
+      "do": "shoot",
+      "out": "annotated-structure.webp",
+      "clip": {
+        "x": 0,
+        "y": 0,
+        "width": 292,
+        "height": 900
+      }
+    }
+  ]
+}

@@ -116,6 +116,29 @@ section("#81 Help markdown renderer");
   ok("table head", tbl.indexOf("<th>H1</th>") !== -1 && tbl.indexOf("<th>H2</th>") !== -1);
   ok("table body", tbl.indexOf("<td>a</td>") !== -1 && tbl.indexOf("<td>b</td>") !== -1);
   ok("standalone --- stays an hr", md("x\n\n---\n\ny").indexOf("<hr>") !== -1);
+  // #25 figure directive: markdown image + optional "caption" + {poster=..} attr -> <figure>
+  var figFull = md('![The block palette](docs/assets/palette.webp "Add blocks from here"){poster=docs/assets/palette-still.webp}');
+  ok("#25 figure emits <figure><img>", figFull.indexOf("<figure class=\"doc-figure\">") === 0 && figFull.indexOf("<img class=\"doc-figure__img\"") !== -1);
+  ok("#25 figure src + alt emitted", figFull.indexOf("src=\"docs/assets/palette.webp\"") !== -1 && figFull.indexOf("alt=\"The block palette\"") !== -1);
+  ok("#25 figure caption -> figcaption", figFull.indexOf("<figcaption class=\"doc-figure__cap\">Add blocks from here</figcaption>") !== -1);
+  ok("#25 poster carried as data-poster (unused for stills)", figFull.indexOf("data-poster=\"docs/assets/palette-still.webp\"") !== -1);
+  // minimal form: no caption, no poster
+  var figMin = md("![alt only](docs/assets/x.webp)");
+  ok("#25 figure minimal (no caption/poster)", figMin.indexOf("<figure") === 0 && figMin.indexOf("<figcaption") === -1 && figMin.indexOf("data-poster") === -1);
+  ok("#25 figure alt-only still emits alt", figMin.indexOf("alt=\"alt only\"") !== -1);
+  // a figure line is NOT swallowed into a paragraph when surrounded by prose
+  var figProse = md("intro\n\n![cap](docs/assets/y.webp)\n\noutro");
+  ok("#25 figure not wrapped in <p>", figProse.indexOf("<p>intro</p>") !== -1 && figProse.indexOf("<figure") !== -1 && figProse.indexOf("<p><figure") === -1);
+  // lazy-loaded so the docs panel opens fast; escaped attrs (no injection via alt/caption)
+  ok("#25 figure img lazy-loads", figMin.indexOf("loading=\"lazy\"") !== -1);
+  var figInj = md('![a"b](docs/assets/z.webp)');
+  ok("#25 figure escapes quotes in attrs", figInj.indexOf("alt=\"a&quot;b\"") !== -1 && figInj.indexOf("alt=\"a\"b\"") === -1);
+})();
+
+// WIRING: broken figure assets degrade gracefully (impure onerror wiring, not the pure renderer)
+(function () {
+  var ed = src("src/editor.js");
+  ok("#25 openHelpModal wires figure onerror -> --missing", /doc-figure__img[\s\S]{0,220}addEventListener\("error"[\s\S]{0,120}doc-figure--missing/.test(ed));
 })();
 
 // WIRING: the Help button opens the in-app modal, not a (no-op) new tab.
@@ -124,6 +147,283 @@ section("#81 Help markdown renderer");
   ok("#81 help-btn wired to openHelpModal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(ed));
   ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
   ok("#81 help modal fetches the guide", /fetch\("docs\/USER-GUIDE\.md"/.test(ed));
+})();
+
+// ---- #26: docs capture mode — deterministic clock + RNG, freeze, off-by-default -------
+// Two captures of the same scene must be byte-identical: the flag installs a monotonic
+// clock and a seeded RNG so timestamp-/random-suffixed ids reproduce across runs.
+section("#26 docs capture mode");
+(function () {
+  var srcTxt = src("src/capture-mode.js");
+  var realRandom = Math.random;
+  function runCapture(win, loc) {
+    var htmlAttrs = {}, injected = [];
+    var fakeDoc = {
+      readyState: "complete",
+      documentElement: { setAttribute: function (k, v) { htmlAttrs[k] = v; } },
+      head: { appendChild: function (n) { injected.push(n); } },
+      getElementById: function (id) { return injected.filter(function (n) { return n.id === id; })[0] || null; },
+      createElement: function () { return {}; },
+      querySelectorAll: function () { return []; },
+      addEventListener: function () {}
+    };
+    var fakePerf = { now: function () { return 0; } };
+    var fn = new Function("window", "document", "location", "performance", "URLSearchParams", srcTxt);
+    fn(win, fakeDoc, loc, fakePerf, URLSearchParams);
+    var randomSeq = [], nowSeq = [];
+    for (var i = 0; i < 5; i++) randomSeq.push(Math.random());
+    for (var j = 0; j < 5; j++) nowSeq.push(win.Date ? win.Date.now() : NaN);
+    return { htmlAttrs: htmlAttrs, injected: injected, CaptureMode: win.CaptureMode, randomSeq: randomSeq, nowSeq: nowSeq, capDate: win.Date };
+  }
+  // ON via window.__captureMode
+  var r1 = runCapture({ __captureMode: true }, { search: "" });
+  var r2 = runCapture({ __captureMode: true }, { search: "" });
+  ok("#26 sets data-capture=on", r1.htmlAttrs["data-capture"] === "on");
+  ok("#26 injects exactly one freeze stylesheet", r1.injected.length === 1 && r1.injected[0].id === "capture-freeze-css");
+  ok("#26 freeze CSS kills transition/animation + hides caret", /transition:\s*none/.test(r1.injected[0].textContent) && /animation:\s*none/.test(r1.injected[0].textContent) && /caret-color:\s*transparent/.test(r1.injected[0].textContent));
+  ok("#26 exposes window.CaptureMode.active + settle()", r1.CaptureMode && r1.CaptureMode.active === true && typeof r1.CaptureMode.settle === "function");
+  ok("#26 clock monotonic from a fixed epoch", r1.nowSeq[0] >= 1700000000000 && r1.nowSeq[1] === r1.nowSeq[0] + 1);
+  ok("#26 random values in [0,1)", r1.randomSeq.every(function (x) { return x >= 0 && x < 1; }));
+  ok("#26 RNG deterministic across two captures (byte-identical)", JSON.stringify(r1.randomSeq) === JSON.stringify(r2.randomSeq));
+  ok("#26 clock deterministic across two captures", JSON.stringify(r1.nowSeq) === JSON.stringify(r2.nowSeq));
+  ok("#26 argless new Date() is deterministic", new r1.capDate().getTime() >= 1700000000000);
+  Math.random = realRandom;
+  // OFF by default: no flag, no ?capture -> the IIFE returns early, patches nothing
+  var off = runCapture({}, { search: "" });
+  ok("#26 OFF by default: no data-capture, no CaptureMode, no injection", off.htmlAttrs["data-capture"] === undefined && !off.CaptureMode && off.injected.length === 0);
+  ok("#26 OFF by default: Math.random left untouched", Math.random === realRandom);
+  // ON via ?capture=1
+  Math.random = realRandom;
+  var byQuery = runCapture({}, { search: "?capture=1" });
+  ok("#26 ?capture=1 activates", byQuery.CaptureMode && byQuery.CaptureMode.active === true);
+  // capture=0 must NOT activate
+  Math.random = realRandom;
+  var q0 = runCapture({}, { search: "?capture=0" });
+  ok("#26 ?capture=0 does not activate", !q0.CaptureMode);
+  Math.random = realRandom;
+})();
+
+// WIRING: capture-mode.js loads first; never bundled into the SCORM export (invariant intact)
+(function () {
+  var html = src("index.html");
+  var cap = html.indexOf("src/capture-mode.js"), theme = html.indexOf("src/theme.js"), ed = html.indexOf("src/editor.js");
+  ok("#26 capture-mode.js loads before theme.js + editor.js", cap !== -1 && cap < theme && cap < ed);
+  ok("#26 capture-mode.js NOT bundled into SCORM export", src("src/export.js").indexOf("capture-mode") === -1);
+})();
+
+// ---- #27: docs capture scene DSL — pure schema/validation core ------------------------
+// The scene is data; validateScene is the shared gate the runner and this test both use so
+// a malformed scene fails loudly. (The puppeteer-driven capture itself is browser-verified.)
+section("#27 docs capture scene DSL");
+(function () {
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  ok("#27 still budget is ~200KB", dc.STILL_BUDGET === 200 * 1024);
+  ok("#27 step vocabulary is the fixed set", JSON.stringify(dc.STEP_VERBS) === JSON.stringify(["goto", "select", "hover", "click", "type", "wait", "shoot", "shootMotion", "highlight", "callout", "pointer", "clearAnnotations"]));
+  // a valid still scene passes
+  var good = { id: "s1", covers: ["editor-workspace"], kind: "still", viewport: { width: 1440, height: 900, dpr: 2 }, theme: "dark", steps: [{ do: "wait", ms: 300 }, { do: "shoot", out: "s1.webp" }] };
+  ok("#27 valid scene passes", dc.validateScene(good).ok === true);
+  // missing id / covers / steps / shoot each fail
+  ok("#27 requires id", dc.validateScene({ covers: ["x"], steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 requires non-empty covers (staleness #30)", dc.validateScene({ id: "s", covers: [], steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 requires at least one shoot", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "wait", ms: 1 }] }).ok === false);
+  ok("#27 shoot out must end .webp", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "shoot", out: "a.png" }] }).ok === false);
+  ok("#27 unknown verb fails", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "teleport" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 click/goto need a target", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "click" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 type needs target + text", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "type", target: "#x" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#27 a motion scene needs a shootMotion step (a plain shoot is not enough)", dc.validateScene({ id: "s", covers: ["x"], kind: "motion", steps: [{ do: "shoot", out: "a.webp" }] }).ok === false);
+  // resolveOut confines output to docs/assets (no traversal)
+  ok("#27 resolveOut strips path traversal", dc.resolveOut("/repo/docs/assets", "../../evil.webp") === path.join("/repo/docs/assets", "evil.webp"));
+  // the shipped scene is valid and uses the synthetic demo (never real content)
+  var shipped = JSON.parse(src("docs/scenes/structure-panel.json"));
+  ok("#27 shipped structure-panel scene is valid", dc.validateScene(shipped).ok === true);
+  ok("#27 runner loads SAMPLE_DOC only, never reads a stored doc (export-control)", src("tools/docs-capture.js").indexOf("window.SAMPLE_DOC") !== -1 && src("tools/docs-capture.js").indexOf("localStorage.getItem") === -1 && src("tools/docs-capture.js").indexOf("getDoc()") === -1);
+  // the shipped still figure is wired into the guide + the committed asset exists
+  ok("#27 USER-GUIDE references the committed still", src("docs/USER-GUIDE.md").indexOf("docs/assets/structure-panel.webp") !== -1);
+  ok("#27 committed still exists + within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/structure-panel.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
+})();
+
+// ---- #28: animated-WebP muxer + motion scenes -----------------------------------------
+// The muxer assembles Chrome-native per-frame WebP bitstreams into one animated WebP. It is
+// deterministic (same frames in -> same bytes out), backing the no-op-commit promise.
+section("#28 animated-WebP muxer + motion");
+(function () {
+  var wa = require(path.join(ROOT, "tools/webp-anim.js"));
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  // read two committed stills as frame inputs (real Chrome WebP buffers)
+  function readBuf(rel) { return fs.readFileSync(path.join(ROOT, rel)); }
+  function parseChunks(buf) {
+    var out = [], off = 12;
+    while (off + 8 <= buf.length) { var f = buf.toString("latin1", off, off + 4); var s = buf.readUInt32LE(off + 4); out.push({ fourcc: f, size: s }); off += 8 + s + (s & 1); }
+    return out;
+  }
+  var A = readBuf("docs/assets/structure-panel.webp");
+  // parseWebP extracts the image chunk(s) from a Chrome WebP
+  var parsed = wa.parseWebP(A);
+  ok("#28 parseWebP extracts image bytes", parsed.imageBytes && parsed.imageBytes.length > 0);
+  ok("#28 parseWebP rejects non-WEBP", (function () { try { wa.parseWebP(Buffer.from("not a webp")); return false; } catch (e) { return true; } })());
+  // mux two frames -> valid animated WebP container
+  var anim = wa.muxAnimatedWebP({ width: 100, height: 60, loopCount: 0, frames: [{ webp: A, duration: 800 }, { webp: A, duration: 400 }] });
+  ok("#28 muxed buffer is RIFF/WEBP", anim.toString("latin1", 0, 4) === "RIFF" && anim.toString("latin1", 8, 12) === "WEBP");
+  var ch = parseChunks(anim);
+  ok("#28 has VP8X (extended) first", ch[0].fourcc === "VP8X" && ch[0].size === 10);
+  ok("#28 VP8X animation flag set", (anim[12 + 8] & 0x02) === 0x02); // first payload byte of VP8X
+  ok("#28 has ANIM chunk", ch[1].fourcc === "ANIM");
+  ok("#28 one ANMF per frame", ch.filter(function (c) { return c.fourcc === "ANMF"; }).length === 2);
+  // canvas dims encoded as width-1/height-1 (24-bit LE) in VP8X payload bytes 4..9
+  var vp8xOff = 12 + 8;
+  var cw = (anim[vp8xOff + 4] | (anim[vp8xOff + 5] << 8) | (anim[vp8xOff + 6] << 16)) + 1;
+  var chh = (anim[vp8xOff + 7] | (anim[vp8xOff + 8] << 8) | (anim[vp8xOff + 9] << 16)) + 1;
+  ok("#28 VP8X canvas size = requested", cw === 100 && chh === 60);
+  // RIFF size field = filesize - 8
+  ok("#28 RIFF size field correct", anim.readUInt32LE(4) === anim.length - 8);
+  // determinism: same frames -> identical bytes
+  var anim2 = wa.muxAnimatedWebP({ width: 100, height: 60, loopCount: 0, frames: [{ webp: A, duration: 800 }, { webp: A, duration: 400 }] });
+  ok("#28 muxer deterministic (byte-identical)", Buffer.compare(anim, anim2) === 0);
+  // budget + shootMotion schema
+  ok("#28 motion budget ~500KB", dc.MOTION_BUDGET === 500 * 1024);
+  ok("#28 shootMotion is in the vocabulary", dc.STEP_VERBS.indexOf("shootMotion") !== -1);
+  var goodMotion = { id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", poster: "m-still.webp", frames: [{ duration: 800 }, { before: [{ do: "click", target: "#x" }], duration: 800 }] }] };
+  ok("#28 valid motion scene passes", dc.validateScene(goodMotion).ok === true);
+  ok("#28 shootMotion needs a poster (reduced-motion)", dc.validateScene({ id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", frames: [{ duration: 1 }, { duration: 1 }] }] }).ok === false);
+  ok("#28 shootMotion needs >=2 frames", dc.validateScene({ id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", poster: "p.webp", frames: [{ duration: 1 }] }] }).ok === false);
+  ok("#28 shootMotion frame needs duration>0", dc.validateScene({ id: "m", covers: ["x"], kind: "motion", steps: [{ do: "shootMotion", out: "m.webp", poster: "p.webp", frames: [{ duration: 0 }, { duration: 1 }] }] }).ok === false);
+  // shipped motion scene + committed assets
+  var mscene = JSON.parse(src("docs/scenes/outliner-navigate.json"));
+  ok("#28 shipped outliner-navigate motion scene valid", dc.validateScene(mscene).ok === true);
+  ok("#28 committed motion within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/outliner-navigate.webp")).size <= dc.MOTION_BUDGET; } catch (e) { return false; } })());
+  ok("#28 committed poster within still budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/outliner-navigate-still.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
+  ok("#28 committed motion is a real animated WebP (VP8X+ANIM+2 ANMF)", (function () { try { var m = readBuf("docs/assets/outliner-navigate.webp"); var c = parseChunks(m); return c[0].fourcc === "VP8X" && c.some(function (x) { return x.fourcc === "ANIM"; }) && c.filter(function (x) { return x.fourcc === "ANMF"; }).length === 2; } catch (e) { return false; } })());
+  ok("#28 USER-GUIDE references the motion figure + poster", src("docs/USER-GUIDE.md").indexOf("docs/assets/outliner-navigate.webp") !== -1 && src("docs/USER-GUIDE.md").indexOf("poster=docs/assets/outliner-navigate-still.webp") !== -1);
+  ok("#28 webp-anim.js logged in THIRD-PARTY-NOTICES audit", src("THIRD-PARTY-NOTICES.md").indexOf("tools/webp-anim.js") !== -1);
+})();
+
+// WIRING: reduced-motion swaps a motion figure to its poster still (impure docs-panel wiring)
+(function () {
+  var ed = src("src/editor.js");
+  ok("#28 openHelpModal swaps to poster under prefers-reduced-motion", /prefers-reduced-motion[\s\S]{0,220}data-poster[\s\S]{0,80}img\.src\s*=\s*img\.getAttribute\("data-poster"\)/.test(ed) || /reduce\s*&&\s*img\.getAttribute\("data-poster"\)[\s\S]{0,60}img\.src/.test(ed));
+})();
+
+// ---- #29: in-editor annotation overlay (capture-only) ---------------------------------
+// Highlight ring / numbered callout / pointer drawn OVER the editor for docs figures.
+// Verso-UI-only: rendered into a body-level layer, styled in editor.css, NEVER in course
+// output (render()/course.css/SCORM export). Tests: the annotate API draws the right DOM,
+// scene DSL validates the verbs, and the invariant holds (absent from export).
+section("#29 annotation overlay");
+(function () {
+  // -- headless annotate() unit test via a minimal fake DOM --
+  var srcTxt = src("src/capture-mode.js");
+  var realRandom = Math.random;
+  function makeEl(tag) {
+    var el = { tagName: tag, children: [], style: {}, className: "", _text: "", _html: "", parentNode: null,
+      setAttribute: function (k, v) { this["_a_" + k] = v; if (k === "id") this.id = v; },
+      getAttribute: function (k) { return this["_a_" + k]; },
+      appendChild: function (c) { this.children.push(c); c.parentNode = el; return c; },
+      classList: { add: function () {}, contains: function () { return false; } } };
+    Object.defineProperty(el, "textContent", { get: function () { return el._text; }, set: function (v) { el._text = v; el.children = []; } });
+    Object.defineProperty(el, "innerHTML", { get: function () { return el._html; }, set: function (v) { el._html = v; } });
+    return el;
+  }
+  var body = makeEl("body");
+  function findById(n, id) { if (n.id === id) return n; for (var i = 0; i < n.children.length; i++) { var r = findById(n.children[i], id); if (r) return r; } return null; }
+  var fakeDoc = {
+    readyState: "complete",
+    documentElement: { setAttribute: function () {} },
+    head: { appendChild: function () {} }, body: body,
+    getElementById: function (id) { return findById(body, id); },
+    createElement: function (t) { return makeEl(t); },
+    querySelector: function () { return null; }, querySelectorAll: function () { return []; },
+    addEventListener: function () {}
+  };
+  var win = { __captureMode: true };
+  new Function("window", "document", "location", "performance", "URLSearchParams", srcTxt)(win, fakeDoc, { search: "" }, { now: function () { return 0; } }, URLSearchParams);
+  Math.random = realRandom;
+  var CM = win.CaptureMode;
+  ok("#29 CaptureMode exposes annotate + clearAnnotations", CM && typeof CM.annotate === "function" && typeof CM.clearAnnotations === "function");
+  // highlight ring: box{x,y,w,h}, pad 4 -> left x-4, size w+8/h+8
+  CM.annotate({ type: "highlight", box: { x: 10, y: 20, w: 100, h: 40 } });
+  var layer = fakeDoc.getElementById("capture-annotate-layer");
+  ok("#29 highlight draws a ring into the annotate layer", layer && layer.children.length === 1 && layer.children[0].className.indexOf("capture-annot--ring") !== -1);
+  ok("#29 ring positioned at target box (with pad)", layer.children[0].style.left === "6px" && layer.children[0].style.width === "108px");
+  // numbered callout chip
+  CM.annotate({ type: "callout", box: { x: 10, y: 20, w: 100, h: 40 }, n: 3, side: "tr" });
+  var chip = layer.children[1];
+  ok("#29 callout draws a numbered chip", chip.className.indexOf("capture-annot--chip") !== -1 && chip.textContent === "3");
+  ok("#29 callout side 'tr' anchors to top-right corner", chip.style.left === "110px" && chip.style.top === "20px");
+  // pointer
+  CM.annotate({ type: "pointer", box: { x: 10, y: 20, w: 100, h: 40 }, from: "left" });
+  var ptr = layer.children[2];
+  ok("#29 pointer draws an arrow glyph", ptr.className.indexOf("capture-annot--pointer-left") !== -1 && ptr.innerHTML.indexOf("<svg") !== -1);
+  // clearAnnotations empties the layer
+  CM.clearAnnotations();
+  ok("#29 clearAnnotations empties the layer", layer.children.length === 0);
+  // annotate returns false for a missing/unresolvable target
+  ok("#29 annotate no-ops on a missing target", CM.annotate({ type: "highlight", target: ".nope-xyz" }) === false);
+
+  // -- scene DSL validation for the annotation verbs --
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  ["highlight", "callout", "pointer", "clearAnnotations"].forEach(function (v) {
+    ok("#29 '" + v + "' is in the step vocabulary", dc.STEP_VERBS.indexOf(v) !== -1);
+  });
+  ok("#29 highlight needs a target", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "highlight" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#29 callout needs target + n", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "callout", target: "#x" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#29 a valid annotated scene passes", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "highlight", target: "#x" }, { do: "callout", target: "#x", n: 1 }, { do: "pointer", target: "#x" }, { do: "clearAnnotations" }, { do: "shoot", out: "a.webp" }] }).ok === true);
+
+  // -- INVARIANT: annotation overlay is editor chrome only, never course output --
+  ok("#29 annotation classes live in editor.css (chrome), NOT course.css (ships)", src("editor.css").indexOf("capture-annot") !== -1 && src("src/course.css").indexOf("capture-annot") === -1);
+  ok("#29 render.js + export.js never emit annotation classes", src("src/render.js").indexOf("capture-annot") === -1 && src("src/export.js").indexOf("capture-annot") === -1);
+  ok("#29 overlay uses the DS accent token (theme-inherited)", /\.capture-annot--ring\s*\{[^}]*var\(--accent\)/.test(src("editor.css")) && /\.capture-annot--chip\s*\{[\s\S]*?var\(--accent\)/.test(src("editor.css")));
+
+  // -- shipped annotated scenes + committed assets --
+  ok("#29 annotated still scene valid", dc.validateScene(JSON.parse(src("docs/scenes/annotated-structure.json"))).ok === true);
+  ok("#29 annotated motion scene valid", dc.validateScene(JSON.parse(src("docs/scenes/annotated-navigate.json"))).ok === true);
+  ok("#29 annotated still committed within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/annotated-structure.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
+  ok("#29 annotated motion committed within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/annotated-navigate.webp")).size <= dc.MOTION_BUDGET; } catch (e) { return false; } })());
+  ok("#29 USER-GUIDE references both annotated figures", src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-structure.webp") !== -1 && src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-navigate.webp") !== -1);
+})();
+
+// ---- #30: staleness coverage mapping --------------------------------------------------
+// A scene's covers lists the src surfaces it illustrates; --stale maps a diff -> scenes to
+// re-run so the same-session docs-alignment rule can be applied (procedural, not a CI gate).
+section("#30 staleness coverage");
+(function () {
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  // file surfaces vs human tags
+  ok("#30 file surfaces recognised", dc.isFileSurface("src/editor.js") && dc.isFileSurface("editor.css") && dc.isFileSurface("src/editor.js#LIBRARY"));
+  ok("#30 human tags are not file surfaces", !dc.isFileSurface("block-palette") && !dc.isFileSurface("pages-outliner"));
+  // matching: exact, suffix (absolute path), and the #anchor is stripped
+  ok("#30 exact file match", dc.coverMatchesFile("src/editor.js", "src/editor.js"));
+  ok("#30 absolute-path suffix match", dc.coverMatchesFile("src/editor.js", "/Users/x/verso/src/editor.js"));
+  ok("#30 anchor stripped before match", dc.coverMatchesFile("src/editor.js#LIBRARY", "src/editor.js"));
+  ok("#30 human tag never matches a file", !dc.coverMatchesFile("block-palette", "src/editor.js"));
+  ok("#30 unrelated file does not match", !dc.coverMatchesFile("editor.css", "src/render.js"));
+  // staleScenes over a synthetic scene set
+  var scenes = [
+    { id: "a", covers: ["src/editor.js", "editor.css", "pages-outliner"] },
+    { id: "b", covers: ["src/capture-mode.js", "annotation-overlay"] },
+    { id: "c", covers: ["only-a-tag"] }
+  ];
+  var s1 = dc.staleScenes(scenes, ["editor.css"]);
+  ok("#30 editor.css -> only scene a", s1.length === 1 && s1[0].id === "a" && s1[0].matched[0] === "editor.css");
+  var s2 = dc.staleScenes(scenes, ["src/editor.js", "src/capture-mode.js"]);
+  ok("#30 two files -> scenes a + b", s2.map(function (x) { return x.id; }).sort().join(",") === "a,b");
+  var s3 = dc.staleScenes(scenes, ["src/render.js"]);
+  ok("#30 course-output file -> no scenes (chrome only)", s3.length === 0);
+  var s4 = dc.staleScenes(scenes, ["some-other.js"]);
+  ok("#30 unrelated change -> no scenes", s4.length === 0);
+  // every shipped scene has covers with >= 1 file surface (so staleness can map to it)
+  var files = fs.readdirSync(path.join(ROOT, "docs/scenes")).filter(function (f) { return /\.json$/.test(f); });
+  ok("#30 shipped scenes exist", files.length >= 2);
+  var allHaveFileSurface = files.every(function (f) {
+    var sc = JSON.parse(src("docs/scenes/" + f));
+    return (sc.covers || []).some(function (c) { return dc.isFileSurface(c); });
+  });
+  ok("#30 every shipped scene covers >= 1 file surface", allHaveFileSurface);
+  // real coverage: an editor.css change re-runs every shipped scene
+  var real = fs.readdirSync(path.join(ROOT, "docs/scenes")).filter(function (f) { return /\.json$/.test(f); }).map(function (f) { return JSON.parse(src("docs/scenes/" + f)); });
+  ok("#30 editor.css change maps to all shipped scenes", dc.staleScenes(real, ["editor.css"]).length === real.length);
+  // documented: the staleness aid is referenced in the scene README + ADR (deferral noted)
+  ok("#30 scene README documents --stale + covers schema", /--stale/.test(src("docs/scenes/README.md")) && /covers/.test(src("docs/scenes/README.md")));
+  ok("#30 hash-ratchet/CI regeneration noted as deferred", /defer/i.test(src("docs/adr/0004-user-docs-markdown-single-source-runtime-reader.md")));
 })();
 
 // ---- #91: docs anti-drift gate — the User Guide must document every palette block ----

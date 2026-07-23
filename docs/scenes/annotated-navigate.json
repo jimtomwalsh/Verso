@@ -1,0 +1,87 @@
+{
+  "id": "annotated-navigate",
+  "covers": [
+    "src/editor.js",
+    "editor.css",
+    "src/capture-mode.js",
+    "pages-outliner",
+    "page-navigation",
+    "annotation-overlay"
+  ],
+  "kind": "motion",
+  "viewport": {
+    "width": 1440,
+    "height": 900,
+    "dpr": 2
+  },
+  "theme": "dark",
+  "steps": [
+    {
+      "do": "wait",
+      "ms": 500
+    },
+    {
+      "do": "shootMotion",
+      "out": "annotated-navigate.webp",
+      "poster": "annotated-navigate-still.webp",
+      "clip": {
+        "x": 0,
+        "y": 44,
+        "width": 292,
+        "height": 360
+      },
+      "loop": 0,
+      "frames": [
+        {
+          "before": [
+            {
+              "do": "click",
+              "target": "::-p-text(1.1 Getting Started)"
+            },
+            {
+              "do": "wait",
+              "ms": 250
+            },
+            {
+              "do": "highlight",
+              "target": "::-p-text(1.1 Getting Started)"
+            },
+            {
+              "do": "callout",
+              "target": "::-p-text(1.1 Getting Started)",
+              "n": 1,
+              "side": "tr"
+            }
+          ],
+          "duration": 1600
+        },
+        {
+          "before": [
+            {
+              "do": "clearAnnotations"
+            },
+            {
+              "do": "click",
+              "target": "::-p-text(2.1 Common Hazards)"
+            },
+            {
+              "do": "wait",
+              "ms": 250
+            },
+            {
+              "do": "highlight",
+              "target": "::-p-text(2.1 Common Hazards)"
+            },
+            {
+              "do": "callout",
+              "target": "::-p-text(2.1 Common Hazards)",
+              "n": 1,
+              "side": "tr"
+            }
+          ],
+          "duration": 1800
+        }
+      ]
+    }
+  ]
+}

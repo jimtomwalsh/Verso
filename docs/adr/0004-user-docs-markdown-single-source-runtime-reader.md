@@ -20,6 +20,45 @@ truth), unlike hand-authored motion which rots silently.
 - Capture scenes must use a synthetic demo doc only — real course content is
   export-controlled and never enters the repo.
 - Staleness is procedural, not automated: a UI change touching a covered scene re-runs that
-  scene in the same session (hash-ratchet/CI regeneration deliberately deferred).
+  scene in the same session (hash-ratchet/CI regeneration deliberately deferred). Each scene's
+  `covers` lists the src surfaces it illustrates (file surfaces + human tags); `node
+  tools/docs-capture.js --stale <changed-files>` (#30) lists which scenes a diff touches so the
+  same-session docs-alignment rule can be applied. An unchanged scene re-captures byte-identical,
+  so re-running one that didn't change is a free no-op.
 - Popout is environment-adaptive: new-tab standalone page in browsers; full-window in-app
   promotion in the WKWebView shell (which swallows `window.open` — see #81).
+- Capture runner (#27): `tools/docs-capture.js` reads a declarative scene (JSON header +
+  step-list) and drives the real editor via Puppeteer in capture mode on `window.SAMPLE_DOC`
+  (synthetic demo only), emitting a budget-checked still WebP to `docs/assets/`. Determinism
+  has a real constraint: the live zoomed-out canvas page-previews are async-scaled and NOT
+  byte-stable, so scenes `clip` to stable editor chrome (panel/palette/toolbar/inspector), not
+  the whole canvas. The runner is a dev tool (needs Puppeteer via NODE_PATH), never shipped in
+  the app; its pure scene-schema core is unit-tested in `tests/run.js`.
+- Annotations (#29): a capture-only overlay (highlight ring / numbered callout chip / pointer)
+  drawn into a body-level `#capture-annotate-layer`, DS-token styled in editor.css so it
+  inherits the theme, driven by scene steps (highlight/callout/pointer/clearAnnotations). It is
+  editor chrome only — rendered outside `.course-root`, so render()/course.css/the SCORM export
+  never see it (invariant held; verified against a real `buildPackage`). Absent from normal
+  authoring (capture mode is off by default).
+- Motion (#28): `tools/webp-anim.js` is an ORIGINAL animated-WebP **muxer** (VP8X/ANIM/ANMF
+  from the public WebP container spec), not a vendored VP8 encoder — a real encoder was too
+  heavy for the no-build/air-gap stack (the same reason the vendored GIF codec is unsuitable).
+  The runner's `shootMotion` step captures a sequence of frames (motion = discrete state
+  changes between frames, since animations are frozen) and muxes Chrome-native per-frame WebP
+  bitstreams into one budget-checked (~500KB) animated WebP plus a poster still; under
+  `prefers-reduced-motion` the docs reader shows the poster (the #25 `{poster=}` slot). For
+  byte-identical re-runs the runner also resets persisted UI prefs (localStorage + IndexedDB)
+  before each capture, so a stateful toggle driven in one scene can't flip the next run's start.
+- Capture mode (#26): `src/capture-mode.js` self-activates on `?capture=1` or a preset
+  `window.__captureMode` and installs a deterministic clock (monotonic from a fixed epoch),
+  a seeded RNG (mulberry32 over `Math.random`), a freeze stylesheet (transitions/animations
+  off, caret hidden), and a media-settle helper — so two shots of the same demo-doc state are
+  byte-identical, satisfying the "unchanged UI -> identical bytes -> no-op commits" promise.
+  Off by default (zero effect on normal authoring); Verso-UI-only, never bundled into the
+  SCORM export. Loads first in index.html so the patched clock/RNG precede any id minting.
+- Figure directive (#25): a whole guide line of the form
+  `![alt](docs/assets/x.webp "caption"){poster=docs/assets/x-still.webp}` renders a
+  `<figure>` in the docs reader. Caption and `{poster=...}` are optional; `poster` is the
+  reduced-motion still slot for motion figures (#28), unused for stills. A missing asset
+  degrades to a caption-only placeholder (no broken glyph). The first real committed figure
+  is wired by the capture tracer (#27), not hand-authored.
