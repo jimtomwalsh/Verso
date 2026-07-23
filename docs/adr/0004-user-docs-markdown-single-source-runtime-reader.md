@@ -23,6 +23,13 @@ truth), unlike hand-authored motion which rots silently.
   scene in the same session (hash-ratchet/CI regeneration deliberately deferred).
 - Popout is environment-adaptive: new-tab standalone page in browsers; full-window in-app
   promotion in the WKWebView shell (which swallows `window.open` — see #81).
+- Capture mode (#26): `src/capture-mode.js` self-activates on `?capture=1` or a preset
+  `window.__captureMode` and installs a deterministic clock (monotonic from a fixed epoch),
+  a seeded RNG (mulberry32 over `Math.random`), a freeze stylesheet (transitions/animations
+  off, caret hidden), and a media-settle helper — so two shots of the same demo-doc state are
+  byte-identical, satisfying the "unchanged UI -> identical bytes -> no-op commits" promise.
+  Off by default (zero effect on normal authoring); Verso-UI-only, never bundled into the
+  SCORM export. Loads first in index.html so the patched clock/RNG precede any id minting.
 - Figure directive (#25): a whole guide line of the form
   `![alt](docs/assets/x.webp "caption"){poster=docs/assets/x-still.webp}` renders a
   `<figure>` in the docs reader. Caption and `{poster=...}` are optional; `poster` is the

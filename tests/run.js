@@ -149,6 +149,68 @@ section("#81 Help markdown renderer");
   ok("#81 help modal fetches the guide", /fetch\("docs\/USER-GUIDE\.md"/.test(ed));
 })();
 
+// ---- #26: docs capture mode — deterministic clock + RNG, freeze, off-by-default -------
+// Two captures of the same scene must be byte-identical: the flag installs a monotonic
+// clock and a seeded RNG so timestamp-/random-suffixed ids reproduce across runs.
+section("#26 docs capture mode");
+(function () {
+  var srcTxt = src("src/capture-mode.js");
+  var realRandom = Math.random;
+  function runCapture(win, loc) {
+    var htmlAttrs = {}, injected = [];
+    var fakeDoc = {
+      readyState: "complete",
+      documentElement: { setAttribute: function (k, v) { htmlAttrs[k] = v; } },
+      head: { appendChild: function (n) { injected.push(n); } },
+      getElementById: function (id) { return injected.filter(function (n) { return n.id === id; })[0] || null; },
+      createElement: function () { return {}; },
+      querySelectorAll: function () { return []; },
+      addEventListener: function () {}
+    };
+    var fakePerf = { now: function () { return 0; } };
+    var fn = new Function("window", "document", "location", "performance", "URLSearchParams", srcTxt);
+    fn(win, fakeDoc, loc, fakePerf, URLSearchParams);
+    var randomSeq = [], nowSeq = [];
+    for (var i = 0; i < 5; i++) randomSeq.push(Math.random());
+    for (var j = 0; j < 5; j++) nowSeq.push(win.Date ? win.Date.now() : NaN);
+    return { htmlAttrs: htmlAttrs, injected: injected, CaptureMode: win.CaptureMode, randomSeq: randomSeq, nowSeq: nowSeq, capDate: win.Date };
+  }
+  // ON via window.__captureMode
+  var r1 = runCapture({ __captureMode: true }, { search: "" });
+  var r2 = runCapture({ __captureMode: true }, { search: "" });
+  ok("#26 sets data-capture=on", r1.htmlAttrs["data-capture"] === "on");
+  ok("#26 injects exactly one freeze stylesheet", r1.injected.length === 1 && r1.injected[0].id === "capture-freeze-css");
+  ok("#26 freeze CSS kills transition/animation + hides caret", /transition:\s*none/.test(r1.injected[0].textContent) && /animation:\s*none/.test(r1.injected[0].textContent) && /caret-color:\s*transparent/.test(r1.injected[0].textContent));
+  ok("#26 exposes window.CaptureMode.active + settle()", r1.CaptureMode && r1.CaptureMode.active === true && typeof r1.CaptureMode.settle === "function");
+  ok("#26 clock monotonic from a fixed epoch", r1.nowSeq[0] >= 1700000000000 && r1.nowSeq[1] === r1.nowSeq[0] + 1);
+  ok("#26 random values in [0,1)", r1.randomSeq.every(function (x) { return x >= 0 && x < 1; }));
+  ok("#26 RNG deterministic across two captures (byte-identical)", JSON.stringify(r1.randomSeq) === JSON.stringify(r2.randomSeq));
+  ok("#26 clock deterministic across two captures", JSON.stringify(r1.nowSeq) === JSON.stringify(r2.nowSeq));
+  ok("#26 argless new Date() is deterministic", new r1.capDate().getTime() >= 1700000000000);
+  Math.random = realRandom;
+  // OFF by default: no flag, no ?capture -> the IIFE returns early, patches nothing
+  var off = runCapture({}, { search: "" });
+  ok("#26 OFF by default: no data-capture, no CaptureMode, no injection", off.htmlAttrs["data-capture"] === undefined && !off.CaptureMode && off.injected.length === 0);
+  ok("#26 OFF by default: Math.random left untouched", Math.random === realRandom);
+  // ON via ?capture=1
+  Math.random = realRandom;
+  var byQuery = runCapture({}, { search: "?capture=1" });
+  ok("#26 ?capture=1 activates", byQuery.CaptureMode && byQuery.CaptureMode.active === true);
+  // capture=0 must NOT activate
+  Math.random = realRandom;
+  var q0 = runCapture({}, { search: "?capture=0" });
+  ok("#26 ?capture=0 does not activate", !q0.CaptureMode);
+  Math.random = realRandom;
+})();
+
+// WIRING: capture-mode.js loads first; never bundled into the SCORM export (invariant intact)
+(function () {
+  var html = src("index.html");
+  var cap = html.indexOf("src/capture-mode.js"), theme = html.indexOf("src/theme.js"), ed = html.indexOf("src/editor.js");
+  ok("#26 capture-mode.js loads before theme.js + editor.js", cap !== -1 && cap < theme && cap < ed);
+  ok("#26 capture-mode.js NOT bundled into SCORM export", src("src/export.js").indexOf("capture-mode") === -1);
+})();
+
 // ---- #91: docs anti-drift gate — the User Guide must document every palette block ----
 // "Code is truth, docs drift." The block palette (LIBRARY, editor.js) is the single source of
 // truth for what a user can add. This gate extracts every top-level LIBRARY block and asserts
