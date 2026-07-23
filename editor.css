@@ -1803,6 +1803,22 @@ details[open] .disc__caret {
   vertical-align: top;
 }
 .help-doc th { background: rgba(255, 255, 255, 0.04); color: var(--text-primary); font-weight: 600; }
+/* #25 figure directive: committed docs/assets/ still (or motion #28) with a caption. */
+.help-doc .doc-figure { margin: 14px 0; }
+.help-doc .doc-figure__img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--border-subtle); border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.help-doc .doc-figure__cap {
+  margin-top: 6px; font-size: 11.5px; line-height: 1.45;
+  color: var(--text-tertiary); text-align: center;
+}
+/* missing asset: hide the broken glyph, keep the caption as the placeholder */
+.help-doc .doc-figure--missing .doc-figure__img { display: none; }
+.help-doc .doc-figure--missing .doc-figure__cap::before {
+  content: "\26AF\00A0"; color: var(--text-tertiary);
+}
 /* calm inner scrollbar for tall modals */
 .modal-box::-webkit-scrollbar { width: 10px; }
 .modal-box::-webkit-scrollbar-thumb {

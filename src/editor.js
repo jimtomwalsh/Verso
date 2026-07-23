@@ -2711,6 +2711,22 @@
   // (no bundler, classic script) — not a general CommonMark parser.
   function mdToHtml(md) {
     function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    function attr(s) { return esc(s).replace(/"/g, "&quot;"); }
+    // #25 figure directive: a whole line that is a markdown image, optionally with a
+    // CommonMark "caption" title and a {poster=<path>} attribute for the reduced-motion
+    // still of a future motion figure (#28). Kept to the mdToHtml subset (one regex, no
+    // vendored parser). src/poster are docs/assets/ paths; missing assets degrade to alt
+    // text (see openHelpModal's onerror wiring). group order: alt, src, caption, attrs.
+    var FIG_RE = /^!\[([^\]]*)\]\(\s*([^)\s"]+)(?:\s+"([^"]*)")?\s*\)(?:\{([^}]*)\})?\s*$/;
+    function figHtml(m) {
+      var alt = m[1] || "", srcPath = m[2] || "", caption = m[3] || "", attrs = m[4] || "";
+      var pm = attrs.match(/poster\s*=\s*([^\s}]+)/);
+      var poster = pm ? pm[1] : "";
+      var img = "<img class=\"doc-figure__img\" src=\"" + attr(srcPath) + "\" alt=\"" + attr(alt) + "\" loading=\"lazy\""
+        + (poster ? " data-poster=\"" + attr(poster) + "\"" : "") + ">";
+      var cap = caption ? "<figcaption class=\"doc-figure__cap\">" + inline(caption) + "</figcaption>" : "";
+      return "<figure class=\"doc-figure\">" + img + cap + "</figure>";
+    }
     function inline(s) {
       s = esc(s);
       s = s.replace(/`([^`]+)`/g, function (_m, c) { return "<code>" + c + "</code>"; });
@@ -2742,6 +2758,8 @@
       var hd = line.match(/^(#{1,6})\s+(.*)$/);
       if (hd) { var lv = hd[1].length; out.push("<h" + lv + ">" + inline(hd[2].trim()) + "</h" + lv + ">"); i++; continue; }
       if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
+      var fig = line.match(FIG_RE);
+      if (fig) { out.push(figHtml(fig)); i++; continue; }
       if (/^\s*>\s?/.test(line)) { // blockquote (consecutive)
         var qb = [];
         while (i < lines.length && /^\s*>\s?/.test(lines[i])) { qb.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
@@ -2766,6 +2784,7 @@
         !/^\s*```/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i]) &&
         !/^\s*>\s?/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) &&
         !/^\s*\d+\.\s+/.test(lines[i]) && !/^---+\s*$/.test(lines[i]) &&
+        !FIG_RE.test(lines[i]) &&
         !(/\|/.test(lines[i]) && i + 1 < lines.length && isTableSep(lines[i + 1]))) {
         pb.push(lines[i]); i++;
       }
@@ -2793,7 +2812,17 @@
     document.addEventListener("keydown", onEsc, true);
     fetch("docs/USER-GUIDE.md", { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
-      .then(function (md) { body.innerHTML = mdToHtml(md); })
+      .then(function (md) {
+        body.innerHTML = mdToHtml(md);
+        // #25 graceful missing-asset: a broken figure image drops to a caption-only
+        // placeholder rather than a broken-image glyph (kept out of the pure renderer).
+        var figs = body.querySelectorAll("figure.doc-figure > img.doc-figure__img");
+        Array.prototype.forEach.call(figs, function (img) {
+          img.addEventListener("error", function () {
+            var fig = img.parentNode; if (fig) fig.classList.add("doc-figure--missing");
+          });
+        });
+      })
       .catch(function () {
         body.innerHTML = "";
         body.appendChild(h("p", null, "The guide could not be loaded in this context. Open docs/USER-GUIDE.md from the app folder in a text editor or browser."));

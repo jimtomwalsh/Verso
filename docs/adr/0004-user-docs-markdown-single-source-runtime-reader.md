@@ -23,3 +23,9 @@ truth), unlike hand-authored motion which rots silently.
   scene in the same session (hash-ratchet/CI regeneration deliberately deferred).
 - Popout is environment-adaptive: new-tab standalone page in browsers; full-window in-app
   promotion in the WKWebView shell (which swallows `window.open` — see #81).
+- Figure directive (#25): a whole guide line of the form
+  `![alt](docs/assets/x.webp "caption"){poster=docs/assets/x-still.webp}` renders a
+  `<figure>` in the docs reader. Caption and `{poster=...}` are optional; `poster` is the
+  reduced-motion still slot for motion figures (#28), unused for stills. A missing asset
+  degrades to a caption-only placeholder (no broken glyph). The first real committed figure
+  is wired by the capture tracer (#27), not hand-authored.

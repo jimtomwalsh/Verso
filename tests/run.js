@@ -116,6 +116,29 @@ section("#81 Help markdown renderer");
   ok("table head", tbl.indexOf("<th>H1</th>") !== -1 && tbl.indexOf("<th>H2</th>") !== -1);
   ok("table body", tbl.indexOf("<td>a</td>") !== -1 && tbl.indexOf("<td>b</td>") !== -1);
   ok("standalone --- stays an hr", md("x\n\n---\n\ny").indexOf("<hr>") !== -1);
+  // #25 figure directive: markdown image + optional "caption" + {poster=..} attr -> <figure>
+  var figFull = md('![The block palette](docs/assets/palette.webp "Add blocks from here"){poster=docs/assets/palette-still.webp}');
+  ok("#25 figure emits <figure><img>", figFull.indexOf("<figure class=\"doc-figure\">") === 0 && figFull.indexOf("<img class=\"doc-figure__img\"") !== -1);
+  ok("#25 figure src + alt emitted", figFull.indexOf("src=\"docs/assets/palette.webp\"") !== -1 && figFull.indexOf("alt=\"The block palette\"") !== -1);
+  ok("#25 figure caption -> figcaption", figFull.indexOf("<figcaption class=\"doc-figure__cap\">Add blocks from here</figcaption>") !== -1);
+  ok("#25 poster carried as data-poster (unused for stills)", figFull.indexOf("data-poster=\"docs/assets/palette-still.webp\"") !== -1);
+  // minimal form: no caption, no poster
+  var figMin = md("![alt only](docs/assets/x.webp)");
+  ok("#25 figure minimal (no caption/poster)", figMin.indexOf("<figure") === 0 && figMin.indexOf("<figcaption") === -1 && figMin.indexOf("data-poster") === -1);
+  ok("#25 figure alt-only still emits alt", figMin.indexOf("alt=\"alt only\"") !== -1);
+  // a figure line is NOT swallowed into a paragraph when surrounded by prose
+  var figProse = md("intro\n\n![cap](docs/assets/y.webp)\n\noutro");
+  ok("#25 figure not wrapped in <p>", figProse.indexOf("<p>intro</p>") !== -1 && figProse.indexOf("<figure") !== -1 && figProse.indexOf("<p><figure") === -1);
+  // lazy-loaded so the docs panel opens fast; escaped attrs (no injection via alt/caption)
+  ok("#25 figure img lazy-loads", figMin.indexOf("loading=\"lazy\"") !== -1);
+  var figInj = md('![a"b](docs/assets/z.webp)');
+  ok("#25 figure escapes quotes in attrs", figInj.indexOf("alt=\"a&quot;b\"") !== -1 && figInj.indexOf("alt=\"a\"b\"") === -1);
+})();
+
+// WIRING: broken figure assets degrade gracefully (impure onerror wiring, not the pure renderer)
+(function () {
+  var ed = src("src/editor.js");
+  ok("#25 openHelpModal wires figure onerror -> --missing", /doc-figure__img[\s\S]{0,220}addEventListener\("error"[\s\S]{0,120}doc-figure--missing/.test(ed));
 })();
 
 // WIRING: the Help button opens the in-app modal, not a (no-op) new tab.
