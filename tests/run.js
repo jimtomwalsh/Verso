@@ -96,7 +96,11 @@ section("#81 Help markdown renderer");
   if (!m) { ok("locate @md fence", false); return; }
   var g = new Function(m[1] + "\nreturn { mdToHtml: mdToHtml };")();
   var md = g.mdToHtml;
-  ok("heading levels", md("# A\n## B") === "<h1>A</h1>\n<h2>B</h2>");
+  ok("heading levels", md("# A\n## B") === "<h1 id=\"a\">A</h1>\n<h2 id=\"b\">B</h2>");
+  // #8 heading IDs (docs anchors): slugified, deterministic, unique per doc
+  ok("#8 heading emits a slug id", md("## Adding & editing blocks").indexOf("<h2 id=\"adding-editing-blocks\">") !== -1);
+  ok("#8 duplicate headings get unique ids", md("## Setup\n## Setup").indexOf("id=\"setup-2\"") !== -1);
+  ok("#8 heading id strips inline code/punctuation", md("## The `render()` step").indexOf("id=\"the-step\"") !== -1);
   ok("paragraph joins wrapped lines", md("one\ntwo") === "<p>one two</p>");
   ok("inline bold", md("a **b** c").indexOf("<strong>b</strong>") !== -1);
   ok("inline code", md("use `x` here").indexOf("<code>x</code>") !== -1);
@@ -147,6 +151,23 @@ section("#81 Help markdown renderer");
   ok("#81 help-btn wired to openHelpModal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(ed));
   ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
   ok("#81 help modal fetches the guide", /fetch\("docs\/USER-GUIDE\.md"/.test(ed));
+})();
+
+// ---- #8: two-pane docs reader — sidebar TOC + search built from the guide's headings ----
+// The reader is a two-pane surface (search + TOC nav | reading pane). The TOC is built from
+// the guide's own heading IDs, so nav + scroll-spy track the content and never drift.
+section("#8 docs reader (TOC + search)");
+(function () {
+  var ed = src("src/editor.js");
+  ok("#8 reader builds the two-pane split (nav + reading pane)", /modal-box--docs/.test(ed) && /docs-split/.test(ed) && /docs-nav/.test(ed));
+  ok("#8 sidebar has a search input", /docs-search__input/.test(ed) && /Search the guide/.test(ed));
+  ok("#8 TOC built from the guide's h2/h3 heading ids", /function buildDocsNav[\s\S]{0,400}querySelectorAll\("h2\[id\], h3\[id\]"\)/.test(ed));
+  ok("#8 TOC item scrolls the reading pane to its heading", /docs-toc__item[\s\S]{0,400}addEventListener\("click"[\s\S]{0,80}scrollToHead/.test(ed));
+  ok("#8 scroll-spy highlights the active section", /body\.addEventListener\("scroll"[\s\S]{0,600}is-active/.test(ed));
+  ok("#8 search filters the TOC + shows a no-match state", /function runSearch[\s\S]{0,400}is-hidden[\s\S]{0,200}docs-toc__empty|noHits\.style\.display/.test(ed));
+  ok("#8 Escape clears a live search before closing", /activeElement === search && search\.value[\s\S]{0,80}runSearch\(""\)/.test(ed));
+  ok("#8 CSS: TOC active item reuses the accent-quiet/accent token pair", /\.docs-toc__item\.is-active\s*\{[^}]*var\(--accent-quiet\)[^}]*var\(--accent\)/.test(src("editor.css")));
+  ok("#8 CSS: search converges to the ring-wrapper focus-within pattern", /\.docs-search:focus-within\s*\{[^}]*var\(--accent\)/.test(src("editor.css")));
 })();
 
 // ---- #26: docs capture mode — deterministic clock + RNG, freeze, off-by-default -------

@@ -1738,12 +1738,54 @@ details[open] .disc__caret {
 }
 
 /* #81 — in-app Help / User-guide modal: a wide, tall reading pane. */
-.modal-box.modal-box--help {
-  width: 760px; max-width: calc(100vw - 64px);
-  height: min(88vh, 880px);
-  padding: 20px 26px 22px;
+/* #8 docs reader: a wide two-pane guide (sidebar TOC + search | reading pane). */
+.modal-box.modal-box--docs {
+  width: 1040px; max-width: calc(100vw - 48px);
+  height: min(90vh, 900px);
+  padding: 20px 24px 20px;
+  display: flex; flex-direction: column;
 }
-.modal-box--help .modal-head { position: relative; }
+.modal-box--docs .modal-head { position: relative; flex: 0 0 auto; }
+.docs-split { flex: 1 1 auto; min-height: 0; display: flex; gap: 22px; margin-top: 14px; }
+.docs-nav {
+  flex: 0 0 236px; min-height: 0; display: flex; flex-direction: column; gap: 12px;
+  border-right: 1px solid var(--border-subtle); padding-right: 18px;
+}
+/* search: converges to the existing .vbrowser__search sibling — a ring-wrapper holding the
+   icon + a transparent input, focus-within lights the inset ring to var(--accent). */
+.docs-search {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 10px; box-sizing: border-box;
+  background: var(--surface-input); border-radius: var(--radius-sm, 4px);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow 0.12s ease;
+}
+.docs-search:hover { box-shadow: inset 0 0 0 1px var(--border-input); }
+.docs-search:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
+.docs-search__icon { display: inline-flex; flex: none; color: var(--text-tertiary); }
+.docs-search__icon svg { width: 14px; height: 14px; }
+.docs-search__input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  font: 400 12.5px/1 "Inter", system-ui, sans-serif; color: var(--text-primary);
+}
+.docs-search__input::placeholder { color: var(--text-tertiary); }
+.docs-toc {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px; padding-right: 4px;
+}
+.docs-toc__item {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 5px 8px; border: none; background: transparent;
+  font: 500 12.5px/1.35 "Inter", system-ui, sans-serif; color: var(--text-secondary);
+  border-radius: var(--radius-sm, 4px);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.docs-toc__item--h3 { padding-left: 22px; font-size: 12px; font-weight: 400; color: var(--text-tertiary); }
+.docs-toc__item:hover { background: var(--surface-hover); color: var(--text-primary); }
+.docs-toc__item.is-active { background: var(--accent-quiet); color: var(--accent); font-weight: 600; }
+.docs-toc__item.is-hidden { display: none; }
+.docs-toc__empty { font-size: 12px; color: var(--text-tertiary); padding: 6px 8px; margin: 0; }
 .modal-x {
   position: absolute; top: -2px; right: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -1756,10 +1798,14 @@ details[open] .disc__caret {
 .modal-x:hover { background: var(--surface-hover); color: var(--icon-strong); }
 /* rendered markdown: scrolls inside the fixed-height box */
 .help-doc {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  margin-top: 14px; padding-right: 8px;
+  flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto;
+  padding: 0 12px 40px 6px; position: relative;
   font-size: 12.5px; line-height: 1.55; color: var(--text-secondary);
+  scroll-behavior: smooth;
 }
+/* cap the reading measure for legibility, like a real docs site */
+.help-doc > * { max-width: 760px; }
+.help-doc h1 { scroll-margin-top: 8px; }
 .help-doc__loading { color: var(--text-tertiary); }
 .help-doc h1, .help-doc h2, .help-doc h3, .help-doc h4 {
   color: var(--text-primary); font-weight: 600; line-height: 1.3;

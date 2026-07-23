@@ -2734,6 +2734,17 @@
       s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_m, t, u) { return "<a href=\"" + u + "\" target=\"_blank\" rel=\"noopener\">" + t + "</a>"; });
       return s;
     }
+    // #8 heading IDs: slugify heading text so the docs reader's TOC nav can deep-link to a
+    // section (ADR 0004 — "guide headings are docs anchors"). Deterministic + unique per doc.
+    var seenSlugs = {};
+    function slugify(s) {
+      var base = String(s).toLowerCase().replace(/`[^`]*`/g, "").replace(/[*_]/g, "")
+        .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+      var slug = base, n = 2;
+      while (seenSlugs[slug]) { slug = base + "-" + n; n++; }
+      seenSlugs[slug] = true;
+      return slug;
+    }
     function isTableSep(s) { return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(s); }
     function splitRow(s) { return s.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(function (c) { return c.trim(); }); }
     var lines = String(md).replace(/\r\n/g, "\n").split("\n");
@@ -2756,7 +2767,7 @@
         continue;
       }
       var hd = line.match(/^(#{1,6})\s+(.*)$/);
-      if (hd) { var lv = hd[1].length; out.push("<h" + lv + ">" + inline(hd[2].trim()) + "</h" + lv + ">"); i++; continue; }
+      if (hd) { var lv = hd[1].length, ht = hd[2].trim(); out.push("<h" + lv + " id=\"" + slugify(ht) + "\">" + inline(ht) + "</h" + lv + ">"); i++; continue; }
       if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
       var fig = line.match(FIG_RE);
       if (fig) { out.push(figHtml(fig)); i++; continue; }
@@ -2793,45 +2804,127 @@
     return out.join("\n");
   }
   /* @md-end */
+  // #8 docs reader: a two-pane guide (sidebar TOC + search on the left, reading pane on the
+  // right), modelled on a professional docs site. The TOC is built from the guide's own
+  // heading IDs (mdToHtml emits them), so nav + scroll-spy track the content and never drift.
   function openHelpModal() {
     if (document.getElementById("help-modal")) return;
     var modal = h("div", "modal-overlay"); modal.id = "help-modal";
-    var box = h("div", "modal-box modal-box--help");
+    var box = h("div", "modal-box modal-box--docs");
     var head = modalHead(box, "User guide", "Verso — how to build and export a course.");
     var x = h("button", "modal-x"); x.type = "button"; x.setAttribute("aria-label", "Close");
     x.innerHTML = window.Icon ? window.Icon("x") : "×";
     head.appendChild(x);
+
+    var split = h("div", "docs-split");
+    var nav = h("aside", "docs-nav");
+    var searchWrap = h("div", "docs-search");
+    var sIcon = h("span", "docs-search__icon"); sIcon.innerHTML = window.Icon ? window.Icon("search") : "";
+    var search = h("input", "docs-search__input"); search.type = "search";
+    search.placeholder = "Search the guide"; search.setAttribute("aria-label", "Search the guide");
+    searchWrap.appendChild(sIcon); searchWrap.appendChild(search);
+    var toc = h("nav", "docs-toc");
+    var noHits = h("p", "docs-toc__empty", "No matches."); noHits.style.display = "none";
+    nav.appendChild(searchWrap); nav.appendChild(toc); nav.appendChild(noHits);
+
     var body = h("div", "help-doc"); body.appendChild(h("p", "help-doc__loading", "Loading the guide…"));
-    box.appendChild(body);
+    split.appendChild(nav); split.appendChild(body);
+    box.appendChild(split);
     modal.appendChild(box);
     document.body.appendChild(modal);
     function close() { modal.remove(); document.removeEventListener("keydown", onEsc, true); }
-    function onEsc(e) { if (e.key === "Escape") { e.preventDefault(); close(); } }
+    function onEsc(e) {
+      if (e.key === "Escape") {
+        // Escape clears a live search first, then closes (progressive dismiss).
+        if (document.activeElement === search && search.value) { search.value = ""; runSearch(""); return; }
+        e.preventDefault(); close();
+      }
+    }
     x.addEventListener("click", close);
     modal.addEventListener("mousedown", function (e) { if (e.target === modal) close(); });
     document.addEventListener("keydown", onEsc, true);
+
+    var runSearch = function () {}; // set after load
     fetch("docs/USER-GUIDE.md", { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
       .then(function (md) {
         body.innerHTML = mdToHtml(md);
-        // #25 graceful missing-asset: a broken figure image drops to a caption-only
-        // placeholder rather than a broken-image glyph (kept out of the pure renderer).
-        // #28 reduced-motion: a motion figure (animated WebP) carries a poster still in
-        // data-poster; when the reader prefers reduced motion, show the still instead.
-        var reduce = false;
-        try { reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
-        var figs = body.querySelectorAll("figure.doc-figure > img.doc-figure__img");
-        Array.prototype.forEach.call(figs, function (img) {
-          if (reduce && img.getAttribute("data-poster")) { img.src = img.getAttribute("data-poster"); }
-          img.addEventListener("error", function () {
-            var fig = img.parentNode; if (fig) fig.classList.add("doc-figure--missing");
-          });
-        });
+        postProcessFigures(body);
+        runSearch = buildDocsNav(body, toc, noHits);
+        search.addEventListener("input", function () { runSearch(search.value); });
+        setTimeout(function () { search.focus(); }, 30);
       })
       .catch(function () {
         body.innerHTML = "";
         body.appendChild(h("p", null, "The guide could not be loaded in this context. Open docs/USER-GUIDE.md from the app folder in a text editor or browser."));
       });
+  }
+
+  // #25/#28 figure post-processing (impure, kept out of the pure renderer): reduced-motion
+  // swaps a motion figure to its poster still; a broken asset drops to a caption placeholder.
+  function postProcessFigures(body) {
+    var reduce = false;
+    try { reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
+    var figs = body.querySelectorAll("figure.doc-figure > img.doc-figure__img");
+    Array.prototype.forEach.call(figs, function (img) {
+      if (reduce && img.getAttribute("data-poster")) { img.src = img.getAttribute("data-poster"); }
+      img.addEventListener("error", function () { var fig = img.parentNode; if (fig) fig.classList.add("doc-figure--missing"); });
+    });
+  }
+
+  // Build the sidebar TOC from the rendered guide's h2/h3 headings, wire click-to-scroll +
+  // scroll-spy (active section follows the reading pane), and return a search(query) fn that
+  // filters the TOC to sections whose heading OR body text matches. Returns runSearch.
+  function buildDocsNav(body, toc, noHits) {
+    var heads = Array.prototype.slice.call(body.querySelectorAll("h2[id], h3[id]"));
+    var items = []; // { el(nav button), head, id, level, text, sectionText }
+    heads.forEach(function (hEl) {
+      var level = hEl.tagName === "H2" ? 2 : 3;
+      var text = hEl.textContent.trim();
+      // section text = this heading + following siblings up to the next h2/h3 (for search)
+      var chunk = [text], sib = hEl.nextElementSibling;
+      while (sib && sib.tagName !== "H2" && sib.tagName !== "H3") { chunk.push(sib.textContent || ""); sib = sib.nextElementSibling; }
+      var btn = h("button", "docs-toc__item docs-toc__item--h" + level);
+      btn.type = "button"; btn.textContent = text; btn.setAttribute("data-target", hEl.id);
+      btn.addEventListener("click", function () { scrollToHead(body, hEl); setActive(hEl.id); });
+      toc.appendChild(btn);
+      items.push({ el: btn, head: hEl, id: hEl.id, level: level, text: text.toLowerCase(), sectionText: chunk.join(" ").toLowerCase() });
+    });
+    function setActive(id) {
+      items.forEach(function (it) { it.el.classList.toggle("is-active", it.id === id); });
+      var cur = items.filter(function (it) { return it.id === id; })[0];
+      if (cur) cur.el.scrollIntoView({ block: "nearest" });
+    }
+    // scroll-spy: highlight the topmost heading currently at/above the reading-pane top
+    var ticking = false;
+    body.addEventListener("scroll", function () {
+      if (ticking) return; ticking = true;
+      window.requestAnimationFrame(function () {
+        ticking = false;
+        var top = body.getBoundingClientRect().top, active = items[0];
+        for (var k = 0; k < items.length; k++) {
+          if (items[k].head.getBoundingClientRect().top - top <= 8) active = items[k]; else break;
+        }
+        if (active) items.forEach(function (it) { it.el.classList.toggle("is-active", it === active); });
+      });
+    });
+    if (items[0]) items[0].el.classList.add("is-active");
+    // search: filter the TOC to matching sections; jump to the first match on Enter
+    function runSearch(q) {
+      q = String(q || "").trim().toLowerCase();
+      var hits = 0;
+      items.forEach(function (it) {
+        var match = !q || it.text.indexOf(q) !== -1 || it.sectionText.indexOf(q) !== -1;
+        it.el.classList.toggle("is-hidden", !match);
+        if (match && q) hits++;
+      });
+      noHits.style.display = (q && hits === 0) ? "" : "none";
+    }
+    return runSearch;
+  }
+  function scrollToHead(body, hEl) {
+    var top = hEl.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+    body.scrollTo ? body.scrollTo({ top: Math.max(0, top - 8), behavior: "auto" }) : (body.scrollTop = top - 8);
   }
   (function wireHelp() {
     var b = document.getElementById("help-btn");
