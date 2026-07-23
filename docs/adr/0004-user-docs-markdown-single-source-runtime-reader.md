@@ -30,6 +30,12 @@ truth), unlike hand-authored motion which rots silently.
   byte-stable, so scenes `clip` to stable editor chrome (panel/palette/toolbar/inspector), not
   the whole canvas. The runner is a dev tool (needs Puppeteer via NODE_PATH), never shipped in
   the app; its pure scene-schema core is unit-tested in `tests/run.js`.
+- Annotations (#29): a capture-only overlay (highlight ring / numbered callout chip / pointer)
+  drawn into a body-level `#capture-annotate-layer`, DS-token styled in editor.css so it
+  inherits the theme, driven by scene steps (highlight/callout/pointer/clearAnnotations). It is
+  editor chrome only — rendered outside `.course-root`, so render()/course.css/the SCORM export
+  never see it (invariant held; verified against a real `buildPackage`). Absent from normal
+  authoring (capture mode is off by default).
 - Motion (#28): `tools/webp-anim.js` is an ORIGINAL animated-WebP **muxer** (VP8X/ANIM/ANMF
   from the public WebP container spec), not a vendored VP8 encoder — a real encoder was too
   heavy for the no-build/air-gap stack (the same reason the vendored GIF codec is unsuitable).

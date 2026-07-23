@@ -35,7 +35,8 @@ var MOTION_BUDGET = 500 * 1024; // ~500 KB (animated WebP, #28)
 // The scene step vocabulary. goto/select/click resolve a CSS target and click it; hover
 // hovers; type types text into a target; wait pauses; shoot screenshots a still WebP;
 // shootMotion (#28) captures a sequence of frames -> one animated WebP + a poster still.
-var STEP_VERBS = ["goto", "select", "hover", "click", "type", "wait", "shoot", "shootMotion"];
+var STEP_VERBS = ["goto", "select", "hover", "click", "type", "wait", "shoot", "shootMotion",
+  "highlight", "callout", "pointer", "clearAnnotations"];
 var SCENE_KINDS = ["still", "motion"]; // motion arrived with #28
 
 function isPlainObject(v) { return v && typeof v === "object" && !Array.isArray(v); }
@@ -62,6 +63,10 @@ function validateScene(scene) {
     if (st.do === "wait" && !(st.ms >= 0)) errors.push("step[" + i + "] wait needs ms>=0");
     if ((st.do === "goto" || st.do === "select" || st.do === "hover" || st.do === "click") && !st.target) errors.push("step[" + i + "] " + st.do + " needs a target selector");
     if (st.do === "type" && (!st.target || typeof st.text !== "string")) errors.push("step[" + i + "] type needs target + text");
+    // #29 annotation verbs (capture-only overlay): highlight/callout/pointer need a target;
+    // callout needs a number; clearAnnotations takes nothing.
+    if ((st.do === "highlight" || st.do === "pointer") && !st.target) errors.push("step[" + i + "] " + st.do + " needs a target selector");
+    if (st.do === "callout" && (!st.target || !(st.n >= 0))) errors.push("step[" + i + "] callout needs target + n (number)");
     if (st.do === "shoot") { stills++; if (!st.out || !/\.webp$/.test(st.out)) errors.push("step[" + i + "] shoot needs out ending in .webp"); }
     if (st.do === "shootMotion") {
       motions++;
@@ -161,7 +166,7 @@ if (require.main === module) {
     var written = [];
     for (var i = 0; i < scene.steps.length; i++) {
       var st = scene.steps[i];
-      if (["wait", "hover", "type", "goto", "select", "click"].indexOf(st.do) !== -1) { await runInteractive(pg, st); continue; }
+      if (["wait", "hover", "type", "goto", "select", "click", "highlight", "callout", "pointer", "clearAnnotations"].indexOf(st.do) !== -1) { await runInteractive(pg, st); continue; }
 
       if (st.do === "shoot") {
         await settle(pg);
@@ -214,6 +219,10 @@ if (require.main === module) {
       if (clip) o.clip = clip;
       return o;
     }
+    async function resolveBox(pg, target) {
+      try { return await pg.$eval(target, function (el) { var r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }); }
+      catch (e) { return null; }
+    }
     async function resolveClip(pg, spec) {
       if (spec && typeof spec === "object") return { x: spec.x, y: spec.y, width: spec.width, height: spec.height };
       if (spec) {
@@ -233,7 +242,18 @@ if (require.main === module) {
       if (st.do === "type") { try { await pg.type(st.target, st.text, { delay: 0 }); } catch (e) { console.warn("type miss: " + st.target); } return; }
       if (st.do === "goto" || st.do === "select" || st.do === "click") {
         try { await pg.click(st.target); } catch (e) { console.warn(st.do + " miss: " + st.target); }
+        return;
       }
+      // #29 annotation overlay verbs -> the capture-only CaptureMode.annotate API. The runner
+      // resolves the target box (so scenes can use ::-p-text / nth selectors) and passes it in.
+      if (st.do === "highlight" || st.do === "callout" || st.do === "pointer") {
+        var abox = await resolveBox(pg, st.target);
+        if (!abox) { console.warn(st.do + " miss: " + st.target); return; }
+        await pg.evaluate(function (spec) { window.CaptureMode && window.CaptureMode.annotate(spec); },
+          { type: st.do, box: abox, n: st.n, side: st.side || "tl", from: st.from || "left" });
+        return;
+      }
+      if (st.do === "clearAnnotations") { await pg.evaluate(function () { window.CaptureMode && window.CaptureMode.clearAnnotations(); }); return; }
     }
   })();
 

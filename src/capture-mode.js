@@ -114,13 +114,85 @@
     markReady();
   }
 
-  // ---- Public surface (used by the scene runner #27) ------------------------------------
+  // ---- 5. Annotation overlay (#29) ------------------------------------------------------
+  // A capture-ONLY overlay drawn OVER the editor to teach a workflow in a docs figure:
+  // a highlight ring, a numbered callout chip, and a pointer arrow, each positioned against
+  // a target element's box. Rendered into a body-level layer (NOT inside .course-root), so it
+  // is editor chrome only — render()/the SCORM export never see it (they serialise the pure
+  // render output, not this layer). Styled with DS tokens in editor.css (var(--accent)), so
+  // the annotations inherit the active theme. Driven by declarative scene steps via the API
+  // below. Absent entirely from normal authoring (capture mode is off by default).
+  function annotLayer() {
+    var el = document.getElementById("capture-annotate-layer");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "capture-annotate-layer";
+      (document.body || document.documentElement).appendChild(el);
+    }
+    return el;
+  }
+  function clearAnnotations() { var l = document.getElementById("capture-annotate-layer"); if (l) l.textContent = ""; }
+  function boxOf(target) {
+    var t = typeof target === "string" ? document.querySelector(target) : target;
+    if (!t || !t.getBoundingClientRect) return null;
+    var r = t.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+  // draw one annotation: { type:'highlight'|'callout'|'pointer', box?, target?, n?, side? }.
+  // box (viewport coords {x,y,w,h}) is authoritative — the runner resolves it (so scenes can
+  // target ::-p-text / nth selectors); target is a querySelector fallback for in-page callers.
+  function annotate(spec) {
+    if (!spec || !spec.type) return false;
+    var b = spec.box && spec.box.w != null ? spec.box : boxOf(spec.target);
+    if (!b) return false;
+    var layer = annotLayer();
+    var pad = 4;
+    if (spec.type === "highlight") {
+      var ring = document.createElement("div");
+      ring.className = "capture-annot capture-annot--ring";
+      ring.style.left = (b.x - pad) + "px"; ring.style.top = (b.y - pad) + "px";
+      ring.style.width = (b.w + pad * 2) + "px"; ring.style.height = (b.h + pad * 2) + "px";
+      layer.appendChild(ring);
+      return true;
+    }
+    if (spec.type === "callout") {
+      var chip = document.createElement("div");
+      chip.className = "capture-annot capture-annot--chip";
+      chip.textContent = spec.n != null ? String(spec.n) : "1";
+      var side = spec.side || "tl";
+      var cx = (side.indexOf("r") !== -1) ? b.x + b.w : b.x;
+      var cy = (side.indexOf("b") !== -1) ? b.y + b.h : b.y;
+      chip.style.left = cx + "px"; chip.style.top = cy + "px";
+      layer.appendChild(chip);
+      return true;
+    }
+    if (spec.type === "pointer") {
+      var from = spec.from || "left";
+      var ptr = document.createElement("div");
+      ptr.className = "capture-annot capture-annot--pointer capture-annot--pointer-" + from;
+      // Lucide "arrow-right" geometry, rotated per side in CSS; colour = var(--accent)
+      ptr.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
+      var midY = b.y + b.h / 2, midX = b.x + b.w / 2, gap = 40;
+      if (from === "left") { ptr.style.left = (b.x - gap - 24) + "px"; ptr.style.top = (midY - 12) + "px"; }
+      else if (from === "right") { ptr.style.left = (b.x + b.w + gap) + "px"; ptr.style.top = (midY - 12) + "px"; }
+      else if (from === "top") { ptr.style.left = (midX - 12) + "px"; ptr.style.top = (b.y - gap - 24) + "px"; }
+      else { ptr.style.left = (midX - 12) + "px"; ptr.style.top = (b.y + b.h + gap) + "px"; }
+      layer.appendChild(ptr);
+      return true;
+    }
+    return false;
+  }
+
+  // ---- Public surface (used by the scene runner #27/#29) --------------------------------
   window.CaptureMode = {
     active: true,
     epoch: EPOCH,
     // advance-and-settle helper the runner calls just before a shoot step
     settle: function (root) { injectFreezeCSS(); settleMedia(root); },
     // deterministic id helper for scene-authored fixtures that want a stable id
-    seq: function (prefix) { return (prefix || "cap") + "-" + nowMs(); }
+    seq: function (prefix) { return (prefix || "cap") + "-" + nowMs(); },
+    // #29 annotation overlay (capture-only, never in course output)
+    annotate: annotate,
+    clearAnnotations: clearAnnotations
   };
 })();

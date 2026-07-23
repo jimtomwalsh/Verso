@@ -218,7 +218,7 @@ section("#27 docs capture scene DSL");
 (function () {
   var dc = require(path.join(ROOT, "tools/docs-capture.js"));
   ok("#27 still budget is ~200KB", dc.STILL_BUDGET === 200 * 1024);
-  ok("#27 step vocabulary is the fixed set", JSON.stringify(dc.STEP_VERBS) === JSON.stringify(["goto", "select", "hover", "click", "type", "wait", "shoot", "shootMotion"]));
+  ok("#27 step vocabulary is the fixed set", JSON.stringify(dc.STEP_VERBS) === JSON.stringify(["goto", "select", "hover", "click", "type", "wait", "shoot", "shootMotion", "highlight", "callout", "pointer", "clearAnnotations"]));
   // a valid still scene passes
   var good = { id: "s1", covers: ["editor-workspace"], kind: "still", viewport: { width: 1440, height: 900, dpr: 2 }, theme: "dark", steps: [{ do: "wait", ms: 300 }, { do: "shoot", out: "s1.webp" }] };
   ok("#27 valid scene passes", dc.validateScene(good).ok === true);
@@ -301,6 +301,84 @@ section("#28 animated-WebP muxer + motion");
 (function () {
   var ed = src("src/editor.js");
   ok("#28 openHelpModal swaps to poster under prefers-reduced-motion", /prefers-reduced-motion[\s\S]{0,220}data-poster[\s\S]{0,80}img\.src\s*=\s*img\.getAttribute\("data-poster"\)/.test(ed) || /reduce\s*&&\s*img\.getAttribute\("data-poster"\)[\s\S]{0,60}img\.src/.test(ed));
+})();
+
+// ---- #29: in-editor annotation overlay (capture-only) ---------------------------------
+// Highlight ring / numbered callout / pointer drawn OVER the editor for docs figures.
+// Verso-UI-only: rendered into a body-level layer, styled in editor.css, NEVER in course
+// output (render()/course.css/SCORM export). Tests: the annotate API draws the right DOM,
+// scene DSL validates the verbs, and the invariant holds (absent from export).
+section("#29 annotation overlay");
+(function () {
+  // -- headless annotate() unit test via a minimal fake DOM --
+  var srcTxt = src("src/capture-mode.js");
+  var realRandom = Math.random;
+  function makeEl(tag) {
+    var el = { tagName: tag, children: [], style: {}, className: "", _text: "", _html: "", parentNode: null,
+      setAttribute: function (k, v) { this["_a_" + k] = v; if (k === "id") this.id = v; },
+      getAttribute: function (k) { return this["_a_" + k]; },
+      appendChild: function (c) { this.children.push(c); c.parentNode = el; return c; },
+      classList: { add: function () {}, contains: function () { return false; } } };
+    Object.defineProperty(el, "textContent", { get: function () { return el._text; }, set: function (v) { el._text = v; el.children = []; } });
+    Object.defineProperty(el, "innerHTML", { get: function () { return el._html; }, set: function (v) { el._html = v; } });
+    return el;
+  }
+  var body = makeEl("body");
+  function findById(n, id) { if (n.id === id) return n; for (var i = 0; i < n.children.length; i++) { var r = findById(n.children[i], id); if (r) return r; } return null; }
+  var fakeDoc = {
+    readyState: "complete",
+    documentElement: { setAttribute: function () {} },
+    head: { appendChild: function () {} }, body: body,
+    getElementById: function (id) { return findById(body, id); },
+    createElement: function (t) { return makeEl(t); },
+    querySelector: function () { return null; }, querySelectorAll: function () { return []; },
+    addEventListener: function () {}
+  };
+  var win = { __captureMode: true };
+  new Function("window", "document", "location", "performance", "URLSearchParams", srcTxt)(win, fakeDoc, { search: "" }, { now: function () { return 0; } }, URLSearchParams);
+  Math.random = realRandom;
+  var CM = win.CaptureMode;
+  ok("#29 CaptureMode exposes annotate + clearAnnotations", CM && typeof CM.annotate === "function" && typeof CM.clearAnnotations === "function");
+  // highlight ring: box{x,y,w,h}, pad 4 -> left x-4, size w+8/h+8
+  CM.annotate({ type: "highlight", box: { x: 10, y: 20, w: 100, h: 40 } });
+  var layer = fakeDoc.getElementById("capture-annotate-layer");
+  ok("#29 highlight draws a ring into the annotate layer", layer && layer.children.length === 1 && layer.children[0].className.indexOf("capture-annot--ring") !== -1);
+  ok("#29 ring positioned at target box (with pad)", layer.children[0].style.left === "6px" && layer.children[0].style.width === "108px");
+  // numbered callout chip
+  CM.annotate({ type: "callout", box: { x: 10, y: 20, w: 100, h: 40 }, n: 3, side: "tr" });
+  var chip = layer.children[1];
+  ok("#29 callout draws a numbered chip", chip.className.indexOf("capture-annot--chip") !== -1 && chip.textContent === "3");
+  ok("#29 callout side 'tr' anchors to top-right corner", chip.style.left === "110px" && chip.style.top === "20px");
+  // pointer
+  CM.annotate({ type: "pointer", box: { x: 10, y: 20, w: 100, h: 40 }, from: "left" });
+  var ptr = layer.children[2];
+  ok("#29 pointer draws an arrow glyph", ptr.className.indexOf("capture-annot--pointer-left") !== -1 && ptr.innerHTML.indexOf("<svg") !== -1);
+  // clearAnnotations empties the layer
+  CM.clearAnnotations();
+  ok("#29 clearAnnotations empties the layer", layer.children.length === 0);
+  // annotate returns false for a missing/unresolvable target
+  ok("#29 annotate no-ops on a missing target", CM.annotate({ type: "highlight", target: ".nope-xyz" }) === false);
+
+  // -- scene DSL validation for the annotation verbs --
+  var dc = require(path.join(ROOT, "tools/docs-capture.js"));
+  ["highlight", "callout", "pointer", "clearAnnotations"].forEach(function (v) {
+    ok("#29 '" + v + "' is in the step vocabulary", dc.STEP_VERBS.indexOf(v) !== -1);
+  });
+  ok("#29 highlight needs a target", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "highlight" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#29 callout needs target + n", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "callout", target: "#x" }, { do: "shoot", out: "a.webp" }] }).ok === false);
+  ok("#29 a valid annotated scene passes", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "highlight", target: "#x" }, { do: "callout", target: "#x", n: 1 }, { do: "pointer", target: "#x" }, { do: "clearAnnotations" }, { do: "shoot", out: "a.webp" }] }).ok === true);
+
+  // -- INVARIANT: annotation overlay is editor chrome only, never course output --
+  ok("#29 annotation classes live in editor.css (chrome), NOT course.css (ships)", src("editor.css").indexOf("capture-annot") !== -1 && src("src/course.css").indexOf("capture-annot") === -1);
+  ok("#29 render.js + export.js never emit annotation classes", src("src/render.js").indexOf("capture-annot") === -1 && src("src/export.js").indexOf("capture-annot") === -1);
+  ok("#29 overlay uses the DS accent token (theme-inherited)", /\.capture-annot--ring\s*\{[^}]*var\(--accent\)/.test(src("editor.css")) && /\.capture-annot--chip\s*\{[\s\S]*?var\(--accent\)/.test(src("editor.css")));
+
+  // -- shipped annotated scenes + committed assets --
+  ok("#29 annotated still scene valid", dc.validateScene(JSON.parse(src("docs/scenes/annotated-structure.json"))).ok === true);
+  ok("#29 annotated motion scene valid", dc.validateScene(JSON.parse(src("docs/scenes/annotated-navigate.json"))).ok === true);
+  ok("#29 annotated still committed within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/annotated-structure.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
+  ok("#29 annotated motion committed within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/annotated-navigate.webp")).size <= dc.MOTION_BUDGET; } catch (e) { return false; } })());
+  ok("#29 USER-GUIDE references both annotated figures", src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-structure.webp") !== -1 && src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-navigate.webp") !== -1);
 })();
 
 // ---- #91: docs anti-drift gate — the User Guide must document every palette block ----

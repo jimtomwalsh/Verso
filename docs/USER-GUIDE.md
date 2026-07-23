@@ -65,9 +65,13 @@ editing — but do keep JSON backups (see §12) since the data lives only in thi
 
 ## 3. Core concepts
 
+![The three structural levels in the Structure panel: chapters (1) contain pages (2), and blocks (3) are inserted from the palette.](docs/assets/annotated-structure.webp "Chapters (1) contain pages (2); blocks (3) come from the palette below.")
+
 - **Document = one course.** Held in the browser; shown as a tab.
 - **Chapters → Pages → Blocks.** A course is chapters; each chapter has pages; each page
   holds blocks. The learner moves page-to-page; chapters drive the nav/progress.
+
+![The highlighted page is the active one; clicking another page moves the highlight and jumps to it.](docs/assets/annotated-navigate.webp "The highlight follows the active page as you click through the outliner."){poster=docs/assets/annotated-navigate-still.webp}
 - **Blocks** are the content units (heading, paragraph, image, quiz, card grid…). Some
   blocks are **containers** (Card, Columns, Card Reveal, Accordion) that hold child blocks.
 - **Document settings vs block settings.** The inspector shows **document-wide** settings
