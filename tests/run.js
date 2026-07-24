@@ -3794,7 +3794,11 @@ section("richer bullet lists");
   ok("css applies to inline lists in any field", /\.body-copy ul, \.body-copy ol/.test(css));
   ok("css nested levels distinct markers", /\.body-list ul ul, \.body-copy ul ul ul \{ list-style-type: square/.test(css));
   ok("editor list is a single on/off switch (no doubled ul/ol pair)", /switchRow\("List", listOn,/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
-  ok("editor list marker controls only render when the list is on", /if \(listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  ok("editor list marker controls render when the list is on OR the field root is a list", /if \(rootIsList \|\| listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
+  // detect it, drop the meaningless on/off toggle, and always surface the marker settings.
+  ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
+  ok("editor hides the List on/off toggle for a root-list field", /if \(!rootIsList\) \{\s*switchRow\("List", listOn,/.test(e));
   ok("editor list off-branch clears both ul and ol", /queryCommandState\("insertOrderedList"\)\) document\.execCommand\("insertOrderedList"[\s\S]*?queryCommandState\("insertUnorderedList"\)\) document\.execCommand\("insertUnorderedList"/.test(e));
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));

@@ -11232,15 +11232,24 @@
     // case/align/style control language above; marker size stays a numeric iconField (exception).
     inspector.appendChild(sub("List"));
     function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
-    switchRow("List", listOn, function (on) {
-      node.focus();
-      if (on) { if (!listOn()) document.execCommand("insertUnorderedList", false, null); }
-      else { if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null); if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null); }
-      writeModel(node, node.innerHTML);
-      renderModelView();
-      renderInspector();
-    });
-    if (listOn()) {
+    // #31: a field whose editable ROOT is itself a list element (the quiz Chapter-summary
+    // <ul>, the list block's <ul>) is ALWAYS a list — you can't un-list the container, and
+    // its marker style/colour/size live on the field node directly. queryCommandState is
+    // false there when the field is just selected (no caret in a nested list), which used to
+    // hide the marker controls entirely. So for a root-list field, drop the meaningless
+    // on/off toggle and always surface the marker settings.
+    var rootIsList = node.tagName === "UL" || node.tagName === "OL";
+    if (!rootIsList) {
+      switchRow("List", listOn, function (on) {
+        node.focus();
+        if (on) { if (!listOn()) document.execCommand("insertUnorderedList", false, null); }
+        else { if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null); if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null); }
+        writeModel(node, node.innerHTML);
+        renderModelView();
+        renderInspector();
+      });
+    }
+    if (rootIsList || listOn()) {
       var MARKERS = [["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
       var MARK_GLYPH = { disc: "•", circle: "◦", square: "▪", dash: "–", arrow: "→", check: "✓", decimal: "1.", "lower-alpha": "a.", "lower-roman": "i.", custom: (obj.listMarkerChar || "✱") };
       var markerOpts = MARKERS.map(function (o) { var g = MARK_GLYPH[o[1]] || ""; return [o[1], o[0], { html: '<span class="cs-mark">' + g + '</span>' + o[0] }]; });

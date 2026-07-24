@@ -170,7 +170,10 @@ Every block you can insert, grouped by type. Software tours have their own secti
 - **Navigation button** — jumps to another page.
 - **Acknowledge / Checkbox** — a gate the learner must tick.
 - **Quiz (knowledge check)** — multiple-choice and other question types, with feedback, a
-  pass panel, optional shuffle, per-quiz colours, and a celebrate-on-pass toggle.
+  pass panel, optional shuffle, per-quiz colours, and a celebrate-on-pass toggle. The pass
+  panel's **Chapter summary** is a bulleted list you edit on the canvas; click into it and the
+  Text panel's **List** settings (bullet style, custom glyph, marker colour and size) apply to
+  it like any other list.
 - **Chapter Card grid** — the auto-built chapter-menu component.
 
 > **Note.** Interactive blocks can **gate the Next button** — the learner must complete them to
