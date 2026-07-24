@@ -50,6 +50,7 @@ function createSyncHub(blockStore, opts) {
   var mode = opts.mode || "local";
   var now = opts.now || function () { return 0; };
   var lockManager = opts.lockManager || null; // ticket 10 plugs in here; absent -> auto-grant
+  var roleOf = opts.roleOf || function (c) { return (c && c.role) || "author"; }; // real roles = ticket 17
   var docs = {};     // docId -> array of subscribed clients
   var clients = [];  // all connected clients
 
@@ -80,6 +81,9 @@ function createSyncHub(blockStore, opts) {
     if (env.type === "sync.hello") return onHello(client, env);
     if (env.type === "block.change") return onBlockChange(client, env);
     if (env.type === "lock.acquire" || env.type === "lock.release") return onLock(client, env);
+    if (env.type === "structure.op") return onStructure(client, env);   // ticket 14
+    if (env.type === "doc.restore") return onRestore(client, env);      // ticket 14 (admin)
+    if (env.type === "block.revert") return onRevert(client, env);      // ticket 14 (author)
     if (env.type === "presence.heartbeat" || env.type === "cursor.update") {
       // ephemeral: fan out as-is, never seq-stamped, never logged (presence/cursor state
       // is ticket 11; here we just relay so peers see live activity).
@@ -144,6 +148,68 @@ function createSyncHub(blockStore, opts) {
       : lockManager.release(client, env.docId, env.blockId, env.payload && env.payload.class);
     if (r && r.broadcast) fanOut(env.docId, r.broadcast, null);
     if (r && r.reply) client.transport.send(r.reply);
+  }
+
+  var EDIT_ROLES = { admin: true, author: true };
+  function canEdit(client) { return !!EDIT_ROLES[roleOf(client)]; }
+
+  // Structural op (ticket 14). The ONE real conflict: a delete/move-out touching a block
+  // another user holds a CONTENT lock on is REFUSED -- never evicts the editor. A reorder
+  // is always allowed (content applies by block id regardless of position, AC2).
+  function onStructure(client, env) {
+    if (!canEdit(client)) return client.transport.send(envelope("structure.denied", env.docId, null, null, null, now(), { reason: "role may not edit" }));
+    var p = env.payload || {};
+    if (!blockStore) return;
+    if (p.op === "delete") {
+      var h = lockManager && lockManager.holder && lockManager.holder(env.docId, env.blockId);
+      if (h && h !== client) {
+        return client.transport.send(envelope("structure.denied", env.docId, env.blockId, null, null, now(), { reason: "someone is editing this block -- can't remove", holder: h.author, op: "delete" }));
+      }
+      var rd = blockStore.deleteBlock(env.docId, env.blockId, env.author);
+      if (!rd.ok) return client.transport.send(envelope("structure.denied", env.docId, env.blockId, null, null, now(), { reason: rd.error }));
+      return fanOut(env.docId, envelope("structure.applied", env.docId, env.blockId, rd.seq, env.author, now(), { op: "delete", pageId: rd.pageId }), null);
+    }
+    if (p.op === "reorder") {
+      var rr = blockStore.reorderBlocks(env.docId, p.pageId, p.order, env.author);
+      if (!rr.ok) return client.transport.send(envelope("structure.denied", env.docId, null, null, null, now(), { reason: rr.error }));
+      return fanOut(env.docId, envelope("structure.applied", env.docId, null, rr.seq, env.author, now(), { op: "reorder", pageId: rr.pageId, order: rr.order }), null);
+    }
+    return client.transport.send(envelope("structure.denied", env.docId, null, null, null, now(), { reason: "unknown structural op" }));
+  }
+
+  // Admin file-checkpoint restore (ticket 14). Requires others idle, OR an explicit
+  // force-evict (with a warning) that releases others' locks first. Broadcasts
+  // sync.resnapshot so EVERY client (incl. origin) discards local state and converges.
+  // A client holding buffered unacked edits at this moment surfaces a soft conflict
+  // client-side (ticket 13) -- never a silent loss; the resnapshot carries the seq.
+  function onRestore(client, env) {
+    if (roleOf(client) !== "admin") return client.transport.send(envelope("restore.denied", env.docId, null, null, null, now(), { reason: "admin only" }));
+    var p = env.payload || {};
+    var othersHold = lockManager ? lockManager.allLocks().filter(function (l) { return l.docId === env.docId && l.holder !== client; }) : [];
+    if (othersHold.length && !p.force) {
+      return client.transport.send(envelope("restore.denied", env.docId, null, null, null, now(), { reason: "others are editing -- restore needs everyone idle or a force-evict", needsForce: true, holders: othersHold.map(function (l) { return l.author; }) }));
+    }
+    if (othersHold.length && p.force && lockManager) {
+      othersHold.forEach(function (l) { lockManager._forceRelease(l.docId, l.resourceId, l.class); });
+      fanOut(env.docId, envelope("lock.state", env.docId, null, null, null, now(), { locks: lockManager.stateFor(env.docId), forceEvicted: true }), null);
+    }
+    var rr = blockStore.restoreCheckpoint(env.docId, p.checkpointId, env.author);
+    if (!rr.ok) return client.transport.send(envelope("restore.denied", env.docId, null, null, null, now(), { reason: rr.error }));
+    // broadcast to ALL clients on the doc (origin included) so everyone converges
+    var snap = envelope("sync.resnapshot", env.docId, null, rr.seq, env.author, now(), { snapshot: blockStore.materializeDoc(env.docId), seq: rr.seq, restoredTo: p.checkpointId });
+    subs(env.docId).forEach(function (c) { if (mode === "server") try { c.transport.send(snap); } catch (e) {} });
+  }
+
+  // Author single-block revert (ticket 14): revert a block in place to a prior logged
+  // state; others sync it live as a NORMAL block.change.
+  function onRevert(client, env) {
+    if (!canEdit(client)) return client.transport.send(envelope("block.denied", env.docId, env.blockId, null, null, now(), { reason: "role may not edit" }));
+    var p = env.payload || {};
+    var rv = blockStore ? blockStore.revertBlock(env.docId, env.blockId, p.toSeq, env.author) : { ok: false };
+    if (!rv.ok) return client.transport.send(envelope("block.denied", env.docId, env.blockId, null, null, now(), { reason: rv.error }));
+    var out = envelope("block.change", env.docId, env.blockId, rv.seq, env.author, now(), { patch: rv.content, baseSeq: rv.seq, revert: true });
+    fanOut(env.docId, out, client);
+    client.transport.send(envelope("block.ack", env.docId, env.blockId, rv.seq, env.author, now(), { revert: true }));
   }
 
   return {

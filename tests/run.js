@@ -644,6 +644,60 @@ section("platform-pivot 12 lease reaper");
   }
 })();
 
+// ---- platform-pivot 14: conflict rule (structure vs content lock) + rollback ----
+section("platform-pivot 14 conflict + rollback");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> conflict/rollback tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-conf-test-"));
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" }, { id: "b3", type: "para", text: "Q" } ] } ] }, "sys");
+    var cp = store.createCheckpoint("C-1", "v1", "admin");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport(), tadm = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"), ADM = hub.connect(tadm, "admin");
+    A.role = "author"; B.role = "author"; ADM.role = "admin";
+    [ta, tb, tadm].forEach(function (tt, i) { tt.receive(env("sync.hello", "C-1", null, null, ["alice", "bob", "admin"][i], 0, { sinceSeq: 0 })); });
+    ta.receive(env("lock.acquire", "C-1", "b1", null, "alice", 0, {}));
+    // AC1: delete a content-locked block -> refused, never evicts
+    tb.receive(env("structure.op", "C-1", "b1", null, "bob", 0, { op: "delete" }));
+    ok("AC1: delete of a content-locked block is REFUSED", tb.sent.some(function (e) { return e.type === "structure.denied" && /editing this/.test(e.payload.reason); }));
+    ok("AC1: the editor is not evicted", lm.holder("C-1", "b1") === A && store.materializeDoc("C-1").pages[0].blocks.some(function (b) { return b.id === "b1"; }));
+    // AC2: reorder succeeds despite a held content lock
+    tb.receive(env("structure.op", "C-1", null, null, "bob", 0, { op: "reorder", pageId: "p1", order: ["b3", "b1", "b2"] }));
+    ok("AC2: reorder succeeds while a block is content-locked", store.materializeDoc("C-1").pages[0].blocks.map(function (b) { return b.id; }).join(",") === "b3,b1,b2");
+    ok("AC2: reorder fanned out to peers", ta.sent.some(function (e) { return e.type === "structure.applied" && e.payload.op === "reorder"; }));
+    // delete of an unlocked block succeeds
+    tb.receive(env("structure.op", "C-1", "b2", null, "bob", 0, { op: "delete" }));
+    ok("delete of an unlocked block succeeds", !store.materializeDoc("C-1").pages[0].blocks.some(function (b) { return b.id === "b2"; }));
+    // AC4: author single-block revert emits a normal block.change
+    clock = 200; ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "EDITED" }, baseSeq: store.maxSeq() }));
+    clock = 260; ta.receive(env("block.revert", "C-1", "b1", null, "alice", 0, { toSeq: cp.atSeq }));
+    ok("AC4: single-block revert fans out a block.change (revert flag)", tb.sent.some(function (e) { return e.type === "block.change" && e.blockId === "b1" && e.payload.revert === true; }));
+    // AC3: admin restore refused while others edit, then force converges everyone
+    tb.receive(env("lock.acquire", "C-1", "b3", null, "bob", 0, {}));
+    tadm.receive(env("doc.restore", "C-1", null, null, "admin", 0, { checkpointId: cp.id }));
+    ok("AC3: restore refused while others editing (needsForce)", tadm.sent.some(function (e) { return e.type === "restore.denied" && e.payload.needsForce === true; }));
+    tadm.receive(env("doc.restore", "C-1", null, null, "admin", 0, { checkpointId: cp.id, force: true }));
+    ok("AC3: force restore evicts the other holder", lm.holder("C-1", "b3") === null);
+    ok("AC3: sync.resnapshot broadcast to ALL clients (convergence)", ta.sent.some(function (e) { return e.type === "sync.resnapshot"; }) && tb.sent.some(function (e) { return e.type === "sync.resnapshot"; }) && tadm.sent.some(function (e) { return e.type === "sync.resnapshot"; }));
+    ok("AC5: resnapshot carries the restored snapshot + seq (client soft-conflict is ticket 13)", ta.sent.filter(function (e) { return e.type === "sync.resnapshot"; })[0].payload.snapshot.meta.code === "C-1");
+    ta.receive(env("doc.restore", "C-1", null, null, "alice", 0, { checkpointId: cp.id }));
+    ok("AC3: a non-admin restore is denied", ta.sent.some(function (e) { return e.type === "restore.denied" && e.payload.reason === "admin only"; }));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
 // ---- platform-pivot 08: wire transports (secondary seam) ----------------------
 // Hand-rolled wss:// codec + long-poll fallback, interchangeable behind the Transport
 // interface. No real sockets -- the RFC6455 codec + queue logic are unit-testable.

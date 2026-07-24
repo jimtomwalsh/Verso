@@ -115,6 +115,7 @@ function createBlockStore(dbPath, opts) {
   var qCheckpoints = db.prepare("SELECT id, at_seq, label, author, ts FROM snapshots WHERE doc_id = ? AND label IS NOT NULL ORDER BY id");
   var qBlockHist  = db.prepare("SELECT seq, block_id, kind, patch, author, ts FROM changes WHERE doc_id = ? AND block_id = ? ORDER BY seq");
   var qBlockMax   = db.prepare("SELECT MAX(seq) AS m FROM changes WHERE doc_id = ? AND block_id = ? AND kind = 'block.put'");
+  var qSetOrder   = db.prepare("UPDATE pages SET block_order = ? WHERE doc_id = ? AND id = ?");
 
   var now = opts.now || function () { return 0; }; // injectable clock (Date.now() in prod)
 
@@ -251,6 +252,43 @@ function createBlockStore(dbPath, opts) {
     return assembleDoc(docMeta, pages, blocks);
   }
 
+  // ---- Structural ops (ticket 14) -------------------------------------------
+  // Structure changes (reorder / delete) mutate a page's block_order (and, for delete,
+  // drop the block row), append a structural event to the log, and take a fresh baseline
+  // snapshot so replayDoc === materializeDoc stays true (structure lives in the snapshot,
+  // not folded from block.put events). The collab layer's conflict rule (never delete a
+  // block another user holds a content lock on) is enforced in the hub BEFORE calling here.
+  function pageRow(docId, pageId) { return qGetPage.all(docId).filter(function (p) { return p.id === pageId; })[0] || null; }
+
+  // Reorder a page's blocks. newOrder must be a permutation of the page's current blocks
+  // (positions only; block CONTENT is untouched -- so a reorder never conflicts with a
+  // content lock, AC2). Returns { ok, seq }.
+  function reorderBlocks(docId, pageId, newOrder, author) {
+    var pr = pageRow(docId, pageId);
+    if (!pr) return { ok: false, error: "no such page" };
+    var cur = JSON.parse(pr.block_order);
+    if (!Array.isArray(newOrder) || newOrder.length !== cur.length || !newOrder.every(function (id) { return cur.indexOf(id) >= 0; })) {
+      return { ok: false, error: "reorder must be a permutation of the page's blocks" };
+    }
+    qSetOrder.run(JSON.stringify(newOrder), docId, pageId);
+    qAppend.run(docId, null, "structure.reorder", JSON.stringify({ pageId: pageId, order: newOrder }), author || null, now());
+    takeSnapshot(docId, author);
+    return { ok: true, seq: maxSeq(), pageId: pageId, order: newOrder };
+  }
+
+  // Delete a block: drop it from its page's block_order + delete the row. Returns {ok,seq}.
+  function deleteBlock(docId, blockId, author) {
+    var pageId = pageOfBlock(docId, blockId);
+    if (pageId === null) return { ok: false, error: "unknown block" };
+    var pr = pageRow(docId, pageId);
+    var order = JSON.parse(pr.block_order).filter(function (id) { return id !== blockId; });
+    qSetOrder.run(JSON.stringify(order), docId, pageId);
+    qDelBlock.run(docId, blockId);
+    qAppend.run(docId, blockId, "structure.delete", JSON.stringify({ pageId: pageId }), author || null, now());
+    takeSnapshot(docId, author);
+    return { ok: true, seq: maxSeq(), pageId: pageId, blockId: blockId };
+  }
+
   // ---- Named checkpoints + rollback TIME-axis (ticket 04) -------------------
   // A checkpoint is a named snapshot at a milestone/publish point. Because the block
   // store only ever holds BASE content (the editor's variant-preview wrapper __vbase is
@@ -314,7 +352,9 @@ function createBlockStore(dbPath, opts) {
       }
     }
     if (content === null) return { ok: false, error: "no history for this block at/before seq " + toSeq, blockId: blockId };
-    return applyChange(docId, blockId, content, author);
+    var res = applyChange(docId, blockId, content, author);
+    if (res.ok) res.content = content; // the reverted-to content, for the hub to fan out
+    return res;
   }
 
   return {
@@ -323,6 +363,8 @@ function createBlockStore(dbPath, opts) {
     materializeDoc: materializeDoc,
     applyChange: applyChange,
     blockLatestSeq: blockLatestSeq,
+    reorderBlocks: reorderBlocks,
+    deleteBlock: deleteBlock,
     changesSince: changesSince,
     takeSnapshot: takeSnapshot,
     replayDoc: replayDoc,
