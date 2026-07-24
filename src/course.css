@@ -1743,6 +1743,17 @@
    the width every animation frame while the video plays, so it moves smoothly (no CSS transition,
    which would lag behind the per-frame updates). */
 .hotspot-video-progress { position: absolute; left: 0; bottom: 0; height: 1px; width: 0; background: var(--color-accent); z-index: 3; pointer-events: none; }
+/* Restart glyph: centred over the screen, shown when the interaction finishes. Click to replay. */
+.hotspot-restart {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 5;
+  width: 64px; height: 64px; padding: 0; border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-accent); color: var(--color-bg); border: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); transition: transform 0.14s ease;
+}
+.hotspot-restart svg { width: 32px; height: 32px; display: block; }
+.hotspot-restart:hover, .hotspot-restart:focus-visible { transform: translate(-50%, -50%) scale(1.08); outline: none; }
+@media (prefers-reduced-motion: reduce) { .hotspot-restart { transition: none; } }
 .hotspot-back, .hotspot-home {
   font-family: inherit; font-weight: 600; font-size: 13px; letter-spacing: 0.02em; line-height: 1;
   color: var(--color-ink); background: var(--color-bg);

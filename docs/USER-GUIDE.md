@@ -239,12 +239,20 @@ its tour-builder node). A single caption line sits **beneath the screen** and up
 screen's caption as the learner moves through the tour — a quiet, always-current instruction that
 never covers the screen.
 
-### Chrome: nav, counter, progress
+### Chrome: nav, counter, progress, restart
 
 - **External nav buttons** (Back / Home) sit below the screen. Turn them off under Behaviour for a
   tour that drives navigation purely through on-screen markers.
 - The **screens-visited counter** anchors top-right, above the screen.
 - A video screen shows a thin **1px progress bar** along the bottom edge as it plays.
+- When the interaction **finishes** — a tour completes, or a play-once video ends — a **restart**
+  button appears centred on the screen so the learner can replay it.
+
+### Editing screens on the canvas
+
+For a multi-screen hotspot, small **‹ ›** buttons flank the interaction on the canvas. Step through
+the screens with them to place and clean up each screen's markers in place, without opening the tour
+builder.
 
 ### Tour builder
 

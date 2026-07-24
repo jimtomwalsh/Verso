@@ -3021,6 +3021,19 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
   transform: translate(50%, 50%); background: var(--accent);
   border: 2px solid var(--surface-raised); border-radius: 2px; cursor: nwse-resize; z-index: 4;
 }
+/* Canvas screen cycler: little prev/next buttons flanking a multi-screen hotspot on the canvas so
+   the author can step through screens to clean up markers. Editor chrome only (never exported). */
+.hotspot-canvas-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 6;
+  width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.96);
+  transition: background var(--dur-fast, 0.12s) var(--ease-standard, ease);
+}
+.hotspot-canvas-nav:hover { background: rgba(0, 0, 0, 0.78); }
+.hotspot-canvas-nav svg { width: 20px; height: 20px; }
+.hotspot-canvas-nav--prev { left: 8px; }
+.hotspot-canvas-nav--next { right: 8px; }
 /* #53 authoring visibility: a hotspot gated on a play-once video is opacity:0 at runtime until
    the video ends. On the EDITING canvas (#canvas-viewport) the AUTHOR must still see + place it,
    so reveal it dimmed with a dashed accent ring. Scoped to the editing viewport by ID so it beats

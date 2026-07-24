@@ -305,7 +305,30 @@
       if (!hsTrack(stage) || stage.__hsComplete) return;
       var cs = stage.getAttribute("data-hotspot-complete-screen");
       var done = (cs && curSid === cs) || hsReachable(stage).every(function (id) { return stage.__hsVisited && stage.__hsVisited[id]; });
-      if (done) { stage.__hsComplete = true; try { stage.dispatchEvent(new CustomEvent("hotspot-complete", { bubbles: true })); } catch (e) {} }
+      if (done) {
+        stage.__hsComplete = true; try { stage.dispatchEvent(new CustomEvent("hotspot-complete", { bubbles: true })); } catch (e) {}
+        // Show the centred restart glyph -- unless the finished screen still has a play-once video
+        // running, in which case its "ended" handler shows it (so restart appears when it FINISHES).
+        if (!hsVisibleOncePlaying(stage)) hsShowRestart(stage);
+      }
+    }
+    // ---- restart glyph (shown when the interaction finishes) ----------------
+    function hsShowRestart(stage) { var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = false; }
+    // The current screen's play-once video (entry lives in the frame; a sub-screen in its panel).
+    function hsCurrentOnceVideo(stage) {
+      var open = stage.querySelector(".hotspot-screen:not([hidden])");
+      var scope = open || stage.querySelector(".hotspot-frame"); if (!scope) return null;
+      var found = null;
+      qsAll(scope, 'video[data-hotspot-video="once"]').forEach(function (v) { if (open || v.parentNode === scope) found = v; });
+      return found;
+    }
+    function hsVisibleOncePlaying(stage) { var v = hsCurrentOnceVideo(stage); return !!(v && !v.ended); }
+    function hsRestart(stage) {
+      stage.__hsVisited = {}; stage.__hsComplete = false; stage.__hsStack = [];
+      var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = true;
+      qsAll(stage, ".hotspot-marker").forEach(function (m) { m.classList.remove("is-viewed"); });
+      if (hsScreenMode(stage)) screenBase(stage); // -> entry + re-seed counter/caption + replay entry video
+      else { updateViewedCounter(stage); hsSyncVideos(stage); } // popover/video: reset viewed + replay the video
     }
     function hsTrailName(stage, sid) {
       var entryId = stage.getAttribute("data-hotspot-entry");
@@ -411,6 +434,10 @@
           // native freeze on the last frame; offer Replay unless the author hid it
           if (v.getAttribute("data-noreplay") !== "1") { btn.textContent = "Replay"; btn.hidden = false; }
           hsRevealGated();
+          // a play-once video finishing IS the finish for a video/popover interaction, and the last
+          // beat of a completed tour -> reveal the centred restart glyph.
+          var st = v.closest && v.closest(".hotspot-stage");
+          if (st && (!hsScreenMode(st) || st.__hsComplete)) hsShowRestart(st);
         });
         // reduced-motion learners don't autoplay -> reveal gated hotspots up front so they are
         // never stranded waiting for an "ended" that won't fire on its own.
@@ -593,6 +620,7 @@
         if (e.target.closest && e.target.closest(".hotspot-back")) { e.preventDefault(); e.stopPropagation(); screenBack(stage); return; }
         if (e.target.closest && e.target.closest(".hotspot-home")) { e.preventDefault(); e.stopPropagation(); screenBase(stage); return; }
         // #224 T6b: loop carousel forward/back (buttons, not markers) -> cycle within the loop
+        if (e.target.closest && e.target.closest("[data-hotspot-restart]")) { e.preventDefault(); e.stopPropagation(); hsRestart(stage); return; } // centred restart glyph
         if (e.target.closest && e.target.closest("[data-loop-close]")) { e.preventDefault(); e.stopPropagation(); loopExit(stage); return; }
         if (e.target.closest && e.target.closest("[data-loop-prev]")) { e.preventDefault(); e.stopPropagation(); loopGo(stage, -1); return; }
         if (e.target.closest && e.target.closest("[data-loop-next]")) { e.preventDefault(); e.stopPropagation(); loopGo(stage, 1); return; }

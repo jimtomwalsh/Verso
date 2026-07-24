@@ -5599,6 +5599,19 @@
     var home = stage.querySelector(".hotspot-home"); if (home) home.hidden = true;
     return shown;
   }
+  // #(feedback): step the CANVAS through a tour's screens so the author can clean up each
+  // screen's markers/targets in place. Advances hotspotEditScreenId, re-shows that screen on the
+  // canvas + re-renders the inspector to it. Panel markers are already wired for drag at build.
+  function hsCanvasCycle(node, block, dir) {
+    var ss = (block.screens || []).filter(Boolean);
+    if (ss.length < 2) return;
+    var idx = 0;
+    for (var i = 0; i < ss.length; i++) if (ss[i].id === hotspotEditScreenId) idx = i;
+    var next = ss[(idx + dir + ss.length) % ss.length];
+    hotspotEditScreenId = next.id; hotspotEditId = null;
+    renderInspector();
+    showEditScreen(node, next.id);
+  }
   // Reveal the inspector's current edit state on the canvas: the edited screen (so its
   // markers drag), plus the selected marker's popover if it is a card marker.
   function revealHotspot(blockNode, block, hsId) {
@@ -11878,6 +11891,19 @@
   function wireHotspotNode(node) {
     var block = node.__block; if (!block) return;
     var stage = node.querySelector(".hotspot-stage"); if (!stage) return;
+    // #(feedback): little prev/next buttons either side of the interaction to cycle screens on the
+    // canvas (clean up each screen's markers/targets in place). Editor chrome only, multi-screen only.
+    if ((block.screens || []).filter(Boolean).length > 1 && !node.querySelector(".hotspot-canvas-nav")) {
+      [["prev", -1, "chevron-left", "‹", "Previous screen"], ["next", 1, "chevron-right", "›", "Next screen"]].forEach(function (d) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "hotspot-canvas-nav hotspot-canvas-nav--" + d[0];
+        b.setAttribute("aria-label", d[4]); b.title = d[4];
+        b.innerHTML = window.Icon ? window.Icon(d[2]) : d[3];
+        b.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+        b.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); hsCanvasCycle(node, block, d[1]); });
+        node.appendChild(b);
+      });
+    }
     Array.prototype.forEach.call(stage.querySelectorAll(".hotspot-marker"), function (mk) {
       var hs = findHotspot(block, mk.getAttribute("data-hotspot"));
       if (!hs) return;
