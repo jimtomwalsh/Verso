@@ -9,7 +9,7 @@ export interface PresencePeer {
   state: "editing" | "viewing";
   /** Stable id of the block the peer is on, if any (for the hover tooltip + "route around" cue). */
   blockId?: string | null;
-  /** Human label of that block, for the tooltip ("editing Range, bearing…"). */
+  /** Human label of that block, for the tooltip ("editing Introduction…"). */
   blockLabel?: string | null;
 }
 

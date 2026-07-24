@@ -11718,6 +11718,12 @@
       var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
     } catch (e) {}
   }
+  // ticket 11/13: the top-level canvas block a field node belongs to (the sync granularity is the
+  // top-level block by stable id). Used to drive collab lock/edit events off the edit lifecycle.
+  function collabBlockOf(node) {
+    var cb = node && node.closest && node.closest(".canvas-block");
+    return (cb && cb.__block) || (node && node.__block) || null;
+  }
   function enableEditing(root) {
     // locked blocks: mark them (editor.css lays a click-shield) and skip all
     // editing/selection wiring below, so they can't be moved or edited on the
@@ -11736,7 +11742,7 @@
       if (lockedCard && lockedCard.__instance && lockedCard.__instance.locked) return;
       node.classList.add("is-editable");
       node.setAttribute("spellcheck", "false");
-      node.addEventListener("focus", function () { hasPushedForFocus = false; selectFieldNode(node); });
+      node.addEventListener("focus", function () { hasPushedForFocus = false; selectFieldNode(node); if (typeof CollabChrome !== "undefined") CollabChrome.onEditFocus(collabBlockOf(node)); }); // collab: implicit lock acquire on edit-intent (server mode only)
       node.addEventListener("input", function () {
         if (!hasPushedForFocus) {
           pushHistory();
@@ -11747,7 +11753,9 @@
         scheduleSpellcheck(); // P0: re-check typos as the author types
         var key = node.getAttribute("data-edit");
         if (!rich && panelFields[key] && panelFields[key].value !== node.textContent) panelFields[key].value = node.textContent;
+        if (typeof CollabChrome !== "undefined") CollabChrome.onEditCommit(collabBlockOf(node)); // collab: fan the edit out (debounced) + buffer it
       });
+      node.addEventListener("blur", function () { if (typeof CollabChrome !== "undefined") CollabChrome.onEditBlur(collabBlockOf(node)); }); // collab: auto-release the lock on blur (server mode only)
       // Paste as PLAIN TEXT by default: the browser's default contenteditable paste
       // drags the SOURCE's rich HTML (fonts/colours/spans + even a copied canvas
       // block's editor chrome) into the field, overriding its style. Instead strip to
@@ -14918,8 +14926,17 @@
   var CollabChrome = (function () {
     var wired = false, session = null, peers = [], locks = [], pending = [];
     var resolvedConflicts = [], notifyArmed = {};
+    // send-side (drives the pipe from the local author's edit lifecycle); all no-op in standalone.
+    var HEARTBEAT_MS = 12000, EDIT_DEBOUNCE_MS = 400;
+    var editingBlockId = null, viewingBlockId = null, beatTimer = null, editTimer = null, pendingBlock = null;
     function enabled() { return !!(window.VersoSync && window.VersoSync.enabled); }
     function live() { return !!(window.VersoSync && window.VersoSync.isCollaborating()); }
+    // find a top-level canvas block by its stable id (data-id), escaping the selector. Shared by
+    // the lock chrome + the remote cursors (both address blocks by the same stable id).
+    function blockElById(id) {
+      var esc = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+      return canvas.querySelector('.canvas-block[data-id="' + esc + '"]');
+    }
 
     function clusterEl() {
       var host = document.querySelector(".toolbar__group--right");
@@ -14977,8 +14994,7 @@
       if (!live()) return;
       var me = commentIdentity().name;
       peerHeldBlocks(locks, me).forEach(function (hb) {
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(hb.blockId) : hb.blockId;
-        var el = canvas.querySelector('.canvas-block[data-id="' + esc + '"]');
+        var el = blockElById(hb.blockId);
         if (!el) return;
         var colour = colourForName(hb.holder);
         el.classList.add("collab-held"); el.style.setProperty("--hcol", colour);
@@ -15006,7 +15022,8 @@
       menu.appendChild(bh); menu.appendChild(bn);
       document.body.appendChild(menu);
       var r = e.currentTarget.getBoundingClientRect();
-      menu.style.left = Math.min(r.left, window.innerWidth - 210) + "px";
+      var MENU_W = 200; // the menu's min-width (190) + a small viewport margin; keep it on-screen
+      menu.style.left = Math.min(r.left, window.innerWidth - MENU_W) + "px";
       menu.style.top = (r.bottom + 6) + "px";
     }
     // a tiny transient toast (reused for handoff/notify confirmation; light, non-blocking)
@@ -15072,8 +15089,7 @@
       if (!live()) return;
       var me = commentIdentity().name;
       viewerCursors(peers, me).forEach(function (vc) {
-        var esc = (window.CSS && CSS.escape) ? CSS.escape(vc.blockId) : vc.blockId;
-        var el = canvas.querySelector('.canvas-block[data-id="' + esc + '"]');
+        var el = blockElById(vc.blockId);
         if (!el) return;
         var colour = vc.colour || colourForName(vc.name);
         var caret = h("div", "collab-cursor"); caret.style.setProperty("--ccol", colour);
@@ -15081,6 +15097,39 @@
         el.appendChild(caret);
       });
     }
+    // ---- send-side: drive the pipe from the local author's edit lifecycle (tickets 11 + 13) ----
+    // Nothing here runs in standalone (every method gates on live()+session). edit-intent (focus)
+    // implicitly acquires the block's content lock + heartbeats; edit-commit fans the block out
+    // (debounced, and recorded in the durable unacked buffer); blur/idle releases the lock.
+    function beat() { if (live() && session && session.heartbeat) session.heartbeat(viewingBlockId, editingBlockId); }
+    function onEditFocus(block) {
+      if (!live() || !block || !block.id || !session) return;
+      viewingBlockId = editingBlockId = block.id;
+      if (session.acquireLock) session.acquireLock(block.id); // implicit acquire on edit-intent (spec stories 8-9)
+      beat();
+    }
+    function onEditCommit(block) {
+      if (!live() || !block || !block.id) return;
+      pendingBlock = block; // coalesce rapid keystrokes; the server coalesces again downstream
+      if (editTimer) clearTimeout(editTimer);
+      editTimer = setTimeout(flushEdit, EDIT_DEBOUNCE_MS);
+    }
+    function flushEdit() {
+      editTimer = null;
+      if (!live() || !pendingBlock || !session || !session.sendChange) { pendingBlock = null; return; }
+      var b = pendingBlock; pendingBlock = null;
+      var content; try { content = JSON.parse(JSON.stringify(b)); } catch (e) { return; } // plain, serialisable
+      var baseSeq = (window.VersoSync && window.VersoSync._state) ? window.VersoSync._state().seq : 0;
+      session.sendChange(b.id, content, baseSeq); // fans out + records in the durable unacked buffer
+    }
+    function onEditBlur(block) {
+      if (!live() || !block || !block.id) return;
+      if (editTimer) { clearTimeout(editTimer); flushEdit(); } // commit any pending edit before releasing
+      if (session && session.releaseLock) session.releaseLock(block.id); // auto-release on blur (spec story 9)
+      if (editingBlockId === block.id) editingBlockId = null;
+      beat();
+    }
+
     function onEvent(env, state) {
       if (!env) return;
       if (env.type === "presence.state") { peers = (state && state.peers) || []; reproject(); }
@@ -15115,19 +15164,23 @@
       try {
         window.VersoSync.onEvent(onEvent);
         document.addEventListener("blur", flushPending, true); // flush deferred remote edits when a field loses focus
+        // light-dismiss for the handoff menu (NOT the conflict modal). Wired here (server mode only)
+        // -- the menu can only open while collaborating, so it never needs these in standalone.
+        document.addEventListener("click", closeHeldMenu);
+        document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeHeldMenu(); });
+        beatTimer = setInterval(beat, HEARTBEAT_MS); // ticket 11 AC4: heartbeat drives presence TTL
         session = window.VersoSync.connect(activeDocId);
       } catch (e) {}
     }
-    // Light-dismiss for the handoff menu (NOT the conflict modal, which never auto-dismisses).
-    // Always wired -- harmless when no menu is open, so it works the instant a menu appears.
-    document.addEventListener("click", closeHeldMenu);
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeHeldMenu(); });
     // Re-draw the collab overlays after a mount() (canvas.innerHTML was cleared). Cheap + gated.
     function reproject() { try { renderPresence(); renderLocks(); renderCursors(); } catch (e) {} }
     return { ensure: ensure, reproject: reproject, live: live, _model: presenceModel,
+      // send-side (called from the editor's edit lifecycle)
+      onEditFocus: onEditFocus, onEditCommit: onEditCommit, onEditBlur: onEditBlur,
       _peers: function (p) { peers = p || []; }, _locks: function (l) { locks = l || []; },
       _applyRemote: applyRemote, _flush: flushPending, _pending: function () { return pending.slice(); },
       _showConflicts: showConflicts, _openHeldMenu: openHeldMenu, _resolved: function () { return resolvedConflicts.slice(); },
+      _beat: beat, _editing: function () { return editingBlockId; }, _setSession: function (s) { session = s; },
       _session: function () { return session; } };
   })();
   window.__CollabChrome = CollabChrome;

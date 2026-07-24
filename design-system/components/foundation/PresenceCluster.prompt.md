@@ -3,8 +3,8 @@
 ```jsx
 <PresenceCluster
   peers={[
-    { name: "Priya", colour: colourForName("Priya"), state: "editing", blockId: "b2", blockLabel: "Range, bearing, elevation" },
-    { name: "Marcus", colour: colourForName("Marcus"), state: "viewing", blockId: "b3", blockLabel: "Why clutter is hard" },
+    { name: "Priya", colour: colourForName("Priya"), state: "editing", blockId: "b2", blockLabel: "Introduction" },
+    { name: "Marcus", colour: colourForName("Marcus"), state: "viewing", blockId: "b3", blockLabel: "Pricing overview" },
     { name: "Lena", colour: colourForName("Lena"), state: "viewing", blockId: null }
   ]}
   max={4}

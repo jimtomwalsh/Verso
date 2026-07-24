@@ -489,6 +489,15 @@ section("platform-pivot 11 presence chrome");
   ok("renderCursors is ephemeral + pointer-events:none (never intercepts a click)", /\.collab-cursor \{[\s\S]{0,200}pointer-events: none/.test(css) && /function renderCursors\(\) \{[\s\S]{0,120}if \(!live\(\)\) return;/.test(t));
   ok("reproject re-draws cursors after a rebuild", /renderPresence\(\); renderLocks\(\); renderCursors\(\);/.test(t));
 
+  // ---- send-side: drive the pipe from the edit lifecycle (tickets 11 AC4 + 13 AC1) ----
+  ok("edit-intent (focus) implicitly acquires the content lock + heartbeats", /function onEditFocus\(block\)/.test(t) && /session\.acquireLock\(block\.id\)/.test(t));
+  ok("edit-commit fans the block out (debounced) via sendChange", /function onEditCommit\(block\)/.test(t) && /setTimeout\(flushEdit, EDIT_DEBOUNCE_MS\)/.test(t) && /session\.sendChange\(b\.id, content, baseSeq\)/.test(t));
+  ok("blur auto-releases the lock (after flushing any pending edit)", /function onEditBlur\(block\)/.test(t) && /session\.releaseLock\(block\.id\)/.test(t));
+  ok("heartbeat timer starts in ensure() (drives presence TTL, AC4)", /beatTimer = setInterval\(beat, HEARTBEAT_MS\)/.test(t));
+  ok("beat sends viewing + editing block ids over the session", /function beat\(\) \{ if \(live\(\) && session && session\.heartbeat\) session\.heartbeat\(viewingBlockId, editingBlockId\); \}/.test(t));
+  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /CollabChrome\.onEditFocus\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditCommit\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditBlur\(collabBlockOf\(node\)\)/.test(t));
+  ok("send-side is gated on live()+session (inert in standalone)", /function onEditFocus\(block\) \{\s*if \(!live\(\) \|\| !block \|\| !block\.id \|\| !session\) return;/.test(t));
+
   // ---- ticket 13-UI: soft-conflict modal rows + handoff/notify (pure + wiring) ----
   var cdoc = { pages: [ { id: "p1", blocks: [ { id: "b1", type: "para", text: "SERVER-CURRENT" } ] } ] };
   var view = [ { blockId: "b1", mine: { id: "b1", type: "para", text: "MY-EDIT" }, hasMine: true, serverSeq: 9 },
