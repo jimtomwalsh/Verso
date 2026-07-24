@@ -6995,6 +6995,7 @@
   var tourLinkSel = null;         // T5b: the SELECTED edge (its source marker id) — decoupled from
                                   // hotspotEditId, which the re-hosted inspector always pins to a marker
   var TOUR_NODE_W = 300, TOUR_THUMB_H = 169; // board-space node metrics (16:9 thumb; larger for precise pin placement, #224 QA)
+  var TOUR_SOURCE_W = 440, TOUR_SOURCE_H = 248; // source-video scratch node (larger — it's the harvest surface)
   var TOUR_NOMINAL_W = 1280; // WYSIWYG: assumed learner screen width (landscape tablet) used to scale fixed-px point markers to the thumb; box markers are %-sized so they need no scaling
   var TOUR_NODE_H = TOUR_THUMB_H + 44;       // approx full card height (thumb + title) for marquee hit
   var tourLoopSel = null;         // #224 T6: the SELECTED loop frame id (its own selection lane)
@@ -7143,6 +7144,12 @@
     var upBtn = h("button", "vbrowser__btn", "Upload screens");
     upBtn.addEventListener("click", tourUploadScreens);
     bar.appendChild(upBtn);
+    // Add source video = drop a scratch video onto the board to harvest screenshots/segments
+    // from (author-time only; never ships). Playhead/in-out/harvest controls land in a later pass.
+    var srcBtn = h("button", "vbrowser__btn", "Add source video");
+    srcBtn.title = "Add a source video to harvest screens from (author-time scratch — never exported)";
+    srcBtn.addEventListener("click", tourAddSource);
+    bar.appendChild(srcBtn);
     // #224 T6: add a loop (screen-carousel) frame.
     var loopBtn = h("button", "vbrowser__btn", "Add loop");
     loopBtn.title = "Add a loop: a frame holding a set of screens the learner cycles forward/back";
@@ -7186,6 +7193,9 @@
     // Loop frames sit BENEATH the nodes (a group frame, like the edge layer) so member
     // ScreenNodes paint inside them. Order in the layer: loops, then nodes, then edges on top.
     var loops = h("div", "tourb__loops"); layer.appendChild(loops);
+    // Source-video scratch nodes (harvest surfaces): a distinct layer, beneath the screen
+    // nodes. They live on tourBlock.sources[] and are excluded from render/export.
+    var sources = h("div", "tourb__sources"); layer.appendChild(sources);
     var nodes = h("div", "tourb__nodes"); layer.appendChild(nodes);
     var edges = document.createElementNS(SVGNS, "svg"); edges.setAttribute("class", "tourb-edges");
     layer.appendChild(edges);
@@ -7220,7 +7230,7 @@
     body.appendChild(board); body.appendChild(panel);
     overlay.appendChild(body);
     document.body.appendChild(overlay);
-    tourUI = { overlay: overlay, board: board, layer: layer, loops: loops, edges: edges, nodes: nodes, panelBody: panelBody, count: count, zlvl: zlvl, faceWrap: faceWrap, addHsBtn: addHsBtn, pill: pill, pillActions: pillActions, pillActionsSep: pillActionsSep, panel: panel, propsBtn: propsBtn };
+    tourUI = { overlay: overlay, board: board, layer: layer, loops: loops, sources: sources, edges: edges, nodes: nodes, panelBody: panelBody, count: count, zlvl: zlvl, faceWrap: faceWrap, addHsBtn: addHsBtn, pill: pill, pillActions: pillActions, pillActionsSep: pillActionsSep, panel: panel, propsBtn: propsBtn };
     wireTourBoardGestures();
     return tourUI;
   }
@@ -7355,6 +7365,7 @@
     if (!tourUI) return;
     tourScrubNode = null; // #54: nodes are rebuilt below -> drop the stale hover-scrub reference
     renderTourLoops();
+    renderTourSources();
     var ss = tourScreens(), entry = tourEntryScreen();
     // #224 T6: members of a loop are positioned inside their frame's grid (not at their
     // own bx/by); write the slot back onto bx/by so edges + drag-start stay consistent.
@@ -7510,6 +7521,439 @@
     scheduleSave(); renderTourNodes();
     requestAnimationFrame(tourFit);
   }
+  // ---- source-video scratch nodes (harvest surfaces; excluded from render/export) ----
+  // They live on tourBlock.sources[] = [{ id, visual:"asset:<id>", name, bx, by }]. render.js
+  // never reads `sources`, and eachMediaSlot skips it, so a source is author-time-only. This
+  // first pass gives the on-board presence + interim hover-scrub; the playhead/in-out transport
+  // and the harvest (screenshot / segment) actions land in later passes.
+  function tourSources() { return (tourBlock && Array.isArray(tourBlock.sources)) ? tourBlock.sources : []; }
+  function tourSourceById(id) { var ss = tourSources(); for (var i = 0; i < ss.length; i++) if (ss[i] && ss[i].id === id) return ss[i]; return null; }
+  function tourSourceSrc(src) {
+    var v = src && src.visual;
+    if (!v || typeof v !== "string") return null;
+    if (v.indexOf("asset:") === 0) return editorAssetResolve(v.slice(6));
+    return v;
+  }
+  function tourAddSource() {
+    if (!tourBlock) return;
+    var inp = document.createElement("input"); inp.type = "file"; inp.accept = "video/*";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () {
+        pushHistory();
+        if (!Array.isArray(tourBlock.sources)) tourBlock.sources = [];
+        var id = "src-" + Math.random().toString(36).slice(2, 8); while (tourSourceById(id)) id += "x";
+        // drop it ABOVE the current node/source spread so it reads as a separate surface
+        var minY = Infinity;
+        tourScreens().forEach(function (s) { if (s) minY = Math.min(minY, s.by || 0); });
+        tourSources().forEach(function (s) { if (s) minY = Math.min(minY, s.by || 0); });
+        if (!isFinite(minY)) minY = 60;
+        var nm = (f.name || "").replace(/\.[^.]+$/, "").trim();
+        var srcNode = { id: id, visual: assetRef(r.result, f), bx: 80, by: minY - TOUR_SOURCE_H - 120 };
+        if (nm) srcNode.name = nm;
+        tourBlock.sources.push(srcNode);
+        scheduleSave(); renderTourNodes();
+        requestAnimationFrame(tourFit);
+      };
+      r.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  function tourRemoveSource(src) {
+    if (!src || !tourBlock) return;
+    confirmModal("Remove source video", "Screens you have already harvested from it are kept.", function () {
+      pushHistory();
+      var arr = tourSources(); var i = arr.indexOf(src); if (i >= 0) arr.splice(i, 1);
+      if (!arr.length) delete tourBlock.sources;
+      scheduleSave(); renderTourNodes();
+      try { sweepAllAssets(); } catch (_) {} // free the removed source's blob now (it's unreferenced)
+    }, { okLabel: "Remove", danger: true });
+  }
+  function renderTourSources() {
+    if (!tourUI || !tourUI.sources) return;
+    tourUI.sources.innerHTML = "";
+    tourSources().forEach(function (src, si) {
+      if (!src) return;
+      var card = h("div", "tourb-source");
+      card.style.left = (src.bx || 0) + "px"; card.style.top = (src.by || 0) + "px"; card.style.width = TOUR_SOURCE_W + "px";
+      card.setAttribute("data-source-id", src.id);
+      // header: SOURCE tag + name + remove
+      var head = h("div", "tourb-source__head");
+      if (window.Icon) { var gi = h("span", "tourb-source__glyph"); gi.innerHTML = window.Icon("square-play"); head.appendChild(gi); }
+      head.appendChild(h("span", "tourb-source__tag", "Source"));
+      var nm = h("input", "tourb-source__title"); nm.type = "text"; nm.spellcheck = false;
+      nm.placeholder = "Source " + (si + 1); nm.value = src.name || "";
+      var pushed = false;
+      nm.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      nm.addEventListener("focus", function () { pushed = false; });
+      nm.addEventListener("input", function () { if (!pushed) { pushHistory(); pushed = true; } if (nm.value) src.name = nm.value; else delete src.name; scheduleSave(); });
+      head.appendChild(nm);
+      var rm = iconBtn("trash", "Remove source video", true); rm.classList.add("tourb-source__remove");
+      rm.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      rm.addEventListener("click", function (e) { e.stopPropagation(); tourRemoveSource(src); });
+      head.appendChild(rm);
+      card.appendChild(head);
+      // video thumb — a LIVE video (the harvest surface): the transport plays/scrubs it, so
+      // (unlike screen nodes) we keep the live element rather than poster-swapping it.
+      var thumb = h("div", "tourb-source__thumb");
+      var vsrc = tourSourceSrc(src);
+      var vid = null;
+      if (!vsrc) { thumb.classList.add("is-empty"); thumb.style.height = TOUR_SOURCE_H + "px"; if (window.Icon) thumb.innerHTML = window.Icon("square-play"); }
+      else {
+        vid = document.createElement("video"); vid.src = vsrc; vid.muted = true;
+        vid.setAttribute("muted", ""); vid.setAttribute("playsinline", ""); vid.setAttribute("preload", "auto");
+        thumb.appendChild(vid);
+        if (tourCropEditSrc === src.id) thumb.appendChild(tourBuildCropOverlay(src, thumb));
+      }
+      card.appendChild(thumb);
+      if (vid) card.appendChild(tourBuildTransport(src, vid));
+      card.addEventListener("pointerdown", function (e) { tourSourcePointerDown(src, card, e); });
+      tourUI.sources.appendChild(card);
+    });
+  }
+  function tourSourcePointerDown(src, card, e) {
+    if (e.button !== 0 || tourSpace) return;
+    if (e.target.closest(".tourb-source__title, .tourb-source__remove, .tourb-transport")) return;
+    e.stopPropagation();
+    var start = { x: e.clientX, y: e.clientY }, moved = false, pushedH = false;
+    var ox = src.bx || 0, oy = src.by || 0;
+    try { card.setPointerCapture(e.pointerId); } catch (_) {}
+    function mv(ev) {
+      if (!moved && Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) < 4) return;
+      if (!pushedH) { pushHistory(); pushedH = true; }
+      moved = true;
+      var dx = (ev.clientX - start.x) / tourZoom, dy = (ev.clientY - start.y) / tourZoom;
+      src.bx = Math.round(ox + dx); src.by = Math.round(oy + dy);
+      card.style.left = src.bx + "px"; card.style.top = src.by + "px";
+    }
+    function up() { card.removeEventListener("pointermove", mv); card.removeEventListener("pointerup", up); if (moved) scheduleSave(); }
+    card.addEventListener("pointermove", mv); card.addEventListener("pointerup", up);
+  }
+
+  /* __TOUR_MEDIA_PURE__ start (pure helpers; extracted verbatim by tests/run.js) */
+  function tourFormatTime(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+  // Marking an in/out point at time t. Keep 0 <= in < out; a mark that would cross the
+  // other end DROPS that other end (it's no longer valid) rather than silently reordering.
+  // cur = { in, out } (either may be null/undefined). Returns a fresh { in, out }.
+  function tourApplyMark(kind, t, cur) {
+    cur = cur || {};
+    var inP = (cur.in == null) ? null : cur.in, outP = (cur.out == null) ? null : cur.out;
+    if (kind === "in") { inP = t; if (outP != null && outP <= t) outP = null; }
+    else { outP = t; if (inP != null && inP >= t) inP = null; }
+    return { in: inP, out: outP };
+  }
+  // Resolve a normalised crop {x,y,w,h} (0-1 fractions of the source) against the video's
+  // natural pixels -> a source rect {sx,sy,sw,sh} and the output {w,h}. Clamped in-bounds
+  // with a 1% min so a harvest is never zero-sized. No crop -> the full frame.
+  function tourCropRect(crop, natW, natH) {
+    var c = crop || { x: 0, y: 0, w: 1, h: 1 };
+    var x = Math.max(0, Math.min(1, c.x == null ? 0 : c.x));
+    var y = Math.max(0, Math.min(1, c.y == null ? 0 : c.y));
+    var w = Math.max(0.01, Math.min(1 - x, c.w == null ? 1 : c.w));
+    var hh = Math.max(0.01, Math.min(1 - y, c.h == null ? 1 : c.h));
+    var sw = Math.max(1, Math.round(w * natW)), sh = Math.max(1, Math.round(hh * natH));
+    return { sx: Math.round(x * natW), sy: Math.round(y * natH), sw: sw, sh: sh, w: sw, h: sh };
+  }
+  // A segment is harvestable only when both ends are marked and in < out.
+  function tourSegReady(inP, outP) { return inP != null && outP != null && outP > inP; }
+  /* __TOUR_MEDIA_PURE__ end */
+
+  var tourPlayingVideo = null; // only one source plays at a time
+  var tourCropEditSrc = null;  // id of the source whose crop overlay is open (one at a time)
+  function tourPauseAllSources(except) {
+    if (tourPlayingVideo && tourPlayingVideo !== except) { try { tourPlayingVideo.pause(); } catch (_) {} }
+  }
+  // The MediaTransport strip (DSLMS board/SourceNode): scrub rail + playhead + in/out ticks,
+  // and a controls row (play/pause, time readout, Set in / Set out). Plays/scrubs the LIVE
+  // video passed in; marks persist on src.in / src.out (seconds).
+  function tourBuildTransport(src, vid) {
+    var wrap = h("div", "tourb-transport");
+    // --- scrub rail ---
+    var rail = h("div", "tourb-transport__rail");
+    var range = h("div", "tourb-transport__range"); rail.appendChild(range);
+    var fill = h("div", "tourb-transport__fill"); rail.appendChild(fill);
+    var inTick = h("div", "tourb-transport__tick tourb-transport__tick--in"); rail.appendChild(inTick);
+    var outTick = h("div", "tourb-transport__tick tourb-transport__tick--out"); rail.appendChild(outTick);
+    var knob = h("div", "tourb-transport__knob"); rail.appendChild(knob);
+    wrap.appendChild(rail);
+    // --- controls row ---
+    var row = h("div", "tourb-transport__row");
+    var play = iconBtn("play", "Play / pause"); play.classList.add("tourb-transport__play");
+    row.appendChild(play);
+    var time = h("span", "tourb-transport__time", "0:00 / 0:00"); row.appendChild(time);
+    row.appendChild(h("div", "tourb-transport__spacer"));
+    // crop: toggle the crop overlay on the source (all harvests come out this same W x H)
+    var cropB = iconBtn("crop", "Crop the source (all screens harvested from it share this size)");
+    cropB.classList.add("tourb-transport__crop"); if (tourCropEditSrc === src.id) cropB.classList.add("is-on");
+    cropB.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cropB.addEventListener("click", function (e) { e.stopPropagation(); tourCropEditSrc = (tourCropEditSrc === src.id) ? null : src.id; renderTourSources(); });
+    row.appendChild(cropB);
+    var setIn = h("button", "tourb-transport__mark", "Set in"); setIn.type = "button"; setIn.title = "Set the segment IN point at the playhead"; row.appendChild(setIn);
+    var setOut = h("button", "tourb-transport__mark", "Set out"); setOut.type = "button"; setOut.title = "Set the segment OUT point at the playhead"; row.appendChild(setOut);
+    // harvest: freeze the current frame into a new image screen (＋ Segment lands here in tick 5)
+    var shot = h("button", "tourb-transport__harvest"); shot.type = "button";
+    shot.innerHTML = (window.Icon ? window.Icon("image") : "") + "<span>Screenshot</span>";
+    shot.title = "Create a screen from the current frame";
+    shot.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    shot.addEventListener("click", function (e) { e.stopPropagation(); tourHarvestScreenshot(src, vid); });
+    row.appendChild(shot);
+    // harvest a clip between in/out (silent WebM). Enabled only when a valid segment is marked.
+    var seg = h("button", "tourb-transport__harvest tourb-transport__harvest--seg"); seg.type = "button";
+    seg.innerHTML = (window.Icon ? window.Icon("scissors") : "") + "<span>Segment</span>";
+    seg.title = "Create an animated screen from the in → out segment";
+    seg.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    seg.addEventListener("click", function (e) { e.stopPropagation(); tourHarvestSegment(src, vid); });
+    row.appendChild(seg);
+    wrap.appendChild(row);
+
+    function dur() { var d = vid.duration; return (d && isFinite(d) && d > 0) ? d : 0; }
+    function paint() {
+      var d = dur(), t = vid.currentTime || 0;
+      var pct = d ? Math.max(0, Math.min(100, t / d * 100)) : 0;
+      knob.style.left = pct + "%"; fill.style.width = pct + "%";
+      time.textContent = tourFormatTime(t) + " / " + tourFormatTime(d);
+      var hasIn = src.in != null && d, hasOut = src.out != null && d;
+      inTick.hidden = !hasIn; outTick.hidden = !hasOut;
+      if (hasIn) inTick.style.left = Math.max(0, Math.min(100, src.in / d * 100)) + "%";
+      if (hasOut) outTick.style.left = Math.max(0, Math.min(100, src.out / d * 100)) + "%";
+      var lo = hasIn ? src.in / d * 100 : (hasOut ? 0 : 0);
+      var hi = hasOut ? src.out / d * 100 : (hasIn ? 100 : 0);
+      if ((hasIn || hasOut) && hi > lo) { range.hidden = false; range.style.left = lo + "%"; range.style.width = (hi - lo) + "%"; }
+      else range.hidden = true;
+      play.innerHTML = (window.Icon ? window.Icon(vid.paused ? "play" : "pause") : "");
+      seg.disabled = !tourSegReady(src.in, src.out); // a clip needs a valid in < out
+    }
+    function seekTo(clientX) {
+      var d = dur(); if (!d) return;
+      var r = rail.getBoundingClientRect(); if (!r.width) return;
+      var frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      try { vid.currentTime = frac * d; } catch (_) {}
+    }
+    // click / drag the rail to seek
+    rail.addEventListener("pointerdown", function (e) {
+      e.stopPropagation(); e.preventDefault();
+      try { rail.setPointerCapture(e.pointerId); } catch (_) {}
+      seekTo(e.clientX);
+      function mv(ev) { seekTo(ev.clientX); }
+      function up() { rail.removeEventListener("pointermove", mv); rail.removeEventListener("pointerup", up); }
+      rail.addEventListener("pointermove", mv); rail.addEventListener("pointerup", up);
+    });
+    play.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (vid.paused) { tourPauseAllSources(vid); tourPlayingVideo = vid; vid.play().catch(function () {}); }
+      else vid.pause();
+    });
+    function mark(kind) {
+      pushHistory();
+      var r = tourApplyMark(kind, vid.currentTime || 0, { in: src.in, out: src.out });
+      if (r.in == null) delete src.in; else src.in = r.in;
+      if (r.out == null) delete src.out; else src.out = r.out;
+      scheduleSave(); paint();
+    }
+    setIn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    setOut.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    setIn.addEventListener("click", function (e) { e.stopPropagation(); mark("in"); });
+    setOut.addEventListener("click", function (e) { e.stopPropagation(); mark("out"); });
+    vid.addEventListener("timeupdate", paint);
+    vid.addEventListener("loadedmetadata", paint);
+    vid.addEventListener("play", paint);
+    vid.addEventListener("pause", paint);
+    paint();
+    return wrap;
+  }
+  // Freeze the source's CURRENT frame into a new image screen node. A normal harvested asset
+  // (assetRef -> AssetStore, content-hash dedupe); the export media pre-pass downscales it like
+  // any image, so we store full-res here. Records lightweight provenance `source:{id,t}`
+  // (editor-only, ignored by render like bx/by) so tick 6 can re-bake in place.
+  function tourHarvestScreenshot(src, vid, replace) {
+    if (!vid || !vid.videoWidth) return; // no decoded frame yet -> nothing to grab
+    var url;
+    try {
+      // honour the source crop so every screen harvested from this source is the same W x H
+      var r = tourCropRect(src.crop, vid.videoWidth, vid.videoHeight);
+      var cv = document.createElement("canvas"); cv.width = r.w; cv.height = r.h;
+      cv.getContext("2d").drawImage(vid, r.sx, r.sy, r.sw, r.sh, 0, 0, r.w, r.h);
+      url = cv.toDataURL("image/png"); // throws if the frame is cross-origin tainted
+    } catch (_) { return; }
+    pushHistory();
+    var t = vid.currentTime || 0;
+    // RE-BAKE: replace an existing screen's visual in place -> its id + markers/nav survive.
+    if (replace) {
+      replace.visual = assetRef(url, { type: "image/png", name: (src.name || "source") + " " + tourFormatTime(t) });
+      replace.kind = "image"; replace.source = { id: src.id, t: t };
+      tourSelKind = "node"; hotspotEditScreenId = replace.id; hotspotEditId = null; tourLoopSel = null;
+      scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+      return;
+    }
+    var sid = "scr-" + Math.random().toString(36).slice(2, 8); while (tourScreenById(sid)) sid += "x";
+    // stack harvests from THIS source down its own column so they don't pile on one spot
+    var sibs = tourScreens().filter(function (s) { return s && s.source && s.source.id === src.id; }).length;
+    var scr = {
+      id: sid,
+      visual: assetRef(url, { type: "image/png", name: (src.name || "source") + " " + tourFormatTime(t) }),
+      kind: "image", alt: "", markers: [],
+      bx: (src.bx || 0) + TOUR_SOURCE_W + 60, by: (src.by || 0) + sibs * (TOUR_THUMB_H + 130),
+      source: { id: src.id, t: t } // provenance -> non-destructive re-bake (tick 6)
+    };
+    scr.name = (src.name ? src.name + " " : "") + tourFormatTime(t);
+    tourBlock.screens.push(scr);
+    tourSelKind = "node"; hotspotEditScreenId = sid; hotspotEditId = null; tourLoopSel = null;
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  // ---- ＋ Segment: record the in->out slice to a SILENT WebM screen (Q7) ----
+  // Play the source in->out drawing each frame through the CROP canvas, capture that canvas's
+  // stream into a MediaRecorder. Canvas capture carries no audio (silent by construction) and
+  // bakes the crop in, so the clip is the same W x H as screenshot harvests. Output = a normal
+  // kind:"video" screen (keeps the shipped hotspot-video runtime: progress/reveal/once/loop).
+  var tourSegRecording = false;
+  function tourPickWebmMime() {
+    var c = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+    for (var i = 0; i < c.length; i++) { try { if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch (_) {} }
+    return "";
+  }
+  function tourHarvestSegment(src, vid, replace, inOut) {
+    var inMark = inOut ? inOut.in : src.in, outMark = inOut ? inOut.out : src.out;
+    if (tourSegRecording || !vid || !tourSegReady(inMark, outMark)) return;
+    if (typeof MediaRecorder === "undefined") return;
+    var r = tourCropRect(src.crop, vid.videoWidth || 1280, vid.videoHeight || 720);
+    var cv = document.createElement("canvas"); cv.width = r.w; cv.height = r.h;
+    var ctx = cv.getContext("2d");
+    var stream = cv.captureStream ? cv.captureStream(30) : null;
+    if (!stream) return;
+    var mime = tourPickWebmMime(), rec;
+    try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); } catch (_) { return; }
+    var chunks = [], raf = null, inPt = inMark, outPt = outMark;
+    function stopDraw() { if (raf) { cancelAnimationFrame(raf); raf = null; } try { vid.pause(); } catch (_) {} }
+    function draw() {
+      try { ctx.drawImage(vid, r.sx, r.sy, r.sw, r.sh, 0, 0, r.w, r.h); } catch (_) {}
+      if ((vid.currentTime || 0) >= outPt) { try { rec.stop(); } catch (_) {} return; }
+      raf = requestAnimationFrame(draw);
+    }
+    rec.ondataavailable = function (e) { if (e && e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = function () {
+      stopDraw();
+      var blob = new Blob(chunks, { type: mime || "video/webm" });
+      var fr = new FileReader();
+      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace); };
+      fr.onerror = function () { tourSegRecording = false; };
+      fr.readAsDataURL(blob);
+    };
+    tourSegRecording = true;
+    var onSeeked = function () {
+      vid.removeEventListener("seeked", onSeeked);
+      try { rec.start(); } catch (_) { tourSegRecording = false; return; }
+      vid.play().catch(function () {});
+      draw();
+    };
+    vid.addEventListener("seeked", onSeeked);
+    try { vid.currentTime = inPt; } catch (_) { onSeeked(); }
+  }
+  function tourFinishSegment(src, dataUrl, inPt, outPt, replace) {
+    tourSegRecording = false;
+    if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) return;
+    pushHistory();
+    var label0 = (src.name ? src.name + " " : "") + tourFormatTime(inPt) + "-" + tourFormatTime(outPt);
+    // RE-BAKE: replace an existing screen's clip in place -> id + markers/nav survive.
+    if (replace) {
+      replace.visual = assetRef(dataUrl, { type: "video/webm", name: label0 });
+      replace.kind = "video"; if (!replace.playback) replace.playback = "once"; replace.source = { id: src.id, in: inPt, out: outPt };
+      tourSelKind = "node"; hotspotEditScreenId = replace.id; hotspotEditId = null; tourLoopSel = null;
+      scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+      return;
+    }
+    var sid = "scr-" + Math.random().toString(36).slice(2, 8); while (tourScreenById(sid)) sid += "x";
+    var sibs = tourScreens().filter(function (s) { return s && s.source && s.source.id === src.id; }).length;
+    var label = (src.name ? src.name + " " : "") + tourFormatTime(inPt) + "-" + tourFormatTime(outPt);
+    var scr = {
+      id: sid,
+      visual: assetRef(dataUrl, { type: "video/webm", name: label }),
+      kind: "video", playback: "once", alt: "", markers: [],
+      bx: (src.bx || 0) + TOUR_SOURCE_W + 60, by: (src.by || 0) + sibs * (TOUR_THUMB_H + 130),
+      source: { id: src.id, in: inPt, out: outPt } // provenance -> re-cut (tick 6)
+    };
+    scr.name = label;
+    tourBlock.screens.push(scr);
+    tourSelKind = "node"; hotspotEditScreenId = sid; hotspotEditId = null; tourLoopSel = null;
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  // Non-destructive RE-BAKE: re-run the harvest from the still-present source and swap this
+  // screen's visual IN PLACE (id + markers/nav preserved) -- so "nudge the frame / re-cut after
+  // I changed the crop" is one click, not delete + re-harvest + re-wire. Needs the source (Q3:
+  // it persists). No-op if the source was removed.
+  function tourRebakeScreen(s) {
+    if (!s || !s.source) return;
+    var src = tourSourceById(s.source.id); if (!src) return; // source gone -> nothing to re-bake from
+    var vid = (tourUI && tourUI.sources) ? tourUI.sources.querySelector('.tourb-source[data-source-id="' + src.id + '"] video') : null;
+    if (!vid || !vid.videoWidth) return;
+    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out }); return; }
+    var t = s.source.t || 0;
+    var grab = function () { tourHarvestScreenshot(src, vid, s); };
+    if (Math.abs((vid.currentTime || 0) - t) < 0.06) { grab(); return; }
+    var on = function () { vid.removeEventListener("seeked", on); grab(); };
+    vid.addEventListener("seeked", on);
+    try { vid.currentTime = t; } catch (_) { vid.removeEventListener("seeked", on); grab(); }
+  }
+  // Crop overlay on a source thumb: a draggable/resizable rect stored NORMALISED on src.crop
+  // (0-1 fractions). All harvests route through it (tourCropRect) so every screen from this
+  // source is the same size. A full-frame crop is stored as "no crop" (whole frame).
+  function tourBuildCropOverlay(src, thumb) {
+    var c0 = (src.crop && typeof src.crop === "object") ? src.crop : {};
+    var crop = { x: c0.x || 0, y: c0.y || 0, w: c0.w == null ? 1 : c0.w, h: c0.h == null ? 1 : c0.h };
+    var ov = h("div", "tourb-crop");
+    var box = h("div", "tourb-crop__box");
+    function clampAll() {
+      crop.w = Math.max(0.05, Math.min(1, crop.w)); crop.h = Math.max(0.05, Math.min(1, crop.h));
+      crop.x = Math.max(0, Math.min(1 - crop.w, crop.x)); crop.y = Math.max(0, Math.min(1 - crop.h, crop.y));
+    }
+    function place() { box.style.left = (crop.x * 100) + "%"; box.style.top = (crop.y * 100) + "%"; box.style.width = (crop.w * 100) + "%"; box.style.height = (crop.h * 100) + "%"; }
+    function r3(n) { return Math.round(n * 1000) / 1000; }
+    function store() {
+      clampAll();
+      if (crop.x <= 0.001 && crop.y <= 0.001 && crop.w >= 0.999 && crop.h >= 0.999) delete src.crop; // full frame = no crop
+      else src.crop = { x: r3(crop.x), y: r3(crop.y), w: r3(crop.w), h: r3(crop.h) };
+      scheduleSave();
+    }
+    place();
+    // drag the body = move
+    box.addEventListener("pointerdown", function (e) {
+      if (e.target !== box) return; // corner handles have their own
+      e.stopPropagation(); e.preventDefault();
+      var r = thumb.getBoundingClientRect(), ox = crop.x, oy = crop.y, sx = e.clientX, sy = e.clientY, pushed = false;
+      try { box.setPointerCapture(e.pointerId); } catch (_) {}
+      function mv(ev) { if (!pushed) { pushHistory(); pushed = true; } crop.x = ox + (ev.clientX - sx) / r.width; crop.y = oy + (ev.clientY - sy) / r.height; clampAll(); place(); }
+      function up() { box.removeEventListener("pointermove", mv); box.removeEventListener("pointerup", up); store(); place(); }
+      box.addEventListener("pointermove", mv); box.addEventListener("pointerup", up);
+    });
+    // corner handles = resize (the opposite corner stays anchored)
+    [["nw", -1, -1], ["ne", 1, -1], ["sw", -1, 1], ["se", 1, 1]].forEach(function (cn) {
+      var hx = cn[1], hy = cn[2];
+      var hd = h("div", "tourb-crop__handle tourb-crop__handle--" + cn[0]);
+      hd.addEventListener("pointerdown", function (e) {
+        e.stopPropagation(); e.preventDefault();
+        var r = thumb.getBoundingClientRect(), o = { x: crop.x, y: crop.y, w: crop.w, h: crop.h }, sx = e.clientX, sy = e.clientY, pushed = false;
+        try { hd.setPointerCapture(e.pointerId); } catch (_) {}
+        function mv(ev) {
+          if (!pushed) { pushHistory(); pushed = true; }
+          var dx = (ev.clientX - sx) / r.width, dy = (ev.clientY - sy) / r.height;
+          if (hx < 0) { crop.x = o.x + dx; crop.w = o.w - dx; } else { crop.w = o.w + dx; }
+          if (hy < 0) { crop.y = o.y + dy; crop.h = o.h - dy; } else { crop.h = o.h + dy; }
+          if (crop.w < 0.05) { if (hx < 0) crop.x = o.x + o.w - 0.05; crop.w = 0.05; }
+          if (crop.h < 0.05) { if (hy < 0) crop.y = o.y + o.h - 0.05; crop.h = 0.05; }
+          clampAll(); place();
+        }
+        function up() { hd.removeEventListener("pointermove", mv); hd.removeEventListener("pointerup", up); store(); place(); }
+        hd.addEventListener("pointermove", mv); hd.addEventListener("pointerup", up);
+      });
+      box.appendChild(hd);
+    });
+    ov.appendChild(box);
+    return ov;
+  }
   function tourSelectLoop(loop) {
     tourSelKind = loop ? "loop" : null;
     tourLoopSel = loop ? loop.id : null; hotspotEditId = null; hotspotEditScreenId = null; tourNodeSel = []; tourLinkSel = null;
@@ -7572,6 +8016,11 @@
       finB.addEventListener("click", function () { pushHistory(); if (isFin) delete tourBlock.completionScreen; else tourBlock.completionScreen = s.id; scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); }); host.appendChild(finB);
       host.appendChild(h("span", "tb-sep"));
       var replB = iconBtn("image", "Replace screen image"); replB.addEventListener("click", function () { tourReplaceScreenImage(s); }); host.appendChild(replB);
+      // re-bake from source: only for a harvested screen whose source is still on the board
+      if (s.source && tourSourceById(s.source.id)) {
+        var rbB = iconBtn("refresh", "Re-bake from source (re-capture this screen from its source video)");
+        rbB.addEventListener("click", function () { tourRebakeScreen(s); }); host.appendChild(rbB);
+      }
       var dupN = iconBtn("duplicate", "Duplicate screen"); dupN.addEventListener("click", function () { tourDuplicateScreen(s); }); host.appendChild(dupN);
       if (!isEntry) { var delN = iconBtn("trash", "Delete screen", true); delN.addEventListener("click", function () { tourDeleteScreen(s); }); host.appendChild(delN); } // entry/Home is protected
       shown = true;

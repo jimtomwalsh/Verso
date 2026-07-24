@@ -885,6 +885,27 @@ section("YY asset-seam");
   ok("migrate success->ref", md.pages[0].blocks[0].src === "asset:hoisted");
   ok("migrate fail keeps data:", md.pages[0].blocks[1].src === "data:img,FAILME");
 
+  // Hotspot tour SOURCE videos (author-time harvest scratch) must never ship: a `sources`
+  // container is SKIPPED by eachMediaSlot, so resolveMedia (used by BOTH the editor pre-pass
+  // and the export bake) leaves it untouched -> no media/<id> file, no inline base64 in export.
+  // But collectAssetRefs (garbage-collection) MUST still keep it, so a persisted source survives
+  // the unload mark-sweep and is there next time the tour builder opens.
+  var sdoc = { pages: [{ blocks: [
+    { type: "hotspot", screens: [{ visual: "asset:SCR" }], sources: [{ id: "src1", visual: "asset:SRCVID" }] }
+  ] }] };
+  var sres = [];
+  var srestore = rw.resolveMedia(sdoc, function (id) { sres.push(id); return "URL:" + id; });
+  ok("source excluded from resolve (render+export)", sres.indexOf("SRCVID") === -1 && sres.indexOf("SCR") !== -1);
+  ok("source ref left intact by resolve", sdoc.pages[0].blocks[0].sources[0].visual === "asset:SRCVID");
+  srestore();
+  ok("source KEPT for GC (persists across sessions)", rw.collectAssetRefs(sdoc).sort().join(",") === "SCR,SRCVID");
+
+  // A harvested screen carries provenance `source:{id,t}` (which source frame it came from).
+  // That's inert data (id string + number) — it must add NO asset ref (no export/GC impact);
+  // only the screen's own visual counts.
+  var pdoc = { pages: [{ blocks: [{ type: "hotspot", screens: [{ visual: "asset:PV", source: { id: "src-x", t: 5 } }] }] }] };
+  ok("harvest provenance source:{id,t} is inert (no asset ref)", rw.collectAssetRefs(pdoc).join(",") === "PV");
+
   // embed-html hoist (quota/data-loss reroute): raw htmlEmbed markup must leave
   // the doc JSON as an "asset:<id>" ref; already-ref/URL html + non-embeds untouched;
   // a failed put is left raw (non-destructive); round-trips back to raw via resolveEmbedHtml.
@@ -928,6 +949,36 @@ section("YY asset-seam");
   failNext = false;
   AS.sweep([svg]);
   ok("sweep removes unref", !AS.has(id) && AS.has(svg));
+})();
+
+// ---- tour source MediaTransport: pure time/mark helpers ------------------
+section("tour media transport (pure)");
+(function () {
+  var etxt = src("src/editor.js");
+  var a = etxt.indexOf("/* __TOUR_MEDIA_PURE__ start");
+  var b = etxt.indexOf("/* __TOUR_MEDIA_PURE__ end");
+  if (a < 0 || b < 0) { ok("tour media pure block present", false); return; }
+  var block = etxt.slice(etxt.indexOf("\n", a) + 1, b);
+  var api = new Function(block + "; return { fmt: tourFormatTime, mark: tourApplyMark, crop: tourCropRect, segReady: tourSegReady };")();
+  ok("fmt 0 -> 0:00", api.fmt(0) === "0:00");
+  ok("fmt 65 -> 1:05", api.fmt(65) === "1:05");
+  ok("fmt neg -> 0:00", api.fmt(-5) === "0:00");
+  var r1 = api.mark("in", 3, {});
+  ok("mark in", r1.in === 3 && r1.out == null);
+  var r2 = api.mark("out", 10, r1);
+  ok("mark out keeps valid in", r2.in === 3 && r2.out === 10);
+  ok("out<=in drops the in", (function () { var r = api.mark("out", 2, r2); return r.in == null && r.out === 2; })());
+  ok("in>=out drops the out", (function () { var r = api.mark("in", 20, { in: 3, out: 10 }); return r.in === 20 && r.out == null; })());
+  // crop rect: no crop = full frame; a normalised crop maps to source-px + output dims;
+  // clamped in-bounds; all harvests from one crop share the same output W x H.
+  ok("cropRect null = full frame", (function () { var r = api.crop(null, 1920, 1080); return r.sx === 0 && r.sy === 0 && r.sw === 1920 && r.sh === 1080 && r.w === 1920 && r.h === 1080; })());
+  ok("cropRect half", (function () { var r = api.crop({ x: 0.25, y: 0.5, w: 0.5, h: 0.5 }, 1920, 1080); return r.sx === 480 && r.sy === 540 && r.w === 960 && r.h === 540; })());
+  ok("cropRect clamps out-of-bounds", (function () { var r = api.crop({ x: 0.8, y: 0, w: 0.5, h: 1 }, 1000, 1000); return r.sx === 800 && r.w === 200; })());
+  ok("cropRect two harvests same size", (function () { var a = api.crop({ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }, 1280, 720), b = api.crop({ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }, 1280, 720); return a.w === b.w && a.h === b.h; })());
+  // segment gate: needs both ends marked and in < out
+  ok("segReady both + in<out", api.segReady(2, 8) === true);
+  ok("segReady needs both", api.segReady(2, null) === false && api.segReady(null, 8) === false);
+  ok("segReady rejects out<=in", api.segReady(8, 2) === false && api.segReady(5, 5) === false);
 })();
 
 // ---- assetSrc resolver hook ----------------------------------------------

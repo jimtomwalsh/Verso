@@ -2948,6 +2948,59 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 .tourb__marquee { position: absolute; z-index: 20; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
 .tourb-edges { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .tourb__nodes { position: absolute; top: 0; left: 0; }
+.tourb__sources { position: absolute; top: 0; left: 0; }
+/* Source-video scratch node: the harvest surface. Distinct from a ScreenNode (accent-tinted
+   header, dashed ring) so it reads as an author-time tool, NOT a screen that ships. */
+.tourb-source {
+  position: absolute; display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--surface-raised); border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-100);
+  padding: var(--space-2); cursor: grab; user-select: none;
+}
+.tourb-source.is-dragging { cursor: grabbing; z-index: 5; }
+.tourb-source__head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 0; }
+.tourb-source__glyph { display: inline-flex; color: var(--accent); }
+.tourb-source__glyph svg { width: 15px; height: 15px; }
+.tourb-source__tag {
+  flex: none; font: var(--type-caption); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+  padding: 1px 6px; border-radius: var(--radius-pill);
+}
+.tourb-source__title { flex: 1 1 auto; min-width: 0; font: var(--type-body-strong); color: var(--text-primary); background: transparent; border: 0; padding: 2px 4px; border-radius: var(--radius-sm); }
+.tourb-source__title:focus { outline: none; background: var(--surface-canvas); box-shadow: inset 0 0 0 1px var(--border-input); }
+.tourb-source__remove { flex: none; width: 24px; height: 24px; }
+.tourb-source__thumb { position: relative; width: 100%; border-radius: var(--radius-sm); background: var(--surface-canvas); overflow: hidden; }
+.tourb-source__thumb img, .tourb-source__thumb video { width: 100%; height: auto; display: block; pointer-events: none; border-radius: var(--radius-sm); }
+.tourb-source__thumb.is-empty { display: flex; align-items: center; justify-content: center; color: var(--icon-idle); }
+.tourb-source__thumb.is-empty svg { width: 32px; height: 32px; }
+/* MediaTransport (DSLMS board/SourceNode): scrub rail + playhead + in/out ticks, then a
+   controls row. Bound to DSLMS tokens; the transport lives ON the media it controls. */
+.tourb-transport { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) 2px 2px; }
+.tourb-transport__rail { position: relative; height: 4px; border-radius: var(--radius-pill); background: var(--border-subtle); cursor: pointer; touch-action: none; }
+.tourb-transport__range { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 24%, transparent); pointer-events: none; }
+.tourb-transport__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: var(--radius-pill); background: var(--accent); pointer-events: none; }
+.tourb-transport__tick { position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px; background: var(--accent); transform: translateX(-1px); pointer-events: none; }
+.tourb-transport__knob { position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: var(--radius-pill); background: var(--accent); box-shadow: var(--shadow-100); transform: translateY(-50%); pointer-events: none; }
+.tourb-transport__row { display: flex; align-items: center; gap: var(--space-2); }
+.tourb-transport__play { flex: none; width: 28px; height: 28px; }
+.tourb-transport__time { flex: none; font-variant-numeric: tabular-nums; font: var(--type-caption); color: var(--text-secondary); }
+.tourb-transport__spacer { flex: 1 1 auto; }
+.tourb-transport__mark { flex: none; font: var(--type-caption); color: var(--text-secondary); background: var(--surface-canvas); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__mark:hover { color: var(--text-primary); border-color: var(--border-focus); }
+.tourb-transport__harvest { flex: none; display: inline-flex; align-items: center; gap: 4px; font: var(--type-caption); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__harvest svg { width: 13px; height: 13px; }
+.tourb-transport__harvest:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.tourb-transport__harvest:disabled { opacity: 0.4; cursor: not-allowed; }
+.tourb-transport__crop { flex: none; width: 28px; height: 28px; }
+.tourb-transport__crop.is-on { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+/* crop overlay on the source thumb: a bright rect with corner handles; dim outside via a big ring shadow */
+.tourb-crop { position: absolute; inset: 0; z-index: 4; }
+.tourb-crop__box { position: absolute; box-sizing: border-box; border: 1px solid var(--accent); box-shadow: 0 0 0 9999px color-mix(in srgb, #000 45%, transparent); cursor: move; }
+.tourb-crop__handle { position: absolute; width: 12px; height: 12px; background: var(--accent); border: 1px solid #fff; border-radius: 2px; }
+.tourb-crop__handle--nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.tourb-crop__handle--ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.tourb-crop__handle--sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.tourb-crop__handle--se { right: -6px; bottom: -6px; cursor: nwse-resize; }
 /* right inspector — re-hosts renderHotspotInspector */
 /* Properties DRAWER: an absolute slide-in over the right of the board (the board is always full
    width behind it), collapsed by default so the board dominates — canvas-first. Opens on demand for
