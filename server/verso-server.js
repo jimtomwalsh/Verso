@@ -19,6 +19,8 @@
 var http = require("node:http");
 var createStore = require("./store").createStore;
 var createBlockStore = require("./block-store").createBlockStore;
+var createSyncHub = require("./sync").createSyncHub;
+var createSyncRoutes = require("./sync-wire").createSyncRoutes;
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -67,7 +69,7 @@ function authorize(req, config) {
 // drive it without binding a socket. An optional blockStore (ticket 03) mounts the
 // block-addressable /api/doc/* routes below the same API -- the boundary Phase-2 sync
 // fans out from. When absent, only the ticket-02 blob routes are served.
-function makeHandler(store, config, blockStore) {
+function makeHandler(store, config, blockStore, sync) {
   config = config || {};
   return function handler(req, res) {
     var raw = req.url || "";
@@ -201,6 +203,18 @@ function makeHandler(store, config, blockStore) {
       return sendJson(res, 405, { ok: false, error: "method not allowed" });
     }
 
+    // --- live-collaboration long-poll fallback (ticket 08; server mode only) ---
+    // The wss:// pipe is handled on the http 'upgrade' event (see createServer). These
+    // are the mandated long-poll endpoints for proxies/networks without WebSockets.
+    if (url === "/sync/send" && method === "POST" && sync) return withJsonBody(req, res, function (body) {
+      sync.handleSend(body.clientId, body.envelope, body.author, function (r) { return sendJson(res, r.ok ? 200 : 409, r); });
+    });
+    if (url === "/sync/poll" && method === "GET" && sync) {
+      var clientId = "", author = null;
+      (query.split("&")).forEach(function (kv) { var p = kv.split("="); if (p[0] === "clientId") clientId = decodeURIComponent(p[1] || ""); if (p[0] === "author") author = decodeURIComponent(p[1] || ""); });
+      return sync.handlePoll(clientId, author, function (r) { return sendJson(res, 200, r); });
+    }
+
     return sendJson(res, 404, { ok: false, error: "unknown API route" });
   };
 }
@@ -215,9 +229,17 @@ function createServer(opts) {
   var blockStore = opts.hasOwnProperty("blockStore")
     ? opts.blockStore
     : (opts.dbPath ? createBlockStore(opts.dbPath, {}) : null);
-  var server = http.createServer(makeHandler(store, config, blockStore));
+  // Live-collaboration hub (ticket 08). Created always, but DORMANT unless mode==="server":
+  // the hub fans out nothing in local mode, and createSyncRoutes returns an inert object
+  // with no 'upgrade' handler -- so the desktop app never grows a collaboration surface.
+  var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now }) : null;
+  var sync = hub ? createSyncRoutes(hub, config) : null;
+  var server = http.createServer(makeHandler(store, config, blockStore, sync));
+  if (sync && !sync.dormant) server.on("upgrade", sync.upgrade); // wss:// only in server mode
   server.__store = store;
   server.__blockStore = blockStore;
+  server.__hub = hub;
+  server.__sync = sync;
   server.__config = config;
   return server;
 }

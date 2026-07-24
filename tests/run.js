@@ -62,7 +62,8 @@ section("syntax");
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
- "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js"
+ "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
+ "server/sync.js", "server/sync-wire.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -232,7 +233,7 @@ section("platform-pivot 02 server-of-one");
 // ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
 section("platform-pivot 02 server invariants");
 (function () {
-  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js");
+  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js") + src("server/sync.js") + src("server/sync-wire.js");
   // Dependency-free: only node: builtins may be required (bundled runtime is the sole exception).
   var reqs = s.match(/require\(("|')([^"')]+)\1\)/g) || [];
   var badDep = reqs.filter(function (m) {
@@ -461,6 +462,96 @@ section("platform-pivot 05 round-trip fidelity");
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
+})();
+
+// ---- platform-pivot 08: live-collaboration sequencer + fan-out (primary seam) ----
+// The favoured seam: drive typed envelopes through the hub against a real block store
+// via an in-memory FakeTransport, assert the emitted seq-stamped events + persist-
+// before-fan-out + local-mode dormancy. No sockets (the wire is a secondary, thin seam).
+section("platform-pivot 08 sync hub");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> sync hub tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-sync-test-"));
+  var idn = 0;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return 0; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] } ] }, "sys");
+    var env = SY.envelope;
+    // server mode: two clients, block.change A -> delivered to B seq-stamped, persist-first
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return 7; } });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    hub.connect(ta, "alice"); hub.connect(tb, "bob");
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ok("AC3: sync.hello -> catchup replaying events since sinceSeq (one model)", ta.sent.some(function (e) { return e.type === "sync.catchup" && Array.isArray(e.payload.events); }));
+    var seqBefore = store.maxSeq();
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "H2" }, baseSeq: seqBefore }));
+    ok("AC1: persist BEFORE fan-out (store advanced by 1)", store.maxSeq() === seqBefore + 1);
+    ok("AC1: materialized state reflects the change", store.materializeDoc("C-1").pages[0].blocks[0].text === "H2");
+    var fanned = tb.sent.filter(function (e) { return e.type === "block.change"; });
+    ok("AC1: block.change delivered to the OTHER client", fanned.length === 1 && fanned[0].blockId === "b1");
+    ok("AC1/AC3: fanned-out event is seq-stamped by the server", fanned[0].seq === seqBefore + 1);
+    ok("AC1: origin gets an ack, not an echoed block.change", ta.sent.some(function (e) { return e.type === "block.ack" && e.seq === seqBefore + 1; }) && !ta.sent.some(function (e) { return e.type === "block.change"; }));
+    ok("AC4: no second event model -- change lives in Foundation's log", store.changesSince(seqBefore, "C-1").length === 1);
+    ok("stale-write guard: baseSeq carried on fan-out (for 09/13)", fanned[0].payload.baseSeq === seqBefore);
+    // ephemeral presence fans out but is never logged
+    var seqNow = store.maxSeq();
+    ta.receive(env("presence.heartbeat", "C-1", null, null, "alice", 0, { editingBlockId: "b1" }));
+    ok("presence fans out to the peer", tb.sent.some(function (e) { return e.type === "presence.heartbeat"; }));
+    ok("presence is ephemeral (no log append)", store.maxSeq() === seqNow);
+    // lock auto-grant absent a lockManager (ticket 10 plugs in)
+    ta.receive(env("lock.acquire", "C-1", "b2", null, "alice", 0, {}));
+    ok("lock.acquire auto-granted (no lockManager yet -> ticket 10)", ta.sent.some(function (e) { return e.type === "lock.granted" && e.blockId === "b2"; }));
+    // disconnect cleanup
+    var n = hub._subs("C-1").length; tb.close();
+    ok("drop removes the client from subscribers", hub._subs("C-1").length === n - 1);
+    // AC5: local mode inert -> no fan-out (still persists locally)
+    var hubL = SY.createSyncHub(store, { mode: "local", now: function () { return 0; } });
+    var la = SY.FakeTransport(), lb = SY.FakeTransport();
+    hubL.connect(la, "x"); hubL.connect(lb, "y");
+    la.receive(env("sync.hello", "C-1", null, null, "x", 0, { sinceSeq: 0 }));
+    lb.receive(env("sync.hello", "C-1", null, null, "y", 0, { sinceSeq: 0 }));
+    la.receive(env("block.change", "C-1", "b2", null, "x", 0, { content: { id: "b2", type: "para", text: "local" } }));
+    ok("AC5: local mode does NOT fan out to peers", !lb.sent.some(function (e) { return e.type === "block.change"; }));
+    ok("AC5: local mode still persists (store is the source of truth)", store.materializeDoc("C-1").pages[0].blocks[1].text === "local");
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 08: wire transports (secondary seam) ----------------------
+// Hand-rolled wss:// codec + long-poll fallback, interchangeable behind the Transport
+// interface. No real sockets -- the RFC6455 codec + queue logic are unit-testable.
+section("platform-pivot 08 sync wire");
+(function () {
+  var W = require(path.join(ROOT, "server/sync-wire.js"));
+  // RFC6455 handshake example vector
+  ok("wsAccept matches the RFC6455 example vector", W.wsAccept("dGhlIHNhbXBsZSBub25jZQ==") === "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+  var enc = W.wsEncodeText("hello");
+  ok("encoded text frame: FIN+text opcode + 5-byte payload", enc[0] === 0x81 && enc.length === 7);
+  function maskFrame(str) { var p = Buffer.from(str), mask = Buffer.from([1, 2, 3, 4]), m = Buffer.alloc(p.length); for (var i = 0; i < p.length; i++) m[i] = p[i] ^ mask[i & 3]; return Buffer.concat([Buffer.from([0x81, 0x80 | p.length]), mask, m]); }
+  var dec = W.wsDecode(maskFrame("ping"));
+  ok("wsDecode unmasks a client text frame", dec.messages.length === 1 && dec.messages[0] === "ping" && dec.rest.length === 0);
+  var partial = W.wsDecode(Buffer.from([0x81, 0x80 | 10, 1, 2, 3, 4, 0, 0]));
+  ok("wsDecode buffers an incomplete frame (waits for more)", partial.messages.length === 0 && partial.rest.length > 0);
+  var lp = W.LongPollTransport();
+  ok("LongPollTransport satisfies the Transport interface", ["send", "onMessage", "onDrop", "close"].every(function (k) { return typeof lp[k] === "function"; }));
+  var got = null; lp.send({ type: "x" }); lp.poll(function (evs) { got = evs; });
+  ok("long-poll: a queued send drains on poll", got && got.length === 1 && got[0].type === "x");
+  var got2 = null; lp.poll(function (evs) { got2 = evs; }); lp.send({ type: "y" });
+  ok("long-poll: a hanging poll resolves when an event arrives", got2 && got2.length === 1 && got2[0].type === "y");
+  ok("AC2: WsTransport + LongPollTransport are both exposed behind the interface", typeof W.WsTransport === "function" && typeof W.LongPollTransport === "function");
+  // AC5 dormancy
+  var rL = W.createSyncRoutes({ connect: function () {} }, { mode: "local" });
+  var sr = null; rL.handleSend("c", {}, "a", function (r) { sr = r; });
+  ok("AC5: createSyncRoutes is dormant + refuses in local mode", rL.dormant === true && sr.ok === false);
+  var rS = W.createSyncRoutes({ connect: function () { return {}; } }, { mode: "server" });
+  ok("server mode gives a live upgrade + long-poll", rS.dormant === false && typeof rS.upgrade === "function");
 })();
 
 // ---- platform-pivot 03: block-addressable doc routes over HTTP ----------------
