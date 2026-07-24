@@ -98,6 +98,7 @@ function createBlockStore(dbPath, opts) {
   var qGetPage    = db.prepare("SELECT id, meta, block_order FROM pages WHERE doc_id = ? ORDER BY ord");
   var qPutBlock   = db.prepare("INSERT INTO blocks (doc_id, id, page_id, content, ver) VALUES (?, ?, ?, ?, 1) ON CONFLICT(doc_id, id) DO UPDATE SET page_id = excluded.page_id, content = excluded.content, ver = blocks.ver + 1");
   var qGetBlock   = db.prepare("SELECT content, ver FROM blocks WHERE doc_id = ? AND id = ?");
+  var qDelBlock   = db.prepare("DELETE FROM blocks WHERE doc_id = ? AND id = ?");
   var qAppend     = db.prepare("INSERT INTO changes (doc_id, block_id, kind, patch, author, ts) VALUES (?, ?, ?, ?, ?, ?)");
   var qSince      = db.prepare("SELECT seq, doc_id, block_id, kind, patch, author, ts FROM changes WHERE seq > ? ORDER BY seq");
   var qSinceDoc   = db.prepare("SELECT seq, doc_id, block_id, kind, patch, author, ts FROM changes WHERE seq > ? AND doc_id = ? ORDER BY seq");
@@ -109,6 +110,18 @@ function createBlockStore(dbPath, opts) {
 
   function maxSeq() { var r = qMaxSeq.get(); return (r && r.m) || 0; }
 
+  // The page a block lives on, per the structural source of truth (block_order), or
+  // null if the block is not part of the doc's structure. A block edit must target a
+  // block that is actually IN the doc -- otherwise it would log an event + insert a
+  // page-less row that materializeDoc never surfaces (a silent-drop; see applyChange).
+  function pageOfBlock(docId, blockId) {
+    var pages = qGetPage.all(docId);
+    for (var i = 0; i < pages.length; i++) {
+      if (JSON.parse(pages[i].block_order).indexOf(blockId) >= 0) return pages[i].id;
+    }
+    return null;
+  }
+
   // Import a whole doc: decompose into rows + take an "imported" baseline snapshot so
   // replay has a clean, bounded starting point. This ONE path also serves .verso
   // import + local->server publish + migration (ticket 05 hardens round-trip fidelity).
@@ -119,7 +132,7 @@ function createBlockStore(dbPath, opts) {
       qPutPage.run(docId, p.meta.id, JSON.stringify(p.meta), JSON.stringify(p.blockIds), ord);
       p.blockIds.forEach(function (bid) {
         // fresh import -> insert at ver 1 (delete any stale prior rows first for idempotency)
-        db.prepare("DELETE FROM blocks WHERE doc_id = ? AND id = ?").run(docId, bid);
+        qDelBlock.run(docId, bid);
         qPutBlock.run(docId, bid, p.meta.id, JSON.stringify(d.blocks[bid]));
       });
     });
@@ -151,20 +164,21 @@ function createBlockStore(dbPath, opts) {
   // materialized block row (content = patch, per-block ver bumped). Returns the new
   // global seq + the per-block ver (AC1). patch = the block's new full content (v1
   // coarse per-block put; finer patches are a later optimization).
+  //
+  // The block MUST already be part of the doc's structure (in some page's block_order).
+  // A content put does not add blocks -- adding/removing/reordering blocks is a
+  // structural change that goes through import (full re-decompose + fresh snapshot) in
+  // v1; incremental structural events are Phase 2. Rejecting an unknown block here
+  // prevents a logged-but-invisible orphan row (the silent-drop the review caught).
   function applyChange(docId, blockId, patch, author) {
+    var pageId = pageOfBlock(docId, blockId);
+    if (pageId === null) return { ok: false, error: "unknown block (not in this doc's structure)", blockId: blockId };
     var content = (typeof patch === "string") ? patch : JSON.stringify(patch);
     qAppend.run(docId, blockId, "block.put", content, author || null, now());
     var seq = maxSeq();
-    // materialize: find the page this block lives on (keep it where it is)
-    var existing = qGetBlock.get(docId, blockId);
-    var pageId = null;
-    if (existing) {
-      var pr = qGetPage.all(docId).filter(function (p) { return JSON.parse(p.block_order).indexOf(blockId) >= 0; })[0];
-      pageId = pr ? pr.id : null;
-    }
     qPutBlock.run(docId, blockId, pageId, content);
     var after = qGetBlock.get(docId, blockId);
-    return { seq: seq, blockId: blockId, ver: after ? after.ver : 1, author: author || null };
+    return { ok: true, seq: seq, blockId: blockId, ver: after ? after.ver : 1, author: author || null };
   }
 
   // Reconnect/rollback replay contract: events with seq > N (optionally one doc).

@@ -38,6 +38,20 @@ function readBody(req, cb) {
   req.on("end", function () { cb(tooBig ? null : Buffer.concat(chunks)); });
   req.on("error", function () { cb(null); });
 }
+// Read a raw body, replying 413 on an over-size/read failure; else hand the buffer to cb.
+function withBody(req, res, cb) {
+  readBody(req, function (buf) {
+    if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
+    cb(buf);
+  });
+}
+// As withBody, but parse the body as JSON, replying 400 on malformed JSON.
+function withJsonBody(req, res, cb) {
+  withBody(req, res, function (buf) {
+    var obj; try { obj = JSON.parse(buf.toString("utf8")); } catch (e) { return sendJson(res, 400, { ok: false, error: "bad json" }); }
+    cb(obj, buf);
+  });
+}
 
 // Auth boundary (Phase 3 issue 02/08 fills this). In local mode and until identity
 // lands, it default-ALLOWS. It exists now so every route already flows through one
@@ -77,8 +91,7 @@ function makeHandler(store, config, blockStore) {
     // --- registry (doc-of-record; blob-level v1) ---
     if (rest === "registry") {
       if (method === "GET") return sendJson(res, 200, { ok: true, registry: store.getRegistry() });
-      if (method === "PUT") return readBody(req, function (buf) {
-        if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
+      if (method === "PUT") return withBody(req, res, function (buf) {
         store.setRegistry(buf.toString("utf8"));
         return sendJson(res, 200, { ok: true });
       });
@@ -91,8 +104,7 @@ function makeHandler(store, config, blockStore) {
       if (!key) return sendJson(res, 400, { ok: false, error: "missing key" });
       if (method === "GET") return sendJson(res, 200, { ok: true, value: store.getKv(key) });
       if (method === "DELETE") { store.deleteKv(key); return sendJson(res, 200, { ok: true }); }
-      if (method === "PUT") return readBody(req, function (buf) {
-        if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
+      if (method === "PUT") return withBody(req, res, function (buf) {
         store.setKv(key, buf.toString("utf8"));
         return sendJson(res, 200, { ok: true });
       });
@@ -117,8 +129,7 @@ function makeHandler(store, config, blockStore) {
         if (!m) return sendJson(res, 404, { ok: false, error: "no such media" });
         return sendJson(res, 200, { ok: true, data: m.data, mime: m.mime });
       }
-      if (method === "PUT") return readBody(req, function (buf) {
-        if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
+      if (method === "PUT") return withBody(req, res, function (buf) {
         var data = buf.toString("utf8"), mime = null;
         // Accept either a raw data: URL body or a {data,mime} JSON envelope.
         if (data.charAt(0) === "{") { try { var p = JSON.parse(data); data = p.data; mime = p.mime || null; } catch (e) {} }
@@ -141,16 +152,14 @@ function makeHandler(store, config, blockStore) {
         var mat = blockStore.materializeDoc(docId);
         return mat ? sendJson(res, 200, { ok: true, doc: mat }) : sendJson(res, 404, { ok: false, error: "no such doc" });
       }
-      if (op === "import" && method === "POST") return readBody(req, function (buf) {
-        if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
-        var body; try { body = JSON.parse(buf.toString("utf8")); } catch (e) { return sendJson(res, 400, { ok: false, error: "bad json" }); }
+      if (op === "import" && method === "POST") return withJsonBody(req, res, function (body) {
         return sendJson(res, 200, { ok: true, result: blockStore.importDoc(docId, body.doc || body, body.author) });
       });
-      if (op === "change" && method === "POST") return readBody(req, function (buf) {
-        if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
-        var body; try { body = JSON.parse(buf.toString("utf8")); } catch (e) { return sendJson(res, 400, { ok: false, error: "bad json" }); }
+      if (op === "change" && method === "POST") return withJsonBody(req, res, function (body) {
         if (!body.blockId) return sendJson(res, 400, { ok: false, error: "missing blockId" });
-        return sendJson(res, 200, { ok: true, change: blockStore.applyChange(docId, body.blockId, body.patch, body.author) });
+        var ch = blockStore.applyChange(docId, body.blockId, body.patch, body.author);
+        if (!ch.ok) return sendJson(res, 404, ch); // unknown block -> not silently dropped
+        return sendJson(res, 200, { ok: true, change: ch });
       });
       if (op === "changes" && method === "GET") {
         var since = 0;

@@ -36,6 +36,26 @@ function ok(name, cond) {
 function warn(msg) { warnings++; console.warn("  WARN [" + sectionName + "] " + msg); }
 function slice(txt, from, to) { var a = txt.indexOf(from), b = txt.indexOf(to, a + 1); return txt.slice(a, b); }
 
+// Spin up a server-of-one on an ephemeral port against a temp SQLite store, run an
+// async probe(base, server, dbPath), and always tear it down. Shared by the pivot
+// server-integration sections (callers guard on node:sqlite before invoking).
+function withServer(probe) {
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-srv-"));
+  var dbPath = path.join(tmp, "verso.sqlite");
+  return (async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "local", port: 0, host: "127.0.0.1", dbPath: dbPath }, function (s) {
+        base = "http://127.0.0.1:" + s.address().port; resolve();
+      });
+    });
+    try { await probe(base, server, dbPath); }
+    finally { try { server.close(); } catch (e) {} try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} }
+  })();
+}
+
 // ---- node --check on every src file --------------------------------------
 section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
@@ -162,19 +182,9 @@ section("platform-pivot 02 server-of-one");
 (function () {
   try { require("node:sqlite"); }
   catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> server round-trip skipped"); return; }
-  var os = require("os");
-  var srv = require(path.join(ROOT, "server/verso-server.js"));
   var createStore = require(path.join(ROOT, "server/store.js")).createStore;
-  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-srv-test-"));
-  var dbPath = path.join(tmp, "verso.sqlite");
-  __async.push((async function () {
-    var server, base;
-    await new Promise(function (resolve) {
-      server = srv.startServer({ mode: "local", port: 0, host: "127.0.0.1", dbPath: dbPath }, function (s) {
-        base = "http://127.0.0.1:" + s.address().port; resolve();
-      });
-    });
-    try {
+  __async.push(withServer(async function (base, server, dbPath) {
+    {
       var doc = { "C-1": { meta: { code: "C-1", title: "Sample" }, chapters: [{ id: "ch1", blocks: [{ id: "b1", type: "text", html: "<p>hi</p>" }] }] } };
       var regJson = JSON.stringify(doc);
       var r, j;
@@ -215,11 +225,8 @@ section("platform-pivot 02 server-of-one");
       var s2 = createStore(dbPath);
       ok("registry persists across reopen (SQLite/WAL on local disk)", s2.getRegistry() === regJson);
       s2.close();
-    } finally {
-      try { server.close(); } catch (e) {}
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
     }
-  })());
+  }));
 })();
 
 // ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
@@ -343,6 +350,13 @@ section("platform-pivot 03 block-store");
     clock = 300;
     store.applyChange("C-1", "b3", { id: "b3", type: "para", text: "P3-edited" }, "carol");
     ok("AC2: materialize === replay from latest snapshot (bounded)", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+
+    // orphan-block guard: a change to a block not in the doc's structure is rejected,
+    // appends NO event, and does not corrupt materialize/replay (review finding).
+    var seqBeforeGhost = store.maxSeq();
+    var ghost = store.applyChange("C-1", "ghost", { id: "ghost" }, "x");
+    ok("unknown block rejected (ok:false), no event appended", ghost.ok === false && store.maxSeq() === seqBeforeGhost);
+    ok("orphan reject leaves materialize === replay intact", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
   } finally {
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
@@ -357,17 +371,8 @@ section("platform-pivot 03 doc routes");
 (function () {
   try { require("node:sqlite"); }
   catch (e) { warn("node:sqlite unavailable -> doc-route tests skipped"); return; }
-  var os = require("os");
-  var srv = require(path.join(ROOT, "server/verso-server.js"));
-  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-doc-test-"));
-  __async.push((async function () {
-    var server, base;
-    await new Promise(function (resolve) {
-      server = srv.startServer({ mode: "local", port: 0, host: "127.0.0.1", dbPath: path.join(tmp, "verso.sqlite") }, function (s) {
-        base = "http://127.0.0.1:" + s.address().port; resolve();
-      });
-    });
-    try {
+  __async.push(withServer(async function (base) {
+    {
       var doc = { meta: { code: "C-1", title: "T" }, pages: [ { id: "p1", name: "One", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] };
       var r, j;
       r = await fetch(base + "/api/doc/C-1/import", { method: "POST", body: JSON.stringify({ doc: doc, author: "alice" }) }); j = await r.json();
@@ -386,11 +391,14 @@ section("platform-pivot 03 doc routes");
       r = await fetch(base + "/api/doc/C-1/snapshot", { method: "POST", body: "{}" }); j = await r.json();
       ok("POST snapshot ok", j.ok === true && j.snapshot.atSeq === seqAfter);
       r = await fetch(base + "/api/doc/absent"); ok("GET absent doc -> 404", r.status === 404);
-    } finally {
-      try { server.close(); } catch (e) {}
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+      // orphan-block guard: a change to a block not in the doc is rejected (not a silent drop)
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", body: JSON.stringify({ blockId: "ghost", patch: { id: "ghost" }, author: "x" }) });
+      j = await r.json();
+      ok("change to unknown block -> 404 + {ok:false} (no silent orphan)", r.status === 404 && j.ok === false);
+      r = await fetch(base + "/api/doc/C-1/changes?since=0"); j = await r.json();
+      ok("rejected change appended NO event", j.changes.length === 1);
     }
-  })());
+  }));
 })();
 
 // ---- #81: in-app Help guide markdown renderer -----------------------------
