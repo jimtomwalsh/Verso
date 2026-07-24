@@ -1,0 +1,88 @@
+/*
+ * src/store-http.js -- HTTP registry adapter for the 'http' storage backend
+ * (platform-pivot 02/31). The client-side counterpart of server/verso-server.js:
+ * it lets the StorageBackend seam (ticket 01) point at the server-of-one instead of
+ * browser storage. Loaded BEFORE editor.js so the seam can select it at boot.
+ *
+ * INERT BY DEFAULT. It installs window.__storageAdapter (name "http") ONLY when a
+ * server URL is present (window.__versoServerUrl, injected in server mode). In a
+ * plain browser or the local desktop shell there is no server URL -> nothing installs
+ * and the default 'browser' backend is untouched. Mutually exclusive with the native
+ * 'file' adapter (store-native.js installs only under the WKWebView bridge).
+ *
+ * Sync-read contract: readRegistry() must be synchronous (editor reads it at boot),
+ * so in server mode the server injects the current registry blob as
+ * window.__versoServerRegistryB64 at page load; writeRegistry() updates that in-page
+ * cache synchronously and POSTs the durable write, surfacing a failed write through
+ * the shared save-state (Editor.reportSaveFailure) rather than losing it silently --
+ * exactly the store-native.js posture.
+ *
+ * Dependency-free: uses the browser's built-in fetch. No external network beyond the
+ * configured same-origin/on-prem server. render() is never involved.
+ */
+(function () {
+  "use strict";
+
+  // PURE URL builder (headless-testable): base + facet -> endpoint. Trailing slash on
+  // base is tolerated; keys/ids are encoded so "authoring.activeDocId" etc. are safe.
+  /* @http-api-start */
+  function apiUrl(base, facet, keyOrId) {
+    var b = String(base || "").replace(/\/+$/, "");
+    var p = b + "/api/" + facet;
+    if (keyOrId != null && keyOrId !== "") p += "/" + encodeURIComponent(keyOrId);
+    return p;
+  }
+  /* @http-api-end */
+
+  function serverUrl() {
+    return (typeof window !== "undefined" && window.__versoServerUrl) || null;
+  }
+  if (!serverUrl()) return; // no server configured -> inert; browser backend only
+
+  var dec = (typeof TextDecoder !== "undefined") ? new TextDecoder() : null;
+  function b64ToText(b64) {
+    if (!b64) return null;
+    try {
+      var bin = atob(b64), a = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+      return dec ? dec.decode(a) : bin;
+    } catch (e) { return null; }
+  }
+
+  // Seed the in-page cache from the server's page-load injection (the on-disk registry).
+  var base = serverUrl();
+  var cache = b64ToText(window.__versoServerRegistryB64);
+
+  function reportFailure(msg) {
+    if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure(msg);
+    if (window.console && console.error) console.error("[store-http] " + msg);
+  }
+
+  window.__storageAdapter = {
+    name: "http",
+    readRegistry: function () { return cache; }, // synchronous (the seam's contract)
+    writeRegistry: function (json) {
+      cache = json; // in-page truth updates synchronously (optimistic)
+      try {
+        fetch(apiUrl(base, "registry"), { method: "PUT", body: json, headers: { "Content-Type": "application/json" } })
+          .then(function (r) { return r.ok ? r.json() : { ok: false }; })
+          .then(function (j) { if (!j || !j.ok) reportFailure("Save to the Verso server failed. Export JSON now to avoid losing work."); })
+          .catch(function () { reportFailure("Could not reach the Verso server to save. Check your connection; export JSON now to avoid losing work."); });
+      } catch (e) { return { ok: false, quota: false, error: e }; }
+      return { ok: true }; // optimistic; durable failure surfaces via reportFailure
+    }
+  };
+
+  // Async API surface for later phases (transport #08, migration #05). Not wired into
+  // the sync media facet yet -- that async rework is Phase 2, not this ticket.
+  window.__versoHttpApi = {
+    base: base,
+    url: apiUrl,
+    getRegistry: function () { return fetch(apiUrl(base, "registry")).then(function (r) { return r.json(); }).then(function (j) { return j.registry; }); },
+    putRegistry: function (json) { return fetch(apiUrl(base, "registry"), { method: "PUT", body: json }).then(function (r) { return r.json(); }); },
+    getKv: function (k) { return fetch(apiUrl(base, "kv", k)).then(function (r) { return r.json(); }).then(function (j) { return j.value; }); },
+    putKv: function (k, v) { return fetch(apiUrl(base, "kv", k), { method: "PUT", body: v }).then(function (r) { return r.json(); }); },
+    getMedia: function (id) { return fetch(apiUrl(base, "media", id)).then(function (r) { return r.ok ? r.json() : null; }); },
+    putMedia: function (id, data, mime) { return fetch(apiUrl(base, "media", id), { method: "PUT", body: JSON.stringify({ data: data, mime: mime }) }).then(function (r) { return r.json(); }); }
+  };
+})();

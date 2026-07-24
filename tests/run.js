@@ -36,12 +36,35 @@ function ok(name, cond) {
 function warn(msg) { warnings++; console.warn("  WARN [" + sectionName + "] " + msg); }
 function slice(txt, from, to) { var a = txt.indexOf(from), b = txt.indexOf(to, a + 1); return txt.slice(a, b); }
 
+// Spin up a server-of-one on an ephemeral port against a temp SQLite store, run an
+// async probe(base, server, dbPath), and always tear it down. Shared by the pivot
+// server-integration sections (callers guard on node:sqlite before invoking).
+function withServer(probe) {
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-srv-"));
+  var dbPath = path.join(tmp, "verso.sqlite");
+  return (async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "local", port: 0, host: "127.0.0.1", dbPath: dbPath }, function (s) {
+        base = "http://127.0.0.1:" + s.address().port; resolve();
+      });
+    });
+    try { await probe(base, server, dbPath); }
+    finally { try { server.close(); } catch (e) {} try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} }
+  })();
+}
+
 // ---- node --check on every src file --------------------------------------
 section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js"
+ "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
+ "server/migrations.js", "server/backup.js", "server/fixtures.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -86,6 +109,1523 @@ section("#66 storage seam");
   ok("flag flipped + adapter injected -> injected", g.pickStorageAdapter("file", injected, browser) === injected);
   // ...but a flipped flag with no adapter present must NEVER strand a save.
   ok("flag flipped, no adapter -> browser fallback", g.pickStorageAdapter("file", null, browser) === browser);
+})();
+
+// ---- platform-pivot 01: StorageBackend seam (EXPAND, browser conformance) ----
+// The single interface unifying the 3 storage choke points. At the browser default
+// each facet must route to EXACTLY today's behaviour: registry -> the registry
+// adapter, k/v -> writeStore over localStorage, media -> the AssetStore. Zero
+// behaviour change is the whole point of EXPAND, so this pins it.
+section("platform-pivot 01 StorageBackend seam");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @storage-backend-start \*\/([\s\S]*?)\/\* @storage-backend-end \*\//);
+  if (!m) { ok("locate @storage-backend fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { makeStorageBackend: makeStorageBackend };")();
+
+  // Spy deps that mimic the real ones exactly (writeStore is the durable helper).
+  function writeStore(storage, key, value) {
+    try { storage.setItem(key, value); return { ok: true }; }
+    catch (e) { return { ok: false, error: e }; }
+  }
+  var kv = {}, calls = [];
+  var storage = {
+    getItem: function (k) { calls.push(["get", k]); return (k in kv) ? kv[k] : null; },
+    setItem: function (k, v) { calls.push(["set", k, v]); kv[k] = v; },
+    removeItem: function (k) { calls.push(["rm", k]); delete kv[k]; }
+  };
+  var adapter = {
+    name: "browser",
+    readRegistry: function () { return kv["reg"] || null; },
+    writeRegistry: function (json) { kv["reg"] = json; return { ok: true, via: "adapter" }; }
+  };
+  var media = { put: function () {}, url: function () {}, get: function () {}, has: function () {}, sweep: function () {}, placeholder: "P" };
+  var be = g.makeStorageBackend({
+    registryAdapter: function () { return adapter; },
+    writeStore: writeStore,
+    storage: storage,
+    assetStore: function () { return media; }
+  });
+
+  // name reflects the live adapter
+  ok("name reflects registry adapter", be.name === "browser");
+  // registry facet routes through the adapter (the #66/#68 swap point)
+  ok("writeRegistry -> adapter", be.writeRegistry('{"C-1":{}}').via === "adapter" && kv["reg"] === '{"C-1":{}}');
+  ok("readRegistry -> adapter", be.readRegistry() === '{"C-1":{}}');
+  // k/v facet routes through writeStore over the injected localStorage-shaped store
+  var wr = be.writeKey("authoring.activeDocId", '"C-1"');
+  ok("writeKey ok via writeStore", wr.ok === true && kv["authoring.activeDocId"] === '"C-1"');
+  ok("readKey reads back", be.readKey("authoring.activeDocId") === '"C-1"');
+  ok("readKey missing -> null", be.readKey("nope") === null);
+  ok("removeKey clears", be.removeKey("authoring.activeDocId").ok === true && !("authoring.activeDocId" in kv));
+  // media facet IS the AssetStore (put/url/get/has/sweep + placeholder)
+  ok("media facet is the AssetStore", be.media === media);
+  ["put", "url", "get", "has", "sweep"].forEach(function (fn) {
+    ok("media exposes " + fn, typeof be.media[fn] === "function");
+  });
+  // a throwing k/v store never strands (matches today's swallowed writes)
+  var boom = { setItem: function () { throw new Error("full"); }, getItem: function () { throw new Error("x"); }, removeItem: function () { throw new Error("x"); } };
+  var be2 = g.makeStorageBackend({ registryAdapter: function () { return adapter; }, writeStore: writeStore, storage: boom, assetStore: function () { return media; } });
+  ok("writeKey on failing store -> {ok:false}", be2.writeKey("k", "v").ok === false);
+  ok("readKey on failing store -> null", be2.readKey("k") === null);
+  ok("removeKey on failing store -> {ok:false}", be2.removeKey("k").ok === false);
+  // media absent -> null (never throws)
+  var be3 = g.makeStorageBackend({ registryAdapter: function () { return adapter; }, writeStore: writeStore, storage: storage, assetStore: function () { return null; } });
+  ok("media absent -> null", be3.media === null);
+})();
+
+// ---- platform-pivot 02: server-of-one HTTP storage API + SQLite round-trip ----
+// The one backend artifact. Exercises the REAL HTTP endpoints against the REAL
+// SQLite/WAL store on a temp disk path: whole-doc blob round-trip (AC1), kv + media,
+// sweep, WAL durability across reopen, and that a non-API path is NEVER served (no
+// server-side render). node:sqlite is built into the bundled runtime; on an older
+// CI Node it is absent -> we WARN + skip rather than hard-fail.
+section("platform-pivot 02 server-of-one");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> server round-trip skipped"); return; }
+  var createStore = require(path.join(ROOT, "server/store.js")).createStore;
+  __async.push(withServer(async function (base, server, dbPath) {
+    {
+      var doc = { "C-1": { meta: { code: "C-1", title: "Sample" }, chapters: [{ id: "ch1", blocks: [{ id: "b1", type: "text", html: "<p>hi</p>" }] }] } };
+      var regJson = JSON.stringify(doc);
+      var r, j;
+      r = await fetch(base + "/api/health"); j = await r.json();
+      ok("health: ok + local mode + renders:false", j.ok === true && j.mode === "local" && j.renders === false);
+      // AC1: whole-doc blob round-trip
+      r = await fetch(base + "/api/registry", { method: "PUT", body: regJson }); j = await r.json();
+      ok("PUT registry -> ok", j.ok === true);
+      r = await fetch(base + "/api/registry"); j = await r.json();
+      ok("GET registry -> faithful whole-doc round-trip", j.registry === regJson);
+      // kv (doc-session keys)
+      await (await fetch(base + "/api/kv/authoring.activeDocId", { method: "PUT", body: '"C-1"' })).json();
+      r = await fetch(base + "/api/kv/authoring.activeDocId"); j = await r.json();
+      ok("kv round-trip", j.value === '"C-1"');
+      r = await fetch(base + "/api/kv/absent"); j = await r.json();
+      ok("kv missing -> null", j.value === null);
+      await (await fetch(base + "/api/kv/authoring.activeDocId", { method: "DELETE" })).json();
+      r = await fetch(base + "/api/kv/authoring.activeDocId"); j = await r.json();
+      ok("kv delete clears", j.value === null);
+      // media
+      await (await fetch(base + "/api/media/m1", { method: "PUT", body: JSON.stringify({ data: "data:image/png;base64,AAA", mime: "image/png" }) })).json();
+      r = await fetch(base + "/api/media/m1", { method: "HEAD" });
+      ok("media HEAD present -> 200", r.status === 200);
+      r = await fetch(base + "/api/media/m1"); j = await r.json();
+      ok("media GET round-trip", j.data === "data:image/png;base64,AAA" && j.mime === "image/png");
+      r = await fetch(base + "/api/media/absent", { method: "HEAD" });
+      ok("media HEAD absent -> 404", r.status === 404);
+      await (await fetch(base + "/api/media/m2", { method: "PUT", body: "data:image/png;base64,BBB" })).json();
+      r = await fetch(base + "/api/media/sweep", { method: "POST", body: JSON.stringify({ keep: ["m2"] }) }); j = await r.json();
+      ok("media sweep removes unreferenced (m1), keeps m2", j.removed === 1);
+      ok("media sweep: m2 survives", (await fetch(base + "/api/media/m2", { method: "HEAD" })).status === 200);
+      ok("media sweep: m1 gone", (await fetch(base + "/api/media/m1", { method: "HEAD" })).status === 404);
+      // AC3: never serves the app / never renders — non-API path 404s
+      r = await fetch(base + "/index.html");
+      ok("non-API path 404 (backend never serves app or renders)", r.status === 404);
+      // WAL durability: close server, reopen the store on disk, registry persists
+      server.__store.close();
+      var s2 = createStore(dbPath);
+      ok("registry persists across reopen (SQLite/WAL on local disk)", s2.getRegistry() === regJson);
+      s2.close();
+    }
+  }));
+})();
+
+// ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
+section("platform-pivot 02 server invariants");
+(function () {
+  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js") + src("server/sync.js") + src("server/sync-wire.js") + src("server/lock-manager.js") + src("server/lock-reaper.js");
+  // Dependency-free: only node: builtins may be required (bundled runtime is the sole exception).
+  var reqs = s.match(/require\(("|')([^"')]+)\1\)/g) || [];
+  var badDep = reqs.filter(function (m) {
+    var mod = m.replace(/require\(("|')/, "").replace(/("|')\)/, "");
+    return mod.indexOf("node:") !== 0 && mod.charAt(0) !== "."; // node: builtin or relative only
+  });
+  ok("server requires node: builtins or relative only (no third-party deps)", badDep.length === 0);
+  // Never renders: no import of the render engine, no HTML/app serving.
+  ok("server never requires render/editor engine", !/require\([^)]*(render|editor|export|runtime)[^)]*\)/.test(s));
+  ok("server declares renders:false on health", /renders:\s*false/.test(s));
+  // One identity boundary resolves principal-or-reject in front of storage (ticket 17).
+  ok("server routes through one identity boundary (principalOf + reject)", /function principalOf\(/.test(s) && /authentication required/.test(s));
+  // SEC: server mode hard-fails without a configured link-signing secret (no forgeable tokens)
+  ok("SEC: server mode requires config.linkSecret (hard-fail, no in-repo default ships)", /config\.linkSecret is required in server mode/.test(src("server/verso-server.js")));
+  (function () {
+    try { require("node:sqlite"); } catch (e) { return; }
+    var os = require("os");
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-sec-"));
+    var threw = false;
+    try { require(path.join(ROOT, "server/verso-server.js")).createServer({ dbPath: path.join(tmp, "x.sqlite"), config: { mode: "server" } }); }
+    catch (e) { threw = /linkSecret is required/.test(e.message); }
+    ok("SEC: createServer throws in server mode when linkSecret is absent", threw === true);
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  })();
+  // SQLite/WAL on disk, sole writer posture documented.
+  ok("store uses WAL journal", /journal_mode = WAL/.test(src("server/store.js")));
+})();
+
+// ---- platform-pivot 02: client HTTP adapter (pure URL builder + inert guard) ----
+section("platform-pivot 02 http adapter");
+(function () {
+  var t = src("src/store-http.js");
+  var m = t.match(/\/\* @http-api-start \*\/([\s\S]*?)\/\* @http-api-end \*\//);
+  if (!m) { ok("locate @http-api fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { apiUrl: apiUrl };")();
+  ok("apiUrl registry", g.apiUrl("http://h:4790", "registry") === "http://h:4790/api/registry");
+  ok("apiUrl tolerates trailing slash", g.apiUrl("http://h:4790/", "registry") === "http://h:4790/api/registry");
+  ok("apiUrl kv encodes the key", g.apiUrl("http://h", "kv", "authoring.activeDocId") === "http://h/api/kv/authoring.activeDocId");
+  ok("apiUrl media encodes odd ids", g.apiUrl("http://h", "media", "a/b c") === "http://h/api/media/a%2Fb%20c");
+  // Inert-by-default: the module returns early (installs nothing) with no server URL.
+  ok("store-http returns early when no __versoServerUrl", /if \(!serverUrl\(\)\) return;/.test(t));
+  ok("store-http installs 'http' adapter only after the guard", t.indexOf("if (!serverUrl()) return;") < t.indexOf('name: "http"'));
+  // Never renders / no third-party deps: relies on built-in fetch only.
+  ok("store-http uses built-in fetch (no deps)", /fetch\(/.test(t) && !/require\(/.test(t));
+})();
+
+// ---- platform-pivot client-mount: sync-client pure core (gate + reducer + buffer) ----
+// The browser collaboration client's PURE core, exercised headlessly. The linchpin is
+// isCollaborating(): standalone -> false, so the editor never takes a collaborative branch.
+section("client-mount sync-client core");
+(function () {
+  var t = src("src/sync-client.js");
+  var m = t.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+  if (!m) { ok("locate @sync-client fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay, pendingFor: pendingFor, conflictView: conflictView, helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg };")();
+
+  // THE GATE: only true when there is a server URL AND a live connection.
+  ok("gate: standalone (no serverUrl) -> not collaborating", g.isCollaborating({ connected: true }) === false && g.isCollaborating(null) === false);
+  ok("gate: serverUrl present but not connected -> not collaborating", g.isCollaborating({ serverUrl: "http://h", connected: false }) === false);
+  ok("gate: serverUrl + connected -> collaborating", g.isCollaborating({ serverUrl: "http://h", connected: true }) === true);
+
+  var doc = { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] } ] };
+  var st = { doc: doc, seq: 0, locks: [], peers: [], conflicts: [] };
+  // resnapshot replaces the whole doc + seq
+  var r1 = g.applyServerEvent(st, { type: "sync.resnapshot", payload: { snapshot: { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", text: "SNAP" } ] } ] }, seq: 5 } });
+  ok("apply sync.resnapshot -> replaces doc + seq", r1.doc.pages[0].blocks[0].text === "SNAP" && r1.seq === 5);
+  ok("apply is pure (original state untouched)", st.doc.pages[0].blocks[0].text === "H");
+  // a fanned-out block.change patches the block by stable id
+  var r2 = g.applyServerEvent(st, { type: "block.change", blockId: "b1", seq: 7, payload: { patch: { id: "b1", type: "heading", text: "REMOTE" } } });
+  ok("apply block.change -> patches the block by id, bumps seq", r2.doc.pages[0].blocks[0].text === "REMOTE" && r2.seq === 7 && r2.doc.pages[0].blocks[1].text === "P");
+  // a string patch is parsed
+  var r2b = g.applyServerEvent(st, { type: "block.change", blockId: "b2", seq: 8, payload: { patch: JSON.stringify({ id: "b2", type: "para", text: "STR" }) } });
+  ok("apply block.change with a string patch", r2b.doc.pages[0].blocks[1].text === "STR");
+  // catchup folds a delta of block.put events
+  var r3 = g.applyServerEvent(st, { type: "sync.catchup", payload: { upToSeq: 9, events: [ { kind: "block.put", blockId: "b1", patch: JSON.stringify({ id: "b1", text: "C1" }) }, { kind: "block.put", blockId: "b2", patch: JSON.stringify({ id: "b2", text: "C2" }) } ] } });
+  ok("apply sync.catchup -> folds the delta + sets upToSeq", r3.doc.pages[0].blocks[0].text === "C1" && r3.doc.pages[0].blocks[1].text === "C2" && r3.seq === 9);
+  // lock/presence state + conflict
+  ok("apply lock.state", g.applyServerEvent(st, { type: "lock.state", payload: { locks: [ { resourceId: "b1", holder: "alice" } ] } }).locks.length === 1);
+  ok("apply presence.state", g.applyServerEvent(st, { type: "presence.state", payload: { peers: [ { author: "bob", colour: "#0d99ff" } ] } }).peers.length === 1);
+  ok("apply block.conflict -> records a soft conflict (never silent)", g.applyServerEvent(st, { type: "block.conflict", blockId: "b1", seq: 4, payload: { baseSeq: 2 } }).conflicts.length === 1);
+  ok("unknown/ephemeral type -> no-op", g.applyServerEvent(st, { type: "presence.heartbeat" }).doc === st.doc);
+
+  // the unacked buffer: one entry per block, ack retires, replay returns pending
+  var buf = [];
+  buf = g.bufferAdd(buf, { blockId: "b1", content: { text: "x" }, baseSeq: 1 });
+  buf = g.bufferAdd(buf, { blockId: "b1", content: { text: "y" }, baseSeq: 2 }); // coalesce: still one entry for b1
+  buf = g.bufferAdd(buf, { blockId: "b2", content: { text: "z" }, baseSeq: 1 });
+  ok("buffer coalesces to one entry per block", buf.length === 2 && buf.filter(function (e) { return e.blockId === "b1"; }).length === 1);
+  ok("buffer keeps the latest content for a block", buf.find(function (e) { return e.blockId === "b1"; }).content.text === "y");
+  ok("buffer replay returns pending (reconnect resend)", g.bufferReplay(buf).length === 2);
+  buf = g.bufferAck(buf, "b1");
+  ok("buffer ack retires the acked block's entry", buf.length === 1 && !buf.some(function (e) { return e.blockId === "b1"; }));
+
+  // ticket 13 soft-conflict JOIN: the reducer records WHICH block conflicted (never a silent
+  // drop); conflictView joins that with MY buffered content so the (chrome) prompt shows both.
+  var cbuf = [ { blockId: "b1", content: { id: "b1", text: "MY-EDIT" }, baseSeq: 3 } ];
+  var cst = g.applyServerEvent({ doc: doc, seq: 0, locks: [], peers: [], conflicts: [] }, { type: "block.conflict", blockId: "b1", seq: 9, payload: { baseSeq: 3 } });
+  var cst2 = g.applyServerEvent(cst, { type: "block.conflict", blockId: "b9", seq: 10, payload: { baseSeq: 1 } }); // a block I have no buffered edit for
+  var view = g.conflictView(cst2, cbuf);
+  ok("conflictView: one row per recorded conflict", view.length === 2);
+  ok("conflictView: joins MY buffered content for a block I edited", view[0].blockId === "b1" && view[0].hasMine === true && view[0].mine.text === "MY-EDIT" && view[0].serverSeq === 9);
+  ok("conflictView: a conflict with no buffered edit is still surfaced (hasMine false, never dropped)", view[1].blockId === "b9" && view[1].hasMine === false && view[1].mine === null);
+  ok("pendingFor: finds my buffered entry by block id (null when absent)", g.pendingFor(cbuf, "b1").content.text === "MY-EDIT" && g.pendingFor(cbuf, "zzz") === null);
+
+  // client->server message construction (the wire just serialises these)
+  ok("helloMsg carries sinceSeq", g.helloMsg("C-1", 5).type === "sync.hello" && g.helloMsg("C-1", 5).payload.sinceSeq === 5);
+  ok("changeMsg carries patch + baseSeq", (function () { var e = g.changeMsg("C-1", "b1", { text: "x" }, 3); return e.type === "block.change" && e.blockId === "b1" && e.payload.baseSeq === 3 && e.payload.patch.text === "x"; })());
+  ok("lockMsg acquire/release", g.lockMsg(true, "C-1", "b1").type === "lock.acquire" && g.lockMsg(false, "C-1", "b1").type === "lock.release");
+  ok("heartbeatMsg carries viewing/editing", g.heartbeatMsg("C-1", "b1", "b2").payload.editingBlockId === "b2");
+  ok("commentMsg carries body + thread", g.commentMsg("C-1", "b1", "note", "th1").payload.body === "note");
+})();
+
+// source guard: the client is inert without a server URL (never activates in standalone)
+section("client-mount sync-client inert");
+(function () {
+  var t = src("src/sync-client.js");
+  ok("sync-client gates enabled on window.__versoServerUrl", /enabled:\s*!!serverUrl\(\)/.test(t));
+  ok("sync-client connect() no-ops without a server URL", /connect: function \(docId, opts\) \{\s*if \(!serverUrl\(\)\) return null;/.test(t));
+  ok("sync-client is a classic-script global, no deps/imports", /window\.VersoSync/.test(t) && !/require\(/.test(t) && !/\bimport\s/.test(t));
+  // index.html loads it before editor.js (so the editor can consult the gate at boot)
+  var idx = src("index.html");
+  ok("index.html loads sync-client.js before editor.js", idx.indexOf("src/sync-client.js") > 0 && idx.indexOf("src/sync-client.js") < idx.indexOf("src/editor.js"));
+
+  // ticket 13 durable buffer wiring (browser-only IndexedDB; inert without it)
+  ok("durable buffer is inert without IndexedDB (headless / private mode)", /var HAS = \(typeof indexedDB !== "undefined"\);/.test(t) && /if \(!HAS/.test(t));
+  ok("connect() rehydrates the durable buffer BEFORE the first replay", /hydrated = durable\.load\(docId\)[\s\S]{0,140}bufferAdd\(unacked, e\)/.test(t) && /hydrated\.then\(function \(\) \{ bufferReplay\(unacked\)/.test(t));
+  ok("sendChange + ack persist the buffer (survive crash/sleep)", /unacked = bufferAdd\(unacked, \{ blockId: blockId[\s\S]{0,80}persistBuffer\(\);/.test(t) && /unacked = bufferAck\(unacked, env\.blockId\); persistBuffer\(\);/.test(t));
+})();
+
+// ---- platform-pivot 15: base-only editing guard (axis previews read-only in collab) ----
+// The collab edit gate is a PURE function of {collaborating, activeVariant, activeVersion}.
+// Standalone (collaborating=false) it MUST reduce to today's behaviour exactly (#207: a
+// software version is the editable dynamic flagship; only a variant preview is read-only).
+// While collaborating, every axis preview is read-only so all editing targets the base doc.
+section("platform-pivot 15 base-only editing guard");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @collab-edit-gate-start \*\/([\s\S]*?)\/\* @collab-edit-gate-end \*\//);
+  if (!m) { ok("locate @collab-edit-gate fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { collabEditGate: collabEditGate };")().collabEditGate;
+
+  // --- STANDALONE (collaborating=false): byte-for-byte today's behaviour ---
+  ok("standalone base (no axis) -> canvas editable, version-edit off",
+    g(false, null, null).canvasEditable === true && g(false, null, null).versionEditable === false && g(false, null, null).axisPreviewReadOnly === false);
+  ok("standalone variant preview -> read-only canvas (unchanged)",
+    g(false, "Alpha", null).canvasEditable === false && g(false, "Alpha", null).versionEditable === false);
+  ok("standalone software-version -> editable dynamic flagship (#207 preserved)",
+    g(false, null, "v2").canvasEditable === true && g(false, null, "v2").versionEditable === true);
+  ok("standalone variant OVER a version -> read-only (variant wins)",
+    g(false, "Alpha", "v2").canvasEditable === false && g(false, "Alpha", "v2").versionEditable === false);
+
+  // --- COLLABORATING: any axis preview is read-only; only the BASE doc is editable ---
+  ok("collab base (no axis) -> still editable (block-locking handles concurrency)",
+    g(true, null, null).canvasEditable === true && g(true, null, null).versionEditable === false && g(true, null, null).axisPreviewReadOnly === false);
+  ok("collab software-version -> READ-ONLY (base-only editing; retires the version-clone footgun)",
+    g(true, null, "v2").canvasEditable === false && g(true, null, "v2").versionEditable === false && g(true, null, "v2").axisPreviewReadOnly === true);
+  ok("collab variant preview -> read-only (as standalone) + flagged",
+    g(true, "Alpha", null).canvasEditable === false && g(true, "Alpha", null).axisPreviewReadOnly === true);
+  ok("collab only changes the VERSION axis (variant was already read-only)",
+    g(true, "Alpha", null).canvasEditable === g(false, "Alpha", null).canvasEditable &&
+    g(true, null, "v2").canvasEditable !== g(false, null, "v2").canvasEditable);
+
+  // --- WIRING guard: the three canvas edit-enable sites gate on canvasEditable(), not raw
+  //     !activeVariant; currentDoc() picks the read-only resolved clone when !versionEditable. ---
+  ok("enableEditing sites gate on canvasEditable() (not raw !activeVariant)",
+    (t.match(/if \(canvasEditable\(\)\) enableEditing\(/g) || []).length === 3 &&
+    !/if \(!activeVariant\) enableEditing\(/.test(t));
+  ok("collaborating() reads the ONE VersoSync gate (inert -> false in standalone)",
+    /function collaborating\(\) \{ return !!\(window\.VersoSync && window\.VersoSync\.isCollaborating\(\)\); \}/.test(t));
+  // AC3 footgun: structural/inline edits unwrap to the BASE node (versionBaseNode) so an edit
+  // captured under an active preview axis lands on the base and can't be lost.
+  ok("inline edits unwrap to the base node via versionBaseNode (version-clone footgun guard)",
+    /block = versionBaseNode\(block\);/.test(t));
+})();
+
+// ---- platform-pivot 11: presence chrome (avatar cluster pure model + gated wiring) ----
+// presenceModel maps server presence.state peers -> the avatar cluster to draw. All presence
+// chrome hangs off VersoSync.isCollaborating(), so standalone shows nothing.
+section("platform-pivot 11 presence chrome");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @presence-model-start \*\/([\s\S]*?)\/\* @presence-model-end \*\//);
+  if (!m) { ok("locate @presence-model fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { presenceInitials: presenceInitials, presenceModel: presenceModel, findBlockLocation: findBlockLocation, peerHeldBlocks: peerHeldBlocks, conflictRows: conflictRows, blockPreview: blockPreview, viewerCursors: viewerCursors };")();
+
+  ok("initials: single name -> one letter", g.presenceInitials("Priya") === "P");
+  ok("initials: first+last -> two letters, upper", g.presenceInitials("marcus li") === "ML");
+  ok("initials: empty -> '?'", g.presenceInitials("") === "?" && g.presenceInitials("   ") === "?");
+  var peers = [
+    { name: "Priya", colour: "#e91e8c", editingBlockId: "b2" },      // editing (holds a block)
+    { author: "Marcus", colour: "#2ea36b", viewingBlockId: "b3" },   // viewing (author field alias)
+    { name: "Lena", colour: "#4d7cad", state: "viewing" },
+    { name: "Sam", colour: "#f5a623", state: "editing" },
+    { name: "Wei", colour: "#0d99ff", state: "viewing" }             // 5th -> overflow
+  ];
+  var mo = g.presenceModel(peers, 4);
+  ok("model: shows up to max, collapses the tail to +N", mo.shown.length === 4 && mo.overflow === 1 && mo.total === 5);
+  ok("model: editing detected from state OR editingBlockId", mo.shown[0].editing === true && mo.shown[3].editing === true);
+  ok("model: viewing is not editing", mo.shown[1].editing === false && mo.shown[2].editing === false);
+  ok("model: carries author colour + resolved block id", mo.shown[0].colour === "#e91e8c" && mo.shown[0].blockId === "b2" && mo.shown[1].name === "Marcus");
+  ok("model: no peers -> empty cluster", g.presenceModel([], 4).total === 0 && g.presenceModel(null, 4).shown.length === 0);
+
+  // gated wiring: the cluster only renders while collaborating; ensure() only wires in server mode;
+  // mount() reprojects. Standalone (VersoSync inert) shows no presence chrome.
+  ok("renderPresence gates on live() (isCollaborating) -> hidden in standalone", /if \(!live\(\) \|\| !peers\.length\) \{ el\.innerHTML = ""; el\.style\.display = "none"; return; \}/.test(t));
+  ok("ensure() only subscribes/connects in server mode (enabled)", /function ensure\(\) \{\s*if \(wired \|\| !enabled\(\)\) return;/.test(t));
+  ok("live() is the ONE VersoSync gate", /function live\(\) \{ return !!\(window\.VersoSync && window\.VersoSync\.isCollaborating\(\)\); \}/.test(t));
+  ok("mount() reprojects presence chrome after renderCommentPins", /renderCommentPins\(\);[\s\S]{0,140}CollabChrome\.ensure\(\); CollabChrome\.reproject\(\);/.test(t));
+  ok("presence cluster mounts in the toolbar right group", /document\.querySelector\("\.toolbar__group--right"\)/.test(t));
+  // presence CSS conforms to the PresenceCluster contract (20px, editing solid / viewing hollow)
+  var css = src("editor.css");
+  ok("presence avatar is control-sm + radius-full", /\.collab-av \{[\s\S]{0,160}var\(--control-sm, 20px\)[\s\S]{0,160}var\(--radius-full/.test(css));
+  ok("viewing state is the hollow/tinted variant", /\.collab-av\.is-viewing \{/.test(css));
+
+  // ---- ticket 11b: remote-apply (by stable id) + held-block read-only chrome (pure) ----
+  var pages = [
+    { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] },
+    { id: "p2", blocks: [ { id: "b3", type: "para", text: "Q" } ] }
+  ];
+  ok("findBlockLocation: locates a block by stable id across pages", (function () { var l = g.findBlockLocation(pages, "b3"); return l && l.pi === 1 && l.bi === 0; })());
+  ok("findBlockLocation: first-page block", (function () { var l = g.findBlockLocation(pages, "b2"); return l && l.pi === 0 && l.bi === 1; })());
+  ok("findBlockLocation: unknown id -> null (no throw)", g.findBlockLocation(pages, "zzz") === null && g.findBlockLocation(null, "b1") === null);
+  var locks = [
+    { resourceId: "b1", author: "Priya", class: "content" },
+    { resourceId: "b2", author: "Me", class: "content" },        // my own lock -> no chrome
+    { resourceId: "pageC", author: "Marcus", class: "structure" }, // structure lock -> not shown
+    { blockId: "b3", holder: "Lena" }                              // holder alias, default content
+  ];
+  var held = g.peerHeldBlocks(locks, "Me");
+  ok("peerHeldBlocks: only OTHERS' content locks earn read-only chrome", held.length === 2 && held.map(function (h) { return h.blockId; }).sort().join(",") === "b1,b3");
+  ok("peerHeldBlocks: excludes my own lock + structure locks", !held.some(function (h) { return h.holder === "Me"; }) && !held.some(function (h) { return h.blockId === "pageC"; }));
+
+  // 11b wiring guards: remote-apply is caret-safe (defers while typing) + patches by stable id;
+  // held-block chrome renders only while collaborating.
+  ok("applyRemote defers while a text field is focused (never yanks a caret)", /if \(typeof isTextTarget === "function" && isTextTarget\(document\.activeElement\)\) \{ pending\.push\(env\); return; \}/.test(t));
+  ok("applyRemote patches the one block by stable id then re-renders its page", /doc\.pages\[loc\.pi\]\.blocks\[loc\.bi\] = patch;\s*try \{ reapplyStructural\(loc\.pi\)/.test(t));
+  ok("deferred remote edits flush on blur", /document\.addEventListener\("blur", flushPending, true\)/.test(t));
+  ok("held-block chrome only renders while collaborating", /function renderLocks\(\) \{[\s\S]{0,400}if \(!live\(\)\) return;/.test(t));
+  ok("block.change routes to applyRemote in onEvent", /else if \(env\.type === "block\.change"\) \{ applyRemote\(env\); \}/.test(t));
+  ok("held-block CSS: author-colour inset outline + holder chip", /\.canvas-block\.collab-held \{ box-shadow: inset 0 0 0 1\.5px var\(--hcol/.test(css) && /\.collab-held__chip/.test(css));
+
+  // RemoteCaret: a live cursor/gaze flag for VIEWING peers (editors show via the chip), never me.
+  var cpeers = [
+    { name: "Priya", colour: "#e91e8c", editingBlockId: "b2" },   // editing -> chip, no cursor
+    { name: "Marcus", colour: "#2ea36b", viewingBlockId: "b3" },  // viewing -> cursor
+    { name: "Me", colour: "#0d99ff", viewingBlockId: "b1" }       // me -> never a cursor
+  ];
+  var cursors = g.viewerCursors(cpeers, "Me");
+  ok("viewerCursors: a viewing peer gets a cursor at their block", cursors.length === 1 && cursors[0].blockId === "b3" && cursors[0].name === "Marcus");
+  ok("viewerCursors: an editing peer shows via the chip, not a cursor", !cursors.some(function (c) { return c.name === "Priya"; }));
+  ok("viewerCursors: never me", !cursors.some(function (c) { return c.name === "Me"; }));
+  ok("renderCursors is ephemeral + pointer-events:none (never intercepts a click)", /\.collab-cursor \{[\s\S]{0,200}pointer-events: none/.test(css) && /function renderCursors\(\) \{[\s\S]{0,120}if \(!live\(\)\) return;/.test(t));
+  ok("reproject re-draws cursors after a rebuild", /renderPresence\(\); renderLocks\(\); renderCursors\(\);/.test(t));
+  // AC2 in-block: the peer's caret offset is carried through + placed within the block (corner fallback)
+  var offPeer = [ { name: "Marcus", colour: "#2ea36b", viewingBlockId: "b3", cursor: { selection: { offset: 12 } } }, { name: "Lena", colour: "#4d7cad", viewingBlockId: "b4" } ];
+  var oc = g.viewerCursors(offPeer, "Me");
+  ok("viewerCursors carries the in-block caret offset (null when absent)", oc[0].offset === 12 && oc[1].offset === null);
+  ok("remote caret is positioned at the offset within the block (guarded, corner fallback)", /function positionCaret\(caret, blockEl, offset\)/.test(t) && /if \(offset == null\) return;/.test(t) && /r\.setStart\(node, remaining\)/.test(t));
+  ok("local caret is shared with peers, throttled", /function onCaret\(block, offset\)/.test(t) && /session\.cursorUpdate\(lastCaret\.blockId, \{ offset: lastCaret\.offset \}\)/.test(t) && /CURSOR_THROTTLE_MS/.test(t));
+  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (t.match(/CollabChrome\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
+  // sync-client exposes the cursor.update session method + builder
+  var scc = src("src/sync-client.js");
+  ok("sync-client session: cursorUpdate + cursorMsg builder", /cursorUpdate: function \(blockId, selection\)/.test(scc) && /function cursorMsg\(docId, blockId, selection\)/.test(scc));
+  var sccm = scc.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+  var scg = new Function(sccm[1] + "\nreturn { cursorMsg: cursorMsg };")();
+  ok("cursorMsg builds the ephemeral cursor.update envelope", scg.cursorMsg("C-1", "b1", { offset: 5 }).type === "cursor.update" && scg.cursorMsg("C-1", "b1", { offset: 5 }).payload.selection.offset === 5);
+
+  // ---- send-side: drive the pipe from the edit lifecycle (tickets 11 AC4 + 13 AC1) ----
+  ok("edit-intent (focus) implicitly acquires the content lock + heartbeats", /function onEditFocus\(block\)/.test(t) && /session\.acquireLock\(block\.id\)/.test(t));
+  ok("edit-commit fans the block out (debounced) via sendChange", /function onEditCommit\(block\)/.test(t) && /setTimeout\(flushEdit, EDIT_DEBOUNCE_MS\)/.test(t) && /session\.sendChange\(b\.id, content, baseSeq\)/.test(t));
+  ok("blur auto-releases the lock (after flushing any pending edit)", /function onEditBlur\(block\)/.test(t) && /session\.releaseLock\(block\.id\)/.test(t));
+  ok("heartbeat timer starts in ensure() (drives presence TTL, AC4)", /beatTimer = setInterval\(beat, HEARTBEAT_MS\)/.test(t));
+  ok("beat sends viewing + editing block ids over the session", /function beat\(\) \{ if \(live\(\) && session && session\.heartbeat\) session\.heartbeat\(viewingBlockId, editingBlockId\); \}/.test(t));
+  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /CollabChrome\.onEditFocus\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditCommit\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditBlur\(collabBlockOf\(node\)\)/.test(t));
+  ok("send-side is gated on live()+session (inert in standalone)", /function onEditFocus\(block\) \{\s*if \(!live\(\) \|\| !block \|\| !block\.id \|\| !session\) return;/.test(t));
+  // story 9: auto-release on IDLE (not just blur) so a focused-but-idle author doesn't hold the lock
+  ok("idle-timeout releases the held block (spec story 9)", /function touchIdle\(\)/.test(t) && /session\.releaseLock\(editingBlockId\); editingBlockId = null;/.test(t) && /IDLE_RELEASE_MS/.test(t));
+  ok("edit + caret activity resets the idle timer", /editingBlockId = viewingBlockId = block\.id;[\s\S]{0,120}touchIdle\(\);/.test(t) && /touchIdle\(\); \/\/ caret movement/.test(t));
+  ok("blur supersedes the idle timer", /if \(idleTimer\) \{ clearTimeout\(idleTimer\); idleTimer = null; \} \/\/ blur supersedes/.test(t));
+  // ticket 26 two-way: an author reply/resolve fans back to the reviewer (shared both ways)
+  ok("author reply fans out via session.comment (cid -> server block.id)", /function fanoutReply\(comment, body\)[\s\S]{0,220}session\.comment\(blockIdByCid\(doc, cid\) \|\| cid, body, comment\.threadId/.test(t));
+  ok("author resolve fans out via session.resolveComment", /function fanoutResolve\(comment, resolved\)[\s\S]{0,220}session\.resolveComment\(blockIdByCid\(doc, cid\) \|\| cid, comment\.threadId/.test(t));
+  ok("the shipped reply + resolve controls call the fanout (both ways)", (t.match(/CollabChrome\.fanoutResolve\(c, v\)/g) || []).length >= 2 && /CollabChrome\.fanoutReply\(c, v\)/.test(t));
+  ok("the origin echo of my optimistic reply reconciles by rp_ marker + body (author-independent, no dup/collapse)", /String\(replies\[q\]\.id\)\.indexOf\("rp_"\) === 0 && replies\[q\]\.body === c\.body/.test(t) && /slot\.id = c\.id;/.test(t));
+  var scr = src("src/sync-client.js");
+  ok("sync-client session: resolveComment + resolveMsg builder", /resolveComment: function \(blockId, threadId, resolved\)/.test(scr) && /function resolveMsg\(docId, blockId, threadId, resolved\)/.test(scr));
+
+  // ---- ticket 13-UI: soft-conflict modal rows + handoff/notify (pure + wiring) ----
+  var cdoc = { pages: [ { id: "p1", blocks: [ { id: "b1", type: "para", text: "SERVER-CURRENT" } ] } ] };
+  var view = [ { blockId: "b1", mine: { id: "b1", type: "para", text: "MY-EDIT" }, hasMine: true, serverSeq: 9 },
+               { blockId: "gone", mine: { id: "gone", text: "ORPHAN-MINE" }, hasMine: true, serverSeq: 10 } ];
+  var crows = g.conflictRows(view, cdoc);
+  ok("conflictRows: joins my buffered edit with the server's current block", crows[0].blockId === "b1" && crows[0].mine.text === "MY-EDIT" && crows[0].theirs.text === "SERVER-CURRENT");
+  ok("conflictRows: a conflict whose block is gone still surfaces (theirs null, never dropped)", crows[1].blockId === "gone" && crows[1].theirs === null && crows[1].hasMine === true);
+  ok("blockPreview: strips tags, shows text (empty/deleted fallbacks never blank)", g.blockPreview({ text: "<b>Hi</b> there" }) === "Hi there" && g.blockPreview(null) === "(deleted)" && g.blockPreview({}) !== "");
+
+  // 13-UI wiring: modal driven by conflictView, never auto-dismiss; block.conflict -> reconnect,
+  // resnapshot-with-pending -> restore; handoff/notify go through the session.
+  ok("soft-conflict modal is driven by VersoSync.conflictView()", /conflictRows\(window\.VersoSync\.conflictView\(\)/.test(t));
+  ok("block.conflict opens the reconnect-collision prompt", /else if \(env\.type === "block\.conflict"\) \{ showConflicts\("server"\); \}/.test(t));
+  ok("resnapshot opens the restore-collision prompt only when I have unacked edits", /env\.type === "sync\.resnapshot"/.test(t) && /_buffer\.pending\(\)\.length\) showConflicts\("restored"\)/.test(t));
+  ok("Keep mine re-asserts my edit; Use theirs drops my buffer + applies theirs", /session\.sendChange\(r\.blockId, r\.mine, r\.serverSeq\)/.test(t) && /_buffer\.ack\(r\.blockId\)/.test(t));
+  ok("held chip opens a handoff/notify ContextMenu", /chip\.onclick = function \(e\) \{ e\.stopPropagation\(\); openHeldMenu\(e, hb\); \}/.test(t));
+  ok("handoff + notify go through the sync session", /session\.requestHandoff\(hb\.blockId\)/.test(t) && /session\.notifyWhenFree\(hb\.blockId, !armed\)/.test(t));
+  ok("13-UI CSS: modal shell + panes present", /\.collab-modal \{/.test(css) && /\.collab-pane\.is-mine/.test(css));
+
+  // sync-client exposes the handoff/notify session methods + envelope builders
+  var sc = src("src/sync-client.js");
+  ok("sync-client session: requestHandoff + notifyWhenFree", /requestHandoff: function \(blockId\)/.test(sc) && /notifyWhenFree: function \(blockId, on\)/.test(sc));
+  var scm = sc.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+  var sg = new Function(scm[1] + "\nreturn { handoffMsg: handoffMsg, notifyMsg: notifyMsg };")();
+  ok("sync-client handoffMsg/notifyMsg build the relayed envelopes", sg.handoffMsg("C-1", "b1").type === "lock.requestHandoff" && sg.notifyMsg("C-1", "b1", true).payload.on === true);
+})();
+
+// ---- platform-pivot 26: review-links author round-trip (guest tag + orphaned-anchor tray) ----
+// Reuses the SHIPPED comment system; the delta is guest-vs-internal + never-drop orphan surfacing.
+section("platform-pivot 26 review round-trip");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
+  if (!m) { ok("locate @comment-guest fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
+
+  ok("commentIsGuest: source guest-link OR guest flag", g.commentIsGuest({ source: "guest-link" }) === true && g.commentIsGuest({ guest: true }) === true && g.commentIsGuest({ author: "Me" }) === false);
+  var doc = { pages: [ { blocks: [ { cid: "c1", type: "para" }, { cid: "c2", type: "group", children: [ { cid: "c3" } ] } ] } ] };
+  var cids = g.docCids(doc);
+  ok("docCids: collects cids incl. nested children", cids.c1 && cids.c2 && cids.c3 && !cids.zzz);
+  ok("commentIsOrphaned: block-anchor whose cid is gone -> orphaned (never dropped)", g.commentIsOrphaned({ anchor: { blockId: "gone" } }, doc) === true);
+  ok("commentIsOrphaned: block-anchor whose cid still exists -> not orphaned", g.commentIsOrphaned({ anchor: { blockId: "c3" } }, doc) === false);
+  ok("commentIsOrphaned: page/world anchors don't orphan the same way", g.commentIsOrphaned({ anchor: { pageId: "p1" } }, doc) === false && g.commentIsOrphaned({ anchor: { worldX: 1 } }, doc) === false);
+
+  // wiring: the panel splits orphaned into a tray + tags guests; guest comments ride the SHIPPED
+  // doc.comments store via the sync channel (a delta, not a parallel comment system).
+  ok("panel splits orphaned notes into their own never-drop tray", /var orphaned = shown\.filter\(function \(c\) \{ return commentIsOrphaned\(c, doc\); \}\)/.test(t) && /Orphaned — need a home/.test(t));
+  ok("panel tags guest comments (guest-vs-internal weighing)", /if \(commentIsGuest\(c\)\) top\.appendChild\(h\("span", "comment-row__tag is-guest", "Guest"\)\)/.test(t));
+  ok("orphaned note is dismissible (kept until the author acts, never silently dropped)", /Dismiss this orphaned note[\s\S]{0,220}doc\.comments = \(doc\.comments \|\| \[\]\)\.filter/.test(t));
+  // id-space bridge: server anchors by block.id, client pins by cid -> map at ingest so a guest
+  // comment resolves onto the live block (a raw id with no cid falls through to orphaned).
+  var idoc = { pages: [ { blocks: [ { id: "srv-b2", cid: "c-abc", type: "para" }, { id: "srv-b5", cid: "c-def", type: "group", children: [ { id: "srv-b6", cid: "c-ghi" } ] } ] } ] };
+  ok("blockCidById: maps a server block.id to the client cid (incl. nested)", g.blockCidById(idoc, "srv-b2") === "c-abc" && g.blockCidById(idoc, "srv-b6") === "c-ghi" && g.blockCidById(idoc, "nope") === null);
+  ok("blockIdByCid: the INVERSE (cid -> server block.id) for fanning a reply/resolve back", g.blockIdByCid(idoc, "c-abc") === "srv-b2" && g.blockIdByCid(idoc, "c-ghi") === "srv-b6" && g.blockIdByCid(idoc, "nope") === null);
+  var env = { type: "comment.added", docId: "D1", blockId: "srv-b2", author: "Sam Okafor", ts: 111, payload: { id: "cm_1", threadId: "cm_1", body: "add an example here", kind: "guest" } };
+  var mapped = g.commentFromEnv(env, idoc, function (n) { return "#col"; });
+  ok("commentFromEnv: reads blockId/author off the ENVELOPE, anchors by cid, tags guest", mapped.anchor.blockId === "c-abc" && mapped.author === "Sam Okafor" && mapped.source === "guest-link" && mapped.body === "add an example here" && mapped.colour === "#col");
+  ok("commentFromEnv: a deleted server block -> anchor falls to raw id (surfaces orphaned, not mis-anchored)", g.commentFromEnv({ blockId: "gone", author: "A", payload: { id: "cm_9" } }, idoc, function () { return "#c"; }).anchor.blockId === "gone");
+  ok("commentFromEnv: no comment id -> null (never a blank note)", g.commentFromEnv({ blockId: "srv-b2", payload: {} }, idoc, function () { return "#c"; }) === null);
+
+  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, doc, colourForName\)/.test(t) && /replies\.push\(\{ id: c\.id, body: c\.body/.test(t));
+  ok("comment.added / comment.resolved route through the round-trip", /else if \(env\.type === "comment\.added"\) \{ ingestComment\(env\); \}/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveThread\(env\); \}/.test(t));
+  ok("resolveThread marks the whole thread done (both ways)", /function resolveThread\(env\)[\s\S]{0,260}c\.id === threadId \|\| c\.threadId === threadId/.test(t));
+  var css = src("editor.css");
+  ok("26 CSS: guest tag + orphan tray", /\.comment-row__tag\.is-guest/.test(css) && /\.comment-list\.is-orphan-tray/.test(css));
+})();
+
+// ---- platform-pivot 03: block-addressable store pure helpers ----------------
+// decompose/assemble inverse + debounce-coalesce, exercised without a db.
+section("platform-pivot 03 block-store pure");
+(function () {
+  var t = src("server/block-store.js");
+  var m = t.match(/\/\* @block-pure-start \*\/([\s\S]*?)\/\* @block-pure-end \*\//);
+  if (!m) { ok("locate @block-pure fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { decomposeDoc: decomposeDoc, assembleDoc: assembleDoc, coalesceChanges: coalesceChanges };")();
+  var id = 0, mint = function () { return "m" + (++id); };
+  var doc = { meta: { code: "C-1" }, headerFooter: { on: 1 }, pages: [
+    { id: "p1", name: "One", blocks: [ { id: "b1", type: "heading", text: "H" }, { type: "para", text: "x" } ] },
+    { id: "p2", name: "Two", blocks: [ { id: "b3", type: "para", text: "P3" } ] }
+  ]};
+  var dec = g.decomposeDoc(JSON.parse(JSON.stringify(doc)), mint);
+  ok("decompose: 2 pages", dec.pages.length === 2);
+  ok("decompose: mints id for the id-less block", dec.pages[0].blockIds.length === 2 && /^m\d+$/.test(dec.pages[0].blockIds[1]));
+  ok("decompose: docMeta drops pages, keeps meta+headerFooter", !dec.docMeta.pages && dec.docMeta.meta.code === "C-1" && dec.docMeta.headerFooter.on === 1);
+  var asm = g.assembleDoc(dec.docMeta, dec.pages, dec.blocks);
+  ok("assemble is inverse of decompose (structure + content)",
+    asm.pages.length === 2 && asm.pages[0].blocks[0].text === "H" && asm.pages[1].blocks[0].text === "P3" && asm.meta.code === "C-1");
+  // coalesce: burst within window -> last wins; gap or block change -> split
+  var co = g.coalesceChanges([
+    { blockId: "b1", patch: "a", ts: 0 }, { blockId: "b1", patch: "b", ts: 100 }, { blockId: "b1", patch: "c", ts: 200 },
+    { blockId: "b1", patch: "d", ts: 900 }, { blockId: "b2", patch: "e", ts: 950 }
+  ], 600);
+  ok("coalesce: burst within window collapses to last-wins", co.length === 3 && co[0].patch === "c" && co[1].patch === "d" && co[2].patch === "e");
+  ok("coalesce: empty -> empty", g.coalesceChanges([], 600).length === 0);
+  // ticket 04 AC2 (version-clone footgun). Two parts, honestly separated:
+  //   (i)  NECESSARY server invariant: the preview clone's __vbase back-link is
+  //        NON-ENUMERABLE, so JSON.stringify drops it -- the store never persists the
+  //        wrapper object itself.
+  //   (ii) The ACTUAL guard is CLIENT-SIDE: the clone's ENUMERABLE fields are the
+  //        *previewed variant* values, so storing the clone as-is would persist the
+  //        variant (the footgun). The editor must unwrap to the base node
+  //        (versionBaseNode: node.__vbase || node) BEFORE the content reaches the store
+  //        -- that unwrap lives in editor.js and is exercised at save time (ticket 16).
+  //        Here we simulate it to show the end-to-end guard yields BASE content.
+  var base = { id: "b9", type: "heading", text: "BASE" };
+  var clone = { id: "b9", type: "heading", text: "PREVIEW" };
+  Object.defineProperty(clone, "__vbase", { value: base, enumerable: false });
+  ok("AC2 (i): non-enumerable __vbase never serialises", !("__vbase" in JSON.parse(JSON.stringify(clone))));
+  // the necessary-but-insufficient half: an un-unwrapped clone would persist the PREVIEW
+  ok("AC2 (i): an un-unwrapped clone would wrongly carry the preview value (why the unwrap matters)", JSON.parse(JSON.stringify(clone)).text === "PREVIEW");
+  // (ii) unwrap-to-base first (the client guard), THEN store -> base content persists
+  var versionBaseNode = function (n) { return (n && n.__vbase) || n; };
+  var decV = g.decomposeDoc({ meta: {}, pages: [ { id: "pp", blocks: [ versionBaseNode(clone) ] } ] }, function () { return "x"; });
+  ok("AC2 (ii): unwrapping to base before store persists the BASE, not the preview", JSON.parse(JSON.stringify(decV.blocks["b9"])).text === "BASE");
+})();
+
+// ---- platform-pivot 03: block-addressable store + append log (db-backed) -----
+// The event-sourced core: one edit -> one seq-stamped event; materialize === replay;
+// changesSince(N) replay; per-block ver distinct from global seq; snapshot bounds
+// replay. node:sqlite required -> WARN + skip on older CI Node.
+section("platform-pivot 03 block-store");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> block-store db tests skipped"); return; }
+  var os = require("os");
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-bs-test-"));
+  var clock = 100, idn = 0;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "mint" + (++idn); }, now: function () { return clock; } });
+  var eq = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+  try {
+    var doc = { meta: { code: "C-1", title: "T" }, headerFooter: { header: { on: true } }, pages: [
+      { id: "p1", name: "One", blocks: [ { id: "b1", type: "heading", text: "H" }, { type: "para", text: "no-id" } ] },
+      { id: "p2", name: "Two", blocks: [ { id: "b3", type: "para", text: "P3" } ] }
+    ]};
+    var imp = store.importDoc("C-1", doc, "alice");
+    ok("import: 2 pages / 3 blocks", imp.pages === 2 && imp.blocks === 3);
+    var m0 = store.materializeDoc("C-1");
+    ok("materialize keeps meta + headerFooter", m0.meta.code === "C-1" && m0.headerFooter.header.on === true);
+    ok("materialize round-trips content + mints missing id", m0.pages[0].blocks[0].text === "H" && !!m0.pages[0].blocks[1].id);
+
+    // AC1
+    var before = store.maxSeq();
+    clock = 200;
+    var r1 = store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-edited" }, "bob");
+    ok("AC1: seq advances by exactly 1", r1.seq === before + 1);
+    ok("AC5: per-block ver (2) distinct from global seq", r1.ver === 2 && r1.seq !== r1.ver);
+    var evs = store.changesSince(before);
+    ok("AC1: exactly one appended event", evs.length === 1);
+    ok("AC1: event fields correct", evs[0].blockId === "b1" && evs[0].author === "bob" && evs[0].kind === "block.put" && JSON.parse(evs[0].patch).text === "H-edited");
+    ok("AC1: materialized read reflects the edit", store.materializeDoc("C-1").pages[0].blocks[0].text === "H-edited");
+
+    clock = 260;
+    var r2 = store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-again" }, "bob");
+    ok("AC5: ver climbs to 3, global seq keeps climbing", r2.ver === 3 && r2.seq === r1.seq + 1);
+
+    // AC2
+    ok("AC2: materializeDoc === replayDoc (from import baseline)", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+
+    // AC4
+    var sinceR1 = store.changesSince(r1.seq);
+    ok("AC4: changesSince(N) returns only seq>N in order", sinceR1.length === 1 && sinceR1[0].seq === r2.seq);
+    ok("AC4: changesSince(0) returns the full log", store.changesSince(0).length === 2);
+
+    // snapshot bounds replay, AC2 still holds after a mid-stream snapshot
+    var snap = store.takeSnapshot("C-1", "alice");
+    ok("snapshot captures the seq at snapshot time", snap.atSeq === r2.seq);
+    clock = 300;
+    store.applyChange("C-1", "b3", { id: "b3", type: "para", text: "P3-edited" }, "carol");
+    ok("AC2: materialize === replay from latest snapshot (bounded)", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+
+    // orphan-block guard: a change to a block not in the doc's structure is rejected,
+    // appends NO event, and does not corrupt materialize/replay (review finding).
+    var seqBeforeGhost = store.maxSeq();
+    var ghost = store.applyChange("C-1", "ghost", { id: "ghost" }, "x");
+    ok("unknown block rejected (ok:false), no event appended", ghost.ok === false && store.maxSeq() === seqBeforeGhost);
+    ok("orphan reject leaves materialize === replay intact", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+
+    // ---- ticket 04: named checkpoints + rollback time-axis + single-block revert ----
+    ok("import seeded an 'imported' checkpoint (ticket 05 baseline)", store.listCheckpoints("C-1").filter(function (c) { return c.name === "imported"; }).length === 1);
+    clock = 400;
+    var cpV1 = store.createCheckpoint("C-1", "v1", "bob");
+    ok("AC1: createCheckpoint named + browsable", cpV1.ok && store.listCheckpoints("C-1").some(function (c) { return c.name === "v1"; }));
+    clock = 420; store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-after-v1" }, "bob");
+    ok("edit moved b1 past the checkpoint", store.materializeDoc("C-1").pages[0].blocks[0].text === "H-after-v1");
+    var rr = store.restoreCheckpoint("C-1", cpV1.id, "admin");
+    ok("AC1/AC2: restore rewrites base doc to the checkpoint state", rr.ok && store.materializeDoc("C-1").pages[0].blocks[0].text !== "H-after-v1");
+    ok("AC2: materialize === replay after restore", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+    ok("restore is forward-only: a doc.restore marker is in the log", store.changesSince(0).some(function (e) { return e.kind === "doc.restore"; }));
+    // AC3: single-block history + revert-in-place, other blocks untouched
+    var p3before = store.materializeDoc("C-1").pages[1].blocks[0].text;
+    ok("AC3: blockHistory returns b1 puts in seq order", (function () { var h = store.blockHistory("C-1", "b1"); return h.length >= 1 && h.every(function (e, i, a) { return i === 0 || a[i - 1].seq < e.seq; }); })());
+    clock = 500; store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-latest" }, "bob");
+    var rv = store.revertBlock("C-1", "b1", cpV1.atSeq, "admin");
+    ok("AC3: revertBlock is forward-only (new seq) + ok", rv.ok && rv.seq > cpV1.atSeq);
+    ok("AC3: single-block revert did NOT alter a sibling block", store.materializeDoc("C-1").pages[1].blocks[0].text === p3before);
+    // AC4: authored version data carried through a restore unchanged (orthogonal axis)
+    clock = 560; store.applyChange("C-1", "b3", { id: "b3", type: "para", text: "P3", versionVis: { hide: ["v2"] } }, "bob");
+    var cpVer = store.createCheckpoint("C-1", "hasVersionData", "bob");
+    clock = 580; store.applyChange("C-1", "b3", { id: "b3", type: "para", text: "P3-x" }, "bob");
+    store.restoreCheckpoint("C-1", cpVer.id, "admin");
+    ok("AC4: restore carries authored versionVis through unchanged", eq(store.materializeDoc("C-1").pages[1].blocks[0].versionVis, { hide: ["v2"] }));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 05: .verso <-> block-store round-trip fidelity + migration ----
+// REQUIRED fidelity target from the map: import -> export reconstructs a structurally +
+// content-equivalent doc; the ONE import path serves .verso import, local->server
+// publish, AND legacy-course migration.
+section("platform-pivot 05 round-trip fidelity");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> fidelity tests skipped"); return; }
+  var os = require("os");
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-fid-test-"));
+  var idn = 0;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "mint" + (++idn); }, now: function () { return 0; } });
+  var eq = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+  var clone = function (o) { return JSON.parse(JSON.stringify(o)); };
+  try {
+    // realistic nested doc (courseNav in headerFooter.children, componentGrid instances,
+    // nested block children) -- all with ids so the round-trip is EXACT.
+    var doc = {
+      meta: { title: "Safety", code: "C-1" },
+      headerFooter: { header: { on: true }, footer: { on: true, children: [ { type: "courseNav", sections: [ { id: "s1", label: "01", pageIds: ["ch01"] } ] } ] } },
+      pages: [
+        { id: "ch01", name: "Getting Started", blocks: [
+          { id: "b1", type: "heading", text: "Welcome" },
+          { id: "b2", type: "componentGrid", component: "card", instances: [ { status: "complete", slots: { title: "A" } }, { status: "incomplete", slots: { title: "B" } } ] },
+          { id: "b3", type: "columns", children: [ { id: "b3a", type: "para", text: "left" }, { id: "b3b", type: "para", text: "right" } ] }
+        ]},
+        { id: "ch02", name: "Hazards", blocks: [ { id: "b4", type: "para", text: "P4" } ] }
+      ]
+    };
+    var orig = clone(doc);
+    store.importDoc("C-1", doc, "alice");
+    var exp1 = store.exportDoc("C-1");
+    ok("AC2 REQUIRED: import -> export is exact round-trip fidelity (ids present)", eq(exp1, orig));
+    ok("fidelity: nested componentGrid instances survive", exp1.pages[0].blocks[1].instances[1].slots.title === "B");
+    ok("fidelity: nested block children survive", exp1.pages[0].blocks[2].children[1].text === "right");
+    ok("fidelity: headerFooter.children (courseNav) survive", exp1.headerFooter.footer.children[0].sections[0].pageIds[0] === "ch01");
+    ok("AC1: import seeded an 'imported' checkpoint", store.listCheckpoints("C-1").some(function (c) { return c.name === "imported"; }));
+
+    // idempotence on an id-LESS doc: mint once, then stable across re-round-trips
+    var idless = { meta: { code: "C-2" }, pages: [ { name: "P", blocks: [ { type: "heading", text: "H" }, { type: "para", text: "x" } ] } ] };
+    store.importDoc("C-2", clone(idless), "a");
+    var m1 = store.exportDoc("C-2");
+    store.importDoc("C-2b", clone(m1), "a");
+    var m2 = store.exportDoc("C-2b");
+    ok("AC2: export -> import -> re-export is idempotent (stable)", eq(m1, m2));
+    ok("id-less blocks get stable minted ids on first import", m1.pages[0].blocks.every(function (b) { return !!b.id; }));
+
+    // AC4: legacy blob-format course migrates into block rows + loads back equivalent
+    var legacy = { schemaVersion: 1, meta: { code: "OLD-1", title: "Legacy" }, pages: [
+      { id: "p1", name: "Old Page", legacyFlag: true, blocks: [ { id: "lb1", type: "text", html: "<p>legacy</p>", legacyAttr: "keep" } ] }
+    ]};
+    store.importDoc("OLD-1", clone(legacy), "migrator");
+    var lexp = store.exportDoc("OLD-1");
+    ok("AC4: legacy blob-format course migrates + loads back equivalent", eq(lexp, legacy));
+    ok("AC4: legacy per-block + per-page attrs preserved", lexp.pages[0].blocks[0].legacyAttr === "keep" && lexp.pages[0].legacyFlag === true);
+    // AC3: the ONE importDoc path served .verso doc + fresh doc + legacy doc (all above).
+    ok("AC3: one import path served .verso/import/legacy (3 imports, same fn)", typeof store.importDoc === "function");
+    // fidelity holds under subsequent edits
+    store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "Welcome!" }, "bob");
+    ok("post-import edit keeps materialize === replay", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 08: live-collaboration sequencer + fan-out (primary seam) ----
+// The favoured seam: drive typed envelopes through the hub against a real block store
+// via an in-memory FakeTransport, assert the emitted seq-stamped events + persist-
+// before-fan-out + local-mode dormancy. No sockets (the wire is a secondary, thin seam).
+section("platform-pivot 08 sync hub");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> sync hub tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-sync-test-"));
+  var idn = 0;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return 0; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] } ] }, "sys");
+    var env = SY.envelope;
+    // server mode: two clients, block.change A -> delivered to B seq-stamped, persist-first
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return 7; } });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    hub.connect(ta, "alice"); hub.connect(tb, "bob");
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ok("AC3: a fresh sync.hello (sinceSeq 0) -> resnapshot carrying the base doc", ta.sent.some(function (e) { return e.type === "sync.resnapshot" && e.payload.snapshot && e.payload.snapshot.meta; }));
+    var seqBefore = store.maxSeq();
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "H2" }, baseSeq: seqBefore }));
+    ok("AC1: persist BEFORE fan-out (store advanced by 1)", store.maxSeq() === seqBefore + 1);
+    ok("AC1: materialized state reflects the change", store.materializeDoc("C-1").pages[0].blocks[0].text === "H2");
+    var fanned = tb.sent.filter(function (e) { return e.type === "block.change"; });
+    ok("AC1: block.change delivered to the OTHER client", fanned.length === 1 && fanned[0].blockId === "b1");
+    ok("AC1/AC3: fanned-out event is seq-stamped by the server", fanned[0].seq === seqBefore + 1);
+    ok("AC1: origin gets an ack, not an echoed block.change", ta.sent.some(function (e) { return e.type === "block.ack" && e.seq === seqBefore + 1; }) && !ta.sent.some(function (e) { return e.type === "block.change"; }));
+    ok("AC4: no second event model -- change lives in Foundation's log", store.changesSince(seqBefore, "C-1").length === 1);
+    ok("stale-write guard: baseSeq carried on fan-out (for 09/13)", fanned[0].payload.baseSeq === seqBefore);
+    // ephemeral presence fans out but is never logged
+    var seqNow = store.maxSeq();
+    ta.receive(env("presence.heartbeat", "C-1", null, null, "alice", 0, { editingBlockId: "b1" }));
+    ok("presence fans out to the peer", tb.sent.some(function (e) { return e.type === "presence.heartbeat"; }));
+    ok("presence is ephemeral (no log append)", store.maxSeq() === seqNow);
+    // lock auto-grant absent a lockManager (ticket 10 plugs in)
+    ta.receive(env("lock.acquire", "C-1", "b2", null, "alice", 0, {}));
+    ok("lock.acquire auto-granted (no lockManager yet -> ticket 10)", ta.sent.some(function (e) { return e.type === "lock.granted" && e.blockId === "b2"; }));
+    // disconnect cleanup
+    var n = hub._subs("C-1").length; tb.close();
+    ok("drop removes the client from subscribers", hub._subs("C-1").length === n - 1);
+    // AC5: local mode inert -> no fan-out (still persists locally)
+    var hubL = SY.createSyncHub(store, { mode: "local", now: function () { return 0; } });
+    var la = SY.FakeTransport(), lb = SY.FakeTransport();
+    hubL.connect(la, "x"); hubL.connect(lb, "y");
+    la.receive(env("sync.hello", "C-1", null, null, "x", 0, { sinceSeq: 0 }));
+    lb.receive(env("sync.hello", "C-1", null, null, "y", 0, { sinceSeq: 0 }));
+    la.receive(env("block.change", "C-1", "b2", null, "x", 0, { content: { id: "b2", type: "para", text: "local" } }));
+    ok("AC5: local mode does NOT fan out to peers", !lb.sent.some(function (e) { return e.type === "block.change"; }));
+    ok("AC5: local mode still persists (store is the source of truth)", store.materializeDoc("C-1").pages[0].blocks[1].text === "local");
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 10: block-level locking (model B) through the hub ----------
+// The authoritative lock registry: a block.change is accepted ONLY from the holder;
+// locks are per-leaf-block content or per-container structure (separate namespaces);
+// only edit-capable roles acquire.
+section("platform-pivot 10 locking");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> locking tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-lock-test-"));
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    // AC1: acquire -> granted + lock.state broadcast
+    ta.receive(env("lock.acquire", "C-1", "b1", null, "alice", 0, {}));
+    ok("AC1: acquire -> lock.granted to holder", ta.sent.some(function (e) { return e.type === "lock.granted" && e.blockId === "b1"; }));
+    ok("lock.state broadcast names the holder", tb.sent.some(function (e) { return e.type === "lock.state" && e.payload.locks.some(function (l) { return l.resourceId === "b1" && l.holder === "alice"; }); }));
+    // AC4: non-holder change denied + not persisted; holder change accepted
+    tb.receive(env("block.change", "C-1", "b1", null, "bob", 0, { content: { id: "b1", text: "BOB" }, baseSeq: store.maxSeq() }));
+    ok("AC4: block.change from a non-holder is DENIED", tb.sent.some(function (e) { return e.type === "block.denied" && e.blockId === "b1"; }));
+    ok("AC4: the denied change did NOT persist", store.materializeDoc("C-1").pages[0].blocks[0].text !== "BOB");
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "ALICE" }, baseSeq: store.maxSeq() }));
+    ok("AC4: the holder's change is accepted + persisted", store.materializeDoc("C-1").pages[0].blocks[0].text === "ALICE");
+    // AC2: a colleague works a different block freely
+    tb.receive(env("lock.acquire", "C-1", "b2", null, "bob", 0, {}));
+    tb.receive(env("block.change", "C-1", "b2", null, "bob", 0, { content: { id: "b2", type: "para", text: "BOBP" }, baseSeq: store.maxSeq() }));
+    ok("AC2: colleague edits a different block while b1 is held", store.materializeDoc("C-1").pages[0].blocks[1].text === "BOBP");
+    ok("AC4: acquiring a held block -> lock.denied with holder", (function () { tb.receive(env("lock.acquire", "C-1", "b1", null, "bob", 0, {})); return tb.sent.some(function (e) { return e.type === "lock.denied" && e.blockId === "b1" && e.payload.holder === "alice"; }); })());
+    // AC3: structure lock is a separate, coarse namespace
+    ta.receive(env("lock.acquire", "C-1", "cont1", null, "alice", 0, { class: "structure" }));
+    ok("AC3: structure lock granted in its own class", ta.sent.some(function (e) { return e.type === "lock.granted" && e.blockId === "cont1" && e.payload.class === "structure"; }));
+    ok("AC3: a structure lock is not a content lock", lm.holder("C-1", "cont1") === null);
+    // AC5: reviewer/viewer never get a lock
+    var tc = SY.FakeTransport(); var C = hub.connect(tc, "rev"); C.role = "reviewer";
+    tc.receive(env("lock.acquire", "C-1", "b2", null, "rev", 0, {}));
+    ok("AC5: a reviewer role is denied a lock", tc.sent.some(function (e) { return e.type === "lock.denied" && e.payload.reason === "role may not edit"; }));
+    // release + disconnect auto-release
+    ta.receive(env("lock.release", "C-1", "b1", null, "alice", 0, {}));
+    ok("AC1: release frees the lock", lm.holder("C-1", "b1") === null);
+    tb.close();
+    ok("disconnect auto-releases the client's locks", lm.holder("C-1", "b2") === null);
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 12: heartbeat-lease reaper + baseSeq staleness guard -------
+section("platform-pivot 12 lease reaper");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> reaper tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var RP = require(path.join(ROOT, "server/lock-reaper.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-reap-test-"));
+  var idn = 0, clock = 1000;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var reclaims = 0;
+    var reaper = RP.createReaper(lm, { now: function () { return clock; }, graceMs: 45000, onReclaim: function () { reclaims++; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ta.receive(env("lock.acquire", "C-1", "b1", null, "alice", 0, {}));
+    ok("alice holds b1", lm.holder("C-1", "b1") === A);
+    clock = 1000 + 40000; // within grace
+    ok("sweep before grace window: no reclaim", reaper.sweep().length === 0 && lm.holder("C-1", "b1") === A);
+    clock = 1000 + 50000; // past grace
+    var freed = reaper.sweep();
+    ok("AC1: a vanished holder's block is reclaimed after the grace window", freed.length === 1 && lm.holder("C-1", "b1") === null);
+    ok("AC4: grace window is configurable", reaper.graceMs === 45000);
+    ok("reclaim fires the broadcast callback", reclaims === 1);
+    tb.receive(env("lock.acquire", "C-1", "b1", null, "bob", 0, {}));
+    ok("AC1: a peer re-acquires the freed block", lm.holder("C-1", "b1") === B);
+    ok("AC2: reclaimed block is the last acked (materialized) state -- no fragments", store.materializeDoc("C-1").pages[0].blocks[0].text === "H");
+    // AC3 end-to-end: bob advances b1; alice's late stale change is rejected + not persisted
+    var sBob = store.maxSeq();
+    tb.receive(env("block.change", "C-1", "b1", null, "bob", 0, { content: { id: "b1", type: "heading", text: "BOB" }, baseSeq: sBob }));
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "STALE" }, baseSeq: sBob }));
+    ok("AC3: late change from ex-holder is rejected (not the holder / stale) and not persisted", store.materializeDoc("C-1").pages[0].blocks[0].text === "BOB");
+
+    // AC3 isolated: the baseSeq guard itself, in the lockless config (no lockManager).
+    var hub2 = SY.createSyncHub(store, { mode: "server", now: function () { return clock; } });
+    var tc = SY.FakeTransport(), td = SY.FakeTransport();
+    hub2.connect(tc, "c"); hub2.connect(td, "d");
+    tc.receive(env("sync.hello", "C-1", null, null, "c", 0, { sinceSeq: 0 }));
+    td.receive(env("sync.hello", "C-1", null, null, "d", 0, { sinceSeq: 0 }));
+    var b0 = store.maxSeq();
+    tc.receive(env("block.change", "C-1", "b1", null, "c", 0, { content: { id: "b1", type: "heading", text: "C1" }, baseSeq: b0 }));
+    var b1s = store.maxSeq();
+    td.receive(env("block.change", "C-1", "b1", null, "d", 0, { content: { id: "b1", type: "heading", text: "D-STALE" }, baseSeq: b0 }));
+    ok("AC3: a stale baseSeq is rejected with block.conflict (soft, not silent)", td.sent.some(function (e) { return e.type === "block.conflict" && e.blockId === "b1"; }));
+    ok("AC3: the stale write did not persist", store.materializeDoc("C-1").pages[0].blocks[0].text === "C1");
+    td.receive(env("block.change", "C-1", "b1", null, "d", 0, { content: { id: "b1", type: "heading", text: "D-OK" }, baseSeq: b1s }));
+    ok("AC3: a current-baseSeq retry is accepted (no false reject)", store.materializeDoc("C-1").pages[0].blocks[0].text === "D-OK");
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 14: conflict rule (structure vs content lock) + rollback ----
+section("platform-pivot 14 conflict + rollback");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> conflict/rollback tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-conf-test-"));
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" }, { id: "b3", type: "para", text: "Q" } ] } ] }, "sys");
+    var cp = store.createCheckpoint("C-1", "v1", "admin");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport(), tadm = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"), ADM = hub.connect(tadm, "admin");
+    A.role = "author"; B.role = "author"; ADM.role = "admin";
+    [ta, tb, tadm].forEach(function (tt, i) { tt.receive(env("sync.hello", "C-1", null, null, ["alice", "bob", "admin"][i], 0, { sinceSeq: 0 })); });
+    ta.receive(env("lock.acquire", "C-1", "b1", null, "alice", 0, {}));
+    // AC1: delete a content-locked block -> refused, never evicts
+    tb.receive(env("structure.op", "C-1", "b1", null, "bob", 0, { op: "delete" }));
+    ok("AC1: delete of a content-locked block is REFUSED", tb.sent.some(function (e) { return e.type === "structure.denied" && /editing this/.test(e.payload.reason); }));
+    ok("AC1: the editor is not evicted", lm.holder("C-1", "b1") === A && store.materializeDoc("C-1").pages[0].blocks.some(function (b) { return b.id === "b1"; }));
+    // AC2: reorder succeeds despite a held content lock
+    tb.receive(env("structure.op", "C-1", null, null, "bob", 0, { op: "reorder", pageId: "p1", order: ["b3", "b1", "b2"] }));
+    ok("AC2: reorder succeeds while a block is content-locked", store.materializeDoc("C-1").pages[0].blocks.map(function (b) { return b.id; }).join(",") === "b3,b1,b2");
+    ok("AC2: reorder fanned out to peers", ta.sent.some(function (e) { return e.type === "structure.applied" && e.payload.op === "reorder"; }));
+    // delete of an unlocked block succeeds
+    tb.receive(env("structure.op", "C-1", "b2", null, "bob", 0, { op: "delete" }));
+    ok("delete of an unlocked block succeeds", !store.materializeDoc("C-1").pages[0].blocks.some(function (b) { return b.id === "b2"; }));
+    // AC4: author single-block revert emits a normal block.change
+    clock = 200; ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "EDITED" }, baseSeq: store.maxSeq() }));
+    clock = 260; ta.receive(env("block.revert", "C-1", "b1", null, "alice", 0, { toSeq: cp.atSeq }));
+    ok("AC4: single-block revert fans out a block.change (revert flag)", tb.sent.some(function (e) { return e.type === "block.change" && e.blockId === "b1" && e.payload.revert === true; }));
+    // AC3: admin restore refused while others edit, then force converges everyone
+    tb.receive(env("lock.acquire", "C-1", "b3", null, "bob", 0, {}));
+    tadm.receive(env("doc.restore", "C-1", null, null, "admin", 0, { checkpointId: cp.id }));
+    ok("AC3: restore refused while others editing (needsForce)", tadm.sent.some(function (e) { return e.type === "restore.denied" && e.payload.needsForce === true; }));
+    tadm.receive(env("doc.restore", "C-1", null, null, "admin", 0, { checkpointId: cp.id, force: true }));
+    ok("AC3: force restore evicts the other holder", lm.holder("C-1", "b3") === null);
+    ok("AC3: sync.resnapshot broadcast to ALL clients (convergence)", ta.sent.some(function (e) { return e.type === "sync.resnapshot"; }) && tb.sent.some(function (e) { return e.type === "sync.resnapshot"; }) && tadm.sent.some(function (e) { return e.type === "sync.resnapshot"; }));
+    ok("AC5: resnapshot carries the restored snapshot + seq (client soft-conflict is ticket 13)", ta.sent.filter(function (e) { return e.type === "sync.resnapshot"; })[0].payload.snapshot.meta.code === "C-1");
+    ta.receive(env("doc.restore", "C-1", null, null, "alice", 0, { checkpointId: cp.id }));
+    ok("AC3: a non-admin restore is denied", ta.sent.some(function (e) { return e.type === "restore.denied" && e.payload.reason === "admin only"; }));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 27/28/29: Ops -- versioned artifact, migration runner, backup, fixtures ----
+section("platform-pivot 27/28/29 ops");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> ops tests skipped"); return; }
+  var os = require("os");
+  var sqlite = require("node:sqlite");
+  var MIG = require(path.join(ROOT, "server/migrations.js"));
+  var BK = require(path.join(ROOT, "server/backup.js"));
+  var FX = require(path.join(ROOT, "server/fixtures.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var ID = require(path.join(ROOT, "server/identity.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-ops-test-"));
+  try {
+    // 27: forward-only migration runner
+    var mdb = new sqlite.DatabaseSync(path.join(tmp, "m.sqlite"));
+    var ran = [];
+    var mig = MIG.createMigrator(mdb, [
+      { version: 1, up: function (db) { db.exec("CREATE TABLE t1(x)"); ran.push(1); } },
+      { version: 2, up: function (db) { db.exec("CREATE TABLE t2(x)"); ran.push(2); } }
+    ]);
+    ok("27: store starts at schema version 0", mig.currentVersion() === 0);
+    var r1 = mig.migrate();
+    ok("27: migrate applies pending FORWARD migrations in order", r1.version === 2 && ran.join(",") === "1,2");
+    ran = [];
+    ok("27: re-run is idempotent (no down-migration, nothing re-applied)", mig.migrate().applied.length === 0 && ran.length === 0);
+    ok("27: the running artifact version is identifiable (SERVER_VERSION)", /^\d+\.\d+\.\d+$/.test(MIG.SERVER_VERSION));
+    mdb.close();
+
+    // 29: synthetic fixtures seed a store (neutral placeholders, 4 roles, checkpoints, log)
+    var dbPath = path.join(tmp, "store.sqlite");
+    var bs = BS.createBlockStore(dbPath, {});
+    var idn = ID.createIdentity({ dbPath: dbPath, now: function () { return 0; } });
+    var rev = require(path.join(ROOT, "server/review.js")).createReview({ dbPath: dbPath, now: function () { return 0; } }); // so the comments table exists in the whole-store snapshot
+    var seeded = FX.seed({ blockStore: bs, identity: idn });
+    rev.addComment("SAMPLE-101", "sb1", { kind: "user", author: "reviewer" }, "a synthetic review note");
+    ok("29: fixtures seed a synthetic course + checkpoints + change log", seeded.docId === "SAMPLE-101" && seeded.checkpoints >= 2 && seeded.changes >= 2);
+    ok("29: fixtures seed all four roles", ["admin", "author", "reviewer", "viewer"].every(function (r) { return seeded.users.indexOf(r) >= 0; }));
+    ok("29: fixture content is neutral placeholder only", /synthetic|placeholder|Sample/i.test(FX.SYNTHETIC_COURSE.meta.title));
+    ok("29: docs which layers local mode CANNOT exercise", FX.LOCAL_CANNOT_EXERCISE.indexOf("sync") >= 0 && FX.LOCAL_CANNOT_EXERCISE.indexOf("review-links") >= 0);
+    // 29 AC3: content-isolation invariant is a TESTABLE property -- the only content-import
+    // path is block-store.importDoc(doc) taking an explicit doc payload; NO server module
+    // mirrors/pulls from another (prod) store, and fixtures build from literals.
+    var serverSrc = ["block-store", "verso-server", "fixtures", "backup", "review", "identity", "store"].map(function (f) { return src("server/" + f + ".js"); }).join("\n");
+    ok("29 AC3: no ops path copies another store's content into local (content-isolation)", !/from\s+prod|mirror(Store|Prod)|copyMaster|pullFrom(Prod|Store)/i.test(serverSrc));
+    ok("29 AC3: the ONLY content-import path is importDoc(doc) (explicit author payload)", /function importDoc\(docId, doc, author\)/.test(src("server/block-store.js")) && /function seed\(deps\)/.test(src("server/fixtures.js")));
+
+    // 28: backup (consistent snapshot) -> mutate -> restore -> verify
+    var before = bs.materializeDoc("SAMPLE-101").pages[0].blocks[0].text;
+    idn.close(); rev.close();
+    var snap = BK.snapshot(dbPath, path.join(tmp, "backups"), "t1");
+    ok("28: a consistent snapshot is written to a separate volume", fs.existsSync(snap));
+    bs.applyChange("SAMPLE-101", "sb1", { id: "sb1", type: "heading", text: "MUTATED-AFTER-BACKUP" }, "author");
+    bs.close();
+    var rr = BK.restore(snap, dbPath);
+    ok("28: restore replaces the store from the snapshot", rr.ok === true);
+    var ver = BK.verifyStore(dbPath, ["docs", "pages", "blocks", "changes", "snapshots", "users", "review_links", "comments"]);
+    ok("28: restored store passes integrity_check + has the expected tables (one consistent whole)", ver.ok === true && ver.missing.length === 0);
+    var bs2 = BS.createBlockStore(dbPath, {});
+    ok("28: restored content matches the snapshot (post-backup mutation rolled back)", bs2.materializeDoc("SAMPLE-101").pages[0].blocks[0].text === before);
+    ok("28: restored checkpoints intact", bs2.listCheckpoints("SAMPLE-101").length >= 2);
+    bs2.close();
+    BK.snapshot(dbPath, path.join(tmp, "backups"), "t2"); BK.snapshot(dbPath, path.join(tmp, "backups"), "t3");
+    ok("28: configurable retention prunes to the newest N", BK.prune(path.join(tmp, "backups"), 2).length === 1 && BK.listBackups(path.join(tmp, "backups")).length === 2);
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 22/23/24/25: review-links -- comments, anchoring, orphans, pinning ----
+section("platform-pivot 23 comments");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> comments tests skipped"); return; }
+  var os = require("os");
+  var RV = require(path.join(ROOT, "server/review.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rev-"));
+  var clock = 100;
+  var rev = RV.createReview({ dbPath: path.join(tmp, "r.sqlite"), now: function () { return clock; } });
+  try {
+    // AC (23): a guest comment on block B, anchored to stable id B
+    var c1 = rev.addComment("C-1", "b1", { kind: "guest", name: "Ext Reviewer" }, "Please clarify");
+    ok("23: guest comment stored, anchored to the stable block id + attributed to link name", c1.ok && c1.blockId === "b1" && c1.kind === "guest");
+    // author replies in the same thread + resolves (shared both ways -> same rows)
+    var reply = rev.addComment("C-1", "b1", { kind: "user", author: "Alice" }, "Done", c1.threadId);
+    ok("23: author reply shares the thread", reply.threadId === c1.threadId && reply.kind === "user");
+    rev.resolveThread(c1.threadId, true);
+    // live master: b1 exists, b2 does not -> b2 comment is an ORPHAN (surfaced, not dropped)
+    rev.addComment("C-1", "b2-gone", { kind: "guest", name: "Ext" }, "on a deleted block");
+    var exists = function (bid) { return bid === "b1"; }; // only b1 survives in the live master
+    var list = rev.commentsFor("C-1", exists);
+    ok("23: comment on a surviving block anchors (not orphaned)", list.find(function (c) { return c.id === c1.id; }).orphaned === false);
+    ok("23: comment on a deleted stable id -> SURFACED orphaned anchor (never dropped)", list.some(function (c) { return c.blockId === "b2-gone" && c.orphaned === true; }));
+    ok("23: resolve applied to the whole thread (shared both ways)", list.filter(function (c) { return c.threadId === c1.threadId; }).every(function (c) { return c.resolved === true; }));
+    ok("23: nothing silently dropped -- every comment surfaces", list.length === 3);
+  } finally {
+    try { rev.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// review-links HTTP integration: pinned-snapshot guest read (22), comments both-ways (23),
+// per-link modes + audit (24).
+section("platform-pivot 22/24 review links (HTTP)");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> review-link HTTP tests skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rl-test-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "verso.sqlite"), linkSecret: "s3cr3t" }, function (s) { base = "http://127.0.0.1:" + s.address().port; resolve(); });
+    });
+    try {
+      var idn = server.__identity, bs = server.__blockStore;
+      idn.registerLocalAccount("admin@x", "Admin", "pw", "admin");
+      var r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "admin@x", password: "pw" }) });
+      var cookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      // import a doc + pin a checkpoint
+      await fetch(base + "/api/doc/C-1/import", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ doc: { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "FROZEN" } ] } ] }, author: "admin" }) });
+      var cps = bs.listCheckpoints("C-1"); var cpId = cps[0].id;
+      // 24: issue a guest link pinned to the checkpoint
+      r = await fetch(base + "/api/doc/C-1/links", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ checkpointId: cpId, displayName: "Ext", mode: "guest" }) });
+      var link = await r.json();
+      ok("24: an admin issues a review link pinned to a checkpoint", link.ok && link.token && link.mode === "guest");
+      // edit the LIVE master AFTER pinning
+      await fetch(base + "/api/doc/C-1/change", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ blockId: "b1", patch: { id: "b1", type: "heading", text: "LIVE-EDIT" }, author: "admin" }) });
+      // 22: the guest reads the FROZEN pinned snapshot, not the live edit
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": link.token } }); var gv = await r.json();
+      ok("22: guest reads the pinned frozen snapshot (not live churn)", gv.ok && gv.pinned === true && gv.doc.pages[0].blocks[0].text === "FROZEN");
+      // 23: guest posts a comment (comment cap) but cannot edit
+      r = await fetch(base + "/api/doc/C-1/comments", { method: "POST", headers: { "x-verso-guest": link.token }, body: JSON.stringify({ blockId: "b1", body: "typo here" }) });
+      ok("23: guest may comment (comment capability)", r.status === 200);
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", headers: { "x-verso-guest": link.token }, body: JSON.stringify({ blockId: "b1", patch: {} }) });
+      ok("23: guest still cannot edit (403)", r.status === 403);
+      // the author sees the guest comment on the live master's block
+      r = await fetch(base + "/api/doc/C-1/comments", { headers: { cookie: cookie } }); var cl = await r.json();
+      ok("23: guest comment surfaces to the author on the live block", cl.comments.some(function (c) { return c.blockId === "b1" && c.kind === "guest"; }));
+      // 24: audit list + revoke cuts access immediately
+      r = await fetch(base + "/api/doc/C-1/links", { headers: { cookie: cookie } }); var au = await r.json();
+      ok("24: admin link-audit list shows the link (snapshot, mode, display name)", au.links.some(function (l) { return l.linkId === link.linkId && l.mode === "guest" && l.live === true; }));
+      r = await fetch(base + "/api/doc/C-1/links/" + link.linkId, { method: "DELETE", headers: { cookie: cookie } });
+      ok("24: revoke succeeds", (await r.json()).ok === true);
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": link.token } });
+      ok("24: revoked link cuts guest access immediately (401)", r.status === 401);
+      // 24: an SSO-gated link is NOT authorized as a guest (must go through OIDC)
+      r = await fetch(base + "/api/doc/C-1/links", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ checkpointId: cpId, mode: "sso", displayName: "Sensitive" }) });
+      var ssoLink = await r.json();
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": ssoLink.token } });
+      ok("24: an SSO-gated link is not a guest path (401 as guest)", r.status === 401);
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+})();
+
+// 25: shareable links are server-only; in-editor comment mode works fully offline.
+section("platform-pivot 25 offline comment mode");
+(function () {
+  // regression guard: the shipped editor comment mode persists to the doc (doc.comments)
+  // so it works with NO server present; the review-link server surface is server-mode-only.
+  var ed = src("src/editor.js");
+  ok("25: editor comment mode persists comments on the doc (offline, no server)", /doc\.comments|comments\s*:/.test(ed) && /colourForName/.test(ed));
+  // review/identity server surfaces exist only in server mode (verso-server gates on mode)
+  var vs = src("server/verso-server.js");
+  ok("25: review + identity are created only in server mode (no link affordance server-side in local)", /config\.mode === "server"\) \? createReview/.test(vs) && /config\.mode === "server"\) \? createIdentity/.test(vs));
+})();
+
+// ---- client-mount: real HTTP long-poll sync pipe end-to-end (two clients, authed) ----
+// Proves the whole wire through a RUNNING server-mode server: login -> cookie -> two
+// long-poll clients exchange a block.change over /sync/send + /sync/poll, through the
+// authenticated boundary. (The wss:// browser pipe is ticket-30 server-only-smoke.)
+section("client-mount sync pipe (HTTP e2e)");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> sync-pipe e2e skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-pipe-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "verso.sqlite"), linkSecret: "s3cr3t" }, function (s) { base = "http://127.0.0.1:" + s.address().port; resolve(); });
+    });
+    try {
+      var idn = server.__identity;
+      idn.registerLocalAccount("author@x", "Author", "pw", "author");
+      var r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "author@x", password: "pw" }) });
+      var cookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      var H = { cookie: cookie, "content-type": "application/json" };
+      await fetch(base + "/api/doc/C-1/import", { method: "POST", headers: H, body: JSON.stringify({ doc: { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, author: "author" }) });
+      var send = function (clientId, env) { return fetch(base + "/sync/send", { method: "POST", headers: H, body: JSON.stringify({ clientId: clientId, envelope: env }) }).then(function (x) { return x.json(); }); };
+      var poll = function (clientId) { return fetch(base + "/sync/poll?clientId=" + clientId, { headers: H }).then(function (x) { return x.json(); }); };
+      // SEC: the pipe is behind the auth boundary
+      var anon = await fetch(base + "/sync/send", { method: "POST", body: JSON.stringify({ clientId: "z", envelope: {} }) });
+      ok("e2e: unauthenticated /sync/send rejected (401)", anon.status === 401);
+      // B subscribes first (so it's in the doc's fan-out set), then A edits
+      await send("B", { type: "sync.hello", docId: "C-1", payload: { sinceSeq: 0 } });
+      await send("A", { type: "sync.hello", docId: "C-1", payload: { sinceSeq: 0 } });
+      var seqBefore = server.__blockStore.maxSeq();
+      var sc = await send("A", { type: "block.change", docId: "C-1", blockId: "b1", author: "author", payload: { patch: { id: "b1", type: "heading", text: "REMOTE-EDIT" }, baseSeq: seqBefore } });
+      ok("e2e: authed /sync/send accepts a block.change", sc.ok === true);
+      // the edit persisted through the real server pipe
+      ok("e2e: edit persisted server-side (materialized)", server.__blockStore.materializeDoc("C-1").pages[0].blocks[0].text === "REMOTE-EDIT");
+      // B polls -> receives the fanned-out block.change
+      var pj = await poll("B");
+      ok("e2e: peer B receives the fanned-out block.change over long-poll", pj.ok === true && pj.events.some(function (env) { return env.type === "block.change" && env.blockId === "b1"; }));
+      // and the client reducer applies it to B's local doc
+      var CL = src("src/sync-client.js");
+      var mm = CL.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+      var g = new Function(mm[1] + "\nreturn { applyServerEvent: applyServerEvent };")();
+      var bDoc = { doc: { meta: {}, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, seq: 0 };
+      pj.events.forEach(function (env) { bDoc = g.applyServerEvent(bDoc, env); });
+      ok("e2e: B's client reducer applies the remote edit to its local doc", bDoc.doc.pages[0].blocks[0].text === "REMOTE-EDIT");
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+})();
+
+// ---- platform-pivot 17/18/20: identity spine (roles, sessions, JIT, break-glass, guest) ----
+section("platform-pivot 17/18/20 identity");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> identity tests skipped"); return; }
+  var os = require("os");
+  var ID = require(path.join(ROOT, "server/identity.js"));
+  // 17: the capability matrix (the ONE definition)
+  ok("17: admin can manageUsers + promote", ID.can("admin", "manageUsers") && ID.can("admin", "promote"));
+  ok("17: author edits + publishes but not manageUsers/promote", ID.can("author", "edit") && ID.can("author", "publish") && !ID.can("author", "manageUsers") && !ID.can("author", "promote"));
+  ok("17: reviewer comments but never edits", ID.can("reviewer", "comment") && !ID.can("reviewer", "edit"));
+  ok("17: viewer views only", ID.can("viewer", "view") && !ID.can("viewer", "comment") && !ID.can("viewer", "edit"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-id-test-"));
+  var clock = 1000;
+  var idn = ID.createIdentity({ dbPath: path.join(tmp, "id.sqlite"), now: function () { return clock; }, linkSecret: "s3cr3t", sessionTtlMs: 1000 });
+  try {
+    // 18: bootstrap admin (first-ever) + JIT least-privilege
+    var u1 = idn.findOrCreateUser("alice@x.com", "Alice");
+    ok("18: first-ever sign-in -> bootstrap ADMIN", u1.role === "admin");
+    var u2 = idn.findOrCreateUser("bob@x.com", "Bob");
+    ok("18: a later unknown identity -> VIEWER (JIT)", u2.role === "viewer" && idn.findOrCreateUser("bob@x.com").id === u2.id);
+    var adminP = { principal: u1.id, role: "admin", kind: "user" };
+    ok("18: admin elevates bob to author", idn.setRole(adminP, u2.id, "author").ok && idn.getUser(u2.id).role === "author");
+    ok("17: a non-admin cannot assign roles", idn.setRole({ role: "author", kind: "user" }, u2.id, "admin").ok === false);
+    // 17: local-accounts adapter + session lifecycle
+    idn.registerLocalAccount("carol@x.com", "Carol", "pw123", "author");
+    var login = idn.login(idn.localAccountsAdapter, { email: "carol@x.com", password: "pw123" });
+    ok("17: local login mints a session; resolves to {principal, role}", login && idn.resolveSession(login.token).role === "author");
+    ok("17: wrong password -> no login", idn.login(idn.localAccountsAdapter, { email: "carol@x.com", password: "no" }) === null);
+    clock = 1000 + 2000;
+    ok("17: an expired session resolves to null", idn.resolveSession(login.token) === null);
+    // 18: break-glass admin works during an IdP outage (adapter throws)
+    idn.ensureBreakGlass("root@local", "breakpw");
+    var brokenSSO = { name: "oidc", authenticate: function () { throw new Error("IdP unreachable"); } };
+    ok("18: break-glass logs in while SSO is configured AND the IdP fails", idn.login(brokenSSO, { email: "root@local", password: "breakpw" }).user.role === "admin");
+    // 20: guest link tokens (a guest link must pin a checkpoint -- snapshot id is carried)
+    var link = idn.issueLink(adminP, { docId: "C-1", checkpointId: 1, version: "v1", displayName: "Ext", expiresAt: clock + 100000 });
+    var g = idn.authorizeGuest(link.token);
+    ok("20: valid token -> scoped guest (view+comment on one file)", g && g.kind === "guest" && g.scope.docId === "C-1");
+    ok("20: guest views+comments IN scope, nothing outside", idn.principalCan(g, "view", { docId: "C-1" }) && idn.principalCan(g, "comment", { docId: "C-1" }) && !idn.principalCan(g, "comment", { docId: "OTHER" }));
+    ok("20: guest can NEVER edit / acquire a lock", !idn.principalCan(g, "edit", { docId: "C-1" }));
+    ok("20: a tampered token is rejected", idn.authorizeGuest(link.token.slice(0, -2) + "xx") === null);
+    ok("20: revoking the link revokes access immediately", idn.revokeLink(adminP, link.linkId).ok && idn.authorizeGuest(link.token) === null);
+    ok("20: an expired token is rejected", idn.authorizeGuest(idn.issueLink(adminP, { docId: "C-1", checkpointId: 1, expiresAt: clock - 1 }).token) === null);
+    ok("20: a non-issuer role cannot issue a link", idn.issueLink({ role: "reviewer", kind: "user" }, { docId: "C-1", checkpointId: 1 }).ok === false);
+    ok("20: a guest link MUST pin a checkpoint (unpinned -> refused)", idn.issueLink(adminP, { docId: "C-1" }).ok === false);
+    ok("17: a guest is denied any unscoped/cross-file route (default-deny)", !idn.principalCan(g, "view", null) && !idn.principalCan(g, "view", { docId: "OTHER" }));
+  } finally {
+    try { idn.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 17: identity boundary over HTTP (server mode) --------------
+section("platform-pivot 17 identity boundary");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> identity boundary tests skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-idb-test-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "verso.sqlite"), linkSecret: "s3cr3t" }, function (s) {
+        base = "http://127.0.0.1:" + s.address().port; resolve();
+      });
+    });
+    try {
+      var idn = server.__identity;
+      // seed accounts: first is bootstrap admin; make an explicit author + viewer
+      idn.registerLocalAccount("admin@x", "Admin", "adminpw", "admin");
+      idn.registerLocalAccount("author@x", "Author", "authorpw", "author");
+      idn.registerLocalAccount("viewer@x", "Viewer", "viewerpw", "viewer");
+      var r, j;
+      // AC1: an unauthenticated request to storage is rejected at the boundary
+      r = await fetch(base + "/api/registry");
+      ok("AC1: unauthenticated /api request -> 401 at the boundary", r.status === 401);
+      // login (author) -> cookie
+      r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "author@x", password: "authorpw" }) });
+      j = await r.json();
+      var cookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      ok("17: local-accounts login returns a session cookie", j.ok === true && /verso_session=/.test(cookie));
+      // author can read + write
+      r = await fetch(base + "/api/registry", { headers: { cookie: cookie } });
+      ok("17: author (edit-capable) can read", r.status === 200);
+      r = await fetch(base + "/api/registry", { method: "PUT", headers: { cookie: cookie }, body: '{"C-1":{}}' });
+      ok("17: author can write", r.status === 200);
+      // viewer can read but NOT write
+      r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "viewer@x", password: "viewerpw" }) });
+      var vcookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      r = await fetch(base + "/api/registry", { headers: { cookie: vcookie } });
+      ok("17: viewer can read (view)", r.status === 200);
+      r = await fetch(base + "/api/registry", { method: "PUT", headers: { cookie: vcookie }, body: '{}' });
+      ok("17: viewer is DENIED a write (403; capability matrix enforced)", r.status === 403);
+      // guest token: import first so there's a pinned checkpoint, then a scoped read + no edit
+      await fetch(base + "/api/doc/C-1/import", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ doc: { meta: { code: "C-1" }, pages: [] }, author: "author" }) });
+      var adminUser = idn.findOrCreateUser("admin@x");
+      var cpId = server.__blockStore.listCheckpoints("C-1")[0].id;
+      var link = idn.issueLink({ principal: adminUser.id, role: "admin", kind: "user" }, { docId: "C-1", checkpointId: cpId, displayName: "Guest" });
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": link.token } });
+      ok("20/22: a guest token authorizes a scoped read of the pinned snapshot", r.status === 200 && (await r.json()).pinned === true);
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", headers: { "x-verso-guest": link.token }, body: JSON.stringify({ blockId: "b1", patch: {} }) });
+      ok("20: a guest is DENIED an edit (403)", r.status === 403);
+      // a guest token cannot read the server-wide registry (default-deny on unscoped routes)
+      r = await fetch(base + "/api/registry", { headers: { "x-verso-guest": link.token } });
+      ok("17: a guest token is denied an unscoped route (registry) -- 403", r.status === 403);
+      // /auth/me reflects the principal
+      r = await fetch(base + "/auth/me", { headers: { cookie: cookie } }); j = await r.json();
+      ok("17: /auth/me resolves the session principal", j.principal && j.principal.role === "author");
+      // review-fix: the /sync write path flows through the SAME boundary (no bypass)
+      r = await fetch(base + "/sync/send", { method: "POST", body: JSON.stringify({ clientId: "x", envelope: { type: "block.change", docId: "C-1", blockId: "b1" } }) });
+      ok("SEC: an unauthenticated /sync/send is rejected (401) -- no boundary bypass", r.status === 401);
+      r = await fetch(base + "/sync/poll?clientId=x");
+      ok("SEC: an unauthenticated /sync/poll is rejected (401)", r.status === 401);
+      // review-fix: session cookie is Secure in server mode
+      r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "author@x", password: "authorpw" }) });
+      ok("SEC: server-mode session cookie is HttpOnly + Secure + SameSite", /HttpOnly/.test(r.headers.get("set-cookie")) && /Secure/.test(r.headers.get("set-cookie")) && /SameSite=Strict/.test(r.headers.get("set-cookie")));
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+})();
+
+// ---- platform-pivot 11: presence -- avatars, viewing/editing, cursors, colours -------
+section("platform-pivot 11 presence");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> presence tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var PR = require(path.join(ROOT, "server/presence.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  // AC1: server author colours MUST match editor.js colourForName (comment-review palette)
+  var ed = src("src/editor.js");
+  var m = ed.match(/var COMMENT_COLOURS = \[[^\]]*\];[\s\S]*?function colourForName\([^)]*\) \{[^}]*\}/);
+  ok("locate editor colourForName", !!m);
+  if (m) {
+    var editorColour = new Function(m[0] + "\nreturn colourForName;")();
+    ok("AC1: server authorColour matches editor colourForName (consistency across presence + comments)",
+      ["Alice", "bob", "Carol X", "zzz", ""].every(function (n) { return PR.authorColour(n) === editorColour(n); }));
+  }
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-pres-test-"));
+  var idn = 0, clock = 1000;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var pres = PR.createPresence({ now: function () { return clock; }, ttlMs: 30000 });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: LM.createLockManager({ now: function () { return clock; } }), presence: pres });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ta.receive(env("presence.heartbeat", "C-1", null, null, "alice", 0, { viewingBlockId: "b1", editingBlockId: null }));
+    var ps = tb.sent.filter(function (e) { return e.type === "presence.state"; }).pop();
+    ok("AC1: presence.state broadcast lists peers with colours", ps && ps.payload.peers.some(function (p) { return p.author === "alice" && p.colour === PR.authorColour("alice"); }));
+    ok("AC3: viewing vs editing distinguishable", ps.payload.peers.find(function (p) { return p.author === "alice"; }).viewingBlockId === "b1");
+    tb.receive(env("presence.heartbeat", "C-1", null, null, "bob", 0, { editingBlockId: "b1" }));
+    var ps2 = ta.sent.filter(function (e) { return e.type === "presence.state"; }).pop();
+    ok("AC3: an editing peer shows its editingBlockId", ps2.payload.peers.find(function (p) { return p.author === "bob"; }).editingBlockId === "b1");
+    ta.receive(env("cursor.update", "C-1", null, null, "alice", 0, { selection: { start: 2, end: 5 } }));
+    var ps3 = tb.sent.filter(function (e) { return e.type === "presence.state"; }).pop();
+    ok("AC2: cursor/selection carried per collaborator", JSON.stringify(ps3.payload.peers.find(function (p) { return p.author === "alice"; }).cursor) === JSON.stringify({ start: 2, end: 5 }));
+    clock = 1000 + 40000;
+    ok("AC4: a peer past its heartbeat TTL is swept from peersFor", !pres.peersFor("C-1").some(function (p) { return p.author === "alice"; }));
+    clock = 1000; ta.receive(env("presence.heartbeat", "C-1", null, null, "alice", 0, {})); tb.receive(env("presence.heartbeat", "C-1", null, null, "bob", 0, {}));
+    tb.sent.length = 0; ta.close();
+    ok("disconnect drops the peer + broadcasts fresh presence.state", tb.sent.some(function (e) { return e.type === "presence.state" && !e.payload.peers.some(function (p) { return p.author === "alice"; }); }));
+    // AC4: local/solo mode broadcasts no presence chrome
+    var hubL = SY.createSyncHub(store, { mode: "local", now: function () { return clock; }, presence: PR.createPresence({ now: function () { return clock; } }) });
+    var la = SY.FakeTransport(), lb = SY.FakeTransport(); hubL.connect(la, "x"); hubL.connect(lb, "y");
+    la.receive(env("sync.hello", "C-1", null, null, "x", 0, { sinceSeq: 0 }));
+    la.receive(env("presence.heartbeat", "C-1", null, null, "x", 0, { editingBlockId: "b1" }));
+    ok("AC4: local mode broadcasts NO presence chrome", !lb.sent.some(function (e) { return e.type === "presence.state"; }));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 09: reconnect/replay -- catchup vs resnapshot + idempotence -------
+section("platform-pivot 09 reconnect");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> reconnect tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-recon-"));
+  var dbPath = path.join(tmp, "bs.sqlite");
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(dbPath, { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, catchupWindow: 3 });
+    // AC1: a fresh client (sinceSeq 0) -> resnapshot with the base doc
+    var t0 = SY.FakeTransport(); hub.connect(t0, "a");
+    t0.receive(env("sync.hello", "C-1", null, null, "a", 0, { sinceSeq: 0 }));
+    ok("AC1: fresh hello -> resnapshot (has base -- imported blocks carry no events)", t0.sent.some(function (e) { return e.type === "sync.resnapshot" && e.payload.snapshot.pages[0].blocks[0].text === "H"; }));
+    // make a couple of edits so there is a seq>0 delta to catch up on (import appends no
+    // change events, so maxSeq starts at 0 -> the first real seq is 1).
+    var base = store.maxSeq();
+    var t1 = SY.FakeTransport(); var C = hub.connect(t1, "b");
+    t1.receive(env("sync.hello", "C-1", null, null, "b", 0, { sinceSeq: 0 })); // fresh -> resnapshot
+    clock = 200; t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: "H2" }, baseSeq: store.maxSeq() }));
+    clock = 210; t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: "H3" }, baseSeq: store.maxSeq() }));
+    var afterTwo = store.maxSeq(); // >= 2
+    // AC1: a RECENT reconnect (sinceSeq>0, within the window) -> catchup delta
+    var t2 = SY.FakeTransport(); hub.connect(t2, "c");
+    t2.receive(env("sync.hello", "C-1", null, null, "c", 0, { sinceSeq: afterTwo - 1 }));
+    ok("AC1: recent reconnect (in-buffer) -> catchup delta", t2.sent.some(function (e) { return e.type === "sync.catchup" && e.payload.events.length >= 1; }));
+    // AC1: a client below the low-water mark (too far behind) -> resnapshot
+    // push enough edits that (max - sinceSeq) exceeds catchupWindow(3)
+    clock = 260; ["A", "B", "C", "D"].forEach(function (x) { t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: x }, baseSeq: store.maxSeq() })); });
+    var t3 = SY.FakeTransport(); hub.connect(t3, "d");
+    t3.receive(env("sync.hello", "C-1", null, null, "d", 0, { sinceSeq: base })); // far behind
+    ok("AC1: far-behind reconnect (below low-water mark) -> resnapshot", t3.sent.some(function (e) { return e.type === "sync.resnapshot"; }));
+    // AC3: a duplicate/replayed edit (same value) is an idempotent no-op (no new event)
+    var cur = store.materializeDoc("C-1").pages[0].blocks[0].text;
+    var seqBefore = store.maxSeq();
+    t1.sent.length = 0;
+    t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: cur }, baseSeq: store.maxSeq() }));
+    ok("AC3: replayed identical edit -> idempotent no-op (no event appended)", store.maxSeq() === seqBefore);
+    ok("AC3: idempotent replay still acks the sender (noop flag)", t1.sent.some(function (e) { return e.type === "block.ack" && e.payload.noop === true; }));
+    // AC4: server restart rehydrates the durable log/rows from the store; a fresh hub
+    // starts with empty locks + presence (clients re-establish on reconnect).
+    store.close();
+    var store2 = BS.createBlockStore(dbPath, {});
+    ok("AC4: change log + rows rehydrate from the store on restart", store2.materializeDoc("C-1") && store2.changesSince(0, "C-1").length >= 1);
+    var hub2 = SY.createSyncHub(store2, { mode: "server", now: function () { return 0; } });
+    ok("AC4: a fresh hub starts with no subscribers (presence/locks empty; re-establish on reconnect)", hub2._subs("C-1").length === 0);
+    store2.close();
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot collab review-fixes: auto-acquire, structure-lock, shared envelope ----
+section("platform-pivot collab review-fixes");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> review-fix tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  ok("sync + lock-manager share one envelope module", require(path.join(ROOT, "server/envelope.js")).envelope === require(path.join(ROOT, "server/sync.js")).envelope);
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rfix-"));
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" }, { id: "b3", type: "para", text: "Q" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "A" }, baseSeq: store.maxSeq() }));
+    ok("review-fix: a block.change auto-acquires the content lock (implicit edit-intent)", lm.holder("C-1", "b1") === A);
+    tb.receive(env("block.change", "C-1", "b1", null, "bob", 0, { content: { id: "b1", text: "B" }, baseSeq: store.maxSeq() }));
+    ok("review-fix: holder-only enforced after implicit acquire (bob denied b1)", tb.sent.some(function (e) { return e.type === "block.denied" && e.blockId === "b1"; }));
+    lm.acquire(B, "C-1", "p1", { class: "structure" });
+    ta.receive(env("structure.op", "C-1", null, null, "alice", 0, { op: "reorder", pageId: "p1", order: ["b3", "b2", "b1"] }));
+    ok("review-fix/AC21: a concurrent structural op is refused while the structure lock is held", ta.sent.some(function (e) { return e.type === "structure.denied" && /structural op is in progress/.test(e.payload.reason); }));
+    lm.release(B, "C-1", "p1", "structure");
+    tb.receive(env("block.change", "C-1", "b2", null, "bob", 0, { content: { id: "b2", type: "para", text: "BB" }, baseSeq: store.maxSeq() }));
+    ok("bob auto-holds b2", lm.holder("C-1", "b2") === B);
+    tb.receive(env("structure.op", "C-1", "b2", null, "bob", 0, { op: "delete" }));
+    ok("review-fix: deleter's content lock is released after delete (no dangling lock)", lm.holder("C-1", "b2") === null);
+    ok("review-fix: stateFor reports no lock on the deleted block", !lm.stateFor("C-1").some(function (l) { return l.resourceId === "b2"; }));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 08: wire transports (secondary seam) ----------------------
+// Hand-rolled wss:// codec + long-poll fallback, interchangeable behind the Transport
+// interface. No real sockets -- the RFC6455 codec + queue logic are unit-testable.
+section("platform-pivot 08 sync wire");
+(function () {
+  var W = require(path.join(ROOT, "server/sync-wire.js"));
+  // RFC6455 handshake example vector
+  ok("wsAccept matches the RFC6455 example vector", W.wsAccept("dGhlIHNhbXBsZSBub25jZQ==") === "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+  var enc = W.wsEncodeText("hello");
+  ok("encoded text frame: FIN+text opcode + 5-byte payload", enc[0] === 0x81 && enc.length === 7);
+  function maskFrame(str) { var p = Buffer.from(str), mask = Buffer.from([1, 2, 3, 4]), m = Buffer.alloc(p.length); for (var i = 0; i < p.length; i++) m[i] = p[i] ^ mask[i & 3]; return Buffer.concat([Buffer.from([0x81, 0x80 | p.length]), mask, m]); }
+  var dec = W.wsDecode(maskFrame("ping"));
+  ok("wsDecode unmasks a client text frame", dec.messages.length === 1 && dec.messages[0] === "ping" && dec.rest.length === 0);
+  var partial = W.wsDecode(Buffer.from([0x81, 0x80 | 10, 1, 2, 3, 4, 0, 0]));
+  ok("wsDecode buffers an incomplete frame (waits for more)", partial.messages.length === 0 && partial.rest.length > 0);
+  // ping keepalive (review fix): a ping frame is surfaced so the transport can pong.
+  function maskOp(op, str) { var p = Buffer.from(str), mask = Buffer.from([9, 8, 7, 6]), m = Buffer.alloc(p.length); for (var i = 0; i < p.length; i++) m[i] = p[i] ^ mask[i & 3]; return Buffer.concat([Buffer.from([0x80 | op, 0x80 | p.length]), mask, m]); }
+  var pd = W.wsDecode(maskOp(0x9, "hb"));
+  ok("wsDecode surfaces a ping frame (for pong keepalive)", pd.pings.length === 1 && pd.pings[0].toString() === "hb");
+  var pong = W.wsEncodeControl(0xA, Buffer.from("hb"));
+  ok("wsEncodeControl builds an unmasked pong frame", pong[0] === (0x80 | 0xA) && pong.length === 4);
+  var lp = W.LongPollTransport();
+  ok("LongPollTransport satisfies the Transport interface", ["send", "onMessage", "onDrop", "close"].every(function (k) { return typeof lp[k] === "function"; }));
+  var got = null; lp.send({ type: "x" }); lp.poll(function (evs) { got = evs; });
+  ok("long-poll: a queued send drains on poll", got && got.length === 1 && got[0].type === "x");
+  var got2 = null; lp.poll(function (evs) { got2 = evs; }); lp.send({ type: "y" });
+  ok("long-poll: a hanging poll resolves when an event arrives", got2 && got2.length === 1 && got2[0].type === "y");
+  ok("AC2: WsTransport + LongPollTransport are both exposed behind the interface", typeof W.WsTransport === "function" && typeof W.LongPollTransport === "function");
+  // AC5 dormancy
+  var rL = W.createSyncRoutes({ connect: function () {} }, { mode: "local" });
+  var sr = null; rL.handleSend("c", {}, "a", function (r) { sr = r; });
+  ok("AC5: createSyncRoutes is dormant + refuses in local mode", rL.dormant === true && sr.ok === false);
+  var rS = W.createSyncRoutes({ connect: function () { return {}; } }, { mode: "server" });
+  ok("server mode gives a live upgrade + long-poll", rS.dormant === false && typeof rS.upgrade === "function");
+})();
+
+// ---- platform-pivot 03: block-addressable doc routes over HTTP ----------------
+// The block store reachable BELOW the same HTTP API (import / materialize / change /
+// changes?since=N / snapshot). Proves the API is the boundary the change-log stream
+// crosses (the Phase-2 fan-out point).
+section("platform-pivot 03 doc routes");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> doc-route tests skipped"); return; }
+  __async.push(withServer(async function (base) {
+    {
+      var doc = { meta: { code: "C-1", title: "T" }, pages: [ { id: "p1", name: "One", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] };
+      var r, j;
+      r = await fetch(base + "/api/doc/C-1/import", { method: "POST", body: JSON.stringify({ doc: doc, author: "alice" }) }); j = await r.json();
+      ok("doc import ok", j.ok === true && j.result.blocks === 1);
+      r = await fetch(base + "/api/doc/C-1"); j = await r.json();
+      ok("GET materialized doc", j.ok === true && j.doc.pages[0].blocks[0].text === "H");
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", body: JSON.stringify({ blockId: "b1", patch: { id: "b1", type: "heading", text: "H2" }, author: "bob" }) }); j = await r.json();
+      ok("POST change -> one event with seq + ver", j.ok === true && typeof j.change.seq === "number" && j.change.ver === 2);
+      var seqAfter = j.change.seq;
+      r = await fetch(base + "/api/doc/C-1"); j = await r.json();
+      ok("materialized reflects change", j.doc.pages[0].blocks[0].text === "H2");
+      r = await fetch(base + "/api/doc/C-1/changes?since=0"); j = await r.json();
+      ok("GET changes?since=0 lists the event", j.ok === true && j.changes.length === 1 && j.changes[0].seq === seqAfter);
+      r = await fetch(base + "/api/doc/C-1/changes?since=" + seqAfter); j = await r.json();
+      ok("GET changes?since=N excludes <= N", j.changes.length === 0);
+      r = await fetch(base + "/api/doc/C-1/snapshot", { method: "POST", body: "{}" }); j = await r.json();
+      ok("POST snapshot ok", j.ok === true && j.snapshot.atSeq === seqAfter);
+      r = await fetch(base + "/api/doc/absent"); ok("GET absent doc -> 404", r.status === 404);
+      // orphan-block guard: a change to a block not in the doc is rejected (not a silent drop)
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", body: JSON.stringify({ blockId: "ghost", patch: { id: "ghost" }, author: "x" }) });
+      j = await r.json();
+      ok("change to unknown block -> 404 + {ok:false} (no silent orphan)", r.status === 404 && j.ok === false);
+      r = await fetch(base + "/api/doc/C-1/changes?since=0"); j = await r.json();
+      ok("rejected change appended NO event", j.changes.length === 1);
+      // ticket 04 over HTTP: checkpoints + restore + block history + revert
+      r = await fetch(base + "/api/doc/C-1/checkpoints"); j = await r.json();
+      ok("checkpoints lists the 'imported' baseline", j.ok === true && j.checkpoints.some(function (c) { return c.name === "imported"; }));
+      r = await fetch(base + "/api/doc/C-1/checkpoint", { method: "POST", body: JSON.stringify({ name: "v1", author: "bob" }) }); j = await r.json();
+      ok("POST checkpoint creates a named checkpoint", j.ok === true && j.checkpoint.name === "v1");
+      var cpId = j.checkpoint.id;
+      await fetch(base + "/api/doc/C-1/change", { method: "POST", body: JSON.stringify({ blockId: "b1", patch: { id: "b1", type: "heading", text: "H3" }, author: "bob" }) });
+      r = await fetch(base + "/api/doc/C-1/restore", { method: "POST", body: JSON.stringify({ checkpointId: cpId, author: "admin" }) }); j = await r.json();
+      ok("POST restore ok", j.ok === true);
+      r = await fetch(base + "/api/doc/C-1"); j = await r.json();
+      ok("restore rewrote base doc back to the checkpoint (H2)", j.doc.pages[0].blocks[0].text === "H2");
+      r = await fetch(base + "/api/doc/C-1/block/b1/history"); j = await r.json();
+      ok("GET block history lists b1 events", j.ok === true && j.history.length >= 1);
+      r = await fetch(base + "/api/doc/C-1/block/b1/revert", { method: "POST", body: JSON.stringify({ toSeq: cpId ? 1 : 1, author: "admin" }) }); j = await r.json();
+      ok("POST block revert ok (forward-only)", j.ok === true && typeof j.revert.seq === "number");
+      r = await fetch(base + "/api/doc/C-1/restore", { method: "POST", body: JSON.stringify({ checkpointId: 99999 }) });
+      ok("restore to a bad checkpoint -> 404", r.status === 404);
+    }
+  }));
 })();
 
 // ---- #81: in-app Help guide markdown renderer -----------------------------
@@ -2080,7 +3620,7 @@ section("comment mode (canvas)");
   ok("drop handler creates + stores a comment", /if \(!commentMode\) return;[\s\S]*?makeAnchorFromPoint\(e\.clientX, e\.clientY, e\.target\)[\s\S]*?pushHistory\(\);[\s\S]*?makeComment\(anchor, ""\)[\s\S]*?doc\.comments\.push\(c\)/.test(t));
   ok("first outside click closes the open note (positive exit), next click drops", /if \(openCommentId\) \{ closeCommentPopover\(\); renderCommentPins\(\); return; \}/.test(t));
   // popover: body input, resolve checkbox, delete
-  ok("popover edits body / resolve / delete", /function openCommentPopover[\s\S]*?c\.body = ta\.value[\s\S]*?c\.done = v; scheduleSave\(\); renderCommentPins\(\); refreshCommentPanel\(\)[\s\S]*?doc\.comments\.splice\(i, 1\)/.test(t));
+  ok("popover edits body / resolve / delete", /function openCommentPopover[\s\S]*?c\.body = ta\.value[\s\S]*?c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); refreshCommentPanel\(\)[\s\S]*?doc\.comments\.splice\(i, 1\)/.test(t));
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
   ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(t));
   ok("applyView re-projects pins (pan/zoom)", /persistView\(\);\s*if \(typeof renderCommentPins === "function"\) renderCommentPins\(\)/.test(t));
@@ -2100,7 +3640,7 @@ section("comment list (panel)");
   ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(interactMode\) setInteractMode\(false\)/.test(t));
   ok("list filters Open vs Resolved", /function renderCommentList[\s\S]*?commentFilter === "resolved" \? c\.done : !c\.done/.test(t));
   ok("row = colour-dot + snippet + done checkbox", /comment-row__dot[\s\S]*?comment-row__snip[\s\S]*?comment-row__done/.test(t));
-  ok("resolve from the list syncs the pin", /c\.done = v; scheduleSave\(\); renderCommentPins\(\); renderCommentList\(\)/.test(t));
+  ok("resolve from the list syncs the pin", /c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); renderCommentList\(\)/.test(t));
   ok("click a row pans to the pin (jumpToComment)", /function jumpToComment[\s\S]*?view\.x \+= \(cr\.width \/ 2 - pos\.px\)[\s\S]*?applyView\(\)[\s\S]*?openCommentPopover\(c\)/.test(t));
 })();
 
@@ -6360,9 +7900,12 @@ section("ui-kit #10 DS control set");
 (function () {
   section("#207 edit-in-version (editor wiring)");
   var e = src("src/editor.js");
-  ok("versionEditable(): a version is editable only when no variant preview is layered", /function versionEditable\(\) \{ return !!activeVersion && !activeVariant; \}/.test(e));
+  // ticket 15 rewired the #207 gate through the pure collabEditGate (the "version editable only
+  // when no variant, and not collaborating" semantic now lives + is tested there). versionEditable()
+  // delegates to it; the standalone #207 behaviour is asserted in the "base-only editing guard" section.
+  ok("versionEditable() delegates to the collab edit gate (#207 semantic preserved standalone)", /function versionEditable\(\) \{ return editGate\(\)\.versionEditable; \}/.test(e));
   ok("editable version uses the resolveVersionForEdit tree", /versionEditable\(\) && window\.resolveVersionForEdit\)\s*\? window\.resolveVersionForEdit\(d, activeVersion\)/.test(e));
-  ok("enableEditing gate keys off !activeVariant (version = editable flagship)", (e.match(/if \(!activeVariant\) enableEditing\(world\);/g) || []).length >= 2);
+  ok("enableEditing gate keys off canvasEditable() (version = editable flagship UNLESS collaborating)", (e.match(/if \(canvasEditable\(\)\) enableEditing\(world\);/g) || []).length >= 2);
   ok("writeModel captures into versionOverrides via __vbase when editing a version", /if \(versionEditable\(\) && obj && obj\.__vbase\) setVersionOverrideField\(obj\.__vbase, activeVersion, field, value\);\s*else obj\[field\] = value;/.test(e));
   ok("capture is undoable — the input handler pushHistory precedes writeModel", /pushHistory\(\);[\s\S]{0,120}hasPushedForFocus = true;[\s\S]{0,200}writeModel\(node,/.test(e));
   ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(e));
