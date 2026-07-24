@@ -71,20 +71,45 @@
   }
   function bufferAck(buf, blockId) { return buf.filter(function (e) { return e.blockId !== blockId; }); }
   function bufferReplay(buf) { return buf.slice(); }
+
+  // Build the typed client->server envelopes (pure; the wire just serialises these). Mirror
+  // of the server's envelope shape { type, docId, blockId, seq, author, ts, payload }.
+  function mkEnvelope(type, docId, blockId, payload) {
+    return { type: type, docId: docId, blockId: blockId != null ? blockId : null, seq: null, author: null, ts: 0, payload: payload || {} };
+  }
+  function helloMsg(docId, sinceSeq) { return mkEnvelope("sync.hello", docId, null, { sinceSeq: sinceSeq || 0 }); }
+  function changeMsg(docId, blockId, content, baseSeq) { return mkEnvelope("block.change", docId, blockId, { patch: content, baseSeq: baseSeq }); }
+  function lockMsg(acquire, docId, blockId) { return mkEnvelope(acquire ? "lock.acquire" : "lock.release", docId, blockId, {}); }
+  function heartbeatMsg(docId, viewingBlockId, editingBlockId) { return mkEnvelope("presence.heartbeat", docId, null, { viewingBlockId: viewingBlockId || null, editingBlockId: editingBlockId || null }); }
+  function commentMsg(docId, blockId, body, threadId) { return mkEnvelope("comment.add", docId, blockId, { body: body, threadId: threadId }); }
   /* @sync-client-end */
 
   // ---- thin WIRE (browser only; inert without a server URL) ----------------
   // A WebSocket client with a long-poll fallback behind one send/onMessage interface. The
   // pure core above is where behaviour lives; this just moves bytes. Browser-verified.
-  function WsClient(url, onMessage, onOpen, onClose) {
-    var ws = new WebSocket(url.replace(/^http/, "ws") + "/sync");
+  function WsClient(base, onMessage, onOpen, onClose) {
+    var ws = new WebSocket(base.replace(/^http/, "ws") + "/sync");
     ws.onopen = function () { if (onOpen) onOpen(); };
     ws.onclose = function () { if (onClose) onClose(); };
     ws.onmessage = function (e) { var env; try { env = JSON.parse(e.data); } catch (x) { return; } if (onMessage) onMessage(env); };
+    return { kind: "ws", send: function (env) { try { ws.send(JSON.stringify(env)); } catch (e) {} }, close: function () { try { ws.close(); } catch (e) {} } };
+  }
+  // Long-poll fallback: POST /sync/send, and a self-rescheduling GET /sync/poll loop.
+  function LongPollClient(base, clientId, onMessage, onOpen) {
+    var open = true;
+    function loop() {
+      if (!open) return;
+      fetch(base + "/sync/poll?clientId=" + encodeURIComponent(clientId), { credentials: "include" })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { (j.events || []).forEach(function (env) { if (onMessage) onMessage(env); }); if (open) loop(); })
+        .catch(function () { if (open) setTimeout(loop, 1000); });
+    }
+    if (onOpen) onOpen();
+    loop();
     return {
-      kind: "ws",
-      send: function (env) { try { ws.send(JSON.stringify(env)); } catch (e) {} },
-      close: function () { try { ws.close(); } catch (e) {} }
+      kind: "longpoll",
+      send: function (env) { fetch(base + "/sync/send", { method: "POST", credentials: "include", body: JSON.stringify({ clientId: clientId, envelope: env }) }); },
+      close: function () { open = false; }
     };
   }
 
@@ -92,17 +117,41 @@
   // false in standalone and connect() is a no-op, so nothing in the editor activates.
   var state = { serverUrl: serverUrl(), connected: false, doc: null, seq: 0, locks: [], peers: [], conflicts: [] };
   var unacked = [];
+  var transport = null, listeners = [];
+  function emit(env) { state = applyServerEvent(state, env); if (env && env.type === "block.ack") unacked = bufferAck(unacked, env.blockId); listeners.forEach(function (cb) { try { cb(env, state); } catch (e) {} }); }
+
   window.VersoSync = {
     enabled: !!serverUrl(),
     isCollaborating: function () { return isCollaborating(state); },
+    // The editor subscribes here to apply remote events onto the live doc + chrome.
+    onEvent: function (cb) { listeners.push(cb); },
+    // Open a live connection for a doc. WS primary, long-poll fallback. No-op in standalone.
+    connect: function (docId, opts) {
+      if (!serverUrl()) return null;
+      opts = opts || {};
+      var base = serverUrl();
+      var clientId = "c_" + Math.random().toString(36).slice(2) + Date.now();
+      function onOpen() { state.connected = true; transport.send(helloMsg(docId, state.seq)); bufferReplay(unacked).forEach(function (e) { transport.send(changeMsg(docId, e.blockId, e.content, e.baseSeq)); }); }
+      function onClose() { state.connected = false; }
+      try { transport = WsClient(base, emit, onOpen, onClose); }
+      catch (e) { transport = LongPollClient(base, clientId, emit, onOpen); } // WS unavailable -> fallback
+      state.docId = docId;
+      return {
+        sendChange: function (blockId, content, baseSeq) { unacked = bufferAdd(unacked, { blockId: blockId, content: content, baseSeq: baseSeq }); transport.send(changeMsg(docId, blockId, content, baseSeq)); },
+        acquireLock: function (blockId) { transport.send(lockMsg(true, docId, blockId)); },
+        releaseLock: function (blockId) { transport.send(lockMsg(false, docId, blockId)); },
+        heartbeat: function (viewing, editing) { transport.send(heartbeatMsg(docId, viewing, editing)); },
+        comment: function (blockId, body, threadId) { transport.send(commentMsg(docId, blockId, body, threadId)); },
+        disconnect: function () { if (transport) transport.close(); state.connected = false; }
+      };
+    },
     // exposed for the editor integration + tests
-    _apply: function (env) { state = applyServerEvent(state, env); return state; },
+    _apply: function (env) { emit(env); return state; },
     _state: function () { return state; },
     _buffer: { add: function (e) { unacked = bufferAdd(unacked, e); }, ack: function (id) { unacked = bufferAck(unacked, id); }, replay: function () { return bufferReplay(unacked); }, pending: function () { return unacked.slice(); } },
     // pure helpers (also used by tests)
-    _pure: { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay },
-    // connect is wired in the next step (transport + editor integration); inert for now
-    connect: function () { if (!serverUrl()) return null; /* transport wiring: next step */ return null; },
-    _WsClient: WsClient
+    _pure: { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay,
+      helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg },
+    _WsClient: WsClient, _LongPollClient: LongPollClient
   };
 })();

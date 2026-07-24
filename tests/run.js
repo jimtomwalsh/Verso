@@ -289,7 +289,7 @@ section("client-mount sync-client core");
   var t = src("src/sync-client.js");
   var m = t.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
   if (!m) { ok("locate @sync-client fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay };")();
+  var g = new Function(m[1] + "\nreturn { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay, helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg };")();
 
   // THE GATE: only true when there is a server URL AND a live connection.
   ok("gate: standalone (no serverUrl) -> not collaborating", g.isCollaborating({ connected: true }) === false && g.isCollaborating(null) === false);
@@ -327,6 +327,13 @@ section("client-mount sync-client core");
   ok("buffer replay returns pending (reconnect resend)", g.bufferReplay(buf).length === 2);
   buf = g.bufferAck(buf, "b1");
   ok("buffer ack retires the acked block's entry", buf.length === 1 && !buf.some(function (e) { return e.blockId === "b1"; }));
+
+  // client->server message construction (the wire just serialises these)
+  ok("helloMsg carries sinceSeq", g.helloMsg("C-1", 5).type === "sync.hello" && g.helloMsg("C-1", 5).payload.sinceSeq === 5);
+  ok("changeMsg carries patch + baseSeq", (function () { var e = g.changeMsg("C-1", "b1", { text: "x" }, 3); return e.type === "block.change" && e.blockId === "b1" && e.payload.baseSeq === 3 && e.payload.patch.text === "x"; })());
+  ok("lockMsg acquire/release", g.lockMsg(true, "C-1", "b1").type === "lock.acquire" && g.lockMsg(false, "C-1", "b1").type === "lock.release");
+  ok("heartbeatMsg carries viewing/editing", g.heartbeatMsg("C-1", "b1", "b2").payload.editingBlockId === "b2");
+  ok("commentMsg carries body + thread", g.commentMsg("C-1", "b1", "note", "th1").payload.body === "note");
 })();
 
 // source guard: the client is inert without a server URL (never activates in standalone)
@@ -334,7 +341,7 @@ section("client-mount sync-client inert");
 (function () {
   var t = src("src/sync-client.js");
   ok("sync-client gates enabled on window.__versoServerUrl", /enabled:\s*!!serverUrl\(\)/.test(t));
-  ok("sync-client connect() no-ops without a server URL", /connect: function \(\) \{ if \(!serverUrl\(\)\) return null;/.test(t));
+  ok("sync-client connect() no-ops without a server URL", /connect: function \(docId, opts\) \{\s*if \(!serverUrl\(\)\) return null;/.test(t));
   ok("sync-client is a classic-script global, no deps/imports", /window\.VersoSync/.test(t) && !/require\(/.test(t) && !/\bimport\s/.test(t));
   // index.html loads it before editor.js (so the editor can consult the gate at boot)
   var idx = src("index.html");
@@ -952,6 +959,59 @@ section("platform-pivot 25 offline comment mode");
   // review/identity server surfaces exist only in server mode (verso-server gates on mode)
   var vs = src("server/verso-server.js");
   ok("25: review + identity are created only in server mode (no link affordance server-side in local)", /config\.mode === "server"\) \? createReview/.test(vs) && /config\.mode === "server"\) \? createIdentity/.test(vs));
+})();
+
+// ---- client-mount: real HTTP long-poll sync pipe end-to-end (two clients, authed) ----
+// Proves the whole wire through a RUNNING server-mode server: login -> cookie -> two
+// long-poll clients exchange a block.change over /sync/send + /sync/poll, through the
+// authenticated boundary. (The wss:// browser pipe is ticket-30 server-only-smoke.)
+section("client-mount sync pipe (HTTP e2e)");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> sync-pipe e2e skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-pipe-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "verso.sqlite"), linkSecret: "s3cr3t" }, function (s) { base = "http://127.0.0.1:" + s.address().port; resolve(); });
+    });
+    try {
+      var idn = server.__identity;
+      idn.registerLocalAccount("author@x", "Author", "pw", "author");
+      var r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "author@x", password: "pw" }) });
+      var cookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      var H = { cookie: cookie, "content-type": "application/json" };
+      await fetch(base + "/api/doc/C-1/import", { method: "POST", headers: H, body: JSON.stringify({ doc: { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, author: "author" }) });
+      var send = function (clientId, env) { return fetch(base + "/sync/send", { method: "POST", headers: H, body: JSON.stringify({ clientId: clientId, envelope: env }) }).then(function (x) { return x.json(); }); };
+      var poll = function (clientId) { return fetch(base + "/sync/poll?clientId=" + clientId, { headers: H }).then(function (x) { return x.json(); }); };
+      // SEC: the pipe is behind the auth boundary
+      var anon = await fetch(base + "/sync/send", { method: "POST", body: JSON.stringify({ clientId: "z", envelope: {} }) });
+      ok("e2e: unauthenticated /sync/send rejected (401)", anon.status === 401);
+      // B subscribes first (so it's in the doc's fan-out set), then A edits
+      await send("B", { type: "sync.hello", docId: "C-1", payload: { sinceSeq: 0 } });
+      await send("A", { type: "sync.hello", docId: "C-1", payload: { sinceSeq: 0 } });
+      var seqBefore = server.__blockStore.maxSeq();
+      var sc = await send("A", { type: "block.change", docId: "C-1", blockId: "b1", author: "author", payload: { patch: { id: "b1", type: "heading", text: "REMOTE-EDIT" }, baseSeq: seqBefore } });
+      ok("e2e: authed /sync/send accepts a block.change", sc.ok === true);
+      // the edit persisted through the real server pipe
+      ok("e2e: edit persisted server-side (materialized)", server.__blockStore.materializeDoc("C-1").pages[0].blocks[0].text === "REMOTE-EDIT");
+      // B polls -> receives the fanned-out block.change
+      var pj = await poll("B");
+      ok("e2e: peer B receives the fanned-out block.change over long-poll", pj.ok === true && pj.events.some(function (env) { return env.type === "block.change" && env.blockId === "b1"; }));
+      // and the client reducer applies it to B's local doc
+      var CL = src("src/sync-client.js");
+      var mm = CL.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+      var g = new Function(mm[1] + "\nreturn { applyServerEvent: applyServerEvent };")();
+      var bDoc = { doc: { meta: {}, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, seq: 0 };
+      pj.events.forEach(function (env) { bDoc = g.applyServerEvent(bDoc, env); });
+      ok("e2e: B's client reducer applies the remote edit to its local doc", bDoc.doc.pages[0].blocks[0].text === "REMOTE-EDIT");
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
 })();
 
 // ---- platform-pivot 17/18/20: identity spine (roles, sessions, JIT, break-glass, guest) ----
