@@ -49,6 +49,7 @@ function createSyncHub(blockStore, opts) {
   var now = opts.now || function () { return 0; };
   var lockManager = opts.lockManager || null; // ticket 10 plugs in here; absent -> auto-grant
   var presence = opts.presence || null;       // ticket 11 plugs in here; absent -> plain relay
+  var review = opts.review || null;           // ticket 23 plugs in here; absent -> plain relay
   var roleOf = opts.roleOf || function (c) { return (c && c.role) || "author"; }; // real roles = ticket 17
   var catchupWindow = opts.catchupWindow != null ? opts.catchupWindow : 500; // low-water mark for catchup vs resnapshot (ticket 09)
   var docs = {};     // docId -> array of subscribed clients
@@ -96,6 +97,22 @@ function createSyncHub(blockStore, opts) {
   // the client buffer + soft-conflict UI is client-side (ticket 13).
   function onHandoff(client, env) { return fanOut(env.docId, env, client); }
 
+  // Review comments over sync (ticket 23): store + fan out to EVERYONE on the doc so an
+  // author's editor and a reviewer's link stay in sync BOTH ways. Anchored to stable ids.
+  function onComment(client, env) {
+    var p = env.payload || {};
+    if (!review) return fanOut(env.docId, env, client);
+    var out;
+    if (env.type === "comment.add") {
+      var r = review.addComment(env.docId, env.blockId, client, p.body, p.threadId);
+      out = envelope("comment.added", env.docId, env.blockId, null, r.author, now(), { id: r.id, threadId: r.threadId, body: p.body, kind: r.kind });
+    } else { // comment.resolve
+      review.resolveThread(p.threadId, p.resolved !== false);
+      out = envelope("comment.resolved", env.docId, env.blockId, null, client && client.author, now(), { threadId: p.threadId, resolved: p.resolved !== false });
+    }
+    subs(env.docId).forEach(function (c) { if (mode === "server") try { c.transport.send(out); } catch (e) {} }); // incl. origin (both-ways convergence)
+  }
+
   // One dispatch table keyed by envelope type -- a new message type adds a row here, it
   // does not grow an if-cascade.
   var HANDLERS = {
@@ -109,7 +126,9 @@ function createSyncHub(blockStore, opts) {
     "presence.heartbeat": onPresence,  // ticket 11
     "cursor.update": onPresence,       // ticket 11
     "lock.requestHandoff": onHandoff,  // ticket 13 (relay)
-    "lock.notifyWhenFree": onHandoff   // ticket 13 (relay)
+    "lock.notifyWhenFree": onHandoff,  // ticket 13 (relay)
+    "comment.add": onComment,          // ticket 23
+    "comment.resolve": onComment       // ticket 23
   };
   function handle(client, env) {
     if (!env || !env.type) return;

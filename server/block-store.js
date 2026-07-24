@@ -310,6 +310,13 @@ function createBlockStore(dbPath, opts) {
     var s = takeSnapshot(docId, author, name);
     return { ok: true, id: s.id, name: name, atSeq: s.atSeq };
   }
+  // The frozen materialized state captured by a checkpoint (ticket 22: a review link pins
+  // one checkpoint so a guest reads a coherent, unchanging snapshot). Null if unknown.
+  function checkpointSnapshot(checkpointId) {
+    var snap = qGetSnap.get(checkpointId);
+    return snap ? JSON.parse(snap.state) : null;
+  }
+
   // Browse checkpoints for a master (newest concept first is the UI's job; return in
   // creation order here).
   function listCheckpoints(docId) {
@@ -378,6 +385,7 @@ function createBlockStore(dbPath, opts) {
     maxSeq: maxSeq,
     createCheckpoint: createCheckpoint,
     listCheckpoints: listCheckpoints,
+    checkpointSnapshot: checkpointSnapshot,
     restoreCheckpoint: restoreCheckpoint,
     blockHistory: blockHistory,
     revertBlock: revertBlock,

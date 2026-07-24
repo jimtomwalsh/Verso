@@ -25,6 +25,7 @@ var createLockManager = require("./lock-manager").createLockManager;
 var createReaper = require("./lock-reaper").createReaper;
 var createPresence = require("./presence").createPresence;
 var createIdentity = require("./identity").createIdentity;
+var createReview = require("./review").createReview;
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -74,15 +75,22 @@ function principalOf(req, identity, config) {
   if (guestTok) { var g = identity.authorizeGuest(guestTok); if (g) return g; }
   return identity.resolveSession(parseCookies(req).verso_session) || null;
 }
-// Reads need `view`; writes need `edit`. Finer admin gates (restore, user-mgmt) live in
-// their handlers; this is the coarse storage-boundary check.
-function requiredCap(method) { return (method === "GET" || method === "HEAD") ? "view" : "edit"; }
+// The capability an /api route requires. Reads need `view`; comment routes need `comment`
+// (so reviewers + guests may annotate but not edit); review-link routes need `issueLinks`;
+// admin file-restore needs an admin-only cap; other writes need `edit`.
+function capFor(rest, method) {
+  var read = (method === "GET" || method === "HEAD");
+  if (/^doc\/[^/]+\/comments/.test(rest)) return read ? "view" : "comment";
+  if (/^doc\/[^/]+\/links/.test(rest)) return "issueLinks";
+  if (/^doc\/[^/]+\/restore/.test(rest)) return "promote"; // admin-only file-checkpoint restore
+  return read ? "view" : "edit";
+}
 
 // Build the request handler around a store + config. Exported separately so tests can
 // drive it without binding a socket. An optional blockStore (ticket 03) mounts the
 // block-addressable /api/doc/* routes below the same API -- the boundary Phase-2 sync
 // fans out from. When absent, only the ticket-02 blob routes are served.
-function makeHandler(store, config, blockStore, sync, identity) {
+function makeHandler(store, config, blockStore, sync, identity, review) {
   config = config || {};
   return function handler(req, res) {
     var raw = req.url || "";
@@ -134,7 +142,7 @@ function makeHandler(store, config, blockStore, sync, identity) {
     if (!principal) return sendJson(res, 401, { ok: false, error: "authentication required" });
     req.__principal = principal;
     if (config.mode === "server" && identity) {
-      var cap = requiredCap(method);
+      var cap = capFor(rest, method);
       var scope = null;
       if (principal.kind === "guest" && rest.indexOf("doc/") === 0) scope = { docId: decodeURIComponent(rest.slice(4).split("/")[0]) };
       if (!identity.principalCan(principal, cap, scope)) {
@@ -203,8 +211,42 @@ function makeHandler(store, config, blockStore, sync, identity) {
       var op = slash >= 0 ? tail.slice(slash + 1) : "";
       if (!docId) return sendJson(res, 400, { ok: false, error: "missing doc id" });
       if (op === "" && method === "GET") {
+        // ticket 22: a guest on a review link reads the PINNED checkpoint snapshot (frozen,
+        // never in-progress churn); everyone else reads the live materialized doc.
+        if (req.__principal && req.__principal.kind === "guest" && req.__principal.scope && req.__principal.scope.checkpointId != null) {
+          var pinned = blockStore.checkpointSnapshot(req.__principal.scope.checkpointId);
+          return pinned ? sendJson(res, 200, { ok: true, doc: pinned, pinned: true }) : sendJson(res, 404, { ok: false, error: "pinned snapshot missing" });
+        }
         var mat = blockStore.materializeDoc(docId);
         return mat ? sendJson(res, 200, { ok: true, doc: mat }) : sendJson(res, 404, { ok: false, error: "no such doc" });
+      }
+      // --- review comments (ticket 23): anchored to stable block ids; shared both ways ---
+      if (op === "comments" && method === "GET" && review) {
+        var exists = function (bid) { return blockStore.blockContent(docId, bid) !== null; };
+        return sendJson(res, 200, { ok: true, comments: review.commentsFor(docId, exists) });
+      }
+      if (op === "comments" && method === "POST" && review) return withJsonBody(req, res, function (body) {
+        if (!body.blockId) return sendJson(res, 400, { ok: false, error: "missing blockId" });
+        var r = review.addComment(docId, body.blockId, req.__principal, body.body, body.threadId);
+        if (blockStore.blockContent(docId, body.blockId) === null) r.orphaned = true; // anchor already gone -> surfaced, not dropped
+        return sendJson(res, 200, r);
+      });
+      if (op.indexOf("comments/") === 0 && method === "POST" && review) {
+        var seg = op.split("/"); // comments/<threadId>/resolve
+        if (seg[2] === "resolve") return withJsonBody(req, res, function (body) {
+          return sendJson(res, 200, review.resolveThread(decodeURIComponent(seg[1]), body.resolved !== false));
+        });
+      }
+      // --- review-link management + audit (ticket 24) ---
+      if (op === "links" && method === "GET" && identity) {
+        return sendJson(res, 200, identity.listLinks(req.__principal, docId));
+      }
+      if (op === "links" && method === "POST" && identity) return withJsonBody(req, res, function (body) {
+        var r = identity.issueLink(req.__principal, { docId: docId, checkpointId: body.checkpointId, version: body.version, mode: body.mode, displayName: body.displayName, expiresAt: body.expiresAt });
+        return sendJson(res, r.ok ? 200 : 403, r);
+      });
+      if (op.indexOf("links/") === 0 && method === "DELETE" && identity) {
+        return sendJson(res, 200, identity.revokeLink(req.__principal, decodeURIComponent(op.slice(6))));
       }
       if (op === "import" && method === "POST") return withJsonBody(req, res, function (body) {
         return sendJson(res, 200, { ok: true, result: blockStore.importDoc(docId, body.doc || body, body.author) });
@@ -280,7 +322,10 @@ function createServer(opts) {
   // local mode (a single implicit owner). Injected so tests can pass a shared instance.
   var identity = opts.hasOwnProperty("identity") ? opts.identity
     : ((opts.dbPath && config.mode === "server") ? createIdentity({ dbPath: opts.dbPath, now: opts.now, linkSecret: config.linkSecret, sessionTtlMs: config.sessionTtlMs }) : null);
-  var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager, presence: presence }) : null;
+  // Review comments (ticket 23): server mode only, on the same on-disk store.
+  var review = opts.hasOwnProperty("review") ? opts.review
+    : ((opts.dbPath && config.mode === "server") ? createReview({ dbPath: opts.dbPath, now: opts.now }) : null);
+  var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager, presence: presence, review: review }) : null;
   var sync = hub ? createSyncRoutes(hub, config) : null;
   // Lease reaper (ticket 12): reclaims a vanished holder's stale lock, then broadcasts the
   // freed lock.state so peers can re-acquire. Server mode only; timer opt-in (unref'd).
@@ -293,13 +338,14 @@ function createServer(opts) {
       });
     }
   }) : null;
-  var server = http.createServer(makeHandler(store, config, blockStore, sync, identity));
+  var server = http.createServer(makeHandler(store, config, blockStore, sync, identity, review));
   if (sync && !sync.dormant) server.on("upgrade", sync.upgrade); // wss:// only in server mode
   server.__store = store;
   server.__blockStore = blockStore;
   server.__hub = hub;
   server.__sync = sync;
   server.__identity = identity;
+  server.__review = review;
   server.__lockManager = lockManager;
   server.__reaper = reaper;
   server.__config = config;

@@ -66,8 +66,11 @@ function createIdentity(opts) {
   db.exec(
     "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT, role TEXT NOT NULL, pw_hash TEXT, break_glass INTEGER DEFAULT 0, created_at INTEGER);" +
     "CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER);" +
-    "CREATE TABLE IF NOT EXISTS review_links (id TEXT PRIMARY KEY, doc_id TEXT, version TEXT, display_name TEXT, revoked INTEGER DEFAULT 0, expires_at INTEGER, created_at INTEGER);"
+    "CREATE TABLE IF NOT EXISTS review_links (id TEXT PRIMARY KEY, doc_id TEXT, version TEXT, checkpoint_id INTEGER, mode TEXT DEFAULT 'guest', display_name TEXT, revoked INTEGER DEFAULT 0, expires_at INTEGER, created_at INTEGER);"
   );
+  // defensive migration for a store created before checkpoint_id/mode (ticket 22/24)
+  try { db.exec("ALTER TABLE review_links ADD COLUMN checkpoint_id INTEGER"); } catch (e) {}
+  try { db.exec("ALTER TABLE review_links ADD COLUMN mode TEXT DEFAULT 'guest'"); } catch (e) {}
   var qGetUserByEmail = db.prepare("SELECT * FROM users WHERE email = ?");
   var qGetUserById    = db.prepare("SELECT * FROM users WHERE id = ?");
   var qInsUser        = db.prepare("INSERT INTO users (id, email, name, role, pw_hash, break_glass, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
@@ -76,9 +79,10 @@ function createIdentity(opts) {
   var qInsSession     = db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)");
   var qGetSession     = db.prepare("SELECT * FROM sessions WHERE token = ?");
   var qDelSession     = db.prepare("DELETE FROM sessions WHERE token = ?");
-  var qInsLink        = db.prepare("INSERT INTO review_links (id, doc_id, version, display_name, revoked, expires_at, created_at) VALUES (?, ?, ?, ?, 0, ?, ?)");
+  var qInsLink        = db.prepare("INSERT INTO review_links (id, doc_id, version, checkpoint_id, mode, display_name, revoked, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)");
   var qGetLink        = db.prepare("SELECT * FROM review_links WHERE id = ?");
   var qRevokeLink     = db.prepare("UPDATE review_links SET revoked = 1 WHERE id = ?");
+  var qLinksForDoc    = db.prepare("SELECT id, doc_id, version, checkpoint_id, mode, display_name, revoked, expires_at, created_at FROM review_links WHERE doc_id = ? ORDER BY created_at DESC");
 
   function uid() { return "u_" + crypto.randomBytes(8).toString("hex"); }
 
@@ -171,18 +175,24 @@ function createIdentity(opts) {
   // ---- Guest review-link tokens (ticket 20) --------------------------------
   // Issue a signed, revocable, link-scoped token: view+comment on ONE file+version, no
   // account/IdP/provisioning. issued by an edit-capable role (issueLinks capability).
+  // scope: { docId, version?, checkpointId? (pinned snapshot, ticket 22), displayName?,
+  //          mode? ('guest'|'sso', ticket 24), expiresAt? }. One link = one snapshot; a
+  // link never silently advances -- refreshing a review shares a NEW link (24).
   function issueLink(actor, scope) {
     if (!actor || !can(actor.role, "issueLinks")) return { ok: false, error: "not permitted" };
     var id = "lnk_" + crypto.randomBytes(10).toString("hex");
     var exp = scope.expiresAt != null ? scope.expiresAt : now() + 7 * 24 * 60 * 60 * 1000;
-    qInsLink.run(id, scope.docId, scope.version || "", scope.displayName || "Guest", exp, now());
-    var payload = { linkId: id, docId: scope.docId, version: scope.version || "", name: scope.displayName || "Guest", exp: exp };
+    var mode = scope.mode === "sso" ? "sso" : "guest";
+    var cp = scope.checkpointId != null ? scope.checkpointId : null;
+    qInsLink.run(id, scope.docId, scope.version || "", cp, mode, scope.displayName || "Guest", exp, now());
+    var payload = { linkId: id, docId: scope.docId, version: scope.version || "", cp: cp, mode: mode, name: scope.displayName || "Guest", exp: exp };
     var body = b64url(Buffer.from(JSON.stringify(payload), "utf8"));
     var sig = b64url(crypto.createHmac("sha256", linkSecret).update(body).digest());
-    return { ok: true, linkId: id, token: body + "." + sig, scope: payload };
+    return { ok: true, linkId: id, token: body + "." + sig, mode: mode, scope: payload };
   }
   // Authorize a guest token -> { principal:'guest', role:'guest', scope, caps } | null.
-  // Rejects a bad signature, an expired token, a revoked link, or a scope mismatch.
+  // Rejects a bad signature, an expired token, or a revoked link. An 'sso'-mode link is
+  // NOT authorized as a guest here -- the reviewer must go through the OIDC path (24).
   function authorizeGuest(token) {
     if (!token || token.indexOf(".") < 0) return null;
     var parts = token.split("."), body = parts[0], sig = parts[1];
@@ -193,12 +203,24 @@ function createIdentity(opts) {
     if (payload.exp && payload.exp <= now()) return null; // expired
     var link = qGetLink.get(payload.linkId);
     if (!link || link.revoked) return null; // revoked / unknown
-    return { principal: "guest:" + payload.linkId, kind: "guest", role: "guest", name: payload.name, scope: { docId: payload.docId, version: payload.version } };
+    if (link.mode === "sso") return null;    // sso-gated link -> not a guest path (24)
+    return { principal: "guest:" + payload.linkId, kind: "guest", role: "guest", name: payload.name, scope: { docId: payload.docId, version: payload.version, checkpointId: payload.cp } };
   }
   function revokeLink(actor, linkId) {
     if (!actor || !can(actor.role, "issueLinks")) return { ok: false, error: "not permitted" };
     qRevokeLink.run(linkId);
     return { ok: true, linkId: linkId };
+  }
+  // Admin/author link-audit list for a course (ticket 24): target snapshot, mode, expiry,
+  // display name, revoked. Live = not revoked + not expired.
+  function listLinks(actor, docId) {
+    if (!actor || !can(actor.role, "issueLinks")) return { ok: false, error: "not permitted" };
+    var t = now();
+    return {
+      ok: true, links: qLinksForDoc.all(docId).map(function (l) {
+        return { linkId: l.id, docId: l.doc_id, checkpointId: l.checkpoint_id, mode: l.mode, displayName: l.display_name, expiresAt: l.expires_at, revoked: !!l.revoked, live: !l.revoked && (!l.expires_at || l.expires_at > t) };
+      })
+    };
   }
   // Does this resolved principal (user OR guest) hold a capability, honouring guest scope?
   function principalCan(principal, capability, scope) {
@@ -222,8 +244,8 @@ function createIdentity(opts) {
     // adapters + sessions
     localAccountsAdapter: localAccountsAdapter, login: login,
     createSession: createSession, resolveSession: resolveSession, signOut: signOut,
-    // guest links
-    issueLink: issueLink, authorizeGuest: authorizeGuest, revokeLink: revokeLink,
+    // guest links + review-link management (24)
+    issueLink: issueLink, authorizeGuest: authorizeGuest, revokeLink: revokeLink, listLinks: listLinks,
     close: function () { if (!opts.db) db.close(); }, _db: db
   };
 }

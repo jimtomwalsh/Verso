@@ -63,7 +63,7 @@ section("syntax");
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
- "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js"
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -708,6 +708,108 @@ section("platform-pivot 14 conflict + rollback");
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
+})();
+
+// ---- platform-pivot 22/23/24/25: review-links -- comments, anchoring, orphans, pinning ----
+section("platform-pivot 23 comments");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> comments tests skipped"); return; }
+  var os = require("os");
+  var RV = require(path.join(ROOT, "server/review.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rev-"));
+  var clock = 100;
+  var rev = RV.createReview({ dbPath: path.join(tmp, "r.sqlite"), now: function () { return clock; } });
+  try {
+    // AC (23): a guest comment on block B, anchored to stable id B
+    var c1 = rev.addComment("C-1", "b1", { kind: "guest", name: "Ext Reviewer" }, "Please clarify");
+    ok("23: guest comment stored, anchored to the stable block id + attributed to link name", c1.ok && c1.blockId === "b1" && c1.kind === "guest");
+    // author replies in the same thread + resolves (shared both ways -> same rows)
+    var reply = rev.addComment("C-1", "b1", { kind: "user", author: "Alice" }, "Done", c1.threadId);
+    ok("23: author reply shares the thread", reply.threadId === c1.threadId && reply.kind === "user");
+    rev.resolveThread(c1.threadId, true);
+    // live master: b1 exists, b2 does not -> b2 comment is an ORPHAN (surfaced, not dropped)
+    rev.addComment("C-1", "b2-gone", { kind: "guest", name: "Ext" }, "on a deleted block");
+    var exists = function (bid) { return bid === "b1"; }; // only b1 survives in the live master
+    var list = rev.commentsFor("C-1", exists);
+    ok("23: comment on a surviving block anchors (not orphaned)", list.find(function (c) { return c.id === c1.id; }).orphaned === false);
+    ok("23: comment on a deleted stable id -> SURFACED orphaned anchor (never dropped)", list.some(function (c) { return c.blockId === "b2-gone" && c.orphaned === true; }));
+    ok("23: resolve applied to the whole thread (shared both ways)", list.filter(function (c) { return c.threadId === c1.threadId; }).every(function (c) { return c.resolved === true; }));
+    ok("23: nothing silently dropped -- every comment surfaces", list.length === 3);
+  } finally {
+    try { rev.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// review-links HTTP integration: pinned-snapshot guest read (22), comments both-ways (23),
+// per-link modes + audit (24).
+section("platform-pivot 22/24 review links (HTTP)");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> review-link HTTP tests skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rl-test-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "verso.sqlite"), linkSecret: "s3cr3t" }, function (s) { base = "http://127.0.0.1:" + s.address().port; resolve(); });
+    });
+    try {
+      var idn = server.__identity, bs = server.__blockStore;
+      idn.registerLocalAccount("admin@x", "Admin", "pw", "admin");
+      var r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "admin@x", password: "pw" }) });
+      var cookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      // import a doc + pin a checkpoint
+      await fetch(base + "/api/doc/C-1/import", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ doc: { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "FROZEN" } ] } ] }, author: "admin" }) });
+      var cps = bs.listCheckpoints("C-1"); var cpId = cps[0].id;
+      // 24: issue a guest link pinned to the checkpoint
+      r = await fetch(base + "/api/doc/C-1/links", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ checkpointId: cpId, displayName: "Ext", mode: "guest" }) });
+      var link = await r.json();
+      ok("24: an admin issues a review link pinned to a checkpoint", link.ok && link.token && link.mode === "guest");
+      // edit the LIVE master AFTER pinning
+      await fetch(base + "/api/doc/C-1/change", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ blockId: "b1", patch: { id: "b1", type: "heading", text: "LIVE-EDIT" }, author: "admin" }) });
+      // 22: the guest reads the FROZEN pinned snapshot, not the live edit
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": link.token } }); var gv = await r.json();
+      ok("22: guest reads the pinned frozen snapshot (not live churn)", gv.ok && gv.pinned === true && gv.doc.pages[0].blocks[0].text === "FROZEN");
+      // 23: guest posts a comment (comment cap) but cannot edit
+      r = await fetch(base + "/api/doc/C-1/comments", { method: "POST", headers: { "x-verso-guest": link.token }, body: JSON.stringify({ blockId: "b1", body: "typo here" }) });
+      ok("23: guest may comment (comment capability)", r.status === 200);
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", headers: { "x-verso-guest": link.token }, body: JSON.stringify({ blockId: "b1", patch: {} }) });
+      ok("23: guest still cannot edit (403)", r.status === 403);
+      // the author sees the guest comment on the live master's block
+      r = await fetch(base + "/api/doc/C-1/comments", { headers: { cookie: cookie } }); var cl = await r.json();
+      ok("23: guest comment surfaces to the author on the live block", cl.comments.some(function (c) { return c.blockId === "b1" && c.kind === "guest"; }));
+      // 24: audit list + revoke cuts access immediately
+      r = await fetch(base + "/api/doc/C-1/links", { headers: { cookie: cookie } }); var au = await r.json();
+      ok("24: admin link-audit list shows the link (snapshot, mode, display name)", au.links.some(function (l) { return l.linkId === link.linkId && l.mode === "guest" && l.live === true; }));
+      r = await fetch(base + "/api/doc/C-1/links/" + link.linkId, { method: "DELETE", headers: { cookie: cookie } });
+      ok("24: revoke succeeds", (await r.json()).ok === true);
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": link.token } });
+      ok("24: revoked link cuts guest access immediately (401)", r.status === 401);
+      // 24: an SSO-gated link is NOT authorized as a guest (must go through OIDC)
+      r = await fetch(base + "/api/doc/C-1/links", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ checkpointId: cpId, mode: "sso", displayName: "Sensitive" }) });
+      var ssoLink = await r.json();
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": ssoLink.token } });
+      ok("24: an SSO-gated link is not a guest path (401 as guest)", r.status === 401);
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+})();
+
+// 25: shareable links are server-only; in-editor comment mode works fully offline.
+section("platform-pivot 25 offline comment mode");
+(function () {
+  // regression guard: the shipped editor comment mode persists to the doc (doc.comments)
+  // so it works with NO server present; the review-link server surface is server-mode-only.
+  var ed = src("src/editor.js");
+  ok("25: editor comment mode persists comments on the doc (offline, no server)", /doc\.comments|comments\s*:/.test(ed) && /colourForName/.test(ed));
+  // review/identity server surfaces exist only in server mode (verso-server gates on mode)
+  var vs = src("server/verso-server.js");
+  ok("25: review + identity are created only in server mode (no link affordance server-side in local)", /config\.mode === "server"\) \? createReview/.test(vs) && /config\.mode === "server"\) \? createIdentity/.test(vs));
 })();
 
 // ---- platform-pivot 17/18/20: identity spine (roles, sessions, JIT, break-glass, guest) ----
