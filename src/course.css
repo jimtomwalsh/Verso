@@ -1565,6 +1565,26 @@
   100% { transform: scale(1.9); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .hotspot-marker::before { animation: none; } }
+/* #53 gated marker: hidden until its screen's play-once video ends, then the runtime adds
+   .is-revealed. Non-interactive while hidden so a learner can't click through it. */
+.hotspot-marker--gated { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+.hotspot-marker--gated.is-revealed { opacity: 1; pointer-events: auto; }
+/* #48 box marker: a resizable region outline (w x h % set inline) instead of a point
+   badge. Transparent fill so the highlighted UI stays visible; accent border + the same
+   pulse ring. width/height come from the marker (inline %); the badge sizing vars are moot. */
+.hotspot-marker--box {
+  border: 2px solid var(--hotspot-color); border-radius: 6px;
+  background: transparent; color: transparent; box-shadow: none;
+}
+.hotspot-marker--box::before { border-radius: 6px; }
+.hotspot-marker--box:hover, .hotspot-marker--box:focus-visible {
+  transform: translate(-50%, -50%); /* no scale — a region must not jump size on hover */
+  background: color-mix(in srgb, var(--hotspot-color) 12%, transparent);
+  box-shadow: none;
+}
+.hotspot-marker--box.is-active { transform: translate(-50%, -50%); }
+/* viewed: recolour the outline only (never add a fill — the UI must stay visible) */
+.hotspot-marker--box.is-viewed { background: transparent; border-color: var(--hotspot-viewed, var(--color-success)); }
 
 /* custom marker: an uploaded (animated) SVG replaces the badge. Strip the circle
    chrome + pulse ring so the artwork shows as-authored, sized by --hotspot-size.
@@ -1706,7 +1726,23 @@
 /* Back + Home sit together, floated top-left of the image. Both match the standard
    course/nav button (white outline + text, bg fill, hover to surface); Back retraces
    one step (chevron), Home (deep tours only) jumps to the entry screen (house). */
-.hotspot-nav { position: absolute; top: 12px; left: 12px; z-index: 4; display: flex; gap: 8px; }
+/* #52: nav + progress sit in a band BELOW the screen frame (in normal flow), not absolutely
+   over the image. The band spreads nav (left) and the counter (right); the trail wraps below.
+   Empty band collapses so a single-screen popover shows no stray gap. */
+.hotspot-chrome { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-top: 10px; }
+.hotspot-chrome:empty { display: none; }
+.hotspot-nav { display: flex; gap: 8px; }
+/* Top band ABOVE the screen: the "screens visited" counter anchors top-right here. */
+.hotspot-topbar { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 8px; }
+.hotspot-topbar:empty { display: none; }
+/* Caption beneath the screen: a single, quietly-updating line, never over the screen.
+   Defaults to the Body 1 text style (matches .body-copy: 17px / 1.6 / full ink). */
+.hotspot-caption { flex-basis: 100%; order: 1; color: var(--color-ink); font-size: 17px; line-height: 1.6; text-align: center; }
+.hotspot-caption:empty { display: none; }
+/* 1px playback progress along the bottom edge of the screen (video screens). The runtime drives
+   the width every animation frame while the video plays, so it moves smoothly (no CSS transition,
+   which would lag behind the per-frame updates). */
+.hotspot-video-progress { position: absolute; left: 0; bottom: 0; height: 1px; width: 0; background: var(--color-accent); z-index: 3; pointer-events: none; }
 .hotspot-back, .hotspot-home {
   font-family: inherit; font-weight: 600; font-size: 13px; letter-spacing: 0.02em; line-height: 1;
   color: var(--color-ink); background: var(--color-bg);
@@ -1720,12 +1756,11 @@
 .hotspot-back:hover, .hotspot-home:hover { border-color: var(--color-ink); color: var(--color-ink); background: var(--color-surface); }
 /* "X of N viewed" progress pill, top-right of the stage (opposite the Back button). */
 .hotspot-counter {
-  position: absolute; top: 12px; right: 12px; z-index: 4;
+  margin-left: auto; /* push to the right edge of the chrome band */
   font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; line-height: 1;
   color: var(--color-ink-soft); background: var(--color-bg);
   border: 1px solid var(--color-ink-soft); border-radius: 999px;
-  padding: 5px 11px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  pointer-events: none;
+  padding: 5px 11px; pointer-events: none;
 }
 .hotspot-counter.is-complete { color: var(--color-success, var(--color-ink)); border-color: var(--color-success, var(--color-ink-soft)); }
 

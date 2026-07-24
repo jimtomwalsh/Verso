@@ -2966,10 +2966,18 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 .tourb-node__badge--entry { color: var(--accent); }
 .tourb-node__badge--done { left: auto; right: var(--space-2); color: var(--accent); transform-origin: top right; }
 .tourb-node__badge--done svg { width: 12px; height: 12px; }
+/* #55: video badge (bottom-left corner, a free spot) — a play glyph marking a video screen. */
+.tourb-node__badge--video { top: auto; bottom: var(--space-2); left: var(--space-2); color: var(--accent); transform-origin: bottom left; padding: 0 4px; }
+.tourb-node__badge--video svg { width: 12px; height: 12px; }
 .tourb-node__title { border: none; outline: none; background: transparent; font: var(--type-label-strong); color: var(--text-primary);
   padding: 2px var(--space-1); border-radius: var(--radius-xs); width: 100%; }
 .tourb-node__title:focus { box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-input); }
 .tourb-node__title::placeholder { color: var(--text-tertiary); }
+/* secondary caption field beneath the node title (the learner's below-screen caption) */
+.tourb-node__caption { border: none; outline: none; background: transparent; font: var(--type-caption); color: var(--text-secondary);
+  padding: 1px var(--space-1); border-radius: var(--radius-xs); width: 100%; }
+.tourb-node__caption:focus { box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-input); color: var(--text-primary); }
+.tourb-node__caption::placeholder { color: var(--text-tertiary); }
 
 /* pins + ConnectionPort — sized so every handle is visible and grab-able on the node */
 .tourb-pin {
@@ -2985,6 +2993,41 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 .tourb-pin.is-selected { box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--border-focus); z-index: 5; }
 /* card pins read differently from navigate pins so they don't look like links */
 .tourb-pin--card { background: var(--surface-raised); color: var(--accent); box-shadow: 0 0 0 2px var(--surface-raised), inset 0 0 0 2px var(--accent); }
+/* WYSIWYG board markers: the REAL .hotspot-marker (course.css) rendered on the board node so the
+   design phase matches the learner exactly, with editor affordances layered on. */
+.tourb-marker { cursor: grab; touch-action: none; }
+.tourb-marker:active { cursor: grabbing; }
+/* suppress the learner hover-scale during placement (it fights the drag) */
+.tourb-node__thumb .hotspot-marker:hover, .tourb-node__thumb .hotspot-marker:focus-visible { transform: translate(-50%, -50%); }
+/* selection ring — editor chrome only */
+.tourb-marker.is-selected { outline: 2px solid var(--border-focus); outline-offset: 3px; z-index: 5; }
+/* #48 region (box) pin: a transparent, sized outline (w/h inline %). Unlike point pins it
+   scales WITH the board (it maps to a real screen area), so it drops the --tour-inv counter-scale. */
+.tourb-pin--box {
+  transform: translate(-50%, -50%); width: 20%; height: 12%; border-radius: 4px;
+  background: transparent; color: transparent; box-shadow: inset 0 0 0 2px var(--accent);
+}
+.tourb-pin--box:hover { filter: none; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.tourb-pin--box.is-selected { box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 2px var(--border-focus); }
+.tourb-pin__resize {
+  position: absolute; right: 0; bottom: 0; width: 11px; height: 11px;
+  transform: translate(50%, 50%) scale(var(--tour-inv, 1)); transform-origin: bottom right;
+  background: var(--accent); border: 2px solid var(--surface-raised); border-radius: 2px;
+  cursor: nwse-resize; touch-action: none; z-index: 7;
+}
+/* #48 on-canvas region-marker resize handle (editor chrome — never ships in SCORM) */
+.hotspot-resize {
+  position: absolute; right: 0; bottom: 0; width: 12px; height: 12px;
+  transform: translate(50%, 50%); background: var(--accent);
+  border: 2px solid var(--surface-raised); border-radius: 2px; cursor: nwse-resize; z-index: 4;
+}
+/* #53 authoring visibility: a hotspot gated on a play-once video is opacity:0 at runtime until
+   the video ends. On the EDITING canvas (#canvas-viewport) the AUTHOR must still see + place it,
+   so reveal it dimmed with a dashed accent ring. Scoped to the editing viewport by ID so it beats
+   course.css (loaded after) and does NOT leak into Demo (#demo) or the tour Preview
+   (#tourb-preview) -- those preview the true reveal-after-video behaviour. Export never loads
+   editor.css, so the shipped course is unaffected. */
+#canvas-viewport .hotspot-marker--gated { opacity: 0.5; pointer-events: auto; outline: 1px dashed var(--accent); outline-offset: 2px; }
 .tourb-port {
   position: absolute; transform: translate(calc(-50% + 15px), calc(-50% - 15px)) scale(var(--tour-inv, 1)); z-index: 6;
   width: 15px; height: 15px; border-radius: 50%; background: var(--surface-raised);

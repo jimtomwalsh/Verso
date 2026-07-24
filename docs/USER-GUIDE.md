@@ -186,13 +186,29 @@ becomes a guided software walkthrough.
 
 ### Behaviour
 
-Under **Behaviour**, pick **Popover on click** or **Screen navigation**. Add screens in the
-**Screens** list; the first is the **Entry** screen. Each screen has its own image and pins, so
-a tour can go any number of levels deep. A navigation pin's **Goes to** menu targets any screen
-(or mints a new one).
+Under **Behaviour**, **Default for new hotspots** sets whether a *newly added* hotspot starts as a
+**Popover on click** or **Screen navigation**. It is only a starting point — each hotspot's own
+**Action** (in **Selected hotspot**) is the truth, so **one experience can mix** popover and
+navigation hotspots freely. Switching the default never rewrites hotspots you have already placed.
+Add screens in the **Screens** list; the first is the **Entry** screen. Each screen has its own
+image and pins, so a tour can go any number of levels deep. A navigation pin's **Goes to** menu
+targets any screen (or mints a new one).
 
 In a deep tour, the learner gets a **Back** control and, by default, a **Home** control (jumps
-to the entry screen). Both are optional and their labels are editable.
+to the entry screen). Both are optional and their labels are editable. The navigation controls and
+the progress counter sit in a bar **below the screen**, so they never cover screen content — and
+the space beneath the image stays clear for step instructions.
+
+### Point or region markers
+
+Select a hotspot and pick its **Shape**:
+
+- **Point** — the default info badge.
+- **Box (region)** — a resizable, transparent outline that frames a UI element (a button, a
+  field) without covering it. It takes the course accent colour and the same pulse, so it still
+  invites a click. Set **W** and **H** as a percentage of the image, or drag the box's
+  **bottom-right corner handle** on the canvas or the tour board to resize it. A region marker
+  can open a popover or navigate, exactly like a point.
 
 ### Video & GIF screens
 
@@ -201,7 +217,9 @@ goes. A video screen offers a **Playback** choice:
 
 - **Loop** — an idle animation that cycles.
 - **Play once** — autoplays muted on arrival, then freezes on the last frame with an optional
-  **Replay** button.
+  **Replay** button. Turn on **Reveal hotspots after it ends** to keep that screen's hotspots
+  hidden until the video finishes — so a "continue" or a card only appears once the demo has
+  played through. (Reduced-motion learners get those hotspots up front, so they are never stuck.)
 
 Reduced-motion learners see the first frame with a Play button instead. A popover card can also
 hold a video. Video is packaged as separate files in the SCORM zip, so the course still loads
@@ -213,6 +231,20 @@ Under **Behaviour**, a tour counts complete once the learner has **visited every
 which releases the page's Next when gating is on. Alternatively, pick a **completion screen**,
 or switch tracking off (**Mark as viewed**) so a decorative tour never holds Next. A
 **Navigation trail** toggle shows the learner a breadcrumb of the screens they walked.
+
+### Captions
+
+Give each screen a **Caption** (in its inspector, or the secondary field under the screen name on
+its tour-builder node). A single caption line sits **beneath the screen** and updates to the current
+screen's caption as the learner moves through the tour — a quiet, always-current instruction that
+never covers the screen.
+
+### Chrome: nav, counter, progress
+
+- **External nav buttons** (Back / Home) sit below the screen. Turn them off under Behaviour for a
+  tour that drives navigation purely through on-screen markers.
+- The **screens-visited counter** anchors top-right, above the screen.
+- A video screen shows a thin **1px progress bar** along the bottom edge as it plays.
 
 ### Tour builder
 
@@ -226,7 +258,13 @@ board where every screen is a node laid out in 2D.
 - **Link.** Drag the **port** on a navigation pin to another node to draw or repoint its link;
   click a link's **×** to remove it.
 - **Edit in place.** Selecting a node shows that screen's normal properties in the Inspector —
-  it's the same editor, re-hosted. Drag a pin to move a hotspot, or nudge it with the arrow keys.
+  it's the same editor, re-hosted. Drag a marker to move a hotspot, or nudge it with the arrow keys.
+- **What you see is what they get.** Markers on the board render exactly as the learner sees them —
+  the real colour, the point badge or the resizable region box, the pulse — so you place against the
+  final look, not a stand-in. A selected marker gets a thin selection ring on top.
+- **Video nodes.** A video screen carries a small **play badge** so you can tell it from an image
+  at a glance, and its node posters on the video's **final frame**. **Hover** a video node to scrub
+  its preview — move left-to-right across the node to seek through the recording.
 - **Preview.** **Preview** runs an isolated test of just this tour without exporting; **Escape**
   returns you to the board.
 

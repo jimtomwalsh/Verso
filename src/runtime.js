@@ -336,13 +336,25 @@
       stage.__hsStack = stack.slice(0, idx);                   // truncate the path to that crumb
       screenShow(stage, stack[idx - 1]);
     }
+    // Caption: keep the single below-screen caption line in sync with the CURRENT screen. The
+    // per-screen text rides the DOM (data-screen-caption on each panel; the entry caption on the
+    // stage) so this never re-reads the doc.
+    function hsUpdateCaption(stage, curSid) {
+      var cap = stage.querySelector(".hotspot-caption"); if (!cap) return;
+      var entryId = stage.getAttribute("data-hotspot-entry");
+      var text;
+      if (curSid === entryId) text = stage.getAttribute("data-hotspot-entry-caption") || "";
+      else { var p = stage.querySelector('.hotspot-screen[data-screen-id="' + curSid + '"]'); text = (p && p.getAttribute("data-screen-caption")) || ""; }
+      cap.textContent = text;
+    }
     // called after every screen change (base/show): record the screen, refresh the
-    // counter + trail, and test completion. Screen-mode only (popover mode keeps the
+    // counter + trail + caption, and test completion. Screen-mode only (popover mode keeps the
     // marker-viewed counter via updateViewedCounter); base/show only run in screen mode.
     function hsAfterNav(stage, curSid) {
       hsMarkVisited(stage, curSid);
       hsUpdateCounter(stage);
       hsRenderTrail(stage);
+      hsUpdateCaption(stage, curSid);
       hsCheckComplete(stage, curSid);
     }
     // ---- screen video playback (#217): a screen visual of kind "video" is a screen
@@ -370,11 +382,39 @@
       if (v.__hsSetup) return; v.__hsSetup = true;
       v.muted = true; // keep autoplay-eligible even if the attribute was stripped
       var btn = hsBtnFor(v);
+      // 1px playback progress bar along the bottom of the screen: reflect THIS video while it is
+      // the current screen's video. currentTime advances continuously, so we sample it every
+      // animation frame while playing (smooth), not on the coarse ~4Hz timeupdate (which jumps).
+      var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+      function progressTick() {
+        v.__hsRaf = null;
+        if (v.paused || v.ended) return; // stopped -> leave the bar at its last width
+        var st = v.closest && v.closest(".hotspot-stage");
+        var bar = st && st.querySelector(".hotspot-video-progress");
+        if (bar && v.duration && isFinite(v.duration)) bar.style.width = (v.currentTime / v.duration * 100) + "%";
+        v.__hsRaf = raf(progressTick);
+      }
+      v.addEventListener("play", function () { if (!v.__hsRaf) v.__hsRaf = raf(progressTick); });
+      v.addEventListener("ended", function () { // pin the bar to 100% on a clean finish
+        var st = v.closest && v.closest(".hotspot-stage"); var bar = st && st.querySelector(".hotspot-video-progress");
+        if (bar) bar.style.width = "100%";
+      });
+      // #53: reveal any hotspots on this screen that are gated on the video ending. The video
+      // and its markers share a container (the .hotspot-frame for the entry, or the screen's
+      // .hotspot-screen panel), so reveal within that host.
+      function hsRevealGated() {
+        var host = (v.closest && (v.closest(".hotspot-screen") || v.closest(".hotspot-frame"))) || null;
+        if (host) qsAll(host, ".hotspot-marker--gated").forEach(function (m) { m.classList.add("is-revealed"); });
+      }
       if (v.getAttribute("data-hotspot-video") === "once") {
         v.addEventListener("ended", function () {
           // native freeze on the last frame; offer Replay unless the author hid it
           if (v.getAttribute("data-noreplay") !== "1") { btn.textContent = "Replay"; btn.hidden = false; }
+          hsRevealGated();
         });
+        // reduced-motion learners don't autoplay -> reveal gated hotspots up front so they are
+        // never stranded waiting for an "ended" that won't fire on its own.
+        if (hsReduce()) hsRevealGated();
       }
     }
     // play the CURRENT screen's video, pause every other; entry videos are the frame's
@@ -383,6 +423,7 @@
       var vids = qsAll(stage, ".hotspot-video");
       if (!vids.length) return;
       var open = stage.querySelector(".hotspot-screen:not([hidden])");
+      var pbar = stage.querySelector(".hotspot-video-progress"); if (pbar) pbar.style.width = "0%"; // reset; the current video refills via timeupdate
       var reduce = hsReduce();
       vids.forEach(function (v) {
         setupHotspotVideo(v);

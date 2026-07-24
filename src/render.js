@@ -733,6 +733,58 @@
   }
   window.markerSrcdoc = markerSrcdoc;
 
+  // Build ONE hotspot marker element exactly as the learner sees it (colour, box/point, glyph/
+  // SVG/animation, size). Shared by the course renderer (renderMarkers) AND the editor's tour
+  // board, so the design-phase marker is pixel-identical to the final (WYSIWYG). Returns the
+  // <button.hotspot-marker> positioned at its x/y%; the caller owns append + popover + gating.
+  function hotspotMarkerEl(block, hs, i, loopById) {
+    loopById = loopById || {};
+    var mk = el("button", "hotspot-marker");
+    mk.type = "button";
+    mk.setAttribute("data-hotspot", hs.id);
+    mk.setAttribute("data-action", hs.action === "navigate" ? "navigate" : "card");
+    if (hs.action === "navigate" && hs.target) mk.setAttribute("data-target", hs.target);
+    mk.setAttribute("aria-label", hs.label || ((hs.action === "navigate" ? "Go to screen " : "Open hotspot ") + (i + 1)));
+    if (hs.label) mk.title = hs.label;
+    mk.style.left = (hs.x == null ? 50 : hs.x) + "%";
+    mk.style.top = (hs.y == null ? 50 : hs.y) + "%";
+    if (block.markerColor) mk.style.setProperty("--hotspot-color", block.markerColor);
+    if (block.markerSize) mk.style.setProperty("--hotspot-size", block.markerSize + "px");
+    if (block.viewedColor) mk.style.setProperty("--hotspot-viewed", block.viewedColor);
+    if (hs.shape === "box") {
+      mk.classList.add("hotspot-marker--box");
+      mk.style.width = (hs.w == null ? 20 : hs.w) + "%";
+      mk.style.height = (hs.h == null ? 12 : hs.h) + "%";
+    } else if (block.markerHtml) {
+      mk.classList.add("hotspot-marker--custom", "hotspot-marker--embed");
+      var fr = document.createElement("iframe");
+      fr.className = "hotspot-marker__frame";
+      fr.setAttribute("sandbox", "allow-same-origin");
+      fr.setAttribute("scrolling", "no");
+      fr.setAttribute("tabindex", "-1");
+      fr.setAttribute("aria-hidden", "true");
+      fr.setAttribute("title", hs.label || "marker animation");
+      fr.setAttribute("srcdoc", markerSrcdoc(block.markerHtml));
+      mk.appendChild(fr);
+    } else {
+      var mSvg = block.markerSvg ? markerSvgNode(block.markerSvg) : null;
+      if (mSvg) {
+        mk.classList.add("hotspot-marker--custom");
+        mSvg.setAttribute("class", "hotspot-marker__svg");
+        mk.appendChild(mSvg);
+      } else if (hs.action === "navigate" && hs.target && loopById[hs.target]) {
+        mk.classList.add("hotspot-marker--loop");
+        var lg = el("span", "hotspot-marker__glyph hotspot-marker__glyph--loop");
+        lg.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg>';
+        mk.appendChild(lg);
+      } else {
+        mk.appendChild(el("span", "hotspot-marker__glyph", "i"));
+      }
+    }
+    return mk;
+  }
+  window.hotspotMarkerEl = hotspotMarkerEl;
+
   // Editable text bound to obj[field]. data-edit = queryable marker; live __bind
   // = write path into the model. Neither serialises into shipped HTML.
   // Font choices (Exo 2 + Inter are web-loaded; rest are system).
@@ -2264,6 +2316,7 @@
       stage.setAttribute("data-popover-place", block.popoverPlace || "auto"); // author popover placement (positionPopover reads it)
       stage.setAttribute("data-hotspot-entry", entry.id || ""); // runtime "Home"/base target
       stage.setAttribute("data-hotspot-entry-name", scrLabel(entry, screens.indexOf(entry)));
+      if (entry.caption) stage.setAttribute("data-hotspot-entry-caption", entry.caption); // caption sync (entry has no panel)
       if (block.completionScreen && byId[block.completionScreen]) stage.setAttribute("data-hotspot-complete-screen", block.completionScreen);
       // #146: the STAGE spans the full page width (popover space); the IMAGE + its
       // markers live in an inner .hotspot-frame that is sized (block.imgWidth %, default
@@ -2280,7 +2333,21 @@
       // normal. .hotspot-frame is a plain position:relative box (no stacking context), so
       // the blend reaches the page (unlike inside a card — see #178 card content fix).
       if (block.blendMode && block.blendMode !== "normal") frame.style.setProperty("--img-blend", block.blendMode);
+      // Top band ABOVE the screen: the "screens visited" counter anchors here (top-right).
+      var topbar = el("div", "hotspot-topbar");
+      stage.appendChild(topbar);
+      // 1px playback progress bar along the BOTTOM of the screen, for video screens; the runtime
+      // sets its width from the current screen's video (data-hotspot-vprogress).
+      if (screens.some(function (s) { return s && s.kind === "video"; })) {
+        var vprog = el("div", "hotspot-video-progress");
+        vprog.setAttribute("data-hotspot-vprogress", "1");
+        frame.appendChild(vprog);
+      }
       stage.appendChild(frame);
+      // Chrome band BELOW the screen: nav buttons (author-toggleable) + the updating caption.
+      // Empty band collapses (CSS :empty).
+      var chrome = el("div", "hotspot-chrome");
+      stage.appendChild(chrome);
 
       // Shared marker + card renderer: overlays each marker on its screen at %-coords,
       // and (for a card marker) appends its hidden anchored popover to the STAGE (the
@@ -2290,53 +2357,15 @@
       function renderMarkers(scr, container) {
         (scr && scr.markers || []).forEach(function (hs, i) {
           if (!hs) return;
-          var mk = el("button", "hotspot-marker");
-          mk.type = "button";
-          mk.setAttribute("data-hotspot", hs.id);
-          mk.setAttribute("data-action", hs.action === "navigate" ? "navigate" : "card");
-          if (hs.action === "navigate" && hs.target) mk.setAttribute("data-target", hs.target);
-          mk.setAttribute("aria-label", hs.label || ((hs.action === "navigate" ? "Go to screen " : "Open hotspot ") + (i + 1)));
-          if (hs.label) mk.title = hs.label;
-          mk.style.left = (hs.x == null ? 50 : hs.x) + "%";
-          mk.style.top = (hs.y == null ? 50 : hs.y) + "%";
-          if (block.markerColor) mk.style.setProperty("--hotspot-color", block.markerColor);
-          if (block.markerSize) mk.style.setProperty("--hotspot-size", block.markerSize + "px");
-          if (block.viewedColor) mk.style.setProperty("--hotspot-viewed", block.viewedColor);
-          // Custom uploaded marker replaces the "i" badge; same size control drives
-          // it, CSS turns it green on .is-viewed. Three inputs, in priority order:
-          //   markerHtml — a full HTML animation (e.g. animated SVG + <head> CSS,
-          //     or any self-contained motion). Rendered in a sandboxed srcdoc iframe
-          //     so its own CSS/keyframes are fully isolated (no page leak) and no
-          //     external script runs (stripped) -> air-gap + CSP safe in SCORM.
-          //   markerSvg  — a lone SVG asset, inlined as-authored (exact recolour).
-          //   else       — the default "i" glyph.
-          if (block.markerHtml) {
-            mk.classList.add("hotspot-marker--custom", "hotspot-marker--embed");
-            var fr = document.createElement("iframe");
-            fr.className = "hotspot-marker__frame";
-            fr.setAttribute("sandbox", "allow-same-origin"); // isolate; no scripts
-            fr.setAttribute("scrolling", "no");
-            fr.setAttribute("tabindex", "-1");
-            fr.setAttribute("aria-hidden", "true");
-            fr.setAttribute("title", hs.label || "marker animation");
-            fr.setAttribute("srcdoc", markerSrcdoc(block.markerHtml));
-            mk.appendChild(fr);
-          } else {
-            var mSvg = block.markerSvg ? markerSvgNode(block.markerSvg) : null;
-            if (mSvg) {
-              mk.classList.add("hotspot-marker--custom");
-              mSvg.setAttribute("class", "hotspot-marker__svg");
-              mk.appendChild(mSvg);
-            } else if (hs.action === "navigate" && hs.target && loopById[hs.target]) {
-              // #224 QA: a marker that opens a LOOP gets a distinct stacked-cards glyph (a set
-              // of screen states) instead of the default "i", so learners can tell it differs.
-              mk.classList.add("hotspot-marker--loop");
-              var lg = el("span", "hotspot-marker__glyph hotspot-marker__glyph--loop");
-              lg.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg>';
-              mk.appendChild(lg);
-            } else {
-              mk.appendChild(el("span", "hotspot-marker__glyph", "i"));
-            }
+          // WYSIWYG: the exact learner marker (also reused by the editor's tour board). A box is a
+          // resizable transparent region (w x h % of the frame) highlighting UI without obscuring
+          // it; a point is the badge/SVG/animation. x/y is the CENTRE so popover anchoring holds.
+          var mk = hotspotMarkerEl(block, hs, i, loopById);
+          // #53: on a play-once video screen set to reveal-after-end, markers start hidden and
+          // are unhidden by the runtime once the video finishes (setupHotspotVideo "ended").
+          if (scr && scr.kind === "video" && scr.playback === "once" && scr.revealAfterEnd) {
+            mk.classList.add("hotspot-marker--gated");
+            mk.setAttribute("data-reveal-after-end", "1");
           }
           container.appendChild(mk); // marker overlays its screen (the frame or a panel)
 
@@ -2421,6 +2450,7 @@
         var panel = el("div", "hotspot-screen");
         panel.setAttribute("data-screen-id", s.id);
         panel.setAttribute("data-screen-name", scrLabel(s, si));
+        if (s.caption) panel.setAttribute("data-screen-caption", s.caption); // caption sync
         panel.hidden = true;
         if (s.visual) panel.appendChild(visualNode(s, "hotspot-screen__img", false));
         renderMarkers(s, panel);
@@ -2433,7 +2463,7 @@
       // screen-mode chrome: Back retraces the learner's path one step; Home (deep
       // tours only, author-optional) jumps to the entry screen. Both hidden until a
       // destination screen is open. Wrapped in .hotspot-nav so they sit together.
-      if (screenMode) {
+      if (screenMode && !block.hideNav) {
         var nav = el("div", "hotspot-nav");
         var back = el("button", "hotspot-back", block.backLabel || "Back");
         back.type = "button";
@@ -2447,7 +2477,7 @@
           home.hidden = true;
           nav.appendChild(home);
         }
-        frame.appendChild(nav); // anchor to the image corner, not the full-width stage
+        chrome.appendChild(nav); // #52: below the screen frame, not over the image
       }
       // #224 T6b + QA: loop MODAL. Emit each targeted loop's membership/order/wrap as a hidden
       // metadata node (runtime reads it to know a data-target is a loop), plus ONE shared modal
@@ -2502,7 +2532,7 @@
           counter.setAttribute("data-hotspot-counter", "1");
           counter.setAttribute("aria-live", "polite");
           counter.textContent = counterText;
-          frame.appendChild(counter); // anchor to the image corner, not the full-width stage
+          topbar.appendChild(counter); // anchor top-right ABOVE the screen
         }
       }
       // #218 Navigation trail (author-optional, off by default): a breadcrumb of the
@@ -2515,6 +2545,15 @@
         trail.setAttribute("aria-label", "Tour path");
         trail.hidden = true; // shown once the learner steps off the entry screen
         stage.appendChild(trail);
+      }
+      // Caption beneath the screen: a single line that updates to the CURRENT screen's caption as
+      // the learner navigates (screen mode); in popover mode it shows the entry caption. Emitted
+      // only when at least one screen has a caption. Runtime keeps its text in sync on nav.
+      if (screens.some(function (s) { return s && s.caption; })) {
+        var cap = el("div", "hotspot-caption", entry.caption || "");
+        cap.setAttribute("data-hotspot-caption", "1");
+        cap.setAttribute("aria-live", "polite");
+        chrome.appendChild(cap);
       }
       wrap.appendChild(stage);
       return wrap;
