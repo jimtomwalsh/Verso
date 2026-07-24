@@ -1151,6 +1151,7 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   ok("runtime: restart requires all reachable screens visited (real multi-screen tour)", /function hsAllContentDone\(stage\)[\s\S]*?if \(reach\.length < 2\) return false;[\s\S]*?if \(!reach\.every\(function \(id\) \{ return vis\[id\]; \}\)\) return false;/.test(rt));
   ok("runtime: restart requires every watched play-once video to have ended (content)", /if \(\(!screenMode \|\| vis\[sid\]\) && !v\.ended\) ok = false;/.test(rt));
   ok("runtime: restart re-evaluated reactively on nav + video end", /hsUpdateRestart\(stage\); \/\/ reactively/.test(rt) && /if \(st\) hsUpdateRestart\(st\);/.test(rt));
+  ok("runtime: restart gated on a TERMINAL screen (completion screen or dead-end), so it can't ride along", /function hsIsTerminal\(stage\)[\s\S]*?if \(cs\) return hsCurrentScreenId\(stage\) === cs;[\s\S]*?return !onward;/.test(rt) && /rb\.hidden = !\(hsAllContentDone\(stage\) && hsIsTerminal\(stage\)\)/.test(rt));
   ok("runtime: restart click resets + replays; wired in the delegate", /function hsRestart\(stage\) \{\s*stage\.__hsVisited = \{\}; stage\.__hsComplete = false;[\s\S]*?data-hotspot-restart\]"\)\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); hsRestart\(stage\); return; \}/.test(rt));
   ok("css: restart glyph centred + white on a translucent disc", /\.hotspot-restart \{[^}]*left: 50%; top: 50%; transform: translate\(-50%, -50%\)[^}]*color: #ffffff;/.test(css));
   // canvas video screens pin to the final frame (editor only) so marker targeting isn't blind.

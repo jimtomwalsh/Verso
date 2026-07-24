@@ -329,7 +329,29 @@
       });
       return ok;
     }
-    function hsUpdateRestart(stage) { var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = !hsAllContentDone(stage); }
+    // The screen the learner is currently on (entry = no panel open).
+    function hsCurrentScreenId(stage) {
+      var open = stage.querySelector(".hotspot-screen:not([hidden])");
+      return open ? open.getAttribute("data-screen-id") : stage.getAttribute("data-hotspot-entry");
+    }
+    // The current screen's own markers (entry markers are direct children of the frame; a sub-screen's live in its panel).
+    function hsCurrentMarkers(stage) {
+      var open = stage.querySelector(".hotspot-screen:not([hidden])");
+      if (open) return qsAll(open, ".hotspot-marker");
+      var frame = stage.querySelector(".hotspot-frame");
+      return frame ? qsAll(frame, ".hotspot-marker").filter(function (m) { return m.parentNode === frame; }) : [];
+    }
+    // Terminal = the END of the flow: the author's completion screen, or (absent one) a dead-end
+    // screen with no onward navigation. Gating restart on this stops it riding along across every
+    // screen after completion -- it shows only when the learner is actually AT the end.
+    function hsIsTerminal(stage) {
+      var cs = stage.getAttribute("data-hotspot-complete-screen");
+      if (cs) return hsCurrentScreenId(stage) === cs;
+      var onward = false;
+      hsCurrentMarkers(stage).forEach(function (m) { if (m.getAttribute("data-action") === "navigate" && m.getAttribute("data-target")) onward = true; });
+      return !onward;
+    }
+    function hsUpdateRestart(stage) { var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = !(hsAllContentDone(stage) && hsIsTerminal(stage)); }
     function hsRestart(stage) {
       stage.__hsVisited = {}; stage.__hsComplete = false; stage.__hsStack = [];
       var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = true;

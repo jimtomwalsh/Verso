@@ -246,8 +246,9 @@ never covers the screen.
 - The **screens-visited counter** anchors top-right, above the screen.
 - A video screen shows a thin **1px progress bar** along the bottom edge as it plays.
 - When the interaction is **fully finished** — every screen visited and every play-once video
-  watched to the end — a white **restart** button appears centred on the screen so the learner can
-  replay it. It stays hidden until then.
+  watched to the end — a white **restart** button appears centred on the **final** screen (the
+  completion screen, or a dead-end with nowhere further to go) so the learner can replay. It stays
+  hidden until then, and hides again if they navigate back through the tour.
 
 ### Editing screens on the canvas
 
