@@ -9,21 +9,39 @@ that run in an LMS.
 Vanilla JavaScript, no build step, no dependencies. The editor opens straight
 from `file://` — it runs entirely on your own machine.
 
+## Two ways to run Verso
+
+- **Local / standalone (the default, shipping today).** One author, one machine.
+  Everything below under *Security, privacy & data handling* applies to this posture and
+  is unchanged.
+- **Server-of-one (optional, on-prem, _in development_).** The same engine, plus a
+  minimal self-hostable Node backend so a small team can work in the same master courses
+  on an **on-prem** server (never cloud). It adds accounts/SSO, real-time collaboration,
+  block-locking, and review links. This posture is **not yet released** — it is dormant
+  and no local install points at it. When it ships it is strictly opt-in; enabling it does
+  not change the standalone experience. Its architecture + security model live in
+  [`server/README.md`](server/README.md) and the *Server mode* section of
+  [`SECURITY.md`](SECURITY.md).
+
 ## Security, privacy & data handling
+
+> This section describes the **local / standalone** posture — the shipping product. The
+> optional on-prem **server mode** (in development) has a distinct security model; see
+> [`SECURITY.md`](SECURITY.md).
 
 Verso is designed to keep your content on your own machine. In short:
 
 - **Self-hosted / local-first.** Runs from a local file, a local static server, or an
-  optional macOS desktop shell. There is **no server, no cloud, no hosted backend** —
-  nothing to sign in to.
+  optional macOS desktop shell. In this posture there is **no server, no cloud, no hosted
+  backend** — nothing to sign in to.
 - **Your content never leaves your device.** Courses are stored locally (browser
   `localStorage` / IndexedDB, or local files via the File System Access API). Nothing is
   transmitted to the tool's author or any backend.
 - **No accounts, no telemetry, no analytics, no tracking, no phone-home.** The app
   collects and sends nothing.
-- **No AI.** Verso contains no AI/ML components and sends no data to any AI service.
 - **Zero third-party runtime dependencies.** Dependency-free vanilla JS — no `npm
-  install`, no `node_modules`, no bundled framework.
+  install`, no `node_modules`, no bundled framework. (Server mode adds one consciously
+  accepted exception, a bundled Node runtime — scoped to that posture, see below.)
 - **Self-contained exports.** SCORM packages inline their fonts and assets and run
   offline / air-gapped in an LMS.
 - **Fully air-gap capable.** All editor fonts are vendored locally; with local media the
@@ -105,10 +123,13 @@ src/
   editor.js         canvas editor + inspector UI
   export.js         SCORM 1.2 packaging
   model.js / schema.js / persist.js / theme.js / csv.js / components.js …
+  store-http.js     HTTP storage adapter — inert unless a server URL is injected
+  sync-client.js    live-collaboration client — inert unless a server URL is injected
 tests/run.js        headless regression suite (no deps)
 viewer/             standalone review Viewer (publish → comment → merge back)
 desktop/            optional macOS app shell (WKWebView)
 design-system/      the Verso UI design system (tokens + components)
+server/             optional server-of-one backend (server mode, in development)
 docs/               user guide + architecture decision records (docs/adr/)
 UX-STYLE-GUIDE.md   canonical inspector controls + design rules
 ```
@@ -116,9 +137,14 @@ UX-STYLE-GUIDE.md   canonical inspector controls + design rules
 ## Stack rules
 
 - Vanilla JS, classic `<script>` globals — **no** ES modules, bundler, or
-  `npm install` in the app. Must open from `file://`.
+  `npm install` in the **app**. Must open from `file://`.
 - `editor.css` = Verso UI only. `src/course.css` = tokens-only, ships in SCORM.
 - No emojis in code or files.
+- The optional `server/` backend (server mode, in development) is the one scoped
+  exception to "dependency-free": it uses only Node built-ins (`node:sqlite`,
+  `node:crypto`, `node:http`) plus a consciously accepted bundled Node runtime.
+  It never renders, and everything in it is dormant unless a deployment runs in
+  server mode — the standalone `file://` app is unaffected.
 
 ## Contributing
 

@@ -42,6 +42,11 @@ Build inspector controls from the canonical set (see `UX-STYLE-GUIDE.md` and the
   tokens-only, ships in SCORM.
 - **No emojis** in code or files.
 - Keep the app **dependency-free** — do not add third-party runtime packages.
+- **`server/` is the one scoped exception** (optional server-of-one backend, server mode,
+  in development): Node built-ins only (`node:sqlite`, `node:crypto`, `node:http`) plus a
+  consciously accepted bundled Node runtime — still no third-party npm packages, no
+  external network calls, and it never renders. It is dormant unless a deployment runs in
+  server mode; the standalone `file://` app is unaffected.
 
 ## Testing
 
