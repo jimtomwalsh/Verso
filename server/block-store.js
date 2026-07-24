@@ -154,6 +154,13 @@ function createBlockStore(dbPath, opts) {
     return { docId: docId, pages: d.pages.length, blocks: Object.keys(d.blocks).length };
   }
 
+  // Export the portable doc-of-record: the materialized current state, ready to be
+  // wrapped as a .verso package (ticket 05). .verso stays the portable EXPORT, never
+  // the live doc-of-record -- the store rows are the source of truth once imported.
+  // Import is the inverse (importDoc): ONE path serving .verso import, local->server
+  // publish, and legacy-course migration.
+  function exportDoc(docId) { return materializeDoc(docId); }
+
   // Materialized current-state read: assemble the doc from the block/page rows.
   function materializeDoc(docId) {
     var dr = qGetDoc.get(docId);
@@ -306,6 +313,7 @@ function createBlockStore(dbPath, opts) {
 
   return {
     importDoc: importDoc,
+    exportDoc: exportDoc,
     materializeDoc: materializeDoc,
     applyChange: applyChange,
     changesSince: changesSince,

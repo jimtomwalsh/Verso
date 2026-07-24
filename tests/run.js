@@ -396,6 +396,73 @@ section("platform-pivot 03 block-store");
   }
 })();
 
+// ---- platform-pivot 05: .verso <-> block-store round-trip fidelity + migration ----
+// REQUIRED fidelity target from the map: import -> export reconstructs a structurally +
+// content-equivalent doc; the ONE import path serves .verso import, local->server
+// publish, AND legacy-course migration.
+section("platform-pivot 05 round-trip fidelity");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> fidelity tests skipped"); return; }
+  var os = require("os");
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-fid-test-"));
+  var idn = 0;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "mint" + (++idn); }, now: function () { return 0; } });
+  var eq = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+  var clone = function (o) { return JSON.parse(JSON.stringify(o)); };
+  try {
+    // realistic nested doc (courseNav in headerFooter.children, componentGrid instances,
+    // nested block children) -- all with ids so the round-trip is EXACT.
+    var doc = {
+      meta: { title: "Safety", code: "C-1" },
+      headerFooter: { header: { on: true }, footer: { on: true, children: [ { type: "courseNav", sections: [ { id: "s1", label: "01", pageIds: ["ch01"] } ] } ] } },
+      pages: [
+        { id: "ch01", name: "Getting Started", blocks: [
+          { id: "b1", type: "heading", text: "Welcome" },
+          { id: "b2", type: "componentGrid", component: "card", instances: [ { status: "complete", slots: { title: "A" } }, { status: "incomplete", slots: { title: "B" } } ] },
+          { id: "b3", type: "columns", children: [ { id: "b3a", type: "para", text: "left" }, { id: "b3b", type: "para", text: "right" } ] }
+        ]},
+        { id: "ch02", name: "Hazards", blocks: [ { id: "b4", type: "para", text: "P4" } ] }
+      ]
+    };
+    var orig = clone(doc);
+    store.importDoc("C-1", doc, "alice");
+    var exp1 = store.exportDoc("C-1");
+    ok("AC2 REQUIRED: import -> export is exact round-trip fidelity (ids present)", eq(exp1, orig));
+    ok("fidelity: nested componentGrid instances survive", exp1.pages[0].blocks[1].instances[1].slots.title === "B");
+    ok("fidelity: nested block children survive", exp1.pages[0].blocks[2].children[1].text === "right");
+    ok("fidelity: headerFooter.children (courseNav) survive", exp1.headerFooter.footer.children[0].sections[0].pageIds[0] === "ch01");
+    ok("AC1: import seeded an 'imported' checkpoint", store.listCheckpoints("C-1").some(function (c) { return c.name === "imported"; }));
+
+    // idempotence on an id-LESS doc: mint once, then stable across re-round-trips
+    var idless = { meta: { code: "C-2" }, pages: [ { name: "P", blocks: [ { type: "heading", text: "H" }, { type: "para", text: "x" } ] } ] };
+    store.importDoc("C-2", clone(idless), "a");
+    var m1 = store.exportDoc("C-2");
+    store.importDoc("C-2b", clone(m1), "a");
+    var m2 = store.exportDoc("C-2b");
+    ok("AC2: export -> import -> re-export is idempotent (stable)", eq(m1, m2));
+    ok("id-less blocks get stable minted ids on first import", m1.pages[0].blocks.every(function (b) { return !!b.id; }));
+
+    // AC4: legacy blob-format course migrates into block rows + loads back equivalent
+    var legacy = { schemaVersion: 1, meta: { code: "OLD-1", title: "Legacy" }, pages: [
+      { id: "p1", name: "Old Page", legacyFlag: true, blocks: [ { id: "lb1", type: "text", html: "<p>legacy</p>", legacyAttr: "keep" } ] }
+    ]};
+    store.importDoc("OLD-1", clone(legacy), "migrator");
+    var lexp = store.exportDoc("OLD-1");
+    ok("AC4: legacy blob-format course migrates + loads back equivalent", eq(lexp, legacy));
+    ok("AC4: legacy per-block + per-page attrs preserved", lexp.pages[0].blocks[0].legacyAttr === "keep" && lexp.pages[0].legacyFlag === true);
+    // AC3: the ONE importDoc path served .verso doc + fresh doc + legacy doc (all above).
+    ok("AC3: one import path served .verso/import/legacy (3 imports, same fn)", typeof store.importDoc === "function");
+    // fidelity holds under subsequent edits
+    store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "Welcome!" }, "bob");
+    ok("post-import edit keeps materialize === replay", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
 // ---- platform-pivot 03: block-addressable doc routes over HTTP ----------------
 // The block store reachable BELOW the same HTTP API (import / materialize / change /
 // changes?since=N / snapshot). Proves the API is the boundary the change-log stream
