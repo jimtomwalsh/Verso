@@ -89,8 +89,14 @@ function createBlockStore(dbPath, opts) {
     "CREATE TABLE IF NOT EXISTS blocks (doc_id TEXT, id TEXT, page_id TEXT, content TEXT NOT NULL, ver INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (doc_id, id));" +
     // The single global append-only change log. seq = the one monotonic sequence.
     "CREATE TABLE IF NOT EXISTS changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT, block_id TEXT, kind TEXT, patch TEXT, author TEXT, ts INTEGER);" +
-    "CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT, at_seq INTEGER, state TEXT, ts INTEGER);"
+    // Snapshots bound replay length. A snapshot with a non-null `label` is a NAMED
+    // CHECKPOINT (ticket 04) -- a milestone/publish point an author can browse + restore
+    // to. Unlabelled snapshots are the periodic materialisation baselines.
+    "CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT, at_seq INTEGER, state TEXT, label TEXT, author TEXT, ts INTEGER);"
   );
+  // Defensive migration for a store created before `label`/`author` existed (dev dbs).
+  try { db.exec("ALTER TABLE snapshots ADD COLUMN label TEXT"); } catch (e) {}
+  try { db.exec("ALTER TABLE snapshots ADD COLUMN author TEXT"); } catch (e) {}
 
   var qPutDoc     = db.prepare("INSERT INTO docs (id, meta, page_order) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET meta = excluded.meta, page_order = excluded.page_order");
   var qGetDoc     = db.prepare("SELECT meta, page_order FROM docs WHERE id = ?");
@@ -103,8 +109,11 @@ function createBlockStore(dbPath, opts) {
   var qSince      = db.prepare("SELECT seq, doc_id, block_id, kind, patch, author, ts FROM changes WHERE seq > ? ORDER BY seq");
   var qSinceDoc   = db.prepare("SELECT seq, doc_id, block_id, kind, patch, author, ts FROM changes WHERE seq > ? AND doc_id = ? ORDER BY seq");
   var qMaxSeq     = db.prepare("SELECT MAX(seq) AS m FROM changes");
-  var qPutSnap    = db.prepare("INSERT INTO snapshots (doc_id, at_seq, state, ts) VALUES (?, ?, ?, ?)");
+  var qPutSnap    = db.prepare("INSERT INTO snapshots (doc_id, at_seq, state, label, author, ts) VALUES (?, ?, ?, ?, ?, ?)");
   var qLastSnap   = db.prepare("SELECT at_seq, state FROM snapshots WHERE doc_id = ? ORDER BY at_seq DESC, id DESC LIMIT 1");
+  var qGetSnap    = db.prepare("SELECT id, doc_id, at_seq, state, label, author, ts FROM snapshots WHERE id = ?");
+  var qCheckpoints = db.prepare("SELECT id, at_seq, label, author, ts FROM snapshots WHERE doc_id = ? AND label IS NOT NULL ORDER BY id");
+  var qBlockHist  = db.prepare("SELECT seq, block_id, kind, patch, author, ts FROM changes WHERE doc_id = ? AND block_id = ? ORDER BY seq");
 
   var now = opts.now || function () { return 0; }; // injectable clock (Date.now() in prod)
 
@@ -122,21 +131,26 @@ function createBlockStore(dbPath, opts) {
     return null;
   }
 
-  // Import a whole doc: decompose into rows + take an "imported" baseline snapshot so
-  // replay has a clean, bounded starting point. This ONE path also serves .verso
-  // import + local->server publish + migration (ticket 05 hardens round-trip fidelity).
-  function importDoc(docId, doc, author) {
-    var d = decomposeDoc(doc, mintId);
+  // Write a decomposed doc into the doc/page/block rows (fresh, ver reset to 1). Shared
+  // by import (mints ids) and checkpoint restore (ids already present). Idempotent.
+  function putDecomposed(docId, d) {
     qPutDoc.run(docId, JSON.stringify(d.docMeta), JSON.stringify(d.pages.map(function (p) { return p.meta.id; })));
     d.pages.forEach(function (p, ord) {
       qPutPage.run(docId, p.meta.id, JSON.stringify(p.meta), JSON.stringify(p.blockIds), ord);
       p.blockIds.forEach(function (bid) {
-        // fresh import -> insert at ver 1 (delete any stale prior rows first for idempotency)
-        qDelBlock.run(docId, bid);
+        qDelBlock.run(docId, bid); // fresh write -> insert at ver 1
         qPutBlock.run(docId, bid, p.meta.id, JSON.stringify(d.blocks[bid]));
       });
     });
-    takeSnapshot(docId, author); // baseline
+  }
+
+  // Import a whole doc: decompose into rows + seed an "imported" named checkpoint so
+  // replay has a clean, bounded starting point AND the doc starts restorable. This ONE
+  // path also serves .verso import + local->server publish + migration (ticket 05).
+  function importDoc(docId, doc, author) {
+    var d = decomposeDoc(doc, mintId);
+    putDecomposed(docId, d);
+    createCheckpoint(docId, "imported", author); // baseline named checkpoint (ticket 05)
     return { docId: docId, pages: d.pages.length, blocks: Object.keys(d.blocks).length };
   }
 
@@ -189,13 +203,15 @@ function createBlockStore(dbPath, opts) {
     });
   }
 
-  // Periodic snapshot: record the materialized state + the seq it captures, so replay
-  // can start here instead of seq 0 (bounds replay length + log-driven load time).
-  function takeSnapshot(docId, author) {
+  // Snapshot: record the materialized state + the seq it captures, so replay can start
+  // here instead of seq 0 (bounds replay length + log-driven load time). A non-null
+  // `label` promotes it to a NAMED CHECKPOINT (ticket 04) an author can browse + restore.
+  function takeSnapshot(docId, author, label) {
     var state = materializeDoc(docId);
     var atSeq = maxSeq();
-    qPutSnap.run(docId, atSeq, JSON.stringify(state), now());
-    return { docId: docId, atSeq: atSeq };
+    qPutSnap.run(docId, atSeq, JSON.stringify(state), label || null, author || null, now());
+    var id = qMaxSeq && db.prepare("SELECT last_insert_rowid() AS id").get().id;
+    return { docId: docId, id: id, atSeq: atSeq, label: label || null };
   }
 
   // Rebuild the doc by REPLAYING the log from the latest snapshot forward. Must equal
@@ -222,6 +238,72 @@ function createBlockStore(dbPath, opts) {
     return assembleDoc(docMeta, pages, blocks);
   }
 
+  // ---- Named checkpoints + rollback TIME-axis (ticket 04) -------------------
+  // A checkpoint is a named snapshot at a milestone/publish point. Because the block
+  // store only ever holds BASE content (the editor's variant-preview wrapper __vbase is
+  // non-enumerable and never serialises), a checkpoint captures the BASE doc, and a
+  // restore rewrites the BASE doc -- the version-clone footgun is avoided by
+  // construction. Rollback is thus a distinct TIME axis, orthogonal to the authored
+  // variant / version / software-version axes (which live inside block content and are
+  // carried through a restore unchanged, not re-selected).
+
+  // Create a named checkpoint an author can browse + restore to.
+  function createCheckpoint(docId, name, author) {
+    if (!name) return { ok: false, error: "checkpoint needs a name" };
+    var s = takeSnapshot(docId, author, name);
+    return { ok: true, id: s.id, name: name, atSeq: s.atSeq };
+  }
+  // Browse checkpoints for a master (newest concept first is the UI's job; return in
+  // creation order here).
+  function listCheckpoints(docId) {
+    return qCheckpoints.all(docId).map(function (r) {
+      return { id: r.id, name: r.label, atSeq: r.at_seq, author: r.author, ts: r.ts };
+    });
+  }
+  // Restore the whole doc to a named checkpoint: rewrite the BASE-doc rows to the
+  // checkpoint's captured state, append a durable `doc.restore` marker to the log (the
+  // restore is itself never-lose history), then take a fresh baseline so replay stays
+  // consistent. Forward-only: the log is never rewritten.
+  function restoreCheckpoint(docId, checkpointId, author) {
+    var snap = qGetSnap.get(checkpointId);
+    if (!snap || snap.doc_id !== docId) return { ok: false, error: "no such checkpoint for this doc" };
+    var state = JSON.parse(snap.state);
+    // state already carries stable ids -> decompose without minting (guard against it).
+    var d = decomposeDoc(state, function () { throw new Error("restore must not mint ids"); });
+    putDecomposed(docId, d);
+    qAppend.run(docId, null, "doc.restore", JSON.stringify({ toCheckpoint: checkpointId, atSeq: snap.at_seq }), author || null, now());
+    takeSnapshot(docId, author); // fresh baseline so replayDoc === materializeDoc
+    return { ok: true, docId: docId, restoredTo: checkpointId, atSeq: snap.at_seq, seq: maxSeq() };
+  }
+
+  // ---- Single-block history + revert-in-place (ticket 04 substrate) ---------
+  // Per-block history: every change event for one block, in seq order. The substrate
+  // Phase 2's single-block-revert restore mode acts on.
+  function blockHistory(docId, blockId) {
+    return qBlockHist.all(docId, blockId).map(function (r) {
+      return { seq: r.seq, blockId: r.block_id, kind: r.kind, patch: r.patch, author: r.author, ts: r.ts };
+    });
+  }
+  // Revert ONE block in place to its content as of seq <= toSeq, appending a NEW event
+  // (forward-only -- the log is never rewritten). Returns the applyChange result. If the
+  // block had no event at/before toSeq, falls back to its content in the newest snapshot
+  // at/before toSeq (the import baseline).
+  function revertBlock(docId, blockId, toSeq, author) {
+    var hist = blockHistory(docId, blockId).filter(function (e) { return e.kind === "block.put" && e.seq <= toSeq; });
+    var content = null;
+    if (hist.length) content = hist[hist.length - 1].patch; // last put at/before toSeq (a JSON string)
+    else {
+      // no put yet -> recover from the newest snapshot at/before toSeq
+      var snaps = db.prepare("SELECT state FROM snapshots WHERE doc_id = ? AND at_seq <= ? ORDER BY at_seq DESC, id DESC LIMIT 1").get(docId, toSeq);
+      if (snaps) {
+        var st = JSON.parse(snaps.state);
+        (st.pages || []).forEach(function (p) { (p.blocks || []).forEach(function (b) { if (b && b.id === blockId) content = JSON.stringify(b); }); });
+      }
+    }
+    if (content === null) return { ok: false, error: "no history for this block at/before seq " + toSeq, blockId: blockId };
+    return applyChange(docId, blockId, content, author);
+  }
+
   return {
     importDoc: importDoc,
     materializeDoc: materializeDoc,
@@ -230,6 +312,11 @@ function createBlockStore(dbPath, opts) {
     takeSnapshot: takeSnapshot,
     replayDoc: replayDoc,
     maxSeq: maxSeq,
+    createCheckpoint: createCheckpoint,
+    listCheckpoints: listCheckpoints,
+    restoreCheckpoint: restoreCheckpoint,
+    blockHistory: blockHistory,
+    revertBlock: revertBlock,
     close: function () { db.close(); },
     _db: db
   };

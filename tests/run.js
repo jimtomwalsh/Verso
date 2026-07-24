@@ -294,6 +294,14 @@ section("platform-pivot 03 block-store pure");
   ], 600);
   ok("coalesce: burst within window collapses to last-wins", co.length === 3 && co[0].patch === "c" && co[1].patch === "d" && co[2].patch === "e");
   ok("coalesce: empty -> empty", g.coalesceChanges([], 600).length === 0);
+  // ticket 04 AC2 (version-clone footgun guard): a preview clone carries its base via a
+  // NON-ENUMERABLE __vbase back-link, so the base doc the store persists (and any
+  // checkpoint/restore over it) never captures the previewed variant wrapper.
+  var clone = { id: "b9", type: "heading", text: "PREVIEW" };
+  Object.defineProperty(clone, "__vbase", { value: { text: "BASE" }, enumerable: false });
+  var decV = g.decomposeDoc({ meta: {}, pages: [ { id: "pp", blocks: [ clone ] } ] }, function () { return "x"; });
+  var storedV = JSON.parse(JSON.stringify(decV.blocks["b9"])); // what actually persists
+  ok("AC2: non-enumerable __vbase never serialises into the store", !("__vbase" in storedV) && storedV.text === "PREVIEW");
 })();
 
 // ---- platform-pivot 03: block-addressable store + append log (db-backed) -----
@@ -357,6 +365,31 @@ section("platform-pivot 03 block-store");
     var ghost = store.applyChange("C-1", "ghost", { id: "ghost" }, "x");
     ok("unknown block rejected (ok:false), no event appended", ghost.ok === false && store.maxSeq() === seqBeforeGhost);
     ok("orphan reject leaves materialize === replay intact", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+
+    // ---- ticket 04: named checkpoints + rollback time-axis + single-block revert ----
+    ok("import seeded an 'imported' checkpoint (ticket 05 baseline)", store.listCheckpoints("C-1").filter(function (c) { return c.name === "imported"; }).length === 1);
+    clock = 400;
+    var cpV1 = store.createCheckpoint("C-1", "v1", "bob");
+    ok("AC1: createCheckpoint named + browsable", cpV1.ok && store.listCheckpoints("C-1").some(function (c) { return c.name === "v1"; }));
+    clock = 420; store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-after-v1" }, "bob");
+    ok("edit moved b1 past the checkpoint", store.materializeDoc("C-1").pages[0].blocks[0].text === "H-after-v1");
+    var rr = store.restoreCheckpoint("C-1", cpV1.id, "admin");
+    ok("AC1/AC2: restore rewrites base doc to the checkpoint state", rr.ok && store.materializeDoc("C-1").pages[0].blocks[0].text !== "H-after-v1");
+    ok("AC2: materialize === replay after restore", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+    ok("restore is forward-only: a doc.restore marker is in the log", store.changesSince(0).some(function (e) { return e.kind === "doc.restore"; }));
+    // AC3: single-block history + revert-in-place, other blocks untouched
+    var p3before = store.materializeDoc("C-1").pages[1].blocks[0].text;
+    ok("AC3: blockHistory returns b1 puts in seq order", (function () { var h = store.blockHistory("C-1", "b1"); return h.length >= 1 && h.every(function (e, i, a) { return i === 0 || a[i - 1].seq < e.seq; }); })());
+    clock = 500; store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-latest" }, "bob");
+    var rv = store.revertBlock("C-1", "b1", cpV1.atSeq, "admin");
+    ok("AC3: revertBlock is forward-only (new seq) + ok", rv.ok && rv.seq > cpV1.atSeq);
+    ok("AC3: single-block revert did NOT alter a sibling block", store.materializeDoc("C-1").pages[1].blocks[0].text === p3before);
+    // AC4: authored version data carried through a restore unchanged (orthogonal axis)
+    clock = 560; store.applyChange("C-1", "b3", { id: "b3", type: "para", text: "P3", versionVis: { hide: ["v2"] } }, "bob");
+    var cpVer = store.createCheckpoint("C-1", "hasVersionData", "bob");
+    clock = 580; store.applyChange("C-1", "b3", { id: "b3", type: "para", text: "P3-x" }, "bob");
+    store.restoreCheckpoint("C-1", cpVer.id, "admin");
+    ok("AC4: restore carries authored versionVis through unchanged", eq(store.materializeDoc("C-1").pages[1].blocks[0].versionVis, { hide: ["v2"] }));
   } finally {
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
@@ -397,6 +430,23 @@ section("platform-pivot 03 doc routes");
       ok("change to unknown block -> 404 + {ok:false} (no silent orphan)", r.status === 404 && j.ok === false);
       r = await fetch(base + "/api/doc/C-1/changes?since=0"); j = await r.json();
       ok("rejected change appended NO event", j.changes.length === 1);
+      // ticket 04 over HTTP: checkpoints + restore + block history + revert
+      r = await fetch(base + "/api/doc/C-1/checkpoints"); j = await r.json();
+      ok("checkpoints lists the 'imported' baseline", j.ok === true && j.checkpoints.some(function (c) { return c.name === "imported"; }));
+      r = await fetch(base + "/api/doc/C-1/checkpoint", { method: "POST", body: JSON.stringify({ name: "v1", author: "bob" }) }); j = await r.json();
+      ok("POST checkpoint creates a named checkpoint", j.ok === true && j.checkpoint.name === "v1");
+      var cpId = j.checkpoint.id;
+      await fetch(base + "/api/doc/C-1/change", { method: "POST", body: JSON.stringify({ blockId: "b1", patch: { id: "b1", type: "heading", text: "H3" }, author: "bob" }) });
+      r = await fetch(base + "/api/doc/C-1/restore", { method: "POST", body: JSON.stringify({ checkpointId: cpId, author: "admin" }) }); j = await r.json();
+      ok("POST restore ok", j.ok === true);
+      r = await fetch(base + "/api/doc/C-1"); j = await r.json();
+      ok("restore rewrote base doc back to the checkpoint (H2)", j.doc.pages[0].blocks[0].text === "H2");
+      r = await fetch(base + "/api/doc/C-1/block/b1/history"); j = await r.json();
+      ok("GET block history lists b1 events", j.ok === true && j.history.length >= 1);
+      r = await fetch(base + "/api/doc/C-1/block/b1/revert", { method: "POST", body: JSON.stringify({ toSeq: cpId ? 1 : 1, author: "admin" }) }); j = await r.json();
+      ok("POST block revert ok (forward-only)", j.ok === true && typeof j.revert.seq === "number");
+      r = await fetch(base + "/api/doc/C-1/restore", { method: "POST", body: JSON.stringify({ checkpointId: 99999 }) });
+      ok("restore to a bad checkpoint -> 404", r.status === 404);
     }
   }));
 })();

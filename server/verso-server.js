@@ -170,6 +170,34 @@ function makeHandler(store, config, blockStore) {
         var author = null; try { author = (JSON.parse((buf || Buffer.from("{}")).toString("utf8")) || {}).author; } catch (e) {}
         return sendJson(res, 200, { ok: true, snapshot: blockStore.takeSnapshot(docId, author) });
       });
+      // --- checkpoints + rollback time-axis (ticket 04) ---
+      if (op === "checkpoints" && method === "GET") {
+        return sendJson(res, 200, { ok: true, checkpoints: blockStore.listCheckpoints(docId) });
+      }
+      if (op === "checkpoint" && method === "POST") return withJsonBody(req, res, function (body) {
+        var cp = blockStore.createCheckpoint(docId, body.name, body.author);
+        return cp.ok ? sendJson(res, 200, { ok: true, checkpoint: cp }) : sendJson(res, 400, cp);
+      });
+      if (op === "restore" && method === "POST") return withJsonBody(req, res, function (body) {
+        var rr = blockStore.restoreCheckpoint(docId, body.checkpointId, body.author);
+        return rr.ok ? sendJson(res, 200, { ok: true, restore: rr }) : sendJson(res, 404, rr);
+      });
+      // --- single-block history + revert-in-place (ticket 04) ---
+      // "block/<blockId>/history" (GET) | "block/<blockId>/revert" (POST)
+      if (op.indexOf("block/") === 0) {
+        var bparts = op.slice(6).split("/");
+        var blockId = decodeURIComponent(bparts[0] || "");
+        var baction = bparts[1] || "";
+        if (!blockId) return sendJson(res, 400, { ok: false, error: "missing block id" });
+        if (baction === "history" && method === "GET") {
+          return sendJson(res, 200, { ok: true, history: blockStore.blockHistory(docId, blockId) });
+        }
+        if (baction === "revert" && method === "POST") return withJsonBody(req, res, function (body) {
+          var rv = blockStore.revertBlock(docId, blockId, body.toSeq, body.author);
+          return rv.ok ? sendJson(res, 200, { ok: true, revert: rv }) : sendJson(res, 404, rv);
+        });
+        return sendJson(res, 405, { ok: false, error: "method not allowed" });
+      }
       return sendJson(res, 405, { ok: false, error: "method not allowed" });
     }
 
