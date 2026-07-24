@@ -101,6 +101,9 @@
   // channel). requestHandoff nudges the current holder; notifyWhenFree fires on release.
   function handoffMsg(docId, blockId) { return mkEnvelope("lock.requestHandoff", docId, blockId, {}); }
   function notifyMsg(docId, blockId, on) { return mkEnvelope("lock.notifyWhenFree", docId, blockId, { on: on !== false }); }
+  // Ticket 11 AC2: the local caret/selection within a block, so peers see a live cursor. Ephemeral
+  // (not seq-stamped, not logged) -- carries a character offset into the block's text.
+  function cursorMsg(docId, blockId, selection) { return mkEnvelope("cursor.update", docId, blockId, { selection: selection || null }); }
   /* @sync-client-end */
 
   // ---- thin WIRE (browser only; inert without a server URL) ----------------
@@ -186,6 +189,7 @@
         comment: function (blockId, body, threadId) { transport.send(commentMsg(docId, blockId, body, threadId)); },
         requestHandoff: function (blockId) { transport.send(handoffMsg(docId, blockId)); },
         notifyWhenFree: function (blockId, on) { transport.send(notifyMsg(docId, blockId, on)); },
+        cursorUpdate: function (blockId, selection) { transport.send(cursorMsg(docId, blockId, selection)); },
         disconnect: function () { if (transport) transport.close(); state.connected = false; }
       };
     },
@@ -201,7 +205,7 @@
     // pure helpers (also used by tests)
     _pure: { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay,
       pendingFor: pendingFor, conflictView: conflictView,
-      helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg, handoffMsg: handoffMsg, notifyMsg: notifyMsg },
+      helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg, handoffMsg: handoffMsg, notifyMsg: notifyMsg, cursorMsg: cursorMsg },
     _WsClient: WsClient, _LongPollClient: LongPollClient, _DurableBuffer: DurableBuffer
   };
 })();

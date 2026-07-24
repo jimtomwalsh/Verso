@@ -488,6 +488,19 @@ section("platform-pivot 11 presence chrome");
   ok("viewerCursors: never me", !cursors.some(function (c) { return c.name === "Me"; }));
   ok("renderCursors is ephemeral + pointer-events:none (never intercepts a click)", /\.collab-cursor \{[\s\S]{0,200}pointer-events: none/.test(css) && /function renderCursors\(\) \{[\s\S]{0,120}if \(!live\(\)\) return;/.test(t));
   ok("reproject re-draws cursors after a rebuild", /renderPresence\(\); renderLocks\(\); renderCursors\(\);/.test(t));
+  // AC2 in-block: the peer's caret offset is carried through + placed within the block (corner fallback)
+  var offPeer = [ { name: "Marcus", colour: "#2ea36b", viewingBlockId: "b3", cursor: { selection: { offset: 12 } } }, { name: "Lena", colour: "#4d7cad", viewingBlockId: "b4" } ];
+  var oc = g.viewerCursors(offPeer, "Me");
+  ok("viewerCursors carries the in-block caret offset (null when absent)", oc[0].offset === 12 && oc[1].offset === null);
+  ok("remote caret is positioned at the offset within the block (guarded, corner fallback)", /function positionCaret\(caret, blockEl, offset\)/.test(t) && /if \(offset == null\) return;/.test(t) && /r\.setStart\(node, remaining\)/.test(t));
+  ok("local caret is shared with peers, throttled", /function onCaret\(block, offset\)/.test(t) && /session\.cursorUpdate\(lastCaret\.blockId, \{ offset: lastCaret\.offset \}\)/.test(t) && /CURSOR_THROTTLE_MS/.test(t));
+  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (t.match(/CollabChrome\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
+  // sync-client exposes the cursor.update session method + builder
+  var scc = src("src/sync-client.js");
+  ok("sync-client session: cursorUpdate + cursorMsg builder", /cursorUpdate: function \(blockId, selection\)/.test(scc) && /function cursorMsg\(docId, blockId, selection\)/.test(scc));
+  var sccm = scc.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+  var scg = new Function(sccm[1] + "\nreturn { cursorMsg: cursorMsg };")();
+  ok("cursorMsg builds the ephemeral cursor.update envelope", scg.cursorMsg("C-1", "b1", { offset: 5 }).type === "cursor.update" && scg.cursorMsg("C-1", "b1", { offset: 5 }).payload.selection.offset === 5);
 
   // ---- send-side: drive the pipe from the edit lifecycle (tickets 11 AC4 + 13 AC1) ----
   ok("edit-intent (focus) implicitly acquires the content lock + heartbeats", /function onEditFocus\(block\)/.test(t) && /session\.acquireLock\(block\.id\)/.test(t));
@@ -532,7 +545,7 @@ section("platform-pivot 26 review round-trip");
   var t = src("src/editor.js");
   var m = t.match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
   if (!m) { ok("locate @comment-guest fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids };")();
+  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, commentFromEnv: commentFromEnv };")();
 
   ok("commentIsGuest: source guest-link OR guest flag", g.commentIsGuest({ source: "guest-link" }) === true && g.commentIsGuest({ guest: true }) === true && g.commentIsGuest({ author: "Me" }) === false);
   var doc = { pages: [ { blocks: [ { cid: "c1", type: "para" }, { cid: "c2", type: "group", children: [ { cid: "c3" } ] } ] } ] };
@@ -547,8 +560,19 @@ section("platform-pivot 26 review round-trip");
   ok("panel splits orphaned notes into their own never-drop tray", /var orphaned = shown\.filter\(function \(c\) \{ return commentIsOrphaned\(c, doc\); \}\)/.test(t) && /Orphaned — need a home/.test(t));
   ok("panel tags guest comments (guest-vs-internal weighing)", /if \(commentIsGuest\(c\)\) top\.appendChild\(h\("span", "comment-row__tag is-guest", "Guest"\)\)/.test(t));
   ok("orphaned note is dismissible (kept until the author acts, never silently dropped)", /Dismiss this orphaned note[\s\S]{0,220}doc\.comments = \(doc\.comments \|\| \[\]\)\.filter/.test(t));
-  ok("guest comment ingest upserts into the shipped doc.comments by id", /function ingestComment\(payload\)/.test(t) && /if \(i >= 0\) doc\.comments\[i\] = c; else doc\.comments\.push\(c\);/.test(t) && /renderCommentPins\(\); if \(typeof refreshCommentPanel/.test(t));
-  ok("comment.added / comment.resolved route through the round-trip ingest", /else if \(env\.type === "comment\.added"\) \{ ingestComment/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveComment/.test(t));
+  // id-space bridge: server anchors by block.id, client pins by cid -> map at ingest so a guest
+  // comment resolves onto the live block (a raw id with no cid falls through to orphaned).
+  var idoc = { pages: [ { blocks: [ { id: "srv-b2", cid: "c-abc", type: "para" }, { id: "srv-b5", cid: "c-def", type: "group", children: [ { id: "srv-b6", cid: "c-ghi" } ] } ] } ] };
+  ok("blockCidById: maps a server block.id to the client cid (incl. nested)", g.blockCidById(idoc, "srv-b2") === "c-abc" && g.blockCidById(idoc, "srv-b6") === "c-ghi" && g.blockCidById(idoc, "nope") === null);
+  var env = { type: "comment.added", docId: "D1", blockId: "srv-b2", author: "Sam Okafor", ts: 111, payload: { id: "cm_1", threadId: "cm_1", body: "add PRF here", kind: "guest" } };
+  var mapped = g.commentFromEnv(env, idoc, function (n) { return "#col"; });
+  ok("commentFromEnv: reads blockId/author off the ENVELOPE, anchors by cid, tags guest", mapped.anchor.blockId === "c-abc" && mapped.author === "Sam Okafor" && mapped.source === "guest-link" && mapped.body === "add PRF here" && mapped.colour === "#col");
+  ok("commentFromEnv: a deleted server block -> anchor falls to raw id (surfaces orphaned, not mis-anchored)", g.commentFromEnv({ blockId: "gone", author: "A", payload: { id: "cm_9" } }, idoc, function () { return "#c"; }).anchor.blockId === "gone");
+  ok("commentFromEnv: no comment id -> null (never a blank note)", g.commentFromEnv({ blockId: "srv-b2", payload: {} }, idoc, function () { return "#c"; }) === null);
+
+  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, doc, colourForName\)/.test(t) && /parent\.replies\.push\(/.test(t));
+  ok("comment.added / comment.resolved route through the round-trip", /else if \(env\.type === "comment\.added"\) \{ ingestComment\(env\); \}/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveThread\(env\); \}/.test(t));
+  ok("resolveThread marks the whole thread done (both ways)", /function resolveThread\(env\)[\s\S]{0,260}c\.id === threadId \|\| c\.threadId === threadId/.test(t));
   var css = src("editor.css");
   ok("26 CSS: guest tag + orphan tray", /\.comment-row__tag\.is-guest/.test(css) && /\.comment-list\.is-orphan-tray/.test(css));
 })();

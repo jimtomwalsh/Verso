@@ -1896,6 +1896,43 @@
     if (!a || !a.blockId) return false; // only block-anchored notes orphan (page/world resolve differently)
     return !docCids(doc)[a.blockId];
   }
+  // ticket 26 id-space bridge: the server anchors review comments by the STABLE block id (block.id),
+  // but the client comment mode pins by CID (data-cid). Map a server block.id -> its client cid so a
+  // guest comment resolves onto the live block. Returns the cid, or null (-> surfaces as orphaned,
+  // never mis-anchored). Pure; walks nested containers like docCids.
+  function blockCidById(doc, id) {
+    if (id == null) return null;
+    var found = null;
+    function walk(b) {
+      if (found || !b || typeof b !== "object") return;
+      if (b.id === id && typeof b.cid === "string") { found = b.cid; return; }
+      ["children", "columns", "items", "blocks", "cells"].forEach(function (k) { if (Array.isArray(b[k])) b[k].forEach(walk); });
+    }
+    ((doc && doc.pages) || []).forEach(function (p) { (p.blocks || []).forEach(walk); });
+    return found;
+  }
+  // ticket 26: map a server->client `comment.added` ENVELOPE (blockId + author live on the envelope;
+  // {id, threadId, body, kind} in payload -- see server/sync.js) into a client comment shaped like
+  // makeComment, anchored by cid so the shipped pins/panel render it. Guest notes carry source. Pure
+  // (colourFn injected). -> a client comment, or null if the envelope has no comment id.
+  function commentFromEnv(env, doc, colourFn) {
+    if (!env) return null;
+    var p = env.payload || {};
+    if (!p.id) return null;
+    var cid = blockCidById(doc, env.blockId);
+    return {
+      id: p.id,
+      anchor: { blockId: cid || env.blockId }, // cid resolves the pin; a raw id falls through to orphaned
+      body: p.body || "",
+      author: env.author || null,
+      colour: env.author ? colourFn(env.author) : null,
+      done: false,
+      source: (p.kind === "guest") ? "guest-link" : null,
+      threadId: p.threadId || p.id,
+      createdAt: env.ts || 0,
+      replies: []
+    };
+  }
   /* @comment-guest-end */
   window.__commentModel = { isReceipt: commentIsReceipt, isTask: commentIsTask, tasks: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks, isGuest: commentIsGuest, isOrphaned: commentIsOrphaned };
   // Re-mint on duplicate: a cloned subtree must never reuse ids, or a copy's
@@ -11724,6 +11761,16 @@
     var cb = node && node.closest && node.closest(".canvas-block");
     return (cb && cb.__block) || (node && node.__block) || null;
   }
+  // ticket 11 AC2: the caret's character offset within an editable field (for a remote cursor).
+  // Best-effort + guarded -> null if unavailable, so the render falls back to a block-corner flag.
+  function caretOffsetIn(node) {
+    try {
+      var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
+      var r = sel.getRangeAt(0); if (!node.contains(r.endContainer)) return null;
+      var pre = document.createRange(); pre.selectNodeContents(node); pre.setEnd(r.endContainer, r.endOffset);
+      return pre.toString().length;
+    } catch (e) { return null; }
+  }
   function enableEditing(root) {
     // locked blocks: mark them (editor.css lays a click-shield) and skip all
     // editing/selection wiring below, so they can't be moved or edited on the
@@ -11753,8 +11800,9 @@
         scheduleSpellcheck(); // P0: re-check typos as the author types
         var key = node.getAttribute("data-edit");
         if (!rich && panelFields[key] && panelFields[key].value !== node.textContent) panelFields[key].value = node.textContent;
-        if (typeof CollabChrome !== "undefined") CollabChrome.onEditCommit(collabBlockOf(node)); // collab: fan the edit out (debounced) + buffer it
+        if (typeof CollabChrome !== "undefined") { CollabChrome.onEditCommit(collabBlockOf(node)); CollabChrome.onCaret(collabBlockOf(node), caretOffsetIn(node)); } // collab: fan the edit out (debounced) + share the caret (throttled)
       });
+      node.addEventListener("keyup", function () { if (typeof CollabChrome !== "undefined") CollabChrome.onCaret(collabBlockOf(node), caretOffsetIn(node)); }); // collab: caret moves (arrows/click) without an edit
       node.addEventListener("blur", function () { if (typeof CollabChrome !== "undefined") CollabChrome.onEditBlur(collabBlockOf(node)); }); // collab: auto-release the lock on blur (server mode only)
       // Paste as PLAIN TEXT by default: the browser's default contenteditable paste
       // drags the SOURCE's rich HTML (fonts/colours/spans + even a copied canvas
@@ -14919,7 +14967,11 @@
     return (peers || []).filter(function (p) {
       var nm = p.name || p.author;
       return !!nm && nm !== meName && !p.editingBlockId && !!p.viewingBlockId;
-    }).map(function (p) { return { blockId: p.viewingBlockId, name: p.name || p.author, colour: p.colour || null }; });
+    }).map(function (p) {
+      var cur = p.cursor || null;
+      var offset = cur ? (cur.offset != null ? cur.offset : (cur.selection && cur.selection.offset)) : null;
+      return { blockId: p.viewingBlockId, name: p.name || p.author, colour: p.colour || null, offset: (typeof offset === "number" ? offset : null) };
+    });
   }
   /* @presence-model-end */
 
@@ -14927,8 +14979,9 @@
     var wired = false, session = null, peers = [], locks = [], pending = [];
     var resolvedConflicts = [], notifyArmed = {};
     // send-side (drives the pipe from the local author's edit lifecycle); all no-op in standalone.
-    var HEARTBEAT_MS = 12000, EDIT_DEBOUNCE_MS = 400;
+    var HEARTBEAT_MS = 12000, EDIT_DEBOUNCE_MS = 400, CURSOR_THROTTLE_MS = 120;
     var editingBlockId = null, viewingBlockId = null, beatTimer = null, editTimer = null, pendingBlock = null;
+    var caretPending = false, lastCaret = null;
     function enabled() { return !!(window.VersoSync && window.VersoSync.enabled); }
     function live() { return !!(window.VersoSync && window.VersoSync.isCollaborating()); }
     // find a top-level canvas block by its stable id (data-id), escaping the selector. Shared by
@@ -15094,8 +15147,43 @@
         var colour = vc.colour || colourForName(vc.name);
         var caret = h("div", "collab-cursor"); caret.style.setProperty("--ccol", colour);
         caret.appendChild(h("span", "collab-cursor__flag", vc.name));
+        positionCaret(caret, el, vc.offset); // ticket 11 AC2: place it at the offset WITHIN the block (corner fallback)
         el.appendChild(caret);
       });
+    }
+    // place a remote caret at a character offset inside a block's editable field. Best-effort +
+    // guarded: on any failure it leaves the CSS default (a block-corner flag), never throws.
+    function positionCaret(caret, blockEl, offset) {
+      if (offset == null) return;
+      try {
+        var field = blockEl.querySelector("[data-edit]") || blockEl;
+        var remaining = offset, node, rect = null;
+        var walker = document.createTreeWalker(field, NodeFilter.SHOW_TEXT, null, false);
+        while ((node = walker.nextNode())) {
+          var len = node.nodeValue.length;
+          if (remaining <= len) {
+            var r = document.createRange(); r.setStart(node, remaining); r.collapse(true);
+            rect = (r.getClientRects()[0]) || r.getBoundingClientRect(); break;
+          }
+          remaining -= len;
+        }
+        if (!rect) return;
+        var br = blockEl.getBoundingClientRect();
+        caret.style.top = (rect.top - br.top) + "px";
+        caret.style.left = (rect.left - br.left) + "px";
+        if (rect.height) caret.style.height = rect.height + "px";
+      } catch (e) {}
+    }
+    // ticket 11 AC2: share the local caret with peers (throttled -> one send per window, latest wins).
+    function onCaret(block, offset) {
+      if (!live() || !block || !block.id || !session || !session.cursorUpdate || typeof offset !== "number") return;
+      lastCaret = { blockId: block.id, offset: offset };
+      if (caretPending) return;
+      caretPending = true;
+      setTimeout(function () {
+        caretPending = false;
+        if (lastCaret && live() && session && session.cursorUpdate) session.cursorUpdate(lastCaret.blockId, { offset: lastCaret.offset });
+      }, CURSOR_THROTTLE_MS);
     }
     // ---- send-side: drive the pipe from the local author's edit lifecycle (tickets 11 + 13) ----
     // Nothing here runs in standalone (every method gates on live()+session). edit-intent (focus)
@@ -15139,23 +15227,37 @@
       else if (env.type === "sync.resnapshot") {                                       // restore-collision if I had unacked edits
         if (window.VersoSync && window.VersoSync._buffer && window.VersoSync._buffer.pending().length) showConflicts("restored");
       }
-      else if (env.type === "comment.added") { ingestComment(env.payload || env); }    // ticket 26: guest/author comment round-trip
-      else if (env.type === "comment.resolved") { resolveComment(env.payload || env); }
+      else if (env.type === "comment.added") { ingestComment(env); }    // ticket 26: guest/author comment round-trip
+      else if (env.type === "comment.resolved") { resolveThread(env); }
     }
+    function afterCommentChange() { try { renderCommentPins(); if (typeof refreshCommentPanel === "function") refreshCommentPanel(); } catch (e) {} }
     // ticket 26: a comment fanned out over the sync channel (a guest reviewer's note, or another
-    // author's) lands in the SHIPPED doc.comments store by id and renders through the existing pins
-    // + panel -- a delta, not a parallel comment system. Guest notes carry source:"guest-link".
-    function ingestComment(payload) {
-      var c = payload && (payload.comment || payload); if (!c || !c.id || !c.anchor) return;
+    // author's) is mapped from the server envelope into a client comment (anchored by CID, so the
+    // SHIPPED pins/panel resolve it) and upserted into doc.comments -- a delta, not a parallel comment
+    // system. A reply (threadId != id) attaches to its parent's replies; else it's a top-level note.
+    function ingestComment(env) {
+      var c = commentFromEnv(env, doc, colourForName); if (!c) return;
       doc.comments = doc.comments || [];
+      if (c.threadId && c.threadId !== c.id) {
+        var parent = null;
+        for (var j = 0; j < doc.comments.length; j++) if (doc.comments[j].id === c.threadId) { parent = doc.comments[j]; break; }
+        if (parent) {
+          parent.replies = parent.replies || [];
+          if (!parent.replies.some(function (r) { return r.id === c.id; })) parent.replies.push({ id: c.id, body: c.body, author: c.author, colour: c.colour, createdAt: c.createdAt });
+          afterCommentChange(); return;
+        }
+      }
       var i = -1; for (var k = 0; k < doc.comments.length; k++) if (doc.comments[k].id === c.id) { i = k; break; }
       if (i >= 0) doc.comments[i] = c; else doc.comments.push(c);
-      try { renderCommentPins(); if (typeof refreshCommentPanel === "function") refreshCommentPanel(); } catch (e) {}
+      afterCommentChange();
     }
-    function resolveComment(payload) {
-      var id = payload && (payload.id || (payload.comment && payload.comment.id)); if (!id) return;
-      (doc.comments || []).forEach(function (c) { if (c.id === id) c.done = true; });
-      try { renderCommentPins(); if (typeof refreshCommentPanel === "function") refreshCommentPanel(); } catch (e) {}
+    // ticket 26: an author reply/resolve (or a guest's) marks the whole thread done, both ways.
+    function resolveThread(env) {
+      var p = (env && env.payload) || {};
+      var threadId = p.threadId; if (!threadId) return;
+      var resolved = p.resolved !== false;
+      (doc.comments || []).forEach(function (c) { if (c.id === threadId || c.threadId === threadId) c.done = resolved; });
+      afterCommentChange();
     }
     // Idempotent: subscribe + connect once, only in server mode. No-op in standalone.
     function ensure() {
@@ -15176,10 +15278,11 @@
     function reproject() { try { renderPresence(); renderLocks(); renderCursors(); } catch (e) {} }
     return { ensure: ensure, reproject: reproject, live: live, _model: presenceModel,
       // send-side (called from the editor's edit lifecycle)
-      onEditFocus: onEditFocus, onEditCommit: onEditCommit, onEditBlur: onEditBlur,
+      onEditFocus: onEditFocus, onEditCommit: onEditCommit, onEditBlur: onEditBlur, onCaret: onCaret,
       _peers: function (p) { peers = p || []; }, _locks: function (l) { locks = l || []; },
       _applyRemote: applyRemote, _flush: flushPending, _pending: function () { return pending.slice(); },
       _showConflicts: showConflicts, _openHeldMenu: openHeldMenu, _resolved: function () { return resolvedConflicts.slice(); },
+      _ingestComment: ingestComment, _resolveThread: resolveThread,
       _beat: beat, _editing: function () { return editingBlockId; }, _setSession: function (s) { session = s; },
       _session: function () { return session; } };
   })();
