@@ -49,6 +49,7 @@ function createSyncHub(blockStore, opts) {
   var now = opts.now || function () { return 0; };
   var lockManager = opts.lockManager || null; // ticket 10 plugs in here; absent -> auto-grant
   var roleOf = opts.roleOf || function (c) { return (c && c.role) || "author"; }; // real roles = ticket 17
+  var catchupWindow = opts.catchupWindow != null ? opts.catchupWindow : 500; // low-water mark for catchup vs resnapshot (ticket 09)
   var docs = {};     // docId -> array of subscribed clients
   var clients = [];  // all connected clients
 
@@ -95,19 +96,27 @@ function createSyncHub(blockStore, opts) {
     if (h) h(client, env); // unknown types are ignored (forward-compatible envelope)
   }
 
-  // Connect / reconnect handshake: subscribe + replay the doc's events since sinceSeq
-  // (Foundation's changesSince -- one model). Full resnapshot decision is ticket 09.
+  // Connect / reconnect handshake -- transport-invisible (ticket 09). Everything funnels
+  // through sync.hello {sinceSeq}:
+  //   - a RECENT reconnect (sinceSeq in-buffer) gets a bounded sync.catchup DELTA of the
+  //     events since sinceSeq (Foundation's changesSince -- one model);
+  //   - a FRESH client (sinceSeq<=0, which has no base -- imported blocks carry no
+  //     block.put events) OR one BELOW the low-water mark (too far behind to replay) gets
+  //     a full sync.resnapshot of the materialized doc.
   function onHello(client, env) {
     client.docId = env.docId;
     var a = subs(env.docId); if (a.indexOf(client) < 0) a.push(client);
     var since = (env.payload && env.payload.sinceSeq) || 0;
-    var events = blockStore ? blockStore.changesSince(since, env.docId) : [];
     var upTo = blockStore ? blockStore.maxSeq() : 0;
-    // send the current lock registry too (empty until ticket 10 wires a lockManager)
+    // send the current lock registry too (empty until a lockManager is wired / after restart)
     if (lockManager && lockManager.stateFor) {
       client.transport.send(envelope("lock.state", env.docId, null, null, null, now(), { locks: lockManager.stateFor(env.docId) }));
     }
-    client.transport.send(envelope("sync.catchup", env.docId, null, upTo, null, now(), { events: events, upToSeq: upTo }));
+    if (blockStore && since > 0 && (upTo - since) <= catchupWindow) {
+      client.transport.send(envelope("sync.catchup", env.docId, null, upTo, null, now(), { events: blockStore.changesSince(since, env.docId), upToSeq: upTo }));
+    } else {
+      client.transport.send(envelope("sync.resnapshot", env.docId, null, upTo, null, now(), { snapshot: blockStore ? blockStore.materializeDoc(env.docId) : null, seq: upTo }));
+    }
   }
 
   // A block edit: (optionally) check the holder's lock, persist to the store BEFORE
@@ -140,6 +149,15 @@ function createSyncHub(blockStore, opts) {
       return client.transport.send(envelope("block.conflict", env.docId, env.blockId, blockStore.blockLatestSeq(env.docId, env.blockId), null, now(), { reason: "stale baseSeq", baseSeq: p.baseSeq }));
     }
     var content = (p.patch != null) ? p.patch : p.content;
+    // Idempotent replay (ticket 09): a duplicate/replayed edit that sets the value the
+    // block already holds appends NO event -- ack it as a harmless no-op. Makes reconnect
+    // replay safe even when the buffered edit was actually acked before the drop.
+    if (blockStore && blockStore.blockContent) {
+      var contentStr = (typeof content === "string") ? content : JSON.stringify(content);
+      if (blockStore.blockContent(env.docId, env.blockId) === contentStr) {
+        return client.transport.send(envelope("block.ack", env.docId, env.blockId, blockStore.blockLatestSeq(env.docId, env.blockId), env.author, now(), { baseSeq: p.baseSeq, noop: true }));
+      }
+    }
     var res = blockStore ? blockStore.applyChange(env.docId, env.blockId, content, env.author) : { ok: true, seq: 0 };
     if (!res.ok) {
       return client.transport.send(envelope("block.denied", env.docId, env.blockId, null, null, now(), { reason: res.error }));

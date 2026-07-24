@@ -499,7 +499,7 @@ section("platform-pivot 08 sync hub");
     hub.connect(ta, "alice"); hub.connect(tb, "bob");
     ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
     tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
-    ok("AC3: sync.hello -> catchup replaying events since sinceSeq (one model)", ta.sent.some(function (e) { return e.type === "sync.catchup" && Array.isArray(e.payload.events); }));
+    ok("AC3: a fresh sync.hello (sinceSeq 0) -> resnapshot carrying the base doc", ta.sent.some(function (e) { return e.type === "sync.resnapshot" && e.payload.snapshot && e.payload.snapshot.meta; }));
     var seqBefore = store.maxSeq();
     ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "H2" }, baseSeq: seqBefore }));
     ok("AC1: persist BEFORE fan-out (store advanced by 1)", store.maxSeq() === seqBefore + 1);
@@ -706,6 +706,64 @@ section("platform-pivot 14 conflict + rollback");
     ok("AC3: a non-admin restore is denied", ta.sent.some(function (e) { return e.type === "restore.denied" && e.payload.reason === "admin only"; }));
   } finally {
     try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 09: reconnect/replay -- catchup vs resnapshot + idempotence -------
+section("platform-pivot 09 reconnect");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> reconnect tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-recon-"));
+  var dbPath = path.join(tmp, "bs.sqlite");
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(dbPath, { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, catchupWindow: 3 });
+    // AC1: a fresh client (sinceSeq 0) -> resnapshot with the base doc
+    var t0 = SY.FakeTransport(); hub.connect(t0, "a");
+    t0.receive(env("sync.hello", "C-1", null, null, "a", 0, { sinceSeq: 0 }));
+    ok("AC1: fresh hello -> resnapshot (has base -- imported blocks carry no events)", t0.sent.some(function (e) { return e.type === "sync.resnapshot" && e.payload.snapshot.pages[0].blocks[0].text === "H"; }));
+    // make a couple of edits so there is a seq>0 delta to catch up on (import appends no
+    // change events, so maxSeq starts at 0 -> the first real seq is 1).
+    var base = store.maxSeq();
+    var t1 = SY.FakeTransport(); var C = hub.connect(t1, "b");
+    t1.receive(env("sync.hello", "C-1", null, null, "b", 0, { sinceSeq: 0 })); // fresh -> resnapshot
+    clock = 200; t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: "H2" }, baseSeq: store.maxSeq() }));
+    clock = 210; t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: "H3" }, baseSeq: store.maxSeq() }));
+    var afterTwo = store.maxSeq(); // >= 2
+    // AC1: a RECENT reconnect (sinceSeq>0, within the window) -> catchup delta
+    var t2 = SY.FakeTransport(); hub.connect(t2, "c");
+    t2.receive(env("sync.hello", "C-1", null, null, "c", 0, { sinceSeq: afterTwo - 1 }));
+    ok("AC1: recent reconnect (in-buffer) -> catchup delta", t2.sent.some(function (e) { return e.type === "sync.catchup" && e.payload.events.length >= 1; }));
+    // AC1: a client below the low-water mark (too far behind) -> resnapshot
+    // push enough edits that (max - sinceSeq) exceeds catchupWindow(3)
+    clock = 260; ["A", "B", "C", "D"].forEach(function (x) { t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: x }, baseSeq: store.maxSeq() })); });
+    var t3 = SY.FakeTransport(); hub.connect(t3, "d");
+    t3.receive(env("sync.hello", "C-1", null, null, "d", 0, { sinceSeq: base })); // far behind
+    ok("AC1: far-behind reconnect (below low-water mark) -> resnapshot", t3.sent.some(function (e) { return e.type === "sync.resnapshot"; }));
+    // AC3: a duplicate/replayed edit (same value) is an idempotent no-op (no new event)
+    var cur = store.materializeDoc("C-1").pages[0].blocks[0].text;
+    var seqBefore = store.maxSeq();
+    t1.sent.length = 0;
+    t1.receive(env("block.change", "C-1", "b1", null, "b", 0, { content: { id: "b1", type: "heading", text: cur }, baseSeq: store.maxSeq() }));
+    ok("AC3: replayed identical edit -> idempotent no-op (no event appended)", store.maxSeq() === seqBefore);
+    ok("AC3: idempotent replay still acks the sender (noop flag)", t1.sent.some(function (e) { return e.type === "block.ack" && e.payload.noop === true; }));
+    // AC4: server restart rehydrates the durable log/rows from the store; a fresh hub
+    // starts with empty locks + presence (clients re-establish on reconnect).
+    store.close();
+    var store2 = BS.createBlockStore(dbPath, {});
+    ok("AC4: change log + rows rehydrate from the store on restart", store2.materializeDoc("C-1") && store2.changesSince(0, "C-1").length >= 1);
+    var hub2 = SY.createSyncHub(store2, { mode: "server", now: function () { return 0; } });
+    ok("AC4: a fresh hub starts with no subscribers (presence/locks empty; re-establish on reconnect)", hub2._subs("C-1").length === 0);
+    store2.close();
+  } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
 })();

@@ -210,6 +210,11 @@ function createBlockStore(dbPath, opts) {
   // to reject a late write from an ex-holder whose block was reclaimed + advanced.
   function blockLatestSeq(docId, blockId) { var r = qBlockMax.get(docId, blockId); return (r && r.m) || 0; }
 
+  // The current stored content (JSON string) of a block, or null. The collab layer uses
+  // this to make a duplicate/replayed edit an idempotent no-op (ticket 09): re-applying
+  // the value a block already holds appends no event.
+  function blockContent(docId, blockId) { var r = qGetBlock.get(docId, blockId); return r ? r.content : null; }
+
   // Reconnect/rollback replay contract: events with seq > N (optionally one doc).
   function changesSince(seq, docId) {
     var rows = docId ? qSinceDoc.all(seq, docId) : qSince.all(seq);
@@ -364,6 +369,7 @@ function createBlockStore(dbPath, opts) {
     materializeDoc: materializeDoc,
     applyChange: applyChange,
     blockLatestSeq: blockLatestSeq,
+    blockContent: blockContent,
     reorderBlocks: reorderBlocks,
     deleteBlock: deleteBlock,
     changesSince: changesSince,
