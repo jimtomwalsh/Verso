@@ -104,6 +104,9 @@
   // Ticket 11 AC2: the local caret/selection within a block, so peers see a live cursor. Ephemeral
   // (not seq-stamped, not logged) -- carries a character offset into the block's text.
   function cursorMsg(docId, blockId, selection) { return mkEnvelope("cursor.update", docId, blockId, { selection: selection || null }); }
+  // Ticket 26: an author's reply is a comment.add on the parent thread; a resolve is comment.resolve.
+  // The hub fans both to EVERYONE incl. the origin, so the round-trip is shared both ways.
+  function resolveMsg(docId, blockId, threadId, resolved) { return mkEnvelope("comment.resolve", docId, blockId, { threadId: threadId, resolved: resolved !== false }); }
   /* @sync-client-end */
 
   // ---- thin WIRE (browser only; inert without a server URL) ----------------
@@ -190,6 +193,7 @@
         requestHandoff: function (blockId) { transport.send(handoffMsg(docId, blockId)); },
         notifyWhenFree: function (blockId, on) { transport.send(notifyMsg(docId, blockId, on)); },
         cursorUpdate: function (blockId, selection) { transport.send(cursorMsg(docId, blockId, selection)); },
+        resolveComment: function (blockId, threadId, resolved) { transport.send(resolveMsg(docId, blockId, threadId, resolved)); },
         disconnect: function () { if (transport) transport.close(); state.connected = false; }
       };
     },
@@ -205,7 +209,7 @@
     // pure helpers (also used by tests)
     _pure: { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay,
       pendingFor: pendingFor, conflictView: conflictView,
-      helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg, handoffMsg: handoffMsg, notifyMsg: notifyMsg, cursorMsg: cursorMsg },
+      helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg, handoffMsg: handoffMsg, notifyMsg: notifyMsg, cursorMsg: cursorMsg, resolveMsg: resolveMsg },
     _WsClient: WsClient, _LongPollClient: LongPollClient, _DurableBuffer: DurableBuffer
   };
 })();

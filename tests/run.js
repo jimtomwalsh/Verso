@@ -510,6 +510,17 @@ section("platform-pivot 11 presence chrome");
   ok("beat sends viewing + editing block ids over the session", /function beat\(\) \{ if \(live\(\) && session && session\.heartbeat\) session\.heartbeat\(viewingBlockId, editingBlockId\); \}/.test(t));
   ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /CollabChrome\.onEditFocus\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditCommit\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditBlur\(collabBlockOf\(node\)\)/.test(t));
   ok("send-side is gated on live()+session (inert in standalone)", /function onEditFocus\(block\) \{\s*if \(!live\(\) \|\| !block \|\| !block\.id \|\| !session\) return;/.test(t));
+  // story 9: auto-release on IDLE (not just blur) so a focused-but-idle author doesn't hold the lock
+  ok("idle-timeout releases the held block (spec story 9)", /function touchIdle\(\)/.test(t) && /session\.releaseLock\(editingBlockId\); editingBlockId = null;/.test(t) && /IDLE_RELEASE_MS/.test(t));
+  ok("edit + caret activity resets the idle timer", /editingBlockId = viewingBlockId = block\.id;[\s\S]{0,120}touchIdle\(\);/.test(t) && /touchIdle\(\); \/\/ caret movement/.test(t));
+  ok("blur supersedes the idle timer", /if \(idleTimer\) \{ clearTimeout\(idleTimer\); idleTimer = null; \} \/\/ blur supersedes/.test(t));
+  // ticket 26 two-way: an author reply/resolve fans back to the reviewer (shared both ways)
+  ok("author reply fans out via session.comment (cid -> server block.id)", /function fanoutReply\(comment, body\)[\s\S]{0,220}session\.comment\(blockIdByCid\(doc, cid\) \|\| cid, body, comment\.threadId/.test(t));
+  ok("author resolve fans out via session.resolveComment", /function fanoutResolve\(comment, resolved\)[\s\S]{0,220}session\.resolveComment\(blockIdByCid\(doc, cid\) \|\| cid, comment\.threadId/.test(t));
+  ok("the shipped reply + resolve controls call the fanout (both ways)", (t.match(/CollabChrome\.fanoutResolve\(c, v\)/g) || []).length >= 2 && /CollabChrome\.fanoutReply\(c, v\)/.test(t));
+  ok("the origin echo of my optimistic reply is deduped by content", /r\.author === c\.author && r\.body === c\.body/.test(t));
+  var scr = src("src/sync-client.js");
+  ok("sync-client session: resolveComment + resolveMsg builder", /resolveComment: function \(blockId, threadId, resolved\)/.test(scr) && /function resolveMsg\(docId, blockId, threadId, resolved\)/.test(scr));
 
   // ---- ticket 13-UI: soft-conflict modal rows + handoff/notify (pure + wiring) ----
   var cdoc = { pages: [ { id: "p1", blocks: [ { id: "b1", type: "para", text: "SERVER-CURRENT" } ] } ] };
@@ -545,7 +556,7 @@ section("platform-pivot 26 review round-trip");
   var t = src("src/editor.js");
   var m = t.match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
   if (!m) { ok("locate @comment-guest fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, commentFromEnv: commentFromEnv };")();
+  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
 
   ok("commentIsGuest: source guest-link OR guest flag", g.commentIsGuest({ source: "guest-link" }) === true && g.commentIsGuest({ guest: true }) === true && g.commentIsGuest({ author: "Me" }) === false);
   var doc = { pages: [ { blocks: [ { cid: "c1", type: "para" }, { cid: "c2", type: "group", children: [ { cid: "c3" } ] } ] } ] };
@@ -564,9 +575,10 @@ section("platform-pivot 26 review round-trip");
   // comment resolves onto the live block (a raw id with no cid falls through to orphaned).
   var idoc = { pages: [ { blocks: [ { id: "srv-b2", cid: "c-abc", type: "para" }, { id: "srv-b5", cid: "c-def", type: "group", children: [ { id: "srv-b6", cid: "c-ghi" } ] } ] } ] };
   ok("blockCidById: maps a server block.id to the client cid (incl. nested)", g.blockCidById(idoc, "srv-b2") === "c-abc" && g.blockCidById(idoc, "srv-b6") === "c-ghi" && g.blockCidById(idoc, "nope") === null);
-  var env = { type: "comment.added", docId: "D1", blockId: "srv-b2", author: "Sam Okafor", ts: 111, payload: { id: "cm_1", threadId: "cm_1", body: "add PRF here", kind: "guest" } };
+  ok("blockIdByCid: the INVERSE (cid -> server block.id) for fanning a reply/resolve back", g.blockIdByCid(idoc, "c-abc") === "srv-b2" && g.blockIdByCid(idoc, "c-ghi") === "srv-b6" && g.blockIdByCid(idoc, "nope") === null);
+  var env = { type: "comment.added", docId: "D1", blockId: "srv-b2", author: "Sam Okafor", ts: 111, payload: { id: "cm_1", threadId: "cm_1", body: "add an example here", kind: "guest" } };
   var mapped = g.commentFromEnv(env, idoc, function (n) { return "#col"; });
-  ok("commentFromEnv: reads blockId/author off the ENVELOPE, anchors by cid, tags guest", mapped.anchor.blockId === "c-abc" && mapped.author === "Sam Okafor" && mapped.source === "guest-link" && mapped.body === "add PRF here" && mapped.colour === "#col");
+  ok("commentFromEnv: reads blockId/author off the ENVELOPE, anchors by cid, tags guest", mapped.anchor.blockId === "c-abc" && mapped.author === "Sam Okafor" && mapped.source === "guest-link" && mapped.body === "add an example here" && mapped.colour === "#col");
   ok("commentFromEnv: a deleted server block -> anchor falls to raw id (surfaces orphaned, not mis-anchored)", g.commentFromEnv({ blockId: "gone", author: "A", payload: { id: "cm_9" } }, idoc, function () { return "#c"; }).anchor.blockId === "gone");
   ok("commentFromEnv: no comment id -> null (never a blank note)", g.commentFromEnv({ blockId: "srv-b2", payload: {} }, idoc, function () { return "#c"; }) === null);
 
@@ -3608,7 +3620,7 @@ section("comment mode (canvas)");
   ok("drop handler creates + stores a comment", /if \(!commentMode\) return;[\s\S]*?makeAnchorFromPoint\(e\.clientX, e\.clientY, e\.target\)[\s\S]*?pushHistory\(\);[\s\S]*?makeComment\(anchor, ""\)[\s\S]*?doc\.comments\.push\(c\)/.test(t));
   ok("first outside click closes the open note (positive exit), next click drops", /if \(openCommentId\) \{ closeCommentPopover\(\); renderCommentPins\(\); return; \}/.test(t));
   // popover: body input, resolve checkbox, delete
-  ok("popover edits body / resolve / delete", /function openCommentPopover[\s\S]*?c\.body = ta\.value[\s\S]*?c\.done = v; scheduleSave\(\); renderCommentPins\(\); refreshCommentPanel\(\)[\s\S]*?doc\.comments\.splice\(i, 1\)/.test(t));
+  ok("popover edits body / resolve / delete", /function openCommentPopover[\s\S]*?c\.body = ta\.value[\s\S]*?c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); refreshCommentPanel\(\)[\s\S]*?doc\.comments\.splice\(i, 1\)/.test(t));
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
   ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(t));
   ok("applyView re-projects pins (pan/zoom)", /persistView\(\);\s*if \(typeof renderCommentPins === "function"\) renderCommentPins\(\)/.test(t));
@@ -3628,7 +3640,7 @@ section("comment list (panel)");
   ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(interactMode\) setInteractMode\(false\)/.test(t));
   ok("list filters Open vs Resolved", /function renderCommentList[\s\S]*?commentFilter === "resolved" \? c\.done : !c\.done/.test(t));
   ok("row = colour-dot + snippet + done checkbox", /comment-row__dot[\s\S]*?comment-row__snip[\s\S]*?comment-row__done/.test(t));
-  ok("resolve from the list syncs the pin", /c\.done = v; scheduleSave\(\); renderCommentPins\(\); renderCommentList\(\)/.test(t));
+  ok("resolve from the list syncs the pin", /c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); renderCommentList\(\)/.test(t));
   ok("click a row pans to the pin (jumpToComment)", /function jumpToComment[\s\S]*?view\.x \+= \(cr\.width \/ 2 - pos\.px\)[\s\S]*?applyView\(\)[\s\S]*?openCommentPopover\(c\)/.test(t));
 })();
 

@@ -1881,14 +1881,19 @@
   // note whose target block (by stable cid) the author has since deleted. Surfaced, never dropped.
   /* @comment-guest-start */
   function commentIsGuest(c) { return !!(c && (c.source === "guest-link" || c.guest === true)); }
-  function docCids(doc, acc) {
-    acc = acc || {};
+  // walk every block in the doc (incl. nested containers), calling visit(block). The ONE place that
+  // knows the container-child keys, shared by the cid scans below (kills the duplicated walkers).
+  function walkBlocks(doc, visit) {
     function walk(b) {
       if (!b || typeof b !== "object") return;
-      if (typeof b.cid === "string") acc[b.cid] = true;
+      visit(b);
       ["children", "columns", "items", "blocks", "cells"].forEach(function (k) { if (Array.isArray(b[k])) b[k].forEach(walk); });
     }
     ((doc && doc.pages) || []).forEach(function (p) { (p.blocks || []).forEach(walk); });
+  }
+  function docCids(doc, acc) {
+    acc = acc || {};
+    walkBlocks(doc, function (b) { if (typeof b.cid === "string") acc[b.cid] = true; });
     return acc;
   }
   function commentIsOrphaned(c, doc) {
@@ -1903,12 +1908,15 @@
   function blockCidById(doc, id) {
     if (id == null) return null;
     var found = null;
-    function walk(b) {
-      if (found || !b || typeof b !== "object") return;
-      if (b.id === id && typeof b.cid === "string") { found = b.cid; return; }
-      ["children", "columns", "items", "blocks", "cells"].forEach(function (k) { if (Array.isArray(b[k])) b[k].forEach(walk); });
-    }
-    ((doc && doc.pages) || []).forEach(function (p) { (p.blocks || []).forEach(walk); });
+    walkBlocks(doc, function (b) { if (found == null && b.id === id && typeof b.cid === "string") found = b.cid; });
+    return found;
+  }
+  // inverse of blockCidById: a client cid -> the server STABLE block id, so an author's reply/resolve
+  // can be fanned back to the server (which anchors by block.id). Null if unmapped. Pure.
+  function blockIdByCid(doc, cid) {
+    if (cid == null) return null;
+    var found = null;
+    walkBlocks(doc, function (b) { if (found == null && b.cid === cid && b.id != null) found = b.id; });
     return found;
   }
   // ticket 26: map a server->client `comment.added` ENVELOPE (blockId + author live on the envelope;
@@ -14841,7 +14849,7 @@
         dismiss.addEventListener("click", function (e) { e.stopPropagation(); pushHistory(); doc.comments = (doc.comments || []).filter(function (x) { return x.id !== c.id; }); scheduleSave(); renderCommentPins(); renderCommentList(); });
         row.appendChild(dismiss);
       } else {
-        var box = UI.Checkbox({ checked: !!c.done, onChange: function (v) { pushHistory(); c.done = v; scheduleSave(); renderCommentPins(); renderCommentList(); } });
+        var box = UI.Checkbox({ checked: !!c.done, onChange: function (v) { pushHistory(); c.done = v; if (typeof CollabChrome !== "undefined") CollabChrome.fanoutResolve(c, v); scheduleSave(); renderCommentPins(); renderCommentList(); } });
         box.classList.add("comment-row__done"); box.title = "Resolve";
         box.addEventListener("click", function (e) { e.stopPropagation(); });
         row.appendChild(box);
@@ -14979,9 +14987,9 @@
     var wired = false, session = null, peers = [], locks = [], pending = [];
     var resolvedConflicts = [], notifyArmed = {};
     // send-side (drives the pipe from the local author's edit lifecycle); all no-op in standalone.
-    var HEARTBEAT_MS = 12000, EDIT_DEBOUNCE_MS = 400, CURSOR_THROTTLE_MS = 120;
+    var HEARTBEAT_MS = 12000, EDIT_DEBOUNCE_MS = 400, CURSOR_THROTTLE_MS = 120, IDLE_RELEASE_MS = 30000;
     var editingBlockId = null, viewingBlockId = null, beatTimer = null, editTimer = null, pendingBlock = null;
-    var caretPending = false, lastCaret = null;
+    var caretPending = false, lastCaret = null, idleTimer = null;
     function enabled() { return !!(window.VersoSync && window.VersoSync.enabled); }
     function live() { return !!(window.VersoSync && window.VersoSync.isCollaborating()); }
     // find a top-level canvas block by its stable id (data-id), escaping the selector. Shared by
@@ -15177,6 +15185,7 @@
     // ticket 11 AC2: share the local caret with peers (throttled -> one send per window, latest wins).
     function onCaret(block, offset) {
       if (!live() || !block || !block.id || !session || !session.cursorUpdate || typeof offset !== "number") return;
+      touchIdle(); // caret movement is activity -> keep the lock alive
       lastCaret = { blockId: block.id, offset: offset };
       if (caretPending) return;
       caretPending = true;
@@ -15190,14 +15199,27 @@
     // implicitly acquires the block's content lock + heartbeats; edit-commit fans the block out
     // (debounced, and recorded in the durable unacked buffer); blur/idle releases the lock.
     function beat() { if (live() && session && session.heartbeat) session.heartbeat(viewingBlockId, editingBlockId); }
+    // spec story 9: auto-release a held block on IDLE (blur is handled in onEditBlur; this closes the
+    // "focused but idle" gap so a walked-away author doesn't hold the lock indefinitely). Reset on any
+    // edit/caret activity. In an autosave app there is no manual "save" trigger -- blur + idle cover it.
+    function touchIdle() {
+      if (!live()) return;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(function () {
+        idleTimer = null;
+        if (live() && session && session.releaseLock && editingBlockId) { session.releaseLock(editingBlockId); editingBlockId = null; beat(); }
+      }, IDLE_RELEASE_MS);
+    }
     function onEditFocus(block) {
       if (!live() || !block || !block.id || !session) return;
       viewingBlockId = editingBlockId = block.id;
       if (session.acquireLock) session.acquireLock(block.id); // implicit acquire on edit-intent (spec stories 8-9)
-      beat();
+      beat(); touchIdle();
     }
     function onEditCommit(block) {
       if (!live() || !block || !block.id) return;
+      editingBlockId = viewingBlockId = block.id; // (re)engage on edit activity (e.g. typing after an idle release)
+      touchIdle();
       pendingBlock = block; // coalesce rapid keystrokes; the server coalesces again downstream
       if (editTimer) clearTimeout(editTimer);
       editTimer = setTimeout(flushEdit, EDIT_DEBOUNCE_MS);
@@ -15212,10 +15234,27 @@
     }
     function onEditBlur(block) {
       if (!live() || !block || !block.id) return;
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } // blur supersedes the idle timer
       if (editTimer) { clearTimeout(editTimer); flushEdit(); } // commit any pending edit before releasing
       if (session && session.releaseLock) session.releaseLock(block.id); // auto-release on blur (spec story 9)
       if (editingBlockId === block.id) editingBlockId = null;
       beat();
+    }
+    // ticket 26: fan an author's reply/resolve back to the reviewer + peers (shared BOTH ways --
+    // spec 4 stories 12/23). A reply is comment.add on the parent thread; the hub echoes it to the
+    // origin, so ingestComment adds it locally (send-only avoids a duplicate). Translate the client
+    // cid anchor -> the server stable block id. Returns true when it fanned out (server mode).
+    function fanoutReply(comment, body) {
+      if (!live() || !session || !session.comment || !comment) return false;
+      var cid = comment.anchor && comment.anchor.blockId;
+      session.comment(blockIdByCid(doc, cid) || cid, body, comment.threadId || comment.id);
+      return true;
+    }
+    function fanoutResolve(comment, resolved) {
+      if (!live() || !session || !session.resolveComment || !comment) return false;
+      var cid = comment.anchor && comment.anchor.blockId;
+      session.resolveComment(blockIdByCid(doc, cid) || cid, comment.threadId || comment.id, resolved);
+      return true;
     }
 
     function onEvent(env, state) {
@@ -15243,7 +15282,8 @@
         for (var j = 0; j < doc.comments.length; j++) if (doc.comments[j].id === c.threadId) { parent = doc.comments[j]; break; }
         if (parent) {
           parent.replies = parent.replies || [];
-          if (!parent.replies.some(function (r) { return r.id === c.id; })) parent.replies.push({ id: c.id, body: c.body, author: c.author, colour: c.colour, createdAt: c.createdAt });
+          if (!parent.replies.some(function (r) { return r.id === c.id || (r.author === c.author && r.body === c.body); })) parent.replies.push({ id: c.id, body: c.body, author: c.author, colour: c.colour, createdAt: c.createdAt }); // dedupe the origin echo of my own optimistic reply (server mints a new id)
+
           afterCommentChange(); return;
         }
       }
@@ -15279,6 +15319,7 @@
     return { ensure: ensure, reproject: reproject, live: live, _model: presenceModel,
       // send-side (called from the editor's edit lifecycle)
       onEditFocus: onEditFocus, onEditCommit: onEditCommit, onEditBlur: onEditBlur, onCaret: onCaret,
+      fanoutReply: fanoutReply, fanoutResolve: fanoutResolve,
       _peers: function (p) { peers = p || []; }, _locks: function (l) { locks = l || []; },
       _applyRemote: applyRemote, _flush: flushPending, _pending: function () { return pending.slice(); },
       _showConflicts: showConflicts, _openHeldMenu: openHeldMenu, _resolved: function () { return resolvedConflicts.slice(); },
@@ -15559,7 +15600,7 @@
     });
     ta.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); ta.blur(); closeCommentPopover(); renderCommentPins(); } });
     var row = h("div", "comment-popover__row");
-    var doneCheck = UI.Checkbox({ checked: !!c.done, label: "Resolved", onChange: function (v) { pushHistory(); c.done = v; scheduleSave(); renderCommentPins(); refreshCommentPanel(); } });
+    var doneCheck = UI.Checkbox({ checked: !!c.done, label: "Resolved", onChange: function (v) { pushHistory(); c.done = v; if (typeof CollabChrome !== "undefined") CollabChrome.fanoutResolve(c, v); scheduleSave(); renderCommentPins(); refreshCommentPanel(); } });
     doneCheck.classList.add("comment-popover__done");
     var del = h("button", "comment-popover__del", "Delete");
     del.addEventListener("click", function () {
@@ -15584,7 +15625,9 @@
     replyField.input.addEventListener("mousedown", function (e) { e.stopPropagation(); });
     var replyBtn = UI.Button({ variant: "secondary", full: true, label: "Reply", onClick: function () {
       var v = (replyField.input.value || "").trim(); if (!v) return;
-      pushHistory(); c.replies = c.replies || []; c.replies.push(makeReply(v)); scheduleSave();
+      pushHistory(); c.replies = c.replies || []; c.replies.push(makeReply(v)); // optimistic local add (instant)
+      if (typeof CollabChrome !== "undefined") CollabChrome.fanoutReply(c, v); // collab: fan out; the echo is deduped by content
+      scheduleSave();
       openCommentPopover(c); renderCommentPins(); // rebuild the popover with the new reply
     } });
     thread.appendChild(replyField); thread.appendChild(replyBtn);
