@@ -3188,3 +3188,89 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
   background: var(--danger); border-radius: 999px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ===== Live-collaboration presence chrome (platform-pivot ticket 11; server-mode only) =====
+   Conforms to design-system PresenceCluster: 20px author avatars in the toolbar right group,
+   editing = solid author-colour ring/fill, viewing = hollow 40% ring, "+N" overflow. Hidden
+   (display:none, no peers) in standalone/solo -- the controller only shows it while collaborating. */
+.collab-presence { display: inline-flex; align-items: center; padding-right: 6px; margin-right: 2px; }
+.collab-av {
+  width: var(--control-sm, 20px); height: var(--control-sm, 20px);
+  border-radius: var(--radius-full, 999px);
+  margin-left: -6px; display: inline-grid; place-items: center;
+  font: 600 var(--text-2xs, 10px)/1 Inter, system-ui, sans-serif; color: #fff;
+  position: relative; cursor: default;
+  background: var(--acol, #888);
+  box-shadow: 0 0 0 1.5px var(--acol, #888), 0 0 0 3px var(--surface-app, #1e1e1e);
+  transition: transform .15s cubic-bezier(.2,.6,.2,1), box-shadow .15s cubic-bezier(.2,.6,.2,1);
+}
+.collab-av:first-child { margin-left: 0; }
+.collab-av:hover { transform: translateY(-1px); z-index: 3; }
+/* viewing = hollow: tinted centre + reduced ring, initials in the author colour */
+.collab-av.is-viewing {
+  background: color-mix(in srgb, var(--acol, #888) 28%, transparent);
+  color: var(--acol, #888);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--acol, #888) 45%, transparent), 0 0 0 3px var(--surface-app, #1e1e1e);
+}
+.collab-av--more { background: var(--surface-raised, #262626); color: var(--text-secondary, #9a9a9a);
+  box-shadow: 0 0 0 1px var(--border-subtle, rgba(255,255,255,.10)), 0 0 0 3px var(--surface-app, #1e1e1e); }
+
+/* held-block read-only chrome (platform-pivot ticket 11b; server-mode only). A block a PEER
+   holds: author-colour inset outline + an "editing..." holder chip; goes read-only (the visible
+   face of ticket 15's gate). Only rendered while collaborating; my own locks show nothing. */
+.canvas-block.collab-held { box-shadow: inset 0 0 0 1.5px var(--hcol, #888); border-radius: var(--radius-md, 6px); }
+.canvas-block.collab-held__chip, .collab-held__chip {
+  position: absolute; top: -11px; right: 10px; height: 22px; display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 8px 0 4px; background: var(--surface-raised, #262626); border-radius: var(--radius-md, 6px);
+  box-shadow: var(--shadow-popover, 0 2px 5px rgba(0,0,0,.28)); font: 600 var(--text-2xs, 10px)/1 Inter, system-ui, sans-serif;
+  color: var(--text-primary, #ededed); z-index: 4; pointer-events: none; white-space: nowrap;
+}
+.collab-held__av {
+  width: 16px; height: 16px; border-radius: var(--radius-full, 999px); display: inline-grid; place-items: center;
+  font: 700 8px/1 Inter, system-ui, sans-serif; color: #fff; background: var(--hcol, #888);
+}
+.collab-held__lbl { opacity: .92; font-weight: 500; }
+
+/* soft-conflict modal + handoff menu + toast (platform-pivot ticket 13-UI; server-mode only).
+   Canonical Modal shell (never auto-dismisses), two panes "my edits vs current/restored". */
+.collab-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 900; display: grid; place-items: center; }
+.collab-modal { width: 460px; max-width: calc(100vw - 32px); background: var(--surface-raised, #262626);
+  border-radius: var(--radius-lg, 8px); box-shadow: var(--shadow-modal, 0 12px 40px rgba(0,0,0,.5)); padding: 18px; }
+.collab-modal__title { font: 600 var(--text-xl, 20px)/1.2 Inter, system-ui, sans-serif; color: var(--text-primary, #ededed); }
+.collab-modal__desc { margin: 5px 0 14px; color: var(--text-secondary, #9a9a9a); font-size: var(--text-md, 13px); }
+.collab-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.collab-pane { border: 1px solid var(--border-subtle, rgba(255,255,255,.10)); border-radius: var(--radius-md, 6px); overflow: hidden; }
+.collab-pane__h { font-size: var(--text-2xs, 10px); text-transform: uppercase; letter-spacing: .06em; color: var(--text-secondary, #9a9a9a);
+  padding: 7px 10px; background: var(--surface-input, #2c2c2c); border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,.10)); }
+.collab-pane.is-mine .collab-pane__h { color: var(--accent, #0d99ff); }
+.collab-pane__b { padding: 10px; font-size: var(--text-sm, 12px); color: #d6d6d6; min-height: 56px; word-break: break-word; }
+.collab-modal__foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.collab-btn { height: 28px; padding: 0 12px; border-radius: var(--radius-sm, 4px); border: 1px solid var(--border-strong, rgba(255,255,255,.16));
+  background: var(--surface-input, #2c2c2c); color: var(--text-primary, #ededed); font: inherit; font-size: var(--text-xs, 11px); cursor: pointer; }
+.collab-btn.is-primary { background: var(--accent, #0d99ff); border-color: transparent; color: #fff; font-weight: 600; }
+.collab-menu { position: fixed; min-width: 190px; background: var(--surface-raised, #262626); border-radius: var(--radius-md, 6px);
+  box-shadow: var(--shadow-menu, 0 4px 12px rgba(0,0,0,.36)); padding: 5px; z-index: 910; }
+.collab-menu__item { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text-primary, #ededed);
+  font: inherit; font-size: var(--text-xs, 11px); padding: 7px 9px; border-radius: var(--radius-sm, 4px); cursor: pointer; }
+.collab-menu__item:hover { background: var(--surface-hover, rgba(255,255,255,.06)); }
+.collab-menu__item.is-armed { color: var(--accent, #0d99ff); }
+.collab-toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(6px); z-index: 920;
+  background: var(--surface-raised, #262626); color: var(--text-primary, #ededed); font-size: var(--text-xs, 11px);
+  padding: 9px 13px; border-radius: var(--radius-md, 6px); box-shadow: var(--shadow-menu, 0 4px 12px rgba(0,0,0,.36));
+  opacity: 0; transition: opacity .18s, transform .18s; }
+.collab-toast.is-on { opacity: 1; transform: translateX(-50%); }
+
+/* review-links round-trip: guest tag + orphaned-anchor tray (platform-pivot ticket 26).
+   Additive to the shipped comment panel -- a Guest badge distinguishes review-link notes from
+   internal authors, and orphaned notes (their block deleted) get their own tray, never dropped. */
+.comment-row__mid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.comment-row__meta { display: flex; align-items: center; gap: 6px; }
+.comment-row__name { font-size: var(--text-2xs, 10px); color: var(--text-secondary, #9a9a9a); font-weight: 500; }
+.comment-row__tag { font-size: 8px; text-transform: uppercase; letter-spacing: .05em; padding: 1px 5px;
+  border-radius: var(--radius-full, 999px); background: var(--surface-input, #2c2c2c); color: var(--text-secondary, #9a9a9a); }
+.comment-row__tag.is-guest { background: rgba(233,30,140,.16); color: #f07ab8; }
+.comment-list.is-orphan-tray .comment-row { background: rgba(224,86,63,.07); }
+.comment-row.is-orphan .comment-row__dot { opacity: .5; }
+.comment-row__orphan-note { font-size: 9px; color: #e0563f; }
+.comment-group__head { font: var(--type-section, 600 11px/1.3 Inter, system-ui, sans-serif); color: var(--text-secondary, #9a9a9a);
+  padding: 10px 2px 4px; margin-top: 6px; border-top: 1px solid var(--border-subtle, rgba(255,255,255,.10)); }

@@ -289,7 +289,7 @@ section("client-mount sync-client core");
   var t = src("src/sync-client.js");
   var m = t.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
   if (!m) { ok("locate @sync-client fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay, helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg };")();
+  var g = new Function(m[1] + "\nreturn { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay, pendingFor: pendingFor, conflictView: conflictView, helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg };")();
 
   // THE GATE: only true when there is a server URL AND a live connection.
   ok("gate: standalone (no serverUrl) -> not collaborating", g.isCollaborating({ connected: true }) === false && g.isCollaborating(null) === false);
@@ -328,6 +328,17 @@ section("client-mount sync-client core");
   buf = g.bufferAck(buf, "b1");
   ok("buffer ack retires the acked block's entry", buf.length === 1 && !buf.some(function (e) { return e.blockId === "b1"; }));
 
+  // ticket 13 soft-conflict JOIN: the reducer records WHICH block conflicted (never a silent
+  // drop); conflictView joins that with MY buffered content so the (chrome) prompt shows both.
+  var cbuf = [ { blockId: "b1", content: { id: "b1", text: "MY-EDIT" }, baseSeq: 3 } ];
+  var cst = g.applyServerEvent({ doc: doc, seq: 0, locks: [], peers: [], conflicts: [] }, { type: "block.conflict", blockId: "b1", seq: 9, payload: { baseSeq: 3 } });
+  var cst2 = g.applyServerEvent(cst, { type: "block.conflict", blockId: "b9", seq: 10, payload: { baseSeq: 1 } }); // a block I have no buffered edit for
+  var view = g.conflictView(cst2, cbuf);
+  ok("conflictView: one row per recorded conflict", view.length === 2);
+  ok("conflictView: joins MY buffered content for a block I edited", view[0].blockId === "b1" && view[0].hasMine === true && view[0].mine.text === "MY-EDIT" && view[0].serverSeq === 9);
+  ok("conflictView: a conflict with no buffered edit is still surfaced (hasMine false, never dropped)", view[1].blockId === "b9" && view[1].hasMine === false && view[1].mine === null);
+  ok("pendingFor: finds my buffered entry by block id (null when absent)", g.pendingFor(cbuf, "b1").content.text === "MY-EDIT" && g.pendingFor(cbuf, "zzz") === null);
+
   // client->server message construction (the wire just serialises these)
   ok("helloMsg carries sinceSeq", g.helloMsg("C-1", 5).type === "sync.hello" && g.helloMsg("C-1", 5).payload.sinceSeq === 5);
   ok("changeMsg carries patch + baseSeq", (function () { var e = g.changeMsg("C-1", "b1", { text: "x" }, 3); return e.type === "block.change" && e.blockId === "b1" && e.payload.baseSeq === 3 && e.payload.patch.text === "x"; })());
@@ -346,6 +357,178 @@ section("client-mount sync-client inert");
   // index.html loads it before editor.js (so the editor can consult the gate at boot)
   var idx = src("index.html");
   ok("index.html loads sync-client.js before editor.js", idx.indexOf("src/sync-client.js") > 0 && idx.indexOf("src/sync-client.js") < idx.indexOf("src/editor.js"));
+
+  // ticket 13 durable buffer wiring (browser-only IndexedDB; inert without it)
+  ok("durable buffer is inert without IndexedDB (headless / private mode)", /var HAS = \(typeof indexedDB !== "undefined"\);/.test(t) && /if \(!HAS/.test(t));
+  ok("connect() rehydrates the durable buffer BEFORE the first replay", /hydrated = durable\.load\(docId\)[\s\S]{0,140}bufferAdd\(unacked, e\)/.test(t) && /hydrated\.then\(function \(\) \{ bufferReplay\(unacked\)/.test(t));
+  ok("sendChange + ack persist the buffer (survive crash/sleep)", /unacked = bufferAdd\(unacked, \{ blockId: blockId[\s\S]{0,80}persistBuffer\(\);/.test(t) && /unacked = bufferAck\(unacked, env\.blockId\); persistBuffer\(\);/.test(t));
+})();
+
+// ---- platform-pivot 15: base-only editing guard (axis previews read-only in collab) ----
+// The collab edit gate is a PURE function of {collaborating, activeVariant, activeVersion}.
+// Standalone (collaborating=false) it MUST reduce to today's behaviour exactly (#207: a
+// software version is the editable dynamic flagship; only a variant preview is read-only).
+// While collaborating, every axis preview is read-only so all editing targets the base doc.
+section("platform-pivot 15 base-only editing guard");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @collab-edit-gate-start \*\/([\s\S]*?)\/\* @collab-edit-gate-end \*\//);
+  if (!m) { ok("locate @collab-edit-gate fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { collabEditGate: collabEditGate };")().collabEditGate;
+
+  // --- STANDALONE (collaborating=false): byte-for-byte today's behaviour ---
+  ok("standalone base (no axis) -> canvas editable, version-edit off",
+    g(false, null, null).canvasEditable === true && g(false, null, null).versionEditable === false && g(false, null, null).axisPreviewReadOnly === false);
+  ok("standalone variant preview -> read-only canvas (unchanged)",
+    g(false, "Alpha", null).canvasEditable === false && g(false, "Alpha", null).versionEditable === false);
+  ok("standalone software-version -> editable dynamic flagship (#207 preserved)",
+    g(false, null, "v2").canvasEditable === true && g(false, null, "v2").versionEditable === true);
+  ok("standalone variant OVER a version -> read-only (variant wins)",
+    g(false, "Alpha", "v2").canvasEditable === false && g(false, "Alpha", "v2").versionEditable === false);
+
+  // --- COLLABORATING: any axis preview is read-only; only the BASE doc is editable ---
+  ok("collab base (no axis) -> still editable (block-locking handles concurrency)",
+    g(true, null, null).canvasEditable === true && g(true, null, null).versionEditable === false && g(true, null, null).axisPreviewReadOnly === false);
+  ok("collab software-version -> READ-ONLY (base-only editing; retires the version-clone footgun)",
+    g(true, null, "v2").canvasEditable === false && g(true, null, "v2").versionEditable === false && g(true, null, "v2").axisPreviewReadOnly === true);
+  ok("collab variant preview -> read-only (as standalone) + flagged",
+    g(true, "Alpha", null).canvasEditable === false && g(true, "Alpha", null).axisPreviewReadOnly === true);
+  ok("collab only changes the VERSION axis (variant was already read-only)",
+    g(true, "Alpha", null).canvasEditable === g(false, "Alpha", null).canvasEditable &&
+    g(true, null, "v2").canvasEditable !== g(false, null, "v2").canvasEditable);
+
+  // --- WIRING guard: the three canvas edit-enable sites gate on canvasEditable(), not raw
+  //     !activeVariant; currentDoc() picks the read-only resolved clone when !versionEditable. ---
+  ok("enableEditing sites gate on canvasEditable() (not raw !activeVariant)",
+    (t.match(/if \(canvasEditable\(\)\) enableEditing\(/g) || []).length === 3 &&
+    !/if \(!activeVariant\) enableEditing\(/.test(t));
+  ok("collaborating() reads the ONE VersoSync gate (inert -> false in standalone)",
+    /function collaborating\(\) \{ return !!\(window\.VersoSync && window\.VersoSync\.isCollaborating\(\)\); \}/.test(t));
+  // AC3 footgun: structural/inline edits unwrap to the BASE node (versionBaseNode) so an edit
+  // captured under an active preview axis lands on the base and can't be lost.
+  ok("inline edits unwrap to the base node via versionBaseNode (version-clone footgun guard)",
+    /block = versionBaseNode\(block\);/.test(t));
+})();
+
+// ---- platform-pivot 11: presence chrome (avatar cluster pure model + gated wiring) ----
+// presenceModel maps server presence.state peers -> the avatar cluster to draw. All presence
+// chrome hangs off VersoSync.isCollaborating(), so standalone shows nothing.
+section("platform-pivot 11 presence chrome");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @presence-model-start \*\/([\s\S]*?)\/\* @presence-model-end \*\//);
+  if (!m) { ok("locate @presence-model fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { presenceInitials: presenceInitials, presenceModel: presenceModel, findBlockLocation: findBlockLocation, peerHeldBlocks: peerHeldBlocks, conflictRows: conflictRows, blockPreview: blockPreview };")();
+
+  ok("initials: single name -> one letter", g.presenceInitials("Priya") === "P");
+  ok("initials: first+last -> two letters, upper", g.presenceInitials("marcus li") === "ML");
+  ok("initials: empty -> '?'", g.presenceInitials("") === "?" && g.presenceInitials("   ") === "?");
+  var peers = [
+    { name: "Priya", colour: "#e91e8c", editingBlockId: "b2" },      // editing (holds a block)
+    { author: "Marcus", colour: "#2ea36b", viewingBlockId: "b3" },   // viewing (author field alias)
+    { name: "Lena", colour: "#4d7cad", state: "viewing" },
+    { name: "Sam", colour: "#f5a623", state: "editing" },
+    { name: "Wei", colour: "#0d99ff", state: "viewing" }             // 5th -> overflow
+  ];
+  var mo = g.presenceModel(peers, 4);
+  ok("model: shows up to max, collapses the tail to +N", mo.shown.length === 4 && mo.overflow === 1 && mo.total === 5);
+  ok("model: editing detected from state OR editingBlockId", mo.shown[0].editing === true && mo.shown[3].editing === true);
+  ok("model: viewing is not editing", mo.shown[1].editing === false && mo.shown[2].editing === false);
+  ok("model: carries author colour + resolved block id", mo.shown[0].colour === "#e91e8c" && mo.shown[0].blockId === "b2" && mo.shown[1].name === "Marcus");
+  ok("model: no peers -> empty cluster", g.presenceModel([], 4).total === 0 && g.presenceModel(null, 4).shown.length === 0);
+
+  // gated wiring: the cluster only renders while collaborating; ensure() only wires in server mode;
+  // mount() reprojects. Standalone (VersoSync inert) shows no presence chrome.
+  ok("renderPresence gates on live() (isCollaborating) -> hidden in standalone", /if \(!live\(\) \|\| !peers\.length\) \{ el\.innerHTML = ""; el\.style\.display = "none"; return; \}/.test(t));
+  ok("ensure() only subscribes/connects in server mode (enabled)", /function ensure\(\) \{\s*if \(wired \|\| !enabled\(\)\) return;/.test(t));
+  ok("live() is the ONE VersoSync gate", /function live\(\) \{ return !!\(window\.VersoSync && window\.VersoSync\.isCollaborating\(\)\); \}/.test(t));
+  ok("mount() reprojects presence chrome after renderCommentPins", /renderCommentPins\(\);[\s\S]{0,140}CollabChrome\.ensure\(\); CollabChrome\.reproject\(\);/.test(t));
+  ok("presence cluster mounts in the toolbar right group", /document\.querySelector\("\.toolbar__group--right"\)/.test(t));
+  // presence CSS conforms to the PresenceCluster contract (20px, editing solid / viewing hollow)
+  var css = src("editor.css");
+  ok("presence avatar is control-sm + radius-full", /\.collab-av \{[\s\S]{0,160}var\(--control-sm, 20px\)[\s\S]{0,160}var\(--radius-full/.test(css));
+  ok("viewing state is the hollow/tinted variant", /\.collab-av\.is-viewing \{/.test(css));
+
+  // ---- ticket 11b: remote-apply (by stable id) + held-block read-only chrome (pure) ----
+  var pages = [
+    { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] },
+    { id: "p2", blocks: [ { id: "b3", type: "para", text: "Q" } ] }
+  ];
+  ok("findBlockLocation: locates a block by stable id across pages", (function () { var l = g.findBlockLocation(pages, "b3"); return l && l.pi === 1 && l.bi === 0; })());
+  ok("findBlockLocation: first-page block", (function () { var l = g.findBlockLocation(pages, "b2"); return l && l.pi === 0 && l.bi === 1; })());
+  ok("findBlockLocation: unknown id -> null (no throw)", g.findBlockLocation(pages, "zzz") === null && g.findBlockLocation(null, "b1") === null);
+  var locks = [
+    { resourceId: "b1", author: "Priya", class: "content" },
+    { resourceId: "b2", author: "Me", class: "content" },        // my own lock -> no chrome
+    { resourceId: "pageC", author: "Marcus", class: "structure" }, // structure lock -> not shown
+    { blockId: "b3", holder: "Lena" }                              // holder alias, default content
+  ];
+  var held = g.peerHeldBlocks(locks, "Me");
+  ok("peerHeldBlocks: only OTHERS' content locks earn read-only chrome", held.length === 2 && held.map(function (h) { return h.blockId; }).sort().join(",") === "b1,b3");
+  ok("peerHeldBlocks: excludes my own lock + structure locks", !held.some(function (h) { return h.holder === "Me"; }) && !held.some(function (h) { return h.blockId === "pageC"; }));
+
+  // 11b wiring guards: remote-apply is caret-safe (defers while typing) + patches by stable id;
+  // held-block chrome renders only while collaborating.
+  ok("applyRemote defers while a text field is focused (never yanks a caret)", /if \(typeof isTextTarget === "function" && isTextTarget\(document\.activeElement\)\) \{ pending\.push\(env\); return; \}/.test(t));
+  ok("applyRemote patches the one block by stable id then re-renders its page", /doc\.pages\[loc\.pi\]\.blocks\[loc\.bi\] = patch;\s*try \{ reapplyStructural\(loc\.pi\)/.test(t));
+  ok("deferred remote edits flush on blur", /document\.addEventListener\("blur", flushPending, true\)/.test(t));
+  ok("held-block chrome only renders while collaborating", /function renderLocks\(\) \{[\s\S]{0,400}if \(!live\(\)\) return;/.test(t));
+  ok("block.change routes to applyRemote in onEvent", /else if \(env\.type === "block\.change"\) \{ applyRemote\(env\); \}/.test(t));
+  ok("held-block CSS: author-colour inset outline + holder chip", /\.canvas-block\.collab-held \{ box-shadow: inset 0 0 0 1\.5px var\(--hcol/.test(css) && /\.collab-held__chip/.test(css));
+
+  // ---- ticket 13-UI: soft-conflict modal rows + handoff/notify (pure + wiring) ----
+  var cdoc = { pages: [ { id: "p1", blocks: [ { id: "b1", type: "para", text: "SERVER-CURRENT" } ] } ] };
+  var view = [ { blockId: "b1", mine: { id: "b1", type: "para", text: "MY-EDIT" }, hasMine: true, serverSeq: 9 },
+               { blockId: "gone", mine: { id: "gone", text: "ORPHAN-MINE" }, hasMine: true, serverSeq: 10 } ];
+  var crows = g.conflictRows(view, cdoc);
+  ok("conflictRows: joins my buffered edit with the server's current block", crows[0].blockId === "b1" && crows[0].mine.text === "MY-EDIT" && crows[0].theirs.text === "SERVER-CURRENT");
+  ok("conflictRows: a conflict whose block is gone still surfaces (theirs null, never dropped)", crows[1].blockId === "gone" && crows[1].theirs === null && crows[1].hasMine === true);
+  ok("blockPreview: strips tags, shows text (empty/deleted fallbacks never blank)", g.blockPreview({ text: "<b>Hi</b> there" }) === "Hi there" && g.blockPreview(null) === "(deleted)" && g.blockPreview({}) !== "");
+
+  // 13-UI wiring: modal driven by conflictView, never auto-dismiss; block.conflict -> reconnect,
+  // resnapshot-with-pending -> restore; handoff/notify go through the session.
+  ok("soft-conflict modal is driven by VersoSync.conflictView()", /conflictRows\(window\.VersoSync\.conflictView\(\)/.test(t));
+  ok("block.conflict opens the reconnect-collision prompt", /else if \(env\.type === "block\.conflict"\) \{ showConflicts\("server"\); \}/.test(t));
+  ok("resnapshot opens the restore-collision prompt only when I have unacked edits", /env\.type === "sync\.resnapshot"/.test(t) && /_buffer\.pending\(\)\.length\) showConflicts\("restored"\)/.test(t));
+  ok("Keep mine re-asserts my edit; Use theirs drops my buffer + applies theirs", /session\.sendChange\(r\.blockId, r\.mine, r\.serverSeq\)/.test(t) && /_buffer\.ack\(r\.blockId\)/.test(t));
+  ok("held chip opens a handoff/notify ContextMenu", /chip\.onclick = function \(e\) \{ e\.stopPropagation\(\); openHeldMenu\(e, hb\); \}/.test(t));
+  ok("handoff + notify go through the sync session", /session\.requestHandoff\(hb\.blockId\)/.test(t) && /session\.notifyWhenFree\(hb\.blockId, !armed\)/.test(t));
+  ok("13-UI CSS: modal shell + panes present", /\.collab-modal \{/.test(css) && /\.collab-pane\.is-mine/.test(css));
+
+  // sync-client exposes the handoff/notify session methods + envelope builders
+  var sc = src("src/sync-client.js");
+  ok("sync-client session: requestHandoff + notifyWhenFree", /requestHandoff: function \(blockId\)/.test(sc) && /notifyWhenFree: function \(blockId, on\)/.test(sc));
+  var scm = sc.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+  var sg = new Function(scm[1] + "\nreturn { handoffMsg: handoffMsg, notifyMsg: notifyMsg };")();
+  ok("sync-client handoffMsg/notifyMsg build the relayed envelopes", sg.handoffMsg("C-1", "b1").type === "lock.requestHandoff" && sg.notifyMsg("C-1", "b1", true).payload.on === true);
+})();
+
+// ---- platform-pivot 26: review-links author round-trip (guest tag + orphaned-anchor tray) ----
+// Reuses the SHIPPED comment system; the delta is guest-vs-internal + never-drop orphan surfacing.
+section("platform-pivot 26 review round-trip");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
+  if (!m) { ok("locate @comment-guest fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids };")();
+
+  ok("commentIsGuest: source guest-link OR guest flag", g.commentIsGuest({ source: "guest-link" }) === true && g.commentIsGuest({ guest: true }) === true && g.commentIsGuest({ author: "Me" }) === false);
+  var doc = { pages: [ { blocks: [ { cid: "c1", type: "para" }, { cid: "c2", type: "group", children: [ { cid: "c3" } ] } ] } ] };
+  var cids = g.docCids(doc);
+  ok("docCids: collects cids incl. nested children", cids.c1 && cids.c2 && cids.c3 && !cids.zzz);
+  ok("commentIsOrphaned: block-anchor whose cid is gone -> orphaned (never dropped)", g.commentIsOrphaned({ anchor: { blockId: "gone" } }, doc) === true);
+  ok("commentIsOrphaned: block-anchor whose cid still exists -> not orphaned", g.commentIsOrphaned({ anchor: { blockId: "c3" } }, doc) === false);
+  ok("commentIsOrphaned: page/world anchors don't orphan the same way", g.commentIsOrphaned({ anchor: { pageId: "p1" } }, doc) === false && g.commentIsOrphaned({ anchor: { worldX: 1 } }, doc) === false);
+
+  // wiring: the panel splits orphaned into a tray + tags guests; guest comments ride the SHIPPED
+  // doc.comments store via the sync channel (a delta, not a parallel comment system).
+  ok("panel splits orphaned notes into their own never-drop tray", /var orphaned = shown\.filter\(function \(c\) \{ return commentIsOrphaned\(c, doc\); \}\)/.test(t) && /Orphaned — need a home/.test(t));
+  ok("panel tags guest comments (guest-vs-internal weighing)", /if \(commentIsGuest\(c\)\) top\.appendChild\(h\("span", "comment-row__tag is-guest", "Guest"\)\)/.test(t));
+  ok("orphaned note is dismissible (kept until the author acts, never silently dropped)", /Dismiss this orphaned note[\s\S]{0,220}doc\.comments = \(doc\.comments \|\| \[\]\)\.filter/.test(t));
+  ok("guest comment ingest upserts into the shipped doc.comments by id", /function ingestComment\(payload\)/.test(t) && /if \(i >= 0\) doc\.comments\[i\] = c; else doc\.comments\.push\(c\);/.test(t) && /renderCommentPins\(\); if \(typeof refreshCommentPanel/.test(t));
+  ok("comment.added / comment.resolved route through the round-trip ingest", /else if \(env\.type === "comment\.added"\) \{ ingestComment/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveComment/.test(t));
+  var css = src("editor.css");
+  ok("26 CSS: guest tag + orphan tray", /\.comment-row__tag\.is-guest/.test(css) && /\.comment-list\.is-orphan-tray/.test(css));
 })();
 
 // ---- platform-pivot 03: block-addressable store pure helpers ----------------
@@ -7659,9 +7842,12 @@ section("ui-kit #10 DS control set");
 (function () {
   section("#207 edit-in-version (editor wiring)");
   var e = src("src/editor.js");
-  ok("versionEditable(): a version is editable only when no variant preview is layered", /function versionEditable\(\) \{ return !!activeVersion && !activeVariant; \}/.test(e));
+  // ticket 15 rewired the #207 gate through the pure collabEditGate (the "version editable only
+  // when no variant, and not collaborating" semantic now lives + is tested there). versionEditable()
+  // delegates to it; the standalone #207 behaviour is asserted in the "base-only editing guard" section.
+  ok("versionEditable() delegates to the collab edit gate (#207 semantic preserved standalone)", /function versionEditable\(\) \{ return editGate\(\)\.versionEditable; \}/.test(e));
   ok("editable version uses the resolveVersionForEdit tree", /versionEditable\(\) && window\.resolveVersionForEdit\)\s*\? window\.resolveVersionForEdit\(d, activeVersion\)/.test(e));
-  ok("enableEditing gate keys off !activeVariant (version = editable flagship)", (e.match(/if \(!activeVariant\) enableEditing\(world\);/g) || []).length >= 2);
+  ok("enableEditing gate keys off canvasEditable() (version = editable flagship UNLESS collaborating)", (e.match(/if \(canvasEditable\(\)\) enableEditing\(world\);/g) || []).length >= 2);
   ok("writeModel captures into versionOverrides via __vbase when editing a version", /if \(versionEditable\(\) && obj && obj\.__vbase\) setVersionOverrideField\(obj\.__vbase, activeVersion, field, value\);\s*else obj\[field\] = value;/.test(e));
   ok("capture is undoable — the input handler pushHistory precedes writeModel", /pushHistory\(\);[\s\S]{0,120}hasPushedForFocus = true;[\s\S]{0,200}writeModel\(node,/.test(e));
   ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(e));

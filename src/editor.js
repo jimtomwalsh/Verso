@@ -1875,7 +1875,29 @@
   function receiptsFor(doc, taskId) { return ((doc && doc.comments) || []).filter(function (c) { return commentIsReceipt(c) && c.parentId === taskId; }); }
   function openTasks(doc) { return taskComments(doc).filter(function (c) { return !c.done; }); }
   function doneTasks(doc) { return taskComments(doc).filter(function (c) { return !!c.done; }); }
-  window.__commentModel = { isReceipt: commentIsReceipt, isTask: commentIsTask, tasks: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks };
+  // ticket 26 (review-links round-trip): guest-vs-internal + orphaned-anchor classifiers. Both are
+  // pure + additive over the SHIPPED comment object (no new store, no migration) -- a guest comment
+  // is an ordinary doc.comments entry with source:"guest-link"; an orphaned one is a block-anchored
+  // note whose target block (by stable cid) the author has since deleted. Surfaced, never dropped.
+  /* @comment-guest-start */
+  function commentIsGuest(c) { return !!(c && (c.source === "guest-link" || c.guest === true)); }
+  function docCids(doc, acc) {
+    acc = acc || {};
+    function walk(b) {
+      if (!b || typeof b !== "object") return;
+      if (typeof b.cid === "string") acc[b.cid] = true;
+      ["children", "columns", "items", "blocks", "cells"].forEach(function (k) { if (Array.isArray(b[k])) b[k].forEach(walk); });
+    }
+    ((doc && doc.pages) || []).forEach(function (p) { (p.blocks || []).forEach(walk); });
+    return acc;
+  }
+  function commentIsOrphaned(c, doc) {
+    var a = c && c.anchor;
+    if (!a || !a.blockId) return false; // only block-anchored notes orphan (page/world resolve differently)
+    return !docCids(doc)[a.blockId];
+  }
+  /* @comment-guest-end */
+  window.__commentModel = { isReceipt: commentIsReceipt, isTask: commentIsTask, tasks: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks, isGuest: commentIsGuest, isOrphaned: commentIsOrphaned };
   // Re-mint on duplicate: a cloned subtree must never reuse ids, or a copy's
   // interactions/gate would collide with the original — and a shared cid would make
   // a comment anchor to two blocks at once. Walk children / columns / items and
@@ -3107,7 +3129,7 @@
     canvas.classList.toggle("is-version-preview", !!activeVersion);
     updateVariantBadge();
     updateVersionBadge();
-    if (!activeVariant) enableEditing(world); // #207: a variant preview is read-only; a software version is the editable flagship
+    if (canvasEditable()) enableEditing(world); // #207 + ticket 15: variant preview read-only; software version editable UNLESS collaborating
     fitEmbeds();
     refreshCanvasSelection();
     if (!view.ready) fitAll(); else applyView();
@@ -3140,7 +3162,7 @@
       // frame.innerHTML="" above wiped any grid overlay — re-seed it on the active page
       if (i === currentPage && gridMode !== "off") frame.appendChild(makeGridOverlay());
     } finally { if (__restoreMedia) __restoreMedia(); }
-    if (!activeVariant) enableEditing(frame);
+    if (canvasEditable()) enableEditing(frame); // ticket 15: base-only editing while collaborating
     fitEmbedsIn(frame);
     drawConnectors();
     refreshCanvasSelection();
@@ -13882,7 +13904,7 @@
     canvas.classList.toggle("is-version-preview", !!activeVersion);
     updateVariantBadge();
     updateVersionBadge();
-    if (!activeVariant) enableEditing(world); // #207: version = editable flagship; only a variant preview is read-only
+    if (canvasEditable()) enableEditing(world); // #207 + ticket 15: version = editable flagship UNLESS collaborating (base-only)
     fitEmbeds();
     // fitEmbeds() resizes HTML/web-embed iframes to fit, changing their frames'
     // heights AFTER the drawConnectors() above measured them — re-stack so the pages
@@ -13903,6 +13925,7 @@
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
     renderCommentPins(); // §12: re-project review pins (canvas.innerHTML was cleared)
+    if (typeof CollabChrome !== "undefined") { CollabChrome.ensure(); CollabChrome.reproject(); } // ticket 11: presence chrome (server-mode only; inert in standalone)
 
     if (activeInfo) {
       var inputs = inspector.querySelectorAll("input, select, textarea");
@@ -14736,24 +14759,50 @@
       UI.Button({ variant: commentFilter === "resolved" ? "primary" : "secondary", full: true, label: "Resolved (" + resN + ")", onClick: function () { commentFilter = "resolved"; renderCommentList(); } })
     ] }));
     var shown = list.filter(function (c) { return commentFilter === "resolved" ? c.done : !c.done; });
+    // ticket 26: split off ORPHANED notes (block-anchored, block since deleted) into their own tray
+    // so a reviewer's feedback is never silently lost when the author deletes the block it points at.
+    var orphaned = shown.filter(function (c) { return commentIsOrphaned(c, doc); });
+    var anchored = shown.filter(function (c) { return !commentIsOrphaned(c, doc); });
     if (!shown.length) {
       inspector.appendChild(h("div", "insp-hint", commentFilter === "resolved" ? "No resolved comments yet." : "No open comments. Click anywhere on the canvas to drop one."));
       return;
     }
-    var listWrap = h("div", "comment-list");
-    shown.forEach(function (c) {
-      var row = h("div", "comment-row" + (c.id === openCommentId ? " is-open" : ""));
+    // one row builder, reused for the anchored list + the orphaned tray (ticket 26).
+    function commentRow(c, isOrphan) {
+      var row = h("div", "comment-row" + (c.id === openCommentId ? " is-open" : "") + (isOrphan ? " is-orphan" : ""));
       var dot = h("span", "comment-row__dot"); if (c.colour) dot.style.background = c.colour;
+      var mid = h("div", "comment-row__mid");
+      var top = h("div", "comment-row__meta");
+      if (c.author) top.appendChild(h("span", "comment-row__name", c.author));
+      if (commentIsGuest(c)) top.appendChild(h("span", "comment-row__tag is-guest", "Guest")); // ticket 26: guest-vs-internal
+      if (top.childNodes.length) mid.appendChild(top);
       var text = (c.body || "").trim();
-      var snip = h("span", "comment-row__snip" + (text ? "" : " is-empty"), text || "(empty note)");
-      var box = UI.Checkbox({ checked: !!c.done, onChange: function (v) { pushHistory(); c.done = v; scheduleSave(); renderCommentPins(); renderCommentList(); } });
-      box.classList.add("comment-row__done"); box.title = "Resolve";
-      box.addEventListener("click", function (e) { e.stopPropagation(); });
-      row.appendChild(dot); row.appendChild(snip); row.appendChild(box);
-      row.addEventListener("click", function () { jumpToComment(c); renderCommentList(); });
-      listWrap.appendChild(row);
-    });
+      mid.appendChild(h("span", "comment-row__snip" + (text ? "" : " is-empty"), text || "(empty note)"));
+      if (isOrphan) mid.appendChild(h("div", "comment-row__orphan-note", "The block this points at was deleted."));
+      row.appendChild(dot); row.appendChild(mid);
+      if (isOrphan) {
+        var dismiss = iconBtn("trash", "Dismiss this orphaned note", true);
+        dismiss.addEventListener("click", function (e) { e.stopPropagation(); pushHistory(); doc.comments = (doc.comments || []).filter(function (x) { return x.id !== c.id; }); scheduleSave(); renderCommentPins(); renderCommentList(); });
+        row.appendChild(dismiss);
+      } else {
+        var box = UI.Checkbox({ checked: !!c.done, onChange: function (v) { pushHistory(); c.done = v; scheduleSave(); renderCommentPins(); renderCommentList(); } });
+        box.classList.add("comment-row__done"); box.title = "Resolve";
+        box.addEventListener("click", function (e) { e.stopPropagation(); });
+        row.appendChild(box);
+        row.addEventListener("click", function () { jumpToComment(c); renderCommentList(); });
+      }
+      return row;
+    }
+    var listWrap = h("div", "comment-list");
+    anchored.forEach(function (c) { listWrap.appendChild(commentRow(c, false)); });
     inspector.appendChild(listWrap);
+    if (orphaned.length) {
+      inspector.appendChild(h("div", "comment-group__head", "Orphaned — need a home (" + orphaned.length + ")"));
+      inspector.appendChild(h("div", "insp-hint", "These notes lost the block they pointed at. Kept, never dropped — re-anchor by re-adding the block, or dismiss."));
+      var orphanWrap = h("div", "comment-list is-orphan-tray");
+      orphaned.forEach(function (c) { orphanWrap.appendChild(commentRow(c, true)); });
+      inspector.appendChild(orphanWrap);
+    }
   }
   // Re-render the panel list after a comment change (only while in comment mode —
   // renderInspector clears + routes to renderCommentList; calling it directly would
@@ -14791,6 +14840,272 @@
     a.download = "comments-" + (doc.code || doc.id || "course") + ".json"; a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
+  // ===== Live-collaboration chrome (platform-pivot ticket 11; SERVER-MODE ONLY) =========
+  // Presence avatars (this increment) + remote cursors + held-block read-only chrome (11b).
+  // ONE controller, INERT unless VersoSync.isCollaborating(): every render path hangs off that
+  // single gate, so standalone/solo shows NO presence chrome and takes exactly today's branches.
+  // Reuses colourForName (the comment-review palette -> one colour per person everywhere). Nothing
+  // here touches render()/course.css -- editor chrome only.
+  //
+  // PURE model (headless-tested; no DOM, no network): the peers list -> the avatar cluster to draw
+  // (editing vs viewing, deterministic initials, "+N" overflow past `max`). The server's
+  // presence.state peer carries {name/author, colour, viewingBlockId, editingBlockId, cursor}.
+  /* @presence-model-start */
+  function presenceInitials(name) {
+    var parts = String(name || "?").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return "?";
+    return ((parts[0][0] || "?") + (parts.length > 1 ? (parts[parts.length - 1][0] || "") : "")).toUpperCase();
+  }
+  function presenceModel(peers, max) {
+    max = max || 4;
+    var list = (peers || []).map(function (p) {
+      var nm = p.name || p.author || "?";
+      return { name: nm, initials: presenceInitials(nm), colour: p.colour || null,
+        editing: p.state === "editing" || !!p.editingBlockId,
+        blockId: p.editingBlockId || p.viewingBlockId || p.blockId || null };
+    });
+    return { shown: list.slice(0, max), overflow: Math.max(0, list.length - max), total: list.length };
+  }
+  // ticket 11b: locate a top-level block's page/index by stable id (the remote block.change
+  // target). Pure; returns {pi, bi} or null. The server's block.change is keyed by stable id.
+  function findBlockLocation(pages, id) {
+    for (var p = 0; p < (pages || []).length; p++) {
+      var bs = (pages[p] && pages[p].blocks) || [];
+      for (var b = 0; b < bs.length; b++) if (bs[b] && bs[b].id === id) return { pi: p, bi: b };
+    }
+    return null;
+  }
+  // ticket 11b: which locks earn read-only chrome -- CONTENT locks held by SOMEONE ELSE (never my
+  // own; structure locks are momentary and not shown). Pure; -> [{blockId, holder}].
+  function peerHeldBlocks(locks, meName) {
+    return (locks || []).filter(function (lk) {
+      var cls = lk.class || lk.klass || "content";
+      var who = lk.author || lk.holder;
+      return cls === "content" && !!(lk.resourceId || lk.blockId) && !!who && who !== meName;
+    }).map(function (lk) { return { blockId: lk.resourceId || lk.blockId, holder: lk.author || lk.holder }; });
+  }
+  // ticket 13-UI: the soft-conflict prompt rows. Joins VersoSync.conflictView() (WHICH block +
+  // MY buffered edit) with the server's CURRENT block from the reduced doc, so the modal can show
+  // "my edits vs current/restored" side by side. Pure; never drops a conflict (a row with no
+  // server block still surfaces). -> [{blockId, mine, theirs, hasMine, serverSeq}].
+  function conflictRows(view, doc) {
+    var pages = (doc && doc.pages) || [];
+    return (view || []).map(function (c) {
+      var loc = findBlockLocation(pages, c.blockId);
+      var theirs = loc ? pages[loc.pi].blocks[loc.bi] : null;
+      return { blockId: c.blockId, mine: c.mine || null, theirs: theirs, hasMine: !!c.hasMine, serverSeq: c.serverSeq };
+    });
+  }
+  // ticket 13-UI: a compact text preview of a block for the two conflict panes (headline text /
+  // body / first string field). Pure; falls back to a short JSON snippet so nothing renders blank.
+  function blockPreview(b) {
+    if (!b) return "(deleted)";
+    var f = b.text || b.body || b.html || b.title || b.caption;
+    if (typeof f === "string") return f.replace(/<[^>]+>/g, "").trim() || "(empty)";
+    try { var s = JSON.stringify(b); return s.length > 160 ? s.slice(0, 157) + "…" : s; } catch (e) { return "(block)"; }
+  }
+  /* @presence-model-end */
+
+  var CollabChrome = (function () {
+    var wired = false, session = null, peers = [], locks = [], pending = [];
+    var resolvedConflicts = [], notifyArmed = {};
+    function enabled() { return !!(window.VersoSync && window.VersoSync.enabled); }
+    function live() { return !!(window.VersoSync && window.VersoSync.isCollaborating()); }
+
+    function clusterEl() {
+      var host = document.querySelector(".toolbar__group--right");
+      if (!host) return null;
+      var el = host.querySelector(".collab-presence");
+      if (!el) { el = h("div", "collab-presence"); host.insertBefore(el, host.firstChild); }
+      return el;
+    }
+    // ticket 11: the presence avatar cluster (avatars of who is here, editing vs viewing).
+    function renderPresence() {
+      var el = clusterEl(); if (!el) return;
+      if (!live() || !peers.length) { el.innerHTML = ""; el.style.display = "none"; return; }
+      el.style.display = "";
+      el.innerHTML = "";
+      var m = presenceModel(peers, 4);
+      m.shown.forEach(function (p) {
+        var av = h("div", "collab-av" + (p.editing ? " is-editing" : " is-viewing"));
+        av.style.setProperty("--acol", p.colour || "#888");
+        av.setAttribute("title", p.name + (p.editing ? " — editing" : " — viewing"));
+        av.textContent = p.initials;
+        el.appendChild(av);
+      });
+      if (m.overflow) { var more = h("div", "collab-av collab-av--more"); more.textContent = "+" + m.overflow; el.appendChild(more); }
+    }
+    // ticket 11b: a fanned-out remote block.change -> patch the ONE changed block on the live
+    // canvas by stable id. Caret-safe: while the local author is typing, DEFER (queue) and flush
+    // on the next blur, so a peer's edit never yanks a caret. (Block-locking already prevents a
+    // peer editing the block I hold, so the deferred window only affects my own in-flight typing.)
+    function applyRemote(env) {
+      if (!env || env.type !== "block.change" || !env.blockId) return;
+      var patch = env.payload && env.payload.patch;
+      if (typeof patch === "string") { try { patch = JSON.parse(patch); } catch (e) { return; } }
+      if (!patch) return;
+      if (typeof isTextTarget === "function" && isTextTarget(document.activeElement)) { pending.push(env); return; }
+      var loc = findBlockLocation((doc && doc.pages) || [], env.blockId);
+      if (!loc) return;
+      doc.pages[loc.pi].blocks[loc.bi] = patch;
+      try { reapplyStructural(loc.pi); } catch (e) { try { mount(); } catch (e2) {} } // re-render just that page (mount() if previewing)
+      reproject();
+    }
+    function flushPending() {
+      if (!pending.length) return;
+      var q = pending; pending = [];
+      q.forEach(applyRemote);
+    }
+    // ticket 11b: held-block read-only chrome. A block a PEER holds a content lock on gets an
+    // author-colour inset outline + an "editing…" holder chip and goes contenteditable=false
+    // (the visible face of ticket 15's read-only gate). My own locks show no chrome.
+    function renderLocks() {
+      Array.prototype.forEach.call(canvas.querySelectorAll(".collab-held"), function (el) {
+        el.classList.remove("collab-held"); el.style.removeProperty("--hcol"); el.removeAttribute("data-collab-holder");
+        el.removeAttribute("aria-readonly");
+        var c = el.querySelector(".collab-held__chip"); if (c) c.remove();
+      });
+      if (!live()) return;
+      var me = commentIdentity().name;
+      peerHeldBlocks(locks, me).forEach(function (hb) {
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(hb.blockId) : hb.blockId;
+        var el = canvas.querySelector('.canvas-block[data-id="' + esc + '"]');
+        if (!el) return;
+        var colour = colourForName(hb.holder);
+        el.classList.add("collab-held"); el.style.setProperty("--hcol", colour);
+        el.setAttribute("data-collab-holder", hb.holder); el.setAttribute("aria-readonly", "true");
+        var chip = h("div", "collab-held__chip"); chip.style.setProperty("--hcol", colour);
+        var av = h("span", "collab-held__av"); av.textContent = presenceInitials(hb.holder); chip.appendChild(av);
+        chip.appendChild(h("span", "collab-held__lbl", hb.holder + " editing…"));
+        chip.setAttribute("role", "button"); chip.setAttribute("title", "Ask " + hb.holder + " for this block");
+        chip.onclick = function (e) { e.stopPropagation(); openHeldMenu(e, hb); };
+        el.appendChild(chip);
+      });
+    }
+    // ticket 13-UI: the human path out of a stuck lock -- a ContextMenu off the held-block chip.
+    // Request handoff nudges the holder; notify-when-free arms a ping on release. Both go over the
+    // presence channel (server relays them). Light-dismiss (click-out / Escape).
+    function closeHeldMenu() { var m = document.querySelector(".collab-menu"); if (m) m.remove(); }
+    function openHeldMenu(e, hb) {
+      closeHeldMenu();
+      var armed = !!notifyArmed[hb.blockId];
+      var menu = h("div", "collab-menu");
+      var bh = h("button", "collab-menu__item", "Request handoff");
+      bh.onclick = function (ev) { ev.stopPropagation(); closeHeldMenu(); if (session && session.requestHandoff) session.requestHandoff(hb.blockId); toast(hb.holder + " nudged for this block"); };
+      var bn = h("button", "collab-menu__item" + (armed ? " is-armed" : ""), armed ? "Notifying when free" : "Notify me when free");
+      bn.onclick = function (ev) { ev.stopPropagation(); closeHeldMenu(); notifyArmed[hb.blockId] = !armed; if (session && session.notifyWhenFree) session.notifyWhenFree(hb.blockId, !armed); toast(!armed ? "You’ll be told when this block frees" : "Notify-when-free off"); };
+      menu.appendChild(bh); menu.appendChild(bn);
+      document.body.appendChild(menu);
+      var r = e.currentTarget.getBoundingClientRect();
+      menu.style.left = Math.min(r.left, window.innerWidth - 210) + "px";
+      menu.style.top = (r.bottom + 6) + "px";
+    }
+    // a tiny transient toast (reused for handoff/notify confirmation; light, non-blocking)
+    function toast(msg) {
+      var t = h("div", "collab-toast", msg); document.body.appendChild(t);
+      requestAnimationFrame(function () { t.classList.add("is-on"); });
+      setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 3000);
+    }
+    // ---- ticket 13-UI: the soft-conflict prompt (reconnect-collision + restore-collision) ----
+    // Driven by VersoSync.conflictView() joined with the current doc. Two panes -- my buffered
+    // edits vs the current/restored block -- and a deliberate Keep mine / Use theirs. NEVER auto-
+    // dismisses and NEVER silently drops. `variant` = "server" (reconnect) | "restored" (restore).
+    function showConflicts(variant) {
+      if (!live() || !window.VersoSync || !window.VersoSync.conflictView) return;
+      var rows = conflictRows(window.VersoSync.conflictView(), window.VersoSync._state ? window.VersoSync._state().doc : (doc || null))
+        .filter(function (r) { return resolvedConflicts.indexOf(r.blockId) === -1; });
+      if (!rows.length) { closeConflict(); return; }
+      var r = rows[0]; // resolve one block at a time; the modal reopens for the next
+      var theirsLabel = variant === "restored" ? "Restored version" : "Current on server";
+      var desc = variant === "restored"
+        ? "An admin restored this course while you had unsaved edits."
+        : "This block moved on while you were disconnected.";
+      closeConflict();
+      var scrim = h("div", "collab-scrim"); scrim.setAttribute("data-collab-conflict", "1");
+      var modal = h("div", "collab-modal");
+      modal.appendChild(h("div", "collab-modal__title", "Resolve your unsaved edits"));
+      modal.appendChild(h("div", "collab-modal__desc", desc + " Nothing is lost — choose which to keep. (" + rows.length + " to resolve)"));
+      var panes = h("div", "collab-panes");
+      var pMine = h("div", "collab-pane is-mine"); pMine.appendChild(h("div", "collab-pane__h", "Your edits")); pMine.appendChild(h("div", "collab-pane__b", blockPreview(r.mine)));
+      var pTheirs = h("div", "collab-pane"); pTheirs.appendChild(h("div", "collab-pane__h", theirsLabel)); pTheirs.appendChild(h("div", "collab-pane__b", blockPreview(r.theirs)));
+      panes.appendChild(pMine); panes.appendChild(pTheirs);
+      modal.appendChild(panes);
+      var foot = h("div", "collab-modal__foot");
+      var useTheirs = h("button", "collab-btn", "Use " + (variant === "restored" ? "restored" : "theirs"));
+      var keepMine = h("button", "collab-btn is-primary", "Keep mine");
+      useTheirs.onclick = function () { resolveConflict(r, "theirs", variant); };
+      keepMine.onclick = function () { resolveConflict(r, "mine", variant); };
+      foot.appendChild(useTheirs); foot.appendChild(keepMine);
+      modal.appendChild(foot);
+      scrim.appendChild(modal); document.body.appendChild(scrim);
+    }
+    function closeConflict() {
+      var s = document.querySelector(".collab-scrim[data-collab-conflict]"); if (s) s.remove();
+    }
+    function resolveConflict(r, which, variant) {
+      resolvedConflicts.push(r.blockId);
+      try {
+        if (which === "mine" && r.hasMine && session && session.sendChange) {
+          session.sendChange(r.blockId, r.mine, r.serverSeq); // re-assert my edit on top of the new server seq
+        } else if (which === "theirs") {
+          if (window.VersoSync && window.VersoSync._buffer) window.VersoSync._buffer.ack(r.blockId); // drop my buffered edit
+          if (r.theirs) applyRemote({ type: "block.change", blockId: r.blockId, payload: { patch: r.theirs } });
+        }
+      } catch (e) {}
+      showConflicts(variant); // reopen for the next unresolved block, or close when none remain
+    }
+
+    function onEvent(env, state) {
+      if (!env) return;
+      if (env.type === "presence.state") { peers = (state && state.peers) || []; reproject(); }
+      else if (env.type === "lock.state") { locks = (state && state.locks) || []; reproject(); }
+      else if (env.type === "block.change") { applyRemote(env); }
+      else if (env.type === "block.conflict") { showConflicts("server"); }           // reconnect-collision
+      else if (env.type === "sync.resnapshot") {                                       // restore-collision if I had unacked edits
+        if (window.VersoSync && window.VersoSync._buffer && window.VersoSync._buffer.pending().length) showConflicts("restored");
+      }
+      else if (env.type === "comment.added") { ingestComment(env.payload || env); }    // ticket 26: guest/author comment round-trip
+      else if (env.type === "comment.resolved") { resolveComment(env.payload || env); }
+    }
+    // ticket 26: a comment fanned out over the sync channel (a guest reviewer's note, or another
+    // author's) lands in the SHIPPED doc.comments store by id and renders through the existing pins
+    // + panel -- a delta, not a parallel comment system. Guest notes carry source:"guest-link".
+    function ingestComment(payload) {
+      var c = payload && (payload.comment || payload); if (!c || !c.id || !c.anchor) return;
+      doc.comments = doc.comments || [];
+      var i = -1; for (var k = 0; k < doc.comments.length; k++) if (doc.comments[k].id === c.id) { i = k; break; }
+      if (i >= 0) doc.comments[i] = c; else doc.comments.push(c);
+      try { renderCommentPins(); if (typeof refreshCommentPanel === "function") refreshCommentPanel(); } catch (e) {}
+    }
+    function resolveComment(payload) {
+      var id = payload && (payload.id || (payload.comment && payload.comment.id)); if (!id) return;
+      (doc.comments || []).forEach(function (c) { if (c.id === id) c.done = true; });
+      try { renderCommentPins(); if (typeof refreshCommentPanel === "function") refreshCommentPanel(); } catch (e) {}
+    }
+    // Idempotent: subscribe + connect once, only in server mode. No-op in standalone.
+    function ensure() {
+      if (wired || !enabled()) return;
+      wired = true;
+      try {
+        window.VersoSync.onEvent(onEvent);
+        document.addEventListener("blur", flushPending, true); // flush deferred remote edits when a field loses focus
+        session = window.VersoSync.connect(activeDocId);
+      } catch (e) {}
+    }
+    // Light-dismiss for the handoff menu (NOT the conflict modal, which never auto-dismisses).
+    // Always wired -- harmless when no menu is open, so it works the instant a menu appears.
+    document.addEventListener("click", closeHeldMenu);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeHeldMenu(); });
+    // Re-draw the collab overlays after a mount() (canvas.innerHTML was cleared). Cheap + gated.
+    function reproject() { try { renderPresence(); renderLocks(); } catch (e) {} }
+    return { ensure: ensure, reproject: reproject, live: live, _model: presenceModel,
+      _peers: function (p) { peers = p || []; }, _locks: function (l) { locks = l || []; },
+      _applyRemote: applyRemote, _flush: flushPending, _pending: function () { return pending.slice(); },
+      _showConflicts: showConflicts, _openHeldMenu: openHeldMenu, _resolved: function () { return resolvedConflicts.slice(); },
+      _session: function () { return session; } };
+  })();
+  window.__CollabChrome = CollabChrome;
+
   function mergeComments(incoming) {
     doc.comments = doc.comments || [];
     var byId = {}; doc.comments.forEach(function (c) { byId[c.id] = c; });
@@ -16538,10 +16853,33 @@
   // ACTUAL editability gate is narrower: only a VARIANT preview is read-only; a software version
   // is the editable flagship (#207), so canvas editing keys off !activeVariant, not !isPreview().
   function isPreview() { return !!activeVariant || !!activeVersion; }
+  // Ticket 15 (platform-pivot, collab): base-only editing while collaborating. All concurrent
+  // editing + structural ops target the BASE doc (structural ops are already base-only — isPreview
+  // blocks them for any active axis); an axis preview (product-variant OR software-version) is
+  // READ-ONLY while collaborating. PURE (no editor state) so tests/run.js pins it. Standalone:
+  // collaborating=false, so every result reduces EXACTLY to today's behaviour (a software version
+  // stays the editable dynamic flagship #207; only a variant preview is read-only).
+  /* @collab-edit-gate-start */
+  function collabEditGate(collaborating, activeVariant, activeVersion) {
+    var axisActive = !!activeVariant || !!activeVersion;
+    return {
+      axisPreviewReadOnly: !!collaborating && axisActive,                       // any axis preview -> read-only in collab
+      canvasEditable: !activeVariant && !(!!collaborating && !!activeVersion),  // base only under collab
+      versionEditable: !!activeVersion && !activeVariant && !collaborating      // #207 in-place version edit off in collab
+    };
+  }
+  /* @collab-edit-gate-end */
+  // The ONE collab gate (server URL AND a live connection). VersoSync is always defined (inert
+  // without a server URL) -> false in standalone, so every branch below is today's code.
+  function collaborating() { return !!(window.VersoSync && window.VersoSync.isCollaborating()); }
+  function editGate() { return collabEditGate(collaborating(), activeVariant, activeVersion); }
+  // Canvas content is editable on the base doc; a variant preview is always read-only, and a
+  // software-version preview becomes read-only too WHILE COLLABORATING (base-only editing).
+  function canvasEditable() { return editGate().canvasEditable; }
   // #207: a non-base software version is the editable "dynamic flagship" when no variant preview
-  // is layered on top (a variant preview is always read-only). Base (activeVersion null) edits
-  // write base fields; an active version's inline edits capture into versionOverrides[version].
-  function versionEditable() { return !!activeVersion && !activeVariant; }
+  // is layered on top. Base (activeVersion null) edits write base fields; an active version's
+  // inline edits capture into versionOverrides[version] — but NOT while collaborating (base only).
+  function versionEditable() { return editGate().versionEditable; }
   // The two axes NEST: product resolves first (variant), then the software version resolves on
   // top of the already-product-resolved doc. Base editing
   // (both null) binds to the raw doc so it stays live-editable. An EDITABLE version uses the

@@ -72,6 +72,21 @@
   function bufferAck(buf, blockId) { return buf.filter(function (e) { return e.blockId !== blockId; }); }
   function bufferReplay(buf) { return buf.slice(); }
 
+  // Ticket 13: the UI join for a soft-conflict prompt -- "my buffered edits vs current",
+  // never a silent drop. The reducer above records WHICH block conflicted (block.conflict /
+  // a resnapshot landing on a buffered block); the unacked buffer holds MY content; server
+  // state holds CURRENT. These PURE helpers join them so the (chrome) prompt can show both
+  // sides. pendingFor -> my buffered entry for a block (or null); conflictView -> one row per
+  // recorded conflict enriched with my buffered content + whether I still hold it.
+  function pendingFor(buf, blockId) { for (var i = 0; i < buf.length; i++) if (buf[i].blockId === blockId) return buf[i]; return null; }
+  function conflictView(state, buf) {
+    buf = buf || [];
+    return ((state && state.conflicts) || []).map(function (c) {
+      var p = pendingFor(buf, c.blockId);
+      return { blockId: c.blockId, baseSeq: c.baseSeq, serverSeq: c.serverSeq, mine: p ? p.content : null, hasMine: !!p };
+    });
+  }
+
   // Build the typed client->server envelopes (pure; the wire just serialises these). Mirror
   // of the server's envelope shape { type, docId, blockId, seq, author, ts, payload }.
   function mkEnvelope(type, docId, blockId, payload) {
@@ -82,6 +97,10 @@
   function lockMsg(acquire, docId, blockId) { return mkEnvelope(acquire ? "lock.acquire" : "lock.release", docId, blockId, {}); }
   function heartbeatMsg(docId, viewingBlockId, editingBlockId) { return mkEnvelope("presence.heartbeat", docId, null, { viewingBlockId: viewingBlockId || null, editingBlockId: editingBlockId || null }); }
   function commentMsg(docId, blockId, body, threadId) { return mkEnvelope("comment.add", docId, blockId, { body: body, threadId: threadId }); }
+  // Ticket 13: the human path out of a stuck lock (the server relays both over the presence
+  // channel). requestHandoff nudges the current holder; notifyWhenFree fires on release.
+  function handoffMsg(docId, blockId) { return mkEnvelope("lock.requestHandoff", docId, blockId, {}); }
+  function notifyMsg(docId, blockId, on) { return mkEnvelope("lock.notifyWhenFree", docId, blockId, { on: on !== false }); }
   /* @sync-client-end */
 
   // ---- thin WIRE (browser only; inert without a server URL) ----------------
@@ -113,12 +132,31 @@
     };
   }
 
+  // ---- durable unacked buffer (ticket 13; browser-only IndexedDB) ----------
+  // The in-memory `unacked` buffer survives a RECONNECT (replayed on open). This persists it
+  // across a CRASH / laptop-sleep / tab-close too, so in-progress edits are NEVER lost -- they
+  // rehydrate on the next connect and replay. Keyed by docId. INERT (every method resolves to a
+  // no-op) when IndexedDB is unavailable (headless tests / private mode) so the client still runs.
+  function DurableBuffer(dbName) {
+    var HAS = (typeof indexedDB !== "undefined");
+    function open() { return new Promise(function (res, rej) { var r = indexedDB.open(dbName, 1); r.onupgradeneeded = function () { r.result.createObjectStore("buf"); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; }); }
+    return {
+      enabled: HAS,
+      load: function (docId) { if (!HAS || !docId) return Promise.resolve([]); return open().then(function (db) { return new Promise(function (res) { var g = db.transaction("buf", "readonly").objectStore("buf").get(docId); g.onsuccess = function () { res(g.result || []); }; g.onerror = function () { res([]); }; }); }).catch(function () { return []; }); },
+      save: function (docId, entries) { if (!HAS || !docId) return Promise.resolve(); return open().then(function (db) { return new Promise(function (res) { var tx = db.transaction("buf", "readwrite"); tx.objectStore("buf").put((entries || []).slice(), docId); tx.oncomplete = res; tx.onerror = res; }); }).catch(function () {}); }
+    };
+  }
+
   // The public facade. INERT unless a server URL is present -> window.VersoSync.enabled is
   // false in standalone and connect() is a no-op, so nothing in the editor activates.
   var state = { serverUrl: serverUrl(), connected: false, doc: null, seq: 0, locks: [], peers: [], conflicts: [] };
   var unacked = [];
   var transport = null, listeners = [];
-  function emit(env) { state = applyServerEvent(state, env); if (env && env.type === "block.ack") unacked = bufferAck(unacked, env.blockId); listeners.forEach(function (cb) { try { cb(env, state); } catch (e) {} }); }
+  var durable = DurableBuffer("verso-sync-buffer");
+  var hydrated = Promise.resolve();
+  // persist the current buffer for the active doc (fire-and-forget; never blocks the edit path)
+  function persistBuffer() { if (state.docId) durable.save(state.docId, unacked); }
+  function emit(env) { state = applyServerEvent(state, env); if (env && env.type === "block.ack") { unacked = bufferAck(unacked, env.blockId); persistBuffer(); } listeners.forEach(function (cb) { try { cb(env, state); } catch (e) {} }); }
 
   window.VersoSync = {
     enabled: !!serverUrl(),
@@ -131,27 +169,39 @@
       opts = opts || {};
       var base = serverUrl();
       var clientId = "c_" + Math.random().toString(36).slice(2) + Date.now();
-      function onOpen() { state.connected = true; transport.send(helloMsg(docId, state.seq)); bufferReplay(unacked).forEach(function (e) { transport.send(changeMsg(docId, e.blockId, e.content, e.baseSeq)); }); }
+      state.docId = docId;
+      // Rehydrate any edits durably buffered before a crash/sleep, coalesced into the in-memory
+      // buffer, BEFORE the first replay -- so onOpen resends them even after a full restart.
+      hydrated = durable.load(docId).then(function (entries) { (entries || []).forEach(function (e) { unacked = bufferAdd(unacked, e); }); });
+      // Replay waits for hydration so a fast socket-open can't race past the persisted buffer.
+      function onOpen() { state.connected = true; transport.send(helloMsg(docId, state.seq)); hydrated.then(function () { bufferReplay(unacked).forEach(function (e) { transport.send(changeMsg(docId, e.blockId, e.content, e.baseSeq)); }); }); }
       function onClose() { state.connected = false; }
       try { transport = WsClient(base, emit, onOpen, onClose); }
       catch (e) { transport = LongPollClient(base, clientId, emit, onOpen); } // WS unavailable -> fallback
-      state.docId = docId;
       return {
-        sendChange: function (blockId, content, baseSeq) { unacked = bufferAdd(unacked, { blockId: blockId, content: content, baseSeq: baseSeq }); transport.send(changeMsg(docId, blockId, content, baseSeq)); },
+        sendChange: function (blockId, content, baseSeq) { unacked = bufferAdd(unacked, { blockId: blockId, content: content, baseSeq: baseSeq }); persistBuffer(); transport.send(changeMsg(docId, blockId, content, baseSeq)); },
         acquireLock: function (blockId) { transport.send(lockMsg(true, docId, blockId)); },
         releaseLock: function (blockId) { transport.send(lockMsg(false, docId, blockId)); },
         heartbeat: function (viewing, editing) { transport.send(heartbeatMsg(docId, viewing, editing)); },
         comment: function (blockId, body, threadId) { transport.send(commentMsg(docId, blockId, body, threadId)); },
+        requestHandoff: function (blockId) { transport.send(handoffMsg(docId, blockId)); },
+        notifyWhenFree: function (blockId, on) { transport.send(notifyMsg(docId, blockId, on)); },
         disconnect: function () { if (transport) transport.close(); state.connected = false; }
       };
     },
     // exposed for the editor integration + tests
     _apply: function (env) { emit(env); return state; },
     _state: function () { return state; },
-    _buffer: { add: function (e) { unacked = bufferAdd(unacked, e); }, ack: function (id) { unacked = bufferAck(unacked, id); }, replay: function () { return bufferReplay(unacked); }, pending: function () { return unacked.slice(); } },
+    _buffer: { add: function (e) { unacked = bufferAdd(unacked, e); persistBuffer(); }, ack: function (id) { unacked = bufferAck(unacked, id); persistBuffer(); }, replay: function () { return bufferReplay(unacked); }, pending: function () { return unacked.slice(); } },
+    // the soft-conflict UI join (ticket 13): one row per recorded conflict, my buffered content
+    // vs the block that advanced. Never a silent drop -- the reducer already recorded the block.
+    conflictView: function () { return conflictView(state, unacked); },
+    // the durable buffer (ticket 13): survives crash/sleep, rehydrated + replayed on reconnect.
+    _durable: durable,
     // pure helpers (also used by tests)
     _pure: { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay,
-      helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg },
-    _WsClient: WsClient, _LongPollClient: LongPollClient
+      pendingFor: pendingFor, conflictView: conflictView,
+      helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg, handoffMsg: handoffMsg, notifyMsg: notifyMsg },
+    _WsClient: WsClient, _LongPollClient: LongPollClient, _DurableBuffer: DurableBuffer
   };
 })();
