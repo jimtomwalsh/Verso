@@ -63,7 +63,7 @@ section("syntax");
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
- "server/sync.js", "server/sync-wire.js"
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -233,7 +233,7 @@ section("platform-pivot 02 server-of-one");
 // ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
 section("platform-pivot 02 server invariants");
 (function () {
-  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js") + src("server/sync.js") + src("server/sync-wire.js");
+  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js") + src("server/sync.js") + src("server/sync-wire.js") + src("server/lock-manager.js");
   // Dependency-free: only node: builtins may be required (bundled runtime is the sole exception).
   var reqs = s.match(/require\(("|')([^"')]+)\1\)/g) || [];
   var badDep = reqs.filter(function (m) {
@@ -518,6 +518,64 @@ section("platform-pivot 08 sync hub");
     la.receive(env("block.change", "C-1", "b2", null, "x", 0, { content: { id: "b2", type: "para", text: "local" } }));
     ok("AC5: local mode does NOT fan out to peers", !lb.sent.some(function (e) { return e.type === "block.change"; }));
     ok("AC5: local mode still persists (store is the source of truth)", store.materializeDoc("C-1").pages[0].blocks[1].text === "local");
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 10: block-level locking (model B) through the hub ----------
+// The authoritative lock registry: a block.change is accepted ONLY from the holder;
+// locks are per-leaf-block content or per-container structure (separate namespaces);
+// only edit-capable roles acquire.
+section("platform-pivot 10 locking");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> locking tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-lock-test-"));
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    // AC1: acquire -> granted + lock.state broadcast
+    ta.receive(env("lock.acquire", "C-1", "b1", null, "alice", 0, {}));
+    ok("AC1: acquire -> lock.granted to holder", ta.sent.some(function (e) { return e.type === "lock.granted" && e.blockId === "b1"; }));
+    ok("lock.state broadcast names the holder", tb.sent.some(function (e) { return e.type === "lock.state" && e.payload.locks.some(function (l) { return l.resourceId === "b1" && l.holder === "alice"; }); }));
+    // AC4: non-holder change denied + not persisted; holder change accepted
+    tb.receive(env("block.change", "C-1", "b1", null, "bob", 0, { content: { id: "b1", text: "BOB" }, baseSeq: store.maxSeq() }));
+    ok("AC4: block.change from a non-holder is DENIED", tb.sent.some(function (e) { return e.type === "block.denied" && e.blockId === "b1"; }));
+    ok("AC4: the denied change did NOT persist", store.materializeDoc("C-1").pages[0].blocks[0].text !== "BOB");
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "ALICE" }, baseSeq: store.maxSeq() }));
+    ok("AC4: the holder's change is accepted + persisted", store.materializeDoc("C-1").pages[0].blocks[0].text === "ALICE");
+    // AC2: a colleague works a different block freely
+    tb.receive(env("lock.acquire", "C-1", "b2", null, "bob", 0, {}));
+    tb.receive(env("block.change", "C-1", "b2", null, "bob", 0, { content: { id: "b2", type: "para", text: "BOBP" }, baseSeq: store.maxSeq() }));
+    ok("AC2: colleague edits a different block while b1 is held", store.materializeDoc("C-1").pages[0].blocks[1].text === "BOBP");
+    ok("AC4: acquiring a held block -> lock.denied with holder", (function () { tb.receive(env("lock.acquire", "C-1", "b1", null, "bob", 0, {})); return tb.sent.some(function (e) { return e.type === "lock.denied" && e.blockId === "b1" && e.payload.holder === "alice"; }); })());
+    // AC3: structure lock is a separate, coarse namespace
+    ta.receive(env("lock.acquire", "C-1", "cont1", null, "alice", 0, { class: "structure" }));
+    ok("AC3: structure lock granted in its own class", ta.sent.some(function (e) { return e.type === "lock.granted" && e.blockId === "cont1" && e.payload.class === "structure"; }));
+    ok("AC3: a structure lock is not a content lock", lm.holder("C-1", "cont1") === null);
+    // AC5: reviewer/viewer never get a lock
+    var tc = SY.FakeTransport(); var C = hub.connect(tc, "rev"); C.role = "reviewer";
+    tc.receive(env("lock.acquire", "C-1", "b2", null, "rev", 0, {}));
+    ok("AC5: a reviewer role is denied a lock", tc.sent.some(function (e) { return e.type === "lock.denied" && e.payload.reason === "role may not edit"; }));
+    // release + disconnect auto-release
+    ta.receive(env("lock.release", "C-1", "b1", null, "alice", 0, {}));
+    ok("AC1: release frees the lock", lm.holder("C-1", "b1") === null);
+    tb.close();
+    ok("disconnect auto-releases the client's locks", lm.holder("C-1", "b2") === null);
   } finally {
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}

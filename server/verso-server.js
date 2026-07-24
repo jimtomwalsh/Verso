@@ -21,6 +21,7 @@ var createStore = require("./store").createStore;
 var createBlockStore = require("./block-store").createBlockStore;
 var createSyncHub = require("./sync").createSyncHub;
 var createSyncRoutes = require("./sync-wire").createSyncRoutes;
+var createLockManager = require("./lock-manager").createLockManager;
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -232,7 +233,10 @@ function createServer(opts) {
   // Live-collaboration hub (ticket 08). Created always, but DORMANT unless mode==="server":
   // the hub fans out nothing in local mode, and createSyncRoutes returns an inert object
   // with no 'upgrade' handler -- so the desktop app never grows a collaboration surface.
-  var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now }) : null;
+  // Locks (ticket 10) are authoritative only in server mode; in local mode there is one
+  // user, so the hub auto-grants (no lockManager) -- the solo experience is unchanged.
+  var lockManager = (blockStore && config.mode === "server") ? createLockManager({ now: opts.now }) : null;
+  var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager }) : null;
   var sync = hub ? createSyncRoutes(hub, config) : null;
   var server = http.createServer(makeHandler(store, config, blockStore, sync));
   if (sync && !sync.dormant) server.on("upgrade", sync.upgrade); // wss:// only in server mode

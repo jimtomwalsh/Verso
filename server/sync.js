@@ -118,6 +118,8 @@ function createSyncHub(blockStore, opts) {
     if (!res.ok) {
       return client.transport.send(envelope("block.denied", env.docId, env.blockId, null, null, now(), { reason: res.error }));
     }
+    // an accepted edit is activity -> refresh the holder's lease (keeps the reaper away)
+    if (lockManager && lockManager.heartbeat) lockManager.heartbeat(client, env.docId, env.blockId, "content");
     // fan out to the OTHER clients, seq-stamped with Foundation's global seq
     fanOut(env.docId, envelope("block.change", env.docId, env.blockId, res.seq, env.author, now(), { patch: content, baseSeq: p.baseSeq }), client);
     // ack the sender so it can retire its unacked buffer (ticket 13)
@@ -130,7 +132,9 @@ function createSyncHub(blockStore, opts) {
     if (!lockManager) {
       return client.transport.send(envelope(env.type === "lock.acquire" ? "lock.granted" : "lock.released", env.docId, env.blockId, null, client.author, now(), { holder: client.author }));
     }
-    var r = env.type === "lock.acquire" ? lockManager.acquire(client, env.docId, env.blockId, env.payload) : lockManager.release(client, env.docId, env.blockId);
+    var r = env.type === "lock.acquire"
+      ? lockManager.acquire(client, env.docId, env.blockId, env.payload)
+      : lockManager.release(client, env.docId, env.blockId, env.payload && env.payload.class);
     if (r && r.broadcast) fanOut(env.docId, r.broadcast, null);
     if (r && r.reply) client.transport.send(r.reply);
   }
