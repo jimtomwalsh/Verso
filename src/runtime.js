@@ -307,6 +307,58 @@
       var done = (cs && curSid === cs) || hsReachable(stage).every(function (id) { return stage.__hsVisited && stage.__hsVisited[id]; });
       if (done) { stage.__hsComplete = true; try { stage.dispatchEvent(new CustomEvent("hotspot-complete", { bubbles: true })); } catch (e) {} }
     }
+    // ---- restart glyph: shown ONLY when the whole interaction is finished -----
+    // "Finished" = every reachable screen visited AND every play-once video on a visited screen has
+    // ENDED (all content watched). A degenerate/unwired screen tour (only the entry reachable) never
+    // counts, so it can't show mid-authoring. Reactive -- re-evaluated on every nav + video end --
+    // so it hides again when the state is no longer complete (e.g. after Restart or replay).
+    function hsAllContentDone(stage) {
+      var screenMode = hsScreenMode(stage), vis = stage.__hsVisited || {}, entryId = stage.getAttribute("data-hotspot-entry");
+      if (screenMode) {
+        var reach = hsReachable(stage);
+        if (reach.length < 2) return false;                                  // not a real multi-screen tour
+        if (!reach.every(function (id) { return vis[id]; })) return false;   // not every screen seen yet
+      } else if (!stage.querySelector('video[data-hotspot-video="once"]')) {
+        return false;                                                         // popover-only image: no "finish"
+      }
+      var ok = true;
+      qsAll(stage, 'video[data-hotspot-video="once"]').forEach(function (v) {
+        var panel = v.closest && v.closest(".hotspot-screen");
+        var sid = panel ? panel.getAttribute("data-screen-id") : entryId;
+        if ((!screenMode || vis[sid]) && !v.ended) ok = false;              // a watched screen's video isn't finished
+      });
+      return ok;
+    }
+    // The screen the learner is currently on (entry = no panel open).
+    function hsCurrentScreenId(stage) {
+      var open = stage.querySelector(".hotspot-screen:not([hidden])");
+      return open ? open.getAttribute("data-screen-id") : stage.getAttribute("data-hotspot-entry");
+    }
+    // The current screen's own markers (entry markers are direct children of the frame; a sub-screen's live in its panel).
+    function hsCurrentMarkers(stage) {
+      var open = stage.querySelector(".hotspot-screen:not([hidden])");
+      if (open) return qsAll(open, ".hotspot-marker");
+      var frame = stage.querySelector(".hotspot-frame");
+      return frame ? qsAll(frame, ".hotspot-marker").filter(function (m) { return m.parentNode === frame; }) : [];
+    }
+    // Terminal = the END of the flow: the author's completion screen, or (absent one) a dead-end
+    // screen with no onward navigation. Gating restart on this stops it riding along across every
+    // screen after completion -- it shows only when the learner is actually AT the end.
+    function hsIsTerminal(stage) {
+      var cs = stage.getAttribute("data-hotspot-complete-screen");
+      if (cs) return hsCurrentScreenId(stage) === cs;
+      var onward = false;
+      hsCurrentMarkers(stage).forEach(function (m) { if (m.getAttribute("data-action") === "navigate" && m.getAttribute("data-target")) onward = true; });
+      return !onward;
+    }
+    function hsUpdateRestart(stage) { var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = !(hsAllContentDone(stage) && hsIsTerminal(stage)); }
+    function hsRestart(stage) {
+      stage.__hsVisited = {}; stage.__hsComplete = false; stage.__hsStack = [];
+      var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = true;
+      qsAll(stage, ".hotspot-marker").forEach(function (m) { m.classList.remove("is-viewed"); });
+      if (hsScreenMode(stage)) screenBase(stage); // -> entry + re-seed counter/caption + replay entry video
+      else { updateViewedCounter(stage); hsSyncVideos(stage); } // popover/video: reset viewed + replay the video
+    }
     function hsTrailName(stage, sid) {
       var entryId = stage.getAttribute("data-hotspot-entry");
       if (sid === entryId) return stage.getAttribute("data-hotspot-entry-name") || "Home";
@@ -336,14 +388,27 @@
       stage.__hsStack = stack.slice(0, idx);                   // truncate the path to that crumb
       screenShow(stage, stack[idx - 1]);
     }
+    // Caption: keep the single below-screen caption line in sync with the CURRENT screen. The
+    // per-screen text rides the DOM (data-screen-caption on each panel; the entry caption on the
+    // stage) so this never re-reads the doc.
+    function hsUpdateCaption(stage, curSid) {
+      var cap = stage.querySelector(".hotspot-caption"); if (!cap) return;
+      var entryId = stage.getAttribute("data-hotspot-entry");
+      var text;
+      if (curSid === entryId) text = stage.getAttribute("data-hotspot-entry-caption") || "";
+      else { var p = stage.querySelector('.hotspot-screen[data-screen-id="' + curSid + '"]'); text = (p && p.getAttribute("data-screen-caption")) || ""; }
+      cap.textContent = text;
+    }
     // called after every screen change (base/show): record the screen, refresh the
-    // counter + trail, and test completion. Screen-mode only (popover mode keeps the
+    // counter + trail + caption, and test completion. Screen-mode only (popover mode keeps the
     // marker-viewed counter via updateViewedCounter); base/show only run in screen mode.
     function hsAfterNav(stage, curSid) {
       hsMarkVisited(stage, curSid);
       hsUpdateCounter(stage);
       hsRenderTrail(stage);
+      hsUpdateCaption(stage, curSid);
       hsCheckComplete(stage, curSid);
+      hsUpdateRestart(stage); // reactively show/hide the centred restart glyph
     }
     // ---- screen video playback (#217): a screen visual of kind "video" is a screen
     // recording. It autoplays MUTED on screen-enter; "loop" idles/cycles, "play-once"
@@ -370,11 +435,42 @@
       if (v.__hsSetup) return; v.__hsSetup = true;
       v.muted = true; // keep autoplay-eligible even if the attribute was stripped
       var btn = hsBtnFor(v);
+      // 1px playback progress bar along the bottom of the screen: reflect THIS video while it is
+      // the current screen's video. currentTime advances continuously, so we sample it every
+      // animation frame while playing (smooth), not on the coarse ~4Hz timeupdate (which jumps).
+      var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+      function progressTick() {
+        v.__hsRaf = null;
+        if (v.paused || v.ended) return; // stopped -> leave the bar at its last width
+        var st = v.closest && v.closest(".hotspot-stage");
+        var bar = st && st.querySelector(".hotspot-video-progress");
+        if (bar && v.duration && isFinite(v.duration)) bar.style.width = (v.currentTime / v.duration * 100) + "%";
+        v.__hsRaf = raf(progressTick);
+      }
+      v.addEventListener("play", function () { if (!v.__hsRaf) v.__hsRaf = raf(progressTick); });
+      v.addEventListener("ended", function () { // pin the bar to 100% on a clean finish
+        var st = v.closest && v.closest(".hotspot-stage"); var bar = st && st.querySelector(".hotspot-video-progress");
+        if (bar) bar.style.width = "100%";
+      });
+      // #53: reveal any hotspots on this screen that are gated on the video ending. The video
+      // and its markers share a container (the .hotspot-frame for the entry, or the screen's
+      // .hotspot-screen panel), so reveal within that host.
+      function hsRevealGated() {
+        var host = (v.closest && (v.closest(".hotspot-screen") || v.closest(".hotspot-frame"))) || null;
+        if (host) qsAll(host, ".hotspot-marker--gated").forEach(function (m) { m.classList.add("is-revealed"); });
+      }
       if (v.getAttribute("data-hotspot-video") === "once") {
         v.addEventListener("ended", function () {
           // native freeze on the last frame; offer Replay unless the author hid it
           if (v.getAttribute("data-noreplay") !== "1") { btn.textContent = "Replay"; btn.hidden = false; }
+          hsRevealGated();
+          // a play-once video finishing may complete the interaction -> re-evaluate the restart glyph.
+          var st = v.closest && v.closest(".hotspot-stage");
+          if (st) hsUpdateRestart(st);
         });
+        // reduced-motion learners don't autoplay -> reveal gated hotspots up front so they are
+        // never stranded waiting for an "ended" that won't fire on its own.
+        if (hsReduce()) hsRevealGated();
       }
     }
     // play the CURRENT screen's video, pause every other; entry videos are the frame's
@@ -383,6 +479,7 @@
       var vids = qsAll(stage, ".hotspot-video");
       if (!vids.length) return;
       var open = stage.querySelector(".hotspot-screen:not([hidden])");
+      var pbar = stage.querySelector(".hotspot-video-progress"); if (pbar) pbar.style.width = "0%"; // reset; the current video refills via timeupdate
       var reduce = hsReduce();
       vids.forEach(function (v) {
         setupHotspotVideo(v);
@@ -552,6 +649,7 @@
         if (e.target.closest && e.target.closest(".hotspot-back")) { e.preventDefault(); e.stopPropagation(); screenBack(stage); return; }
         if (e.target.closest && e.target.closest(".hotspot-home")) { e.preventDefault(); e.stopPropagation(); screenBase(stage); return; }
         // #224 T6b: loop carousel forward/back (buttons, not markers) -> cycle within the loop
+        if (e.target.closest && e.target.closest("[data-hotspot-restart]")) { e.preventDefault(); e.stopPropagation(); hsRestart(stage); return; } // centred restart glyph
         if (e.target.closest && e.target.closest("[data-loop-close]")) { e.preventDefault(); e.stopPropagation(); loopExit(stage); return; }
         if (e.target.closest && e.target.closest("[data-loop-prev]")) { e.preventDefault(); e.stopPropagation(); loopGo(stage, -1); return; }
         if (e.target.closest && e.target.closest("[data-loop-next]")) { e.preventDefault(); e.stopPropagation(); loopGo(stage, 1); return; }

@@ -96,12 +96,20 @@ section("#81 Help markdown renderer");
   if (!m) { ok("locate @md fence", false); return; }
   var g = new Function(m[1] + "\nreturn { mdToHtml: mdToHtml };")();
   var md = g.mdToHtml;
-  ok("heading levels", md("# A\n## B") === "<h1>A</h1>\n<h2>B</h2>");
+  ok("heading levels", md("# A\n## B") === "<h1 id=\"a\">A</h1>\n<h2 id=\"b\">B</h2>");
+  // #8 heading IDs (docs anchors): slugified, deterministic, unique per doc
+  ok("#8 heading emits a slug id", md("## Adding & editing blocks").indexOf("<h2 id=\"adding-editing-blocks\">") !== -1);
+  ok("#8 duplicate headings get unique ids", md("## Setup\n## Setup").indexOf("id=\"setup-2\"") !== -1);
+  ok("#8 heading id strips inline code/punctuation", md("## The `render()` step").indexOf("id=\"the-step\"") !== -1);
   ok("paragraph joins wrapped lines", md("one\ntwo") === "<p>one two</p>");
   ok("inline bold", md("a **b** c").indexOf("<strong>b</strong>") !== -1);
   ok("inline code", md("use `x` here").indexOf("<code>x</code>") !== -1);
   ok("unordered list", md("- a\n- b") === "<ul><li>a</li><li>b</li></ul>");
   ok("ordered list", md("1. a\n2. b") === "<ol><li>a</li><li>b</li></ol>");
+  // #8 lazy continuation: a wrapped bullet joins into one item so inline spans don't break
+  ok("#8 wrapped bullet joins (bold not split)", md("- a **Comment\n  mode** b").indexOf("<li>a <strong>Comment mode</strong> b</li>") !== -1);
+  ok("#8 continuation stops at next bullet", md("- one\n  wrapped\n- two") === "<ul><li>one wrapped</li><li>two</li></ul>");
+  ok("#8 continuation stops at a blank line", md("- one\n\npara").indexOf("<li>one</li></ul>") !== -1 && md("- one\n\npara").indexOf("<p>para</p>") !== -1);
   ok("horizontal rule", md("---") === "<hr>");
   ok("blockquote wraps", md("> hi").indexOf("<blockquote>") === 0);
   // HTML in the source is escaped (defensive — trusted content, still no injection)
@@ -147,6 +155,42 @@ section("#81 Help markdown renderer");
   ok("#81 help-btn wired to openHelpModal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(ed));
   ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
   ok("#81 help modal fetches the guide", /fetch\("docs\/USER-GUIDE\.md"/.test(ed));
+})();
+
+// ---- #8: two-pane docs reader — sidebar TOC + search built from the guide's headings ----
+// The reader is a two-pane surface (search + TOC nav | reading pane). The TOC is built from
+// the guide's own heading IDs, so nav + scroll-spy track the content and never drift.
+section("#8 docs reader (TOC + search)");
+(function () {
+  var ed = src("src/editor.js");
+  ok("#8 reader builds the two-pane split (nav + reading pane)", /modal-box--docs/.test(ed) && /docs-split/.test(ed) && /docs-nav/.test(ed));
+  ok("#8 sidebar has a search input", /docs-search__input/.test(ed) && /Search the guide/.test(ed));
+  ok("#8 TOC built from the guide's h2/h3 heading ids", /function buildDocsNav[\s\S]{0,400}querySelectorAll\("h2\[id\], h3\[id\]"\)/.test(ed));
+  ok("#8 TOC item scrolls the reading pane to its heading", /docs-toc__item[\s\S]{0,400}addEventListener\("click"[\s\S]{0,80}scrollToHead/.test(ed));
+  ok("#8 scroll-spy highlights the active section", /body\.addEventListener\("scroll"[\s\S]{0,600}is-active/.test(ed));
+  ok("#8 search filters the TOC + shows a no-match state", /function runSearch[\s\S]{0,400}is-hidden[\s\S]{0,200}docs-toc__empty|noHits\.style\.display/.test(ed));
+  ok("#8 Escape clears a live search before closing", /activeElement === search && search\.value[\s\S]{0,80}runSearch\(""\)/.test(ed));
+  ok("#8 CSS: TOC active item reuses the accent-quiet/accent token pair", /\.docs-toc__item\.is-active\s*\{[^}]*var\(--accent-quiet\)[^}]*var\(--accent\)/.test(src("editor.css")));
+  ok("#8 CSS: search converges to the ring-wrapper focus-within pattern", /\.docs-search:focus-within\s*\{[^}]*var\(--accent\)/.test(src("editor.css")));
+})();
+
+// ---- #8 docs auto-maintenance — the drift checker tool (code is truth) -----------------
+// tools/docs-maintain.js introspects the block palette and verifies the guide documents each
+// block. This is the runnable, author-facing form of the #91 anti-drift gate; the test shares
+// its pure core so there is ONE coverage rule, and proves the drift-bite.
+section("#8 docs auto-maintenance");
+(function () {
+  var dm = require(path.join(ROOT, "tools/docs-maintain.js"));
+  var ed = src("src/editor.js"), guide = src("docs/USER-GUIDE.md");
+  var blocks = dm.extractLibrary(ed);
+  ok("#8 maintain: parses the block palette from source (>= 20)", blocks.length >= 20 && blocks.every(function (b) { return b.group && b.label; }));
+  var cov = dm.blockCoverage(ed, guide);
+  ok("#8 maintain: every palette block is documented (no drift)"
+    + (cov.undocumented.length ? " -- MISSING: " + cov.undocumented.map(function (b) { return b.label; }).join(" | ") : ""), cov.undocumented.length === 0);
+  ok("#8 maintain: coverage groups the inventory by category", Object.keys(cov.groups).length >= 3);
+  // the checker BITES: a hypothetical undocumented block is caught
+  ok("#8 maintain: drift-bite — an undocumented block fails coverage", dm.isDocumented("Zorptron 9000", guide) === false);
+  ok("#8 maintain: core-label rule strips a trailing qualifier", dm.coreLabel("Card (container)") === "Card");
 })();
 
 // ---- #26: docs capture mode — deterministic clock + RNG, freeze, off-by-default -------
@@ -967,7 +1011,7 @@ section("#146 hotspot base-image size + margin popover");
   ok("render: base image appended to the FRAME (not the stage)", /frame\.appendChild\(visualNode\(entry, "hotspot-image", true\)\);/.test(r) && /img\.className = cls;[\s\S]*?img\.src = assetSrc\(scr\.visual\)/.test(r)); // #217: shared visualNode(scr, cls, recolor) emits img/svg/<video>
   ok("render: markers appended to their screen container (frame or panel)", /container\.appendChild\(mk\);/.test(r)); // #216: shared renderMarkers(scr, container)
   ok("render: popover appended to the STAGE (can open into the margin)", /stage\.appendChild\(pop\);/.test(r));
-  ok("render: back (in nav) + counter anchor to the frame", /nav\.appendChild\(back\);[\s\S]*?frame\.appendChild\(nav\);/.test(r) && /frame\.appendChild\(counter\);/.test(r)); // #216: Back+Home wrapped in .hotspot-nav
+  ok("render: back (in nav) wrapped in .hotspot-nav, placed in the chrome band (#52)", /nav\.appendChild\(back\);[\s\S]*?chrome\.appendChild\(nav\);/.test(r) && /topbar\.appendChild\(counter\);/.test(r)); // #216 wrap; nav below, counter in the top band above
 
   var css = src("src/course.css");
   ok("css: .hotspot-frame sizes via --hotspot-img-width and centres", /\.hotspot-frame \{[^}]*max-width: var\(--hotspot-img-width, 100%\);[^}]*margin-inline: auto;/.test(css));
@@ -981,6 +1025,142 @@ section("#146 hotspot base-image size + margin popover");
   var e = src("src/editor.js");
   ok("editor: marker drag is relative to the frame (correct at any width)", /mk\.closest && mk\.closest\("\.hotspot-frame"\) \|\| stage\)\.getBoundingClientRect\(\)/.test(e));
   ok("editor: inspector exposes a base-image width control writing block.imgWidth", /if \(isNaN\(n\) \|\| n >= 100\) delete block\.imgWidth; else block\.imgWidth = Math\.max\(20, n\)/.test(e));
+})();
+
+section("#48 box (region) hotspot marker");
+(function () {
+  var r = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ecss = src("editor.css");
+  // render: a box marker renders as a sized region (transparent, no glyph), not a point badge.
+  ok("render: shape==box adds .hotspot-marker--box + inline w/h %", /if \(hs\.shape === "box"\) \{[\s\S]*?mk\.classList\.add\("hotspot-marker--box"\);[\s\S]*?mk\.style\.width = \(hs\.w == null \? 20 : hs\.w\) \+ "%";[\s\S]*?mk\.style\.height = \(hs\.h == null \? 12 : hs\.h\) \+ "%";/.test(r));
+  ok("render: box branch bypasses the glyph/custom marker path (else-if)", /if \(hs\.shape === "box"\) \{[\s\S]*?mk\.classList\.add\("hotspot-marker--box"\);[\s\S]*?\} else if \(block\.markerHtml\)/.test(r));
+  ok("render: shared hotspotMarkerEl builds the learner marker + is exposed", /function hotspotMarkerEl\(block, hs, i, loopById\)[\s\S]*?return mk;\s*\}\s*window\.hotspotMarkerEl = hotspotMarkerEl;/.test(r) && /var mk = hotspotMarkerEl\(block, hs, i, loopById\);/.test(r));
+  // css: transparent fill, accent outline, keeps the pulse ring, never adds a fill when viewed.
+  ok("css: .hotspot-marker--box is transparent with an accent border", /\.hotspot-marker--box \{[^}]*border: 2px solid var\(--hotspot-color\);[^}]*background: transparent;/.test(css));
+  ok("css: box viewed recolours the outline only (no fill)", /\.hotspot-marker--box\.is-viewed \{ background: transparent; border-color: var\(--hotspot-viewed/.test(css));
+  // editor: inspector Shape control + W/H fields; box seeds default 20x12.
+  ok("editor: inspector Shape control writes marker.shape=box + seeds w/h", /segmentedLive\("Shape", \[\["Point", "point"\], \["Box \(region\)", "box"\]\][\s\S]*?active\.shape = "box"; if \(active\.w == null\) active\.w = 20; if \(active\.h == null\) active\.h = 12;/.test(e));
+  // editor: both resize surfaces write m.w/m.h (tour board) and hs.w/hs.h (canvas), doubled from centre.
+  ok("editor: tour-board box resize sets m.w/m.h from centre", /function tourBeginPinResize[\s\S]*?m\.w = Math\.max\(2, Math\.min\(100, Math\.round\(\(px - cx\) \* 2\)\)\);/.test(e));
+  ok("editor: on-canvas box resize handle sets hs.w/hs.h", /hs\.shape === "box" && !mk\.querySelector\("\.hotspot-resize"\)[\s\S]*?hs\.w = Math\.max\(2, Math\.min\(100, Math\.round\(\(px - cx\) \* 2\)\)\);/.test(e));
+  ok("editor.css: box pin + resize handles styled (chrome only)", /\.tourb-pin--box \{/.test(ecss) && /\.tourb-pin__resize \{/.test(ecss) && /\.hotspot-resize \{/.test(ecss));
+})();
+
+section("#49 mix card + navigate hotspots (per-marker action)");
+(function () {
+  var e = src("src/editor.js");
+  // per-hotspot Action toggle in the Selected-hotspot inspector (the real truth).
+  ok("editor: per-hotspot Action segmented control sets marker.action", /segmentedLive\("Action", \[\["Card popover", "card"\], \["Navigate", "navigate"\]\][\s\S]*?active\.action = \(v === "navigate"\) \? "navigate" : "card";/.test(e));
+  // block.mode demoted to a default-only hint: switching it must NOT bulk-rewrite markers.
+  ok("editor: mode is 'Default for new hotspots' (relabelled)", /insp-row__label--stacked", "Default for new hotspots"/.test(e));
+  ok("editor: switching the default no longer rewrites every marker.action", !/if \(v === "screen"\) block\.mode = "screen"; else delete block\.mode;\s*\n\s*curScreen\.markers\.forEach\(function \(m\) \{ if \(m\) m\.action =/.test(e));
+  // nav chrome + card appearance show for a MIXED tour (any nav marker / any card marker),
+  // not only when the block default matches.
+  ok("editor: nav chrome shows when any hotspot navigates", /var hasNavMarker = \(block\.screens[\s\S]*?if \(block\.mode === "screen" \|\| hasNavMarker\) \{/.test(e));
+  ok("editor: overlay-card appearance shows when any hotspot is a card", /var hasCardMarker = \(block\.screens[\s\S]*?if \(block\.mode !== "screen" \|\| hasCardMarker\) \{/.test(e));
+  // render + runtime already honour per-marker action (no block.mode read) -> mixing works live.
+  var r = src("src/render.js");
+  ok("render: marker data-action comes from the marker, not block.mode", /mk\.setAttribute\("data-action", hs\.action === "navigate" \? "navigate" : "card"\)/.test(r));
+})();
+
+section("#52 tour nav + progress outside the screen frame");
+(function () {
+  var r = src("src/render.js"), css = src("src/course.css");
+  // render: a .hotspot-chrome band is appended to the STAGE (below the frame); nav + counter go IN it.
+  ok("render: chrome band appended to the stage after the frame", /stage\.appendChild\(frame\);[\s\S]*?var chrome = el\("div", "hotspot-chrome"\);\s*stage\.appendChild\(chrome\);/.test(r));
+  ok("render: nav goes in the chrome band; neither nav nor counter is in the frame", /chrome\.appendChild\(nav\)/.test(r) && !/frame\.appendChild\(nav\)/.test(r) && !/frame\.appendChild\(counter\)/.test(r));
+  // css: band is a below-frame flex row; nav + counter are NO LONGER absolutely positioned.
+  ok("css: .hotspot-chrome is a below-frame flex band that collapses when empty", /\.hotspot-chrome \{[^}]*display: flex;[^}]*margin-top: 10px;/.test(css) && /\.hotspot-chrome:empty \{ display: none; \}/.test(css));
+  ok("css: .hotspot-nav no longer position:absolute", /\.hotspot-nav \{ display: flex; gap: 8px; \}/.test(css));
+  ok("css: .hotspot-counter flows (no absolute), pushed right", /\.hotspot-counter \{\s*margin-left: auto;/.test(css) && !/\.hotspot-counter \{\s*position: absolute/.test(css));
+})();
+
+section("#53 reveal hotspots after a play-once video ends");
+(function () {
+  var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
+  // render: markers on a video+once+revealAfterEnd screen start gated (hidden).
+  ok("render: gates markers on a play-once reveal-after-end screen", /scr\.kind === "video" && scr\.playback === "once" && scr\.revealAfterEnd[\s\S]*?mk\.classList\.add\("hotspot-marker--gated"\);/.test(r));
+  ok("css: gated marker hidden until .is-revealed", /\.hotspot-marker--gated \{ opacity: 0; pointer-events: none;[\s\S]*?\.hotspot-marker--gated\.is-revealed \{ opacity: 1; pointer-events: auto; \}/.test(css));
+  // runtime: reveal on video ended; reduced-motion reveals up front (no stranding).
+  ok("runtime: video 'ended' reveals gated markers in the video's host", /function hsRevealGated\(\)[\s\S]*?qsAll\(host, "\.hotspot-marker--gated"\)\.forEach\(function \(m\) \{ m\.classList\.add\("is-revealed"\); \}\)/.test(rt));
+  ok("runtime: reveals gated markers on 'ended' AND up front for reduced motion", /v\.addEventListener\("ended", function \(\) \{[\s\S]*?hsRevealGated\(\);[\s\S]*?if \(hsReduce\(\)\) hsRevealGated\(\);/.test(rt));
+  // editor: inspector toggle (once-only) + poster seeks to the LAST frame.
+  ok("editor: inspector offers a reveal-after-end toggle for play-once video", /switchRow\("Reveal hotspots after it ends", function \(\) \{ return !!curScreen\.revealAfterEnd;/.test(e));
+  ok("editor: tour poster seeks to the last frame before capture", /var last = Math\.max\(0, dur - 0\.05\);[\s\S]*?v\.currentTime = last;/.test(e));
+  // authoring visibility: gated markers are opacity:0 at runtime but must be visible (dimmed) on
+  // the editing canvas so the author can place them -- scoped to #canvas-viewport so it does not
+  // leak into Demo / the tour Preview (which show the true reveal-after-video behaviour).
+  var ecss = src("editor.css");
+  ok("editor.css: gated markers shown dimmed on the editing canvas only", /#canvas-viewport \.hotspot-marker--gated \{ opacity: 0\.5;[^}]*outline: 1px dashed/.test(ecss));
+})();
+
+section("#55 video vs image tour-node badge");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css");
+  ok("editor: renderTourNodes adds a video badge for kind==video", /if \(s\.kind === "video"\) \{ var vbadge = h\("span", "tourb-node__badge tourb-node__badge--video"\)[\s\S]*?window\.Icon\("play"\)/.test(e));
+  ok("editor.css: .tourb-node__badge--video styled at a free corner", /\.tourb-node__badge--video \{[^}]*bottom: var\(--space-2\);[^}]*left: var\(--space-2\);/.test(ecss));
+})();
+
+section("#54 hover a video tour-node to scrub");
+(function () {
+  var e = src("src/editor.js");
+  ok("editor: video board branch wires hover-scrub", /thumb\.appendChild\(v\); tourWireHoverScrub\(thumb, src\);/.test(e));
+  ok("editor: hover brings a live video back and scrubs X->currentTime", /function tourWireHoverScrub\(thumb, src\)[\s\S]*?thumb\.replaceChild\(v, poster\);[\s\S]*?var frac = Math\.max\(0, Math\.min\(1, \(e\.clientX - r\.left\) \/ r\.width\)\);[\s\S]*?v\.currentTime = frac \* dur;/.test(e));
+  ok("editor: only one node scrubs at a time (restore previous on enter)", /if \(tourScrubNode && tourScrubNode !== thumb\) tourRestoreScrub\(tourScrubNode\);/.test(e));
+  ok("editor: leave restores the cached poster", /thumb\.addEventListener\("pointerleave", function \(\) \{ tourRestoreScrub\(thumb\); \}\)/.test(e) && /if \(thumb\.__scrubPoster\) thumb\.replaceChild\(thumb\.__scrubPoster, v\)/.test(e));
+  ok("editor: board rebuild drops the stale scrub reference", /tourScrubNode = null; \/\/ #54/.test(e));
+})();
+
+section("WYSIWYG: tour board renders the REAL learner marker");
+(function () {
+  var e = src("src/editor.js"), r = src("src/render.js");
+  // board markers = the shared render.js builder (identical to the learner), not abstract pins.
+  ok("editor: board markers built via window.hotspotMarkerEl (real learner marker)", /var pin = window\.hotspotMarkerEl\(tourBlock, m, mi, loopById\);/.test(e));
+  ok("editor: course theme applied to the thumb so markers resolve real colours", /window\.applyTheme\(thumb, activeTheme\(\)\); thumb\.setAttribute\("data-mode", activeMode\);/.test(e));
+  ok("editor: fixed-px point markers scaled to the thumb; boxes are %-sized (unscaled)", /if \(!isBox\) pin\.style\.setProperty\("--hotspot-size", \(\(tourBlock\.markerSize \|\| 34\) \* TOUR_NODE_W \/ TOUR_NOMINAL_W\)/.test(e));
+  ok("editor: board marker carries .tourb-marker + selection + data-pin (drag/resize/connect intact)", /pin\.classList\.add\("tourb-marker"\);[\s\S]*?if \(hotspotEditId === m\.id\) pin\.classList\.add\("is-selected"\);[\s\S]*?pin\.setAttribute\("data-pin", m\.id\);/.test(e));
+  // the shared builder is the single source of the marker DOM (editor == learner).
+  ok("render: hotspotMarkerEl is the shared marker builder used by renderMarkers", /window\.hotspotMarkerEl = hotspotMarkerEl;/.test(r) && /var mk = hotspotMarkerEl\(block, hs, i, loopById\);/.test(r));
+})();
+
+section("hotspot chrome: caption + video progress + nav toggle + counter placement");
+(function () {
+  var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
+  // caption: an updating below-screen line; per-screen text rides the DOM; runtime syncs on nav.
+  ok("render: caption emitted (entry text) when any screen has one", /screens\.some\(function \(s\) \{ return s && s\.caption; \}\)[\s\S]*?el\("div", "hotspot-caption", entry\.caption \|\| ""\)/.test(r));
+  ok("render: per-screen caption rides the DOM (panel + entry attrs)", /panel\.setAttribute\("data-screen-caption", s\.caption\)/.test(r) && /stage\.setAttribute\("data-hotspot-entry-caption", entry\.caption\)/.test(r));
+  ok("runtime: caption synced to the current screen on every nav", /function hsUpdateCaption\(stage, curSid\)[\s\S]*?cap\.textContent = text;/.test(rt) && /hsUpdateCaption\(stage, curSid\);/.test(rt));
+  ok("css: caption is a centred line below the screen, collapses when empty", /\.hotspot-caption \{[^}]*text-align: center;/.test(css) && /\.hotspot-caption:empty \{ display: none; \}/.test(css));
+  // video progress: 1px bar along the screen bottom; runtime sets its width from the current video.
+  ok("render: 1px video-progress bar emitted for video tours", /screens\.some\(function \(s\) \{ return s && s\.kind === "video"; \}\)[\s\S]*?el\("div", "hotspot-video-progress"\)[\s\S]*?frame\.appendChild\(vprog\)/.test(r));
+  ok("runtime: progress bar sampled every animation frame while playing (smooth, not jumpy)", /function progressTick\(\)[\s\S]*?bar\.style\.width = \(v\.currentTime \/ v\.duration \* 100\) \+ "%";[\s\S]*?v\.__hsRaf = raf\(progressTick\);/.test(rt) && /v\.addEventListener\("play", function \(\) \{ if \(!v\.__hsRaf\) v\.__hsRaf = raf\(progressTick\); \}\);/.test(rt));
+  ok("runtime: progress bar pins to 100% on a clean finish", /v\.addEventListener\("ended"[\s\S]*?bar\.style\.width = "100%";/.test(rt));
+  ok("runtime: progress bar reset on screen sync", /\.hotspot-video-progress"\); if \(pbar\) pbar\.style\.width = "0%";/.test(rt));
+  ok("css: .hotspot-video-progress is a 1px accent bar at the screen bottom", /\.hotspot-video-progress \{ position: absolute; left: 0; bottom: 0; height: 1px;[^}]*background: var\(--color-accent\)/.test(css));
+  // nav toggle: external Back/Home suppressible; counter anchors top-right ABOVE the screen.
+  ok("render: external nav suppressed when block.hideNav", /if \(screenMode && !block\.hideNav\) \{/.test(r));
+  ok("render: counter goes in the top band (above the screen), not the chrome band", /topbar\.appendChild\(counter\)/.test(r) && !/chrome\.appendChild\(counter\)/.test(r));
+  ok("css: .hotspot-topbar right-aligns above the screen", /\.hotspot-topbar \{ display: flex; justify-content: flex-end;/.test(css));
+  // editor: nav toggle + per-screen caption fields (inspector + board node).
+  ok("editor: External nav buttons toggle writes block.hideNav", /switchRow\("External nav buttons", function \(\) \{ return !block\.hideNav;/.test(e));
+  ok("editor: Caption field (inspector) writes curScreen.caption", /textLine\("Caption", function \(\) \{ return curScreen\.caption;/.test(e));
+  ok("editor: board node has a secondary caption field writing s.caption", /h\("input", "tourb-node__caption"\)[\s\S]*?if \(capIn\.value\) s\.caption = capIn\.value; else delete s\.caption;/.test(e));
+  // restart glyph: centred, hidden, shown when the interaction finishes; click restarts.
+  ok("render: hidden restart glyph emitted for tours + play-once video screens", /screenMode \|\| screens\.some\(function \(s\) \{ return s && s\.kind === "video" && s\.playback === "once"; \}\)[\s\S]*?el\("button", "hotspot-restart"\)[\s\S]*?frame\.appendChild\(rstb\)/.test(r));
+  // restart shows ONLY when finished: every reachable screen visited AND every watched play-once
+  // video ended; a degenerate one-screen tour never counts (no mid-authoring show); reactive.
+  ok("runtime: restart requires all reachable screens visited (real multi-screen tour)", /function hsAllContentDone\(stage\)[\s\S]*?if \(reach\.length < 2\) return false;[\s\S]*?if \(!reach\.every\(function \(id\) \{ return vis\[id\]; \}\)\) return false;/.test(rt));
+  ok("runtime: restart requires every watched play-once video to have ended (content)", /if \(\(!screenMode \|\| vis\[sid\]\) && !v\.ended\) ok = false;/.test(rt));
+  ok("runtime: restart re-evaluated reactively on nav + video end", /hsUpdateRestart\(stage\); \/\/ reactively/.test(rt) && /if \(st\) hsUpdateRestart\(st\);/.test(rt));
+  ok("runtime: restart gated on a TERMINAL screen (completion screen or dead-end), so it can't ride along", /function hsIsTerminal\(stage\)[\s\S]*?if \(cs\) return hsCurrentScreenId\(stage\) === cs;[\s\S]*?return !onward;/.test(rt) && /rb\.hidden = !\(hsAllContentDone\(stage\) && hsIsTerminal\(stage\)\)/.test(rt));
+  ok("runtime: restart click resets + replays; wired in the delegate", /function hsRestart\(stage\) \{\s*stage\.__hsVisited = \{\}; stage\.__hsComplete = false;[\s\S]*?data-hotspot-restart\]"\)\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); hsRestart\(stage\); return; \}/.test(rt));
+  ok("css: restart glyph centred + white on a translucent disc", /\.hotspot-restart \{[^}]*left: 50%; top: 50%; transform: translate\(-50%, -50%\)[^}]*color: #ffffff;/.test(css));
+  ok("css: restart [hidden] beats the display:flex base (glyph truly hides)", /\.hotspot-restart\[hidden\] \{ display: none; \}/.test(css));
+  // canvas video screens pin to the final frame (editor only) so marker targeting isn't blind.
+  ok("editor: canvas hotspot videos pinned to the final frame (not grey)", /v\.__canvasPinned = true;[\s\S]*?function pinLast\(\) \{ var d = v\.duration; if \(d && isFinite\(d\) && d > 0\) \{ try \{ v\.currentTime = Math\.max\(0, d - 0\.05\);/.test(e));
+  // canvas screen cycler (editor chrome): prev/next buttons flank a multi-screen hotspot.
+  ok("editor: hsCanvasCycle steps hotspotEditScreenId + re-shows + re-renders", /function hsCanvasCycle\(node, block, dir\)[\s\S]*?hotspotEditScreenId = next\.id; hotspotEditId = null;\s*renderInspector\(\);\s*showEditScreen\(node, next\.id\);/.test(e));
+  ok("editor: wireHotspotNode injects the prev/next canvas nav for multi-screen only", /\(block\.screens \|\| \[\]\)\.filter\(Boolean\)\.length > 1 && !node\.querySelector\("\.hotspot-canvas-nav"\)[\s\S]*?hsCanvasCycle\(node, block, d\[1\]\)/.test(e));
+  ok("editor.css: .hotspot-canvas-nav flanks the interaction (left/right, centred)", /\.hotspot-canvas-nav--prev \{ left: 8px; \}/.test(src("editor.css")) && /\.hotspot-canvas-nav--next \{ right: 8px; \}/.test(src("editor.css")));
 })();
 
 // Split-page (slice) tool lives in the two-level inspector's Actions row (the floating
@@ -5933,6 +6113,40 @@ section("ui-kit #10 DS control set");
   ok("resolveVersion does NOT mutate the base doc", JSON.stringify(pdoc) === before);
 })();
 
+// #50 data-loss guard: a STRUCTURAL tour-graph edit (hotspot screens/markers) made on the
+// BASE node -- which openTourBuilder guarantees by unwrapping the version display clone via
+// versionBaseNode -- must survive re-resolution of a software-version display clone (both the
+// editor edit-tree and the pure export path). Regression guard for GH #50, where pressing the
+// tour-builder Preview in flagship read as wiping the whole hotspot block.
+(function () {
+  section("#50 tour-graph structural edit survives version re-resolution");
+  var rtxt = src("src/render.js");
+  var slice = rtxt.slice(rtxt.indexOf("var VARIANT_AXIS"), rtxt.indexOf("// ---- interaction model normalisation"));
+  var stub = {}; new Function("window", slice)(stub);
+  var rfe = stub.resolveVersionForEdit, rv = stub.resolveVersion;
+  var versions = ["Flagship", "V2"];
+  function mk() { return { versions: versions, pages: [{ id: "p", blocks: [
+    { id: "hb", type: "hotspot", entry: "s1", screens: [{ id: "s1", visual: "", kind: "image", markers: [] }] }
+  ] }] }; }
+  function hb(d) { return d.pages[0].blocks[0]; }
+
+  // The edit-tree clone carries a non-enumerable __vbase back-link -> openTourBuilder unwraps
+  // to that base, so a structural graph edit lands on base, never on the disposable clone.
+  var doc = mk();
+  var clone = hb(rfe(doc, "V2"));
+  ok("#50 version edit-clone carries __vbase back-link", !!clone.__vbase);
+  clone.__vbase.screens.push({ id: "s2", visual: "x", kind: "image", markers: [{ id: "m1", x: 50, y: 50, action: "card", blocks: [] }] });
+  ok("#50 base structural edit survives edit-tree re-resolution (V2 active)", hb(rfe(doc, "V2")).screens.length === 2);
+  ok("#50 base structural edit survives pure export resolution (V2)", hb(rv(doc, "V2")).screens.length === 2);
+
+  // Same guarantee for the anchor version (Flagship == versions[0]): the anchor's own
+  // versionOverrides are ignored (base is the data anchor), so base edits are always visible.
+  var doc2 = mk();
+  (hb(rfe(doc2, "Flagship")).__vbase || hb(doc2)).screens.push({ id: "s2", visual: "x", kind: "image", markers: [] });
+  ok("#50 base structural edit survives in the anchor version (Flagship)",
+    hb(rfe(doc2, "Flagship")).screens.length === 2 && hb(rv(doc2, "Flagship")).screens.length === 2);
+})();
+
 // Version RENAME: name a software version (base included) so it can be identified. The pure
 // core rewrites doc.versions PLUS every per-node key ref (versionVis only/hide + versionOverrides)
 // across pages / nested blocks / componentGrid instances, so a renamed key still resolves.
@@ -7145,9 +7359,12 @@ section("#215 hotspot unified screen-graph");
   }
   function fel(tag, className, text) { var n = new FakeNode(tag); if (className) n._className = className; if (text != null) n.textContent = text; return n; }
   var hb = slice(r, "hotspot: function (block) {", "componentGrid: function");
+  // renderMarkers now delegates to the module-scope hotspotMarkerEl (shared with the editor board);
+  // include its source in the isolated eval so the sliced renderer can call it.
+  var hmSrc = slice(r, "function hotspotMarkerEl(block, hs, i, loopById) {", "window.hotspotMarkerEl = hotspotMarkerEl;");
   var makeHotspot = new Function(
     "el", "assetSrc", "inlineSvg", "markerSrcdoc", "markerSvgNode", "applyPopoverStyle", "renderBlock", "document",
-    "var o = {" + hb + "}; return o.hotspot;"
+    hmSrc + " var o = {" + hb + "}; return o.hotspot;"
   )(fel, function (v) { return v; }, function () { return null; }, function (h2) { return "srcdoc:" + h2; }, function () { return null; },
     function () {}, function (child) { return fel("div", "stub-" + child.type, child.text || ""); }, fdoc);
 
@@ -7158,8 +7375,8 @@ section("#215 hotspot unified screen-graph");
   // destination is a .hotspot-screen PANEL keyed by data-screen-id holding its own
   // .hotspot-screen__img (+ its own markers, see the depth-2 case below); Back lives in
   // a .hotspot-nav wrapper. Popover-only blocks emit no panels/nav (no navigate marker).
-  var EXPECT_POP = "div.block-hotspot{data-hotspot-block=1;data-mode=popover;data-track-viewed=1}[div.hotspot-stage{data-hotspot-entry=scr-entry;data-hotspot-entry-name=Home;data-popover-place=auto}[div.hotspot-frame{}[img.hotspot-image{alt=Base;src=https://x/base.png}[],button.hotspot-marker{aria-label=First;data-action=card;data-hotspot=hs_a;title=First;type=button}(--hotspot-color:#f00;--hotspot-size:40px;--hotspot-viewed:#0f0;left:10%;top:20%)[span.hotspot-marker__glyph{}'i'[]],button.hotspot-marker{aria-label=Open hotspot 2;data-action=card;data-hotspot=hs_b;type=button}(--hotspot-color:#f00;--hotspot-size:40px;--hotspot-viewed:#0f0;left:70%;top:80%)[span.hotspot-marker__glyph{}'i'[]],div.hotspot-counter{aria-live=polite;data-hotspot-counter=1}'0 of 2 viewed'[]],div.hotspot-popover{data-hotspot-panel=hs_a;hidden}[button.hotspot-popover__close{aria-label=Close;type=button}~&times;~[],div.hotspot-popover__content{}[div.stub-subheading{}'T'[],div.stub-paragraph{}'P'[]]],div.hotspot-popover{data-hotspot-panel=hs_b;hidden}(minHeight:120px;width:300px)[button.hotspot-popover__close{aria-label=Close;type=button}~&times;~[],div.hotspot-popover__content{}[div.stub-paragraph{}'Q'[]]]]]";
-  var EXPECT_SCR = "div.block-hotspot{data-hotspot-block=1;data-mode=screen;data-track-viewed=1}[div.hotspot-stage{data-hotspot-entry=scr-entry;data-hotspot-entry-name=Home;data-popover-place=auto}[div.hotspot-frame{}(--hotspot-img-width:80%)[img.hotspot-image{alt=Menu;src=https://x/menu.png}[],div.hotspot-screen{data-screen-id=scr-hs_1;data-screen-name=Screen 1;hidden}[img.hotspot-screen__img{alt=S1;src=https://x/s1.png}[]],button.hotspot-marker{aria-label=Go;data-action=navigate;data-hotspot=hs_1;data-target=scr-hs_1;title=Go;type=button}(left:15%;top:25%)[span.hotspot-marker__glyph{}'i'[]],button.hotspot-marker{aria-label=Go to screen 2;data-action=navigate;data-hotspot=hs_2;type=button}(left:55%;top:65%)[span.hotspot-marker__glyph{}'i'[]],div.hotspot-nav{}[button.hotspot-back{data-hotspot-back=1;type=button;hidden}'Return'[]],div.hotspot-counter{aria-live=polite;data-hotspot-counter=1}'0 of 2 screens visited'[]]]]";
+  var EXPECT_POP = "div.block-hotspot{data-hotspot-block=1;data-mode=popover;data-track-viewed=1}[div.hotspot-stage{data-hotspot-entry=scr-entry;data-hotspot-entry-name=Home;data-popover-place=auto}[div.hotspot-topbar{}[div.hotspot-counter{aria-live=polite;data-hotspot-counter=1}'0 of 2 viewed'[]],div.hotspot-frame{}[img.hotspot-image{alt=Base;src=https://x/base.png}[],button.hotspot-marker{aria-label=First;data-action=card;data-hotspot=hs_a;title=First;type=button}(--hotspot-color:#f00;--hotspot-size:40px;--hotspot-viewed:#0f0;left:10%;top:20%)[span.hotspot-marker__glyph{}'i'[]],button.hotspot-marker{aria-label=Open hotspot 2;data-action=card;data-hotspot=hs_b;type=button}(--hotspot-color:#f00;--hotspot-size:40px;--hotspot-viewed:#0f0;left:70%;top:80%)[span.hotspot-marker__glyph{}'i'[]]],div.hotspot-chrome{}[],div.hotspot-popover{data-hotspot-panel=hs_a;hidden}[button.hotspot-popover__close{aria-label=Close;type=button}~&times;~[],div.hotspot-popover__content{}[div.stub-subheading{}'T'[],div.stub-paragraph{}'P'[]]],div.hotspot-popover{data-hotspot-panel=hs_b;hidden}(minHeight:120px;width:300px)[button.hotspot-popover__close{aria-label=Close;type=button}~&times;~[],div.hotspot-popover__content{}[div.stub-paragraph{}'Q'[]]]]]";
+  var EXPECT_SCR = "div.block-hotspot{data-hotspot-block=1;data-mode=screen;data-track-viewed=1}[div.hotspot-stage{data-hotspot-entry=scr-entry;data-hotspot-entry-name=Home;data-popover-place=auto}[div.hotspot-topbar{}[div.hotspot-counter{aria-live=polite;data-hotspot-counter=1}'0 of 2 screens visited'[]],div.hotspot-frame{}(--hotspot-img-width:80%)[img.hotspot-image{alt=Menu;src=https://x/menu.png}[],div.hotspot-screen{data-screen-id=scr-hs_1;data-screen-name=Screen 1;hidden}[img.hotspot-screen__img{alt=S1;src=https://x/s1.png}[]],button.hotspot-marker{aria-label=Go;data-action=navigate;data-hotspot=hs_1;data-target=scr-hs_1;title=Go;type=button}(left:15%;top:25%)[span.hotspot-marker__glyph{}'i'[]],button.hotspot-marker{aria-label=Go to screen 2;data-action=navigate;data-hotspot=hs_2;type=button}(left:55%;top:65%)[span.hotspot-marker__glyph{}'i'[]],button.hotspot-restart{aria-label=Restart;data-hotspot-restart=1;type=button;hidden}~<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5\"/></svg>~[]],div.hotspot-chrome{}[div.hotspot-nav{}[button.hotspot-back{data-hotspot-back=1;type=button;hidden}'Return'[]]]]]";
 
   ok("render parity: migrated popover block == legacy learner DOM", ser(makeHotspot(migrate(popFixture()))) === EXPECT_POP);
   ok("render parity: migrated screen block == legacy learner DOM", ser(makeHotspot(migrate(scrFixture()))) === EXPECT_SCR);
