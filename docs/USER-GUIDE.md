@@ -267,14 +267,27 @@ against the real end-state UI instead of a blank frame.
 For a multi-screen tour, the Screens section has an **Open tour builder** button — a full-screen
 board where every screen is a node laid out in 2D.
 
-- **Navigate.** Pan with a two-finger or space drag; zoom with ⌘/Ctrl-scroll; press **Fit** to
-  frame everything.
+- **Navigate.** Pan with a two-finger or space drag; zoom with ⌘/Ctrl-scroll. A **floating tool bar**
+  sits over the board with **Tidy**, the **Cards face-up** toggle and the **zoom / Fit** control — the
+  same floating-toolbar idea as the main canvas.
 - **Build.** **Upload screens** adds several images at once. Drag nodes to arrange them; the
   layout saves with the course. **Tidy** (⌘/Ctrl+T) snaps nodes into a clean grid.
+- **Add a hotspot by clicking.** Press **Add hotspot** in the board's top bar, then click anywhere
+  on a screen — a marker drops exactly where you click. Press **Esc** (or the button again) to cancel
+  without placing.
 - **Link.** Drag the **port** on a navigation pin to another node to draw or repoint its link;
   click a link's **×** to remove it.
-- **Edit in place.** Selecting a node shows that screen's normal properties in the Inspector —
-  it's the same editor, re-hosted. Drag a marker to move a hotspot, or nudge it with the arrow keys.
+- **Edit in place.** Drag a marker to move a hotspot, or nudge it with the arrow keys.
+- **Properties drawer.** The board fills the screen; the **Properties** button (top bar) slides in a
+  drawer for the finer settings — colours, card padding, blend, alt text, video playback, nav labels —
+  showing whatever you've selected. It starts closed so the board dominates; **Esc** or the ‹ button
+  closes it. Most building happens on the board and toolbar; the drawer is for the occasional deep tweak.
+- **Quick actions in the toolbar.** Whatever you select adds its actions to the floating toolbar:
+  a **screen** gets set-as-Home, set-as-Finish, replace image and duplicate; a **hotspot** gets its
+  **Card ↔ Navigate** and **Point ↔ Box** toggles plus duplicate and delete; a **loop** gets wrap and
+  delete. (Inside the builder those hotspot toggles live on the toolbar, so the Inspector stays for the
+  finer settings.) **Right-click** any screen, hotspot or loop for the same actions as a menu. The
+  **Home** screen is protected — it can't be deleted.
 - **What you see is what they get.** Markers on the board render exactly as the learner sees them —
   the real colour, the point badge or the resizable region box, the pulse — so you place against the
   final look, not a stand-in. A selected marker gets a thin selection ring on top.
