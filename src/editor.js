@@ -6902,14 +6902,13 @@
     var addHs = h("button", "prop-btn prop-btn--accent", "+ Add hotspot");
     addHs.addEventListener("click", function () {
       pushHistory();
-      var id = "hs_" + Math.random().toString(36).slice(2, 8);
-      // #216: a new Marker on the CURRENT screen; action follows the block's authoring
-      // hint. Card blocks are seeded either way so a later mode flip has copy to show.
-      // Cascade the seed position (diagonal, 30->70%) so repeated adds don't stack on one
-      // point (which bunches the pins unusably in the tour builder).
+      // #216: a new Marker on the CURRENT screen (seed shared with the board click-to-drop,
+      // via tourMakeMarker). Cascade the seed position (diagonal, 30->70%) so repeated adds
+      // don't stack on one point (which bunches the pins unusably in the tour builder).
       var _mn = (curScreen.markers.length % 6), _mp = 30 + _mn * 8;
-      curScreen.markers.push({ id: id, x: _mp, y: _mp, action: block.mode === "screen" ? "navigate" : "card", blocks: [ { type: "subheading", text: "Hotspot title" }, { type: "paragraph", text: "Describe what this point shows." } ] });
-      hotspotEditId = id;
+      var _m = tourMakeMarker(block, _mp, _mp);
+      curScreen.markers.push(_m);
+      hotspotEditId = _m.id;
       reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block");
     });
     inspector.appendChild(addHs);
@@ -6952,7 +6951,9 @@
       // #49: per-hotspot Action — the real truth (block "Default for new hotspots" only seeds
       // new ones). Flip freely: card blocks AND a navigate target are both kept, so switching
       // back and forth is lossless. Everything below re-renders for the chosen action.
-      segmentedLive("Action", [["Card popover", "card"], ["Navigate", "navigate"]],
+      // Single home: while the tour builder is open, Action lives on the floating pill (not here);
+      // in the plain sidebar (no pill) it stays in the panel.
+      if (!tourBoardIsOpen()) segmentedLive("Action", [["Card popover", "card"], ["Navigate", "navigate"]],
         function (v) { return (active.action === "navigate" ? "navigate" : "card") === v; },
         function (v) {
           active.action = (v === "navigate") ? "navigate" : "card";
@@ -6971,7 +6972,8 @@
       // #48 marker shape: a POINT badge, or a resizable BOX region -- a transparent hit-box
       // that highlights a UI element without obscuring it. Box adds W x H (% of the image);
       // drag the box's corner handle on the canvas / tour board to resize, or set them here.
-      segmentedLive("Shape", [["Point", "point"], ["Box (region)", "box"]],
+      // Single home: Shape lives on the pill while the builder is open; in the plain sidebar, here.
+      if (!tourBoardIsOpen()) segmentedLive("Shape", [["Point", "point"], ["Box (region)", "box"]],
         function (v) { return (active.shape === "box" ? "box" : "point") === v; },
         function (v) {
           if (v === "box") { active.shape = "box"; if (active.w == null) active.w = 20; if (active.h == null) active.h = 12; }
@@ -7093,6 +7095,12 @@
   var tourZoom = 1, tourPanX = 0, tourPanY = 0;
   var tourFacesUp = false;        // T5c: every card popover open for bulk edit
   var tourConnect = null;         // T5b: active drag-to-connect { srcId, from }
+  var tourPlacing = false;        // click-to-drop: "Add hotspot" armed -> next click on a screen drops a marker
+  var tourPanelOpen = false;      // the Properties drawer: collapsed by default so the board dominates
+                                  // (canvas-first); opened on demand for the deep value settings.
+  var tourSelKind = null;         // the EXPLICIT board selection kind ('node'|'marker'|'loop') the pill
+                                  // segment reflects — decoupled from hotspotEditId, which the re-hosted
+                                  // panel auto-points at markers[0] even when a node is selected.
   var tourReturnFocus = null;     // focus return on close
   var tourNodeSel = [];           // multi-select: screen ids box/click-selected on the board
   var tourSpace = false;          // Space held (board pan modifier, mirrors the main canvas)
@@ -7102,6 +7110,7 @@
   var tourLinkSel = null;         // T5b: the SELECTED edge (its source marker id) — decoupled from
                                   // hotspotEditId, which the re-hosted inspector always pins to a marker
   var TOUR_NODE_W = 300, TOUR_THUMB_H = 169; // board-space node metrics (16:9 thumb; larger for precise pin placement, #224 QA)
+  var TOUR_SOURCE_W = 440, TOUR_SOURCE_H = 248; // source-video scratch node (larger — it's the harvest surface)
   var TOUR_NOMINAL_W = 1280; // WYSIWYG: assumed learner screen width (landscape tablet) used to scale fixed-px point markers to the thumb; box markers are %-sized so they need no scaling
   var TOUR_NODE_H = TOUR_THUMB_H + 44;       // approx full card height (thumb + title) for marquee hit
   var tourLoopSel = null;         // #224 T6: the SELECTED loop frame id (its own selection lane)
@@ -7149,6 +7158,18 @@
   }
   function tourScreens() { return (tourBlock && Array.isArray(tourBlock.screens)) ? tourBlock.screens : []; }
   function tourScreenById(id) { var ss = tourScreens(); for (var i = 0; i < ss.length; i++) if (ss[i] && ss[i].id === id) return ss[i]; return null; }
+  // #216: seed a new Marker. ONE source of truth for the panel "+ Add hotspot" and the
+  // board click-to-drop, so the two can't drift. Action follows the block's authoring hint;
+  // card blocks are seeded either way so a later mode flip has copy to show. Position is
+  // passed in (panel cascades it 30->70%; click-to-drop uses the exact clicked x/y%).
+  function tourMakeMarker(block, x, y) {
+    return {
+      id: "hs_" + Math.random().toString(36).slice(2, 8),
+      x: x, y: y,
+      action: (block && block.mode === "screen") ? "navigate" : "card",
+      blocks: [ { type: "subheading", text: "Hotspot title" }, { type: "paragraph", text: "Describe what this point shows." } ]
+    };
+  }
   function tourEntryScreen() { return tourScreenById(tourBlock && tourBlock.entry) || tourScreens()[0] || null; }
   function tourScreenLabel(s, i) { return (s && s.name) || (s === tourEntryScreen() ? "Home" : "Screen " + i); }
 
@@ -7231,34 +7252,42 @@
     bar.appendChild(title);
     var count = h("span", "tourb__count"); bar.appendChild(count);
     var spacer = h("div", "vbrowser__spacer"); bar.appendChild(spacer);
-    // Upload screens = the ONE primary creative action (multi-file)
-    var upBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "Upload screens");
+    // Top bar = the CREATIVE actions + overlay chrome. The board TOOLS (Tidy / Cards face-up /
+    // zoom) live in a floating pill over the board (built below) — a true canvas-overlay-bar
+    // mirror, so the board reads like the main editor canvas. Preview is the single accent
+    // primary (DSLMS action-priority); Upload screens is a strong secondary.
+    var upBtn = h("button", "vbrowser__btn", "Upload screens");
     upBtn.addEventListener("click", tourUploadScreens);
     bar.appendChild(upBtn);
-    // #224 T6: add a loop (screen-carousel) frame — the ONE secondary creative action
+    // Add source video = drop a scratch video onto the board to harvest screenshots/segments
+    // from (author-time only; never ships). Playhead/in-out/harvest controls land in a later pass.
+    var srcBtn = h("button", "vbrowser__btn", "Add source video");
+    srcBtn.title = "Add a source video to harvest screens from (author-time scratch — never exported)";
+    srcBtn.addEventListener("click", tourAddSource);
+    bar.appendChild(srcBtn);
+    // #224 T6: add a loop (screen-carousel) frame.
     var loopBtn = h("button", "vbrowser__btn", "Add loop");
     loopBtn.title = "Add a loop: a frame holding a set of screens the learner cycles forward/back";
     loopBtn.addEventListener("click", tourAddLoop);
     bar.appendChild(loopBtn);
-    // Tidy: snap the nodes into a clean grid (also on Cmd/Ctrl+T).
-    var tidyBtn = h("button", "vbrowser__btn", "Tidy");
-    tidyBtn.title = "Tidy layout: arrange the screen nodes into a grid (Cmd/Ctrl+T)";
-    tidyBtn.addEventListener("click", tourTidyLayout);
-    bar.appendChild(tidyBtn);
-    // Cards face-up (T5c) — a compact switch in the bar
-    var faceWrap = h("label", "tourb__switch"); bar.appendChild(faceWrap);
-    tourBuildFaceSwitch(faceWrap);
-    // zoom/fit control (reuse the CanvasOverlayBar zoom form)
-    var zoom = h("div", "zoom tourb__zoom"); zoom.title = "Fit / actual size";
-    var zlvl = h("span", "tourb__zoom-level", "100%"); zoom.appendChild(zlvl);
-    var zcaret = h("span", "zoom__caret"); if (window.Icon) zcaret.innerHTML = window.Icon("chevron-down"); zoom.appendChild(zcaret);
-    zoom.addEventListener("click", tourZoomCycle);
-    bar.appendChild(zoom);
+    // Add hotspot = arm click-to-drop: the next click on a screen drops a marker where you
+    // click (direct manipulation; no round-trip to the panel "+ Add"). Toggles is-armed.
+    var addHsBtn = h("button", "vbrowser__btn tourb__addhs", "Add hotspot");
+    addHsBtn.title = "Add hotspot: click a screen to drop a marker where you click (Esc to cancel)";
+    addHsBtn.addEventListener("click", function () { tourSetPlacing(!tourPlacing); });
+    bar.appendChild(addHsBtn);
     // Isolated preview: test THIS tour (nav + loop carousels) without leaving the builder.
     var prevBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "Preview");
     prevBtn.title = "Test this tour in isolation";
     prevBtn.addEventListener("click", openTourPreview);
     bar.appendChild(prevBtn);
+    // Properties drawer toggle: collapsed by default (canvas-first) — open it for the deep value
+    // settings the pill/menus don't carry (colours, card padding, blend, alt, playback, nav labels).
+    var propsBtn = h("button", "vbrowser__btn tourb__propsbtn");
+    propsBtn.innerHTML = (window.Icon ? window.Icon("panel-left") : "") + "<span>Properties</span>";
+    propsBtn.title = "Show / hide the properties panel";
+    propsBtn.addEventListener("click", function () { tourSetPanelOpen(!tourPanelOpen); });
+    bar.appendChild(propsBtn);
     var doneBtn = h("button", "vbrowser__btn", "Done");
     doneBtn.addEventListener("click", closeTourBuilder);
     bar.appendChild(doneBtn);
@@ -7279,17 +7308,44 @@
     // Loop frames sit BENEATH the nodes (a group frame, like the edge layer) so member
     // ScreenNodes paint inside them. Order in the layer: loops, then nodes, then edges on top.
     var loops = h("div", "tourb__loops"); layer.appendChild(loops);
+    // Source-video scratch nodes (harvest surfaces): a distinct layer, beneath the screen
+    // nodes. They live on tourBlock.sources[] and are excluded from render/export.
+    var sources = h("div", "tourb__sources"); layer.appendChild(sources);
     var nodes = h("div", "tourb__nodes"); layer.appendChild(nodes);
     var edges = document.createElementNS(SVGNS, "svg"); edges.setAttribute("class", "tourb-edges");
     layer.appendChild(edges);
     board.appendChild(layer);
+    // --- floating tool pill (a canvas-overlay-bar mirror, over the board) ---
+    // Reuses the DSLMS raised-pill surface (.canvas-overlay-bar__inner / __sep / .icon-btn) so it
+    // reads as the same product as the main canvas. Holds the board TOOLS (Tidy / Cards face-up /
+    // zoom) and a trailing contextual actions segment (populated by the selection ticket).
+    var pill = h("div", "tourb__pill");
+    var pillInner = h("div", "canvas-overlay-bar__inner tourb__pill-inner");
+    var tidyBtn = iconBtn("layout-grid", "Tidy layout: arrange screens into a grid (Cmd/Ctrl+T)");
+    tidyBtn.addEventListener("click", tourTidyLayout); pillInner.appendChild(tidyBtn);
+    var faceWrap = h("label", "tourb__switch"); pillInner.appendChild(faceWrap);
+    tourBuildFaceSwitch(faceWrap);
+    pillInner.appendChild(h("span", "canvas-overlay-bar__sep"));
+    var zoom = h("div", "zoom tourb__zoom"); zoom.title = "Fit / actual size";
+    var zlvl = h("span", "tourb__zoom-level", "100%"); zoom.appendChild(zlvl);
+    var zcaret = h("span", "zoom__caret"); if (window.Icon) zcaret.innerHTML = window.Icon("chevron-down"); zoom.appendChild(zcaret);
+    zoom.addEventListener("click", tourZoomCycle); pillInner.appendChild(zoom);
+    // contextual selection-actions segment (appended on select, cleared on deselect — ticket 04).
+    var pillActionsSep = h("span", "canvas-overlay-bar__sep canvas-overlay-bar__sep--actions"); pillActionsSep.hidden = true; pillInner.appendChild(pillActionsSep);
+    var pillActions = h("div", "canvas-overlay-bar__actions"); pillActions.hidden = true; pillInner.appendChild(pillActions);
+    pill.appendChild(pillInner); board.appendChild(pill);
     var panel = h("div", "tourb__panel");
-    var panelHead = h("div", "tourb__panel-head", "Properties"); panel.appendChild(panelHead);
+    var panelHead = h("div", "tourb__panel-head");
+    panelHead.appendChild(h("span", "tourb__panel-title", "Properties"));
+    var panelClose = iconBtn("chevron", "Hide properties"); panelClose.classList.add("tourb__panel-close");
+    panelClose.addEventListener("click", function () { tourSetPanelOpen(false); });
+    panelHead.appendChild(panelClose);
+    panel.appendChild(panelHead);
     var panelBody = h("div", "tourb__panel-body"); panel.appendChild(panelBody);
     body.appendChild(board); body.appendChild(panel);
     overlay.appendChild(body);
     document.body.appendChild(overlay);
-    tourUI = { overlay: overlay, board: board, layer: layer, loops: loops, edges: edges, nodes: nodes, panelBody: panelBody, count: count, zlvl: zlvl, faceWrap: faceWrap };
+    tourUI = { overlay: overlay, board: board, layer: layer, loops: loops, sources: sources, edges: edges, nodes: nodes, panelBody: panelBody, count: count, zlvl: zlvl, faceWrap: faceWrap, addHsBtn: addHsBtn, pill: pill, pillActions: pillActions, pillActionsSep: pillActionsSep, panel: panel, propsBtn: propsBtn };
     wireTourBoardGestures();
     return tourUI;
   }
@@ -7316,7 +7372,9 @@
     autoLayoutTourCoords();
     ensureTourBuilder();
     if (window.normalizeHotspotLoops) window.normalizeHotspotLoops(block);
-    tourFacesUp = true; tourConnect = null; tourNodeSel = []; tourSpace = false; tourLinkSel = null; tourHotMarker = null; tourLoopSel = null;
+    tourFacesUp = true; tourConnect = null; tourNodeSel = []; tourSpace = false; tourLinkSel = null; tourHotMarker = null; tourLoopSel = null; tourSelKind = null;
+    tourSetPlacing(false);
+    tourSetPanelOpen(false); // canvas-first: the drawer starts collapsed each time the builder opens
     if (tourUI.faceWrap) tourBuildFaceSwitch(tourUI.faceWrap);
     tourReturnFocus = document.activeElement;
     tourUI.overlay.hidden = false;
@@ -7332,7 +7390,7 @@
     if (!tourUI) return;
     tourUI.overlay.hidden = true;
     document.body.classList.remove("tour-builder-open");
-    tourConnect = null;
+    tourConnect = null; tourSetPlacing(false);
     try { localStorage.removeItem(TOUR_OPEN_KEY); } catch (_) {}
     var ret = tourReturnFocus; tourReturnFocus = null;
     if (ret && ret.focus) { try { ret.focus(); } catch (_) {} }
@@ -7357,6 +7415,7 @@
   // `inspector` target, build, restore — the node card is a handle, never a second editor.
   function renderTourInspector() {
     if (!tourUI || !tourBlock) return;
+    renderTourPillActions(); // the pill segment mirrors the same selection as the panel
     var body = tourUI.panelBody; body.innerHTML = "";
     // #224 T6: a selected loop frame mirrors its own props (title, members, wrap), not the
     // screen/marker inspector — the panel reflects the selection (the design spec).
@@ -7421,6 +7480,7 @@
     if (!tourUI) return;
     tourScrubNode = null; // #54: nodes are rebuilt below -> drop the stale hover-scrub reference
     renderTourLoops();
+    renderTourSources();
     var ss = tourScreens(), entry = tourEntryScreen();
     // #224 T6: members of a loop are positioned inside their frame's grid (not at their
     // own bx/by); write the slot back onto bx/by so edges + drag-start stay consistent.
@@ -7471,6 +7531,7 @@
         if (!isBox) pin.style.setProperty("--hotspot-size", ((tourBlock.markerSize || 34) * TOUR_NODE_W / TOUR_NOMINAL_W) + "px");
         pin.title = m.label || (isBox ? "Region hotspot — drag to move; drag the corner to resize" : (isNav ? "Navigate hotspot — drag to move; drag the ring to link a screen" : "Card hotspot — drag to move"));
         pin.addEventListener("pointerdown", function (e) { tourBeginPinDrag(s, m, pin, thumb, e); });
+        pin.addEventListener("contextmenu", function (e) { e.preventDefault(); e.stopPropagation(); tourSelectMarker(s, m); tourMarkerMenu(s, m, e.clientX, e.clientY); });
         // hover a marker -> light up its leader wire + card (which callout maps to which marker)
         pin.addEventListener("pointerenter", function () { tourHotMarker = m.id; renderTourEdges(); });
         pin.addEventListener("pointerleave", function () { tourHotMarker = hotspotEditId; renderTourEdges(); });
@@ -7510,6 +7571,7 @@
       // node pointer: shift/cmd-click toggles multi-select; plain drag moves (group if
       // multi-selected); plain click single-selects. (persist bx/by; render ignores them.)
       card.addEventListener("pointerdown", function (e) { tourNodePointerDown(s, card, e); });
+      card.addEventListener("contextmenu", function (e) { e.preventDefault(); e.stopPropagation(); tourSelectNode(s); tourNodeMenu(s, e.clientX, e.clientY); });
       tourUI.nodes.appendChild(card);
     });
     // measure each thumb's real (aspect-driven) height in board px so edges/wires anchor to
@@ -7523,6 +7585,7 @@
     tourScreens().forEach(function (s) { if (s) tourLayoutFaceCards(s); });
     renderTourEdges();
     applyTourTransform();
+    renderTourPillActions(); // keep the selection segment current after any node rebuild
   }
 
   // ---- #224 T6: draw the loop frames (beneath the nodes) ----
@@ -7556,6 +7619,7 @@
       // whole-frame pointer: select + drag (members follow). Ignore clicks that land on a
       // member node (nodes are a layer above and handle their own pointer) or the title.
       frame.addEventListener("pointerdown", function (e) { tourLoopPointerDown(loop, frame, e); });
+      frame.addEventListener("contextmenu", function (e) { e.preventDefault(); e.stopPropagation(); tourSelectLoop(loop); tourLoopMenu(loop, e.clientX, e.clientY); });
       tourUI.loops.appendChild(frame);
     });
   }
@@ -7572,7 +7636,441 @@
     scheduleSave(); renderTourNodes();
     requestAnimationFrame(tourFit);
   }
+  // ---- source-video scratch nodes (harvest surfaces; excluded from render/export) ----
+  // They live on tourBlock.sources[] = [{ id, visual:"asset:<id>", name, bx, by }]. render.js
+  // never reads `sources`, and eachMediaSlot skips it, so a source is author-time-only. This
+  // first pass gives the on-board presence + interim hover-scrub; the playhead/in-out transport
+  // and the harvest (screenshot / segment) actions land in later passes.
+  function tourSources() { return (tourBlock && Array.isArray(tourBlock.sources)) ? tourBlock.sources : []; }
+  function tourSourceById(id) { var ss = tourSources(); for (var i = 0; i < ss.length; i++) if (ss[i] && ss[i].id === id) return ss[i]; return null; }
+  function tourSourceSrc(src) {
+    var v = src && src.visual;
+    if (!v || typeof v !== "string") return null;
+    if (v.indexOf("asset:") === 0) return editorAssetResolve(v.slice(6));
+    return v;
+  }
+  function tourAddSource() {
+    if (!tourBlock) return;
+    var inp = document.createElement("input"); inp.type = "file"; inp.accept = "video/*";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () {
+        pushHistory();
+        if (!Array.isArray(tourBlock.sources)) tourBlock.sources = [];
+        var id = "src-" + Math.random().toString(36).slice(2, 8); while (tourSourceById(id)) id += "x";
+        // drop it ABOVE the current node/source spread so it reads as a separate surface
+        var minY = Infinity;
+        tourScreens().forEach(function (s) { if (s) minY = Math.min(minY, s.by || 0); });
+        tourSources().forEach(function (s) { if (s) minY = Math.min(minY, s.by || 0); });
+        if (!isFinite(minY)) minY = 60;
+        var nm = (f.name || "").replace(/\.[^.]+$/, "").trim();
+        var srcNode = { id: id, visual: assetRef(r.result, f), bx: 80, by: minY - TOUR_SOURCE_H - 120 };
+        if (nm) srcNode.name = nm;
+        tourBlock.sources.push(srcNode);
+        scheduleSave(); renderTourNodes();
+        requestAnimationFrame(tourFit);
+      };
+      r.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  function tourRemoveSource(src) {
+    if (!src || !tourBlock) return;
+    confirmModal("Remove source video", "Screens you have already harvested from it are kept.", function () {
+      pushHistory();
+      var arr = tourSources(); var i = arr.indexOf(src); if (i >= 0) arr.splice(i, 1);
+      if (!arr.length) delete tourBlock.sources;
+      scheduleSave(); renderTourNodes();
+      try { sweepAllAssets(); } catch (_) {} // free the removed source's blob now (it's unreferenced)
+    }, { okLabel: "Remove", danger: true });
+  }
+  function renderTourSources() {
+    if (!tourUI || !tourUI.sources) return;
+    tourUI.sources.innerHTML = "";
+    tourSources().forEach(function (src, si) {
+      if (!src) return;
+      var card = h("div", "tourb-source");
+      card.style.left = (src.bx || 0) + "px"; card.style.top = (src.by || 0) + "px"; card.style.width = TOUR_SOURCE_W + "px";
+      card.setAttribute("data-source-id", src.id);
+      // header: SOURCE tag + name + remove
+      var head = h("div", "tourb-source__head");
+      if (window.Icon) { var gi = h("span", "tourb-source__glyph"); gi.innerHTML = window.Icon("square-play"); head.appendChild(gi); }
+      head.appendChild(h("span", "tourb-source__tag", "Source"));
+      var nm = h("input", "tourb-source__title"); nm.type = "text"; nm.spellcheck = false;
+      nm.placeholder = "Source " + (si + 1); nm.value = src.name || "";
+      var pushed = false;
+      nm.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      nm.addEventListener("focus", function () { pushed = false; });
+      nm.addEventListener("input", function () { if (!pushed) { pushHistory(); pushed = true; } if (nm.value) src.name = nm.value; else delete src.name; scheduleSave(); });
+      head.appendChild(nm);
+      var rm = iconBtn("trash", "Remove source video", true); rm.classList.add("tourb-source__remove");
+      rm.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+      rm.addEventListener("click", function (e) { e.stopPropagation(); tourRemoveSource(src); });
+      head.appendChild(rm);
+      card.appendChild(head);
+      // video thumb — a LIVE video (the harvest surface): the transport plays/scrubs it, so
+      // (unlike screen nodes) we keep the live element rather than poster-swapping it.
+      var thumb = h("div", "tourb-source__thumb");
+      var vsrc = tourSourceSrc(src);
+      var vid = null;
+      if (!vsrc) { thumb.classList.add("is-empty"); thumb.style.height = TOUR_SOURCE_H + "px"; if (window.Icon) thumb.innerHTML = window.Icon("square-play"); }
+      else {
+        vid = document.createElement("video"); vid.src = vsrc; vid.muted = true;
+        vid.setAttribute("muted", ""); vid.setAttribute("playsinline", ""); vid.setAttribute("preload", "auto");
+        thumb.appendChild(vid);
+        if (tourCropEditSrc === src.id) thumb.appendChild(tourBuildCropOverlay(src, thumb));
+      }
+      card.appendChild(thumb);
+      if (vid) card.appendChild(tourBuildTransport(src, vid));
+      card.addEventListener("pointerdown", function (e) { tourSourcePointerDown(src, card, e); });
+      tourUI.sources.appendChild(card);
+    });
+  }
+  function tourSourcePointerDown(src, card, e) {
+    if (e.button !== 0 || tourSpace) return;
+    if (e.target.closest(".tourb-source__title, .tourb-source__remove, .tourb-transport")) return;
+    e.stopPropagation();
+    var start = { x: e.clientX, y: e.clientY }, moved = false, pushedH = false;
+    var ox = src.bx || 0, oy = src.by || 0;
+    try { card.setPointerCapture(e.pointerId); } catch (_) {}
+    function mv(ev) {
+      if (!moved && Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) < 4) return;
+      if (!pushedH) { pushHistory(); pushedH = true; }
+      moved = true;
+      var dx = (ev.clientX - start.x) / tourZoom, dy = (ev.clientY - start.y) / tourZoom;
+      src.bx = Math.round(ox + dx); src.by = Math.round(oy + dy);
+      card.style.left = src.bx + "px"; card.style.top = src.by + "px";
+    }
+    function up() { card.removeEventListener("pointermove", mv); card.removeEventListener("pointerup", up); if (moved) scheduleSave(); }
+    card.addEventListener("pointermove", mv); card.addEventListener("pointerup", up);
+  }
+
+  /* __TOUR_MEDIA_PURE__ start (pure helpers; extracted verbatim by tests/run.js) */
+  function tourFormatTime(sec) {
+    sec = Math.max(0, Math.floor(sec || 0));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+  // Marking an in/out point at time t. Keep 0 <= in < out; a mark that would cross the
+  // other end DROPS that other end (it's no longer valid) rather than silently reordering.
+  // cur = { in, out } (either may be null/undefined). Returns a fresh { in, out }.
+  function tourApplyMark(kind, t, cur) {
+    cur = cur || {};
+    var inP = (cur.in == null) ? null : cur.in, outP = (cur.out == null) ? null : cur.out;
+    if (kind === "in") { inP = t; if (outP != null && outP <= t) outP = null; }
+    else { outP = t; if (inP != null && inP >= t) inP = null; }
+    return { in: inP, out: outP };
+  }
+  // Resolve a normalised crop {x,y,w,h} (0-1 fractions of the source) against the video's
+  // natural pixels -> a source rect {sx,sy,sw,sh} and the output {w,h}. Clamped in-bounds
+  // with a 1% min so a harvest is never zero-sized. No crop -> the full frame.
+  function tourCropRect(crop, natW, natH) {
+    var c = crop || { x: 0, y: 0, w: 1, h: 1 };
+    var x = Math.max(0, Math.min(1, c.x == null ? 0 : c.x));
+    var y = Math.max(0, Math.min(1, c.y == null ? 0 : c.y));
+    var w = Math.max(0.01, Math.min(1 - x, c.w == null ? 1 : c.w));
+    var hh = Math.max(0.01, Math.min(1 - y, c.h == null ? 1 : c.h));
+    var sw = Math.max(1, Math.round(w * natW)), sh = Math.max(1, Math.round(hh * natH));
+    return { sx: Math.round(x * natW), sy: Math.round(y * natH), sw: sw, sh: sh, w: sw, h: sh };
+  }
+  // A segment is harvestable only when both ends are marked and in < out.
+  function tourSegReady(inP, outP) { return inP != null && outP != null && outP > inP; }
+  /* __TOUR_MEDIA_PURE__ end */
+
+  var tourPlayingVideo = null; // only one source plays at a time
+  var tourCropEditSrc = null;  // id of the source whose crop overlay is open (one at a time)
+  function tourPauseAllSources(except) {
+    if (tourPlayingVideo && tourPlayingVideo !== except) { try { tourPlayingVideo.pause(); } catch (_) {} }
+  }
+  // The MediaTransport strip (DSLMS board/SourceNode): scrub rail + playhead + in/out ticks,
+  // and a controls row (play/pause, time readout, Set in / Set out). Plays/scrubs the LIVE
+  // video passed in; marks persist on src.in / src.out (seconds).
+  function tourBuildTransport(src, vid) {
+    var wrap = h("div", "tourb-transport");
+    // --- scrub rail ---
+    var rail = h("div", "tourb-transport__rail");
+    var range = h("div", "tourb-transport__range"); rail.appendChild(range);
+    var fill = h("div", "tourb-transport__fill"); rail.appendChild(fill);
+    var inTick = h("div", "tourb-transport__tick tourb-transport__tick--in"); rail.appendChild(inTick);
+    var outTick = h("div", "tourb-transport__tick tourb-transport__tick--out"); rail.appendChild(outTick);
+    var knob = h("div", "tourb-transport__knob"); rail.appendChild(knob);
+    wrap.appendChild(rail);
+    // --- controls row ---
+    var row = h("div", "tourb-transport__row");
+    var play = iconBtn("play", "Play / pause"); play.classList.add("tourb-transport__play");
+    row.appendChild(play);
+    var time = h("span", "tourb-transport__time", "0:00 / 0:00"); row.appendChild(time);
+    row.appendChild(h("div", "tourb-transport__spacer"));
+    // crop: toggle the crop overlay on the source (all harvests come out this same W x H)
+    var cropB = iconBtn("crop", "Crop the source (all screens harvested from it share this size)");
+    cropB.classList.add("tourb-transport__crop"); if (tourCropEditSrc === src.id) cropB.classList.add("is-on");
+    cropB.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cropB.addEventListener("click", function (e) { e.stopPropagation(); tourCropEditSrc = (tourCropEditSrc === src.id) ? null : src.id; renderTourSources(); });
+    row.appendChild(cropB);
+    var setIn = h("button", "tourb-transport__mark", "Set in"); setIn.type = "button"; setIn.title = "Set the segment IN point at the playhead"; row.appendChild(setIn);
+    var setOut = h("button", "tourb-transport__mark", "Set out"); setOut.type = "button"; setOut.title = "Set the segment OUT point at the playhead"; row.appendChild(setOut);
+    // harvest: freeze the current frame into a new image screen (＋ Segment lands here in tick 5)
+    var shot = h("button", "tourb-transport__harvest"); shot.type = "button";
+    shot.innerHTML = (window.Icon ? window.Icon("image") : "") + "<span>Screenshot</span>";
+    shot.title = "Create a screen from the current frame";
+    shot.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    shot.addEventListener("click", function (e) { e.stopPropagation(); tourHarvestScreenshot(src, vid); });
+    row.appendChild(shot);
+    // harvest a clip between in/out (silent WebM). Enabled only when a valid segment is marked.
+    var seg = h("button", "tourb-transport__harvest tourb-transport__harvest--seg"); seg.type = "button";
+    seg.innerHTML = (window.Icon ? window.Icon("scissors") : "") + "<span>Segment</span>";
+    seg.title = "Create an animated screen from the in → out segment";
+    seg.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    seg.addEventListener("click", function (e) { e.stopPropagation(); tourHarvestSegment(src, vid); });
+    row.appendChild(seg);
+    wrap.appendChild(row);
+
+    function dur() { var d = vid.duration; return (d && isFinite(d) && d > 0) ? d : 0; }
+    function paint() {
+      var d = dur(), t = vid.currentTime || 0;
+      var pct = d ? Math.max(0, Math.min(100, t / d * 100)) : 0;
+      knob.style.left = pct + "%"; fill.style.width = pct + "%";
+      time.textContent = tourFormatTime(t) + " / " + tourFormatTime(d);
+      var hasIn = src.in != null && d, hasOut = src.out != null && d;
+      inTick.hidden = !hasIn; outTick.hidden = !hasOut;
+      if (hasIn) inTick.style.left = Math.max(0, Math.min(100, src.in / d * 100)) + "%";
+      if (hasOut) outTick.style.left = Math.max(0, Math.min(100, src.out / d * 100)) + "%";
+      var lo = hasIn ? src.in / d * 100 : (hasOut ? 0 : 0);
+      var hi = hasOut ? src.out / d * 100 : (hasIn ? 100 : 0);
+      if ((hasIn || hasOut) && hi > lo) { range.hidden = false; range.style.left = lo + "%"; range.style.width = (hi - lo) + "%"; }
+      else range.hidden = true;
+      play.innerHTML = (window.Icon ? window.Icon(vid.paused ? "play" : "pause") : "");
+      seg.disabled = !tourSegReady(src.in, src.out); // a clip needs a valid in < out
+    }
+    function seekTo(clientX) {
+      var d = dur(); if (!d) return;
+      var r = rail.getBoundingClientRect(); if (!r.width) return;
+      var frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      try { vid.currentTime = frac * d; } catch (_) {}
+    }
+    // click / drag the rail to seek
+    rail.addEventListener("pointerdown", function (e) {
+      e.stopPropagation(); e.preventDefault();
+      try { rail.setPointerCapture(e.pointerId); } catch (_) {}
+      seekTo(e.clientX);
+      function mv(ev) { seekTo(ev.clientX); }
+      function up() { rail.removeEventListener("pointermove", mv); rail.removeEventListener("pointerup", up); }
+      rail.addEventListener("pointermove", mv); rail.addEventListener("pointerup", up);
+    });
+    play.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (vid.paused) { tourPauseAllSources(vid); tourPlayingVideo = vid; vid.play().catch(function () {}); }
+      else vid.pause();
+    });
+    function mark(kind) {
+      pushHistory();
+      var r = tourApplyMark(kind, vid.currentTime || 0, { in: src.in, out: src.out });
+      if (r.in == null) delete src.in; else src.in = r.in;
+      if (r.out == null) delete src.out; else src.out = r.out;
+      scheduleSave(); paint();
+    }
+    setIn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    setOut.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    setIn.addEventListener("click", function (e) { e.stopPropagation(); mark("in"); });
+    setOut.addEventListener("click", function (e) { e.stopPropagation(); mark("out"); });
+    vid.addEventListener("timeupdate", paint);
+    vid.addEventListener("loadedmetadata", paint);
+    vid.addEventListener("play", paint);
+    vid.addEventListener("pause", paint);
+    paint();
+    return wrap;
+  }
+  // Freeze the source's CURRENT frame into a new image screen node. A normal harvested asset
+  // (assetRef -> AssetStore, content-hash dedupe); the export media pre-pass downscales it like
+  // any image, so we store full-res here. Records lightweight provenance `source:{id,t}`
+  // (editor-only, ignored by render like bx/by) so tick 6 can re-bake in place.
+  function tourHarvestScreenshot(src, vid, replace) {
+    if (!vid || !vid.videoWidth) return; // no decoded frame yet -> nothing to grab
+    var url;
+    try {
+      // honour the source crop so every screen harvested from this source is the same W x H
+      var r = tourCropRect(src.crop, vid.videoWidth, vid.videoHeight);
+      var cv = document.createElement("canvas"); cv.width = r.w; cv.height = r.h;
+      cv.getContext("2d").drawImage(vid, r.sx, r.sy, r.sw, r.sh, 0, 0, r.w, r.h);
+      url = cv.toDataURL("image/png"); // throws if the frame is cross-origin tainted
+    } catch (_) { return; }
+    pushHistory();
+    var t = vid.currentTime || 0;
+    // RE-BAKE: replace an existing screen's visual in place -> its id + markers/nav survive.
+    if (replace) {
+      replace.visual = assetRef(url, { type: "image/png", name: (src.name || "source") + " " + tourFormatTime(t) });
+      replace.kind = "image"; replace.source = { id: src.id, t: t };
+      tourSelKind = "node"; hotspotEditScreenId = replace.id; hotspotEditId = null; tourLoopSel = null;
+      scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+      return;
+    }
+    var sid = "scr-" + Math.random().toString(36).slice(2, 8); while (tourScreenById(sid)) sid += "x";
+    // stack harvests from THIS source down its own column so they don't pile on one spot
+    var sibs = tourScreens().filter(function (s) { return s && s.source && s.source.id === src.id; }).length;
+    var scr = {
+      id: sid,
+      visual: assetRef(url, { type: "image/png", name: (src.name || "source") + " " + tourFormatTime(t) }),
+      kind: "image", alt: "", markers: [],
+      bx: (src.bx || 0) + TOUR_SOURCE_W + 60, by: (src.by || 0) + sibs * (TOUR_THUMB_H + 130),
+      source: { id: src.id, t: t } // provenance -> non-destructive re-bake (tick 6)
+    };
+    scr.name = (src.name ? src.name + " " : "") + tourFormatTime(t);
+    tourBlock.screens.push(scr);
+    tourSelKind = "node"; hotspotEditScreenId = sid; hotspotEditId = null; tourLoopSel = null;
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  // ---- ＋ Segment: record the in->out slice to a SILENT WebM screen (Q7) ----
+  // Play the source in->out drawing each frame through the CROP canvas, capture that canvas's
+  // stream into a MediaRecorder. Canvas capture carries no audio (silent by construction) and
+  // bakes the crop in, so the clip is the same W x H as screenshot harvests. Output = a normal
+  // kind:"video" screen (keeps the shipped hotspot-video runtime: progress/reveal/once/loop).
+  var tourSegRecording = false;
+  function tourPickWebmMime() {
+    var c = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+    for (var i = 0; i < c.length; i++) { try { if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c[i])) return c[i]; } catch (_) {} }
+    return "";
+  }
+  function tourHarvestSegment(src, vid, replace, inOut) {
+    var inMark = inOut ? inOut.in : src.in, outMark = inOut ? inOut.out : src.out;
+    if (tourSegRecording || !vid || !tourSegReady(inMark, outMark)) return;
+    if (typeof MediaRecorder === "undefined") return;
+    var r = tourCropRect(src.crop, vid.videoWidth || 1280, vid.videoHeight || 720);
+    var cv = document.createElement("canvas"); cv.width = r.w; cv.height = r.h;
+    var ctx = cv.getContext("2d");
+    var stream = cv.captureStream ? cv.captureStream(30) : null;
+    if (!stream) return;
+    var mime = tourPickWebmMime(), rec;
+    try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); } catch (_) { return; }
+    var chunks = [], raf = null, inPt = inMark, outPt = outMark;
+    function stopDraw() { if (raf) { cancelAnimationFrame(raf); raf = null; } try { vid.pause(); } catch (_) {} }
+    function draw() {
+      try { ctx.drawImage(vid, r.sx, r.sy, r.sw, r.sh, 0, 0, r.w, r.h); } catch (_) {}
+      if ((vid.currentTime || 0) >= outPt) { try { rec.stop(); } catch (_) {} return; }
+      raf = requestAnimationFrame(draw);
+    }
+    rec.ondataavailable = function (e) { if (e && e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = function () {
+      stopDraw();
+      var blob = new Blob(chunks, { type: mime || "video/webm" });
+      var fr = new FileReader();
+      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace); };
+      fr.onerror = function () { tourSegRecording = false; };
+      fr.readAsDataURL(blob);
+    };
+    tourSegRecording = true;
+    var onSeeked = function () {
+      vid.removeEventListener("seeked", onSeeked);
+      try { rec.start(); } catch (_) { tourSegRecording = false; return; }
+      vid.play().catch(function () {});
+      draw();
+    };
+    vid.addEventListener("seeked", onSeeked);
+    try { vid.currentTime = inPt; } catch (_) { onSeeked(); }
+  }
+  function tourFinishSegment(src, dataUrl, inPt, outPt, replace) {
+    tourSegRecording = false;
+    if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) return;
+    pushHistory();
+    var label0 = (src.name ? src.name + " " : "") + tourFormatTime(inPt) + "-" + tourFormatTime(outPt);
+    // RE-BAKE: replace an existing screen's clip in place -> id + markers/nav survive.
+    if (replace) {
+      replace.visual = assetRef(dataUrl, { type: "video/webm", name: label0 });
+      replace.kind = "video"; if (!replace.playback) replace.playback = "once"; replace.source = { id: src.id, in: inPt, out: outPt };
+      tourSelKind = "node"; hotspotEditScreenId = replace.id; hotspotEditId = null; tourLoopSel = null;
+      scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+      return;
+    }
+    var sid = "scr-" + Math.random().toString(36).slice(2, 8); while (tourScreenById(sid)) sid += "x";
+    var sibs = tourScreens().filter(function (s) { return s && s.source && s.source.id === src.id; }).length;
+    var label = (src.name ? src.name + " " : "") + tourFormatTime(inPt) + "-" + tourFormatTime(outPt);
+    var scr = {
+      id: sid,
+      visual: assetRef(dataUrl, { type: "video/webm", name: label }),
+      kind: "video", playback: "once", alt: "", markers: [],
+      bx: (src.bx || 0) + TOUR_SOURCE_W + 60, by: (src.by || 0) + sibs * (TOUR_THUMB_H + 130),
+      source: { id: src.id, in: inPt, out: outPt } // provenance -> re-cut (tick 6)
+    };
+    scr.name = label;
+    tourBlock.screens.push(scr);
+    tourSelKind = "node"; hotspotEditScreenId = sid; hotspotEditId = null; tourLoopSel = null;
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  // Non-destructive RE-BAKE: re-run the harvest from the still-present source and swap this
+  // screen's visual IN PLACE (id + markers/nav preserved) -- so "nudge the frame / re-cut after
+  // I changed the crop" is one click, not delete + re-harvest + re-wire. Needs the source (Q3:
+  // it persists). No-op if the source was removed.
+  function tourRebakeScreen(s) {
+    if (!s || !s.source) return;
+    var src = tourSourceById(s.source.id); if (!src) return; // source gone -> nothing to re-bake from
+    var vid = (tourUI && tourUI.sources) ? tourUI.sources.querySelector('.tourb-source[data-source-id="' + src.id + '"] video') : null;
+    if (!vid || !vid.videoWidth) return;
+    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out }); return; }
+    var t = s.source.t || 0;
+    var grab = function () { tourHarvestScreenshot(src, vid, s); };
+    if (Math.abs((vid.currentTime || 0) - t) < 0.06) { grab(); return; }
+    var on = function () { vid.removeEventListener("seeked", on); grab(); };
+    vid.addEventListener("seeked", on);
+    try { vid.currentTime = t; } catch (_) { vid.removeEventListener("seeked", on); grab(); }
+  }
+  // Crop overlay on a source thumb: a draggable/resizable rect stored NORMALISED on src.crop
+  // (0-1 fractions). All harvests route through it (tourCropRect) so every screen from this
+  // source is the same size. A full-frame crop is stored as "no crop" (whole frame).
+  function tourBuildCropOverlay(src, thumb) {
+    var c0 = (src.crop && typeof src.crop === "object") ? src.crop : {};
+    var crop = { x: c0.x || 0, y: c0.y || 0, w: c0.w == null ? 1 : c0.w, h: c0.h == null ? 1 : c0.h };
+    var ov = h("div", "tourb-crop");
+    var box = h("div", "tourb-crop__box");
+    function clampAll() {
+      crop.w = Math.max(0.05, Math.min(1, crop.w)); crop.h = Math.max(0.05, Math.min(1, crop.h));
+      crop.x = Math.max(0, Math.min(1 - crop.w, crop.x)); crop.y = Math.max(0, Math.min(1 - crop.h, crop.y));
+    }
+    function place() { box.style.left = (crop.x * 100) + "%"; box.style.top = (crop.y * 100) + "%"; box.style.width = (crop.w * 100) + "%"; box.style.height = (crop.h * 100) + "%"; }
+    function r3(n) { return Math.round(n * 1000) / 1000; }
+    function store() {
+      clampAll();
+      if (crop.x <= 0.001 && crop.y <= 0.001 && crop.w >= 0.999 && crop.h >= 0.999) delete src.crop; // full frame = no crop
+      else src.crop = { x: r3(crop.x), y: r3(crop.y), w: r3(crop.w), h: r3(crop.h) };
+      scheduleSave();
+    }
+    place();
+    // drag the body = move
+    box.addEventListener("pointerdown", function (e) {
+      if (e.target !== box) return; // corner handles have their own
+      e.stopPropagation(); e.preventDefault();
+      var r = thumb.getBoundingClientRect(), ox = crop.x, oy = crop.y, sx = e.clientX, sy = e.clientY, pushed = false;
+      try { box.setPointerCapture(e.pointerId); } catch (_) {}
+      function mv(ev) { if (!pushed) { pushHistory(); pushed = true; } crop.x = ox + (ev.clientX - sx) / r.width; crop.y = oy + (ev.clientY - sy) / r.height; clampAll(); place(); }
+      function up() { box.removeEventListener("pointermove", mv); box.removeEventListener("pointerup", up); store(); place(); }
+      box.addEventListener("pointermove", mv); box.addEventListener("pointerup", up);
+    });
+    // corner handles = resize (the opposite corner stays anchored)
+    [["nw", -1, -1], ["ne", 1, -1], ["sw", -1, 1], ["se", 1, 1]].forEach(function (cn) {
+      var hx = cn[1], hy = cn[2];
+      var hd = h("div", "tourb-crop__handle tourb-crop__handle--" + cn[0]);
+      hd.addEventListener("pointerdown", function (e) {
+        e.stopPropagation(); e.preventDefault();
+        var r = thumb.getBoundingClientRect(), o = { x: crop.x, y: crop.y, w: crop.w, h: crop.h }, sx = e.clientX, sy = e.clientY, pushed = false;
+        try { hd.setPointerCapture(e.pointerId); } catch (_) {}
+        function mv(ev) {
+          if (!pushed) { pushHistory(); pushed = true; }
+          var dx = (ev.clientX - sx) / r.width, dy = (ev.clientY - sy) / r.height;
+          if (hx < 0) { crop.x = o.x + dx; crop.w = o.w - dx; } else { crop.w = o.w + dx; }
+          if (hy < 0) { crop.y = o.y + dy; crop.h = o.h - dy; } else { crop.h = o.h + dy; }
+          if (crop.w < 0.05) { if (hx < 0) crop.x = o.x + o.w - 0.05; crop.w = 0.05; }
+          if (crop.h < 0.05) { if (hy < 0) crop.y = o.y + o.h - 0.05; crop.h = 0.05; }
+          clampAll(); place();
+        }
+        function up() { hd.removeEventListener("pointermove", mv); hd.removeEventListener("pointerup", up); store(); place(); }
+        hd.addEventListener("pointermove", mv); hd.addEventListener("pointerup", up);
+      });
+      box.appendChild(hd);
+    });
+    ov.appendChild(box);
+    return ov;
+  }
   function tourSelectLoop(loop) {
+    tourSelKind = loop ? "loop" : null;
     tourLoopSel = loop ? loop.id : null; hotspotEditId = null; hotspotEditScreenId = null; tourNodeSel = []; tourLinkSel = null;
     renderTourInspector(); renderTourNodes();
   }
@@ -7584,6 +8082,153 @@
     var i = tourLoops().indexOf(loop); if (i >= 0) tourBlock.loops.splice(i, 1);
     if (tourLoopSel === loop.id) tourLoopSel = null;
     scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  // ---- selection-contextual actions segment (the pill's pillActions mount) ----------------
+  // Mirrors the board selection: appends per-object VERBS + the object's DEFINING mode toggles
+  // (marker Action/Shape) into the floating pill, cleared on deselect. Single home — the
+  // Action/Shape toggles are removed from the re-hosted panel while the builder is open (they
+  // stay in the plain sidebar, where there is no pill). Same "one bar, contextual segment"
+  // pattern as the main canvas ensureBlockToolbar.
+  function tourPillIcon(name) { return window.Icon ? window.Icon(name) : ""; }
+  function renderTourPillActions() {
+    if (!tourUI || !tourUI.pillActions) return;
+    var host = tourUI.pillActions, sep = tourUI.pillActionsSep;
+    host.innerHTML = "";
+    // Branch on the EXPLICIT selection kind, not hotspotEditId (the re-hosted panel points that at
+    // markers[0] even for a node selection — see renderHotspotInspector).
+    var m = (tourSelKind === "marker" && hotspotEditId && tourBlock) ? findHotspot(tourBlock, hotspotEditId) : null;
+    var s = hotspotEditScreenId ? tourScreenById(hotspotEditScreenId) : null;
+    var loop = (tourSelKind === "loop" && tourLoopSel) ? tourLoopById(tourLoopSel) : null;
+    var shown = false;
+    if (tourSelKind === "marker" && m && s) {
+      // Action: Card <-> Navigate (moved off the panel — single home in the builder)
+      var aw = h("div", "tourb__pillseg");
+      segmentedIconLive("", [[tourPillIcon("message-square"), "card", "Card popover"], [tourPillIcon("navigation"), "navigate", "Navigate to a screen"]],
+        function (v) { return (m.action === "navigate" ? "navigate" : "card") === v; },
+        function (v) { m.action = (v === "navigate") ? "navigate" : "card"; hotspotEditId = m.id; reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); }, aw);
+      host.appendChild(aw);
+      // Shape: Point <-> Box
+      var sw = h("div", "tourb__pillseg");
+      segmentedIconLive("", [[tourPillIcon("target"), "point", "Point marker"], [tourPillIcon("square"), "box", "Box region"]],
+        function (v) { return (m.shape === "box" ? "box" : "point") === v; },
+        function (v) { if (v === "box") { m.shape = "box"; if (m.w == null) m.w = 20; if (m.h == null) m.h = 12; } else delete m.shape; reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); }, sw);
+      host.appendChild(sw);
+      host.appendChild(h("span", "tb-sep"));
+      var dupM = iconBtn("duplicate", "Duplicate hotspot"); dupM.addEventListener("click", function () { tourDuplicateMarker(s, m); }); host.appendChild(dupM);
+      var delM = iconBtn("trash", "Delete hotspot", true); delM.addEventListener("click", function () { tourDeleteMarker(s, m); }); host.appendChild(delM);
+      shown = true;
+    } else if (tourSelKind === "loop" && loop) {
+      var wrapB = iconBtn("refresh", loop.wrap ? "Wrap around: on (cycle past the ends)" : "Wrap around: off"); if (loop.wrap) wrapB.classList.add("is-on");
+      wrapB.addEventListener("click", function () { pushHistory(); if (loop.wrap) delete loop.wrap; else loop.wrap = true; scheduleSave(); renderTourNodes(); renderTourInspector(); }); host.appendChild(wrapB);
+      var delL = iconBtn("trash", "Delete loop", true); delL.addEventListener("click", function () { tourDeleteLoop(loop); }); host.appendChild(delL);
+      shown = true;
+    } else if (tourSelKind === "node" && s) {
+      var isEntry = tourBlock.entry === s.id;
+      var homeB = iconBtn("square-play", isEntry ? "Entry (Home) screen" : "Set as entry (Home) screen"); if (isEntry) homeB.classList.add("is-on");
+      homeB.addEventListener("click", function () { if (isEntry) return; pushHistory(); tourBlock.entry = s.id; scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); }); host.appendChild(homeB);
+      var isFin = tourBlock.completionScreen === s.id;
+      var finB = iconBtn("check-square", isFin ? "Finish screen (click to clear)" : "Set as finish (completion) screen"); if (isFin) finB.classList.add("is-on");
+      finB.addEventListener("click", function () { pushHistory(); if (isFin) delete tourBlock.completionScreen; else tourBlock.completionScreen = s.id; scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); }); host.appendChild(finB);
+      host.appendChild(h("span", "tb-sep"));
+      var replB = iconBtn("image", "Replace screen image"); replB.addEventListener("click", function () { tourReplaceScreenImage(s); }); host.appendChild(replB);
+      // re-bake from source: only for a harvested screen whose source is still on the board
+      if (s.source && tourSourceById(s.source.id)) {
+        var rbB = iconBtn("refresh", "Re-bake from source (re-capture this screen from its source video)");
+        rbB.addEventListener("click", function () { tourRebakeScreen(s); }); host.appendChild(rbB);
+      }
+      var dupN = iconBtn("duplicate", "Duplicate screen"); dupN.addEventListener("click", function () { tourDuplicateScreen(s); }); host.appendChild(dupN);
+      if (!isEntry) { var delN = iconBtn("trash", "Delete screen", true); delN.addEventListener("click", function () { tourDeleteScreen(s); }); host.appendChild(delN); } // entry/Home is protected
+      shown = true;
+    }
+    host.hidden = !shown; if (sep) sep.hidden = !shown;
+  }
+  // ---- object verbs the pill segment fires (screen/ marker duplicate, delete, image replace) ----
+  function tourReplaceScreenImage(s) {
+    var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*,.svg,video/*";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () { pushHistory(); s.visual = assetRef(r.result, f); s.kind = (f.type && f.type.indexOf("video/") === 0) ? "video" : "image"; scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); };
+      r.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  function tourDuplicateScreen(s) {
+    pushHistory();
+    var copy = clone(s);
+    copy.id = "scr-" + Math.random().toString(36).slice(2, 8); while (tourScreenById(copy.id)) copy.id += "x";
+    (copy.markers || []).forEach(function (mk) { if (mk) mk.id = "hs_" + Math.random().toString(36).slice(2, 8); });
+    copy.bx = (s.bx || 0) + 28; copy.by = (s.by || 0) + 28;
+    if (copy.name) copy.name = copy.name + " copy";
+    var i = tourBlock.screens.indexOf(s);
+    tourBlock.screens.splice(i < 0 ? tourBlock.screens.length : i + 1, 0, copy);
+    tourSelKind = "node"; hotspotEditScreenId = copy.id; hotspotEditId = null; tourLoopSel = null;
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  function tourDuplicateMarker(s, m) {
+    pushHistory();
+    var copy = clone(m);
+    copy.id = "hs_" + Math.random().toString(36).slice(2, 8);
+    copy.x = clampPct((m.x == null ? 50 : m.x) + 4); copy.y = clampPct((m.y == null ? 50 : m.y) + 4);
+    var i = (s.markers || []).indexOf(m);
+    (s.markers = s.markers || []).splice(i < 0 ? s.markers.length : i + 1, 0, copy);
+    tourSelKind = "marker"; hotspotEditScreenId = s.id; hotspotEditId = copy.id;
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  function tourDeleteMarker(s, m) {
+    pushHistory();
+    var i = (s.markers || []).indexOf(m); if (i >= 0) s.markers.splice(i, 1);
+    if (hotspotEditId === m.id) hotspotEditId = null;
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  // Delete a screen node from the board. Mirrors the panel deleteScreen (entry/Home is protected),
+  // and clears every dangling reference: inbound navigate targets, the completion pointer, and any
+  // loop membership — so no edge or badge points at a removed screen.
+  function tourDeleteScreen(s) {
+    var entry = tourEntryScreen();
+    if (!s || (entry && s.id === entry.id)) return; // never delete the entry/Home screen
+    var i = tourBlock.screens.indexOf(s); if (i < 0) return;
+    pushHistory();
+    tourBlock.screens.splice(i, 1);
+    tourBlock.screens.forEach(function (sc) { (sc && sc.markers || []).forEach(function (m) { if (m && m.target === s.id) delete m.target; }); });
+    if (tourBlock.completionScreen === s.id) delete tourBlock.completionScreen;
+    (tourBlock.loops || []).forEach(function (l) { if (l && l.screens) { var j = l.screens.indexOf(s.id); if (j >= 0) l.screens.splice(j, 1); } });
+    if (hotspotEditScreenId === s.id) { hotspotEditScreenId = (entry && entry.id) || null; hotspotEditId = null; }
+    scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+  }
+  // ---- right-click context menus: the SAME verbs as the pill segment, a second surface (one
+  // vocabulary). Selecting first keeps the menu + pill mirrored to the object. ----
+  function tourMarkerMenu(s, m, x, y) {
+    var isNav = m.action === "navigate", isBox = m.shape === "box";
+    showContextMenu(x, y, [
+      { label: "Card popover", active: !isNav, onClick: function () { pushHistory(); m.action = "card"; hotspotEditId = m.id; reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); } },
+      { label: "Navigate to a screen", active: isNav, onClick: function () { pushHistory(); m.action = "navigate"; hotspotEditId = m.id; reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); } },
+      { sep: true },
+      { label: "Point marker", active: !isBox, onClick: function () { pushHistory(); delete m.shape; reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); } },
+      { label: "Box region", active: isBox, onClick: function () { pushHistory(); m.shape = "box"; if (m.w == null) m.w = 20; if (m.h == null) m.h = 12; reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); } },
+      { sep: true },
+      { label: "Duplicate hotspot", onClick: function () { tourDuplicateMarker(s, m); } },
+      { label: "Delete hotspot", danger: true, onClick: function () { tourDeleteMarker(s, m); } }
+    ]);
+  }
+  function tourNodeMenu(s, x, y) {
+    var isEntry = tourBlock.entry === s.id, isFin = tourBlock.completionScreen === s.id;
+    var items = [
+      { label: "Set as Home (entry)", active: isEntry, onClick: function () { if (isEntry) return; pushHistory(); tourBlock.entry = s.id; scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); } },
+      { label: isFin ? "Clear finish screen" : "Set as finish screen", active: isFin, onClick: function () { pushHistory(); if (isFin) delete tourBlock.completionScreen; else tourBlock.completionScreen = s.id; scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block"); } },
+      { sep: true },
+      { label: "Replace image…", onClick: function () { tourReplaceScreenImage(s); } },
+      { label: "Duplicate screen", onClick: function () { tourDuplicateScreen(s); } }
+    ];
+    if (!isEntry) items.push({ sep: true }, { label: "Delete screen", danger: true, onClick: function () { tourDeleteScreen(s); } });
+    showContextMenu(x, y, items);
+  }
+  function tourLoopMenu(loop, x, y) {
+    showContextMenu(x, y, [
+      { label: "Wrap around", active: !!loop.wrap, onClick: function () { pushHistory(); if (loop.wrap) delete loop.wrap; else loop.wrap = true; scheduleSave(); renderTourNodes(); renderTourInspector(); } },
+      { sep: true },
+      { label: "Delete loop", danger: true, onClick: function () { tourDeleteLoop(loop); } }
+    ]);
   }
   // Add/remove/reorder membership after a node is dropped: the screen joins the loop whose
   // frame its centre lands in, leaves if dropped out, or re-indexes if moved within its loop.
@@ -7868,9 +8513,54 @@
   var tourZoomState = 0; // 0 -> fit, 1 -> 100%
   function tourZoomCycle() { tourZoomState = (tourZoomState + 1) % 2; if (tourZoomState === 1) { tourZoom = 1; applyTourTransform(); } else tourFit(); }
 
+  // Arm / disarm click-to-drop placement. Armed = the "Add hotspot" button lights + the board
+  // shows a crosshair; the next click on a screen image drops a marker. Cancels any live connect.
+  function tourSetPlacing(on) {
+    tourPlacing = !!on;
+    if (tourPlacing) tourConnect = null;
+    if (tourUI) {
+      if (tourUI.addHsBtn) tourUI.addHsBtn.classList.toggle("is-armed", tourPlacing);
+      if (tourUI.board) tourUI.board.classList.toggle("is-placing", tourPlacing);
+    }
+  }
+
+  // Open / close the Properties drawer. Collapsed = slid off-screen (board reclaims the width);
+  // open = slid in over the right of the board. State lives on tourPanelOpen for the session.
+  function tourSetPanelOpen(open) {
+    tourPanelOpen = !!open;
+    if (tourUI) {
+      if (tourUI.panel) tourUI.panel.classList.toggle("is-open", tourPanelOpen);
+      if (tourUI.propsBtn) tourUI.propsBtn.classList.toggle("is-on", tourPanelOpen);
+    }
+  }
+
   function wireTourBoardGestures() {
     var board = tourUI.board;
     board.setAttribute("tabindex", "-1");
+    // Click-to-drop placement (capture phase, so it beats node-select + pan/marquee). While
+    // armed, a click on a screen's image drops a marker at that exact x/y% (1:1 with the
+    // learner render), selects it, and disarms. A click on anything that isn't a real screen
+    // image cancels placement. Reuses the panel "+ Add" seed + refresh path (syncTourBoard).
+    board.addEventListener("pointerdown", function (e) {
+      if (!tourPlacing || e.button !== 0) return;
+      var thumbEl = e.target && e.target.closest ? e.target.closest(".tourb-node__thumb") : null;
+      if (!thumbEl || thumbEl.classList.contains("is-empty")) { e.preventDefault(); e.stopPropagation(); tourSetPlacing(false); return; }
+      var card = thumbEl.closest(".tourb-node");
+      var s = card && tourScreenById(card.getAttribute("data-screen-id"));
+      if (!s) { e.preventDefault(); e.stopPropagation(); tourSetPlacing(false); return; }
+      e.preventDefault(); e.stopPropagation();
+      var r = thumbEl.getBoundingClientRect();
+      var x = Math.round(clampPct((e.clientX - r.left) / r.width * 100));
+      var y = Math.round(clampPct((e.clientY - r.top) / r.height * 100));
+      pushHistory();
+      var m = tourMakeMarker(tourBlock, x, y);
+      (s.markers = s.markers || []).push(m);
+      tourSetPlacing(false);
+      tourSelKind = "marker"; hotspotEditScreenId = s.id; hotspotEditId = m.id; tourHotMarker = m.id;
+      tourLinkSel = (m.action === "navigate") ? m.id : null;
+      // sync the hidden canvas + export, then syncTourBoard() (fires from reselect) redraws the board.
+      reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
+    }, true);
     // cmd/ctrl-wheel zoom anchored at the cursor; plain wheel/trackpad pans
     board.addEventListener("wheel", function (e) {
       if (e.ctrlKey || e.metaKey) {
@@ -7948,8 +8638,8 @@
   function tourClearPinSel() { if (tourUI) Array.prototype.forEach.call(tourUI.nodes.querySelectorAll("[data-pin].is-selected"), function (p) { p.classList.remove("is-selected"); }); }
 
   // ---- selection ----
-  function tourSelectNode(s) { hotspotEditScreenId = s.id; hotspotEditId = null; tourLinkSel = null; tourNodeSel = [s.id]; renderTourInspector(); renderTourNodes(); }
-  function tourSelectMarker(s, m) { hotspotEditScreenId = s.id; hotspotEditId = m.id; tourHotMarker = m.id; tourLinkSel = (m && m.action === "navigate") ? m.id : null; renderTourInspector(); renderTourNodes(); }
+  function tourSelectNode(s) { tourSelKind = "node"; tourLoopSel = null; hotspotEditScreenId = s.id; hotspotEditId = null; tourLinkSel = null; tourNodeSel = [s.id]; renderTourInspector(); renderTourNodes(); }
+  function tourSelectMarker(s, m) { tourSelKind = "marker"; tourLoopSel = null; hotspotEditScreenId = s.id; hotspotEditId = m.id; tourHotMarker = m.id; tourLinkSel = (m && m.action === "navigate") ? m.id : null; renderTourInspector(); renderTourNodes(); }
 
   // ---- node pointer: multi-select (shift/cmd-click) + drag reposition (group-aware) ----
   function tourNodePointerDown(s, card, e) {
@@ -7960,7 +8650,7 @@
     if (e.shiftKey || e.metaKey || e.ctrlKey) {
       var i = tourNodeSel.indexOf(s.id);
       if (i >= 0) tourNodeSel.splice(i, 1); else tourNodeSel.push(s.id);
-      hotspotEditScreenId = s.id; hotspotEditId = null; tourLoopSel = null; tourLinkSel = null;
+      tourSelKind = "node"; hotspotEditScreenId = s.id; hotspotEditId = null; tourLoopSel = null; tourLinkSel = null;
       renderTourInspector(); tourApplyNodeSelClasses(); renderTourEdges(); // #224 QA: light this node's connectors
       return;
     }
@@ -8109,6 +8799,10 @@
       // Esc while typing in a card / title first blurs the field (don't exit the builder).
       var inField = e.target && e.target.closest && e.target.closest(".tourb-node__title, .tourb-node__caption, [contenteditable=true]");
       if (inField) { e.preventDefault(); try { e.target.blur(); } catch (_) {} return; }
+      // armed click-to-drop disarms first (a mode you can back out of before it closes anything).
+      if (tourPlacing) { e.preventDefault(); tourSetPlacing(false); return; }
+      // an open Properties drawer closes next (on-demand surface, easy to dismiss).
+      if (tourPanelOpen) { e.preventDefault(); tourSetPanelOpen(false); return; }
       // otherwise step out one level at a time: Cards face-up mode, then a selected link,
       // then a multi-selection, then close. (Do NOT gate on hotspotEditId — the re-hosted
       // inspector always pins it to a marker, so that would never let Escape reach close.)
@@ -11337,25 +12031,45 @@
     unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
     unlinkB.addEventListener("click", function () { document.execCommand("unlink", false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); });
     biu.appendChild(unlinkB);
+    // List — #9: folded INTO this inline-format toggle bar (was a separate switchEl below).
+    // As a prop-toggle it shares B/I/U's mousedown-preventDefault, so the field keeps its
+    // text selection and execCommand acts on the right range. The old switch had no such
+    // guard: clicking it blurred the field first -> collapsed caret -> the toggle "did
+    // nothing". A field whose editable ROOT is a list (#31: the quiz summary <ul>, the list
+    // block) is inherently a list, so it shows NO toggle here — its marker settings live in
+    // the List section below.
+    var rootIsList = node.tagName === "UL" || node.tagName === "OL";
+    function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
+    if (!rootIsList) {
+      var listB = h("button", "prop-toggle prop-toggle--icon" + (listOn() ? " is-on" : ""));
+      listB.type = "button";
+      listB.title = "List";
+      listB.innerHTML = Icon("list");
+      listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      listB.addEventListener("click", function () {
+        node.focus();
+        if (listOn()) {
+          if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null);
+          if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null);
+        } else {
+          document.execCommand("insertUnorderedList", false, null);
+        }
+        writeModel(node, node.innerHTML);
+        renderModelView();
+        renderInspector(); // reveals / hides the List marker section below
+      });
+      biu.appendChild(listB);
+    }
     inspector.appendChild(biu);
 
-    // List — ONE toggle + a marker picker (James 2026-07-08). The old ul/ol pair doubled up
-    // (Bullet style already switches disc<->numbered<->lettered via CSS list-style-type, so a
-    // <ul> renders numbers/letters too — no separate <ol> needed) AND could both read "on" at
-    // once + the ordered button was flaky. Collapsed to a single switch; the marker (incl.
-    // Numbered / Lettered / Roman) lives entirely in the Bullet-style dropdown. Matches the
-    // case/align/style control language above; marker size stays a numeric iconField (exception).
-    inspector.appendChild(sub("List"));
-    function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
-    switchRow("List", listOn, function (on) {
-      node.focus();
-      if (on) { if (!listOn()) document.execCommand("insertUnorderedList", false, null); }
-      else { if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null); if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null); }
-      writeModel(node, node.innerHTML);
-      renderModelView();
-      renderInspector();
-    });
-    if (listOn()) {
+    // List marker settings — the on/off toggle now lives in the inline-format bar above (#9).
+    // This section is purely the marker styling, shown only when the field IS a list: an
+    // inline list toggled on, OR a root-<ul>/<ol> field (#31: the quiz Chapter-summary <ul>,
+    // the list block). One <ul> renders disc / numbered / lettered alike (list-style-type is
+    // tag-agnostic), so the marker (incl. Numbered / Lettered / Roman) lives entirely in the
+    // Bullet-style dropdown; marker size stays a numeric iconField (exception).
+    if (rootIsList || listOn()) {
+      inspector.appendChild(sub("List"));
       var MARKERS = [["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
       var MARK_GLYPH = { disc: "•", circle: "◦", square: "▪", dash: "–", arrow: "→", check: "✓", decimal: "1.", "lower-alpha": "a.", "lower-roman": "i.", custom: (obj.listMarkerChar || "✱") };
       var markerOpts = MARKERS.map(function (o) { var g = MARK_GLYPH[o[1]] || ""; return [o[1], o[0], { html: '<span class="cs-mark">' + g + '</span>' + o[0] }]; });

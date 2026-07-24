@@ -134,7 +134,9 @@ Every block you can insert, grouped by type. Software tours have their own secti
 ### Text
 
 - **Heading / Subheading / Paragraph / Quote** — rich text. Select text to **Bold**, *Italic*,
-  or underline, or add an inline **Link**. Apply a saved text style (§9) for consistent type.
+  or underline, add an inline **Link**, or turn it into a **List** — all from the one formatting
+  bar in the Text panel. Apply a saved text style (§9) for consistent type. When a field is a
+  list, its marker settings (bullet style, custom glyph, colour, size) appear just below.
 - **Bulleted list** — marker style, colour, custom glyphs, and nesting.
 - **Note / callout** — a highlighted aside.
 
@@ -170,7 +172,10 @@ Every block you can insert, grouped by type. Software tours have their own secti
 - **Navigation button** — jumps to another page.
 - **Acknowledge / Checkbox** — a gate the learner must tick.
 - **Quiz (knowledge check)** — multiple-choice and other question types, with feedback, a
-  pass panel, optional shuffle, per-quiz colours, and a celebrate-on-pass toggle.
+  pass panel, optional shuffle, per-quiz colours, and a celebrate-on-pass toggle. The pass
+  panel's **Chapter summary** is a bulleted list you edit on the canvas; click into it and the
+  Text panel's **List** settings (bullet style, custom glyph, marker colour and size) apply to
+  it like any other list.
 - **Chapter Card grid** — the auto-built chapter-menu component.
 
 > **Note.** Interactive blocks can **gate the Next button** — the learner must complete them to
@@ -262,20 +267,61 @@ against the real end-state UI instead of a blank frame.
 For a multi-screen tour, the Screens section has an **Open tour builder** button — a full-screen
 board where every screen is a node laid out in 2D.
 
-- **Navigate.** Pan with a two-finger or space drag; zoom with ⌘/Ctrl-scroll; press **Fit** to
-  frame everything.
+- **Navigate.** Pan with a two-finger or space drag; zoom with ⌘/Ctrl-scroll. A **floating tool bar**
+  sits over the board with **Tidy**, the **Cards face-up** toggle and the **zoom / Fit** control — the
+  same floating-toolbar idea as the main canvas.
 - **Build.** **Upload screens** adds several images at once. Drag nodes to arrange them; the
   layout saves with the course. **Tidy** (⌘/Ctrl+T) snaps nodes into a clean grid.
+- **Add a hotspot by clicking.** Press **Add hotspot** in the board's top bar, then click anywhere
+  on a screen — a marker drops exactly where you click. Press **Esc** (or the button again) to cancel
+  without placing.
 - **Link.** Drag the **port** on a navigation pin to another node to draw or repoint its link;
   click a link's **×** to remove it.
-- **Edit in place.** Selecting a node shows that screen's normal properties in the Inspector —
-  it's the same editor, re-hosted. Drag a marker to move a hotspot, or nudge it with the arrow keys.
+- **Edit in place.** Drag a marker to move a hotspot, or nudge it with the arrow keys.
+- **Properties drawer.** The board fills the screen; the **Properties** button (top bar) slides in a
+  drawer for the finer settings — colours, card padding, blend, alt text, video playback, nav labels —
+  showing whatever you've selected. It starts closed so the board dominates; **Esc** or the ‹ button
+  closes it. Most building happens on the board and toolbar; the drawer is for the occasional deep tweak.
+- **Quick actions in the toolbar.** Whatever you select adds its actions to the floating toolbar:
+  a **screen** gets set-as-Home, set-as-Finish, replace image and duplicate; a **hotspot** gets its
+  **Card ↔ Navigate** and **Point ↔ Box** toggles plus duplicate and delete; a **loop** gets wrap and
+  delete. (Inside the builder those hotspot toggles live on the toolbar, so the Inspector stays for the
+  finer settings.) **Right-click** any screen, hotspot or loop for the same actions as a menu. The
+  **Home** screen is protected — it can't be deleted.
 - **What you see is what they get.** Markers on the board render exactly as the learner sees them —
   the real colour, the point badge or the resizable region box, the pulse — so you place against the
   final look, not a stand-in. A selected marker gets a thin selection ring on top.
 - **Video nodes.** A video screen carries a small **play badge** so you can tell it from an image
   at a glance, and its node posters on the video's **final frame**. **Hover** a video node to scrub
   its preview — move left-to-right across the node to seek through the recording.
+- **Source videos (harvest a tour from a recording).** **Add source video** drops a video onto the
+  board as a **Source** node — a scratch surface you build screens from instead of pre-cutting them
+  elsewhere. Each source has its own **player**: play/pause, a **playhead** you can drag or click to
+  scrub, a time readout, and **Set in** / **Set out** to mark a segment (the marked range highlights
+  on the scrub bar). A source is **author-time only: it is never included in the exported course**, so
+  a long screen-recording never bloats your package. It stays saved with the course so you can come
+  back and keep working from it; the **trash** button on the node removes it (screens you've already
+  made from it are kept).
+- **Crop the source (uniform size).** The **crop** button on a source's player shows a crop frame over
+  the video — drag it to move, the corners to resize. Every screen you then harvest from that source
+  comes out at that **same size**, so a set of screens lines up perfectly. Re-cropping only affects
+  screens you make *after* the change (ones you already harvested keep their size).
+- **＋ Screenshot (freeze a frame into a screen).** With a source scrubbed to the moment you want,
+  press **Screenshot** on its player — Verso freezes that exact frame into a **new image screen** on
+  the board, named after the source and the time (e.g. "Capture 0:07"), and selects it ready for
+  hotspots. It's a normal screen from then on. Harvest as many as you like; they stack down their own
+  column.
+- **＋ Segment (turn a clip into a screen).** Mark **Set in** and **Set out** on a source, then press
+  **Segment** — Verso records that stretch of the video into a **new video screen** (silent, cropped to
+  the source's crop, so it matches your screenshots). It plays once and freezes on its last frame, and
+  carries the full hotspot-video behaviour (progress bar, reveal-after-end). Recording runs in real
+  time, so a ten-second clip takes about ten seconds. **Segment** is greyed out until a valid in/out
+  range is marked.
+- **Re-bake from source (non-destructive tweaks).** A screen you harvested remembers where it came
+  from. Select it and press **Re-bake from source** (on its toolbar) to re-capture it from the source
+  — handy after you crop the source or want the frame nudged. It **updates the screen in place**: the
+  hotspots and links you've already added to it are kept. (Available only while the source is still on
+  the board.)
 - **Preview.** **Preview** runs an isolated test of just this tour without exporting; **Escape**
   returns you to the board.
 

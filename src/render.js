@@ -3331,6 +3331,11 @@
     if (seen.indexOf(node) !== -1) return; // JSON docs are acyclic; guard anyway
     seen.push(node);
     Object.keys(node).forEach(function (k) {
+      // `sources` = a hotspot block's author-time SCRATCH source videos (the tour builder
+      // harvests screenshots/segments out of them). They are NOT rendered and must NEVER ship:
+      // skipping the container here excludes them from BOTH the editor resolve-pass and the
+      // export bake in ONE place (the board resolves them separately via editorAssetResolve).
+      if (k === "sources") return;
       var val = node[k];
       if (typeof val === "string") visit(node, k, val);
       else if (val && typeof val === "object") eachMediaSlot(val, visit, seen);
@@ -3487,12 +3492,43 @@
   };
 
   // Every distinct asset id referenced by a doc (for mark-sweep GC).
+  // Deep-collect every "asset:<id>" ref inside `node` (no sources skip). Used to rescue
+  // the source-video refs that eachMediaSlot deliberately steps over.
+  function deepAssetRefs(node, add, seen) {
+    if (!node || typeof node !== "object") return;
+    seen = seen || [];
+    if (seen.indexOf(node) !== -1) return;
+    seen.push(node);
+    Object.keys(node).forEach(function (k) {
+      var val = node[k];
+      if (typeof val === "string") { var m = ASSET_RE.exec(val); if (m) add(m[1]); }
+      else if (val && typeof val === "object") deepAssetRefs(val, add, seen);
+    });
+  }
+  // Walk to every `sources` container (which eachMediaSlot skips) and collect its refs.
+  function collectSourceRefs(node, add, seen) {
+    if (!node || typeof node !== "object") return;
+    seen = seen || [];
+    if (seen.indexOf(node) !== -1) return;
+    seen.push(node);
+    Object.keys(node).forEach(function (k) {
+      var val = node[k];
+      if (!val || typeof val !== "object") return;
+      if (k === "sources") { deepAssetRefs(val, add); return; }
+      collectSourceRefs(val, add, seen);
+    });
+  }
+
   window.collectAssetRefs = function (doc) {
     var ids = {};
     eachMediaSlot(doc, function (container, key, val) {
       var m = ASSET_RE.exec(val);
       if (m) ids[m[1]] = true;
     });
+    // `sources` are skipped by eachMediaSlot (never rendered/exported), but a PERSISTED
+    // source video IS referenced for garbage-collection -- keep it so a saved scratch
+    // source survives the mark-sweep and is there next time the tour builder opens.
+    collectSourceRefs(doc, function (id) { ids[id] = true; });
     return Object.keys(ids);
   };
 })();
