@@ -22,6 +22,7 @@ var createBlockStore = require("./block-store").createBlockStore;
 var createSyncHub = require("./sync").createSyncHub;
 var createSyncRoutes = require("./sync-wire").createSyncRoutes;
 var createLockManager = require("./lock-manager").createLockManager;
+var createReaper = require("./lock-reaper").createReaper;
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -238,13 +239,27 @@ function createServer(opts) {
   var lockManager = (blockStore && config.mode === "server") ? createLockManager({ now: opts.now }) : null;
   var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager }) : null;
   var sync = hub ? createSyncRoutes(hub, config) : null;
+  // Lease reaper (ticket 12): reclaims a vanished holder's stale lock, then broadcasts the
+  // freed lock.state so peers can re-acquire. Server mode only; timer opt-in (unref'd).
+  var reaper = (lockManager && hub) ? createReaper(lockManager, {
+    now: opts.now, graceMs: config.lockGraceMs,
+    onReclaim: function (freed) {
+      var docs = {}; freed.forEach(function (f) { docs[f.docId] = true; });
+      Object.keys(docs).forEach(function (docId) {
+        hub.fanOut(docId, hub.envelope("lock.state", docId, null, null, null, (opts.now || function () { return 0; })(), { locks: lockManager.stateFor(docId), reclaimed: true }), null);
+      });
+    }
+  }) : null;
   var server = http.createServer(makeHandler(store, config, blockStore, sync));
   if (sync && !sync.dormant) server.on("upgrade", sync.upgrade); // wss:// only in server mode
   server.__store = store;
   server.__blockStore = blockStore;
   server.__hub = hub;
   server.__sync = sync;
+  server.__lockManager = lockManager;
+  server.__reaper = reaper;
   server.__config = config;
+  if (reaper && config.reaperIntervalMs) reaper.start(config.reaperIntervalMs); // opt-in periodic sweep
   return server;
 }
 

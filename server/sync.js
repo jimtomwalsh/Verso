@@ -113,6 +113,13 @@ function createSyncHub(blockStore, opts) {
         lockManager.holder(env.docId, env.blockId) !== client) {
       return client.transport.send(envelope("block.denied", env.docId, env.blockId, null, null, now(), { reason: "locked by another editor" }));
     }
+    // baseSeq staleness guard (ticket 12): reject a late write based on a version the
+    // block has already moved past (e.g. an ex-holder's edit after the reaper reclaimed
+    // the block and a new holder advanced it). A soft conflict -- never a silent drop.
+    if (p.baseSeq != null && blockStore && blockStore.blockLatestSeq &&
+        blockStore.blockLatestSeq(env.docId, env.blockId) > p.baseSeq) {
+      return client.transport.send(envelope("block.conflict", env.docId, env.blockId, blockStore.blockLatestSeq(env.docId, env.blockId), null, now(), { reason: "stale baseSeq", baseSeq: p.baseSeq }));
+    }
     var content = (p.patch != null) ? p.patch : p.content;
     var res = blockStore ? blockStore.applyChange(env.docId, env.blockId, content, env.author) : { ok: true, seq: 0 };
     if (!res.ok) {

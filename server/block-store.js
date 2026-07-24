@@ -114,6 +114,7 @@ function createBlockStore(dbPath, opts) {
   var qGetSnap    = db.prepare("SELECT id, doc_id, at_seq, state, label, author, ts FROM snapshots WHERE id = ?");
   var qCheckpoints = db.prepare("SELECT id, at_seq, label, author, ts FROM snapshots WHERE doc_id = ? AND label IS NOT NULL ORDER BY id");
   var qBlockHist  = db.prepare("SELECT seq, block_id, kind, patch, author, ts FROM changes WHERE doc_id = ? AND block_id = ? ORDER BY seq");
+  var qBlockMax   = db.prepare("SELECT MAX(seq) AS m FROM changes WHERE doc_id = ? AND block_id = ? AND kind = 'block.put'");
 
   var now = opts.now || function () { return 0; }; // injectable clock (Date.now() in prod)
 
@@ -201,6 +202,11 @@ function createBlockStore(dbPath, opts) {
     var after = qGetBlock.get(docId, blockId);
     return { ok: true, seq: seq, blockId: blockId, ver: after ? after.ver : 1, author: author || null };
   }
+
+  // The global seq at which a block was last changed (0 if never). The collab layer's
+  // baseSeq staleness guard (ticket 12) compares an incoming edit's baseSeq against this
+  // to reject a late write from an ex-holder whose block was reclaimed + advanced.
+  function blockLatestSeq(docId, blockId) { var r = qBlockMax.get(docId, blockId); return (r && r.m) || 0; }
 
   // Reconnect/rollback replay contract: events with seq > N (optionally one doc).
   function changesSince(seq, docId) {
@@ -316,6 +322,7 @@ function createBlockStore(dbPath, opts) {
     exportDoc: exportDoc,
     materializeDoc: materializeDoc,
     applyChange: applyChange,
+    blockLatestSeq: blockLatestSeq,
     changesSince: changesSince,
     takeSnapshot: takeSnapshot,
     replayDoc: replayDoc,

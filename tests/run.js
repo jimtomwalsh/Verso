@@ -63,7 +63,7 @@ section("syntax");
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
- "server/sync.js", "server/sync-wire.js", "server/lock-manager.js"
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -233,7 +233,7 @@ section("platform-pivot 02 server-of-one");
 // ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
 section("platform-pivot 02 server invariants");
 (function () {
-  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js") + src("server/sync.js") + src("server/sync-wire.js") + src("server/lock-manager.js");
+  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js") + src("server/sync.js") + src("server/sync-wire.js") + src("server/lock-manager.js") + src("server/lock-reaper.js");
   // Dependency-free: only node: builtins may be required (bundled runtime is the sole exception).
   var reqs = s.match(/require\(("|')([^"')]+)\1\)/g) || [];
   var badDep = reqs.filter(function (m) {
@@ -576,6 +576,68 @@ section("platform-pivot 10 locking");
     ok("AC1: release frees the lock", lm.holder("C-1", "b1") === null);
     tb.close();
     ok("disconnect auto-releases the client's locks", lm.holder("C-1", "b2") === null);
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 12: heartbeat-lease reaper + baseSeq staleness guard -------
+section("platform-pivot 12 lease reaper");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> reaper tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var RP = require(path.join(ROOT, "server/lock-reaper.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-reap-test-"));
+  var idn = 0, clock = 1000;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var reclaims = 0;
+    var reaper = RP.createReaper(lm, { now: function () { return clock; }, graceMs: 45000, onReclaim: function () { reclaims++; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ta.receive(env("lock.acquire", "C-1", "b1", null, "alice", 0, {}));
+    ok("alice holds b1", lm.holder("C-1", "b1") === A);
+    clock = 1000 + 40000; // within grace
+    ok("sweep before grace window: no reclaim", reaper.sweep().length === 0 && lm.holder("C-1", "b1") === A);
+    clock = 1000 + 50000; // past grace
+    var freed = reaper.sweep();
+    ok("AC1: a vanished holder's block is reclaimed after the grace window", freed.length === 1 && lm.holder("C-1", "b1") === null);
+    ok("AC4: grace window is configurable", reaper.graceMs === 45000);
+    ok("reclaim fires the broadcast callback", reclaims === 1);
+    tb.receive(env("lock.acquire", "C-1", "b1", null, "bob", 0, {}));
+    ok("AC1: a peer re-acquires the freed block", lm.holder("C-1", "b1") === B);
+    ok("AC2: reclaimed block is the last acked (materialized) state -- no fragments", store.materializeDoc("C-1").pages[0].blocks[0].text === "H");
+    // AC3 end-to-end: bob advances b1; alice's late stale change is rejected + not persisted
+    var sBob = store.maxSeq();
+    tb.receive(env("block.change", "C-1", "b1", null, "bob", 0, { content: { id: "b1", type: "heading", text: "BOB" }, baseSeq: sBob }));
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "STALE" }, baseSeq: sBob }));
+    ok("AC3: late change from ex-holder is rejected (not the holder / stale) and not persisted", store.materializeDoc("C-1").pages[0].blocks[0].text === "BOB");
+
+    // AC3 isolated: the baseSeq guard itself, in the lockless config (no lockManager).
+    var hub2 = SY.createSyncHub(store, { mode: "server", now: function () { return clock; } });
+    var tc = SY.FakeTransport(), td = SY.FakeTransport();
+    hub2.connect(tc, "c"); hub2.connect(td, "d");
+    tc.receive(env("sync.hello", "C-1", null, null, "c", 0, { sinceSeq: 0 }));
+    td.receive(env("sync.hello", "C-1", null, null, "d", 0, { sinceSeq: 0 }));
+    var b0 = store.maxSeq();
+    tc.receive(env("block.change", "C-1", "b1", null, "c", 0, { content: { id: "b1", type: "heading", text: "C1" }, baseSeq: b0 }));
+    var b1s = store.maxSeq();
+    td.receive(env("block.change", "C-1", "b1", null, "d", 0, { content: { id: "b1", type: "heading", text: "D-STALE" }, baseSeq: b0 }));
+    ok("AC3: a stale baseSeq is rejected with block.conflict (soft, not silent)", td.sent.some(function (e) { return e.type === "block.conflict" && e.blockId === "b1"; }));
+    ok("AC3: the stale write did not persist", store.materializeDoc("C-1").pages[0].blocks[0].text === "C1");
+    td.receive(env("block.change", "C-1", "b1", null, "d", 0, { content: { id: "b1", type: "heading", text: "D-OK" }, baseSeq: b1s }));
+    ok("AC3: a current-baseSeq retry is accepted (no false reject)", store.materializeDoc("C-1").pages[0].blocks[0].text === "D-OK");
   } finally {
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
