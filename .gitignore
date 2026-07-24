@@ -17,6 +17,15 @@ CLAUDE.local.md
 node_modules/
 *.log
 
+# --- Platform pivot (server-of-one) — local runtime data + real config (secrets) ---
+# The server's on-disk store and the real config (with secrets) stay local; only the
+# code + the safe example config are versioned.
+server/verso-server.config.json
+server/data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
 # --- build artifacts (regenerated; don't version) ---
 desktop/Verso.app/
 export/build/

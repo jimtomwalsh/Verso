@@ -1,0 +1,12 @@
+{
+  "mode": "local",
+  "host": "127.0.0.1",
+  "port": 4790,
+  "dataDir": "./data",
+  "_notes": {
+    "copy-to": "verso-server.config.json (gitignored) to run for real; this example is safe defaults only.",
+    "mode": "'local' binds loopback (127.0.0.1) and keeps auth dormant; 'server' binds host and turns the auth hooks live (identity phase).",
+    "secrets": "Auth client-ids/secrets and TLS material go HERE (in the gitignored real config), never in source code.",
+    "invariant": "This backend does storage/transport/auth/presence only -- it NEVER renders. render() stays client-side in both modes."
+  }
+}

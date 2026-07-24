@@ -41,7 +41,8 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js"
+ "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -149,6 +150,114 @@ section("platform-pivot 01 StorageBackend seam");
   // media absent -> null (never throws)
   var be3 = g.makeStorageBackend({ registryAdapter: function () { return adapter; }, writeStore: writeStore, storage: storage, assetStore: function () { return null; } });
   ok("media absent -> null", be3.media === null);
+})();
+
+// ---- platform-pivot 02: server-of-one HTTP storage API + SQLite round-trip ----
+// The one backend artifact. Exercises the REAL HTTP endpoints against the REAL
+// SQLite/WAL store on a temp disk path: whole-doc blob round-trip (AC1), kv + media,
+// sweep, WAL durability across reopen, and that a non-API path is NEVER served (no
+// server-side render). node:sqlite is built into the bundled runtime; on an older
+// CI Node it is absent -> we WARN + skip rather than hard-fail.
+section("platform-pivot 02 server-of-one");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> server round-trip skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var createStore = require(path.join(ROOT, "server/store.js")).createStore;
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-srv-test-"));
+  var dbPath = path.join(tmp, "verso.sqlite");
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "local", port: 0, host: "127.0.0.1", dbPath: dbPath }, function (s) {
+        base = "http://127.0.0.1:" + s.address().port; resolve();
+      });
+    });
+    try {
+      var doc = { "C-1": { meta: { code: "C-1", title: "Sample" }, chapters: [{ id: "ch1", blocks: [{ id: "b1", type: "text", html: "<p>hi</p>" }] }] } };
+      var regJson = JSON.stringify(doc);
+      var r, j;
+      r = await fetch(base + "/api/health"); j = await r.json();
+      ok("health: ok + local mode + renders:false", j.ok === true && j.mode === "local" && j.renders === false);
+      // AC1: whole-doc blob round-trip
+      r = await fetch(base + "/api/registry", { method: "PUT", body: regJson }); j = await r.json();
+      ok("PUT registry -> ok", j.ok === true);
+      r = await fetch(base + "/api/registry"); j = await r.json();
+      ok("GET registry -> faithful whole-doc round-trip", j.registry === regJson);
+      // kv (doc-session keys)
+      await (await fetch(base + "/api/kv/authoring.activeDocId", { method: "PUT", body: '"C-1"' })).json();
+      r = await fetch(base + "/api/kv/authoring.activeDocId"); j = await r.json();
+      ok("kv round-trip", j.value === '"C-1"');
+      r = await fetch(base + "/api/kv/absent"); j = await r.json();
+      ok("kv missing -> null", j.value === null);
+      await (await fetch(base + "/api/kv/authoring.activeDocId", { method: "DELETE" })).json();
+      r = await fetch(base + "/api/kv/authoring.activeDocId"); j = await r.json();
+      ok("kv delete clears", j.value === null);
+      // media
+      await (await fetch(base + "/api/media/m1", { method: "PUT", body: JSON.stringify({ data: "data:image/png;base64,AAA", mime: "image/png" }) })).json();
+      r = await fetch(base + "/api/media/m1", { method: "HEAD" });
+      ok("media HEAD present -> 200", r.status === 200);
+      r = await fetch(base + "/api/media/m1"); j = await r.json();
+      ok("media GET round-trip", j.data === "data:image/png;base64,AAA" && j.mime === "image/png");
+      r = await fetch(base + "/api/media/absent", { method: "HEAD" });
+      ok("media HEAD absent -> 404", r.status === 404);
+      await (await fetch(base + "/api/media/m2", { method: "PUT", body: "data:image/png;base64,BBB" })).json();
+      r = await fetch(base + "/api/media/sweep", { method: "POST", body: JSON.stringify({ keep: ["m2"] }) }); j = await r.json();
+      ok("media sweep removes unreferenced (m1), keeps m2", j.removed === 1);
+      ok("media sweep: m2 survives", (await fetch(base + "/api/media/m2", { method: "HEAD" })).status === 200);
+      ok("media sweep: m1 gone", (await fetch(base + "/api/media/m1", { method: "HEAD" })).status === 404);
+      // AC3: never serves the app / never renders — non-API path 404s
+      r = await fetch(base + "/index.html");
+      ok("non-API path 404 (backend never serves app or renders)", r.status === 404);
+      // WAL durability: close server, reopen the store on disk, registry persists
+      server.__store.close();
+      var s2 = createStore(dbPath);
+      ok("registry persists across reopen (SQLite/WAL on local disk)", s2.getRegistry() === regJson);
+      s2.close();
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+})();
+
+// ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
+section("platform-pivot 02 server invariants");
+(function () {
+  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js");
+  // Dependency-free: only node: builtins may be required (bundled runtime is the sole exception).
+  var reqs = s.match(/require\(("|')([^"')]+)\1\)/g) || [];
+  var badDep = reqs.filter(function (m) {
+    var mod = m.replace(/require\(("|')/, "").replace(/("|')\)/, "");
+    return mod.indexOf("node:") !== 0 && mod.charAt(0) !== "."; // node: builtin or relative only
+  });
+  ok("server requires node: builtins or relative only (no third-party deps)", badDep.length === 0);
+  // Never renders: no import of the render engine, no HTML/app serving.
+  ok("server never requires render/editor engine", !/require\([^)]*(render|editor|export|runtime)[^)]*\)/.test(s));
+  ok("server declares renders:false on health", /renders:\s*false/.test(s));
+  // One authorize() choke point exists (identity phase attaches here).
+  ok("server routes through one authorize() choke point", /function authorize\(/.test(s) && /if \(!authorize\(/.test(s));
+  // SQLite/WAL on disk, sole writer posture documented.
+  ok("store uses WAL journal", /journal_mode = WAL/.test(src("server/store.js")));
+})();
+
+// ---- platform-pivot 02: client HTTP adapter (pure URL builder + inert guard) ----
+section("platform-pivot 02 http adapter");
+(function () {
+  var t = src("src/store-http.js");
+  var m = t.match(/\/\* @http-api-start \*\/([\s\S]*?)\/\* @http-api-end \*\//);
+  if (!m) { ok("locate @http-api fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { apiUrl: apiUrl };")();
+  ok("apiUrl registry", g.apiUrl("http://h:4790", "registry") === "http://h:4790/api/registry");
+  ok("apiUrl tolerates trailing slash", g.apiUrl("http://h:4790/", "registry") === "http://h:4790/api/registry");
+  ok("apiUrl kv encodes the key", g.apiUrl("http://h", "kv", "authoring.activeDocId") === "http://h/api/kv/authoring.activeDocId");
+  ok("apiUrl media encodes odd ids", g.apiUrl("http://h", "media", "a/b c") === "http://h/api/media/a%2Fb%20c");
+  // Inert-by-default: the module returns early (installs nothing) with no server URL.
+  ok("store-http returns early when no __versoServerUrl", /if \(!serverUrl\(\)\) return;/.test(t));
+  ok("store-http installs 'http' adapter only after the guard", t.indexOf("if (!serverUrl()) return;") < t.indexOf('name: "http"'));
+  // Never renders / no third-party deps: relies on built-in fetch only.
+  ok("store-http uses built-in fetch (no deps)", /fetch\(/.test(t) && !/require\(/.test(t));
 })();
 
 // ---- #81: in-app Help guide markdown renderer -----------------------------
