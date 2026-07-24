@@ -62,7 +62,7 @@ section("syntax");
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
- "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
+ "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
 ].forEach(function (f) {
@@ -279,6 +279,66 @@ section("platform-pivot 02 http adapter");
   ok("store-http installs 'http' adapter only after the guard", t.indexOf("if (!serverUrl()) return;") < t.indexOf('name: "http"'));
   // Never renders / no third-party deps: relies on built-in fetch only.
   ok("store-http uses built-in fetch (no deps)", /fetch\(/.test(t) && !/require\(/.test(t));
+})();
+
+// ---- platform-pivot client-mount: sync-client pure core (gate + reducer + buffer) ----
+// The browser collaboration client's PURE core, exercised headlessly. The linchpin is
+// isCollaborating(): standalone -> false, so the editor never takes a collaborative branch.
+section("client-mount sync-client core");
+(function () {
+  var t = src("src/sync-client.js");
+  var m = t.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
+  if (!m) { ok("locate @sync-client fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { isCollaborating: isCollaborating, applyServerEvent: applyServerEvent, replaceBlockById: replaceBlockById, bufferAdd: bufferAdd, bufferAck: bufferAck, bufferReplay: bufferReplay };")();
+
+  // THE GATE: only true when there is a server URL AND a live connection.
+  ok("gate: standalone (no serverUrl) -> not collaborating", g.isCollaborating({ connected: true }) === false && g.isCollaborating(null) === false);
+  ok("gate: serverUrl present but not connected -> not collaborating", g.isCollaborating({ serverUrl: "http://h", connected: false }) === false);
+  ok("gate: serverUrl + connected -> collaborating", g.isCollaborating({ serverUrl: "http://h", connected: true }) === true);
+
+  var doc = { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" } ] } ] };
+  var st = { doc: doc, seq: 0, locks: [], peers: [], conflicts: [] };
+  // resnapshot replaces the whole doc + seq
+  var r1 = g.applyServerEvent(st, { type: "sync.resnapshot", payload: { snapshot: { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", text: "SNAP" } ] } ] }, seq: 5 } });
+  ok("apply sync.resnapshot -> replaces doc + seq", r1.doc.pages[0].blocks[0].text === "SNAP" && r1.seq === 5);
+  ok("apply is pure (original state untouched)", st.doc.pages[0].blocks[0].text === "H");
+  // a fanned-out block.change patches the block by stable id
+  var r2 = g.applyServerEvent(st, { type: "block.change", blockId: "b1", seq: 7, payload: { patch: { id: "b1", type: "heading", text: "REMOTE" } } });
+  ok("apply block.change -> patches the block by id, bumps seq", r2.doc.pages[0].blocks[0].text === "REMOTE" && r2.seq === 7 && r2.doc.pages[0].blocks[1].text === "P");
+  // a string patch is parsed
+  var r2b = g.applyServerEvent(st, { type: "block.change", blockId: "b2", seq: 8, payload: { patch: JSON.stringify({ id: "b2", type: "para", text: "STR" }) } });
+  ok("apply block.change with a string patch", r2b.doc.pages[0].blocks[1].text === "STR");
+  // catchup folds a delta of block.put events
+  var r3 = g.applyServerEvent(st, { type: "sync.catchup", payload: { upToSeq: 9, events: [ { kind: "block.put", blockId: "b1", patch: JSON.stringify({ id: "b1", text: "C1" }) }, { kind: "block.put", blockId: "b2", patch: JSON.stringify({ id: "b2", text: "C2" }) } ] } });
+  ok("apply sync.catchup -> folds the delta + sets upToSeq", r3.doc.pages[0].blocks[0].text === "C1" && r3.doc.pages[0].blocks[1].text === "C2" && r3.seq === 9);
+  // lock/presence state + conflict
+  ok("apply lock.state", g.applyServerEvent(st, { type: "lock.state", payload: { locks: [ { resourceId: "b1", holder: "alice" } ] } }).locks.length === 1);
+  ok("apply presence.state", g.applyServerEvent(st, { type: "presence.state", payload: { peers: [ { author: "bob", colour: "#0d99ff" } ] } }).peers.length === 1);
+  ok("apply block.conflict -> records a soft conflict (never silent)", g.applyServerEvent(st, { type: "block.conflict", blockId: "b1", seq: 4, payload: { baseSeq: 2 } }).conflicts.length === 1);
+  ok("unknown/ephemeral type -> no-op", g.applyServerEvent(st, { type: "presence.heartbeat" }).doc === st.doc);
+
+  // the unacked buffer: one entry per block, ack retires, replay returns pending
+  var buf = [];
+  buf = g.bufferAdd(buf, { blockId: "b1", content: { text: "x" }, baseSeq: 1 });
+  buf = g.bufferAdd(buf, { blockId: "b1", content: { text: "y" }, baseSeq: 2 }); // coalesce: still one entry for b1
+  buf = g.bufferAdd(buf, { blockId: "b2", content: { text: "z" }, baseSeq: 1 });
+  ok("buffer coalesces to one entry per block", buf.length === 2 && buf.filter(function (e) { return e.blockId === "b1"; }).length === 1);
+  ok("buffer keeps the latest content for a block", buf.find(function (e) { return e.blockId === "b1"; }).content.text === "y");
+  ok("buffer replay returns pending (reconnect resend)", g.bufferReplay(buf).length === 2);
+  buf = g.bufferAck(buf, "b1");
+  ok("buffer ack retires the acked block's entry", buf.length === 1 && !buf.some(function (e) { return e.blockId === "b1"; }));
+})();
+
+// source guard: the client is inert without a server URL (never activates in standalone)
+section("client-mount sync-client inert");
+(function () {
+  var t = src("src/sync-client.js");
+  ok("sync-client gates enabled on window.__versoServerUrl", /enabled:\s*!!serverUrl\(\)/.test(t));
+  ok("sync-client connect() no-ops without a server URL", /connect: function \(\) \{ if \(!serverUrl\(\)\) return null;/.test(t));
+  ok("sync-client is a classic-script global, no deps/imports", /window\.VersoSync/.test(t) && !/require\(/.test(t) && !/\bimport\s/.test(t));
+  // index.html loads it before editor.js (so the editor can consult the gate at boot)
+  var idx = src("index.html");
+  ok("index.html loads sync-client.js before editor.js", idx.indexOf("src/sync-client.js") > 0 && idx.indexOf("src/sync-client.js") < idx.indexOf("src/editor.js"));
 })();
 
 // ---- platform-pivot 03: block-addressable store pure helpers ----------------

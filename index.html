@@ -219,6 +219,8 @@
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->
   <script src="src/store-http.js"></script>
+  <!-- platform-pivot live-collaboration client (server-of-one): defines window.VersoSync, INERT unless a server URL is injected (window.__versoServerUrl). In local / standalone it never activates -> the editor takes exactly today's branches. Must precede editor.js. -->
+  <script src="src/sync-client.js"></script>
   <!-- #69 clobber-proof cutover: defines window.Migration (save-suppression guard + backup builder + migrate-then-flip core) so editor.js's save choke points can be neutered across a backend switch and Editor.migrateToFileBackend can drive the guarded cutover. Must precede editor.js. -->
   <script src="src/migration.js"></script>
   <!-- Spellchecker (P0) — chrome only. Bloom-filter dictionary + pure checker; editor.js
