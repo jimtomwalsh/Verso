@@ -418,7 +418,7 @@ section("platform-pivot 11 presence chrome");
   var t = src("src/editor.js");
   var m = t.match(/\/\* @presence-model-start \*\/([\s\S]*?)\/\* @presence-model-end \*\//);
   if (!m) { ok("locate @presence-model fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { presenceInitials: presenceInitials, presenceModel: presenceModel, findBlockLocation: findBlockLocation, peerHeldBlocks: peerHeldBlocks, conflictRows: conflictRows, blockPreview: blockPreview };")();
+  var g = new Function(m[1] + "\nreturn { presenceInitials: presenceInitials, presenceModel: presenceModel, findBlockLocation: findBlockLocation, peerHeldBlocks: peerHeldBlocks, conflictRows: conflictRows, blockPreview: blockPreview, viewerCursors: viewerCursors };")();
 
   ok("initials: single name -> one letter", g.presenceInitials("Priya") === "P");
   ok("initials: first+last -> two letters, upper", g.presenceInitials("marcus li") === "ML");
@@ -475,6 +475,19 @@ section("platform-pivot 11 presence chrome");
   ok("held-block chrome only renders while collaborating", /function renderLocks\(\) \{[\s\S]{0,400}if \(!live\(\)\) return;/.test(t));
   ok("block.change routes to applyRemote in onEvent", /else if \(env\.type === "block\.change"\) \{ applyRemote\(env\); \}/.test(t));
   ok("held-block CSS: author-colour inset outline + holder chip", /\.canvas-block\.collab-held \{ box-shadow: inset 0 0 0 1\.5px var\(--hcol/.test(css) && /\.collab-held__chip/.test(css));
+
+  // RemoteCaret: a live cursor/gaze flag for VIEWING peers (editors show via the chip), never me.
+  var cpeers = [
+    { name: "Priya", colour: "#e91e8c", editingBlockId: "b2" },   // editing -> chip, no cursor
+    { name: "Marcus", colour: "#2ea36b", viewingBlockId: "b3" },  // viewing -> cursor
+    { name: "Me", colour: "#0d99ff", viewingBlockId: "b1" }       // me -> never a cursor
+  ];
+  var cursors = g.viewerCursors(cpeers, "Me");
+  ok("viewerCursors: a viewing peer gets a cursor at their block", cursors.length === 1 && cursors[0].blockId === "b3" && cursors[0].name === "Marcus");
+  ok("viewerCursors: an editing peer shows via the chip, not a cursor", !cursors.some(function (c) { return c.name === "Priya"; }));
+  ok("viewerCursors: never me", !cursors.some(function (c) { return c.name === "Me"; }));
+  ok("renderCursors is ephemeral + pointer-events:none (never intercepts a click)", /\.collab-cursor \{[\s\S]{0,200}pointer-events: none/.test(css) && /function renderCursors\(\) \{[\s\S]{0,120}if \(!live\(\)\) return;/.test(t));
+  ok("reproject re-draws cursors after a rebuild", /renderPresence\(\); renderLocks\(\); renderCursors\(\);/.test(t));
 
   // ---- ticket 13-UI: soft-conflict modal rows + handoff/notify (pure + wiring) ----
   var cdoc = { pages: [ { id: "p1", blocks: [ { id: "b1", type: "para", text: "SERVER-CURRENT" } ] } ] };

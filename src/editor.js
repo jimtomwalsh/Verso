@@ -14904,6 +14904,15 @@
     if (typeof f === "string") return f.replace(/<[^>]+>/g, "").trim() || "(empty)";
     try { var s = JSON.stringify(b); return s.length > 160 ? s.slice(0, 157) + "…" : s; } catch (e) { return "(block)"; }
   }
+  // ticket 11 (RemoteCaret): which peers show a live cursor/gaze flag on a block -- those VIEWING a
+  // block (an EDITING peer already shows via the held-block chip, so skip them to avoid doubling).
+  // Never me. Pure; -> [{blockId, name, colour}].
+  function viewerCursors(peers, meName) {
+    return (peers || []).filter(function (p) {
+      var nm = p.name || p.author;
+      return !!nm && nm !== meName && !p.editingBlockId && !!p.viewingBlockId;
+    }).map(function (p) { return { blockId: p.viewingBlockId, name: p.name || p.author, colour: p.colour || null }; });
+  }
   /* @presence-model-end */
 
   var CollabChrome = (function () {
@@ -15055,6 +15064,23 @@
       showConflicts(variant); // reopen for the next unresolved block, or close when none remain
     }
 
+    // ticket 11 (RemoteCaret): a live cursor/gaze flag for each VIEWING peer, anchored to the block
+    // they're looking at (so it tracks pan/zoom with the block, like the held chip). Author-colour,
+    // ephemeral, pointer-events:none -- it can never intercept a click. Editors show via the chip.
+    function renderCursors() {
+      Array.prototype.forEach.call(canvas.querySelectorAll(".collab-cursor"), function (n) { n.remove(); });
+      if (!live()) return;
+      var me = commentIdentity().name;
+      viewerCursors(peers, me).forEach(function (vc) {
+        var esc = (window.CSS && CSS.escape) ? CSS.escape(vc.blockId) : vc.blockId;
+        var el = canvas.querySelector('.canvas-block[data-id="' + esc + '"]');
+        if (!el) return;
+        var colour = vc.colour || colourForName(vc.name);
+        var caret = h("div", "collab-cursor"); caret.style.setProperty("--ccol", colour);
+        caret.appendChild(h("span", "collab-cursor__flag", vc.name));
+        el.appendChild(caret);
+      });
+    }
     function onEvent(env, state) {
       if (!env) return;
       if (env.type === "presence.state") { peers = (state && state.peers) || []; reproject(); }
@@ -15097,7 +15123,7 @@
     document.addEventListener("click", closeHeldMenu);
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeHeldMenu(); });
     // Re-draw the collab overlays after a mount() (canvas.innerHTML was cleared). Cheap + gated.
-    function reproject() { try { renderPresence(); renderLocks(); } catch (e) {} }
+    function reproject() { try { renderPresence(); renderLocks(); renderCursors(); } catch (e) {} }
     return { ensure: ensure, reproject: reproject, live: live, _model: presenceModel,
       _peers: function (p) { peers = p || []; }, _locks: function (l) { locks = l || []; },
       _applyRemote: applyRemote, _flush: flushPending, _pending: function () { return pending.slice(); },

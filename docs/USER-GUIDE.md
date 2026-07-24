@@ -47,7 +47,7 @@ Your work **saves automatically to this browser** (IndexedDB) as you go; the **A
 saved** status in the top bar confirms it.
 
 > **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
-> before clearing browser data or switching machines (§13).
+> before clearing browser data or switching machines (§15).
 
 ---
 
@@ -384,7 +384,38 @@ Gather stakeholder feedback without shipping a SCORM.
 
 ---
 
-## 14. Publishing to SCORM
+## 14. Collaborating in server mode
+
+When your team runs Verso on a shared server (rather than the standalone app), several people
+can edit the same course at once. **The standalone `file://` app is unchanged — this section
+applies only in server mode.**
+
+- **See who's here.** Avatars of everyone in the course show in the top bar, each in that
+  person's colour (the same colour their comments use). A solid ring means they're editing; a
+  hollow ring means they're just viewing, and a small flag shows where a colleague is looking.
+- **Edit together, safely.** The moment you start typing in a block it becomes yours. A block
+  someone else is editing shows read-only with their "editing…" badge, so two people never
+  overwrite each other, and their edits appear on your canvas live without disturbing your cursor.
+- **Ask for a block.** Click a colleague's "editing…" badge to **Request handoff** (a nudge to
+  release it) or **Notify me when free** (you're told the moment it frees).
+- **Nothing is lost.** Your in-progress edits are saved on your own machine as you type, so a
+  dropped connection or a closed tab is survivable — they replay when you reconnect. If a block
+  changed while you were away, Verso shows a **prompt to keep your version or theirs** — never a
+  silent overwrite.
+- **Previews are read-only while collaborating.** With others in the file, editing always targets
+  the base course; previewing a variant or software version is view-only, which keeps everyone's
+  edits and history unambiguous.
+
+**Review links.** Share a link to a **frozen snapshot** of a course. A reviewer opens it in their
+browser — no app, no account — reads it, and leaves comments pinned to the content. Their comments
+appear back in your editor, pinned to the live block and tagged **Guest** so you can tell them from
+your team's notes; reply and resolve, and they see it on their link. If you later delete a block a
+reviewer commented on, their note isn't lost — it moves to an **Orphaned** list so you can re-place
+or dismiss it.
+
+---
+
+## 15. Publishing to SCORM
 
 **Import & Export → Export SCORM** builds a SCORM 1.2 `.zip`. All fonts, images, and HTML
 interactions are embedded, so the package is self-contained and runs offline. Upload the `.zip`
@@ -399,7 +430,7 @@ restores it.
 
 ---
 
-## 15. Keyboard shortcuts
+## 16. Keyboard shortcuts
 
 `⌘` = Cmd (macOS) / Ctrl (Windows).
 
@@ -423,7 +454,7 @@ restores it.
 
 ---
 
-## 16. Troubleshooting & tips
+## 17. Troubleshooting & tips
 
 - **Your course lives in this browser.** Export a JSON backup regularly, and before clearing
   browser data or switching machines.
