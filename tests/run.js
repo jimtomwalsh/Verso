@@ -3793,12 +3793,14 @@ section("richer bullet lists");
   ok("css custom-glyph ::before markers", /\[data-list-marker="custom"\] li::before \{ content: var\(--li-marker/.test(css));
   ok("css applies to inline lists in any field", /\.body-copy ul, \.body-copy ol/.test(css));
   ok("css nested levels distinct markers", /\.body-list ul ul, \.body-copy ul ul ul \{ list-style-type: square/.test(css));
-  ok("editor list is a single on/off switch (no doubled ul/ol pair)", /switchRow\("List", listOn,/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
+  // #9: List is a single inline-format toggle BUTTON in the B/I/U/Link bar (was a switchEl).
+  ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
+  ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
   ok("editor list marker controls render when the list is on OR the field root is a list", /if \(rootIsList \|\| listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
   // detect it, drop the meaningless on/off toggle, and always surface the marker settings.
   ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
-  ok("editor hides the List on/off toggle for a root-list field", /if \(!rootIsList\) \{\s*switchRow\("List", listOn,/.test(e));
+  ok("editor hides the List toggle for a root-list field", /if \(!rootIsList\) \{\s*var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e));
   ok("editor list off-branch clears both ul and ol", /queryCommandState\("insertOrderedList"\)\) document\.execCommand\("insertOrderedList"[\s\S]*?queryCommandState\("insertUnorderedList"\)\) document\.execCommand\("insertUnorderedList"/.test(e));
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
@@ -3847,7 +3849,10 @@ section("list discoverability + spacing");
   var e = src("src/editor.js");
   ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
-  ok("List folded into the Type section (sub) drives inline lists", /inspector\.appendChild\(sub\("List"\)\);[\s\S]*?insertUnorderedList/.test(e));
+  // #9: the List TOGGLE folds into the inline-format bar; the sub("List") header now heads
+  // only the marker-settings section, shown when the field is a list (rootIsList || listOn).
+  ok("List toggle folded into the inline-format bar (prop-toggle) drives inline lists", /var listB = h\("button", "prop-toggle prop-toggle--icon"[\s\S]*?document\.execCommand\("insertUnorderedList"/.test(e));
+  ok("List marker section is gated on rootIsList || listOn() and headed by sub(List)", /if \(rootIsList \|\| listOn\(\)\) \{\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
   ok("no paragraph<->list block-type conversion", !/textBlockToList/.test(e) && !/function listToTextBlock/.test(e));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();

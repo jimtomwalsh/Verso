@@ -11222,34 +11222,45 @@
     unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
     unlinkB.addEventListener("click", function () { document.execCommand("unlink", false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); });
     biu.appendChild(unlinkB);
-    inspector.appendChild(biu);
-
-    // List — ONE toggle + a marker picker (James 2026-07-08). The old ul/ol pair doubled up
-    // (Bullet style already switches disc<->numbered<->lettered via CSS list-style-type, so a
-    // <ul> renders numbers/letters too — no separate <ol> needed) AND could both read "on" at
-    // once + the ordered button was flaky. Collapsed to a single switch; the marker (incl.
-    // Numbered / Lettered / Roman) lives entirely in the Bullet-style dropdown. Matches the
-    // case/align/style control language above; marker size stays a numeric iconField (exception).
-    inspector.appendChild(sub("List"));
-    function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
-    // #31: a field whose editable ROOT is itself a list element (the quiz Chapter-summary
-    // <ul>, the list block's <ul>) is ALWAYS a list — you can't un-list the container, and
-    // its marker style/colour/size live on the field node directly. queryCommandState is
-    // false there when the field is just selected (no caret in a nested list), which used to
-    // hide the marker controls entirely. So for a root-list field, drop the meaningless
-    // on/off toggle and always surface the marker settings.
+    // List — #9: folded INTO this inline-format toggle bar (was a separate switchEl below).
+    // As a prop-toggle it shares B/I/U's mousedown-preventDefault, so the field keeps its
+    // text selection and execCommand acts on the right range. The old switch had no such
+    // guard: clicking it blurred the field first -> collapsed caret -> the toggle "did
+    // nothing". A field whose editable ROOT is a list (#31: the quiz summary <ul>, the list
+    // block) is inherently a list, so it shows NO toggle here — its marker settings live in
+    // the List section below.
     var rootIsList = node.tagName === "UL" || node.tagName === "OL";
+    function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
     if (!rootIsList) {
-      switchRow("List", listOn, function (on) {
+      var listB = h("button", "prop-toggle prop-toggle--icon" + (listOn() ? " is-on" : ""));
+      listB.type = "button";
+      listB.title = "List";
+      listB.innerHTML = Icon("list");
+      listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      listB.addEventListener("click", function () {
         node.focus();
-        if (on) { if (!listOn()) document.execCommand("insertUnorderedList", false, null); }
-        else { if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null); if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null); }
+        if (listOn()) {
+          if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null);
+          if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null);
+        } else {
+          document.execCommand("insertUnorderedList", false, null);
+        }
         writeModel(node, node.innerHTML);
         renderModelView();
-        renderInspector();
+        renderInspector(); // reveals / hides the List marker section below
       });
+      biu.appendChild(listB);
     }
+    inspector.appendChild(biu);
+
+    // List marker settings — the on/off toggle now lives in the inline-format bar above (#9).
+    // This section is purely the marker styling, shown only when the field IS a list: an
+    // inline list toggled on, OR a root-<ul>/<ol> field (#31: the quiz Chapter-summary <ul>,
+    // the list block). One <ul> renders disc / numbered / lettered alike (list-style-type is
+    // tag-agnostic), so the marker (incl. Numbered / Lettered / Roman) lives entirely in the
+    // Bullet-style dropdown; marker size stays a numeric iconField (exception).
     if (rootIsList || listOn()) {
+      inspector.appendChild(sub("List"));
       var MARKERS = [["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
       var MARK_GLYPH = { disc: "•", circle: "◦", square: "▪", dash: "–", arrow: "→", check: "✓", decimal: "1.", "lower-alpha": "a.", "lower-roman": "i.", custom: (obj.listMarkerChar || "✱") };
       var markerOpts = MARKERS.map(function (o) { var g = MARK_GLYPH[o[1]] || ""; return [o[1], o[0], { html: '<span class="cs-mark">' + g + '</span>' + o[0] }]; });

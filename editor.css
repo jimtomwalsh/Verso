@@ -315,6 +315,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 /* icon-segmented mode choice (e.g. alignment) — square icon cells */
 .prop-toggle-row--icon .prop-toggle--icon { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; padding: 5px 0; }
+/* #9: the List toggle is an icon prop-toggle inside the (non-icon) B/I/U/Link bar — centre its glyph */
+.prop-toggle-row .prop-toggle--icon { display: inline-flex; align-items: center; justify-content: center; }
 .prop-toggle--icon svg { width: 16px; height: 16px; }
 
 /* Assets tab — insertable library items */

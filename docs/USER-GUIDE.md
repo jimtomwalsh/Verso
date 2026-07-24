@@ -134,7 +134,9 @@ Every block you can insert, grouped by type. Software tours have their own secti
 ### Text
 
 - **Heading / Subheading / Paragraph / Quote** — rich text. Select text to **Bold**, *Italic*,
-  or underline, or add an inline **Link**. Apply a saved text style (§9) for consistent type.
+  or underline, add an inline **Link**, or turn it into a **List** — all from the one formatting
+  bar in the Text panel. Apply a saved text style (§9) for consistent type. When a field is a
+  list, its marker settings (bullet style, custom glyph, colour, size) appear just below.
 - **Bulleted list** — marker style, colour, custom glyphs, and nesting.
 - **Note / callout** — a highlighted aside.
 
