@@ -42,7 +42,7 @@ section("syntax");
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
- "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js"
+ "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -225,7 +225,7 @@ section("platform-pivot 02 server-of-one");
 // ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
 section("platform-pivot 02 server invariants");
 (function () {
-  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js");
+  var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js");
   // Dependency-free: only node: builtins may be required (bundled runtime is the sole exception).
   var reqs = s.match(/require\(("|')([^"')]+)\1\)/g) || [];
   var badDep = reqs.filter(function (m) {
@@ -258,6 +258,139 @@ section("platform-pivot 02 http adapter");
   ok("store-http installs 'http' adapter only after the guard", t.indexOf("if (!serverUrl()) return;") < t.indexOf('name: "http"'));
   // Never renders / no third-party deps: relies on built-in fetch only.
   ok("store-http uses built-in fetch (no deps)", /fetch\(/.test(t) && !/require\(/.test(t));
+})();
+
+// ---- platform-pivot 03: block-addressable store pure helpers ----------------
+// decompose/assemble inverse + debounce-coalesce, exercised without a db.
+section("platform-pivot 03 block-store pure");
+(function () {
+  var t = src("server/block-store.js");
+  var m = t.match(/\/\* @block-pure-start \*\/([\s\S]*?)\/\* @block-pure-end \*\//);
+  if (!m) { ok("locate @block-pure fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { decomposeDoc: decomposeDoc, assembleDoc: assembleDoc, coalesceChanges: coalesceChanges };")();
+  var id = 0, mint = function () { return "m" + (++id); };
+  var doc = { meta: { code: "C-1" }, headerFooter: { on: 1 }, pages: [
+    { id: "p1", name: "One", blocks: [ { id: "b1", type: "heading", text: "H" }, { type: "para", text: "x" } ] },
+    { id: "p2", name: "Two", blocks: [ { id: "b3", type: "para", text: "P3" } ] }
+  ]};
+  var dec = g.decomposeDoc(JSON.parse(JSON.stringify(doc)), mint);
+  ok("decompose: 2 pages", dec.pages.length === 2);
+  ok("decompose: mints id for the id-less block", dec.pages[0].blockIds.length === 2 && /^m\d+$/.test(dec.pages[0].blockIds[1]));
+  ok("decompose: docMeta drops pages, keeps meta+headerFooter", !dec.docMeta.pages && dec.docMeta.meta.code === "C-1" && dec.docMeta.headerFooter.on === 1);
+  var asm = g.assembleDoc(dec.docMeta, dec.pages, dec.blocks);
+  ok("assemble is inverse of decompose (structure + content)",
+    asm.pages.length === 2 && asm.pages[0].blocks[0].text === "H" && asm.pages[1].blocks[0].text === "P3" && asm.meta.code === "C-1");
+  // coalesce: burst within window -> last wins; gap or block change -> split
+  var co = g.coalesceChanges([
+    { blockId: "b1", patch: "a", ts: 0 }, { blockId: "b1", patch: "b", ts: 100 }, { blockId: "b1", patch: "c", ts: 200 },
+    { blockId: "b1", patch: "d", ts: 900 }, { blockId: "b2", patch: "e", ts: 950 }
+  ], 600);
+  ok("coalesce: burst within window collapses to last-wins", co.length === 3 && co[0].patch === "c" && co[1].patch === "d" && co[2].patch === "e");
+  ok("coalesce: empty -> empty", g.coalesceChanges([], 600).length === 0);
+})();
+
+// ---- platform-pivot 03: block-addressable store + append log (db-backed) -----
+// The event-sourced core: one edit -> one seq-stamped event; materialize === replay;
+// changesSince(N) replay; per-block ver distinct from global seq; snapshot bounds
+// replay. node:sqlite required -> WARN + skip on older CI Node.
+section("platform-pivot 03 block-store");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> block-store db tests skipped"); return; }
+  var os = require("os");
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-bs-test-"));
+  var clock = 100, idn = 0;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "mint" + (++idn); }, now: function () { return clock; } });
+  var eq = function (a, b) { return JSON.stringify(a) === JSON.stringify(b); };
+  try {
+    var doc = { meta: { code: "C-1", title: "T" }, headerFooter: { header: { on: true } }, pages: [
+      { id: "p1", name: "One", blocks: [ { id: "b1", type: "heading", text: "H" }, { type: "para", text: "no-id" } ] },
+      { id: "p2", name: "Two", blocks: [ { id: "b3", type: "para", text: "P3" } ] }
+    ]};
+    var imp = store.importDoc("C-1", doc, "alice");
+    ok("import: 2 pages / 3 blocks", imp.pages === 2 && imp.blocks === 3);
+    var m0 = store.materializeDoc("C-1");
+    ok("materialize keeps meta + headerFooter", m0.meta.code === "C-1" && m0.headerFooter.header.on === true);
+    ok("materialize round-trips content + mints missing id", m0.pages[0].blocks[0].text === "H" && !!m0.pages[0].blocks[1].id);
+
+    // AC1
+    var before = store.maxSeq();
+    clock = 200;
+    var r1 = store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-edited" }, "bob");
+    ok("AC1: seq advances by exactly 1", r1.seq === before + 1);
+    ok("AC5: per-block ver (2) distinct from global seq", r1.ver === 2 && r1.seq !== r1.ver);
+    var evs = store.changesSince(before);
+    ok("AC1: exactly one appended event", evs.length === 1);
+    ok("AC1: event fields correct", evs[0].blockId === "b1" && evs[0].author === "bob" && evs[0].kind === "block.put" && JSON.parse(evs[0].patch).text === "H-edited");
+    ok("AC1: materialized read reflects the edit", store.materializeDoc("C-1").pages[0].blocks[0].text === "H-edited");
+
+    clock = 260;
+    var r2 = store.applyChange("C-1", "b1", { id: "b1", type: "heading", text: "H-again" }, "bob");
+    ok("AC5: ver climbs to 3, global seq keeps climbing", r2.ver === 3 && r2.seq === r1.seq + 1);
+
+    // AC2
+    ok("AC2: materializeDoc === replayDoc (from import baseline)", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+
+    // AC4
+    var sinceR1 = store.changesSince(r1.seq);
+    ok("AC4: changesSince(N) returns only seq>N in order", sinceR1.length === 1 && sinceR1[0].seq === r2.seq);
+    ok("AC4: changesSince(0) returns the full log", store.changesSince(0).length === 2);
+
+    // snapshot bounds replay, AC2 still holds after a mid-stream snapshot
+    var snap = store.takeSnapshot("C-1", "alice");
+    ok("snapshot captures the seq at snapshot time", snap.atSeq === r2.seq);
+    clock = 300;
+    store.applyChange("C-1", "b3", { id: "b3", type: "para", text: "P3-edited" }, "carol");
+    ok("AC2: materialize === replay from latest snapshot (bounded)", eq(store.materializeDoc("C-1"), store.replayDoc("C-1")));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 03: block-addressable doc routes over HTTP ----------------
+// The block store reachable BELOW the same HTTP API (import / materialize / change /
+// changes?since=N / snapshot). Proves the API is the boundary the change-log stream
+// crosses (the Phase-2 fan-out point).
+section("platform-pivot 03 doc routes");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> doc-route tests skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-doc-test-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "local", port: 0, host: "127.0.0.1", dbPath: path.join(tmp, "verso.sqlite") }, function (s) {
+        base = "http://127.0.0.1:" + s.address().port; resolve();
+      });
+    });
+    try {
+      var doc = { meta: { code: "C-1", title: "T" }, pages: [ { id: "p1", name: "One", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] };
+      var r, j;
+      r = await fetch(base + "/api/doc/C-1/import", { method: "POST", body: JSON.stringify({ doc: doc, author: "alice" }) }); j = await r.json();
+      ok("doc import ok", j.ok === true && j.result.blocks === 1);
+      r = await fetch(base + "/api/doc/C-1"); j = await r.json();
+      ok("GET materialized doc", j.ok === true && j.doc.pages[0].blocks[0].text === "H");
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", body: JSON.stringify({ blockId: "b1", patch: { id: "b1", type: "heading", text: "H2" }, author: "bob" }) }); j = await r.json();
+      ok("POST change -> one event with seq + ver", j.ok === true && typeof j.change.seq === "number" && j.change.ver === 2);
+      var seqAfter = j.change.seq;
+      r = await fetch(base + "/api/doc/C-1"); j = await r.json();
+      ok("materialized reflects change", j.doc.pages[0].blocks[0].text === "H2");
+      r = await fetch(base + "/api/doc/C-1/changes?since=0"); j = await r.json();
+      ok("GET changes?since=0 lists the event", j.ok === true && j.changes.length === 1 && j.changes[0].seq === seqAfter);
+      r = await fetch(base + "/api/doc/C-1/changes?since=" + seqAfter); j = await r.json();
+      ok("GET changes?since=N excludes <= N", j.changes.length === 0);
+      r = await fetch(base + "/api/doc/C-1/snapshot", { method: "POST", body: "{}" }); j = await r.json();
+      ok("POST snapshot ok", j.ok === true && j.snapshot.atSeq === seqAfter);
+      r = await fetch(base + "/api/doc/absent"); ok("GET absent doc -> 404", r.status === 404);
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
 })();
 
 // ---- #81: in-app Help guide markdown renderer -----------------------------

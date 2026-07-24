@@ -30,7 +30,7 @@ function loadConfig() {
   if (process.env.VERSO_HOST) config.host = process.env.VERSO_HOST;
   if (process.env.VERSO_DATA_DIR) config.dataDir = process.env.VERSO_DATA_DIR;
   config.mode = config.mode || "local";
-  config.port = config.port || 4790;
+  config.port = config.port != null ? config.port : 4790;
   config.dataDir = config.dataDir || path.join(HERE, "data");
   return config;
 }

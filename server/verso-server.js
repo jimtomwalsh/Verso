@@ -18,6 +18,7 @@
 
 var http = require("node:http");
 var createStore = require("./store").createStore;
+var createBlockStore = require("./block-store").createBlockStore;
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -49,12 +50,16 @@ function authorize(req, config) {
 }
 
 // Build the request handler around a store + config. Exported separately so tests can
-// drive it without binding a socket.
-function makeHandler(store, config) {
+// drive it without binding a socket. An optional blockStore (ticket 03) mounts the
+// block-addressable /api/doc/* routes below the same API -- the boundary Phase-2 sync
+// fans out from. When absent, only the ticket-02 blob routes are served.
+function makeHandler(store, config, blockStore) {
   config = config || {};
   return function handler(req, res) {
-    var url = req.url || "";
-    var qi = url.indexOf("?"); if (qi >= 0) url = url.slice(0, qi);
+    var raw = req.url || "";
+    var qi = raw.indexOf("?");
+    var query = qi >= 0 ? raw.slice(qi + 1) : "";
+    var url = qi >= 0 ? raw.slice(0, qi) : raw;
     var method = req.method || "GET";
 
     if (url === "/api/health") {
@@ -123,17 +128,59 @@ function makeHandler(store, config) {
       return sendJson(res, 405, { ok: false, error: "method not allowed" });
     }
 
+    // --- block-addressable doc routes (ticket 03; mounted only when a block store is
+    //     wired). The change log crossing here IS the seq-stamped stream Phase 2 fans
+    //     out; GET /changes?since=N is the reconnect-replay contract. ---
+    if (rest.indexOf("doc/") === 0 && blockStore) {
+      var tail = rest.slice(4); // "<id>" | "<id>/change" | "<id>/changes" | "<id>/import" | "<id>/snapshot"
+      var slash = tail.indexOf("/");
+      var docId = decodeURIComponent(slash >= 0 ? tail.slice(0, slash) : tail);
+      var op = slash >= 0 ? tail.slice(slash + 1) : "";
+      if (!docId) return sendJson(res, 400, { ok: false, error: "missing doc id" });
+      if (op === "" && method === "GET") {
+        var mat = blockStore.materializeDoc(docId);
+        return mat ? sendJson(res, 200, { ok: true, doc: mat }) : sendJson(res, 404, { ok: false, error: "no such doc" });
+      }
+      if (op === "import" && method === "POST") return readBody(req, function (buf) {
+        if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
+        var body; try { body = JSON.parse(buf.toString("utf8")); } catch (e) { return sendJson(res, 400, { ok: false, error: "bad json" }); }
+        return sendJson(res, 200, { ok: true, result: blockStore.importDoc(docId, body.doc || body, body.author) });
+      });
+      if (op === "change" && method === "POST") return readBody(req, function (buf) {
+        if (buf === null) return sendJson(res, 413, { ok: false, error: "body too large or read error" });
+        var body; try { body = JSON.parse(buf.toString("utf8")); } catch (e) { return sendJson(res, 400, { ok: false, error: "bad json" }); }
+        if (!body.blockId) return sendJson(res, 400, { ok: false, error: "missing blockId" });
+        return sendJson(res, 200, { ok: true, change: blockStore.applyChange(docId, body.blockId, body.patch, body.author) });
+      });
+      if (op === "changes" && method === "GET") {
+        var since = 0;
+        (query.split("&")).forEach(function (kv) { var p = kv.split("="); if (p[0] === "since") since = parseInt(decodeURIComponent(p[1] || "0"), 10) || 0; });
+        return sendJson(res, 200, { ok: true, since: since, changes: blockStore.changesSince(since, docId) });
+      }
+      if (op === "snapshot" && method === "POST") return readBody(req, function (buf) {
+        var author = null; try { author = (JSON.parse((buf || Buffer.from("{}")).toString("utf8")) || {}).author; } catch (e) {}
+        return sendJson(res, 200, { ok: true, snapshot: blockStore.takeSnapshot(docId, author) });
+      });
+      return sendJson(res, 405, { ok: false, error: "method not allowed" });
+    }
+
     return sendJson(res, 404, { ok: false, error: "unknown API route" });
   };
 }
 
-// Create an http.Server. opts: { store? , dbPath? , config }.
+// Create an http.Server. opts: { store? , blockStore? , dbPath? , config }. When a
+// dbPath is given the block-addressable store (ticket 03) is opened on the SAME file,
+// mounting the /api/doc/* routes below the API. Pass blockStore:null to opt out.
 function createServer(opts) {
   opts = opts || {};
   var config = opts.config || { mode: "local" };
   var store = opts.store || createStore(opts.dbPath);
-  var server = http.createServer(makeHandler(store, config));
+  var blockStore = opts.hasOwnProperty("blockStore")
+    ? opts.blockStore
+    : (opts.dbPath ? createBlockStore(opts.dbPath, {}) : null);
+  var server = http.createServer(makeHandler(store, config, blockStore));
   server.__store = store;
+  server.__blockStore = blockStore;
   server.__config = config;
   return server;
 }
@@ -143,7 +190,8 @@ function createServer(opts) {
 function startServer(config, cb) {
   var server = createServer({ dbPath: config.dbPath, config: config });
   var host = config.mode === "server" ? (config.host || "0.0.0.0") : "127.0.0.1";
-  var port = config.port || 4790;
+  // Honour port 0 (ephemeral, used by tests) -- `|| 4790` would wrongly treat 0 as unset.
+  var port = config.port != null ? config.port : 4790;
   server.listen(port, host, function () { if (cb) cb(server, host, port); });
   return server;
 }
