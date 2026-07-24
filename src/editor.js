@@ -15281,9 +15281,19 @@
         var parent = null;
         for (var j = 0; j < doc.comments.length; j++) if (doc.comments[j].id === c.threadId) { parent = doc.comments[j]; break; }
         if (parent) {
-          parent.replies = parent.replies || [];
-          if (!parent.replies.some(function (r) { return r.id === c.id || (r.author === c.author && r.body === c.body); })) parent.replies.push({ id: c.id, body: c.body, author: c.author, colour: c.colour, createdAt: c.createdAt }); // dedupe the origin echo of my own optimistic reply (server mints a new id)
-
+          var replies = parent.replies = parent.replies || [];
+          // Reconcile the ORIGIN echo of my own optimistic reply. A local optimistic reply carries an
+          // "rp_" id (makeReply); the server mints a fresh "cm_" id + resolves the author server-side.
+          // So match my unconfirmed reply by body + the rp_ marker (NOT by author, which can differ)
+          // and adopt the server id -- never a duplicate, and never collapsing two people's replies
+          // (theirs arrive with cm_ ids, so they only match by exact id).
+          var slot = null;
+          for (var q = 0; q < replies.length; q++) {
+            if (replies[q].id === c.id) { slot = replies[q]; break; } // exact echo already present
+            if (slot == null && String(replies[q].id).indexOf("rp_") === 0 && replies[q].body === c.body) slot = replies[q];
+          }
+          if (slot) { slot.id = c.id; } // adopt the server id (reconcile the optimistic reply)
+          else replies.push({ id: c.id, body: c.body, author: c.author, colour: c.colour, createdAt: c.createdAt });
           afterCommentChange(); return;
         }
       }

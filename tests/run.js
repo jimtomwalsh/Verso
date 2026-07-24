@@ -518,7 +518,7 @@ section("platform-pivot 11 presence chrome");
   ok("author reply fans out via session.comment (cid -> server block.id)", /function fanoutReply\(comment, body\)[\s\S]{0,220}session\.comment\(blockIdByCid\(doc, cid\) \|\| cid, body, comment\.threadId/.test(t));
   ok("author resolve fans out via session.resolveComment", /function fanoutResolve\(comment, resolved\)[\s\S]{0,220}session\.resolveComment\(blockIdByCid\(doc, cid\) \|\| cid, comment\.threadId/.test(t));
   ok("the shipped reply + resolve controls call the fanout (both ways)", (t.match(/CollabChrome\.fanoutResolve\(c, v\)/g) || []).length >= 2 && /CollabChrome\.fanoutReply\(c, v\)/.test(t));
-  ok("the origin echo of my optimistic reply is deduped by content", /r\.author === c\.author && r\.body === c\.body/.test(t));
+  ok("the origin echo of my optimistic reply reconciles by rp_ marker + body (author-independent, no dup/collapse)", /String\(replies\[q\]\.id\)\.indexOf\("rp_"\) === 0 && replies\[q\]\.body === c\.body/.test(t) && /slot\.id = c\.id;/.test(t));
   var scr = src("src/sync-client.js");
   ok("sync-client session: resolveComment + resolveMsg builder", /resolveComment: function \(blockId, threadId, resolved\)/.test(scr) && /function resolveMsg\(docId, blockId, threadId, resolved\)/.test(scr));
 
@@ -582,7 +582,7 @@ section("platform-pivot 26 review round-trip");
   ok("commentFromEnv: a deleted server block -> anchor falls to raw id (surfaces orphaned, not mis-anchored)", g.commentFromEnv({ blockId: "gone", author: "A", payload: { id: "cm_9" } }, idoc, function () { return "#c"; }).anchor.blockId === "gone");
   ok("commentFromEnv: no comment id -> null (never a blank note)", g.commentFromEnv({ blockId: "srv-b2", payload: {} }, idoc, function () { return "#c"; }) === null);
 
-  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, doc, colourForName\)/.test(t) && /parent\.replies\.push\(/.test(t));
+  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, doc, colourForName\)/.test(t) && /replies\.push\(\{ id: c\.id, body: c\.body/.test(t));
   ok("comment.added / comment.resolved route through the round-trip", /else if \(env\.type === "comment\.added"\) \{ ingestComment\(env\); \}/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveThread\(env\); \}/.test(t));
   ok("resolveThread marks the whole thread done (both ways)", /function resolveThread\(env\)[\s\S]{0,260}c\.id === threadId \|\| c\.threadId === threadId/.test(t));
   var css = src("editor.css");
