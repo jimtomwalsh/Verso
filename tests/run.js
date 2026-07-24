@@ -63,7 +63,7 @@ section("syntax");
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
- "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js"
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -704,6 +704,64 @@ section("platform-pivot 14 conflict + rollback");
     ok("AC5: resnapshot carries the restored snapshot + seq (client soft-conflict is ticket 13)", ta.sent.filter(function (e) { return e.type === "sync.resnapshot"; })[0].payload.snapshot.meta.code === "C-1");
     ta.receive(env("doc.restore", "C-1", null, null, "alice", 0, { checkpointId: cp.id }));
     ok("AC3: a non-admin restore is denied", ta.sent.some(function (e) { return e.type === "restore.denied" && e.payload.reason === "admin only"; }));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 11: presence -- avatars, viewing/editing, cursors, colours -------
+section("platform-pivot 11 presence");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> presence tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var PR = require(path.join(ROOT, "server/presence.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  // AC1: server author colours MUST match editor.js colourForName (comment-review palette)
+  var ed = src("src/editor.js");
+  var m = ed.match(/var COMMENT_COLOURS = \[[^\]]*\];[\s\S]*?function colourForName\([^)]*\) \{[^}]*\}/);
+  ok("locate editor colourForName", !!m);
+  if (m) {
+    var editorColour = new Function(m[0] + "\nreturn colourForName;")();
+    ok("AC1: server authorColour matches editor colourForName (consistency across presence + comments)",
+      ["Alice", "bob", "Carol X", "zzz", ""].every(function (n) { return PR.authorColour(n) === editorColour(n); }));
+  }
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-pres-test-"));
+  var idn = 0, clock = 1000;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var pres = PR.createPresence({ now: function () { return clock; }, ttlMs: 30000 });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: LM.createLockManager({ now: function () { return clock; } }), presence: pres });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ta.receive(env("presence.heartbeat", "C-1", null, null, "alice", 0, { viewingBlockId: "b1", editingBlockId: null }));
+    var ps = tb.sent.filter(function (e) { return e.type === "presence.state"; }).pop();
+    ok("AC1: presence.state broadcast lists peers with colours", ps && ps.payload.peers.some(function (p) { return p.author === "alice" && p.colour === PR.authorColour("alice"); }));
+    ok("AC3: viewing vs editing distinguishable", ps.payload.peers.find(function (p) { return p.author === "alice"; }).viewingBlockId === "b1");
+    tb.receive(env("presence.heartbeat", "C-1", null, null, "bob", 0, { editingBlockId: "b1" }));
+    var ps2 = ta.sent.filter(function (e) { return e.type === "presence.state"; }).pop();
+    ok("AC3: an editing peer shows its editingBlockId", ps2.payload.peers.find(function (p) { return p.author === "bob"; }).editingBlockId === "b1");
+    ta.receive(env("cursor.update", "C-1", null, null, "alice", 0, { selection: { start: 2, end: 5 } }));
+    var ps3 = tb.sent.filter(function (e) { return e.type === "presence.state"; }).pop();
+    ok("AC2: cursor/selection carried per collaborator", JSON.stringify(ps3.payload.peers.find(function (p) { return p.author === "alice"; }).cursor) === JSON.stringify({ start: 2, end: 5 }));
+    clock = 1000 + 40000;
+    ok("AC4: a peer past its heartbeat TTL is swept from peersFor", !pres.peersFor("C-1").some(function (p) { return p.author === "alice"; }));
+    clock = 1000; ta.receive(env("presence.heartbeat", "C-1", null, null, "alice", 0, {})); tb.receive(env("presence.heartbeat", "C-1", null, null, "bob", 0, {}));
+    tb.sent.length = 0; ta.close();
+    ok("disconnect drops the peer + broadcasts fresh presence.state", tb.sent.some(function (e) { return e.type === "presence.state" && !e.payload.peers.some(function (p) { return p.author === "alice"; }); }));
+    // AC4: local/solo mode broadcasts no presence chrome
+    var hubL = SY.createSyncHub(store, { mode: "local", now: function () { return clock; }, presence: PR.createPresence({ now: function () { return clock; } }) });
+    var la = SY.FakeTransport(), lb = SY.FakeTransport(); hubL.connect(la, "x"); hubL.connect(lb, "y");
+    la.receive(env("sync.hello", "C-1", null, null, "x", 0, { sinceSeq: 0 }));
+    la.receive(env("presence.heartbeat", "C-1", null, null, "x", 0, { editingBlockId: "b1" }));
+    ok("AC4: local mode broadcasts NO presence chrome", !lb.sent.some(function (e) { return e.type === "presence.state"; }));
   } finally {
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}

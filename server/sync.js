@@ -48,6 +48,7 @@ function createSyncHub(blockStore, opts) {
   var mode = opts.mode || "local";
   var now = opts.now || function () { return 0; };
   var lockManager = opts.lockManager || null; // ticket 10 plugs in here; absent -> auto-grant
+  var presence = opts.presence || null;       // ticket 11 plugs in here; absent -> plain relay
   var roleOf = opts.roleOf || function (c) { return (c && c.role) || "author"; }; // real roles = ticket 17
   var catchupWindow = opts.catchupWindow != null ? opts.catchupWindow : 500; // low-water mark for catchup vs resnapshot (ticket 09)
   var docs = {};     // docId -> array of subscribed clients
@@ -70,15 +71,33 @@ function createSyncHub(blockStore, opts) {
   }
 
   function disconnect(client) {
-    if (client.docId) { var a = subs(client.docId); var i = a.indexOf(client); if (i >= 0) a.splice(i, 1); }
+    var docId = client.docId;
+    if (docId) { var a = subs(docId); var i = a.indexOf(client); if (i >= 0) a.splice(i, 1); }
     var j = clients.indexOf(client); if (j >= 0) clients.splice(j, 1);
     if (lockManager && lockManager.releaseAll) lockManager.releaseAll(client);
+    if (presence) { presence.drop(client); if (docId) fanOut(docId, envelope("presence.state", docId, null, null, null, now(), { peers: presence.peersFor(docId) }), null); }
   }
 
+  // Ephemeral presence/cursor: update the (optional) presence table + broadcast the fresh
+  // presence.state, else just relay. Never seq-stamped, never logged.
+  function onPresence(client, env) {
+    if (presence) {
+      if (env.type === "cursor.update") presence.cursor(client, env.docId, env.payload);
+      else presence.heartbeat(client, env.docId, env.payload);
+      if (lockManager && lockManager.heartbeat && env.payload && env.payload.editingBlockId) {
+        lockManager.heartbeat(client, env.docId, env.payload.editingBlockId, "content"); // presence refreshes the edit lease
+      }
+      return fanOut(env.docId, envelope("presence.state", env.docId, null, null, null, now(), { peers: presence.peersFor(env.docId) }), null);
+    }
+    return fanOut(env.docId, env, client);
+  }
+  // Human path out of a stuck lock (ticket 13 server relay): request-handoff pings the
+  // holder; notify-when-free is registered and fired on release. Ephemeral relay here;
+  // the client buffer + soft-conflict UI is client-side (ticket 13).
+  function onHandoff(client, env) { return fanOut(env.docId, env, client); }
+
   // One dispatch table keyed by envelope type -- a new message type adds a row here, it
-  // does not grow an if-cascade. presence/cursor are ephemeral: relayed as-is, never
-  // seq-stamped, never logged (presence/cursor STATE is ticket 11).
-  var relayEphemeral = function (client, env) { return fanOut(env.docId, env, client); };
+  // does not grow an if-cascade.
   var HANDLERS = {
     "sync.hello": onHello,
     "block.change": onBlockChange,
@@ -87,8 +106,10 @@ function createSyncHub(blockStore, opts) {
     "structure.op": onStructure,   // ticket 14
     "doc.restore": onRestore,      // ticket 14 (admin)
     "block.revert": onRevert,      // ticket 14 (author)
-    "presence.heartbeat": relayEphemeral,
-    "cursor.update": relayEphemeral
+    "presence.heartbeat": onPresence,  // ticket 11
+    "cursor.update": onPresence,       // ticket 11
+    "lock.requestHandoff": onHandoff,  // ticket 13 (relay)
+    "lock.notifyWhenFree": onHandoff   // ticket 13 (relay)
   };
   function handle(client, env) {
     if (!env || !env.type) return;

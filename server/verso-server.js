@@ -23,6 +23,7 @@ var createSyncHub = require("./sync").createSyncHub;
 var createSyncRoutes = require("./sync-wire").createSyncRoutes;
 var createLockManager = require("./lock-manager").createLockManager;
 var createReaper = require("./lock-reaper").createReaper;
+var createPresence = require("./presence").createPresence;
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -237,7 +238,8 @@ function createServer(opts) {
   // Locks (ticket 10) are authoritative only in server mode; in local mode there is one
   // user, so the hub auto-grants (no lockManager) -- the solo experience is unchanged.
   var lockManager = (blockStore && config.mode === "server") ? createLockManager({ now: opts.now }) : null;
-  var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager }) : null;
+  var presence = (blockStore && config.mode === "server") ? createPresence({ now: opts.now, ttlMs: config.presenceTtlMs }) : null;
+  var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager, presence: presence }) : null;
   var sync = hub ? createSyncRoutes(hub, config) : null;
   // Lease reaper (ticket 12): reclaims a vanished holder's stale lock, then broadcasts the
   // freed lock.state so peers can re-acquire. Server mode only; timer opt-in (unref'd).
