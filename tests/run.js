@@ -63,7 +63,8 @@ section("syntax");
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
- "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js"
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
+ "server/migrations.js", "server/backup.js", "server/fixtures.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -706,6 +707,75 @@ section("platform-pivot 14 conflict + rollback");
     ok("AC3: a non-admin restore is denied", ta.sent.some(function (e) { return e.type === "restore.denied" && e.payload.reason === "admin only"; }));
   } finally {
     try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 27/28/29: Ops -- versioned artifact, migration runner, backup, fixtures ----
+section("platform-pivot 27/28/29 ops");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> ops tests skipped"); return; }
+  var os = require("os");
+  var sqlite = require("node:sqlite");
+  var MIG = require(path.join(ROOT, "server/migrations.js"));
+  var BK = require(path.join(ROOT, "server/backup.js"));
+  var FX = require(path.join(ROOT, "server/fixtures.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  var ID = require(path.join(ROOT, "server/identity.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-ops-test-"));
+  try {
+    // 27: forward-only migration runner
+    var mdb = new sqlite.DatabaseSync(path.join(tmp, "m.sqlite"));
+    var ran = [];
+    var mig = MIG.createMigrator(mdb, [
+      { version: 1, up: function (db) { db.exec("CREATE TABLE t1(x)"); ran.push(1); } },
+      { version: 2, up: function (db) { db.exec("CREATE TABLE t2(x)"); ran.push(2); } }
+    ]);
+    ok("27: store starts at schema version 0", mig.currentVersion() === 0);
+    var r1 = mig.migrate();
+    ok("27: migrate applies pending FORWARD migrations in order", r1.version === 2 && ran.join(",") === "1,2");
+    ran = [];
+    ok("27: re-run is idempotent (no down-migration, nothing re-applied)", mig.migrate().applied.length === 0 && ran.length === 0);
+    ok("27: the running artifact version is identifiable (SERVER_VERSION)", /^\d+\.\d+\.\d+$/.test(MIG.SERVER_VERSION));
+    mdb.close();
+
+    // 29: synthetic fixtures seed a store (neutral placeholders, 4 roles, checkpoints, log)
+    var dbPath = path.join(tmp, "store.sqlite");
+    var bs = BS.createBlockStore(dbPath, {});
+    var idn = ID.createIdentity({ dbPath: dbPath, now: function () { return 0; } });
+    var rev = require(path.join(ROOT, "server/review.js")).createReview({ dbPath: dbPath, now: function () { return 0; } }); // so the comments table exists in the whole-store snapshot
+    var seeded = FX.seed({ blockStore: bs, identity: idn });
+    rev.addComment("SAMPLE-101", "sb1", { kind: "user", author: "reviewer" }, "a synthetic review note");
+    ok("29: fixtures seed a synthetic course + checkpoints + change log", seeded.docId === "SAMPLE-101" && seeded.checkpoints >= 2 && seeded.changes >= 2);
+    ok("29: fixtures seed all four roles", ["admin", "author", "reviewer", "viewer"].every(function (r) { return seeded.users.indexOf(r) >= 0; }));
+    ok("29: fixture content is neutral placeholder only", /synthetic|placeholder|Sample/i.test(FX.SYNTHETIC_COURSE.meta.title));
+    ok("29: docs which layers local mode CANNOT exercise", FX.LOCAL_CANNOT_EXERCISE.indexOf("sync") >= 0 && FX.LOCAL_CANNOT_EXERCISE.indexOf("review-links") >= 0);
+    // 29 AC3: content-isolation invariant is a TESTABLE property -- the only content-import
+    // path is block-store.importDoc(doc) taking an explicit doc payload; NO server module
+    // mirrors/pulls from another (prod) store, and fixtures build from literals.
+    var serverSrc = ["block-store", "verso-server", "fixtures", "backup", "review", "identity", "store"].map(function (f) { return src("server/" + f + ".js"); }).join("\n");
+    ok("29 AC3: no ops path copies another store's content into local (content-isolation)", !/from\s+prod|mirror(Store|Prod)|copyMaster|pullFrom(Prod|Store)/i.test(serverSrc));
+    ok("29 AC3: the ONLY content-import path is importDoc(doc) (explicit author payload)", /function importDoc\(docId, doc, author\)/.test(src("server/block-store.js")) && /function seed\(deps\)/.test(src("server/fixtures.js")));
+
+    // 28: backup (consistent snapshot) -> mutate -> restore -> verify
+    var before = bs.materializeDoc("SAMPLE-101").pages[0].blocks[0].text;
+    idn.close(); rev.close();
+    var snap = BK.snapshot(dbPath, path.join(tmp, "backups"), "t1");
+    ok("28: a consistent snapshot is written to a separate volume", fs.existsSync(snap));
+    bs.applyChange("SAMPLE-101", "sb1", { id: "sb1", type: "heading", text: "MUTATED-AFTER-BACKUP" }, "author");
+    bs.close();
+    var rr = BK.restore(snap, dbPath);
+    ok("28: restore replaces the store from the snapshot", rr.ok === true);
+    var ver = BK.verifyStore(dbPath, ["docs", "pages", "blocks", "changes", "snapshots", "users", "review_links", "comments"]);
+    ok("28: restored store passes integrity_check + has the expected tables (one consistent whole)", ver.ok === true && ver.missing.length === 0);
+    var bs2 = BS.createBlockStore(dbPath, {});
+    ok("28: restored content matches the snapshot (post-backup mutation rolled back)", bs2.materializeDoc("SAMPLE-101").pages[0].blocks[0].text === before);
+    ok("28: restored checkpoints intact", bs2.listCheckpoints("SAMPLE-101").length >= 2);
+    bs2.close();
+    BK.snapshot(dbPath, path.join(tmp, "backups"), "t2"); BK.snapshot(dbPath, path.join(tmp, "backups"), "t3");
+    ok("28: configurable retention prunes to the newest N", BK.prune(path.join(tmp, "backups"), 2).length === 1 && BK.listBackups(path.join(tmp, "backups")).length === 2);
+  } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
 })();

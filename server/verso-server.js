@@ -26,6 +26,7 @@ var createReaper = require("./lock-reaper").createReaper;
 var createPresence = require("./presence").createPresence;
 var createIdentity = require("./identity").createIdentity;
 var createReview = require("./review").createReview;
+var migrations = require("./migrations");
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -100,7 +101,8 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
     var method = req.method || "GET";
 
     if (url === "/api/health") {
-      return sendJson(res, 200, { ok: true, mode: config.mode || "local", service: "verso-server", renders: false });
+      // the running artifact version is always identifiable (ticket 27)
+      return sendJson(res, 200, { ok: true, mode: config.mode || "local", service: "verso-server", renders: false, version: migrations.SERVER_VERSION, schemaVersion: migrations.SCHEMA_VERSION });
     }
 
     // --- auth routes (ticket 17; public login/logout; server mode only) ---
