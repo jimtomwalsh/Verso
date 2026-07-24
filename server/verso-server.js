@@ -24,6 +24,7 @@ var createSyncRoutes = require("./sync-wire").createSyncRoutes;
 var createLockManager = require("./lock-manager").createLockManager;
 var createReaper = require("./lock-reaper").createReaper;
 var createPresence = require("./presence").createPresence;
+var createIdentity = require("./identity").createIdentity;
 
 var API = "/api/";
 var MAX_BODY = 512 * 1024 * 1024; // 512MB hard guard (a large course with inline media)
@@ -58,21 +59,30 @@ function withJsonBody(req, res, cb) {
   });
 }
 
-// Auth boundary (Phase 3 issue 02/08 fills this). In local mode and until identity
-// lands, it default-ALLOWS. It exists now so every route already flows through one
-// authorize() choke point -- SSO/JIT/break-glass attach here, not scattered.
-function authorize(req, config) {
-  if (config && config.mode === "server" && typeof config.authorize === "function") {
-    return config.authorize(req); // injected by the identity phase; may return false
-  }
-  return true;
+// ---- Identity boundary (ticket 17) ----------------------------------------
+function parseCookies(req) {
+  var out = {}, c = (req.headers && req.headers.cookie) || "";
+  c.split(";").forEach(function (kv) { var i = kv.indexOf("="); if (i > 0) out[kv.slice(0, i).trim()] = decodeURIComponent(kv.slice(i + 1).trim()); });
+  return out;
 }
+// Resolve the principal for a request. Local mode -> a single implicit OWNER with full
+// power (admin+author); server mode -> a session cookie (user) or an x-verso-guest token,
+// else null (reject). This is the ONE boundary in front of the storage API (AC1).
+function principalOf(req, identity, config) {
+  if (!config || config.mode !== "server" || !identity) return { principal: "owner", role: "admin", kind: "owner", name: "Owner" };
+  var guestTok = req.headers && req.headers["x-verso-guest"];
+  if (guestTok) { var g = identity.authorizeGuest(guestTok); if (g) return g; }
+  return identity.resolveSession(parseCookies(req).verso_session) || null;
+}
+// Reads need `view`; writes need `edit`. Finer admin gates (restore, user-mgmt) live in
+// their handlers; this is the coarse storage-boundary check.
+function requiredCap(method) { return (method === "GET" || method === "HEAD") ? "view" : "edit"; }
 
 // Build the request handler around a store + config. Exported separately so tests can
 // drive it without binding a socket. An optional blockStore (ticket 03) mounts the
 // block-addressable /api/doc/* routes below the same API -- the boundary Phase-2 sync
 // fans out from. When absent, only the ticket-02 blob routes are served.
-function makeHandler(store, config, blockStore, sync) {
+function makeHandler(store, config, blockStore, sync, identity) {
   config = config || {};
   return function handler(req, res) {
     var raw = req.url || "";
@@ -84,14 +94,53 @@ function makeHandler(store, config, blockStore, sync) {
     if (url === "/api/health") {
       return sendJson(res, 200, { ok: true, mode: config.mode || "local", service: "verso-server", renders: false });
     }
+
+    // --- auth routes (ticket 17; public login/logout; server mode only) ---
+    if (url === "/auth/login" && method === "POST" && identity) return withJsonBody(req, res, function (body) {
+      var r = identity.login(identity.localAccountsAdapter, { email: body.email, password: body.password });
+      if (!r) return sendJson(res, 401, { ok: false, error: "invalid credentials" });
+      res.setHeader("Set-Cookie", "verso_session=" + r.token + "; HttpOnly; Path=/; SameSite=Strict");
+      return sendJson(res, 200, { ok: true, user: r.user });
+    });
+    if (url === "/auth/logout" && method === "POST" && identity) {
+      var ck = parseCookies(req); if (ck.verso_session) identity.signOut(ck.verso_session);
+      res.setHeader("Set-Cookie", "verso_session=; Path=/; Max-Age=0");
+      return sendJson(res, 200, { ok: true });
+    }
+    if (url === "/auth/me") {
+      return sendJson(res, 200, { ok: true, principal: principalOf(req, identity, config) });
+    }
+
+    // --- live-collaboration long-poll fallback (ticket 08; server mode only). Handled
+    //     here (NOT under /api/) so it isn't shadowed by the /api 404 below. ---
+    if (url === "/sync/send" && method === "POST" && sync) return withJsonBody(req, res, function (body) {
+      sync.handleSend(body.clientId, body.envelope, body.author, function (r) { return sendJson(res, r.ok ? 200 : 409, r); });
+    });
+    if (url === "/sync/poll" && method === "GET" && sync) {
+      var clientId = "", author = null;
+      (query.split("&")).forEach(function (kv) { var p = kv.split("="); if (p[0] === "clientId") clientId = decodeURIComponent(p[1] || ""); if (p[0] === "author") author = decodeURIComponent(p[1] || ""); });
+      return sync.handlePoll(clientId, author, function (r) { return sendJson(res, 200, r); });
+    }
+
     if (url.indexOf(API) !== 0) {
       return sendJson(res, 404, { ok: false, error: "not an API route (this backend never serves the app or renders)" });
     }
-    if (!authorize(req, config)) {
-      return sendJson(res, 401, { ok: false, error: "unauthorized" });
-    }
 
     var rest = url.slice(API.length); // e.g. "registry", "kv/authoring.activeDocId", "media/<id>"
+
+    // --- identity boundary (ticket 17): resolve principal-or-reject in front of storage,
+    //     then enforce the capability matrix (reads=view, writes=edit; guests scoped). ---
+    var principal = principalOf(req, identity, config);
+    if (!principal) return sendJson(res, 401, { ok: false, error: "authentication required" });
+    req.__principal = principal;
+    if (config.mode === "server" && identity) {
+      var cap = requiredCap(method);
+      var scope = null;
+      if (principal.kind === "guest" && rest.indexOf("doc/") === 0) scope = { docId: decodeURIComponent(rest.slice(4).split("/")[0]) };
+      if (!identity.principalCan(principal, cap, scope)) {
+        return sendJson(res, 403, { ok: false, error: "not permitted (" + cap + ")", role: principal.role });
+      }
+    }
 
     // --- registry (doc-of-record; blob-level v1) ---
     if (rest === "registry") {
@@ -206,18 +255,6 @@ function makeHandler(store, config, blockStore, sync) {
       return sendJson(res, 405, { ok: false, error: "method not allowed" });
     }
 
-    // --- live-collaboration long-poll fallback (ticket 08; server mode only) ---
-    // The wss:// pipe is handled on the http 'upgrade' event (see createServer). These
-    // are the mandated long-poll endpoints for proxies/networks without WebSockets.
-    if (url === "/sync/send" && method === "POST" && sync) return withJsonBody(req, res, function (body) {
-      sync.handleSend(body.clientId, body.envelope, body.author, function (r) { return sendJson(res, r.ok ? 200 : 409, r); });
-    });
-    if (url === "/sync/poll" && method === "GET" && sync) {
-      var clientId = "", author = null;
-      (query.split("&")).forEach(function (kv) { var p = kv.split("="); if (p[0] === "clientId") clientId = decodeURIComponent(p[1] || ""); if (p[0] === "author") author = decodeURIComponent(p[1] || ""); });
-      return sync.handlePoll(clientId, author, function (r) { return sendJson(res, 200, r); });
-    }
-
     return sendJson(res, 404, { ok: false, error: "unknown API route" });
   };
 }
@@ -239,6 +276,10 @@ function createServer(opts) {
   // user, so the hub auto-grants (no lockManager) -- the solo experience is unchanged.
   var lockManager = (blockStore && config.mode === "server") ? createLockManager({ now: opts.now }) : null;
   var presence = (blockStore && config.mode === "server") ? createPresence({ now: opts.now, ttlMs: config.presenceTtlMs }) : null;
+  // Identity (tickets 17/18/20): server mode only, on the same on-disk store. Dormant in
+  // local mode (a single implicit owner). Injected so tests can pass a shared instance.
+  var identity = opts.hasOwnProperty("identity") ? opts.identity
+    : ((opts.dbPath && config.mode === "server") ? createIdentity({ dbPath: opts.dbPath, now: opts.now, linkSecret: config.linkSecret, sessionTtlMs: config.sessionTtlMs }) : null);
   var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager, presence: presence }) : null;
   var sync = hub ? createSyncRoutes(hub, config) : null;
   // Lease reaper (ticket 12): reclaims a vanished holder's stale lock, then broadcasts the
@@ -252,12 +293,13 @@ function createServer(opts) {
       });
     }
   }) : null;
-  var server = http.createServer(makeHandler(store, config, blockStore, sync));
+  var server = http.createServer(makeHandler(store, config, blockStore, sync, identity));
   if (sync && !sync.dormant) server.on("upgrade", sync.upgrade); // wss:// only in server mode
   server.__store = store;
   server.__blockStore = blockStore;
   server.__hub = hub;
   server.__sync = sync;
+  server.__identity = identity;
   server.__lockManager = lockManager;
   server.__reaper = reaper;
   server.__config = config;

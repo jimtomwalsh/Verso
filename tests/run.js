@@ -63,7 +63,7 @@ section("syntax");
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
- "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js"
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -244,8 +244,8 @@ section("platform-pivot 02 server invariants");
   // Never renders: no import of the render engine, no HTML/app serving.
   ok("server never requires render/editor engine", !/require\([^)]*(render|editor|export|runtime)[^)]*\)/.test(s));
   ok("server declares renders:false on health", /renders:\s*false/.test(s));
-  // One authorize() choke point exists (identity phase attaches here).
-  ok("server routes through one authorize() choke point", /function authorize\(/.test(s) && /if \(!authorize\(/.test(s));
+  // One identity boundary resolves principal-or-reject in front of storage (ticket 17).
+  ok("server routes through one identity boundary (principalOf + reject)", /function principalOf\(/.test(s) && /authentication required/.test(s));
   // SQLite/WAL on disk, sole writer posture documented.
   ok("store uses WAL journal", /journal_mode = WAL/.test(src("server/store.js")));
 })();
@@ -708,6 +708,117 @@ section("platform-pivot 14 conflict + rollback");
     try { store.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
+})();
+
+// ---- platform-pivot 17/18/20: identity spine (roles, sessions, JIT, break-glass, guest) ----
+section("platform-pivot 17/18/20 identity");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> identity tests skipped"); return; }
+  var os = require("os");
+  var ID = require(path.join(ROOT, "server/identity.js"));
+  // 17: the capability matrix (the ONE definition)
+  ok("17: admin can manageUsers + promote", ID.can("admin", "manageUsers") && ID.can("admin", "promote"));
+  ok("17: author edits + publishes but not manageUsers/promote", ID.can("author", "edit") && ID.can("author", "publish") && !ID.can("author", "manageUsers") && !ID.can("author", "promote"));
+  ok("17: reviewer comments but never edits", ID.can("reviewer", "comment") && !ID.can("reviewer", "edit"));
+  ok("17: viewer views only", ID.can("viewer", "view") && !ID.can("viewer", "comment") && !ID.can("viewer", "edit"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-id-test-"));
+  var clock = 1000;
+  var idn = ID.createIdentity({ dbPath: path.join(tmp, "id.sqlite"), now: function () { return clock; }, linkSecret: "s3cr3t", sessionTtlMs: 1000 });
+  try {
+    // 18: bootstrap admin (first-ever) + JIT least-privilege
+    var u1 = idn.findOrCreateUser("alice@x.com", "Alice");
+    ok("18: first-ever sign-in -> bootstrap ADMIN", u1.role === "admin");
+    var u2 = idn.findOrCreateUser("bob@x.com", "Bob");
+    ok("18: a later unknown identity -> VIEWER (JIT)", u2.role === "viewer" && idn.findOrCreateUser("bob@x.com").id === u2.id);
+    var adminP = { principal: u1.id, role: "admin", kind: "user" };
+    ok("18: admin elevates bob to author", idn.setRole(adminP, u2.id, "author").ok && idn.getUser(u2.id).role === "author");
+    ok("17: a non-admin cannot assign roles", idn.setRole({ role: "author", kind: "user" }, u2.id, "admin").ok === false);
+    // 17: local-accounts adapter + session lifecycle
+    idn.registerLocalAccount("carol@x.com", "Carol", "pw123", "author");
+    var login = idn.login(idn.localAccountsAdapter, { email: "carol@x.com", password: "pw123" });
+    ok("17: local login mints a session; resolves to {principal, role}", login && idn.resolveSession(login.token).role === "author");
+    ok("17: wrong password -> no login", idn.login(idn.localAccountsAdapter, { email: "carol@x.com", password: "no" }) === null);
+    clock = 1000 + 2000;
+    ok("17: an expired session resolves to null", idn.resolveSession(login.token) === null);
+    // 18: break-glass admin works during an IdP outage (adapter throws)
+    idn.ensureBreakGlass("root@local", "breakpw");
+    var brokenSSO = { name: "oidc", authenticate: function () { throw new Error("IdP unreachable"); } };
+    ok("18: break-glass logs in while SSO is configured AND the IdP fails", idn.login(brokenSSO, { email: "root@local", password: "breakpw" }).user.role === "admin");
+    // 20: guest link tokens
+    var link = idn.issueLink(adminP, { docId: "C-1", version: "v1", displayName: "Ext", expiresAt: clock + 100000 });
+    var g = idn.authorizeGuest(link.token);
+    ok("20: valid token -> scoped guest (view+comment on one file)", g && g.kind === "guest" && g.scope.docId === "C-1");
+    ok("20: guest views+comments IN scope, nothing outside", idn.principalCan(g, "view", { docId: "C-1" }) && idn.principalCan(g, "comment", { docId: "C-1" }) && !idn.principalCan(g, "comment", { docId: "OTHER" }));
+    ok("20: guest can NEVER edit / acquire a lock", !idn.principalCan(g, "edit", { docId: "C-1" }));
+    ok("20: a tampered token is rejected", idn.authorizeGuest(link.token.slice(0, -2) + "xx") === null);
+    ok("20: revoking the link revokes access immediately", idn.revokeLink(adminP, link.linkId).ok && idn.authorizeGuest(link.token) === null);
+    ok("20: an expired token is rejected", idn.authorizeGuest(idn.issueLink(adminP, { docId: "C-1", expiresAt: clock - 1 }).token) === null);
+    ok("20: a non-issuer role cannot issue a link", idn.issueLink({ role: "reviewer", kind: "user" }, { docId: "C-1" }).ok === false);
+  } finally {
+    try { idn.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
+// ---- platform-pivot 17: identity boundary over HTTP (server mode) --------------
+section("platform-pivot 17 identity boundary");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> identity boundary tests skipped"); return; }
+  var os = require("os");
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-idb-test-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp, "verso.sqlite"), linkSecret: "s3cr3t" }, function (s) {
+        base = "http://127.0.0.1:" + s.address().port; resolve();
+      });
+    });
+    try {
+      var idn = server.__identity;
+      // seed accounts: first is bootstrap admin; make an explicit author + viewer
+      idn.registerLocalAccount("admin@x", "Admin", "adminpw", "admin");
+      idn.registerLocalAccount("author@x", "Author", "authorpw", "author");
+      idn.registerLocalAccount("viewer@x", "Viewer", "viewerpw", "viewer");
+      var r, j;
+      // AC1: an unauthenticated request to storage is rejected at the boundary
+      r = await fetch(base + "/api/registry");
+      ok("AC1: unauthenticated /api request -> 401 at the boundary", r.status === 401);
+      // login (author) -> cookie
+      r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "author@x", password: "authorpw" }) });
+      j = await r.json();
+      var cookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      ok("17: local-accounts login returns a session cookie", j.ok === true && /verso_session=/.test(cookie));
+      // author can read + write
+      r = await fetch(base + "/api/registry", { headers: { cookie: cookie } });
+      ok("17: author (edit-capable) can read", r.status === 200);
+      r = await fetch(base + "/api/registry", { method: "PUT", headers: { cookie: cookie }, body: '{"C-1":{}}' });
+      ok("17: author can write", r.status === 200);
+      // viewer can read but NOT write
+      r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "viewer@x", password: "viewerpw" }) });
+      var vcookie = (r.headers.get("set-cookie") || "").split(";")[0];
+      r = await fetch(base + "/api/registry", { headers: { cookie: vcookie } });
+      ok("17: viewer can read (view)", r.status === 200);
+      r = await fetch(base + "/api/registry", { method: "PUT", headers: { cookie: vcookie }, body: '{}' });
+      ok("17: viewer is DENIED a write (403; capability matrix enforced)", r.status === 403);
+      // guest token: view within scope, no edit
+      var adminUser = idn.findOrCreateUser("admin@x");
+      var link = idn.issueLink({ principal: adminUser.id, role: "admin", kind: "user" }, { docId: "C-1", displayName: "Guest" });
+      await fetch(base + "/api/doc/C-1/import", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ doc: { meta: { code: "C-1" }, pages: [] }, author: "author" }) });
+      r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": link.token } });
+      ok("20: a guest token authorizes a scoped read", r.status === 200);
+      r = await fetch(base + "/api/doc/C-1/change", { method: "POST", headers: { "x-verso-guest": link.token }, body: JSON.stringify({ blockId: "b1", patch: {} }) });
+      ok("20: a guest is DENIED an edit (403)", r.status === 403);
+      // /auth/me reflects the principal
+      r = await fetch(base + "/auth/me", { headers: { cookie: cookie } }); j = await r.json();
+      ok("17: /auth/me resolves the session principal", j.principal && j.principal.role === "author");
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
 })();
 
 // ---- platform-pivot 11: presence -- avatars, viewing/editing, cursors, colours -------
