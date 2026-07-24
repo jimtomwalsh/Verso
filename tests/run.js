@@ -1154,6 +1154,7 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   ok("runtime: restart gated on a TERMINAL screen (completion screen or dead-end), so it can't ride along", /function hsIsTerminal\(stage\)[\s\S]*?if \(cs\) return hsCurrentScreenId\(stage\) === cs;[\s\S]*?return !onward;/.test(rt) && /rb\.hidden = !\(hsAllContentDone\(stage\) && hsIsTerminal\(stage\)\)/.test(rt));
   ok("runtime: restart click resets + replays; wired in the delegate", /function hsRestart\(stage\) \{\s*stage\.__hsVisited = \{\}; stage\.__hsComplete = false;[\s\S]*?data-hotspot-restart\]"\)\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); hsRestart\(stage\); return; \}/.test(rt));
   ok("css: restart glyph centred + white on a translucent disc", /\.hotspot-restart \{[^}]*left: 50%; top: 50%; transform: translate\(-50%, -50%\)[^}]*color: #ffffff;/.test(css));
+  ok("css: restart [hidden] beats the display:flex base (glyph truly hides)", /\.hotspot-restart\[hidden\] \{ display: none; \}/.test(css));
   // canvas video screens pin to the final frame (editor only) so marker targeting isn't blind.
   ok("editor: canvas hotspot videos pinned to the final frame (not grey)", /v\.__canvasPinned = true;[\s\S]*?function pinLast\(\) \{ var d = v\.duration; if \(d && isFinite\(d\) && d > 0\) \{ try \{ v\.currentTime = Math\.max\(0, d - 0\.05\);/.test(e));
   // canvas screen cycler (editor chrome): prev/next buttons flank a multi-screen hotspot.

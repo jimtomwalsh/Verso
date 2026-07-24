@@ -1752,6 +1752,9 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); transition: transform 0.14s ease;
 }
 .hotspot-restart svg { width: 32px; height: 32px; display: block; }
+/* the base rule sets display:flex, which would beat the UA [hidden] { display:none }; restore it so
+   the hidden attribute (set by render, toggled by the runtime) actually keeps the glyph off. */
+.hotspot-restart[hidden] { display: none; }
 .hotspot-restart:hover, .hotspot-restart:focus-visible { transform: translate(-50%, -50%) scale(1.08); outline: none; }
 @media (prefers-reduced-motion: reduce) { .hotspot-restart { transition: none; } }
 .hotspot-back, .hotspot-home {
