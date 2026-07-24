@@ -183,9 +183,57 @@
   function storageBackend() { try { return localStorage.getItem(STORAGE_BACKEND_KEY) || "browser"; } catch (e) { return "browser"; } }
   function registryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserRegistryAdapter); }
 
+  // ---- StorageBackend (platform-pivot 01/31 — EXPAND) -----------------------
+  // The single, highest seam the whole platform pivot introduces. It unifies the
+  // three storage choke points — the registry writer (saveRegistry), the low-level
+  // key/value writer (writeStore, for doc-session keys), and the media store
+  // (AssetStore) — behind ONE interface, so a future server-of-one backend can
+  // replace all three at once (below the HTTP storage API) with no call-site churn.
+  //
+  // EXPAND step of the storage-retarget wide refactor: this seam exists BESIDE the
+  // old form. The default impl is EXACTLY today's browser storage — the registry
+  // facet keeps the #66/#68 adapter swap (browser localStorage OR the injected
+  // 'file' adapter), the k/v facet is localStorage through the durable writeStore
+  // helper, and the media facet IS window.AssetStore (uncapped IndexedDB). Zero
+  // behaviour change; nothing points at a server yet. Do NOT flip storageBackend by
+  // hand — the cutover is a guarded migration (#68/#69).
+  //
+  // Scope: only the DOC-OF-RECORD's storage flows through here (registry, the
+  // active/open-doc session keys, media). Pure editor UI prefs (theme mode, grid,
+  // layout, view, tour) are deliberately NOT routed — they stay browser-local per
+  // client in every posture, so server mode never syncs one author's chrome onto
+  // another. Widening this seam past the doc-of-record is out of scope for EXPAND.
+  // PURE factory (DOM-free, all deps injected) so tests/run.js can exercise the
+  // three-facet routing headlessly. deps = { registryAdapter, writeStore, storage
+  // (a localStorage-shaped k/v), assetStore (a lazy () => the media store) }.
+  /* @storage-backend-start */
+  function makeStorageBackend(deps) {
+    return {
+      // reflects the live registry adapter ("browser" | "file")
+      get name() { return deps.registryAdapter().name; },
+      // --- registry (doc-of-record) — delegates to the existing adapter swap ---
+      readRegistry: function () { return deps.registryAdapter().readRegistry(); },
+      writeRegistry: function (json) { return deps.registryAdapter().writeRegistry(json); },
+      // --- low-level key/value (doc-session keys: active doc, open docs) ---
+      readKey: function (key) { try { return deps.storage.getItem(key); } catch (e) { return null; } },
+      writeKey: function (key, value) { return deps.writeStore(deps.storage, key, value); },
+      removeKey: function (key) { try { deps.storage.removeItem(key); return { ok: true }; } catch (e) { return { ok: false, error: e }; } },
+      // --- media (heavy assets) — IS the AssetStore (put/url/get/has/sweep) ---
+      get media() { return deps.assetStore(); }
+    };
+  }
+  /* @storage-backend-end */
+  var StorageBackend = makeStorageBackend({
+    registryAdapter: registryAdapter,
+    writeStore: writeStore,
+    storage: localStorage,
+    assetStore: function () { return window.AssetStore || null; }
+  });
+  window.StorageBackend = StorageBackend;
+
   function getRegistry() {
     try {
-      var r = registryAdapter().readRegistry();
+      var r = StorageBackend.readRegistry();
       if (r) return JSON.parse(r);
     } catch (e) {}
     var defaultRegistry = {};
@@ -425,7 +473,7 @@
       if (window.console && console.error) console.error("[save] serialise failed:", e);
       return false;
     }
-    var res = registryAdapter().writeRegistry(json);
+    var res = StorageBackend.writeRegistry(json);
     if (res.ok) { setSaveState("saved"); if (typeof scheduleBackup === "function") scheduleBackup(); return true; }
     setSaveState("failed", res.quota
       ? "Storage full - your latest changes are NOT saved in this browser. Click to export JSON now and avoid losing work."
@@ -553,23 +601,23 @@
   });
   function getOpenDocIds() {
     try {
-      var o = localStorage.getItem(OPEN_DOCS_KEY);
+      var o = StorageBackend.readKey(OPEN_DOCS_KEY);
       if (o) return JSON.parse(o);
     } catch (e) {}
     return [window.SAMPLE_DOC.meta.code];
   }
   function saveOpenDocIds(ids) {
-    try { localStorage.setItem(OPEN_DOCS_KEY, JSON.stringify(ids)); } catch (e) {}
+    try { StorageBackend.writeKey(OPEN_DOCS_KEY, JSON.stringify(ids)); } catch (e) {}
   }
   function getActiveDocId() {
     try {
-      var a = localStorage.getItem(ACTIVE_DOC_KEY);
+      var a = StorageBackend.readKey(ACTIVE_DOC_KEY);
       if (a) return JSON.parse(a);
     } catch (e) {}
     return window.SAMPLE_DOC.meta.code;
   }
   function saveActiveDocId(id) {
-    try { localStorage.setItem(ACTIVE_DOC_KEY, JSON.stringify(id)); } catch (e) {}
+    try { StorageBackend.writeKey(ACTIVE_DOC_KEY, JSON.stringify(id)); } catch (e) {}
   }
 
   // AAA: versioned doc-migration harness. Every load + import runs this so an

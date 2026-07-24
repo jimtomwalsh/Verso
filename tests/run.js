@@ -88,6 +88,69 @@ section("#66 storage seam");
   ok("flag flipped, no adapter -> browser fallback", g.pickStorageAdapter("file", null, browser) === browser);
 })();
 
+// ---- platform-pivot 01: StorageBackend seam (EXPAND, browser conformance) ----
+// The single interface unifying the 3 storage choke points. At the browser default
+// each facet must route to EXACTLY today's behaviour: registry -> the registry
+// adapter, k/v -> writeStore over localStorage, media -> the AssetStore. Zero
+// behaviour change is the whole point of EXPAND, so this pins it.
+section("platform-pivot 01 StorageBackend seam");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @storage-backend-start \*\/([\s\S]*?)\/\* @storage-backend-end \*\//);
+  if (!m) { ok("locate @storage-backend fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { makeStorageBackend: makeStorageBackend };")();
+
+  // Spy deps that mimic the real ones exactly (writeStore is the durable helper).
+  function writeStore(storage, key, value) {
+    try { storage.setItem(key, value); return { ok: true }; }
+    catch (e) { return { ok: false, error: e }; }
+  }
+  var kv = {}, calls = [];
+  var storage = {
+    getItem: function (k) { calls.push(["get", k]); return (k in kv) ? kv[k] : null; },
+    setItem: function (k, v) { calls.push(["set", k, v]); kv[k] = v; },
+    removeItem: function (k) { calls.push(["rm", k]); delete kv[k]; }
+  };
+  var adapter = {
+    name: "browser",
+    readRegistry: function () { return kv["reg"] || null; },
+    writeRegistry: function (json) { kv["reg"] = json; return { ok: true, via: "adapter" }; }
+  };
+  var media = { put: function () {}, url: function () {}, get: function () {}, has: function () {}, sweep: function () {}, placeholder: "P" };
+  var be = g.makeStorageBackend({
+    registryAdapter: function () { return adapter; },
+    writeStore: writeStore,
+    storage: storage,
+    assetStore: function () { return media; }
+  });
+
+  // name reflects the live adapter
+  ok("name reflects registry adapter", be.name === "browser");
+  // registry facet routes through the adapter (the #66/#68 swap point)
+  ok("writeRegistry -> adapter", be.writeRegistry('{"C-1":{}}').via === "adapter" && kv["reg"] === '{"C-1":{}}');
+  ok("readRegistry -> adapter", be.readRegistry() === '{"C-1":{}}');
+  // k/v facet routes through writeStore over the injected localStorage-shaped store
+  var wr = be.writeKey("authoring.activeDocId", '"C-1"');
+  ok("writeKey ok via writeStore", wr.ok === true && kv["authoring.activeDocId"] === '"C-1"');
+  ok("readKey reads back", be.readKey("authoring.activeDocId") === '"C-1"');
+  ok("readKey missing -> null", be.readKey("nope") === null);
+  ok("removeKey clears", be.removeKey("authoring.activeDocId").ok === true && !("authoring.activeDocId" in kv));
+  // media facet IS the AssetStore (put/url/get/has/sweep + placeholder)
+  ok("media facet is the AssetStore", be.media === media);
+  ["put", "url", "get", "has", "sweep"].forEach(function (fn) {
+    ok("media exposes " + fn, typeof be.media[fn] === "function");
+  });
+  // a throwing k/v store never strands (matches today's swallowed writes)
+  var boom = { setItem: function () { throw new Error("full"); }, getItem: function () { throw new Error("x"); }, removeItem: function () { throw new Error("x"); } };
+  var be2 = g.makeStorageBackend({ registryAdapter: function () { return adapter; }, writeStore: writeStore, storage: boom, assetStore: function () { return media; } });
+  ok("writeKey on failing store -> {ok:false}", be2.writeKey("k", "v").ok === false);
+  ok("readKey on failing store -> null", be2.readKey("k") === null);
+  ok("removeKey on failing store -> {ok:false}", be2.removeKey("k").ok === false);
+  // media absent -> null (never throws)
+  var be3 = g.makeStorageBackend({ registryAdapter: function () { return adapter; }, writeStore: writeStore, storage: storage, assetStore: function () { return null; } });
+  ok("media absent -> null", be3.media === null);
+})();
+
 // ---- #81: in-app Help guide markdown renderer -----------------------------
 section("#81 Help markdown renderer");
 (function () {
