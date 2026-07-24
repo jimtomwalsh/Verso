@@ -109,7 +109,10 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
     if (url === "/auth/login" && method === "POST" && identity) return withJsonBody(req, res, function (body) {
       var r = identity.login(identity.localAccountsAdapter, { email: body.email, password: body.password });
       if (!r) return sendJson(res, 401, { ok: false, error: "invalid credentials" });
-      res.setHeader("Set-Cookie", "verso_session=" + r.token + "; HttpOnly; Path=/; SameSite=Strict");
+      // Secure by default in server mode (on-prem TLS); config.insecureCookie relaxes it
+      // for a plain-HTTP test/dev bring-up only.
+      var secure = (config.mode === "server" && !config.insecureCookie) ? "; Secure" : "";
+      res.setHeader("Set-Cookie", "verso_session=" + r.token + "; HttpOnly; Path=/; SameSite=Strict" + secure);
       return sendJson(res, 200, { ok: true, user: r.user });
     });
     if (url === "/auth/logout" && method === "POST" && identity) {
@@ -123,13 +126,19 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
 
     // --- live-collaboration long-poll fallback (ticket 08; server mode only). Handled
     //     here (NOT under /api/) so it isn't shadowed by the /api 404 below. ---
-    if (url === "/sync/send" && method === "POST" && sync) return withJsonBody(req, res, function (body) {
-      sync.handleSend(body.clientId, body.envelope, body.author, function (r) { return sendJson(res, r.ok ? 200 : 409, r); });
-    });
+    if (url === "/sync/send" && method === "POST" && sync) {
+      var sp = principalOf(req, identity, config);
+      if (!sp) return sendJson(res, 401, { ok: false, error: "authentication required" });
+      return withJsonBody(req, res, function (body) {
+        sync.handleSend(body.clientId, body.envelope, sp, function (r) { return sendJson(res, r.ok ? 200 : (/authentication/.test(r.error || "") ? 401 : 409), r); });
+      });
+    }
     if (url === "/sync/poll" && method === "GET" && sync) {
-      var clientId = "", author = null;
-      (query.split("&")).forEach(function (kv) { var p = kv.split("="); if (p[0] === "clientId") clientId = decodeURIComponent(p[1] || ""); if (p[0] === "author") author = decodeURIComponent(p[1] || ""); });
-      return sync.handlePoll(clientId, author, function (r) { return sendJson(res, 200, r); });
+      var pp = principalOf(req, identity, config);
+      if (!pp) return sendJson(res, 401, { ok: false, error: "authentication required" });
+      var clientId = "";
+      (query.split("&")).forEach(function (kv) { var p = kv.split("="); if (p[0] === "clientId") clientId = decodeURIComponent(p[1] || ""); });
+      return sync.handlePoll(clientId, pp, function (r) { return sendJson(res, r.ok ? 200 : 401, r); });
     }
 
     if (url.indexOf(API) !== 0) {
@@ -213,10 +222,13 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
       var op = slash >= 0 ? tail.slice(slash + 1) : "";
       if (!docId) return sendJson(res, 400, { ok: false, error: "missing doc id" });
       if (op === "" && method === "GET") {
-        // ticket 22: a guest on a review link reads the PINNED checkpoint snapshot (frozen,
-        // never in-progress churn); everyone else reads the live materialized doc.
-        if (req.__principal && req.__principal.kind === "guest" && req.__principal.scope && req.__principal.scope.checkpointId != null) {
-          var pinned = blockStore.checkpointSnapshot(req.__principal.scope.checkpointId);
+        // ticket 22: a guest on a review link reads ONLY the PINNED checkpoint snapshot
+        // (frozen, never in-progress churn) -- an unpinned guest is denied (defence-in-depth
+        // behind the issue-time pin requirement); everyone else reads the live materialized doc.
+        if (req.__principal && req.__principal.kind === "guest") {
+          var cpid = req.__principal.scope && req.__principal.scope.checkpointId;
+          if (cpid == null) return sendJson(res, 403, { ok: false, error: "review link is not pinned to a snapshot" });
+          var pinned = blockStore.checkpointSnapshot(cpid);
           return pinned ? sendJson(res, 200, { ok: true, doc: pinned, pinned: true }) : sendJson(res, 404, { ok: false, error: "pinned snapshot missing" });
         }
         var mat = blockStore.materializeDoc(docId);
@@ -309,6 +321,14 @@ function makeHandler(store, config, blockStore, sync, identity, review) {
 function createServer(opts) {
   opts = opts || {};
   var config = opts.config || { mode: "local" };
+  // Real wall clock in operation (tests inject opts.now). Without this, session/token
+  // expiry (expires_at <= now()) would never fire if an operator omitted a clock.
+  if (opts.now == null) opts.now = function () { return Date.now(); };
+  // In server mode a link-signing secret is MANDATORY -- never fall back to the module's
+  // in-repo dev default, or guest review-link HMACs would be forgeable. Hard-fail startup.
+  if (config.mode === "server" && opts.dbPath && !opts.hasOwnProperty("identity") && !config.linkSecret) {
+    throw new Error("verso-server: config.linkSecret is required in server mode (guest review-link signing) -- set it in the config file.");
+  }
   var store = opts.store || createStore(opts.dbPath);
   var blockStore = opts.hasOwnProperty("blockStore")
     ? opts.blockStore
@@ -328,7 +348,9 @@ function createServer(opts) {
   var review = opts.hasOwnProperty("review") ? opts.review
     : ((opts.dbPath && config.mode === "server") ? createReview({ dbPath: opts.dbPath, now: opts.now }) : null);
   var hub = blockStore ? createSyncHub(blockStore, { mode: config.mode, now: opts.now, lockManager: lockManager, presence: presence, review: review }) : null;
-  var sync = hub ? createSyncRoutes(hub, config) : null;
+  // The sync wire resolves each connection through the SAME identity boundary as /api --
+  // an anonymous /sync connection is rejected; the connection carries the resolved role.
+  var sync = hub ? createSyncRoutes(hub, config, function (req) { return principalOf(req, identity, config); }) : null;
   // Lease reaper (ticket 12): reclaims a vanished holder's stale lock, then broadcasts the
   // freed lock.state so peers can re-acquire. Server mode only; timer opt-in (unref'd).
   var reaper = (lockManager && hub) ? createReaper(lockManager, {

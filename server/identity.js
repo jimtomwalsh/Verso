@@ -102,8 +102,9 @@ function createIdentity(opts) {
   function registerLocalAccount(email, name, password, role, breakGlass) {
     var existing = qGetUserByEmail.get(email);
     if (existing) return existing;
+    // Explicit role wins; else a break-glass or the first-ever account is admin, others viewer.
     var first = (qCountUsers.get().n === 0);
-    var r = role || (first && !breakGlass ? "admin" : (breakGlass ? "admin" : "viewer"));
+    var r = role || (breakGlass || first ? "admin" : "viewer");
     var id = uid();
     qInsUser.run(id, email, name || email, r, hashPassword(password), breakGlass ? 1 : 0, now());
     return qGetUserById.get(id);
@@ -184,6 +185,10 @@ function createIdentity(opts) {
     var exp = scope.expiresAt != null ? scope.expiresAt : now() + 7 * 24 * 60 * 60 * 1000;
     var mode = scope.mode === "sso" ? "sso" : "guest";
     var cp = scope.checkpointId != null ? scope.checkpointId : null;
+    // A guest-mode link MUST pin a checkpoint so the reviewer reads a frozen snapshot, never
+    // live churn, and the link never silently advances (22/24). SSO-mode links resolve a
+    // real user through OIDC, so they don't require a pin.
+    if (mode === "guest" && cp == null) return { ok: false, error: "a guest review link must pin a checkpoint (snapshot)" };
     qInsLink.run(id, scope.docId, scope.version || "", cp, mode, scope.displayName || "Guest", exp, now());
     var payload = { linkId: id, docId: scope.docId, version: scope.version || "", cp: cp, mode: mode, name: scope.displayName || "Guest", exp: exp };
     var body = b64url(Buffer.from(JSON.stringify(payload), "utf8"));
@@ -223,12 +228,14 @@ function createIdentity(opts) {
     };
   }
   // Does this resolved principal (user OR guest) hold a capability, honouring guest scope?
+  // A guest is ALWAYS bounded to its link's file: it may only view/comment, and only on a
+  // route that carries a matching doc scope -- any unscoped or cross-file route is DENIED
+  // (default-deny), so a guest token can never read the server-wide registry/kv/media.
   function principalCan(principal, capability, scope) {
     if (!principal) return false;
     if (principal.kind === "guest") {
       if (!guestCan(capability)) return false;
-      if (scope && principal.scope) return principal.scope.docId === scope.docId; // scoped to one file
-      return true;
+      return !!(scope && scope.docId && principal.scope && principal.scope.docId === scope.docId);
     }
     return can(principal.role, capability);
   }

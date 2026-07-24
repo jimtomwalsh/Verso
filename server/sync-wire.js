@@ -112,39 +112,51 @@ function LongPollTransport() {
 // inert object (dormant:true, no upgrade handler, no-op long-poll), so the whole
 // collaboration layer stays dormant on the desktop app. verso-server calls upgrade() on
 // its http 'upgrade' event and routes /sync/send + /sync/poll to handleSend/handlePoll.
-function createSyncRoutes(hub, config) {
+// resolvePrincipal(req) -> { name/email, role } | null resolves the session cookie / guest
+// token so a sync connection carries the RESOLVED identity, never a self-declared author.
+// An unauthenticated connection is REJECTED -- the collab write path flows through the same
+// identity boundary as the /api routes (no bypass).
+function createSyncRoutes(hub, config, resolvePrincipal) {
   if (!config || config.mode !== "server") {
     return {
       dormant: true,
       upgrade: function (req, socket) { try { socket.destroy(); } catch (e) {} },
-      handleSend: function (id, env, author, cb) { cb({ ok: false, error: "sync dormant (local mode)" }); },
-      handlePoll: function (id, author, cb) { cb({ ok: true, events: [] }); }
+      handleSend: function (id, env, principal, cb) { cb({ ok: false, error: "sync dormant (local mode)" }); },
+      handlePoll: function (id, principal, cb) { cb({ ok: true, events: [] }); }
     };
   }
+  resolvePrincipal = resolvePrincipal || function () { return null; };
   var polls = {}; // clientId -> LongPollTransport
-  function lpFor(clientId, author) {
-    return polls[clientId] || (polls[clientId] = (function () { var t = LongPollTransport(); hub.connect(t, author); return t; })());
+  function nameOf(p) { return (p && (p.name || p.email || p.principal)) || null; }
+  function lpFor(clientId, principal) {
+    return polls[clientId] || (polls[clientId] = (function () { var t = LongPollTransport(); hub.connect(t, nameOf(principal), principal && principal.role); return t; })());
   }
   return {
     dormant: false,
-    // wss:// upgrade handshake -> a WsTransport joined to the hub
+    // wss:// upgrade handshake -> a WsTransport joined to the hub, ONLY for a resolved
+    // principal (session cookie / guest token). Anonymous upgrades are dropped.
     upgrade: function (req, socket) {
       var key = req.headers["sec-websocket-key"];
-      if (!key || (req.url || "").indexOf("/sync") !== 0) { try { socket.destroy(); } catch (e) {} return; }
+      var principal = resolvePrincipal(req);
+      if (!key || !principal || (req.url || "").indexOf("/sync") !== 0) { try { socket.destroy(); } catch (e) {} return; }
       socket.write(
         "HTTP/1.1 101 Switching Protocols\r\n" +
         "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
         "Sec-WebSocket-Accept: " + wsAccept(key) + "\r\n\r\n"
       );
-      hub.connect(WsTransport(socket), parseAuthor(req.url));
+      hub.connect(WsTransport(socket), nameOf(principal), principal.role);
     },
-    handleSend: function (clientId, env, author, cb) { lpFor(clientId, author).inbound(env); cb({ ok: true }); },
-    handlePoll: function (clientId, author, cb) { lpFor(clientId, author).poll(function (events) { cb({ ok: true, events: events }); }); }
+    // principal is resolved by verso-server (from the same boundary) and passed in; a null
+    // principal is rejected before any envelope reaches the hub.
+    handleSend: function (clientId, env, principal, cb) {
+      if (!principal) return cb({ ok: false, error: "authentication required" });
+      lpFor(clientId, principal).inbound(env); cb({ ok: true });
+    },
+    handlePoll: function (clientId, principal, cb) {
+      if (!principal) return cb({ ok: false, error: "authentication required" });
+      lpFor(clientId, principal).poll(function (events) { cb({ ok: true, events: events }); });
+    }
   };
-}
-
-function parseAuthor(url) {
-  var m = /[?&]author=([^&]+)/.exec(url || ""); return m ? decodeURIComponent(m[1]) : null;
 }
 
 module.exports = {

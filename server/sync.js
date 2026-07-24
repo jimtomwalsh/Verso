@@ -63,8 +63,10 @@ function createSyncHub(blockStore, opts) {
     subs(docId).forEach(function (c) { if (c !== except) { try { c.transport.send(env); } catch (e) {} } });
   }
 
-  function connect(transport, author) {
-    var client = { transport: transport, author: author || null, docId: null };
+  function connect(transport, author, role) {
+    // role comes from the RESOLVED session/token (never self-declared) so the hub's
+    // capability gates (edit/lock via roleOf -> client.role) are authoritative.
+    var client = { transport: transport, author: author || null, role: role || null, docId: null };
     clients.push(client);
     transport.onMessage(function (env) { handle(client, env); });
     transport.onDrop(function () { disconnect(client); });

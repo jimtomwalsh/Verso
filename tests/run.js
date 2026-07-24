@@ -247,6 +247,18 @@ section("platform-pivot 02 server invariants");
   ok("server declares renders:false on health", /renders:\s*false/.test(s));
   // One identity boundary resolves principal-or-reject in front of storage (ticket 17).
   ok("server routes through one identity boundary (principalOf + reject)", /function principalOf\(/.test(s) && /authentication required/.test(s));
+  // SEC: server mode hard-fails without a configured link-signing secret (no forgeable tokens)
+  ok("SEC: server mode requires config.linkSecret (hard-fail, no in-repo default ships)", /config\.linkSecret is required in server mode/.test(src("server/verso-server.js")));
+  (function () {
+    try { require("node:sqlite"); } catch (e) { return; }
+    var os = require("os");
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-sec-"));
+    var threw = false;
+    try { require(path.join(ROOT, "server/verso-server.js")).createServer({ dbPath: path.join(tmp, "x.sqlite"), config: { mode: "server" } }); }
+    catch (e) { threw = /linkSecret is required/.test(e.message); }
+    ok("SEC: createServer throws in server mode when linkSecret is absent", threw === true);
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  })();
   // SQLite/WAL on disk, sole writer posture documented.
   ok("store uses WAL journal", /journal_mode = WAL/.test(src("server/store.js")));
 })();
@@ -917,16 +929,18 @@ section("platform-pivot 17/18/20 identity");
     idn.ensureBreakGlass("root@local", "breakpw");
     var brokenSSO = { name: "oidc", authenticate: function () { throw new Error("IdP unreachable"); } };
     ok("18: break-glass logs in while SSO is configured AND the IdP fails", idn.login(brokenSSO, { email: "root@local", password: "breakpw" }).user.role === "admin");
-    // 20: guest link tokens
-    var link = idn.issueLink(adminP, { docId: "C-1", version: "v1", displayName: "Ext", expiresAt: clock + 100000 });
+    // 20: guest link tokens (a guest link must pin a checkpoint -- snapshot id is carried)
+    var link = idn.issueLink(adminP, { docId: "C-1", checkpointId: 1, version: "v1", displayName: "Ext", expiresAt: clock + 100000 });
     var g = idn.authorizeGuest(link.token);
     ok("20: valid token -> scoped guest (view+comment on one file)", g && g.kind === "guest" && g.scope.docId === "C-1");
     ok("20: guest views+comments IN scope, nothing outside", idn.principalCan(g, "view", { docId: "C-1" }) && idn.principalCan(g, "comment", { docId: "C-1" }) && !idn.principalCan(g, "comment", { docId: "OTHER" }));
     ok("20: guest can NEVER edit / acquire a lock", !idn.principalCan(g, "edit", { docId: "C-1" }));
     ok("20: a tampered token is rejected", idn.authorizeGuest(link.token.slice(0, -2) + "xx") === null);
     ok("20: revoking the link revokes access immediately", idn.revokeLink(adminP, link.linkId).ok && idn.authorizeGuest(link.token) === null);
-    ok("20: an expired token is rejected", idn.authorizeGuest(idn.issueLink(adminP, { docId: "C-1", expiresAt: clock - 1 }).token) === null);
-    ok("20: a non-issuer role cannot issue a link", idn.issueLink({ role: "reviewer", kind: "user" }, { docId: "C-1" }).ok === false);
+    ok("20: an expired token is rejected", idn.authorizeGuest(idn.issueLink(adminP, { docId: "C-1", checkpointId: 1, expiresAt: clock - 1 }).token) === null);
+    ok("20: a non-issuer role cannot issue a link", idn.issueLink({ role: "reviewer", kind: "user" }, { docId: "C-1", checkpointId: 1 }).ok === false);
+    ok("20: a guest link MUST pin a checkpoint (unpinned -> refused)", idn.issueLink(adminP, { docId: "C-1" }).ok === false);
+    ok("17: a guest is denied any unscoped/cross-file route (default-deny)", !idn.principalCan(g, "view", null) && !idn.principalCan(g, "view", { docId: "OTHER" }));
   } finally {
     try { idn.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
@@ -975,17 +989,29 @@ section("platform-pivot 17 identity boundary");
       ok("17: viewer can read (view)", r.status === 200);
       r = await fetch(base + "/api/registry", { method: "PUT", headers: { cookie: vcookie }, body: '{}' });
       ok("17: viewer is DENIED a write (403; capability matrix enforced)", r.status === 403);
-      // guest token: view within scope, no edit
-      var adminUser = idn.findOrCreateUser("admin@x");
-      var link = idn.issueLink({ principal: adminUser.id, role: "admin", kind: "user" }, { docId: "C-1", displayName: "Guest" });
+      // guest token: import first so there's a pinned checkpoint, then a scoped read + no edit
       await fetch(base + "/api/doc/C-1/import", { method: "POST", headers: { cookie: cookie }, body: JSON.stringify({ doc: { meta: { code: "C-1" }, pages: [] }, author: "author" }) });
+      var adminUser = idn.findOrCreateUser("admin@x");
+      var cpId = server.__blockStore.listCheckpoints("C-1")[0].id;
+      var link = idn.issueLink({ principal: adminUser.id, role: "admin", kind: "user" }, { docId: "C-1", checkpointId: cpId, displayName: "Guest" });
       r = await fetch(base + "/api/doc/C-1", { headers: { "x-verso-guest": link.token } });
-      ok("20: a guest token authorizes a scoped read", r.status === 200);
+      ok("20/22: a guest token authorizes a scoped read of the pinned snapshot", r.status === 200 && (await r.json()).pinned === true);
       r = await fetch(base + "/api/doc/C-1/change", { method: "POST", headers: { "x-verso-guest": link.token }, body: JSON.stringify({ blockId: "b1", patch: {} }) });
       ok("20: a guest is DENIED an edit (403)", r.status === 403);
+      // a guest token cannot read the server-wide registry (default-deny on unscoped routes)
+      r = await fetch(base + "/api/registry", { headers: { "x-verso-guest": link.token } });
+      ok("17: a guest token is denied an unscoped route (registry) -- 403", r.status === 403);
       // /auth/me reflects the principal
       r = await fetch(base + "/auth/me", { headers: { cookie: cookie } }); j = await r.json();
       ok("17: /auth/me resolves the session principal", j.principal && j.principal.role === "author");
+      // review-fix: the /sync write path flows through the SAME boundary (no bypass)
+      r = await fetch(base + "/sync/send", { method: "POST", body: JSON.stringify({ clientId: "x", envelope: { type: "block.change", docId: "C-1", blockId: "b1" } }) });
+      ok("SEC: an unauthenticated /sync/send is rejected (401) -- no boundary bypass", r.status === 401);
+      r = await fetch(base + "/sync/poll?clientId=x");
+      ok("SEC: an unauthenticated /sync/poll is rejected (401)", r.status === 401);
+      // review-fix: session cookie is Secure in server mode
+      r = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "author@x", password: "authorpw" }) });
+      ok("SEC: server-mode session cookie is HttpOnly + Secure + SameSite", /HttpOnly/.test(r.headers.get("set-cookie")) && /Secure/.test(r.headers.get("set-cookie")) && /SameSite=Strict/.test(r.headers.get("set-cookie")));
     } finally {
       try { server.close(); } catch (e) {}
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
