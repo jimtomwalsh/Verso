@@ -19,6 +19,7 @@
  */
 "use strict";
 
+var envelope = require("./envelope").envelope; // the ONE shared wire shape (no drift)
 var EDIT_ROLES = { admin: true, author: true }; // reviewer/viewer/guest are never offered a lock
 
 function createLockManager(opts) {
@@ -33,10 +34,8 @@ function createLockManager(opts) {
   function docReg(docId) { return registry[docId] || (registry[docId] = { content: {}, structure: {} }); }
   function ns(docId, cls) { var d = docReg(docId); return d[cls === "structure" ? "structure" : "content"]; }
   function canEdit(client) { return !!EDIT_ROLES[roleOf(client)]; }
-
-  function envelope(type, docId, blockId, payload) {
-    return { type: type, docId: docId, blockId: blockId != null ? blockId : null, seq: null, author: null, ts: now(), payload: payload || {} };
-  }
+  // local convenience: an envelope stamped with this manager's clock (never seq-stamped)
+  function lockEnv(type, docId, blockId, payload) { return envelope(type, docId, blockId, null, null, now(), payload); }
 
   // The client currently holding a CONTENT lock on a block (or null). The hub's
   // block.change gate calls this: a change is accepted only from this holder.
@@ -50,16 +49,16 @@ function createLockManager(opts) {
   function acquire(client, docId, resourceId, payload) {
     payload = payload || {};
     var cls = payload.class === "structure" ? "structure" : "content";
-    if (!resourceId) return { reply: envelope("lock.denied", docId, resourceId, { reason: "no resource" }) };
-    if (!canEdit(client)) return { reply: envelope("lock.denied", docId, resourceId, { reason: "role may not edit", role: roleOf(client) }) };
+    if (!resourceId) return { reply: lockEnv("lock.denied", docId, resourceId, { reason: "no resource" }) };
+    if (!canEdit(client)) return { reply: lockEnv("lock.denied", docId, resourceId, { reason: "role may not edit", role: roleOf(client) }) };
     var table = ns(docId, cls), existing = table[resourceId];
     if (existing && existing.holder !== client) {
-      return { reply: envelope("lock.denied", docId, resourceId, { holder: existing.author, class: cls }) };
+      return { reply: lockEnv("lock.denied", docId, resourceId, { holder: existing.author, class: cls }) };
     }
     table[resourceId] = { holder: client, author: client && client.author, acquiredAt: existing ? existing.acquiredAt : now(), lastSeen: now(), class: cls };
     return {
-      reply: envelope("lock.granted", docId, resourceId, { holder: client && client.author, class: cls }),
-      broadcast: envelope("lock.state", docId, null, { locks: stateFor(docId) })
+      reply: lockEnv("lock.granted", docId, resourceId, { holder: client && client.author, class: cls }),
+      broadcast: lockEnv("lock.state", docId, null, { locks: stateFor(docId) })
     };
   }
 
@@ -70,11 +69,11 @@ function createLockManager(opts) {
     if (e && e.holder === client) {
       delete table[resourceId];
       return {
-        reply: envelope("lock.released", docId, resourceId, { class: cls }),
-        broadcast: envelope("lock.state", docId, null, { locks: stateFor(docId) })
+        reply: lockEnv("lock.released", docId, resourceId, { class: cls }),
+        broadcast: lockEnv("lock.state", docId, null, { locks: stateFor(docId) })
       };
     }
-    return { reply: envelope("lock.released", docId, resourceId, { class: cls, noop: true }) };
+    return { reply: lockEnv("lock.released", docId, resourceId, { class: cls, noop: true }) };
   }
 
   // Heartbeat: refresh a held lock's lease so the reaper (ticket 12) doesn't reclaim it.
@@ -117,9 +116,31 @@ function createLockManager(opts) {
     return out;
   }
 
+  // Force-release every lock in a doc NOT held by `exceptClient`. The admin force-evict
+  // path (ticket 14 restore) and the reaper use this instead of reaching into the
+  // registry directly. Returns the freed locks.
+  function forceReleaseDoc(docId, exceptClient) {
+    var d = docReg(docId), freed = [];
+    ["content", "structure"].forEach(function (cls) {
+      Object.keys(d[cls]).forEach(function (rid) {
+        if (d[cls][rid].holder !== exceptClient) { var e = d[cls][rid]; delete d[cls][rid]; freed.push({ docId: docId, resourceId: rid, class: cls, author: e.author }); }
+      });
+    });
+    return freed;
+  }
+  // Does another client hold any lock in this doc? (restore-needs-idle check, ticket 14)
+  function othersHold(docId, exceptClient) {
+    var d = docReg(docId), who = [];
+    ["content", "structure"].forEach(function (cls) {
+      Object.keys(d[cls]).forEach(function (rid) { if (d[cls][rid].holder !== exceptClient) who.push({ resourceId: rid, class: cls, author: d[cls][rid].author }); });
+    });
+    return who;
+  }
+
   return {
     holder: holder, acquire: acquire, release: release, heartbeat: heartbeat,
     releaseAll: releaseAll, stateFor: stateFor, allLocks: allLocks, canEdit: canEdit,
+    forceReleaseDoc: forceReleaseDoc, othersHold: othersHold,
     _forceRelease: function (docId, resourceId, cls) { delete ns(docId, cls)[resourceId]; } // reaper hook
   };
 }

@@ -23,11 +23,9 @@
  */
 "use strict";
 
-// The collaboration envelope. The server stamps `seq` on anything it fans out from the
-// log; ephemeral traffic (presence/cursor) carries no seq.
-function envelope(type, docId, blockId, seq, author, ts, payload) {
-  return { type: type, docId: docId, blockId: blockId != null ? blockId : null, seq: seq != null ? seq : null, author: author != null ? author : null, ts: ts != null ? ts : 0, payload: payload || {} };
-}
+// The ONE collaboration envelope shape, shared with the lock manager (server/envelope.js)
+// so the wire contract can never drift between them.
+var envelope = require("./envelope").envelope;
 
 // In-memory transport for tests + the primary seam. Real wss/long-poll transports (in
 // server/sync-wire.js) satisfy the same interface: send / onMessage / onDrop / close.
@@ -76,20 +74,25 @@ function createSyncHub(blockStore, opts) {
     if (lockManager && lockManager.releaseAll) lockManager.releaseAll(client);
   }
 
+  // One dispatch table keyed by envelope type -- a new message type adds a row here, it
+  // does not grow an if-cascade. presence/cursor are ephemeral: relayed as-is, never
+  // seq-stamped, never logged (presence/cursor STATE is ticket 11).
+  var relayEphemeral = function (client, env) { return fanOut(env.docId, env, client); };
+  var HANDLERS = {
+    "sync.hello": onHello,
+    "block.change": onBlockChange,
+    "lock.acquire": onLock,
+    "lock.release": onLock,
+    "structure.op": onStructure,   // ticket 14
+    "doc.restore": onRestore,      // ticket 14 (admin)
+    "block.revert": onRevert,      // ticket 14 (author)
+    "presence.heartbeat": relayEphemeral,
+    "cursor.update": relayEphemeral
+  };
   function handle(client, env) {
     if (!env || !env.type) return;
-    if (env.type === "sync.hello") return onHello(client, env);
-    if (env.type === "block.change") return onBlockChange(client, env);
-    if (env.type === "lock.acquire" || env.type === "lock.release") return onLock(client, env);
-    if (env.type === "structure.op") return onStructure(client, env);   // ticket 14
-    if (env.type === "doc.restore") return onRestore(client, env);      // ticket 14 (admin)
-    if (env.type === "block.revert") return onRevert(client, env);      // ticket 14 (author)
-    if (env.type === "presence.heartbeat" || env.type === "cursor.update") {
-      // ephemeral: fan out as-is, never seq-stamped, never logged (presence/cursor state
-      // is ticket 11; here we just relay so peers see live activity).
-      return fanOut(env.docId, env, client);
-    }
-    // unknown types are ignored (forward-compatible envelope)
+    var h = HANDLERS[env.type];
+    if (h) h(client, env); // unknown types are ignored (forward-compatible envelope)
   }
 
   // Connect / reconnect handshake: subscribe + replay the doc's events since sinceSeq
@@ -111,11 +114,23 @@ function createSyncHub(blockStore, opts) {
   // fan-out, then fan out seq-stamped + ack the sender with the stamped seq.
   function onBlockChange(client, env) {
     var p = env.payload || {};
-    // lock rule (ticket 10): a block.change is accepted ONLY from the current holder.
-    // Absent a lockManager (08 alone / local), all changes are accepted.
-    if (lockManager && lockManager.holder && lockManager.holder(env.docId, env.blockId) &&
-        lockManager.holder(env.docId, env.blockId) !== client) {
-      return client.transport.send(envelope("block.denied", env.docId, env.blockId, null, null, now(), { reason: "locked by another editor" }));
+    // Lock rule (ticket 10): a block.change is accepted ONLY from the current content-lock
+    // holder. Implicit acquisition on edit-intent (spec: focus / FIRST KEYSTROKE) -- a
+    // change on a block nobody holds AUTO-ACQUIRES the lock for this editor, so the server
+    // enforces holder-only without a separate claim step. Absent a lockManager (08 alone /
+    // local mode) all changes are accepted.
+    if (lockManager && lockManager.holder) {
+      var held = lockManager.holder(env.docId, env.blockId);
+      if (held && held !== client) {
+        return client.transport.send(envelope("block.denied", env.docId, env.blockId, null, null, now(), { reason: "locked by another editor" }));
+      }
+      if (!held) {
+        var acq = lockManager.acquire(client, env.docId, env.blockId, {});
+        if (acq && acq.reply && acq.reply.type === "lock.denied") {
+          return client.transport.send(acq.reply); // e.g. a non-edit role
+        }
+        if (acq && acq.broadcast) fanOut(env.docId, acq.broadcast, client); // announce the implicit lock
+      }
     }
     // baseSeq staleness guard (ticket 12): reject a late write based on a version the
     // block has already moved past (e.g. an ex-holder's edit after the reaper reclaimed
@@ -160,21 +175,38 @@ function createSyncHub(blockStore, opts) {
     if (!canEdit(client)) return client.transport.send(envelope("structure.denied", env.docId, null, null, null, now(), { reason: "role may not edit" }));
     var p = env.payload || {};
     if (!blockStore) return;
+    var deny = function (blockId, extra) { client.transport.send(envelope("structure.denied", env.docId, blockId, null, null, now(), extra)); };
+
+    // Take a brief, coarse STRUCTURE lock on the container for the op's duration (spec
+    // model B: momentary; serializes near-simultaneous reorders, AC21). Separate from
+    // content locks, so colleagues keep editing block content while structure changes.
+    var containerId = p.pageId || (p.op === "delete" ? "delete:" + env.docId : "structure");
+    if (lockManager) {
+      var sl = lockManager.acquire(client, env.docId, containerId, { class: "structure" });
+      if (sl && sl.reply && sl.reply.type === "lock.denied") {
+        return deny(null, { reason: "another structural op is in progress -- retry", holder: sl.reply.payload.holder, op: p.op });
+      }
+    }
+    function releaseStructureLock() { if (lockManager) lockManager.release(client, env.docId, containerId, "structure"); }
+
     if (p.op === "delete") {
       var h = lockManager && lockManager.holder && lockManager.holder(env.docId, env.blockId);
-      if (h && h !== client) {
-        return client.transport.send(envelope("structure.denied", env.docId, env.blockId, null, null, now(), { reason: "someone is editing this block -- can't remove", holder: h.author, op: "delete" }));
-      }
+      if (h && h !== client) { releaseStructureLock(); return deny(env.blockId, { reason: "someone is editing this block -- can't remove", holder: h.author, op: "delete" }); }
       var rd = blockStore.deleteBlock(env.docId, env.blockId, env.author);
-      if (!rd.ok) return client.transport.send(envelope("structure.denied", env.docId, env.blockId, null, null, now(), { reason: rd.error }));
-      return fanOut(env.docId, envelope("structure.applied", env.docId, env.blockId, rd.seq, env.author, now(), { op: "delete", pageId: rd.pageId }), null);
+      if (!rd.ok) { releaseStructureLock(); return deny(env.blockId, { reason: rd.error }); }
+      // the deleter may have held the block's own content lock -> release it (the block is gone)
+      if (lockManager && h === client) lockManager.release(client, env.docId, env.blockId, "content");
+      fanOut(env.docId, envelope("structure.applied", env.docId, env.blockId, rd.seq, env.author, now(), { op: "delete", pageId: rd.pageId }), null);
+      return releaseStructureLock();
     }
     if (p.op === "reorder") {
       var rr = blockStore.reorderBlocks(env.docId, p.pageId, p.order, env.author);
-      if (!rr.ok) return client.transport.send(envelope("structure.denied", env.docId, null, null, null, now(), { reason: rr.error }));
-      return fanOut(env.docId, envelope("structure.applied", env.docId, null, rr.seq, env.author, now(), { op: "reorder", pageId: rr.pageId, order: rr.order }), null);
+      if (!rr.ok) { releaseStructureLock(); return deny(null, { reason: rr.error }); }
+      fanOut(env.docId, envelope("structure.applied", env.docId, null, rr.seq, env.author, now(), { op: "reorder", pageId: rr.pageId, order: rr.order }), null);
+      return releaseStructureLock();
     }
-    return client.transport.send(envelope("structure.denied", env.docId, null, null, null, now(), { reason: "unknown structural op" }));
+    releaseStructureLock();
+    return deny(null, { reason: "unknown structural op" });
   }
 
   // Admin file-checkpoint restore (ticket 14). Requires others idle, OR an explicit
@@ -185,12 +217,12 @@ function createSyncHub(blockStore, opts) {
   function onRestore(client, env) {
     if (roleOf(client) !== "admin") return client.transport.send(envelope("restore.denied", env.docId, null, null, null, now(), { reason: "admin only" }));
     var p = env.payload || {};
-    var othersHold = lockManager ? lockManager.allLocks().filter(function (l) { return l.docId === env.docId && l.holder !== client; }) : [];
-    if (othersHold.length && !p.force) {
-      return client.transport.send(envelope("restore.denied", env.docId, null, null, null, now(), { reason: "others are editing -- restore needs everyone idle or a force-evict", needsForce: true, holders: othersHold.map(function (l) { return l.author; }) }));
+    var others = lockManager ? lockManager.othersHold(env.docId, client) : [];
+    if (others.length && !p.force) {
+      return client.transport.send(envelope("restore.denied", env.docId, null, null, null, now(), { reason: "others are editing -- restore needs everyone idle or a force-evict", needsForce: true, holders: others.map(function (l) { return l.author; }) }));
     }
-    if (othersHold.length && p.force && lockManager) {
-      othersHold.forEach(function (l) { lockManager._forceRelease(l.docId, l.resourceId, l.class); });
+    if (others.length && p.force && lockManager) {
+      lockManager.forceReleaseDoc(env.docId, client);
       fanOut(env.docId, envelope("lock.state", env.docId, null, null, null, now(), { locks: lockManager.stateFor(env.docId), forceEvicted: true }), null);
     }
     var rr = blockStore.restoreCheckpoint(env.docId, p.checkpointId, env.author);

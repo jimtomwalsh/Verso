@@ -63,7 +63,7 @@ section("syntax");
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
- "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js"
+ "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js"
 ].forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
@@ -295,14 +295,26 @@ section("platform-pivot 03 block-store pure");
   ], 600);
   ok("coalesce: burst within window collapses to last-wins", co.length === 3 && co[0].patch === "c" && co[1].patch === "d" && co[2].patch === "e");
   ok("coalesce: empty -> empty", g.coalesceChanges([], 600).length === 0);
-  // ticket 04 AC2 (version-clone footgun guard): a preview clone carries its base via a
-  // NON-ENUMERABLE __vbase back-link, so the base doc the store persists (and any
-  // checkpoint/restore over it) never captures the previewed variant wrapper.
+  // ticket 04 AC2 (version-clone footgun). Two parts, honestly separated:
+  //   (i)  NECESSARY server invariant: the preview clone's __vbase back-link is
+  //        NON-ENUMERABLE, so JSON.stringify drops it -- the store never persists the
+  //        wrapper object itself.
+  //   (ii) The ACTUAL guard is CLIENT-SIDE: the clone's ENUMERABLE fields are the
+  //        *previewed variant* values, so storing the clone as-is would persist the
+  //        variant (the footgun). The editor must unwrap to the base node
+  //        (versionBaseNode: node.__vbase || node) BEFORE the content reaches the store
+  //        -- that unwrap lives in editor.js and is exercised at save time (ticket 16).
+  //        Here we simulate it to show the end-to-end guard yields BASE content.
+  var base = { id: "b9", type: "heading", text: "BASE" };
   var clone = { id: "b9", type: "heading", text: "PREVIEW" };
-  Object.defineProperty(clone, "__vbase", { value: { text: "BASE" }, enumerable: false });
-  var decV = g.decomposeDoc({ meta: {}, pages: [ { id: "pp", blocks: [ clone ] } ] }, function () { return "x"; });
-  var storedV = JSON.parse(JSON.stringify(decV.blocks["b9"])); // what actually persists
-  ok("AC2: non-enumerable __vbase never serialises into the store", !("__vbase" in storedV) && storedV.text === "PREVIEW");
+  Object.defineProperty(clone, "__vbase", { value: base, enumerable: false });
+  ok("AC2 (i): non-enumerable __vbase never serialises", !("__vbase" in JSON.parse(JSON.stringify(clone))));
+  // the necessary-but-insufficient half: an un-unwrapped clone would persist the PREVIEW
+  ok("AC2 (i): an un-unwrapped clone would wrongly carry the preview value (why the unwrap matters)", JSON.parse(JSON.stringify(clone)).text === "PREVIEW");
+  // (ii) unwrap-to-base first (the client guard), THEN store -> base content persists
+  var versionBaseNode = function (n) { return (n && n.__vbase) || n; };
+  var decV = g.decomposeDoc({ meta: {}, pages: [ { id: "pp", blocks: [ versionBaseNode(clone) ] } ] }, function () { return "x"; });
+  ok("AC2 (ii): unwrapping to base before store persists the BASE, not the preview", JSON.parse(JSON.stringify(decV.blocks["b9"])).text === "BASE");
 })();
 
 // ---- platform-pivot 03: block-addressable store + append log (db-backed) -----
@@ -698,6 +710,47 @@ section("platform-pivot 14 conflict + rollback");
   }
 })();
 
+// ---- platform-pivot collab review-fixes: auto-acquire, structure-lock, shared envelope ----
+section("platform-pivot collab review-fixes");
+(function () {
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable -> review-fix tests skipped"); return; }
+  var os = require("os");
+  var SY = require(path.join(ROOT, "server/sync.js"));
+  var LM = require(path.join(ROOT, "server/lock-manager.js"));
+  var BS = require(path.join(ROOT, "server/block-store.js"));
+  ok("sync + lock-manager share one envelope module", require(path.join(ROOT, "server/envelope.js")).envelope === require(path.join(ROOT, "server/sync.js")).envelope);
+  var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-rfix-"));
+  var idn = 0, clock = 100;
+  var store = BS.createBlockStore(path.join(tmp, "bs.sqlite"), { mintId: function () { return "m" + (++idn); }, now: function () { return clock; } });
+  try {
+    store.importDoc("C-1", { meta: { code: "C-1" }, pages: [ { id: "p1", blocks: [ { id: "b1", type: "heading", text: "H" }, { id: "b2", type: "para", text: "P" }, { id: "b3", type: "para", text: "Q" } ] } ] }, "sys");
+    var env = SY.envelope;
+    var lm = LM.createLockManager({ now: function () { return clock; } });
+    var hub = SY.createSyncHub(store, { mode: "server", now: function () { return clock; }, lockManager: lm });
+    var ta = SY.FakeTransport(), tb = SY.FakeTransport();
+    var A = hub.connect(ta, "alice"), B = hub.connect(tb, "bob"); A.role = "author"; B.role = "author";
+    ta.receive(env("sync.hello", "C-1", null, null, "alice", 0, { sinceSeq: 0 }));
+    tb.receive(env("sync.hello", "C-1", null, null, "bob", 0, { sinceSeq: 0 }));
+    ta.receive(env("block.change", "C-1", "b1", null, "alice", 0, { content: { id: "b1", type: "heading", text: "A" }, baseSeq: store.maxSeq() }));
+    ok("review-fix: a block.change auto-acquires the content lock (implicit edit-intent)", lm.holder("C-1", "b1") === A);
+    tb.receive(env("block.change", "C-1", "b1", null, "bob", 0, { content: { id: "b1", text: "B" }, baseSeq: store.maxSeq() }));
+    ok("review-fix: holder-only enforced after implicit acquire (bob denied b1)", tb.sent.some(function (e) { return e.type === "block.denied" && e.blockId === "b1"; }));
+    lm.acquire(B, "C-1", "p1", { class: "structure" });
+    ta.receive(env("structure.op", "C-1", null, null, "alice", 0, { op: "reorder", pageId: "p1", order: ["b3", "b2", "b1"] }));
+    ok("review-fix/AC21: a concurrent structural op is refused while the structure lock is held", ta.sent.some(function (e) { return e.type === "structure.denied" && /structural op is in progress/.test(e.payload.reason); }));
+    lm.release(B, "C-1", "p1", "structure");
+    tb.receive(env("block.change", "C-1", "b2", null, "bob", 0, { content: { id: "b2", type: "para", text: "BB" }, baseSeq: store.maxSeq() }));
+    ok("bob auto-holds b2", lm.holder("C-1", "b2") === B);
+    tb.receive(env("structure.op", "C-1", "b2", null, "bob", 0, { op: "delete" }));
+    ok("review-fix: deleter's content lock is released after delete (no dangling lock)", lm.holder("C-1", "b2") === null);
+    ok("review-fix: stateFor reports no lock on the deleted block", !lm.stateFor("C-1").some(function (l) { return l.resourceId === "b2"; }));
+  } finally {
+    try { store.close(); } catch (e) {}
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+})();
+
 // ---- platform-pivot 08: wire transports (secondary seam) ----------------------
 // Hand-rolled wss:// codec + long-poll fallback, interchangeable behind the Transport
 // interface. No real sockets -- the RFC6455 codec + queue logic are unit-testable.
@@ -713,6 +766,12 @@ section("platform-pivot 08 sync wire");
   ok("wsDecode unmasks a client text frame", dec.messages.length === 1 && dec.messages[0] === "ping" && dec.rest.length === 0);
   var partial = W.wsDecode(Buffer.from([0x81, 0x80 | 10, 1, 2, 3, 4, 0, 0]));
   ok("wsDecode buffers an incomplete frame (waits for more)", partial.messages.length === 0 && partial.rest.length > 0);
+  // ping keepalive (review fix): a ping frame is surfaced so the transport can pong.
+  function maskOp(op, str) { var p = Buffer.from(str), mask = Buffer.from([9, 8, 7, 6]), m = Buffer.alloc(p.length); for (var i = 0; i < p.length; i++) m[i] = p[i] ^ mask[i & 3]; return Buffer.concat([Buffer.from([0x80 | op, 0x80 | p.length]), mask, m]); }
+  var pd = W.wsDecode(maskOp(0x9, "hb"));
+  ok("wsDecode surfaces a ping frame (for pong keepalive)", pd.pings.length === 1 && pd.pings[0].toString() === "hb");
+  var pong = W.wsEncodeControl(0xA, Buffer.from("hb"));
+  ok("wsEncodeControl builds an unmasked pong frame", pong[0] === (0x80 | 0xA) && pong.length === 4);
   var lp = W.LongPollTransport();
   ok("LongPollTransport satisfies the Transport interface", ["send", "onMessage", "onDrop", "close"].every(function (k) { return typeof lp[k] === "function"; }));
   var got = null; lp.send({ type: "x" }); lp.poll(function (evs) { got = evs; });

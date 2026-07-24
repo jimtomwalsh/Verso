@@ -39,10 +39,16 @@ function wsEncodeText(str) {
   }
   return Buffer.concat([header, payload]);
 }
-// Decode client->server frames from a buffer; returns { messages:[str], rest:Buffer, closed:bool }.
-// Client frames are masked (RFC6455). Handles text(1)/close(8)/ping(9); ignores pong.
+// Encode a control frame (pong=0xA) -- unmasked, small payload echoed back.
+function wsEncodeControl(opcode, payload) {
+  payload = payload || Buffer.alloc(0);
+  return Buffer.concat([Buffer.from([0x80 | opcode, payload.length & 0x7f]), payload]);
+}
+// Decode client->server frames from a buffer; returns { messages:[str], rest:Buffer,
+// closed:bool, pings:[Buffer] }. Client frames are masked (RFC6455). Handles text(1) +
+// close(8) + ping(9) [-> caller must pong]; pong(10) is ignored.
 function wsDecode(buf) {
-  var messages = [], closed = false, off = 0;
+  var messages = [], pings = [], closed = false, off = 0;
   while (off + 2 <= buf.length) {
     var b0 = buf[off], b1 = buf[off + 1];
     var opcode = b0 & 0x0f, masked = (b1 & 0x80) !== 0, len = b1 & 0x7f, p = off + 2;
@@ -54,10 +60,11 @@ function wsDecode(buf) {
     var data = buf.slice(p, p + len);
     if (masked) { var un = Buffer.alloc(len); for (var i = 0; i < len; i++) un[i] = data[i] ^ maskKey[i & 3]; data = un; }
     if (opcode === 0x8) { closed = true; off = p + len; break; }
-    if (opcode === 0x1) messages.push(data.toString("utf8"));
+    else if (opcode === 0x1) messages.push(data.toString("utf8"));
+    else if (opcode === 0x9) pings.push(data); // ping -> the transport replies with a pong
     off = p + len;
   }
-  return { messages: messages, rest: buf.slice(off), closed: closed };
+  return { messages: messages, rest: buf.slice(off), closed: closed, pings: pings };
 }
 
 // Build a WsTransport around an upgraded socket. Emits parsed envelopes to onMessage.
@@ -66,6 +73,7 @@ function WsTransport(socket) {
   socket.on("data", function (chunk) {
     buf = Buffer.concat([buf, chunk]);
     var d = wsDecode(buf); buf = d.rest;
+    d.pings.forEach(function (payload) { if (open) try { socket.write(wsEncodeControl(0xA, payload)); } catch (e) {} }); // pong keepalive
     d.messages.forEach(function (m) { var env; try { env = JSON.parse(m); } catch (e) { return; } if (onMsg) onMsg(env); });
     if (d.closed) drop();
   });
@@ -141,5 +149,5 @@ function parseAuthor(url) {
 
 module.exports = {
   WsTransport: WsTransport, LongPollTransport: LongPollTransport, createSyncRoutes: createSyncRoutes,
-  wsAccept: wsAccept, wsEncodeText: wsEncodeText, wsDecode: wsDecode
+  wsAccept: wsAccept, wsEncodeText: wsEncodeText, wsEncodeControl: wsEncodeControl, wsDecode: wsDecode
 };

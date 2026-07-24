@@ -102,6 +102,7 @@ function createBlockStore(dbPath, opts) {
   var qGetDoc     = db.prepare("SELECT meta, page_order FROM docs WHERE id = ?");
   var qPutPage    = db.prepare("INSERT INTO pages (doc_id, id, meta, block_order, ord) VALUES (?, ?, ?, ?, ?) ON CONFLICT(doc_id, id) DO UPDATE SET meta = excluded.meta, block_order = excluded.block_order, ord = excluded.ord");
   var qGetPage    = db.prepare("SELECT id, meta, block_order FROM pages WHERE doc_id = ? ORDER BY ord");
+  var qGetPageById = db.prepare("SELECT id, meta, block_order FROM pages WHERE doc_id = ? AND id = ?");
   var qPutBlock   = db.prepare("INSERT INTO blocks (doc_id, id, page_id, content, ver) VALUES (?, ?, ?, ?, 1) ON CONFLICT(doc_id, id) DO UPDATE SET page_id = excluded.page_id, content = excluded.content, ver = blocks.ver + 1");
   var qGetBlock   = db.prepare("SELECT content, ver FROM blocks WHERE doc_id = ? AND id = ?");
   var qDelBlock   = db.prepare("DELETE FROM blocks WHERE doc_id = ? AND id = ?");
@@ -224,7 +225,7 @@ function createBlockStore(dbPath, opts) {
     var state = materializeDoc(docId);
     var atSeq = maxSeq();
     qPutSnap.run(docId, atSeq, JSON.stringify(state), label || null, author || null, now());
-    var id = qMaxSeq && db.prepare("SELECT last_insert_rowid() AS id").get().id;
+    var id = db.prepare("SELECT last_insert_rowid() AS id").get().id;
     return { docId: docId, id: id, atSeq: atSeq, label: label || null };
   }
 
@@ -258,7 +259,7 @@ function createBlockStore(dbPath, opts) {
   // snapshot so replayDoc === materializeDoc stays true (structure lives in the snapshot,
   // not folded from block.put events). The collab layer's conflict rule (never delete a
   // block another user holds a content lock on) is enforced in the hub BEFORE calling here.
-  function pageRow(docId, pageId) { return qGetPage.all(docId).filter(function (p) { return p.id === pageId; })[0] || null; }
+  function pageRow(docId, pageId) { return qGetPageById.get(docId, pageId) || null; }
 
   // Reorder a page's blocks. newOrder must be a permutation of the page's current blocks
   // (positions only; block CONTENT is untouched -- so a reorder never conflicts with a
