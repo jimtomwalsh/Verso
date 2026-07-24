@@ -305,24 +305,31 @@
       if (!hsTrack(stage) || stage.__hsComplete) return;
       var cs = stage.getAttribute("data-hotspot-complete-screen");
       var done = (cs && curSid === cs) || hsReachable(stage).every(function (id) { return stage.__hsVisited && stage.__hsVisited[id]; });
-      if (done) {
-        stage.__hsComplete = true; try { stage.dispatchEvent(new CustomEvent("hotspot-complete", { bubbles: true })); } catch (e) {}
-        // Show the centred restart glyph -- unless the finished screen still has a play-once video
-        // running, in which case its "ended" handler shows it (so restart appears when it FINISHES).
-        if (!hsVisibleOncePlaying(stage)) hsShowRestart(stage);
+      if (done) { stage.__hsComplete = true; try { stage.dispatchEvent(new CustomEvent("hotspot-complete", { bubbles: true })); } catch (e) {} }
+    }
+    // ---- restart glyph: shown ONLY when the whole interaction is finished -----
+    // "Finished" = every reachable screen visited AND every play-once video on a visited screen has
+    // ENDED (all content watched). A degenerate/unwired screen tour (only the entry reachable) never
+    // counts, so it can't show mid-authoring. Reactive -- re-evaluated on every nav + video end --
+    // so it hides again when the state is no longer complete (e.g. after Restart or replay).
+    function hsAllContentDone(stage) {
+      var screenMode = hsScreenMode(stage), vis = stage.__hsVisited || {}, entryId = stage.getAttribute("data-hotspot-entry");
+      if (screenMode) {
+        var reach = hsReachable(stage);
+        if (reach.length < 2) return false;                                  // not a real multi-screen tour
+        if (!reach.every(function (id) { return vis[id]; })) return false;   // not every screen seen yet
+      } else if (!stage.querySelector('video[data-hotspot-video="once"]')) {
+        return false;                                                         // popover-only image: no "finish"
       }
+      var ok = true;
+      qsAll(stage, 'video[data-hotspot-video="once"]').forEach(function (v) {
+        var panel = v.closest && v.closest(".hotspot-screen");
+        var sid = panel ? panel.getAttribute("data-screen-id") : entryId;
+        if ((!screenMode || vis[sid]) && !v.ended) ok = false;              // a watched screen's video isn't finished
+      });
+      return ok;
     }
-    // ---- restart glyph (shown when the interaction finishes) ----------------
-    function hsShowRestart(stage) { var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = false; }
-    // The current screen's play-once video (entry lives in the frame; a sub-screen in its panel).
-    function hsCurrentOnceVideo(stage) {
-      var open = stage.querySelector(".hotspot-screen:not([hidden])");
-      var scope = open || stage.querySelector(".hotspot-frame"); if (!scope) return null;
-      var found = null;
-      qsAll(scope, 'video[data-hotspot-video="once"]').forEach(function (v) { if (open || v.parentNode === scope) found = v; });
-      return found;
-    }
-    function hsVisibleOncePlaying(stage) { var v = hsCurrentOnceVideo(stage); return !!(v && !v.ended); }
+    function hsUpdateRestart(stage) { var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = !hsAllContentDone(stage); }
     function hsRestart(stage) {
       stage.__hsVisited = {}; stage.__hsComplete = false; stage.__hsStack = [];
       var rb = stage.querySelector(".hotspot-restart"); if (rb) rb.hidden = true;
@@ -379,6 +386,7 @@
       hsRenderTrail(stage);
       hsUpdateCaption(stage, curSid);
       hsCheckComplete(stage, curSid);
+      hsUpdateRestart(stage); // reactively show/hide the centred restart glyph
     }
     // ---- screen video playback (#217): a screen visual of kind "video" is a screen
     // recording. It autoplays MUTED on screen-enter; "loop" idles/cycles, "play-once"
@@ -434,10 +442,9 @@
           // native freeze on the last frame; offer Replay unless the author hid it
           if (v.getAttribute("data-noreplay") !== "1") { btn.textContent = "Replay"; btn.hidden = false; }
           hsRevealGated();
-          // a play-once video finishing IS the finish for a video/popover interaction, and the last
-          // beat of a completed tour -> reveal the centred restart glyph.
+          // a play-once video finishing may complete the interaction -> re-evaluate the restart glyph.
           var st = v.closest && v.closest(".hotspot-stage");
-          if (st && (!hsScreenMode(st) || st.__hsComplete)) hsShowRestart(st);
+          if (st) hsUpdateRestart(st);
         });
         // reduced-motion learners don't autoplay -> reveal gated hotspots up front so they are
         // never stranded waiting for an "ended" that won't fire on its own.

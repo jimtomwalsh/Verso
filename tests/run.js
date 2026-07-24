@@ -1146,10 +1146,15 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   ok("editor: board node has a secondary caption field writing s.caption", /h\("input", "tourb-node__caption"\)[\s\S]*?if \(capIn\.value\) s\.caption = capIn\.value; else delete s\.caption;/.test(e));
   // restart glyph: centred, hidden, shown when the interaction finishes; click restarts.
   ok("render: hidden restart glyph emitted for tours + play-once video screens", /screenMode \|\| screens\.some\(function \(s\) \{ return s && s\.kind === "video" && s\.playback === "once"; \}\)[\s\S]*?el\("button", "hotspot-restart"\)[\s\S]*?frame\.appendChild\(rstb\)/.test(r));
-  ok("runtime: restart shown on completion (unless a play-once video is still playing)", /if \(!hsVisibleOncePlaying\(stage\)\) hsShowRestart\(stage\);/.test(rt));
-  ok("runtime: restart shown when a play-once video ends (video/popover, or completed tour)", /if \(st && \(!hsScreenMode\(st\) \|\| st\.__hsComplete\)\) hsShowRestart\(st\);/.test(rt));
+  // restart shows ONLY when finished: every reachable screen visited AND every watched play-once
+  // video ended; a degenerate one-screen tour never counts (no mid-authoring show); reactive.
+  ok("runtime: restart requires all reachable screens visited (real multi-screen tour)", /function hsAllContentDone\(stage\)[\s\S]*?if \(reach\.length < 2\) return false;[\s\S]*?if \(!reach\.every\(function \(id\) \{ return vis\[id\]; \}\)\) return false;/.test(rt));
+  ok("runtime: restart requires every watched play-once video to have ended (content)", /if \(\(!screenMode \|\| vis\[sid\]\) && !v\.ended\) ok = false;/.test(rt));
+  ok("runtime: restart re-evaluated reactively on nav + video end", /hsUpdateRestart\(stage\); \/\/ reactively/.test(rt) && /if \(st\) hsUpdateRestart\(st\);/.test(rt));
   ok("runtime: restart click resets + replays; wired in the delegate", /function hsRestart\(stage\) \{\s*stage\.__hsVisited = \{\}; stage\.__hsComplete = false;[\s\S]*?data-hotspot-restart\]"\)\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); hsRestart\(stage\); return; \}/.test(rt));
-  ok("css: restart glyph centred over the screen", /\.hotspot-restart \{[^}]*left: 50%; top: 50%; transform: translate\(-50%, -50%\)/.test(css));
+  ok("css: restart glyph centred + white on a translucent disc", /\.hotspot-restart \{[^}]*left: 50%; top: 50%; transform: translate\(-50%, -50%\)[^}]*color: #ffffff;/.test(css));
+  // canvas video screens pin to the final frame (editor only) so marker targeting isn't blind.
+  ok("editor: canvas hotspot videos pinned to the final frame (not grey)", /v\.__canvasPinned = true;[\s\S]*?function pinLast\(\) \{ var d = v\.duration; if \(d && isFinite\(d\) && d > 0\) \{ try \{ v\.currentTime = Math\.max\(0, d - 0\.05\);/.test(e));
   // canvas screen cycler (editor chrome): prev/next buttons flank a multi-screen hotspot.
   ok("editor: hsCanvasCycle steps hotspotEditScreenId + re-shows + re-renders", /function hsCanvasCycle\(node, block, dir\)[\s\S]*?hotspotEditScreenId = next\.id; hotspotEditId = null;\s*renderInspector\(\);\s*showEditScreen\(node, next\.id\);/.test(e));
   ok("editor: wireHotspotNode injects the prev/next canvas nav for multi-screen only", /\(block\.screens \|\| \[\]\)\.filter\(Boolean\)\.length > 1 && !node\.querySelector\("\.hotspot-canvas-nav"\)[\s\S]*?hsCanvasCycle\(node, block, d\[1\]\)/.test(e));

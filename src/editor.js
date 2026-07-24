@@ -11891,6 +11891,15 @@
   function wireHotspotNode(node) {
     var block = node.__block; if (!block) return;
     var stage = node.querySelector(".hotspot-stage"); if (!stage) return;
+    // #(feedback): on the canvas a hotspot video screen otherwise shows a blank grey box, which
+    // makes marker placement blind. Pin each video to its FINAL frame (paused) so the author targets
+    // against the real end-state UI. Editor-only (the runtime owns real playback in demo/export).
+    Array.prototype.forEach.call(stage.querySelectorAll("video"), function (v) {
+      if (v.__canvasPinned) return; v.__canvasPinned = true;
+      v.muted = true; v.removeAttribute("autoplay"); try { v.pause(); } catch (_) {}
+      function pinLast() { var d = v.duration; if (d && isFinite(d) && d > 0) { try { v.currentTime = Math.max(0, d - 0.05); } catch (_) {} } }
+      if (v.readyState >= 1) pinLast(); else v.addEventListener("loadedmetadata", pinLast, { once: true });
+    });
     // #(feedback): little prev/next buttons either side of the interaction to cycle screens on the
     // canvas (clean up each screen's markers/targets in place). Editor chrome only, multi-screen only.
     if ((block.screens || []).filter(Boolean).length > 1 && !node.querySelector(".hotspot-canvas-nav")) {

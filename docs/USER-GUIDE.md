@@ -245,14 +245,16 @@ never covers the screen.
   tour that drives navigation purely through on-screen markers.
 - The **screens-visited counter** anchors top-right, above the screen.
 - A video screen shows a thin **1px progress bar** along the bottom edge as it plays.
-- When the interaction **finishes** — a tour completes, or a play-once video ends — a **restart**
-  button appears centred on the screen so the learner can replay it.
+- When the interaction is **fully finished** — every screen visited and every play-once video
+  watched to the end — a white **restart** button appears centred on the screen so the learner can
+  replay it. It stays hidden until then.
 
 ### Editing screens on the canvas
 
 For a multi-screen hotspot, small **‹ ›** buttons flank the interaction on the canvas. Step through
 the screens with them to place and clean up each screen's markers in place, without opening the tour
-builder.
+builder. A video screen shows its **final frame** on the canvas (paused), so you can place markers
+against the real end-state UI instead of a blank frame.
 
 ### Tour builder
 
