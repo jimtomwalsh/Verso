@@ -2997,6 +2997,14 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 .tourb-transport__speed { display: flex; align-items: center; gap: var(--space-2); }
 .tourb-transport__speed[hidden] { display: none; }
 .tourb-transport__speed-label { flex: none; font: var(--type-caption); color: var(--text-secondary); }
+/* ripple cuts (T3): cut sub-row + rail punch-out bands. Removed = ABSENCE, so a flat neutral
+   sunken fill (accent means kept/live); a pending cut = dashed accent bracket. */
+.tourb-transport__cutrow { display: flex; align-items: center; gap: var(--space-2); }
+.tourb-transport__cutrow[hidden] { display: none; }
+.tourb-transport__mark.is-on { color: var(--accent); border-color: var(--accent); }
+.tourb-transport__cuts { position: absolute; inset: 0; pointer-events: none; }
+.tourb-transport__cut { position: absolute; top: 0; bottom: 0; background: var(--surface-sunken); box-shadow: inset 1px 0 0 var(--border-subtle), inset -1px 0 0 var(--border-subtle); border-radius: 1px; }
+.tourb-transport__cut--pending { background: transparent; border: 1px dashed var(--accent); box-shadow: none; }
 /* crop overlay on the source thumb: a bright rect with corner handles; dim outside via a big ring shadow */
 .tourb-crop { position: absolute; inset: 0; z-index: 4; }
 .tourb-crop__box { position: absolute; box-sizing: border-box; border: 1px solid var(--accent); box-shadow: 0 0 0 9999px color-mix(in srgb, #000 45%, transparent); cursor: move; }

@@ -7687,6 +7687,7 @@
   }
   function renderTourSources() {
     if (!tourUI || !tourUI.sources) return;
+    tourActiveCutCancel = null; // transports are rebuilt below -> any open pending cut is discarded
     tourUI.sources.innerHTML = "";
     tourSources().forEach(function (src, si) {
       if (!src) return;
@@ -7841,6 +7842,8 @@
 
   var tourPlayingVideo = null; // only one source plays at a time
   var tourCropEditSrc = null;  // id of the source whose crop overlay is open (one at a time)
+  var tourActiveCutCancel = null; // canceller for an OPEN pending ripple cut (editor-only), if any;
+                                  // the board Escape ladder dismisses it first (see the global keydown)
   function tourPauseAllSources(except) {
     if (tourPlayingVideo && tourPlayingVideo !== except) { try { tourPlayingVideo.pause(); } catch (_) {} }
   }
@@ -7853,6 +7856,9 @@
     var rail = h("div", "tourb-transport__rail");
     var range = h("div", "tourb-transport__range"); rail.appendChild(range);
     var fill = h("div", "tourb-transport__fill"); rail.appendChild(fill);
+    // ripple cuts: removed bands punched out of the kept tint (rebuilt each paint), above the tint
+    // but below the ticks/knob. Pending cut renders here too as a dashed bracket.
+    var cutLayer = h("div", "tourb-transport__cuts"); rail.appendChild(cutLayer);
     var inTick = h("div", "tourb-transport__tick tourb-transport__tick--in"); rail.appendChild(inTick);
     var outTick = h("div", "tourb-transport__tick tourb-transport__tick--out"); rail.appendChild(outTick);
     var knob = h("div", "tourb-transport__knob"); rail.appendChild(knob);
@@ -7887,6 +7893,45 @@
     row.appendChild(seg);
     wrap.appendChild(row);
 
+    // --- cut sub-row (ripple T3): Set cut-in / Set cut-out, disclosed once in<out exists. ---
+    // pendingCut = seconds of an open cut-in awaiting its cut-out (ephemeral, editor-only).
+    // Committed cuts live on src.cuts (T1 model); the bake (T2) stitches the kept ranges.
+    var pendingCut = null;
+    var cutRow = h("div", "tourb-transport__cutrow");
+    cutRow.appendChild(h("span", "tourb-transport__speed-label", "Cut"));
+    var cutIn = h("button", "tourb-transport__mark", "Cut in"); cutIn.type = "button"; cutIn.title = "Drop a cut-in at the playhead (carve a section out of the segment)";
+    var cutOut = h("button", "tourb-transport__mark", "Cut out"); cutOut.type = "button"; cutOut.title = "Set the cut-out at the playhead to remove the section";
+    cutRow.appendChild(cutIn); cutRow.appendChild(cutOut);
+    wrap.appendChild(cutRow);
+    function hasSpan() { return src.in != null && src.out != null && dur() > 0 && src.out > src.in; }
+    // Open / clear a pending cut-in. The canceller is published module-side so the board's Escape
+    // ladder can dismiss an open cut FIRST (before stepping out of any other board mode).
+    function openPending(t) { pendingCut = t; tourActiveCutCancel = clearPending; paint(); }
+    function clearPending(repaint) { pendingCut = null; if (tourActiveCutCancel === clearPending) tourActiveCutCancel = null; if (repaint !== false) paint(); }
+    function reclipCuts() { // called when in/out move: drop/trim cuts outside the new bounds
+      if (Array.isArray(src.cuts) && src.cuts.length) {
+        src.cuts = tourClipCutsToBounds(src.cuts, src.in, src.out);
+        if (!src.cuts.length) delete src.cuts;
+      }
+      if (pendingCut != null && (!hasSpan() || pendingCut < src.in || pendingCut > src.out)) clearPending(false);
+    }
+    function markCut(kind) {
+      var t = vid.currentTime || 0;
+      if (kind === "in") { openPending(t); return; } // open a pending cut-in (no model change)
+      if (pendingCut == null) return; // guarded by the disabled state
+      var cut = tourApplyCut(pendingCut, t, src.cuts); // ordered {start,end} or null if t<=cut-in
+      if (!cut) { paint(); return; } // invalid crossing -> keep the pending open
+      pushHistory();
+      var merged = tourMergeCuts(tourClipCutsToBounds((src.cuts || []).concat([cut]), src.in, src.out));
+      if (merged.length) src.cuts = merged; else delete src.cuts;
+      clearPending(false);
+      scheduleSave(); paint();
+    }
+    cutIn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cutOut.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cutIn.addEventListener("click", function (e) { e.stopPropagation(); markCut("in"); });
+    cutOut.addEventListener("click", function (e) { e.stopPropagation(); markCut("out"); });
+
     // --- speed sub-row: pick a playback-speed preset for the baked clip (0.5x .. 2x). ---
     // Editor-only intent stored on src.speed; the bake re-times via vid.playbackRate. Progressively
     // disclosed with the segment tools -- shown only once a valid in<out exists (like +Segment enabling).
@@ -7915,7 +7960,6 @@
       var d = dur(), t = vid.currentTime || 0;
       var pct = d ? Math.max(0, Math.min(100, t / d * 100)) : 0;
       knob.style.left = pct + "%"; fill.style.width = pct + "%";
-      time.textContent = tourFormatTime(t) + " / " + tourFormatTime(d);
       var hasIn = src.in != null && d, hasOut = src.out != null && d;
       inTick.hidden = !hasIn; outTick.hidden = !hasOut;
       if (hasIn) inTick.style.left = Math.max(0, Math.min(100, src.in / d * 100)) + "%";
@@ -7925,9 +7969,32 @@
       if ((hasIn || hasOut) && hi > lo) { range.hidden = false; range.style.left = lo + "%"; range.style.width = (hi - lo) + "%"; }
       else range.hidden = true;
       play.innerHTML = (window.Icon ? window.Icon(vid.paused ? "play" : "pause") : "");
-      var segReady = tourSegReady(src.in, src.out); // a clip needs a valid in < out
-      seg.disabled = !segReady;
-      speedRow.hidden = !segReady; // disclose speed with the segment tools
+      // ripple cuts: punch-out bands + pending bracket on the rail, and the net-length readout
+      var span = hasSpan(), cuts = Array.isArray(src.cuts) ? src.cuts : [];
+      cutLayer.innerHTML = "";
+      if (d) {
+        cuts.forEach(function (c) {
+          var band = h("div", "tourb-transport__cut");
+          band.style.left = Math.max(0, Math.min(100, c.start / d * 100)) + "%";
+          band.style.width = Math.max(0, Math.min(100, (c.end - c.start) / d * 100)) + "%";
+          cutLayer.appendChild(band);
+        });
+        if (pendingCut != null) {
+          var pa = Math.min(pendingCut, t), pb = Math.max(pendingCut, t);
+          var pend = h("div", "tourb-transport__cut tourb-transport__cut--pending");
+          pend.style.left = Math.max(0, Math.min(100, pa / d * 100)) + "%";
+          pend.style.width = Math.max(0, Math.min(100, (pb - pa) / d * 100)) + "%";
+          cutLayer.appendChild(pend);
+        }
+      }
+      var netTxt = (span && cuts.length) ? (" · clip " + tourFormatTime(tourNetLength(src.in, src.out, cuts))) : "";
+      time.textContent = tourFormatTime(t) + " / " + tourFormatTime(d) + netTxt;
+      // ＋Segment needs a valid clip with net kept length > 0 (a cut can swallow it)
+      seg.disabled = !tourSegReady(src.in, src.out, cuts);
+      // cut + speed tools disclosed once a span exists; cut-out waits for a pending cut-in
+      cutRow.hidden = !span; speedRow.hidden = !span;
+      cutOut.disabled = pendingCut == null;
+      cutIn.classList.toggle("is-on", pendingCut != null);
     }
     function seekTo(clientX) {
       var d = dur(); if (!d) return;
@@ -7954,6 +8021,7 @@
       var r = tourApplyMark(kind, vid.currentTime || 0, { in: src.in, out: src.out });
       if (r.in == null) delete src.in; else src.in = r.in;
       if (r.out == null) delete src.out; else src.out = r.out;
+      reclipCuts(); // moving a bound drops/trims cuts now outside [in,out]
       scheduleSave(); paint();
     }
     setIn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
@@ -8891,6 +8959,8 @@
       // Esc while typing in a card / title first blurs the field (don't exit the builder).
       var inField = e.target && e.target.closest && e.target.closest(".tourb-node__title, .tourb-node__caption, [contenteditable=true]");
       if (inField) { e.preventDefault(); try { e.target.blur(); } catch (_) {} return; }
+      // an OPEN pending ripple cut cancels first (the most transient mode) and stops there.
+      if (tourActiveCutCancel) { e.preventDefault(); e.stopPropagation(); tourActiveCutCancel(); return; }
       // armed click-to-drop disarms first (a mode you can back out of before it closes anything).
       if (tourPlacing) { e.preventDefault(); tourSetPlacing(false); return; }
       // an open Properties drawer closes next (on-demand surface, easy to dismiss).
