@@ -53,16 +53,20 @@ saved** status in the top bar confirms it.
 
 ## 3. The workspace
 
-Verso has three panes: **Structure** (left), the **Canvas** (centre), and the **Inspector**
-(right), under a top toolbar.
+Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (centre), and the
+**Inspector** (right), under a top toolbar.
 
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
 - **Toolbar (top).** Light/dark toggle, save status, **Undo/Redo**, **Fit all**, **Comment
   mode**, **Demo**, and the **Import & Export** menu (CSV import, SCORM export, JSON backup).
   Open courses appear as tabs on the left.
-- **Structure (left).** The outliner — chapters, pages, and blocks as a tree — with the
-  **Blocks** palette and **Shared Library** below it. Click a page to jump to it.
+- **Left (three stacked, collapsible panes).** **Structure** — the outliner of chapters and
+  pages as a tree. **Blocks** — the insert palette for built-in block types (Text, Media,
+  Layout, Interactive…). **Components** — the browse/insert surface for reusable components:
+  **My Components** (course-local), **Blocks** and **Pages** (the shared cross-course library,
+  §9). Drag the thin divider between any two panes to resize them; click a pane's header to
+  collapse it.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
   pinch) to zoom. Every page is a live, editable render of what the learner will see.
 - **Inspector (right).** Context-sensitive: with nothing selected it shows **document**
@@ -113,7 +117,8 @@ the full catalogue.
 ![Click a page in the outliner; the highlight marks the page you're editing.](docs/assets/annotated-navigate.webp "The highlight marks the active page."){poster=docs/assets/annotated-navigate-still.webp}
 
 **Insert a block.** Open the **Blocks** palette and click or drag a block onto a page — or into
-a container (**Card**, **Columns**, **Card Reveal**).
+a container (**Card**, **Columns**, **Card Reveal**). For a reusable component you've already
+saved (§9), use the **Components** pane instead.
 
 **Select and drill in.** One click selects the outermost container under the cursor; each
 further click drills one level in (container → block → text). **Double-click** jumps straight
@@ -368,8 +373,40 @@ Select nothing, and the Inspector shows document-wide design controls.
   wins).
 - **Guided tour.** Turn on a short onboarding coach-mark tour, shown once at course start.
 - **Page layout.** A master content-width cap and per-breakpoint page padding.
-- **Shared Library.** Save a composed block to a machine-level library and reuse it across
-  courses; edit the master and every course using it updates.
+- **Shared Library.** Right-click a block and choose **Save as component…** (or use the
+  Inspector's equivalent button) to save it to a machine-level library and reuse it across
+  courses. Clicking the resulting entry in the **Components** pane's **Blocks** group places a
+  **live-linked instance**, marked "linked" on the canvas — edit the master (Settings → System →
+  Component Library) and every placement updates automatically, including already-exported courses you
+  re-export. A linked instance is read-only in place on the canvas; select it, use **Edit
+  library instance settings**, and an **Overrides** field per text field on the master lets
+  you change that one placement's wording without touching the master or breaking the link —
+  leave a field empty to keep inheriting from the master. If the master's structure changes
+  and an override's field no longer exists, it's dropped automatically and flagged the next
+  time you open that instance. Use **Detach** to convert a placement into an independent,
+  editable copy (any overrides are kept as its own content; it stops receiving master
+  updates) — a detached block remembers where it came from, so **Relink to library** can
+  re-attach it later (replacing its content with the master's current content). Each entry
+  in Component Library also shows **"Used in N courses / M instances"** so you can see a
+  master's blast radius before touching it; overwriting or removing a master shows that
+  count again as a confirmation. Placements always resolve the master's current content the
+  moment they're viewed — there's no separate publish step — but **Push update** gives you an
+  explicit "yes, this is live everywhere" confirmation and durably saves the master.
+- **Multi-block and whole-page masters.** Select two or more blocks, right-click, and choose
+  **Save selection to library…** to capture the whole selection (grouped) as one reusable
+  master — same live-link/Overrides/Detach behaviour as a single-block master. To reuse a
+  whole page, right-click its label above the canvas (or use **Save page to library…** in its
+  Inspector). Placing a page master back into a course is done from the **Components** pane's
+  **Pages** group — click an entry to live-link a new page right after the current one. A page
+  instance is read-only in place on the canvas; its own Inspector gets the same Overrides /
+  Detach controls a block instance does. **Known limitation:** any navigation button or menu
+  link *inside* a captured page that points to another page is **not** rewired when the page
+  is placed elsewhere — check and fix links after placing a page master into a new course.
+- **Components pane vs. Component Library.** The **Components** left pane (above) is where you
+  *browse and insert* — My Components, Blocks, Pages. **Settings → System → Component
+  Library** is where you *manage* the shared library — rename, overwrite, remove, import/export
+  JSON, see where a master is used, and push updates. Both read from the same shared library;
+  they just serve different jobs.
 
 ---
 
@@ -389,6 +426,13 @@ full-screen, plain-text view of all course copy. With variants, a **Single | Sid
 toggle appears: **Side by side** adds one column per variant. A held variant cell is read-only
 behind a lock — click the lock to edit it; a block with no variant yet shows a **+** to create
 its copy from the flagship.
+
+**Shared Library masters inherit variants and software versions too.** If you gave a block
+per-variant or per-software-version wording *before* saving it to the Shared Library (§9), every
+placement of that master automatically shows the right wording for whichever variant/version the
+host course is currently on — no extra setup. A placement's own **Overrides** (§9) always win
+over the master's variant/version content if both target the same field. **Detach** bakes in
+whatever you were previewing at the moment you detached, not the master's flagship/base content.
 
 ---
 

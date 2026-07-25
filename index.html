@@ -73,8 +73,9 @@
 
     <!-- left: layers / pages / components -->
     <aside class="panel panel--left">
-      <!-- SS: Structure + Blocks are STACKED (both visible), each collapsible, with
-           a draggable horizontal split between them (wired in wireLeftPanes). -->
+      <!-- SS: Structure + Blocks + Components are STACKED (all visible), each
+           collapsible, with a draggable split between each adjacent pair
+           (wired in wireLeftPanes, generalized to N panes). -->
       <div class="lpane lpane--structure" id="lpane-structure">
         <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Structure</span></div>
         <div class="lpane__body" id="tab-structure">
@@ -89,13 +90,9 @@
             </div>
             <div id="pages-list"></div>
           </div>
-          <div class="panel-section">
-            <div class="panel-section__title">Components</div>
-            <div id="components-list"></div>
-          </div>
         </div>
       </div>
-      <div class="lpane-split" id="lpane-split"></div>
+      <div class="lpane-split" id="lpane-split-0"></div>
       <div class="lpane lpane--blocks" id="lpane-blocks">
         <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Blocks</span></div>
         <div class="lpane__body" id="tab-assets">
@@ -106,6 +103,17 @@
             </div>
             <div id="assets-list"></div>
             <div class="insp-hint">Click to add to the focused page, or drag into the Structure panel / a canvas page.</div>
+          </div>
+        </div>
+      </div>
+      <div class="lpane-split" id="lpane-split-1"></div>
+      <div class="lpane lpane--components" id="lpane-components">
+        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Components</span></div>
+        <div class="lpane__body" id="tab-components">
+          <div class="panel-section">
+            <div class="panel-section__title">Reusable components</div>
+            <div id="components-palette-list"></div>
+            <div class="insp-hint">Click to insert. My Components are course-local copies; Blocks and Pages are live-linked to the shared library.</div>
           </div>
         </div>
       </div>

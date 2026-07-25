@@ -540,9 +540,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 .panel-scroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
 
-/* SS: stacked, collapsible, split-adjustable left panes (Structure + Blocks) */
+/* SS: stacked, collapsible, split-adjustable left panes (Structure + Blocks + Components) */
 .lpane { display: flex; flex-direction: column; min-height: 34px; overflow: hidden; flex: 6 1 0; }
 .lpane--blocks { flex: 4 1 0; }
+.lpane--components { flex: 3 1 0; }
 .lpane__head {
   display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px;
   border-bottom: 1px solid var(--border-strong); flex: 0 0 auto; cursor: pointer; user-select: none;
@@ -909,6 +910,35 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
   color: #f5a623; border: 1px solid rgba(245,166,35,0.6); border-radius: 4px;
   padding: 1px 5px; pointer-events: none;
 }
+/* #20: a live library-instance wrapper -- same corner-badge language as [data-detached]
+   above, opposite meaning (still linked, not detached). The nested subtree is a
+   cloneData() display copy (never the live master, see render.js), but it must still
+   read as ONE opaque block on the authoring canvas -- v1 has no inline overrides (#21),
+   so a click inside must select the WRAPPER, never drill into the master's structure.
+   pointer-events:none on every nested .canvas-block makes the browser's hit-test skip
+   straight to the wrapper; inert here, never applied to the shipped course (editor.css
+   is chrome-only, so learners get normal interactive content). */
+[data-library-instance] { position: relative; }
+[data-library-instance]::after {
+  content: "linked"; position: absolute; top: 8px; right: 8px;
+  font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid var(--accent-quiet); border-radius: 4px;
+  padding: 1px 5px; pointer-events: none; z-index: 4;
+}
+[data-library-instance] .canvas-block { pointer-events: none; }
+
+/* #22: same treatment as [data-library-instance] above, at PAGE scope -- an entire
+   page's content resolved live from a page master (render.js's resolvePageLibraryContent).
+   Selection/editing for a page instance happens in the page's own Inspector (Library
+   section: Overrides + Detach), never by clicking into its canvas content. */
+[data-library-page-instance] { position: relative; }
+[data-library-page-instance]::after {
+  content: "linked page"; position: absolute; top: 8px; right: 8px;
+  font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid var(--accent-quiet); border-radius: 4px;
+  padding: 1px 5px; pointer-events: none; z-index: 4;
+}
+[data-library-page-instance] .canvas-block { pointer-events: none; }
 
 /* ==================== properties panel ==================== */
 .panel__empty { font-size: 12px; color: var(--text-tertiary); }
@@ -951,6 +981,9 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
   margin-top: 14px; font-size: 10.5px; line-height: 1.45; color: var(--text-tertiary);
   padding-top: 10px; border-top: 1px solid var(--border-subtle);
 }
+/* #21: surfaces a reconcile-time drop (an override whose master field no longer exists) --
+   same shape as .insp-hint, coloured to read as a notice rather than routine copy. */
+.insp-hint--warn { color: var(--warning, #e0a83e); border-top-color: var(--warning, #e0a83e); }
 /* back-to-block affordance rendered as a <button>: strip the UA button chrome (grey fill +
    border) so it reads as a quiet inline link, keeping only the hairline the .insp-hint gives. */
 .insp-backlink {

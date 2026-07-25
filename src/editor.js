@@ -120,7 +120,6 @@
 
   var canvas = document.getElementById("canvas-viewport");
   var pagesList = document.getElementById("pages-list");
-  var componentsList = document.getElementById("components-list");
   var inspector = document.getElementById("inspector");
 
   // Tab / Shift+Tab moves between fields in the design panel. Committing a field fires
@@ -182,6 +181,18 @@
   /* @store-seam-end */
   function storageBackend() { try { return localStorage.getItem(STORAGE_BACKEND_KEY) || "browser"; } catch (e) { return "browser"; } }
   function registryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserRegistryAdapter); }
+
+  // ---- Library storage adapter (#18) — same seam/flag as the registry above, extended
+  // to the shared component library. The SAME injected window.__storageAdapter object
+  // carries both readRegistry/writeRegistry and readLibrary/writeLibrary once store-native.js
+  // (the 'file' backend) is present, so one flag flip moves both to disk together.
+  var LIBRARY_STORAGE_KEY = "authoring.library";
+  var browserLibraryAdapter = {
+    name: "browser",
+    readLibrary: function () { return localStorage.getItem(LIBRARY_STORAGE_KEY); },
+    writeLibrary: function (json) { return writeStore(localStorage, LIBRARY_STORAGE_KEY, json); }
+  };
+  function libraryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserLibraryAdapter); }
 
   // ---- StorageBackend (platform-pivot 01/31 — EXPAND) -----------------------
   // The single, highest seam the whole platform pivot introduces. It unifies the
@@ -1084,20 +1095,21 @@
   }
 
   // ---- SHARED COMPONENT LIBRARY (cross-course single-source) -----------------
-  // A machine-level store (localStorage, separate from the per-doc registry) of
-  // component DEFS that ANY course references by key. A componentGrid resolves its
-  // def doc -> LIBRARY -> built-in, so a library component is single-source: edit
-  // the master and every course using it updates. render resolves defs to static
-  // HTML at export time (editor context), so the shipped SCORM is self-contained.
-  var LIBRARY_KEY = "authoring.library";
+  // A machine-level store (separate from the per-doc registry) of component DEFS that
+  // ANY course references by key. A componentGrid resolves its def doc -> LIBRARY ->
+  // built-in, so a library component is single-source: edit the master and every course
+  // using it updates. render resolves defs to static HTML at export time (editor
+  // context), so the shipped SCORM is self-contained. Storage routes through
+  // libraryAdapter() (#18) -- localStorage on the 'browser' backend, the per-user file
+  // store on 'file' -- the same seam/flag the doc registry uses.
   function loadLibrary() {
     var lib = { components: {} };
-    try { var raw = localStorage.getItem(LIBRARY_KEY); if (raw) { var p = JSON.parse(raw); if (p && p.components) lib = p; } } catch (e) {}
+    try { var raw = libraryAdapter().readLibrary(); if (raw) { var p = JSON.parse(raw); if (p && p.components) lib = p; } } catch (e) {}
     if (!lib.components) lib.components = {};
     return lib;
   }
   window.LibraryStore = loadLibrary();
-  function saveLibrary() { try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(window.LibraryStore)); } catch (e) {} }
+  function saveLibrary() { try { libraryAdapter().writeLibrary(JSON.stringify(window.LibraryStore)); } catch (e) {} }
   function libComponents() { return (window.LibraryStore && window.LibraryStore.components) || {}; }
   function isLibraryComponent(key) { return !!libComponents()[key]; }
   // doc override -> shared library -> built-in. Shared by the editor + render.
@@ -1944,11 +1956,43 @@
   }
   /* @comment-guest-end */
   window.__commentModel = { isReceipt: commentIsReceipt, isTask: commentIsTask, tasks: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks, isGuest: commentIsGuest, isOrphaned: commentIsOrphaned };
+  // #24: where-used for a shared library master -- courses = how many courses in the
+  // registry reference it at all, instances = total libraryInstance placements across
+  // all of them. Reuses walkBlocks (not a 4th near-duplicate walker) since every
+  // libraryInstance placement is an ordinary block, no different from any other #20
+  // reference for this purpose. PURE (DOM-free): takes the registry object as data, so
+  // tests/run.js can exercise it headlessly against a fixture multi-course registry.
+  /* @where-used-start */
+  function libraryWhereUsed(ref, registryObj) {
+    var courses = 0, instances = 0;
+    Object.keys(registryObj || {}).forEach(function (code) {
+      var count = 0;
+      walkBlocks(registryObj[code], function (b) { if (b.type === "libraryInstance" && b.ref === ref) count++; });
+      // #22: a page master's instances are PAGES (page.libraryRef), not blocks -- walkBlocks
+      // only reaches doc.pages[].blocks, so count those separately on the same pass.
+      ((registryObj[code] && registryObj[code].pages) || []).forEach(function (p) { if (p && p.libraryRef === ref) count++; });
+      if (count > 0) { courses++; instances += count; }
+    });
+    return { courses: courses, instances: instances };
+  }
+  /* @where-used-end */
+  window.__libraryWhereUsed = libraryWhereUsed; // test hook
   // Re-mint on duplicate: a cloned subtree must never reuse ids, or a copy's
   // interactions/gate would collide with the original — and a shared cid would make
   // a comment anchor to two blocks at once. Walk children / columns / items and
   // re-mint every "b_" id AND the cid in place. Call after any block clone that
-  // lands in the document.
+  // lands in the document — duplicate-in-place, duplicate-selection, paste, and
+  // saveBlockAsComponent's CAPTURE of a new component (the ids minted there become
+  // that component's permanent identity, see below).
+  //
+  // #19 stable-id master snapshot contract: NEVER call remintIds on content already
+  // resident in doc.components or LibraryStore.components. A component's ids are
+  // minted exactly ONCE, at the moment it is captured (saveBlockAsComponent) — from
+  // then on they are the component's PERMANENT identity: stable through save/load,
+  // through "Save to library" / "Copy to course" (both plain `clone()`, no remint),
+  // and through .verso export/import (plain JSON, no id processing there either).
+  // This is the substrate #20 (mirror instances) and #21 (instance overrides) build
+  // on: an override keys against a master's block id, so that id must never drift.
   function remintIds(node) {
     if (!node || typeof node !== "object") return node;
     if (typeof node.id === "string" && node.id.indexOf("b_") === 0) node.id = mintId();
@@ -3758,7 +3802,7 @@
   // The block types with a Content level you can ENTER (double-click / Edit contents).
   // Text blocks edit inline (their own dblclick); content-less blocks (spacer/divider/
   // columns/componentGrid/checkbox) have no Content level.
-  var TWO_LEVEL_TYPES = { hotspot: 1, sequence: 1, frame: 1, group: 1, image: 1, accordion: 1, quiz: 1, cardReveal: 1, cardDeck: 1, htmlEmbed: 1, webEmbed: 1, spacer: 1, divider: 1, columns: 1, componentGrid: 1, checkbox: 1 };
+  var TWO_LEVEL_TYPES = { hotspot: 1, sequence: 1, frame: 1, group: 1, image: 1, accordion: 1, quiz: 1, cardReveal: 1, cardDeck: 1, htmlEmbed: 1, webEmbed: 1, spacer: 1, divider: 1, columns: 1, componentGrid: 1, checkbox: 1, libraryInstance: 1 };
   // Double-click a block on the canvas to enter its Content level (the gesture James
   // expects, alongside the "Edit contents" button + the breadcrumb to pop back out).
   if (canvas) canvas.addEventListener("dblclick", function (e) {
@@ -3952,6 +3996,51 @@
       if (Array.isArray(b.screens)) b.screens.forEach(function (s) { if (s && Array.isArray(s.markers)) s.markers.forEach(function (m) { if (m && Array.isArray(m.blocks)) walkTextBlocks(m.blocks, fn); }); });
     });
   }
+  // #21: a library instance's text-field OVERRIDES, keyed to a master text block's
+  // STABLE id (#19). v1 scope (grilled with James): text-only leaf overrides, edited via
+  // an Inspector field list (not inline canvas editing — keeps the #20 opacity guard
+  // untouched). PURE (DOM-free) so tests/run.js can exercise the reconcile rule headlessly.
+  /* @overrides-start */
+  // Every overridable text field currently on a master, keyed by the master's stable id.
+  function collectOverridableTextFields(template) {
+    var out = [];
+    walkTextBlocks([template], function (b) { if (b && typeof b.id === "string" && TEXT_STYLE_TYPES[b.type]) out.push({ id: b.id, type: b.type, text: b.text || "" }); });
+    return out;
+  }
+  // The reconciliation rule (#21 acceptance): an override survives ("living") only while
+  // its field id still exists on the CURRENT master; one whose field was removed is
+  // "dropped" (returned so the caller can prune + surface it to the author). Reordering
+  // never drops anything — overrides key to a stable id, never a position.
+  function reconcileOverrides(template, overrides) {
+    var fieldIds = {};
+    collectOverridableTextFields(template).forEach(function (f) { fieldIds[f.id] = true; });
+    var living = {}, dropped = [];
+    Object.keys(overrides || {}).forEach(function (id) {
+      if (fieldIds[id]) living[id] = overrides[id]; else dropped.push(id);
+    });
+    return { living: living, dropped: dropped };
+  }
+  // #22: page-master twins of the two functions above. A page master's content is an
+  // ARRAY of top-level blocks (def.template.blocks), not one node with .children -- so
+  // these call walkTextBlocks directly on that array instead of wrapping a single node.
+  // Otherwise identical rules (same reconciliation semantics across the whole region).
+  function collectPageOverridableTextFields(pageBlocks) {
+    var out = [];
+    walkTextBlocks(pageBlocks || [], function (b) { if (b && typeof b.id === "string" && TEXT_STYLE_TYPES[b.type]) out.push({ id: b.id, type: b.type, text: b.text || "" }); });
+    return out;
+  }
+  function reconcilePageOverrides(pageBlocks, overrides) {
+    var fieldIds = {};
+    collectPageOverridableTextFields(pageBlocks).forEach(function (f) { fieldIds[f.id] = true; });
+    var living = {}, dropped = [];
+    Object.keys(overrides || {}).forEach(function (id) {
+      if (fieldIds[id]) living[id] = overrides[id]; else dropped.push(id);
+    });
+    return { living: living, dropped: dropped };
+  }
+  /* @overrides-end */
+  window.__reconcileOverrides = reconcileOverrides; // test hook
+  window.__collectOverridableTextFields = collectOverridableTextFields; // test hook
   // Stamp the role style onto ONE block subtree (auto-link on create/drop). Only fills
   // UNSTYLED text blocks (never clobbers a manual styleRef); skips a type whose role is
   // unset/unresolved. Returns the count stamped.
@@ -4304,6 +4393,56 @@
       } finally { inspector = _i; }
     });
     endSections(inspector);
+
+    // #22: page-master library section -- mirrors #20/#21's block-level instance
+    // inspector (renderLibraryInstanceBody): live/linked hint + reconcile-on-open +
+    // Overrides field list + Detach when this page IS an instance; a "Save page to
+    // library" capture action when it isn't. panelSection (not sectionGroup) matches
+    // the "Chapter"/"Header & Footer" organizational sections above, not the
+    // taxonomy-mappable ones.
+    var libSecBody = panelSection(inspector, "Library");
+    if (page.libraryRef) {
+      var pdef = resolveComponentDef(page.libraryRef);
+      var pHead = h("div", "prop-component prop-component--instance");
+      pHead.appendChild(h("span", null, (pdef && pdef.name) || page.libraryRef || "Library page"));
+      libSecBody.appendChild(pHead);
+      libSecBody.appendChild(h("div", "insp-hint", pdef
+        ? "Live library page, linked to “" + (pdef.name || page.libraryRef) + "”. Edit the master in Settings → System → Component Library and every placement updates automatically."
+        : "This page's library master (“" + page.libraryRef + "”) no longer exists. Detach to keep this page as independent content."));
+      if (pdef && pdef.template) {
+        var prec = reconcilePageOverrides(pdef.template.blocks, page.overrides || {});
+        page.overrides = prec.living;
+        if (prec.dropped.length) {
+          saveRegistry(registry);
+          libSecBody.appendChild(h("div", "insp-hint insp-hint--warn", prec.dropped.length + " override" + (prec.dropped.length === 1 ? "" : "s") +
+            " dropped — the master no longer has " + (prec.dropped.length === 1 ? "that field" : "those fields") + "."));
+        }
+        var pfields = collectPageOverridableTextFields(pdef.template.blocks);
+        if (pfields.length) {
+          libSecBody.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Overrides"));
+          var _pi1 = inspector; inspector = libSecBody;
+          try {
+            pfields.forEach(function (f) {
+              var current = (page.overrides[f.id] && page.overrides[f.id].text) || "";
+              fieldRow(f.type.charAt(0).toUpperCase() + f.type.slice(1), current, function (v) {
+                if (v) page.overrides[f.id] = { text: v }; else delete page.overrides[f.id];
+                saveRegistry(registry); mount(); setSelection("page", pi);
+              }, f.text || "inherits from master");
+            });
+          } finally { inspector = _pi1; }
+        }
+      }
+      var pDetachB = h("button", "prop-btn", "Detach"); pDetachB.style.marginTop = "6px";
+      pDetachB.title = "Convert to an independent, editable page — this page stops receiving master updates.";
+      pDetachB.disabled = !pdef;
+      pDetachB.addEventListener("click", function () { detachPageLibraryInstance(pi); });
+      libSecBody.appendChild(pDetachB);
+    } else {
+      libSecBody.appendChild(h("div", "insp-hint", "Save this page to the shared library to reuse it (live-linked) in other courses."));
+      var pSaveB = h("button", "prop-btn prop-btn--accent", "Save page to library…"); pSaveB.style.marginTop = "6px";
+      pSaveB.addEventListener("click", function () { savePageAsLibraryMaster(pi); });
+      libSecBody.appendChild(pSaveB);
+    }
 
     var actBody = panelSection(inspector, "Page actions");
     var dupBtn = h("button", "prop-btn", "Duplicate page");
@@ -4677,6 +4816,7 @@
     if (block.type === "htmlEmbed" || block.type === "webEmbed") return "embed";
     if (block.type === "navButton") return "navButton";
     if (block.type === "componentGrid") return "block";
+    if (block.type === "libraryInstance") return "block";
     // non-text primitives + containers are configured in the block inspector
     if (block.type === "image" || block.type === "divider" || block.type === "spacer" || block.type === "frame" || block.type === "group" || block.type === "checkbox" || block.type === "accordion" || block.type === "cardReveal" || block.type === "sequence" || block.type === "cardDeck" || block.type === "courseNav") return "block";
     if (block.type === "quiz" || block.type === "hotspot" || block.type === "table") return "block";
@@ -4783,6 +4923,81 @@
     setActivePage(pi + 1);
     focusFrame(pi + 1);
     setSelection("page", pi + 1);
+  }
+  // #22: capture a whole PAGE as a shared-library master. Goes straight to the shared
+  // library (unlike a block, which stages through doc.components / "My Components" first)
+  // -- a course-local "My Pages" concept has no clear use on its own, cross-course reuse
+  // IS the point for a page. Mints every block's id ONCE here (remintIds per top-level
+  // block, mirroring saveBlockAsComponent) -- from this point those ids are PERMANENT
+  // (#19's contract), the substrate #21-style overrides on this page's instances key to.
+  function savePageAsLibraryMaster(pi) {
+    var page = doc.pages[pi];
+    if (!page) return;
+    promptModal("Name this reusable page", "Page name", page.name || page.title || "Page", function (v) {
+      var name = (v || "").trim();
+      if (!name) return;
+      var id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      if (!id) { alert("Please use a name with some letters or numbers."); return; }
+      function save() {
+        pushHistory();
+        var blocks = (page.blocks || []).map(function (b) { return remintIds(clone(b)); });
+        window.LibraryStore.components[id] = { name: name, kind: "page", template: { blocks: blocks } };
+        saveLibrary();
+        mount(); setSelection("page", pi);
+        alert("Saved “" + name + "” to the shared library. Find it in Settings → System → Component Library.");
+      }
+      if (libComponents()[id]) confirmModal("Overwrite component", "The library already has “" + id + "”. Overwrite it?", save, { okLabel: "Overwrite" });
+      else save();
+    });
+  }
+  // #22: insert a NEW page that live-links to a page master, right after the current
+  // page in its chapter -- same insertion shape as duplicatePage (fresh page id,
+  // courseNav section sync), but the page carries libraryRef instead of its own blocks.
+  function insertPageFromLibrary(key) {
+    pushHistory();
+    var afterId = doc.pages[currentPage] && doc.pages[currentPage].id;
+    var newPage = {
+      id: "page-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+      name: (libComponents()[key] && libComponents()[key].name) || "Page",
+      chapterId: doc.pages[currentPage] && doc.pages[currentPage].chapterId,
+      libraryRef: key
+    };
+    doc.pages.splice(currentPage + 1, 0, newPage);
+    eachCourseNav(function (nav) {
+      (nav.sections || []).forEach(function (sec) {
+        var at = (sec.pageIds || []).indexOf(afterId);
+        if (at >= 0 && sec.pageIds.indexOf(newPage.id) < 0) sec.pageIds.splice(at + 1, 0, newPage.id);
+      });
+    });
+    currentPage = currentPage + 1;
+    mount();
+    setActivePage(currentPage);
+    setSelection("page", currentPage);
+  }
+  // #22: convert a live page-instance into an independent page, in place -- same "detach
+  // bakes what you see" principle #21/#23 established for block instances: axis content
+  // resolves, THEN instance overrides apply, THEN every block's id is freshly reminted
+  // (a genuine new landed copy, per #19's remintIds contract). Keeps a __linkedFrom
+  // breadcrumb (no relink UI for pages in v1 -- out of this ticket's agreed scope, unlike
+  // #21's block-level Relink).
+  function detachPageLibraryInstance(pi) {
+    var page = doc.pages[pi];
+    if (!page || !page.libraryRef) return;
+    var def = resolveComponentDef(page.libraryRef);
+    if (!def || !def.template) return;
+    pushHistory();
+    var ref = page.libraryRef;
+    var blocks = (def.template.blocks || []).map(function (b) {
+      var withOverrides = clone(b);
+      if (window.resolveLibraryAxisContent) withOverrides = window.resolveLibraryAxisContent(withOverrides, window.__libraryAxisContext);
+      if (page.overrides && window.applyInstanceOverrides) window.applyInstanceOverrides(withOverrides, page.overrides);
+      return remintIds(withOverrides);
+    });
+    delete page.libraryRef;
+    delete page.overrides;
+    page.__linkedFrom = ref;
+    page.blocks = blocks;
+    mount(); setActivePage(pi); setSelection("page", pi);
   }
   // Split-page v2: merge a page with the one after it (inverse of splitPageAtBlock).
   // Only within the SAME chapter (the column-major next page) so content never jumps
@@ -5613,6 +5828,7 @@
     if (block.type === "columns") { renderContentlessBlock(node, "Columns", renderColumnsBody); return; } // SPEC-ui-kit ticket 8
     if (block.type === "table") { renderBlockTwoLevel(node, "Table", CONTENT_DECL, renderTableInspector); return; } // #90
     if (block.type === "componentGrid") { renderContentlessBlock(node, "Component grid", renderComponentGridBody); return; } // SPEC-ui-kit ticket 8
+    if (block.type === "libraryInstance") { renderContentlessBlock(node, "Library instance", renderLibraryInstanceBody); return; } // #20: live-linked mirror, content lives in the master
     if (block.type === "checkbox") { renderContentlessBlock(node, "Checkbox", renderCheckboxBody); return; } // SPEC-ui-kit ticket 8
     var head = h("div", "prop-component");
     head.appendChild(h("span", null, blockLabel(block)));
@@ -6000,6 +6216,106 @@
           reselectBlockNode(block, "block");
         }, "Add " + def.name));
       }
+  }
+
+  // #20/#21: a live-linked mirror of a shared library master, placed inline on the canvas
+  // (distinct from componentGrid, whose instances live inside a grid of cards). Content-
+  // less on the CANVAS by design -- the nested subtree stays non-interactive there
+  // (editor.css's pointer-events guard), so structural edits always happen at the source
+  // (the Component Library panel). #21 adds LOCAL leaf overrides on top of that: a text
+  // field on the master can be overridden per-instance via the field list below (an
+  // Inspector row per overridable field, not inline canvas editing -- keeps the opacity
+  // guard untouched, see the ticket's grill). Reuses the SAME "prop-component
+  // prop-component--instance" header componentGrid cards use for their own instance
+  // inspector (renderInstanceInspector) -- the established "you're looking at an
+  // instance of a shared def" visual language.
+  function renderLibraryInstanceBody(node) {
+    var block = node.__block;
+    var def = resolveComponentDef(block.ref); // doc override -> shared library -> built-in
+    var head = h("div", "prop-component prop-component--instance");
+    head.appendChild(h("span", null, (def && def.name) || block.ref || "Library instance"));
+    inspector.appendChild(head);
+    inspector.appendChild(h("div", "insp-hint", def
+      ? "Live library instance, linked to “" + (def.name || block.ref) + "”. Edit the master in Settings → System → Component Library and every placement updates automatically."
+      : "This instance's library master (“" + block.ref + "”) no longer exists. Detach to keep this placement as an editable copy, or remove it."));
+
+    if (def && def.template) {
+      // #21 RECONCILE: prune + surface any override whose field the master no longer
+      // has (a structural change since this override was set). Runs whenever the
+      // instance's inspector opens -- the natural point an author would notice.
+      var rec = reconcileOverrides(def.template, block.overrides || {});
+      block.overrides = rec.living;
+      if (rec.dropped.length) {
+        saveRegistry(registry);
+        inspector.appendChild(h("div", "insp-hint insp-hint--warn", rec.dropped.length + " override" + (rec.dropped.length === 1 ? "" : "s") +
+          " dropped — the master no longer has " + (rec.dropped.length === 1 ? "that field" : "those fields") + "."));
+      }
+      var fields = collectOverridableTextFields(def.template);
+      if (fields.length) {
+        // A stacked label, not sub() -- the #163 conformance gate reserves raw sub() headers
+        // for grandfathered debt; a stacked label is the canonical in-section grouping here
+        // (same pattern "Add to library"'s "Course component" label already uses).
+        inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Overrides"));
+        fields.forEach(function (f) {
+          var current = (block.overrides[f.id] && block.overrides[f.id].text) || "";
+          fieldRow(f.type.charAt(0).toUpperCase() + f.type.slice(1), current, function (v) {
+            if (v) block.overrides[f.id] = { text: v }; else delete block.overrides[f.id];
+            saveRegistry(registry); mount(); reselectBlockNode(block, "block");
+          }, f.text || "inherits from master");
+        });
+      }
+    }
+
+    var detachB = h("button", "prop-btn", "Detach"); detachB.style.marginTop = "6px";
+    detachB.title = "Convert to an independent, editable copy — this placement stops receiving master updates.";
+    detachB.disabled = !def;
+    detachB.addEventListener("click", function () { detachLibraryInstance(block); });
+    inspector.appendChild(detachB);
+  }
+  // Convert a live mirror into an independent, editable copy, in place: the block's own
+  // fields are replaced with a FRESH remint of the master's current template (#19: this
+  // one DOES remint -- it is a NEW independent copy landing in the document, precisely
+  // the case remintIds exists for, unlike the library-storage "preserve" sites above).
+  // Overrides are BAKED IN as this copy's own content (what the author was actually
+  // seeing), not reverted to the master's raw field values -- a silent revert-to-master
+  // on detach would be a real footgun. The instance-level overrides map itself isn't
+  // carried forward (a plain block has no such field); its VALUES are, as ordinary text.
+  // Keeps a __linkedFrom breadcrumb so #21 RELINK (renderFrameOrGroupTwoLevel) can
+  // re-attach it later.
+  function detachLibraryInstance(block) {
+    var def = resolveComponentDef(block.ref);
+    if (!def || !def.template) return;
+    pushHistory();
+    var ref = block.ref;
+    var withOverrides = clone(def.template);
+    // #23: bake the CURRENT axis content first (same "detach bakes what you see"
+    // principle #21 established for instance overrides) -- axis resolves, THEN the
+    // instance's own field overrides apply on top (most specific wins, matches the
+    // resolve order render.js's BLOCKS.libraryInstance uses).
+    if (window.resolveLibraryAxisContent) withOverrides = window.resolveLibraryAxisContent(withOverrides, window.__libraryAxisContext);
+    // Bake in what the author was ACTUALLY seeing (overrides applied), not the master's
+    // raw content -- a surprise revert-to-master on detach would be a real footgun.
+    if (block.overrides && window.applyInstanceOverrides) window.applyInstanceOverrides(withOverrides, block.overrides);
+    var fresh = remintIds(withOverrides);
+    Object.keys(block).forEach(function (k) { delete block[k]; });
+    Object.keys(fresh).forEach(function (k) { block[k] = fresh[k]; });
+    block.__linkedFrom = ref;
+    reapplyStructural(findPageOfBlock(block));
+    reselectBlockNode(block, "block");
+  }
+  // #21 RELINK: the inverse of detach -- re-attach a (possibly since-edited) block back
+  // to a library master. Replaces the block's fields with a fresh libraryInstance wrapper;
+  // local edits made since detaching are NOT preserved as overrides (the ticket's relink
+  // is "re-attach", not "diff and reconcile a detached copy's edits" -- that's a much
+  // larger problem #21 didn't scope in, see the grill).
+  function relinkToLibrary(block, ref) {
+    pushHistory();
+    Object.keys(block).forEach(function (k) { delete block[k]; });
+    block.type = "libraryInstance";
+    block.id = mintId();
+    block.ref = ref;
+    reapplyStructural(findPageOfBlock(block));
+    reselectBlockNode(block, "block");
   }
 
   // SPEC-ui-kit ticket 8: checkbox = an acknowledgement (label edited on canvas +
@@ -6556,6 +6872,18 @@
       }
     };
     renderBlockTwoLevel(node, "Card", { padding: true, gap: true, radius: true, fill: true, stroke: "switch" }, renderFrameContent, io, blockChromeHandlers(block));
+    // #21 RELINK: a block detached from a library instance keeps a breadcrumb
+    // (__linkedFrom, set by detachLibraryInstance) so it can be re-attached later —
+    // discards whatever local edits were made since detach, so it's confirmed.
+    if (block.__linkedFrom) {
+      var relinkB = h("button", "prop-btn", "Relink to library"); relinkB.style.marginTop = "6px";
+      relinkB.title = "Re-attach to “" + block.__linkedFrom + "” — replaces this block's content with the master's current content and discards edits made since detaching.";
+      relinkB.addEventListener("click", function () {
+        confirmModal("Relink to library", "Re-attach this block to “" + block.__linkedFrom + "”? Its content will be replaced by the master's CURRENT content — any edits made since detaching are discarded.",
+          function () { relinkToLibrary(block, block.__linkedFrom); }, { okLabel: "Relink" });
+      });
+      inspector.appendChild(relinkB);
+    }
   }
 
   function renderHotspotInspector(block) {
@@ -9673,7 +10001,7 @@
   // panes; the pinned bottom glyphs are global actions.
   var __leftView = "document";
   function setLeftPanelView(view) {
-    ["lpane-structure", "lpane-split", "lpane-blocks"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
+    ["lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
     var dt = document.getElementById("rail-tab-document"); if (dt) dt.classList.toggle("is-active", true);
     __leftView = view;
   }
@@ -9717,7 +10045,10 @@
   function buildLibraryBody(c) {
     c.appendChild(h("div", "insp-hint", "A shared library used across ALL your courses. A course REFERENCES a library component; edit the master here and every course using it updates. It bakes into the export, so the shipped SCORM stays self-contained (air-gap safe)."));
     var lib = libComponents();
-    var keys = Object.keys(lib);
+    // #22: PAGE masters get their own list below (different actions -- Insert page, not
+    // Copy to course, since a page isn't a doc.components-shaped thing) -- filter/label
+    // by type per the ticket's acceptance criteria.
+    var keys = Object.keys(lib).filter(function (k) { return lib[k].kind !== "page"; });
     if (keys.length) {
       var list = h("div", "insp-list");
       keys.forEach(function (k) {
@@ -9726,18 +10057,92 @@
         var left = h("div", "insp-list__text");
         left.appendChild(h("span", "insp-list__title", comp.name || k));
         left.appendChild(h("span", "insp-list__meta", (comp.slots || []).map(function (s) { return s.label; }).join(", ") || comp.kind || "component"));
+        // #24: where-used — a live-linked instance (#20) already resolves the CURRENT
+        // master on every render, so this is a read-only blast-radius indicator, not a
+        // staleness warning. Scanning the full registry per row is fine here: the panel
+        // only builds when an author opens Settings > System > Component Library.
+        var usage = libraryWhereUsed(k, getRegistry());
+        left.appendChild(h("span", "insp-list__meta", usage.instances
+          ? "Used in " + usage.courses + " course" + (usage.courses === 1 ? "" : "s") + " / " + usage.instances + " instance" + (usage.instances === 1 ? "" : "s")
+          : "Not placed anywhere yet"));
         item.appendChild(left);
         var acts = h("div"); acts.style.cssText = "display:flex;gap:4px;";
         var copyB = h("button", "prop-btn", "Copy to course"); copyB.style.cssText = "padding:2px 6px;font-size:10px;"; copyB.title = "Detach a local copy into this course (edits won't propagate)";
+        // #19: deliberately plain clone(), NOT remintIds — the master's ids are its
+        // stable identity and must survive a detach untouched (see the contract on remintIds).
         copyB.addEventListener("click", function () { pushHistory(); getComponents()[k] = clone(comp); saveRegistry(registry); mount(); });
+        // #24: an explicit, deliberate confirmation that every #20 live instance already
+        // reflects the current master (architecture, not a data mutation this button
+        // performs) -- and durably persists the master in case an in-memory edit hasn't
+        // been saved yet. Detached/copied-to-course snapshots are NOT live references
+        // (that's the whole point of detaching, #19/#21) so are intentionally out of
+        // scope here; #21's Relink is the targeted way to re-sync one of those.
+        var pushB = h("button", "prop-btn", "Push update"); pushB.style.cssText = "padding:2px 6px;font-size:10px;";
+        pushB.title = "Confirm every live-linked instance reflects this master's current content, and save it durably.";
+        pushB.addEventListener("click", function () {
+          saveLibrary();
+          var fresh = libraryWhereUsed(k, getRegistry());
+          confirmModal("Push update", fresh.instances
+            ? "Saved. " + fresh.instances + " live-linked instance" + (fresh.instances === 1 ? "" : "s") + " across " + fresh.courses + " course" + (fresh.courses === 1 ? "" : "s") + " already reflect “" + (comp.name || k) + "”'s current content — instances resolve the master live, so there's nothing further to push."
+            : "Saved. “" + (comp.name || k) + "” isn't placed anywhere yet, so there's nothing to push.",
+            function () {}, { okLabel: "OK" });
+        });
         var delB = h("button", "prop-btn prop-btn--danger", "✕"); delB.style.cssText = "padding:2px 6px;font-size:10px;";
-        delB.addEventListener("click", function () { confirmModal("Remove component", "Remove “" + (comp.name || k) + "” from the shared library? Courses referencing it fall back to a built-in / show unknown.", function () { delete window.LibraryStore.components[k]; saveLibrary(); mount(); renderInspector(); }, { okLabel: "Remove", danger: true }); });
-        acts.appendChild(copyB); acts.appendChild(delB); item.appendChild(acts);
+        delB.addEventListener("click", function () {
+          var impact = libraryWhereUsed(k, getRegistry());
+          var warn = impact.instances ? " Currently used in " + impact.courses + " course" + (impact.courses === 1 ? "" : "s") + " / " + impact.instances + " instance" + (impact.instances === 1 ? "" : "s") + " —" : "";
+          confirmModal("Remove component", "Remove “" + (comp.name || k) + "” from the shared library?" + warn + " courses referencing it fall back to a built-in / show unknown.", function () { delete window.LibraryStore.components[k]; saveLibrary(); mount(); renderInspector(); }, { okLabel: "Remove", danger: true });
+        });
+        acts.appendChild(copyB); acts.appendChild(pushB); acts.appendChild(delB); item.appendChild(acts);
         list.appendChild(item);
       });
       c.appendChild(list);
     } else {
       c.appendChild(h("div", "insp-hint", "No shared components yet. Promote a course component below, or import a library."));
+    }
+
+    // #22: PAGE masters -- listed + labelled separately from block masters. "Insert page"
+    // (not "Copy to course") since placing one adds a whole page to doc.pages, not a
+    // doc.components entry; capture happens from a page's OWN inspector ("Save page to
+    // library", above in renderPageInspector), not from here.
+    var pageKeys = Object.keys(lib).filter(function (k) { return lib[k].kind === "page"; });
+    if (pageKeys.length) {
+      var pageSecBody = panelSection(c, "Pages");
+      var pageList = h("div", "insp-list");
+      pageKeys.forEach(function (k) {
+        var comp = lib[k];
+        var item = h("div", "insp-list__item");
+        var left = h("div", "insp-list__text");
+        left.appendChild(h("span", "insp-list__title", comp.name || k));
+        left.appendChild(h("span", "insp-list__meta", "page"));
+        var usage = libraryWhereUsed(k, getRegistry());
+        left.appendChild(h("span", "insp-list__meta", usage.instances
+          ? "Used in " + usage.courses + " course" + (usage.courses === 1 ? "" : "s") + " / " + usage.instances + " instance" + (usage.instances === 1 ? "" : "s")
+          : "Not placed anywhere yet"));
+        item.appendChild(left);
+        var pacts = h("div"); pacts.style.cssText = "display:flex;gap:4px;";
+        var insertB = h("button", "prop-btn prop-btn--accent", "Insert page"); insertB.style.cssText = "padding:2px 6px;font-size:10px;"; insertB.title = "Insert a live-linked page right after the current one — editing the master updates every placement";
+        insertB.addEventListener("click", function () { insertPageFromLibrary(k); });
+        var pPushB = h("button", "prop-btn", "Push update"); pPushB.style.cssText = "padding:2px 6px;font-size:10px;";
+        pPushB.title = "Confirm every live-linked page reflects this master's current content, and save it durably.";
+        pPushB.addEventListener("click", function () {
+          saveLibrary();
+          var fresh = libraryWhereUsed(k, getRegistry());
+          confirmModal("Push update", fresh.instances
+            ? "Saved. " + fresh.instances + " live-linked page" + (fresh.instances === 1 ? "" : "s") + " across " + fresh.courses + " course" + (fresh.courses === 1 ? "" : "s") + " already reflect “" + (comp.name || k) + "”'s current content — pages resolve the master live, so there's nothing further to push."
+            : "Saved. “" + (comp.name || k) + "” isn't placed anywhere yet, so there's nothing to push.",
+            function () {}, { okLabel: "OK" });
+        });
+        var pDelB = h("button", "prop-btn prop-btn--danger", "✕"); pDelB.style.cssText = "padding:2px 6px;font-size:10px;";
+        pDelB.addEventListener("click", function () {
+          var impact = libraryWhereUsed(k, getRegistry());
+          var warn = impact.instances ? " Currently used in " + impact.courses + " course" + (impact.courses === 1 ? "" : "s") + " / " + impact.instances + " instance" + (impact.instances === 1 ? "" : "s") + " —" : "";
+          confirmModal("Remove page", "Remove “" + (comp.name || k) + "” from the shared library?" + warn + " courses referencing it show an empty page.", function () { delete window.LibraryStore.components[k]; saveLibrary(); mount(); renderInspector(); }, { okLabel: "Remove", danger: true });
+        });
+        pacts.appendChild(insertB); pacts.appendChild(pPushB); pacts.appendChild(pDelB); item.appendChild(pacts);
+        pageList.appendChild(item);
+      });
+      pageSecBody.appendChild(pageList);
     }
     // promote a course-local component to the shared library (single-sources it)
     var docKeys = Object.keys(doc.components || {}).filter(function (k) { return !(window.COMPONENTS || {})[k]; });
@@ -9752,12 +10157,21 @@
         if (!selectedKey || !doc.components[selectedKey]) return;
         function doSave() {
           pushHistory();
+          // #19: plain clone(), NOT remintIds — promoting to the shared library keeps the
+          // exact ids this course-local component was captured with (see the contract on
+          // remintIds); they become the master's permanent cross-course identity.
           window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);
           delete doc.components[selectedKey]; // single-source: this course now references the library copy
           saveLibrary(); saveRegistry(registry); mount(); renderInspector();
         }
-        if (libComponents()[selectedKey]) confirmModal("Overwrite component", "The library already has “" + selectedKey + "”. Overwrite it?", doSave, { okLabel: "Overwrite" });
-        else doSave();
+        if (libComponents()[selectedKey]) {
+          // #24 IMPACT PREVIEW: the one place a master's content actually changes today
+          // (there's no in-place master editor yet, #21) — so this overwrite confirm is
+          // where a blast-radius preview belongs.
+          var impact = libraryWhereUsed(selectedKey, getRegistry());
+          var warn = impact.instances ? " " + impact.instances + " live-linked instance" + (impact.instances === 1 ? "" : "s") + " across " + impact.courses + " course" + (impact.courses === 1 ? "" : "s") + " will pick up this content immediately." : " It isn't placed anywhere yet.";
+          confirmModal("Overwrite component", "The library already has “" + selectedKey + "”. Overwrite it?" + warn, doSave, { okLabel: "Overwrite" });
+        } else doSave();
       });
       addBody.appendChild(saveB);
     }
@@ -13428,6 +13842,7 @@
         if (pageClipboard) items.push({ label: "Paste page after", onClick: function () { currentPage = pi; pastePage(); } });
         items.push({ label: "Duplicate page", onClick: function () { duplicatePage(pi); } });
         if (hasMergeableNext(pi)) items.push({ label: "Merge with next page", onClick: function () { mergePageWithNext(pi); } });
+        items.push({ label: "Save page to library…", onClick: function () { savePageAsLibraryMaster(pi); } });
         if (doc.pages.length > 1) {
           items.push({ sep: true });
           items.push({ label: "Delete page", danger: true, onClick: function () { deletePage(pi); } });
@@ -13962,6 +14377,19 @@
     clearMulti();
     mount();
     reselectBlockNode(frame, "block");
+    return frame; // #22: lets saveSelectionAsSectionMaster capture the resulting group directly
+  }
+  // #22: a "section" master is just a multi-block selection, grouped then captured --
+  // reuses groupMulti (already enforces the "one shared parent, adjacent" contract a
+  // section needs) + saveBlockAsComponent (already works on ANY block, a group included)
+  // verbatim. No new capture/render/override/axis machinery: a group's children are
+  // walked by the SAME generic children-array logic every other container already uses
+  // (walkTextBlocks, applyInstanceOverrides, resolveAxisNode all check node.children with
+  // no type-specific branching), so overrides/axis/detach/export on a section master work
+  // for free once it's a library entry -- confirmed by browser-verify, not just asserted.
+  function saveSelectionAsSectionMaster() {
+    var frame = groupMulti();
+    if (frame) saveBlockAsComponent(frame);
   }
   // #131: merge the multi-selected TEXT blocks (>=2, all text-style types) into ONE.
   // Fold every body — in CANVAS STACK ORDER (parent-array index, NOT selection order) —
@@ -14042,7 +14470,7 @@
     navButton: "navigation", modeToggle: "contrast", checkbox: "check-square",
     htmlEmbed: "code-xml", webEmbed: "square-play", columns: "columns-2", table: "table", quiz: "list-checks",
     hotspot: "target", courseNav: "menu", accordion: "panels-top-left", cardReveal: "layers", cardDeck: "copy",
-    sequence: "workflow"
+    sequence: "workflow", libraryInstance: "component"
   };
   function blockIcon(b) { return BLOCK_LUCIDE[b.type] || "square"; }
   // A DS twirl caret (Lucide chevron-right, rotates to chevron-down when open). The
@@ -14073,6 +14501,7 @@
     if (b.type === "frame") return "Card (" + ((b.children || []).length) + ")";
     if (b.type === "group") return "Group (" + ((b.children || []).length) + ")";
     if (b.type === "componentGrid") return (COMPONENTS[b.component] ? COMPONENTS[b.component].name : b.component) + " ×" + ((b.instances || []).length);
+    if (b.type === "libraryInstance") { var libDef = resolveComponentDef(b.ref); return (libDef && libDef.name) || b.ref || "Library instance"; }
     if (b.type === "navButton") return b.text ? b.text.slice(0, 24) : "Navigation button";
     if (b.type === "modeToggle") return "Light / dark toggle";
     if (b.type === "checkbox") return b.label ? b.label.slice(0, 24) : "Checkbox";
@@ -14452,6 +14881,7 @@
       if (pageClipboard) items.push({ label: "Paste page after", onClick: function () { currentPage = pi; pastePage(); } });
       items.push({ label: "Duplicate page", onClick: function () { duplicatePage(pi); } });
       if (hasMergeableNext(pi)) items.push({ label: "Merge with next page", onClick: function () { mergePageWithNext(pi); } });
+      items.push({ label: "Save page to library…", onClick: function () { savePageAsLibraryMaster(pi); } });
       if (doc.pages.length > 1) { items.push({ sep: true }); items.push({ label: "Delete page", danger: true, onClick: function () { deletePage(pi); } }); }
       showContextMenu(e.clientX, e.clientY, items);
     });
@@ -14471,7 +14901,9 @@
       if (!multi && depth === 0) items.push({ label: "Duplicate", onClick: function () { duplicateBlock(block); } });
       if (multi && canMergeTextBoxes(multiSel)) items.push({ label: "Merge text boxes", onClick: function () { mergeTextBoxes(); } });
       if (multi) items.push({ label: "Group selection", onClick: function () { groupMulti(); } });
+      if (multi) items.push({ label: "Save selection to library…", onClick: function () { saveSelectionAsSectionMaster(); } }); // #22 section master
       if (!multi && block.type === "group") items.push({ label: "Ungroup", onClick: function () { ungroupBlock(block); } });
+      if (!multi) items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(block); } });
       // #174: reset the block(s) to a blank skeleton — wipe copy/images/embeds, keep structure.
       items.push({ label: "Clear content", onClick: function () { clearBlockContentAction(multi ? multiSel.slice() : block); } });
       items.push({ sep: true });
@@ -14597,21 +15029,6 @@
     else setSelection("block", node);
   }
   function setActivePage(i) { currentPage = i; pageItems.forEach(function (it, idx) { it.classList.toggle("is-active", idx === i); }); if (frameDescs) frameDescs.forEach(function (f) { if (f.label) f.label.classList.toggle("is-active", f.i === i); }); refreshGridOverlay(); }
-  function renderComponentsList() {
-    componentsList.innerHTML = "";
-    var counts = {};
-    doc.pages.forEach(function (p) {
-      (p.blocks || []).forEach(function (b) {
-        if (b.type === "componentGrid") counts[b.component] = (counts[b.component] || 0) + (b.instances || []).length;
-      });
-    });
-    Object.keys(COMPONENTS).forEach(function (key) {
-      var item = h("div", "comp-item");
-      item.appendChild(h("span", "comp-item__name", COMPONENTS[key].name));
-      item.appendChild(h("span", "comp-item__count", "×" + (counts[key] || 0)));
-      componentsList.appendChild(item);
-    });
-  }
 
   // ---- Assets tab: the library of insertable block/component types ----------
   // This is where everything draggable/insertable converges. For now items are
@@ -14722,7 +15139,7 @@
         toggleHost.appendChild(U.SegmentedControl({
           size: "sm", value: view,
           options: [{ value: "grid", icon: "layout-grid", title: "Grid" }, { value: "list", icon: "list", title: "List" }],
-          onChange: function (v) { setPaletteView(v); renderAssets(); }
+          onChange: function (v) { setPaletteView(v); renderAssets(); renderComponentsPalette(); }
         }));
       }
     }
@@ -14756,59 +15173,79 @@
       list.appendChild(det);
     });
 
-    // user-saved composed components (from "Save as component")
-    var comps = getComponents();
-    var composed = Object.keys(comps).filter(function (k) { return comps[k].kind === "composed"; });
-    if (composed.length) {
-      var det = h("details", "asset-group"); det.open = !collapsed["My Components"];
-      det.addEventListener("toggle", function () { setGroupCollapsed("My Components", !det.open); });
+  }
+  // The "Components" left-pane twirl: the SOLE browse/insert surface for reusable
+  // components (moved out of the Blocks palette, which used to carry "My Components" /
+  // "Shared Library" as asset-groups here — see git history for the prior layout).
+  // Three groups: My Components (course-local, copy-only), Blocks (shared cross-course
+  // library, live-linked), Pages (shared cross-course page masters, live-linked).
+  function renderComponentsPalette() {
+    var view = paletteView();
+    var U = window.VersoUI;
+    var list = document.getElementById("components-palette-list");
+    if (!list) return;
+    list.innerHTML = "";
+    var collapsed = collapsedGroups();
+    function groupBody() {
+      if (view === "grid" && U && U.BlockGrid) return U.BlockGrid({ minColWidth: 84 });
+      return h("div", "asset-group__list");
+    }
+    function renderGroup(title, rows, emptyHint) {
+      if (!rows.length && !emptyHint) return;
+      var det = h("details", "asset-group"); det.open = !collapsed[title];
+      det.addEventListener("toggle", function () { setGroupCollapsed(title, !det.open); });
       var sum = h("summary", "asset-group__summary");
       sum.appendChild(h("span", "disc__caret"));
-      sum.appendChild(h("span", "asset-group__title", "My Components"));
+      sum.appendChild(h("span", "asset-group__title", title));
       det.appendChild(sum);
-      var body = groupBody();
-      composed.forEach(function (k) {
-        var comp = comps[k];
-        body.appendChild(paletteEntry(view, {
-          icon: "component", label: comp.name, title: "Click to insert a copy",
-          onInsert: function () { insertBlock(clone(comp.template)); }
-        }));
-      });
-      det.appendChild(body);
+      if (rows.length) {
+        var body = groupBody();
+        rows.forEach(function (row) { body.appendChild(row); });
+        det.appendChild(body);
+      } else {
+        det.appendChild(h("div", "asset-empty", emptyHint));
+      }
       list.appendChild(det);
     }
 
-    // SHARED component library (cross-course single-source, slice 2 = the insert side).
-    // Slice 1 built the store + Save-to-library + import/export JSON; this surfaces those
-    // shared components in the palette so they can be dropped into ANY course. Composed
-    // components only: a slot-def carries a `render` FUNCTION, which JSON can't serialise,
-    // so only template-based (composed) defs survive the library round-trip. Insert = a
-    // COPY of the template (like My Components). Note: a linked/propagating library insert
-    // is a follow-up — it needs slot-defs stored as serialisable templates (render is code).
-    var lib = libComponents();
-    var libComposed = Object.keys(lib).filter(function (k) { return lib[k] && lib[k].kind === "composed" && lib[k].template; });
-    // ALWAYS rendered (even when empty) so the feature is DISCOVERABLE — an empty group
-    // shows a hint on how to fill it, rather than vanishing like "My Components".
-    var detL = h("details", "asset-group"); detL.open = !collapsed["Shared Library"];
-    detL.addEventListener("toggle", function () { setGroupCollapsed("Shared Library", !detL.open); });
-    var sumL = h("summary", "asset-group__summary");
-    sumL.appendChild(h("span", "disc__caret"));
-    sumL.appendChild(h("span", "asset-group__title", "Shared Library"));
-    detL.appendChild(sumL);
-    if (libComposed.length) {
-      var bodyL = groupBody();
-      libComposed.forEach(function (k) {
-        var comp = lib[k];
-        bodyL.appendChild(paletteEntry(view, {
-          icon: "component", label: comp.name || k, title: "Insert a copy from the shared cross-course library",
-          onInsert: function () { insertBlock(clone(comp.template)); }
-        }));
+    // user-saved composed components (from "Save as component") — course-local, copy-only
+    var comps = getComponents();
+    var composedRows = Object.keys(comps).filter(function (k) { return comps[k].kind === "composed"; }).map(function (k) {
+      var comp = comps[k];
+      return paletteEntry(view, {
+        icon: "component", label: comp.name, title: "Click to insert a copy",
+        onInsert: function () { insertBlock(clone(comp.template)); }
       });
-      detL.appendChild(bodyL);
-    } else {
-      detL.appendChild(h("div", "asset-empty", "No shared components yet. Design a block, then use “Save as component” and “Save to library” (document panel) to reuse it across courses."));
-    }
-    list.appendChild(detL);
+    });
+    renderGroup("My Components", composedRows);
+
+    // SHARED component library (cross-course single-source). Composed components only: a
+    // slot-def carries a `render` FUNCTION, which JSON can't serialise, so only
+    // template-based (composed) defs survive the library round-trip. Insert places a
+    // LIVE-LINKED libraryInstance wrapper (edit the master, every placement updates) —
+    // "My Components" above stays copy-only, since it has no cross-course concern. Use
+    // the block inspector's Detach action to convert a placement into an independent,
+    // editable copy. ALWAYS rendered (even when empty) so the feature is DISCOVERABLE.
+    var lib = libComponents();
+    var libBlockRows = Object.keys(lib).filter(function (k) { return lib[k] && lib[k].kind === "composed" && lib[k].template; }).map(function (k) {
+      var comp = lib[k];
+      return paletteEntry(view, {
+        icon: "component", label: comp.name || k, title: "Insert a live-linked instance from the shared cross-course library — editing the master updates every placement",
+        onInsert: function () { insertBlock({ type: "libraryInstance", id: mintId(), ref: k }); }
+      });
+    });
+    renderGroup("Blocks", libBlockRows, "No shared components yet. Design a block, then use “Save as component” and “Save to library” (document panel) to reuse it across courses.");
+
+    // shared library PAGE masters — same live-linked model as Blocks above, one page at a
+    // time. Inserting places a new page right after the current one (insertPageFromLibrary).
+    var libPageRows = Object.keys(lib).filter(function (k) { return lib[k] && lib[k].kind === "page"; }).map(function (k) {
+      var comp = lib[k];
+      return paletteEntry(view, {
+        icon: "file-text", label: comp.name || k, title: "Insert a new page from this shared page master — editing the master updates every placement",
+        onInsert: function () { insertPageFromLibrary(k); }
+      });
+    });
+    renderGroup("Pages", libPageRows, "No shared pages yet. Use “Save page to library…” (page Inspector or right-click) to reuse a page across courses.");
   }
   // FFFF: new/pasted blocks drop AFTER the selected top-level block on the current
   // page (so an insert lands where you are working), else append at the bottom.
@@ -14844,48 +15281,84 @@
     focusFrame(currentPage);
     reselectBlockNode(block, "block"); // select the new block so repeated inserts stack after it
   }
-  // SS: the left panel stacks Structure + Blocks (both visible), each collapsible,
-  // with a draggable split adjusting their height share. Replaces the old tabs.
+  // SS: the left panel stacks N panes (Structure, Blocks, Components — all visible),
+  // each collapsible, with a draggable split between every adjacent pair adjusting
+  // their combined height share. Generalized from a hard-coded two-pane model so a
+  // pane can be added/removed without touching the split math (#component-library
+  // reorg: added the third "Components" pane).
+  var LPANE_ORDER = [
+    { id: "lpane-structure", key: "structure", share: 6 },
+    { id: "lpane-blocks", key: "blocks", share: 4 },
+    { id: "lpane-components", key: "components", share: 3 }
+  ];
   function wireLeftPanes() {
     renderAssets();
+    renderComponentsPalette();
     var panel = document.querySelector(".panel--left");
-    var struct = document.getElementById("lpane-structure");
-    var blocks = document.getElementById("lpane-blocks");
-    var split = document.getElementById("lpane-split");
-    if (!panel || !struct || !blocks) return;
+    var panes = LPANE_ORDER.map(function (o) {
+      return { el: document.getElementById(o.id), key: o.key, share: o.share };
+    }).filter(function (o) { return o.el; });
+    var splits = Array.prototype.slice.call(panel ? panel.querySelectorAll(".lpane-split") : []);
+    if (!panel || panes.length < 2) return;
 
-    function syncSplit() {
-      var bothOpen = !struct.classList.contains("is-collapsed") && !blocks.classList.contains("is-collapsed");
-      if (split) split.style.display = bothOpen ? "" : "none";
+    function syncSplits() {
+      // a split between pane i and pane i+1 only matters (is shown) when BOTH are open
+      splits.forEach(function (split, i) {
+        var a = panes[i], b = panes[i + 1];
+        var bothOpen = a && b && !a.el.classList.contains("is-collapsed") && !b.el.classList.contains("is-collapsed");
+        split.style.display = bothOpen ? "" : "none";
+      });
     }
-    // restore collapse state
-    [{ p: struct, k: "authoring.lpane.structure" }, { p: blocks, k: "authoring.lpane.blocks" }].forEach(function (o) {
-      var v = null; try { v = localStorage.getItem(o.k); } catch (e) {}
-      if (v === "1") o.p.classList.add("is-collapsed");
-      var head = o.p.querySelector(".lpane__head");
+    // restore collapse state + wire collapse toggles
+    panes.forEach(function (o) {
+      var key = "authoring.lpane." + o.key;
+      var v = null; try { v = localStorage.getItem(key); } catch (e) {}
+      if (v === "1") o.el.classList.add("is-collapsed");
+      var head = o.el.querySelector(".lpane__head");
       if (head) head.addEventListener("click", function (e) {
         if (e.target.closest(".outliner-add-btn")) return; // let the + button through
-        o.p.classList.toggle("is-collapsed");
-        try { localStorage.setItem(o.k, o.p.classList.contains("is-collapsed") ? "1" : "0"); } catch (_) {}
-        syncSplit();
+        o.el.classList.toggle("is-collapsed");
+        try { localStorage.setItem(key, o.el.classList.contains("is-collapsed") ? "1" : "0"); } catch (_) {}
+        syncSplits();
       });
     });
-    syncSplit();
+    syncSplits();
 
-    // split ratio (structure share of the two-pane height)
-    function applySplit(v) { struct.style.flexGrow = String(v); blocks.style.flexGrow = String(1 - v); }
-    var r = 0.6; try { var s = localStorage.getItem("authoring.lpane.split"); if (s) r = Math.min(0.85, Math.max(0.15, parseFloat(s))); } catch (e) {}
-    applySplit(r);
-    if (split) split.addEventListener("mousedown", function (e) {
-      e.preventDefault(); split.classList.add("is-dragging");
-      var rect = panel.getBoundingClientRect();
-      function move(ev) {
-        var y = Math.min(0.85, Math.max(0.15, (ev.clientY - rect.top) / rect.height));
-        applySplit(y);
-        try { localStorage.setItem("authoring.lpane.split", String(y)); } catch (_) {}
-      }
-      function up() { split.classList.remove("is-dragging"); document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); }
-      document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    // each adjacent pair's split ratio is stored independently, so dragging one
+    // split only redistributes the two panes touching it, leaving the rest alone.
+    function applyShares() { panes.forEach(function (o) { o.el.style.flexGrow = String(o.share); }); }
+    splits.forEach(function (split, i) {
+      var a = panes[i], b = panes[i + 1];
+      if (!a || !b) return;
+      var combined = a.share + b.share;
+      var r = a.share / combined;
+      var storeKey = "authoring.lpane.split." + i;
+      try {
+        var s = localStorage.getItem(storeKey);
+        if (!s && i === 0) s = localStorage.getItem("authoring.lpane.split"); // pre-reorg key
+        if (s) r = Math.min(0.85, Math.max(0.15, parseFloat(s)));
+      } catch (e) {}
+      a.share = combined * r; b.share = combined * (1 - r);
+    });
+    applyShares();
+
+    splits.forEach(function (split, i) {
+      var a = panes[i], b = panes[i + 1];
+      if (!a || !b) return;
+      var combined = a.share + b.share;
+      split.addEventListener("mousedown", function (e) {
+        e.preventDefault(); split.classList.add("is-dragging");
+        function move(ev) {
+          var aRect = a.el.getBoundingClientRect(), bRect = b.el.getBoundingClientRect();
+          var top = aRect.top, span = (bRect.bottom - top) || 1;
+          var ratio = Math.min(0.85, Math.max(0.15, (ev.clientY - top) / span));
+          a.share = combined * ratio; b.share = combined * (1 - ratio);
+          applyShares();
+          try { localStorage.setItem("authoring.lpane.split." + i, String(ratio)); } catch (_) {}
+        }
+        function up() { split.classList.remove("is-dragging"); document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); }
+        document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+      });
     });
   }
 
@@ -14924,8 +15397,8 @@
     // neighbour). The ResizeObserver catches later async settles (images, font swap).
     drawConnectors();
     renderStructure();
-    renderComponentsList();
-    renderAssets(); // keep the Blocks panel current (e.g. new "My Components")
+    renderAssets(); // keep the Blocks palette current
+    renderComponentsPalette(); // keep the Components pane current (My Components / Blocks / Pages)
     renderModelView();
     
     restoreSelection();
@@ -17679,18 +18152,27 @@
     var ns = opts.nativeStore || window.__nativeStore;
     if (!ns) return fail("precondition", "native file storage is not available on this build (rebuild the desktop app)");
     var browserAdapter = opts.browserAdapter || browserRegistryAdapter;
+    var browserLibAdapter = opts.browserLibraryAdapter || browserLibraryAdapter;
     var putRegistry = opts.putRegistry || ns.putRegistry;
     var getRegistry = opts.getRegistry || ns.getRegistry;
+    var putLibrary = opts.putLibrary || ns.putLibrary;
+    var getLibrary = opts.getLibrary || ns.getLibrary;
     var reload = opts.reload || ns.reload || function () { location.reload(); };
     if (!putRegistry || !getRegistry) return fail("precondition", "native store is missing put/getRegistry");
+    // #18: the library rides the SAME guarded cutover as the registry, so the native
+    // store must support both -- a half-capable build never leaves the library behind.
+    if (!putLibrary || !getLibrary) return fail("precondition", "native store is missing put/getLibrary");
 
-    // Read the authoritative source (never mutated here).
+    // Read the authoritative sources (never mutated here). The library is OPTIONAL --
+    // a fresh install may have no shared components yet, unlike the registry.
     var srcJson;
     try { srcJson = browserAdapter.readRegistry(); } catch (e) { return fail("read", "browser read threw: " + (e && e.message || e)); }
     if (!srcJson) return fail("read", "browser registry is empty");
     var src; try { src = JSON.parse(srcJson); } catch (e) { return fail("read", "browser registry unparseable"); }
     var codes = Object.keys(src);
     if (!codes.length) return fail("read", "no courses in browser registry");
+    var libJson;
+    try { libJson = browserLibAdapter.readLibrary(); } catch (e) { return fail("read", "browser library read threw: " + (e && e.message || e)); }
 
     // 1. BACKUP GATE (awaited, verified on disk) BEFORE any target write or suppression.
     var backup = opts.backup ? opts.backup(src) : window.Migration.runBackupsAsync(src, {
@@ -17703,6 +18185,23 @@
     if (bk.count !== codes.length) return fail("backup", "backup incomplete: " + bk.count + "/" + codes.length + " courses");
     log("backup verified: " + bk.count + " course(s) -> " + bk.dir);
 
+    // 1b. Back up the shared library too (same pre-cutover dir, plain JSON, verified
+    // written) -- skipped only when there is nothing to back up (no library yet).
+    if (libJson) {
+      var libBackup = opts.backupLibrary ? opts.backupLibrary(libJson, bk.dir) : (function () {
+        var path = bk.dir + "library.json";
+        return Promise.resolve(ns.writeFile(path, (new TextEncoder()).encode(libJson))).then(function (bw) {
+          if (!bw || !bw.ok) return { ok: false, error: (bw && bw.error) || "library backup write failed" };
+          return Promise.resolve(ns.verifySize(path)).then(function (sz) {
+            return (sz > 0) ? { ok: true, path: path } : { ok: false, error: "library backup verify failed (not on disk)" };
+          });
+        });
+      })();
+      var lbk; try { lbk = await libBackup; } catch (e) { return fail("backup", "library backup threw: " + (e && e.message || e)); }
+      if (!lbk || !lbk.ok) return fail("backup", "library: " + ((lbk && lbk.error) || "backup failed"));
+      log("library backup verified -> " + lbk.path);
+    }
+
     // 2. SUPPRESS SAVES for the whole switch (no stale flush can land).
     window.Migration.suppress();
     // 3. WRITE the registry to disk and AWAIT the durable-write confirmation.
@@ -17714,8 +18213,20 @@
     if (!v.ok) { window.Migration.resume(); return fail("verify", v.reason); }
     log("verified " + v.count + " course(s) on disk");
 
+    // 3b/4b. WRITE + VERIFY the shared library too, in the SAME suppression window --
+    // either both the registry and the library land on disk, or neither does (the flag
+    // never flips), so the two content types can never straddle backends.
+    if (libJson) {
+      var lw; try { lw = await putLibrary(libJson); } catch (e) { window.Migration.resume(); return fail("write", "library write threw: " + (e && e.message || e)); }
+      if (!lw || !lw.ok) { window.Migration.resume(); return fail("write", "library: " + ((lw && lw.error) || "library disk write failed")); }
+      var libBack; try { libBack = await getLibrary(); } catch (e) { window.Migration.resume(); return fail("verify", "library read-back threw: " + (e && e.message || e)); }
+      var lv = window.Migration.verifyLibrary(libJson, libBack);
+      if (!lv.ok) { window.Migration.resume(); return fail("verify", "library: " + lv.reason); }
+      log("verified " + lv.count + " library component(s) on disk");
+    }
+
     // 5. FLIP the flag, then a controlled reload. Saves stay suppressed through it;
-    // the fresh boot re-reads the on-disk registry and resets the guard.
+    // the fresh boot re-reads the on-disk registry (and library) and resets the guard.
     var setFlag = opts.setFlag || function (vv) { localStorage.setItem(STORAGE_BACKEND_KEY, vv); };
     setFlag("file");
     log("flag flipped to file; reloading under the migrated store");
@@ -17728,7 +18239,7 @@
   // reloads under the file store, so there is nothing more to report.
   function migrateToFileBackendPrompt() {
     confirmModal("Migrate to file storage",
-      "This first backs up EVERY course to a .verso, then moves storage from this browser to on-disk files and reloads. Your browser copy is kept as a read-only fallback. Continue?",
+      "This first backs up EVERY course to a .verso, then moves storage (including your shared component library) from this browser to on-disk files and reloads. Your browser copy is kept as a read-only fallback. Continue?",
       function () {
         migrateToFileBackend({}).then(function (res) {
           if (res && !res.ok) confirmModal("Migration stopped",
@@ -18079,6 +18590,16 @@
         ? window.resolveVersionForEdit(d, activeVersion)
         : (window.resolveVersion ? window.resolveVersion(d, activeVersion) : d);
     }
+    // #23: keep render.js's per-pass library-axis hook (window.__libraryAxisContext)
+    // in sync with the SAME effective keys this call just resolved, so a libraryInstance
+    // placement's master template resolves consistently with the rest of this render
+    // pass. Variant is never null (falls back to hero/identity, same as resolveAxis's
+    // own identity handling) so axis-tagged master content correctly filters even in
+    // flagship/base view; version is null when the doc carries no version axis at all.
+    window.__libraryAxisContext = {
+      variant: activeVariant || (d.heroVariant || "hero"),
+      version: activeVersion || (d.versions && d.versions[0]) || null
+    };
     return d;
   }
   function currentPages() { return currentDoc().pages; }
@@ -18914,6 +19435,7 @@
         items.push({ head: multiSel.length + " items selected" });
         if (canMergeTextBoxes(multiSel)) items.push({ label: "Merge text boxes", onClick: function () { mergeTextBoxes(); } });
         items.push({ label: "Group selection", onClick: function () { groupMulti(); } });
+        items.push({ label: "Save selection to library…", onClick: function () { saveSelectionAsSectionMaster(); } }); // #22 section master
         items.push({ sep: true });
         items.push({ label: "Delete " + multiSel.length + " items", danger: true, onClick: function () { deleteSelection(); } });
         showContextMenu(e.clientX, e.clientY, items);
@@ -18935,6 +19457,7 @@
           if (target.block.type === "group") {
             items.push({ label: "Ungroup", onClick: function () { ungroupBlock(target.block); } });
           }
+          items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(target.block); } });
           // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
           items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([target.block]); } });
           if (canSplitAtBlock(target.block)) {
