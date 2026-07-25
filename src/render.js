@@ -2636,8 +2636,63 @@
         wrap.appendChild(node);
       });
       return wrap;
+    },
+
+    // #20/#21: a live-linked mirror of a shared library master, placed inline in the page
+    // flow (distinct from componentGrid, whose instances live inside a grid of cards).
+    // doc override -> shared library -> built-in, same resolve order as componentGrid's
+    // resolveComponentDef -- so render bakes the master's CURRENT content at export
+    // time too, and editing the master propagates to every instance (single-source).
+    // Renders a cloneData() COPY of the master's template, never the live object: this
+    // is display-only (letting an editor click drill into a live LibraryStore/doc.components
+    // object would risk mutating the shared master in place). editor.css makes the nested
+    // subtree non-interactive on the authoring canvas (the outer instance stays selectable);
+    // #21's overrides are edited via the Inspector field list, not inline, so that guard
+    // never needs to make an exception. block.overrides ({fieldId: {text}}) is applied onto
+    // the CLONE before render -- fields whose id is no longer on the master are simply
+    // absent from the clone, so a stale override id is silently inert here (the editor's
+    // reconcileOverrides is what actually prunes + surfaces that to the author).
+    // KNOWN v1 LIMITATION: nested interaction/gate ids inside the template are the
+    // MASTER's stable ids (#19) and are not renamespaced per instance, so two mirrors of
+    // the same interactive master on one exported course can collide on data-id/cid
+    // targeting -- a future ticket, since #21 scoped reconciliation to text overrides only;
+    // today's only other single-source block (componentGrid cards) sidesteps this because
+    // its instances are flat slot-bound templates, not nested block trees.
+    libraryInstance: function (block) {
+      var docComps = (window.Editor && window.Editor.getDoc && window.Editor.getDoc().components);
+      var libComps = (window.LibraryStore && window.LibraryStore.components) || {};
+      var def = (docComps && docComps[block.ref]) || libComps[block.ref] || (window.COMPONENTS || {})[block.ref];
+      if (!def || !def.template) return el("div", "block-unknown", "[missing library component: " + block.ref + "]");
+      var content = cloneData(def.template);
+      // #23: resolve the master's OWN per-axis content (variant, then software-version)
+      // for the HOST course's current axis selection, BEFORE instance overrides -- an
+      // instance override is the most specific layer and always wins (see
+      // resolveLibraryAxisContent below for why this needs a per-pass hook at all).
+      content = resolveLibraryAxisContent(content, window.__libraryAxisContext);
+      if (block.overrides) applyInstanceOverrides(content, block.overrides);
+      var node = renderBlock(content);
+      // Editor-only marker (harmless, inert in the shipped course): scopes the
+      // non-interactive-nested-subtree rule in editor.css to library-instance wrappers.
+      node.setAttribute("data-library-instance", "1");
+      return node;
     }
   };
+  // #21: apply {fieldId: {text}} overrides onto a template CLONE in place, keyed to each
+  // node's stable id (#19) -- mirrors editor.js's walkTextBlocks descent (children /
+  // columns / items.children+front / hotspot screens) so every field collectOverridableTextFields
+  // lists in the Inspector is exactly the set this can reach.
+  function applyInstanceOverrides(node, overrides) {
+    if (!node || typeof node !== "object") return;
+    if (typeof node.id === "string" && overrides[node.id] && typeof overrides[node.id].text === "string") node.text = overrides[node.id].text;
+    if (Array.isArray(node.children)) node.children.forEach(function (c) { applyInstanceOverrides(c, overrides); });
+    if (Array.isArray(node.columns)) node.columns.forEach(function (col) { (col || []).forEach(function (c) { applyInstanceOverrides(c, overrides); }); });
+    if (Array.isArray(node.items)) node.items.forEach(function (it) { if (!it) return; if (Array.isArray(it.children)) it.children.forEach(function (c) { applyInstanceOverrides(c, overrides); }); if (Array.isArray(it.front)) it.front.forEach(function (c) { applyInstanceOverrides(c, overrides); }); });
+    if (Array.isArray(node.screens)) node.screens.forEach(function (s) { if (s && Array.isArray(s.markers)) s.markers.forEach(function (m) { if (m && Array.isArray(m.blocks)) m.blocks.forEach(function (c) { applyInstanceOverrides(c, overrides); }); }); });
+  }
+  // Exposed so editor.js's detachLibraryInstance can bake CURRENT overrides into the
+  // detached copy (what the author was actually seeing), instead of reverting to the
+  // master's raw un-overridden content -- one walk, reused rather than re-implemented.
+  window.applyInstanceOverrides = applyInstanceOverrides;
 
   function renderBlock(block) {
     var fn = BLOCKS[block.type];
@@ -2745,6 +2800,32 @@
     return (page.blocks || []).some(function (b) { return b.type === "spacer" && b.auto; });
   }
 
+  // #22: a PAGE master, resolved the same way #20's BLOCKS.libraryInstance resolves a
+  // block master -- live, from LibraryStore/doc.components, fetched fresh here (never at
+  // the doc-level axis pre-pass, since a page instance's content doesn't live in doc.pages
+  // at all). page.libraryRef is the master key; page.overrides is the SAME flat
+  // {fieldId:{text}} shape #21 already established (applyInstanceOverrides is reused
+  // verbatim, walking blocks the same way it walks a block's children). Axis content
+  // (#23) resolves per block too, same precedence (axis, then instance override).
+  // KNOWN, DISCLOSED v1 LIMITATION (see the #22 ticket/changelog): internal nav targets
+  // (navButton.goto, courseNav pageIds, componentGrid menu-card gotos) inside a page
+  // master's content are bare page-id strings and are NOT relinked when placed into a
+  // different course -- a goto pointing at another page inside the SAME captured unit (or
+  // anywhere else) resolves exactly as authored, which will usually dangle. There is no
+  // relinking machinery anywhere in this codebase to build on (unlike blocks' stable-id
+  // substrate, #19); solving it properly is out of this ticket's agreed scope.
+  function resolvePageLibraryContent(page) {
+    var docComps = (window.Editor && window.Editor.getDoc && window.Editor.getDoc().components);
+    var libComps = (window.LibraryStore && window.LibraryStore.components) || {};
+    var def = (docComps && docComps[page.libraryRef]) || libComps[page.libraryRef];
+    if (!def || !def.template || !Array.isArray(def.template.blocks)) return null;
+    return def.template.blocks.map(function (b) {
+      var content = cloneData(b);
+      content = resolveLibraryAxisContent(content, window.__libraryAxisContext);
+      if (page.overrides) applyInstanceOverrides(content, page.overrides);
+      return content;
+    });
+  }
   function buildPageSection(page) {
     var section = el("section", "page");
     // Auto vertical spacing is the DEFAULT: every page fills the viewport and
@@ -2759,7 +2840,14 @@
     // Pure: render only stamps the flag; runtime observes completion + disables Next.
     var __gp = page.gateInteractions;
     if (__gp === true || (__gp == null && window.__gateAllInteractions)) section.setAttribute("data-gate-page", "1");
-    (page.blocks || []).forEach(function (block) {
+    var blocks = page.libraryRef ? resolvePageLibraryContent(page) : (page.blocks || []);
+    if (page.libraryRef) {
+      // Editor-only marker (harmless, inert in the shipped course): scopes the same
+      // non-interactive-nested-subtree rule #20 uses, at page scope this time.
+      section.setAttribute("data-library-page-instance", "1");
+      if (!blocks) blocks = []; // missing master -> an empty (not broken) page
+    }
+    blocks.forEach(function (block) {
       var node = renderBlock(block);
       node.__block = block; // back-ref so the editor/outliner can map DOM <-> model
       section.appendChild(node);
@@ -3080,6 +3168,30 @@
     });
     return out;
   }
+
+  // #23: axis-owning library masters. resolveVariant/resolveVersion above walk a whole
+  // DOC via resolveAxis's doc-level orchestration -- but a libraryInstance's template is
+  // fetched fresh from LibraryStore/doc.components INSIDE the BLOCKS dispatch (by design,
+  // #20, so it's always the CURRENT master), after the doc-level axis pre-pass already
+  // ran over the WRAPPER block. So the master's own internal axis content (its nodes may
+  // carry the SAME node.overrides[variantKey] / node.versionOverrides[versionKey] dicts
+  // any other block already can, authored via the ordinary variant/version preview+edit
+  // flow on a ordinary block BEFORE it's captured into the library -- capture is a plain
+  // JSON clone, so those fields already survive it untouched, no new authoring UI needed)
+  // has to be resolved separately, right here, fed by a per-render-pass hook
+  // (window.__libraryAxisContext = {variant, version}) since render.js's axis functions
+  // are otherwise pure with no ambient "current key" concept. Callers (editor.js's
+  // currentDoc(), export.js's buildPackage()/serializeVersionedPages()) set the hook to
+  // the EFFECTIVE key (never null for variant -- always falls back to hero/identity, same
+  // as resolveAxis's own identity handling) immediately before each render pass.
+  function resolveLibraryAxisContent(node, axisCtx) {
+    axisCtx = axisCtx || {};
+    var out = node;
+    if (axisCtx.variant) out = resolveAxisNode(out, axisCtx.variant, VARIANT_AXIS);
+    if (axisCtx.version) out = resolveAxisNode(out, axisCtx.version, VERSION_AXIS);
+    return out;
+  }
+  window.resolveLibraryAxisContent = resolveLibraryAxisContent; // exposed for editor.js's detachLibraryInstance (#21's "bake what you see" principle applies here too)
 
   // Product-variant axis: build-time split (N packages). resolveVariant(doc, v) returns the
   // doc as it renders/exports for variant `v`. Hero is identity where nothing is tagged.
