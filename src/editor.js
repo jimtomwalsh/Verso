@@ -15984,6 +15984,9 @@
       if (!loc) return;
       doc.pages[loc.pi].blocks[loc.bi] = patch;
       try { reapplyStructural(loc.pi); } catch (e) { try { mount(); } catch (e2) {} } // re-render just that page (mount() if previewing)
+      // a remote block.change swaps the block OBJECT -> if the tour builder is open on that same
+      // block, its captured reference just went stale; re-bind it to the live doc (same guard as undo/setDoc).
+      if (typeof rebindTourBuilderToLiveDoc === "function") { try { rebindTourBuilderToLiveDoc(); } catch (e) {} }
       reproject();
     }
     function flushPending() {
