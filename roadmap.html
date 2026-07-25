@@ -265,7 +265,7 @@ const NODES = [
   { id:'b_hot',   dep:'b_text',  state:'shipped',  icon:'target',  label:'Hotspots & tours', blurb:'Interactive image hotspots and clickable software walkthroughs.' },
   { id:'b_slider',dep:'b_text',  state:'planned',  icon:'slider',  label:'Before/after',     blurb:'A draggable before/after image comparison slider.' },
   { id:'b_branch',dep:'b_text',  state:'planned',  icon:'branch',  label:'Branching',        blurb:'A choose-a-path scenario block with branching outcomes.' },
-  { id:'b_vid',   dep:'b_text',  state:'exploring',icon:'film',    label:'Tour from video',  blurb:'Turn a screen recording into a guided click-through, right inside the app.' },
+  { id:'b_vid',   dep:'b_hot',   state:'shipped',  icon:'film',    label:'Tour from video',  blurb:'Drop a screen recording on the tour board, scrub it, and harvest frames and trimmed clips (speed + ripple-cut) as tour screens — no external editor.' },
 
   /* variants (grow from Block contract) — Compare block lives here because it depends on variants */
   { id:'v_prod',  dep:'f_block', state:'shipped',  icon:'branch',  label:'Product variants', blurb:'One source course, many product versions from a thin override layer.' },
