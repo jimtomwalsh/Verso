@@ -9,6 +9,9 @@ that run in an LMS.
 Vanilla JavaScript, no build step, no dependencies. The editor opens straight
 from `file://` — it runs entirely on your own machine.
 
+> 🌳 **[See the Verso roadmap](roadmap.html)** — an at-a-glance map of what Verso does
+> today and where it's growing. (Open `roadmap.html` in a browser.)
+
 ## Two ways to run Verso
 
 - **Local / standalone (the default, shipping today).** One author, one machine.
