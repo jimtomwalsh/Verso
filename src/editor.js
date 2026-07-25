@@ -8089,8 +8089,13 @@
     var inMark = inOut ? inOut.in : src.in, outMark = inOut ? inOut.out : src.out;
     // speed preset: re-bake replays inOut.speed, a fresh bake reads src.speed (default 1x)
     var speed = (inOut && inOut.speed) || src.speed || 1;
-    if (tourSegRecording || !vid || !tourSegReady(inMark, outMark)) return;
+    // ripple cuts: re-bake replays inOut.cuts, a fresh bake reads src.cuts. The bake walks the
+    // KEPT ranges (T1) and splices them; the removed bands are never recorded.
+    var cuts = tourClipCutsToBounds(inOut ? inOut.cuts : src.cuts, inMark, outMark);
+    if (tourSegRecording || !vid || !tourSegReady(inMark, outMark, cuts)) return;
     if (typeof MediaRecorder === "undefined") return;
+    var kept = tourKeptRanges(inMark, outMark, cuts);
+    if (!kept.length) return;
     var r = tourCropRect(src.crop, vid.videoWidth || 1280, vid.videoHeight || 720);
     var cv = document.createElement("canvas"); cv.width = r.w; cv.height = r.h;
     var ctx = cv.getContext("2d");
@@ -8098,11 +8103,28 @@
     if (!stream) return;
     var mime = tourPickWebmMime(), rec;
     try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); } catch (_) { return; }
-    var chunks = [], raf = null, inPt = inMark, outPt = outMark;
+    var chunks = [], raf = null, inPt = inMark, outPt = outMark, pi = 0; // pi = index of the kept piece being captured
     function stopDraw() { if (raf) { cancelAnimationFrame(raf); raf = null; } try { vid.pause(); } catch (_) {} try { vid.playbackRate = 1; } catch (_) {} }
+    // Walk to the next kept piece: pause the recorder BEFORE the seek so the gap isn't captured,
+    // resume on `seeked` -> MediaRecorder splices the pieces with no frozen-frame smear.
+    function advance() {
+      pi++;
+      if (pi >= kept.length) { try { rec.stop(); } catch (_) {} return; } // all pieces captured
+      try { rec.pause(); } catch (_) {}
+      try { vid.pause(); } catch (_) {}
+      var onSeam = function () {
+        vid.removeEventListener("seeked", onSeam);
+        try { rec.resume(); } catch (_) {}
+        try { vid.playbackRate = speed; } catch (_) {}
+        vid.play().catch(function () {});
+        draw();
+      };
+      vid.addEventListener("seeked", onSeam);
+      try { vid.currentTime = kept[pi].in; } catch (_) { onSeam(); }
+    }
     function draw() {
       try { ctx.drawImage(vid, r.sx, r.sy, r.sw, r.sh, 0, 0, r.w, r.h); } catch (_) {}
-      if ((vid.currentTime || 0) >= outPt) { try { rec.stop(); } catch (_) {} return; }
+      if ((vid.currentTime || 0) >= kept[pi].out) { if (raf) { cancelAnimationFrame(raf); raf = null; } advance(); return; }
       raf = requestAnimationFrame(draw);
     }
     rec.ondataavailable = function (e) { if (e && e.data && e.data.size) chunks.push(e.data); };
@@ -8110,7 +8132,7 @@
       stopDraw();
       var blob = new Blob(chunks, { type: mime || "video/webm" });
       var fr = new FileReader();
-      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace, speed); };
+      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace, speed, cuts); };
       fr.onerror = function () { tourSegRecording = false; };
       fr.readAsDataURL(blob);
     };
@@ -8123,19 +8145,20 @@
       draw();
     };
     vid.addEventListener("seeked", onSeeked);
-    try { vid.currentTime = inPt; } catch (_) { onSeeked(); }
+    try { vid.currentTime = kept[0].in; } catch (_) { onSeeked(); }
   }
-  function tourFinishSegment(src, dataUrl, inPt, outPt, replace, speed) {
+  function tourFinishSegment(src, dataUrl, inPt, outPt, replace, speed, cuts) {
     tourSegRecording = false;
     if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) return;
     var sp = tourSpeedField(speed); // 1x = default -> omit (clean provenance, ignored by render)
+    var cx = (Array.isArray(cuts) && cuts.length) ? cuts.map(function (c) { return { start: c.start, end: c.end }; }) : null;
     pushHistory();
     var label0 = (src.name ? src.name + " " : "") + tourFormatTime(inPt) + "-" + tourFormatTime(outPt);
     // RE-BAKE: replace an existing screen's clip in place -> id + markers/nav survive.
     if (replace) {
       replace.visual = assetRef(dataUrl, { type: "video/webm", name: label0 });
       replace.kind = "video"; if (!replace.playback) replace.playback = "once";
-      replace.source = { id: src.id, in: inPt, out: outPt }; if (sp) replace.source.speed = sp;
+      replace.source = { id: src.id, in: inPt, out: outPt }; if (sp) replace.source.speed = sp; if (cx) replace.source.cuts = cx;
       tourSelKind = "node"; hotspotEditScreenId = replace.id; hotspotEditId = null; tourLoopSel = null;
       scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
       return;
@@ -8151,6 +8174,7 @@
       source: { id: src.id, in: inPt, out: outPt } // provenance -> re-cut (tick 6)
     };
     if (sp) scr.source.speed = sp;
+    if (cx) scr.source.cuts = cx;
     scr.name = label;
     tourBlock.screens.push(scr);
     tourSelKind = "node"; hotspotEditScreenId = sid; hotspotEditId = null; tourLoopSel = null;
@@ -8165,7 +8189,7 @@
     var src = tourSourceById(s.source.id); if (!src) return; // source gone -> nothing to re-bake from
     var vid = (tourUI && tourUI.sources) ? tourUI.sources.querySelector('.tourb-source[data-source-id="' + src.id + '"] video') : null;
     if (!vid || !vid.videoWidth) return;
-    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out, speed: s.source.speed }); return; }
+    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out, speed: s.source.speed, cuts: s.source.cuts }); return; }
     var t = s.source.t || 0;
     var grab = function () { tourHarvestScreenshot(src, vid, s); };
     if (Math.abs((vid.currentTime || 0) - t) < 0.06) { grab(); return; }
