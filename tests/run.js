@@ -2425,6 +2425,27 @@ section("YY asset-seam");
   ok("migrate success->ref", md.pages[0].blocks[0].src === "asset:hoisted");
   ok("migrate fail keeps data:", md.pages[0].blocks[1].src === "data:img,FAILME");
 
+  // Hotspot tour SOURCE videos (author-time harvest scratch) must never ship: a `sources`
+  // container is SKIPPED by eachMediaSlot, so resolveMedia (used by BOTH the editor pre-pass
+  // and the export bake) leaves it untouched -> no media/<id> file, no inline base64 in export.
+  // But collectAssetRefs (garbage-collection) MUST still keep it, so a persisted source survives
+  // the unload mark-sweep and is there next time the tour builder opens.
+  var sdoc = { pages: [{ blocks: [
+    { type: "hotspot", screens: [{ visual: "asset:SCR" }], sources: [{ id: "src1", visual: "asset:SRCVID" }] }
+  ] }] };
+  var sres = [];
+  var srestore = rw.resolveMedia(sdoc, function (id) { sres.push(id); return "URL:" + id; });
+  ok("source excluded from resolve (render+export)", sres.indexOf("SRCVID") === -1 && sres.indexOf("SCR") !== -1);
+  ok("source ref left intact by resolve", sdoc.pages[0].blocks[0].sources[0].visual === "asset:SRCVID");
+  srestore();
+  ok("source KEPT for GC (persists across sessions)", rw.collectAssetRefs(sdoc).sort().join(",") === "SCR,SRCVID");
+
+  // A harvested screen carries provenance `source:{id,t}` (which source frame it came from).
+  // That's inert data (id string + number) — it must add NO asset ref (no export/GC impact);
+  // only the screen's own visual counts.
+  var pdoc = { pages: [{ blocks: [{ type: "hotspot", screens: [{ visual: "asset:PV", source: { id: "src-x", t: 5 } }] }] }] };
+  ok("harvest provenance source:{id,t} is inert (no asset ref)", rw.collectAssetRefs(pdoc).join(",") === "PV");
+
   // embed-html hoist (quota/data-loss reroute): raw htmlEmbed markup must leave
   // the doc JSON as an "asset:<id>" ref; already-ref/URL html + non-embeds untouched;
   // a failed put is left raw (non-destructive); round-trips back to raw via resolveEmbedHtml.
@@ -2468,6 +2489,36 @@ section("YY asset-seam");
   failNext = false;
   AS.sweep([svg]);
   ok("sweep removes unref", !AS.has(id) && AS.has(svg));
+})();
+
+// ---- tour source MediaTransport: pure time/mark helpers ------------------
+section("tour media transport (pure)");
+(function () {
+  var etxt = src("src/editor.js");
+  var a = etxt.indexOf("/* __TOUR_MEDIA_PURE__ start");
+  var b = etxt.indexOf("/* __TOUR_MEDIA_PURE__ end");
+  if (a < 0 || b < 0) { ok("tour media pure block present", false); return; }
+  var block = etxt.slice(etxt.indexOf("\n", a) + 1, b);
+  var api = new Function(block + "; return { fmt: tourFormatTime, mark: tourApplyMark, crop: tourCropRect, segReady: tourSegReady };")();
+  ok("fmt 0 -> 0:00", api.fmt(0) === "0:00");
+  ok("fmt 65 -> 1:05", api.fmt(65) === "1:05");
+  ok("fmt neg -> 0:00", api.fmt(-5) === "0:00");
+  var r1 = api.mark("in", 3, {});
+  ok("mark in", r1.in === 3 && r1.out == null);
+  var r2 = api.mark("out", 10, r1);
+  ok("mark out keeps valid in", r2.in === 3 && r2.out === 10);
+  ok("out<=in drops the in", (function () { var r = api.mark("out", 2, r2); return r.in == null && r.out === 2; })());
+  ok("in>=out drops the out", (function () { var r = api.mark("in", 20, { in: 3, out: 10 }); return r.in === 20 && r.out == null; })());
+  // crop rect: no crop = full frame; a normalised crop maps to source-px + output dims;
+  // clamped in-bounds; all harvests from one crop share the same output W x H.
+  ok("cropRect null = full frame", (function () { var r = api.crop(null, 1920, 1080); return r.sx === 0 && r.sy === 0 && r.sw === 1920 && r.sh === 1080 && r.w === 1920 && r.h === 1080; })());
+  ok("cropRect half", (function () { var r = api.crop({ x: 0.25, y: 0.5, w: 0.5, h: 0.5 }, 1920, 1080); return r.sx === 480 && r.sy === 540 && r.w === 960 && r.h === 540; })());
+  ok("cropRect clamps out-of-bounds", (function () { var r = api.crop({ x: 0.8, y: 0, w: 0.5, h: 1 }, 1000, 1000); return r.sx === 800 && r.w === 200; })());
+  ok("cropRect two harvests same size", (function () { var a = api.crop({ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }, 1280, 720), b = api.crop({ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }, 1280, 720); return a.w === b.w && a.h === b.h; })());
+  // segment gate: needs both ends marked and in < out
+  ok("segReady both + in<out", api.segReady(2, 8) === true);
+  ok("segReady needs both", api.segReady(2, null) === false && api.segReady(null, 8) === false);
+  ok("segReady rejects out<=in", api.segReady(8, 2) === false && api.segReady(5, 5) === false);
 })();
 
 // ---- assetSrc resolver hook ----------------------------------------------
@@ -5333,8 +5384,14 @@ section("richer bullet lists");
   ok("css custom-glyph ::before markers", /\[data-list-marker="custom"\] li::before \{ content: var\(--li-marker/.test(css));
   ok("css applies to inline lists in any field", /\.body-copy ul, \.body-copy ol/.test(css));
   ok("css nested levels distinct markers", /\.body-list ul ul, \.body-copy ul ul ul \{ list-style-type: square/.test(css));
-  ok("editor list is a single on/off switch (no doubled ul/ol pair)", /switchRow\("List", listOn,/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
-  ok("editor list marker controls only render when the list is on", /if \(listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  // #9: List is a single inline-format toggle BUTTON in the B/I/U/Link bar (was a switchEl).
+  ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
+  ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
+  ok("editor list marker controls render when the list is on OR the field root is a list", /if \(rootIsList \|\| listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
+  // detect it, drop the meaningless on/off toggle, and always surface the marker settings.
+  ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
+  ok("editor hides the List toggle for a root-list field", /if \(!rootIsList\) \{\s*var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e));
   ok("editor list off-branch clears both ul and ol", /queryCommandState\("insertOrderedList"\)\) document\.execCommand\("insertOrderedList"[\s\S]*?queryCommandState\("insertUnorderedList"\)\) document\.execCommand\("insertUnorderedList"/.test(e));
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
@@ -5383,7 +5440,10 @@ section("list discoverability + spacing");
   var e = src("src/editor.js");
   ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
-  ok("List folded into the Type section (sub) drives inline lists", /inspector\.appendChild\(sub\("List"\)\);[\s\S]*?insertUnorderedList/.test(e));
+  // #9: the List TOGGLE folds into the inline-format bar; the sub("List") header now heads
+  // only the marker-settings section, shown when the field is a list (rootIsList || listOn).
+  ok("List toggle folded into the inline-format bar (prop-toggle) drives inline lists", /var listB = h\("button", "prop-toggle prop-toggle--icon"[\s\S]*?document\.execCommand\("insertUnorderedList"/.test(e));
+  ok("List marker section is gated on rootIsList || listOn() and headed by sub(List)", /if \(rootIsList \|\| listOn\(\)\) \{\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
   ok("no paragraph<->list block-type conversion", !/textBlockToList/.test(e) && !/function listToTextBlock/.test(e));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();

@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Verso Roadmap</title>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  THE VERSO ROADMAP  ·  a skill-tree map of what Verso is and where it's going.
+  Inspired by Up Bank's "Tree of Up": dark, near-monochrome, nodes wired to
+  their prerequisites so you can trace a path from the roots up to the canopy.
+
+  ── HOW TO UPDATE ──────────────────────────────────────────────────────────
+  Everything is generated from the NODES list in the <script> below. Edit that
+  list; the page redraws itself. No build step, no dependencies, works offline.
+
+  A NODE:
+      { id:'x_pdf', dep:'f_scorm', state:'planned', icon:'file',
+        label:'PDF export', blurb:'One plain-English sentence.' }
+
+    · id     unique short string (referenced by other nodes' `dep`)
+    · dep    the id of its ONE nearest prerequisite ('' for the root). This is the
+             whole model: the page lays the tree out from `dep`, so you never place
+             coordinates. A line = "you couldn't build this before its parent."
+             Siblings (same dep, no line between) are parallel/independent.
+    · state  shipped | building | planned | exploring  (shown by node style, NOT position)
+    · icon   a key from the ICONS set below (monochrome line icon — NO emoji)
+    · label  1–3 words, no jargon, no ticket numbers
+    · blurb  ONE sentence shown on hover/tap.
+
+  GOVERNANCE: only curated, EPIC-level capabilities a non-technical person
+  would care about. Bugs / tweaks / tech-debt NEVER appear — they stay in the
+  tracker/backlog (the source of truth). Cut something? Delete the node. No
+  tombstones.
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<style>
+  :root { --accent:#3aa0ff; --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Inter",Helvetica,Arial,sans-serif; }
+
+  html[data-theme="dark"] {
+    --bg-0:#0a0a0b; --bg-1:#101012; --bg-2:#0c0c0e;
+    --ink:#ededed; --ink-2:#8c8c92; --ink-3:#5a5a60;
+    --disc-fill:#17171a; --stroke-ship:#585860; --stroke-plan:#3d3d44; --stroke-explore:#2f2f35;
+    --link:#3a3a40; --link-faint:#2a2a2f; --panel:#141417; --panel-brd:rgba(255,255,255,.08); --chip:#0b0b0d;
+  }
+  html[data-theme="light"] {
+    --bg-0:#e9e9ec; --bg-1:#f4f4f6; --bg-2:#e4e4e8;
+    --ink:#1a1a1e; --ink-2:#5f5f68; --ink-3:#9a9aa2;
+    --disc-fill:#ffffff; --stroke-ship:#9a9aa2; --stroke-plan:#c2c2c8; --stroke-explore:#d2d2d8;
+    --link:#c4c4cc; --link-faint:#d6d6dc; --panel:#ffffff; --panel-brd:rgba(0,0,0,.08); --chip:#eaeaee;
+  }
+
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body {
+    font-family:var(--font-ui); color:var(--ink);
+    background:radial-gradient(130% 90% at 50% 4%, var(--bg-1), var(--bg-2) 55%, var(--bg-0) 100%) fixed;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+  }
+
+  /* header — title/description/legend anchored top-left, theme toggle top-right */
+  header { position:relative; max-width:none; margin:0; padding:22px 30px 12px; }
+  .brand { display:flex; align-items:center; gap:11px; }
+  .brand h1 { margin:0; font-size:19px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; }
+  .brand .mark { color:var(--ink-2); }
+  .tag { margin:11px 0 0; color:var(--ink-2); font-size:13.5px; max-width:600px; line-height:1.6; }
+
+  .legend { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:14px; }
+  .legend .key { display:inline-flex; align-items:center; gap:8px; font-size:11.5px; letter-spacing:.04em;
+                 text-transform:uppercase; color:var(--ink-2); }
+  .lg { width:15px; height:15px; border-radius:50%; flex:none; }
+  .lg.shipped   { background:var(--disc-fill); border:1.5px solid var(--stroke-ship); }
+  .lg.shipped::after { content:""; display:block; width:5px; height:5px; border-radius:50%; background:var(--ink); margin:3.5px auto; }
+  .lg.building  { background:var(--disc-fill); border:1.5px solid var(--accent); box-shadow:0 0 7px -1px var(--accent); }
+  .lg.planned   { background:transparent; border:1.5px solid var(--stroke-plan); }
+  .lg.exploring { background:transparent; border:1.5px dashed var(--stroke-explore); }
+
+  .theme-toggle { position:absolute; top:22px; right:30px; z-index:5;
+    display:inline-flex; align-items:center; gap:8px; cursor:pointer; background:var(--panel);
+    border:1px solid var(--panel-brd); color:var(--ink-2); border-radius:8px; padding:7px 12px;
+    font:inherit; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; }
+  .theme-toggle:hover { color:var(--ink); }
+  .theme-toggle svg { width:14px; height:14px; }
+
+  /* zoomable viewport — full-bleed; starts fit-to-width; drag to pan, scroll/± to zoom */
+  .stage { margin:6px 0 0; padding:0; }
+  .viewport { position:relative; width:100%; height:calc(100vh - 168px); min-height:460px; overflow:hidden;
+    border-top:1px solid var(--panel-brd); cursor:grab; touch-action:none;
+    background:radial-gradient(120% 90% at 50% 0%, var(--bg-1), var(--bg-2) 55%, var(--bg-0) 100%); }
+  .viewport.grabbing { cursor:grabbing; }
+  .canvas { position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform; } /* size + transform via JS */
+  #links { position:absolute; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; overflow:visible; }
+  .zoombar { position:absolute; right:14px; bottom:14px; z-index:20; display:flex; gap:6px; }
+  .zoombar button { width:32px; height:32px; border-radius:8px; background:var(--panel); border:1px solid var(--panel-brd);
+    color:var(--ink-2); font:inherit; font-size:16px; line-height:1; cursor:pointer; display:grid; place-items:center; }
+  .zoombar button:hover { color:var(--ink); border-color:var(--border-strong); }
+  .hint { position:absolute; left:16px; bottom:16px; z-index:20; color:var(--ink-3); font-size:11px;
+    letter-spacing:.03em; pointer-events:none; }
+  /* category header (title grouping) */
+  .cathdr { position:absolute; transform:translateX(-50%); z-index:3; pointer-events:none;
+    font-size:11px; font-weight:650; letter-spacing:.13em; text-transform:uppercase; color:var(--ink);
+    white-space:nowrap; }
+
+  .node { position:absolute; transform:translate(-50%,-50%); z-index:2;
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    background:none; border:0; padding:0; cursor:default; font:inherit; }
+  .disc { width:48px; height:48px; border-radius:50%; display:grid; place-items:center;
+    background:var(--disc-fill); border:1.6px solid var(--stroke-ship); color:var(--ink);
+    transition:transform .16s, box-shadow .16s, border-color .16s; }
+  .disc svg { width:22px; height:22px; }
+  .cap { font-size:10px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-2);
+    text-align:center; max-width:84px; line-height:1.25;
+    background:var(--chip); padding:2px 6px; border-radius:5px; } /* chip occludes any line behind the label */
+
+  .node[data-state="shipped"]   .cap { color:var(--ink); }
+  .node[data-state="building"]  .disc { border-color:var(--accent); color:var(--accent); box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 12%,transparent), 0 0 16px -2px var(--accent); }
+  .node[data-state="building"]  .cap { color:var(--accent); }
+  .node[data-state="planned"]   .disc { background:transparent; border-color:var(--stroke-plan); color:var(--ink-2); }
+  .node[data-state="exploring"] .disc { background:transparent; border-style:dashed; border-color:var(--stroke-explore); color:var(--ink-3); }
+  .node[data-state="exploring"] .cap { color:var(--ink-3); }
+
+  .node:hover .disc, .node:focus-visible .disc { transform:translateY(-2px); border-color:var(--ink); outline:none; }
+  .node[data-state="building"]:hover .disc { border-color:var(--accent); }
+
+  /* tooltip */
+  .blurb { position:absolute; bottom:calc(100% + 10px); left:50%; transform:translateX(-50%) translateY(4px);
+    width:210px; background:var(--panel); color:var(--ink); border:1px solid var(--panel-brd);
+    border-radius:9px; padding:9px 11px; font-size:12px; line-height:1.5; text-transform:none; letter-spacing:0;
+    box-shadow:0 12px 34px rgba(0,0,0,.45); opacity:0; pointer-events:none; transition:opacity .14s, transform .14s; z-index:9; }
+  .blurb b { font-weight:600; }
+  .blurb::after { content:""; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+    border:6px solid transparent; border-top-color:var(--panel); }
+  .node:hover .blurb, .node:focus-within .blurb, .node:focus-visible .blurb { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .zone { position:absolute; left:26px; z-index:2; font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-3); pointer-events:none; }
+
+  .foot { max-width:1120px; margin:0 auto; padding:8px 26px 60px; color:var(--ink-3); font-size:11.5px; line-height:1.7; }
+  .foot a { color:var(--ink-2); }
+</style>
+</head>
+<body>
+  <header>
+    <button class="theme-toggle" id="themeBtn" type="button"><span id="themeIco"></span><span id="themeLbl">Light</span></button>
+    <div class="brand"><span class="mark" id="brandMark"></span><h1>The Verso Roadmap</h1></div>
+    <p class="tag">A map of what Verso does today and where it's growing, grouped by capability area. <b>Drag to pan, scroll to zoom in, hover a node for detail.</b></p>
+    <div class="legend" aria-label="Legend">
+      <span class="key"><span class="lg shipped"></span>Shipped</span>
+      <span class="key"><span class="lg building"></span>Building now</span>
+      <span class="key"><span class="lg planned"></span>Planned</span>
+      <span class="key"><span class="lg exploring"></span>Exploring</span>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="viewport" id="viewport">
+      <div class="canvas" id="canvas">
+        <svg id="links" aria-hidden="true"></svg>
+      </div>
+      <div class="zoombar">
+        <button id="zout" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+        <button id="zfit" type="button" title="Fit to width" aria-label="Fit to width">⤢</button>
+        <button id="zin" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+      </div>
+      <div class="hint">Drag to pan · scroll or ± to zoom</div>
+    </div>
+  </div>
+
+  <p class="foot">
+    A curated, high-level picture — not a promise of dates or a complete task list. Plans in the upper canopy may change.
+    Verso is free and open source (Apache-2.0). Found a bug or have an idea? Open an issue on the
+    <a href="https://github.com/jimtomwalsh/Verso">project tracker</a>.
+  </p>
+
+<script>
+/* ═════════ monochrome line icons (24×24, stroke = currentColor) ═════════ */
+const ICONS = {
+  lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  layers:'<path d="M12 4 4 8l8 4 8-4-8-4Z"/><path d="M4 12l8 4 8-4"/>',
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+  box:'<path d="M12 3 4 7v10l8 4 8-4V7l-8-4Z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
+  save:'<path d="M5 4h11l3 3v13H5V4Z"/><path d="M8 4v5h7M8 20v-6h8v6"/>',
+  cursor:'<path d="M6 4l13 6.5-5.5 1.8L11.5 20 6 4Z"/>',
+  list:'<path d="M8 6h11M8 12h11M8 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  download:'<path d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14"/>',
+  eye:'<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/>',
+  check:'<path d="M4 12l5 5L20 6"/>',
+  checkbox:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/>',
+  type:'<path d="M5 6h14M12 6v13M9 19h6"/>',
+  font:'<path d="M4 18l4-11 4 11M5 14.5h6"/><path d="M14 18l2.4-7 2.4 7M14.7 15.3h3.4"/>',
+  columns:'<rect x="4" y="5" width="6" height="14" rx="1"/><rect x="14" y="5" width="6" height="14" rx="1"/>',
+  target:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  film:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 10h16M9 5v14M15 5v14"/>',
+  slider:'<rect x="3" y="10" width="18" height="4" rx="2"/><circle cx="14" cy="12" r="3.4" fill="currentColor" stroke="none"/>',
+  compare:'<rect x="3" y="6" width="7" height="12" rx="1"/><rect x="14" y="6" width="7" height="12" rx="1"/><path d="M10.5 12h3"/>',
+  contrast:'<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" stroke="none"/>',
+  brush:'<path d="M4 20c2-.5 3-2.5 3-4.5l7-7 3 3-7 7c-2 0-4 1-4.5 3Z"/><path d="M14 6l4 4"/>',
+  flag:'<path d="M6 4v16"/><path d="M6 5h11l-2.2 4L17 13H6"/>',
+  component:'<rect x="3.5" y="3.5" width="9" height="9" rx="1"/><rect x="11.5" y="11.5" width="9" height="9" rx="1"/>',
+  branch:'<circle cx="6.5" cy="6" r="2"/><circle cx="6.5" cy="18" r="2"/><circle cx="17.5" cy="9" r="2"/><path d="M6.5 8v8M6.5 12h5a4 4 0 0 0 4-4"/>',
+  compass:'<circle cx="12" cy="12" r="8"/><path d="M15.5 8.5l-2.2 4.8-4.8 2.2 2.2-4.8 4.8-2.2Z" fill="currentColor" stroke="none"/>',
+  pencil:'<path d="M4 20l1.2-4.2 10-10 3 3-10 10L4 20Z"/><path d="M13.5 6.5l3 3"/>',
+  message:'<path d="M4 5h16v11H9l-5 4V5Z"/>',
+  link:'<path d="M9.5 14.5l5-5"/><path d="M8 12l-1.8 1.8a3 3 0 0 0 4.2 4.2L12 16M16 12l1.8-1.8a3 3 0 0 0-4.2-4.2L12 8"/>',
+  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.2 3-5 6-5s6 1.8 6 5"/><path d="M16 5.5a3 3 0 0 1 0 6M21 20c0-2.2-1.2-3.8-3.2-4.6"/>',
+  idcard:'<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="11" r="2"/><path d="M5.5 16.5c.4-1.6 1.7-2.3 3-2.3s2.6.7 3 2.3M14 9.5h4M14 12.5h4M14 15.5h2.6"/>',
+  file:'<path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v4h4"/>',
+  filetext:'<path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v4h4M9 13h6M9 16h5"/>',
+  monitor:'<rect x="3" y="5" width="18" height="11" rx="2"/><path d="M9 20h6M12 16v4"/>',
+  book:'<path d="M5 4h9a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V4Z"/><path d="M16 4h3v14M8 8h5M8 11h5"/>',
+  database:'<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
+  sprout:'<path d="M12 20v-8M12 12c0-3-2-5-6-5 0 4 2.5 5 6 5ZM12 13c0-3 2-5 6-5 0 4-2.5 5-6 5Z"/>',
+  toggle:'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/>',
+};
+const ico = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]||''}</svg>`;
+
+/* ═════════ ROADMAP DATA — edit this list to update the tree ═════════ */
+/* MODEL: a strict DEPENDENCY TREE. Every node names its ONE nearest prerequisite
+   in `dep` (the root names none). The page computes a tidy-tree layout from that —
+   which is PLANAR BY CONSTRUCTION: edges only ever span the gap between two layers,
+   so they never cross each other and never run through a node, and a whole subtree
+   stays together as a cluster. Position encodes WHAT A THING GROWS FROM, not when
+   it ships; state is shown by node style only. Two nodes under the same parent with
+   NO line between them are independent/parallel; a chain of lines is a real
+   build-before-next sequence. See ROADMAP-RULES.md. To add: give it a `dep` and the
+   layout re-flows — no coordinates to place. Child order below = left→right order. */
+const NODES = [
+  /* root */
+  { id:'f_local', dep:'',        state:'shipped',  icon:'lock',    label:'Local-first',      blurb:'Runs entirely on your own machine — no server, no cloud, no tracking.' },
+
+  /* foundation */
+  { id:'f_render',dep:'f_local', state:'shipped',  icon:'layers',  label:'Pure render',      blurb:'What you see in the editor is exactly what learners get — one honest render.' },
+  { id:'f_block', dep:'f_local', state:'shipped',  icon:'grid',    label:'Block contract',   blurb:'Every content block follows one consistent structure, so the library grows cleanly.' },
+  { id:'f_scorm', dep:'f_local', state:'shipped',  icon:'box',     label:'SCORM export',     blurb:'Publishes a self-contained package that runs offline in any standard LMS.' },
+
+  /* export cluster (grows from SCORM) */
+  { id:'f_port',  dep:'f_scorm', state:'shipped',  icon:'save',    label:'Portable files',   blurb:'Back up or move an entire course as a single file — no lock-in.' },
+  { id:'x_pdf',   dep:'f_scorm', state:'planned',  icon:'file',    label:'PDF export',       blurb:'Export a print-ready PDF snapshot of a course.' },
+
+  /* authoring (grows from Pure render) */
+  { id:'a_canvas',dep:'f_render',state:'shipped',  icon:'cursor',  label:'Canvas editor',    blurb:'Build pages visually by dropping blocks onto a canvas.' },
+  { id:'a_struct',dep:'a_canvas',state:'shipped',  icon:'list',    label:'Chapters & pages', blurb:'Organise a course into chapters and pages with a live outline.' },
+  { id:'a_csv',   dep:'a_canvas',state:'shipped',  icon:'download',label:'CSV import',       blurb:'Bulk-build pages, blocks and quizzes from a spreadsheet.' },
+  { id:'a_prev',  dep:'a_canvas',state:'shipped',  icon:'eye',     label:'Live preview',     blurb:'See the exact learner experience at any moment while you build.' },
+  { id:'a_spell', dep:'a_canvas',state:'shipped',  icon:'check',   label:'Spellcheck',       blurb:'Built-in, offline spellchecking as you write.' },
+
+  /* design & theming (grows from Pure render) */
+  { id:'d_theme', dep:'f_render',state:'shipped',  icon:'contrast',label:'Light & dark',     blurb:'Author colours once; learners get a light/dark toggle.' },
+  { id:'d_style', dep:'d_theme', state:'shipped',  icon:'brush',   label:'Saved styles',     blurb:'Reusable named text styles — edit once, update everywhere.' },
+  { id:'d_font',  dep:'d_theme', state:'shipped',  icon:'font',    label:'Custom fonts',     blurb:'Bring your own fonts, embedded so exports stay offline-safe.' },
+  { id:'d_brand', dep:'d_theme', state:'shipped',  icon:'flag',    label:'Branding',         blurb:'Header, footer, logo, glossary and learner navigation.' },
+  { id:'d_comp',  dep:'d_brand', state:'building', icon:'component',label:'Component library',blurb:'Reusable master components — change the master and every copy updates.' },
+
+  /* multi-format / CCMS cluster (grows from Component library) */
+  { id:'x_single',dep:'d_comp',  state:'exploring',icon:'database',label:'Single-source',    blurb:'Write once; publish course, deck, guide and PDF from one shared content pool.' },
+  { id:'x_paged', dep:'x_single',state:'exploring',icon:'filetext',label:'Document mode',    blurb:'Paged layouts with headers, footers and page numbers.' },
+  { id:'x_pres',  dep:'x_single',state:'exploring',icon:'monitor', label:'Presentations',    blurb:'Author 16:9 slide decks from the same content.' },
+  { id:'x_guide', dep:'x_pres',  state:'exploring',icon:'book',    label:'Facilitator guides',blurb:'Generate a facilitator guide bound to a presentation.' },
+
+  /* content blocks (grow from Text & media) — layout/checks/hotspots + upcoming are all parallel */
+  { id:'b_text',  dep:'f_block', state:'shipped',  icon:'type',    label:'Text & media',     blurb:'Headings, text, images, video, quotes and callouts.' },
+  { id:'b_layout',dep:'b_text',  state:'shipped',  icon:'columns', label:'Layout blocks',    blurb:'Columns, cards, tables, tabs, accordions and carousels.' },
+  { id:'b_kc',    dep:'b_text',  state:'shipped',  icon:'checkbox',label:'Knowledge checks', blurb:'Quizzes with instant feedback to check understanding.' },
+  { id:'b_hot',   dep:'b_text',  state:'shipped',  icon:'target',  label:'Hotspots & tours', blurb:'Interactive image hotspots and clickable software walkthroughs.' },
+  { id:'b_slider',dep:'b_text',  state:'planned',  icon:'slider',  label:'Before/after',     blurb:'A draggable before/after image comparison slider.' },
+  { id:'b_branch',dep:'b_text',  state:'planned',  icon:'branch',  label:'Branching',        blurb:'A choose-a-path scenario block with branching outcomes.' },
+  { id:'b_vid',   dep:'b_text',  state:'exploring',icon:'film',    label:'Tour from video',  blurb:'Turn a screen recording into a guided click-through, right inside the app.' },
+
+  /* variants (grow from Block contract) — Compare block lives here because it depends on variants */
+  { id:'v_prod',  dep:'f_block', state:'shipped',  icon:'branch',  label:'Product variants', blurb:'One source course, many product versions from a thin override layer.' },
+  { id:'v_copy',  dep:'v_prod',  state:'shipped',  icon:'pencil',  label:'Copy editor',      blurb:'Compare and edit variant wording side by side.' },
+  { id:'v_ver',   dep:'v_prod',  state:'shipped',  icon:'compass', label:'Version axis',     blurb:'Switch content by software version alongside product variant.' },
+  { id:'b_compare',dep:'v_prod', state:'planned',  icon:'compare', label:'Compare block',    blurb:'A spec/feature comparison table bound to your product variants.' },
+
+  /* review & collaboration (grows from Block contract) — a genuine sequence */
+  { id:'c_comment',dep:'f_block',state:'shipped',  icon:'message', label:'Comment mode',     blurb:'Pin threaded comments to any block; they never ship to learners.' },
+  { id:'c_viewer', dep:'c_comment',state:'shipped',icon:'link',    label:'Verso Viewer',     blurb:'Share a read-only snapshot; reviewers comment back and it merges in.' },
+  { id:'c_live',   dep:'c_viewer', state:'building',icon:'users',  label:'Live co-authoring',blurb:'Several authors in one course at once, with presence and block-locking.' },
+  { id:'c_acct',   dep:'c_live',   state:'planned',icon:'idcard',  label:'Accounts & links', blurb:'Sign-in, roles, single sign-on and shareable review links.' },
+];
+
+/* ═════════ category-column layout + fan + pan/zoom (no need to edit below) ═════════ */
+const viewport = document.getElementById('viewport');
+const canvas = document.getElementById('canvas');
+const svg = document.getElementById('links');
+
+/* build the tree */
+const kids = {};
+NODES.forEach(n=>{ if(n.dep){ (kids[n.dep]=kids[n.dep]||[]).push(n.id); } });
+const rootId = (NODES.find(n=>!n.dep) || NODES[0]).id;
+const size = {};
+(function sz(id){ let s=1; (kids[id]||[]).forEach(c=>{ sz(c); s+=size[c]; }); size[id]=s; })(rootId);
+
+/* Foundation = the hub (root) + its direct children. Everything else groups into
+   CATEGORY COLUMNS that fan down from the foundation. Within a category, a fishbone:
+   the longest branch is a straight vertical spine, other branches rib off to the
+   right. Categories are packed side-by-side — the map is deliberately WIDE and starts
+   zoomed-to-fit; you pan/zoom in for detail. Planar: no line crosses another. */
+const trunkChildren = kids[rootId] || [];               // f_render, f_block, f_scorm
+const trunk = new Set([rootId, ...trunkChildren]);
+
+function fishbone(hub){
+  const lc={}, lr={}; let cur=0;
+  (function place(id,col){
+    const cs = kids[id] || [];
+    let pi=-1; cs.forEach((c,i)=>{ if(pi<0 || size[c] > size[cs[pi]]) pi=i; });
+    lc[id]=col; lr[id]=cur++;
+    cs.forEach((c,i)=>{ if(i!==pi) place(c,col+1); });    // ribs right, stacked
+    if(pi>=0) place(cs[pi],col);                          // spine continues down
+  })(hub,0);
+  return { lc, lr, w: Math.max(0,...Object.values(lc))+1, h: cur };
+}
+
+/* category = each non-foundation child of a foundation node, in order */
+const cats = [];
+trunkChildren.forEach(f=>{
+  (kids[f]||[]).forEach(ch=>{ if(!trunk.has(ch)) cats.push(Object.assign({ parent:f, root:ch }, fishbone(ch))); });
+});
+
+const CAT_LABEL = { a_canvas:'Authoring', d_theme:'Design & Theming', b_text:'Content Blocks',
+  v_prod:'Variants', c_comment:'Review & Collab', f_port:'Export' };
+
+const COLW=146, ROWH=94, PADX=80, PADY=44, GAP=0.7, CAT_TOP=3.0;
+let gx=0; cats.forEach(cat=>{ cat.gx=gx; gx += cat.w + GAP; });
+const totalCols = Math.max(1, gx - GAP);
+
+const POS = {};
+cats.forEach(cat=>{ Object.keys(cat.lc).forEach(id=>{
+  POS[id] = { x: PADX + (cat.gx + cat.lc[id])*COLW, y: PADY + (CAT_TOP + cat.lr[id])*ROWH };
+}); });
+const centerX = list => { if(!list.length) return PADX; let a=Infinity,b=-Infinity;
+  list.forEach(c=>{ a=Math.min(a,c.gx); b=Math.max(b,c.gx+c.w-1); }); return PADX + ((a+b)/2)*COLW; };
+trunkChildren.forEach(f=>{ POS[f] = { x: centerX(cats.filter(c=>c.parent===f)), y: PADY + 1.15*ROWH }; });
+POS[rootId] = { x: PADX + ((totalCols-1)/2)*COLW, y: PADY };
+
+const W = PADX*2 + (totalCols-1)*COLW;
+const H = PADY + (CAT_TOP + Math.max(...cats.map(c=>c.h)))*ROWH + 40;
+canvas.style.width = W+'px'; canvas.style.height = H+'px';
+
+/* nodes */
+NODES.forEach(n=>{
+  const p = POS[n.id]; if(!p) return;
+  const el = document.createElement('button');
+  el.type='button'; el.className='node'; el.dataset.state=n.state; el.id='n-'+n.id;
+  el.style.left=p.x+'px'; el.style.top=p.y+'px';
+  el.innerHTML = `<span class="disc">${ico(n.icon)}</span><span class="cap">${n.label}</span>`+
+    `<span class="blurb" role="tooltip"><b>${n.label}</b> — ${n.blurb}</span>`;
+  canvas.appendChild(el);
+});
+/* category headers */
+cats.forEach(cat=>{
+  const label = CAT_LABEL[cat.root]; if(!label) return;
+  const d = document.createElement('div'); d.className='cathdr';
+  d.style.left = (PADX + (cat.gx + (cat.w-1)/2)*COLW) + 'px';
+  d.style.top  = (PADY + (CAT_TOP-0.72)*ROWH) + 'px';
+  d.textContent = label;
+  canvas.appendChild(d);
+});
+
+/* edges — drawn straight from known positions (parent above → child below) */
+const NS='http://www.w3.org/2000/svg';
+function draw(){
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const styleFor = s => s==='building' ? {stroke:'var(--accent)',   w:1.8, dash:'',    op:.9}
+                     : s==='planned'  ? {stroke:'var(--link)',      w:1.5, dash:'5 5', op:.85}
+                     : s==='exploring'? {stroke:'var(--link-faint)',w:1.4, dash:'3 6', op:.8}
+                     :                  {stroke:'var(--link)',      w:1.6, dash:'',    op:1};
+  NODES.forEach(n=>{
+    if(!n.dep) return;
+    const a = POS[n.dep], b = POS[n.id]; if(!a || !b) return;
+    const my = (a.y+b.y)/2, st = styleFor(n.state);
+    const p = document.createElementNS(NS,'path');
+    p.setAttribute('d', `M ${a.x} ${a.y} C ${a.x} ${my}, ${b.x} ${my}, ${b.x} ${b.y}`);
+    p.setAttribute('fill','none'); p.setAttribute('stroke',st.stroke);
+    p.setAttribute('stroke-width',st.w); p.setAttribute('stroke-opacity',st.op);
+    if(st.dash) p.setAttribute('stroke-dasharray',st.dash);
+    p.setAttribute('stroke-linecap','round');
+    svg.appendChild(p);
+  });
+}
+draw();
+
+/* ── pan + zoom ── */
+let scale=1, tx=0, ty=0;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function apply(){ canvas.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; }
+function fit(){
+  const vw=viewport.clientWidth, vh=viewport.clientHeight;
+  scale = clamp(Math.min(vw/W, vh/H)*0.96, 0.1, 2);
+  tx = (vw - W*scale)/2; ty = Math.max(16, (vh - H*scale)/2);
+  apply();
+}
+function zoomAt(mx,my,factor){
+  const ns = clamp(scale*factor, 0.1, 4);
+  tx = mx - (mx-tx)*(ns/scale); ty = my - (my-ty)*(ns/scale); scale=ns; apply();
+}
+viewport.addEventListener('wheel', e=>{ e.preventDefault();
+  const r=viewport.getBoundingClientRect();
+  zoomAt(e.clientX-r.left, e.clientY-r.top, e.deltaY<0 ? 1.12 : 1/1.12);
+}, {passive:false});
+let drag=false, dx=0, dy=0;
+viewport.addEventListener('pointerdown', e=>{ drag=true; dx=e.clientX-tx; dy=e.clientY-ty;
+  viewport.classList.add('grabbing'); try{viewport.setPointerCapture(e.pointerId);}catch(_){} });
+viewport.addEventListener('pointermove', e=>{ if(drag){ tx=e.clientX-dx; ty=e.clientY-dy; apply(); } });
+const endDrag=()=>{ drag=false; viewport.classList.remove('grabbing'); };
+viewport.addEventListener('pointerup', endDrag);
+viewport.addEventListener('pointercancel', endDrag);
+document.getElementById('zin').addEventListener('click', ()=>zoomAt(viewport.clientWidth/2, viewport.clientHeight/2, 1.25));
+document.getElementById('zout').addEventListener('click',()=>zoomAt(viewport.clientWidth/2, viewport.clientHeight/2, 1/1.25));
+document.getElementById('zfit').addEventListener('click', fit);
+requestAnimationFrame(fit);
+window.addEventListener('resize', fit);
+
+/* theme */
+const root=document.documentElement, btn=document.getElementById('themeBtn'),
+      lbl=document.getElementById('themeLbl'), tIco=document.getElementById('themeIco');
+document.getElementById('brandMark').innerHTML=ico('sprout');
+function applyTheme(t){ root.setAttribute('data-theme',t); const dark=t==='dark';
+  tIco.innerHTML=ico(dark?'contrast':'toggle'); tIco.firstChild.style.width='14px'; tIco.firstChild.style.height='14px';
+  lbl.textContent=dark?'Light':'Dark'; requestAnimationFrame(draw); }
+try{ const s=localStorage.getItem('verso-roadmap-theme');
+  if(s) applyTheme(s); else if(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches) applyTheme('light'); else applyTheme('dark');
+}catch(_){ applyTheme('dark'); }
+btn.addEventListener('click',()=>{ const nx=root.getAttribute('data-theme')==='dark'?'light':'dark';
+  applyTheme(nx); try{localStorage.setItem('verso-roadmap-theme',nx);}catch(_){}});
+</script>
+</body>
+</html>

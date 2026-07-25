@@ -315,6 +315,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 /* icon-segmented mode choice (e.g. alignment) — square icon cells */
 .prop-toggle-row--icon .prop-toggle--icon { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; padding: 5px 0; }
+/* #9: the List toggle is an icon prop-toggle inside the (non-icon) B/I/U/Link bar — centre its glyph */
+.prop-toggle-row .prop-toggle--icon { display: inline-flex; align-items: center; justify-content: center; }
 .prop-toggle--icon svg { width: 16px; height: 16px; }
 
 /* Assets tab — insertable library items */
@@ -476,12 +478,12 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    the segment reads as one bar with the grid/find/comment/zoom tools. */
 .canvas-overlay-bar__actions { display: inline-flex; align-items: center; gap: 2px; }
 .canvas-overlay-bar__actions[hidden], .canvas-overlay-bar__sep--actions[hidden] { display: none; }
-.canvas-overlay-bar .icon-btn { width: 28px; height: 28px; background: transparent; border: none; color: var(--icon-idle); border-radius: var(--radius-sm, 4px); transition: background 0.12s ease, color 0.12s ease; }
-.canvas-overlay-bar .icon-btn:hover { background: var(--surface-hover); color: var(--icon-strong); border: none; }
-.canvas-overlay-bar .icon-btn.is-on { background: var(--accent-quiet); color: var(--accent); }
-.canvas-overlay-bar .icon-btn.is-off { color: var(--text-tertiary); }
-.canvas-overlay-bar .icon-btn--danger:hover { color: var(--danger); background: var(--surface-hover); }
-.canvas-overlay-bar .tb-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
+.canvas-overlay-bar .icon-btn, .tourb__pill .icon-btn { width: 28px; height: 28px; background: transparent; border: none; color: var(--icon-idle); border-radius: var(--radius-sm, 4px); transition: background 0.12s ease, color 0.12s ease; }
+.canvas-overlay-bar .icon-btn:hover, .tourb__pill .icon-btn:hover { background: var(--surface-hover); color: var(--icon-strong); border: none; }
+.canvas-overlay-bar .icon-btn.is-on, .tourb__pill .icon-btn.is-on { background: var(--accent-quiet); color: var(--accent); }
+.canvas-overlay-bar .icon-btn.is-off, .tourb__pill .icon-btn.is-off { color: var(--text-tertiary); }
+.canvas-overlay-bar .icon-btn--danger:hover, .tourb__pill .icon-btn--danger:hover { color: var(--danger); background: var(--surface-hover); }
+.canvas-overlay-bar .tb-sep, .tourb__pill .tb-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
 /* hide the overlay with the panels in zen/preview (its left/right offsets assume the panels) */
 .workspace.is-panels-hidden .canvas-overlay-bar { display: none; }
 
@@ -2912,7 +2914,7 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 .tourb__zoom:hover { background: var(--surface-hover); }
 .tourb__zoom-level { font: var(--type-label-strong); color: var(--text-primary); min-width: 34px; text-align: center; }
 .tourb__zoom .zoom__caret svg { width: 12px; height: 12px; }
-.tourb__body { flex: 1 1 auto; display: flex; min-height: 0; }
+.tourb__body { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
 .tourb__board {
   flex: 1 1 auto; position: relative; overflow: hidden; outline: none;
   background: var(--surface-canvas);
@@ -2921,6 +2923,24 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 }
 .tourb__board.is-panning { cursor: grabbing; }
 .tourb__board.is-pannable { cursor: grab; }
+/* floating tool pill — a canvas-overlay-bar mirror, bottom-centre over the board. The inner
+   reuses .canvas-overlay-bar__inner (raised surface / radius-lg / shadow); only positioning is
+   local. pointer-events:none on the wrapper so the board still pans behind the pill's gaps. */
+.tourb__pill { position: absolute; z-index: 40; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; pointer-events: none; }
+.tourb__pill-inner { pointer-events: auto; }
+/* the contextual segment's Action / Shape toggles: compact inline segmented controls that fit
+   the pill height (override the panel's full-width stretch). */
+.tourb__pill .tourb__pillseg { display: inline-flex; }
+.tourb__pill .prop-toggle-row { margin: 0; width: auto; }
+.tourb__pill .prop-toggle-row--icon .prop-toggle--icon { flex: 0 0 auto; width: 26px; padding: 4px 0; }
+/* click-to-drop armed: crosshair over the whole board so it's obvious the next click drops a
+   marker; the screen thumbs read as the drop target. */
+.tourb__board.is-placing { cursor: crosshair; }
+.tourb__board.is-placing .tourb-node__thumb { cursor: crosshair; }
+/* "Add hotspot" armed = an accent-outlined toggle (mode engaged), matching the IconButton
+   active convention. */
+.tourb__addhs.is-armed { background: var(--accent); color: var(--text-on-accent); box-shadow: none; }
+.tourb__addhs.is-armed:hover { background: var(--accent-hover); }
 /* No `will-change:transform` here: promoting the layer to a cached GPU texture makes it
    rasterise ONCE at 1x, so zooming in upscales that bitmap and blurs the screen previews.
    Without it the browser re-samples at the live zoom, so content stays crisp when zoomed in. */
@@ -2928,10 +2948,81 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 .tourb__marquee { position: absolute; z-index: 20; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
 .tourb-edges { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .tourb__nodes { position: absolute; top: 0; left: 0; }
+.tourb__sources { position: absolute; top: 0; left: 0; }
+/* Source-video scratch node: the harvest surface. Distinct from a ScreenNode (accent-tinted
+   header, dashed ring) so it reads as an author-time tool, NOT a screen that ships. */
+.tourb-source {
+  position: absolute; display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--surface-raised); border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-100);
+  padding: var(--space-2); cursor: grab; user-select: none;
+}
+.tourb-source.is-dragging { cursor: grabbing; z-index: 5; }
+.tourb-source__head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 0; }
+.tourb-source__glyph { display: inline-flex; color: var(--accent); }
+.tourb-source__glyph svg { width: 15px; height: 15px; }
+.tourb-source__tag {
+  flex: none; font: var(--type-caption); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+  padding: 1px 6px; border-radius: var(--radius-pill);
+}
+.tourb-source__title { flex: 1 1 auto; min-width: 0; font: var(--type-body-strong); color: var(--text-primary); background: transparent; border: 0; padding: 2px 4px; border-radius: var(--radius-sm); }
+.tourb-source__title:focus { outline: none; background: var(--surface-canvas); box-shadow: inset 0 0 0 1px var(--border-input); }
+.tourb-source__remove { flex: none; width: 24px; height: 24px; }
+.tourb-source__thumb { position: relative; width: 100%; border-radius: var(--radius-sm); background: var(--surface-canvas); overflow: hidden; }
+.tourb-source__thumb img, .tourb-source__thumb video { width: 100%; height: auto; display: block; pointer-events: none; border-radius: var(--radius-sm); }
+.tourb-source__thumb.is-empty { display: flex; align-items: center; justify-content: center; color: var(--icon-idle); }
+.tourb-source__thumb.is-empty svg { width: 32px; height: 32px; }
+/* MediaTransport (DSLMS board/SourceNode): scrub rail + playhead + in/out ticks, then a
+   controls row. Bound to DSLMS tokens; the transport lives ON the media it controls. */
+.tourb-transport { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) 2px 2px; }
+.tourb-transport__rail { position: relative; height: 4px; border-radius: var(--radius-pill); background: var(--border-subtle); cursor: pointer; touch-action: none; }
+.tourb-transport__range { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 24%, transparent); pointer-events: none; }
+.tourb-transport__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: var(--radius-pill); background: var(--accent); pointer-events: none; }
+.tourb-transport__tick { position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px; background: var(--accent); transform: translateX(-1px); pointer-events: none; }
+.tourb-transport__knob { position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: var(--radius-pill); background: var(--accent); box-shadow: var(--shadow-100); transform: translateY(-50%); pointer-events: none; }
+.tourb-transport__row { display: flex; align-items: center; gap: var(--space-2); }
+.tourb-transport__play { flex: none; width: 28px; height: 28px; }
+.tourb-transport__time { flex: none; font-variant-numeric: tabular-nums; font: var(--type-caption); color: var(--text-secondary); }
+.tourb-transport__spacer { flex: 1 1 auto; }
+.tourb-transport__mark { flex: none; font: var(--type-caption); color: var(--text-secondary); background: var(--surface-canvas); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__mark:hover { color: var(--text-primary); border-color: var(--border-focus); }
+.tourb-transport__harvest { flex: none; display: inline-flex; align-items: center; gap: 4px; font: var(--type-caption); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__harvest svg { width: 13px; height: 13px; }
+.tourb-transport__harvest:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.tourb-transport__harvest:disabled { opacity: 0.4; cursor: not-allowed; }
+.tourb-transport__crop { flex: none; width: 28px; height: 28px; }
+.tourb-transport__crop.is-on { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+/* crop overlay on the source thumb: a bright rect with corner handles; dim outside via a big ring shadow */
+.tourb-crop { position: absolute; inset: 0; z-index: 4; }
+.tourb-crop__box { position: absolute; box-sizing: border-box; border: 1px solid var(--accent); box-shadow: 0 0 0 9999px color-mix(in srgb, #000 45%, transparent); cursor: move; }
+.tourb-crop__handle { position: absolute; width: 12px; height: 12px; background: var(--accent); border: 1px solid #fff; border-radius: 2px; }
+.tourb-crop__handle--nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.tourb-crop__handle--ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.tourb-crop__handle--sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.tourb-crop__handle--se { right: -6px; bottom: -6px; cursor: nwse-resize; }
 /* right inspector — re-hosts renderHotspotInspector */
-.tourb__panel { flex: 0 0 320px; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border-subtle); background: var(--surface-panel); }
-.tourb__panel-head { flex: none; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-subtle); font: var(--type-label-strong); color: var(--text-secondary); }
+/* Properties DRAWER: an absolute slide-in over the right of the board (the board is always full
+   width behind it), collapsed by default so the board dominates — canvas-first. Opens on demand for
+   the deep value settings the pill/menus don't carry. */
+.tourb__panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 320px; z-index: 45;
+  display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--border-subtle); background: var(--surface-panel);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.28);
+  transform: translateX(100%); transition: transform 0.18s cubic-bezier(.2, 0, 0, 1);
+  pointer-events: none;
+}
+.tourb__panel.is-open { transform: translateX(0); pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .tourb__panel { transition: none; } }
+.tourb__panel-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-subtle); }
+.tourb__panel-title { font: var(--type-label-strong); color: var(--text-secondary); }
+.tourb__panel-close { width: 24px; height: 24px; }
 .tourb__panel-body { flex: 1 1 auto; overflow-y: auto; padding: var(--space-4); }
+/* the top-bar Properties toggle (icon + label); is-on when the drawer is open. */
+.tourb__propsbtn { display: inline-flex; align-items: center; gap: 6px; }
+.tourb__propsbtn svg { width: 14px; height: 14px; }
+.tourb__propsbtn.is-on { background: var(--surface-hover); box-shadow: inset 0 0 0 1px var(--border-input); }
 
 /* ScreenNode card */
 .tourb-node {
