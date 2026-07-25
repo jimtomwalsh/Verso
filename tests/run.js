@@ -2499,7 +2499,7 @@ section("tour media transport (pure)");
   var b = etxt.indexOf("/* __TOUR_MEDIA_PURE__ end");
   if (a < 0 || b < 0) { ok("tour media pure block present", false); return; }
   var block = etxt.slice(etxt.indexOf("\n", a) + 1, b);
-  var api = new Function(block + "; return { fmt: tourFormatTime, mark: tourApplyMark, crop: tourCropRect, segReady: tourSegReady };")();
+  var api = new Function(block + "; return { fmt: tourFormatTime, mark: tourApplyMark, crop: tourCropRect, segReady: tourSegReady, speedField: tourSpeedField };")();
   ok("fmt 0 -> 0:00", api.fmt(0) === "0:00");
   ok("fmt 65 -> 1:05", api.fmt(65) === "1:05");
   ok("fmt neg -> 0:00", api.fmt(-5) === "0:00");
@@ -2519,6 +2519,10 @@ section("tour media transport (pure)");
   ok("segReady both + in<out", api.segReady(2, 8) === true);
   ok("segReady needs both", api.segReady(2, null) === false && api.segReady(null, 8) === false);
   ok("segReady rejects out<=in", api.segReady(8, 2) === false && api.segReady(5, 5) === false);
+  // speed preset -> provenance field: 1x (or junk) = default = no field; other rates persist the number
+  ok("speedField 1x -> null (default)", api.speedField(1) === null && api.speedField("1") === null);
+  ok("speedField omits undefined/0/NaN", api.speedField(undefined) === null && api.speedField(0) === null && api.speedField("x") === null);
+  ok("speedField keeps 0.5 / 2 / 1.25", api.speedField("0.5") === 0.5 && api.speedField(2) === 2 && api.speedField("1.25") === 1.25);
 })();
 
 // ---- assetSrc resolver hook ----------------------------------------------

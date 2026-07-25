@@ -7776,6 +7776,9 @@
   }
   // A segment is harvestable only when both ends are marked and in < out.
   function tourSegReady(inP, outP) { return inP != null && outP != null && outP > inP; }
+  // Speed preset -> the value to persist on provenance. 1x (or invalid) is the default and stores
+  // as NO field (clean provenance, ignored by render like bx/by); any other rate stores the number.
+  function tourSpeedField(speed) { var n = parseFloat(speed); return (n && n !== 1 && isFinite(n)) ? n : null; }
   /* __TOUR_MEDIA_PURE__ end */
 
   var tourPlayingVideo = null; // only one source plays at a time
@@ -7826,6 +7829,29 @@
     row.appendChild(seg);
     wrap.appendChild(row);
 
+    // --- speed sub-row: pick a playback-speed preset for the baked clip (0.5x .. 2x). ---
+    // Editor-only intent stored on src.speed; the bake re-times via vid.playbackRate. Progressively
+    // disclosed with the segment tools -- shown only once a valid in<out exists (like +Segment enabling).
+    var speedRow = h("div", "tourb-transport__speed");
+    speedRow.appendChild(h("span", "tourb-transport__speed-label", "Speed"));
+    var speedOpts = [
+      { value: "0.5", label: "0.5×" }, { value: "0.75", label: "0.75×" },
+      { value: "1", label: "1×" }, { value: "1.25", label: "1.25×" },
+      { value: "1.5", label: "1.5×" }, { value: "2", label: "2×" }
+    ];
+    var speedSeg = window.VersoUI.SegmentedControl({
+      size: "sm", value: String(src.speed || 1), options: speedOpts,
+      onChange: function (v) {
+        pushHistory();
+        var n = tourSpeedField(v); // 1x = default = no field (clean provenance)
+        if (n) src.speed = n; else delete src.speed;
+        scheduleSave();
+      }
+    });
+    speedSeg.style.flex = "1 1 auto"; speedSeg.title = "Playback speed of the baked segment (bake time follows the baked length)";
+    speedRow.appendChild(speedSeg);
+    wrap.appendChild(speedRow);
+
     function dur() { var d = vid.duration; return (d && isFinite(d) && d > 0) ? d : 0; }
     function paint() {
       var d = dur(), t = vid.currentTime || 0;
@@ -7841,7 +7867,9 @@
       if ((hasIn || hasOut) && hi > lo) { range.hidden = false; range.style.left = lo + "%"; range.style.width = (hi - lo) + "%"; }
       else range.hidden = true;
       play.innerHTML = (window.Icon ? window.Icon(vid.paused ? "play" : "pause") : "");
-      seg.disabled = !tourSegReady(src.in, src.out); // a clip needs a valid in < out
+      var segReady = tourSegReady(src.in, src.out); // a clip needs a valid in < out
+      seg.disabled = !segReady;
+      speedRow.hidden = !segReady; // disclose speed with the segment tools
     }
     function seekTo(clientX) {
       var d = dur(); if (!d) return;
@@ -7933,6 +7961,8 @@
   }
   function tourHarvestSegment(src, vid, replace, inOut) {
     var inMark = inOut ? inOut.in : src.in, outMark = inOut ? inOut.out : src.out;
+    // speed preset: re-bake replays inOut.speed, a fresh bake reads src.speed (default 1x)
+    var speed = (inOut && inOut.speed) || src.speed || 1;
     if (tourSegRecording || !vid || !tourSegReady(inMark, outMark)) return;
     if (typeof MediaRecorder === "undefined") return;
     var r = tourCropRect(src.crop, vid.videoWidth || 1280, vid.videoHeight || 720);
@@ -7943,7 +7973,7 @@
     var mime = tourPickWebmMime(), rec;
     try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); } catch (_) { return; }
     var chunks = [], raf = null, inPt = inMark, outPt = outMark;
-    function stopDraw() { if (raf) { cancelAnimationFrame(raf); raf = null; } try { vid.pause(); } catch (_) {} }
+    function stopDraw() { if (raf) { cancelAnimationFrame(raf); raf = null; } try { vid.pause(); } catch (_) {} try { vid.playbackRate = 1; } catch (_) {} }
     function draw() {
       try { ctx.drawImage(vid, r.sx, r.sy, r.sw, r.sh, 0, 0, r.w, r.h); } catch (_) {}
       if ((vid.currentTime || 0) >= outPt) { try { rec.stop(); } catch (_) {} return; }
@@ -7954,7 +7984,7 @@
       stopDraw();
       var blob = new Blob(chunks, { type: mime || "video/webm" });
       var fr = new FileReader();
-      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace); };
+      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace, speed); };
       fr.onerror = function () { tourSegRecording = false; };
       fr.readAsDataURL(blob);
     };
@@ -7962,21 +7992,24 @@
     var onSeeked = function () {
       vid.removeEventListener("seeked", onSeeked);
       try { rec.start(); } catch (_) { tourSegRecording = false; return; }
+      try { vid.playbackRate = speed; } catch (_) {} // re-time the capture: 2x -> half-length clip, 0.5x -> double
       vid.play().catch(function () {});
       draw();
     };
     vid.addEventListener("seeked", onSeeked);
     try { vid.currentTime = inPt; } catch (_) { onSeeked(); }
   }
-  function tourFinishSegment(src, dataUrl, inPt, outPt, replace) {
+  function tourFinishSegment(src, dataUrl, inPt, outPt, replace, speed) {
     tourSegRecording = false;
     if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) return;
+    var sp = tourSpeedField(speed); // 1x = default -> omit (clean provenance, ignored by render)
     pushHistory();
     var label0 = (src.name ? src.name + " " : "") + tourFormatTime(inPt) + "-" + tourFormatTime(outPt);
     // RE-BAKE: replace an existing screen's clip in place -> id + markers/nav survive.
     if (replace) {
       replace.visual = assetRef(dataUrl, { type: "video/webm", name: label0 });
-      replace.kind = "video"; if (!replace.playback) replace.playback = "once"; replace.source = { id: src.id, in: inPt, out: outPt };
+      replace.kind = "video"; if (!replace.playback) replace.playback = "once";
+      replace.source = { id: src.id, in: inPt, out: outPt }; if (sp) replace.source.speed = sp;
       tourSelKind = "node"; hotspotEditScreenId = replace.id; hotspotEditId = null; tourLoopSel = null;
       scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
       return;
@@ -7991,6 +8024,7 @@
       bx: (src.bx || 0) + TOUR_SOURCE_W + 60, by: (src.by || 0) + sibs * (TOUR_THUMB_H + 130),
       source: { id: src.id, in: inPt, out: outPt } // provenance -> re-cut (tick 6)
     };
+    if (sp) scr.source.speed = sp;
     scr.name = label;
     tourBlock.screens.push(scr);
     tourSelKind = "node"; hotspotEditScreenId = sid; hotspotEditId = null; tourLoopSel = null;
@@ -8005,7 +8039,7 @@
     var src = tourSourceById(s.source.id); if (!src) return; // source gone -> nothing to re-bake from
     var vid = (tourUI && tourUI.sources) ? tourUI.sources.querySelector('.tourb-source[data-source-id="' + src.id + '"] video') : null;
     if (!vid || !vid.videoWidth) return;
-    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out }); return; }
+    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out, speed: s.source.speed }); return; }
     var t = s.source.t || 0;
     var grab = function () { tourHarvestScreenshot(src, vid, s); };
     if (Math.abs((vid.currentTime || 0) - t) < 0.06) { grab(); return; }
