@@ -2499,7 +2499,7 @@ section("tour media transport (pure)");
   var b = etxt.indexOf("/* __TOUR_MEDIA_PURE__ end");
   if (a < 0 || b < 0) { ok("tour media pure block present", false); return; }
   var block = etxt.slice(etxt.indexOf("\n", a) + 1, b);
-  var api = new Function(block + "; return { fmt: tourFormatTime, mark: tourApplyMark, crop: tourCropRect, segReady: tourSegReady };")();
+  var api = new Function(block + "; return { fmt: tourFormatTime, mark: tourApplyMark, crop: tourCropRect, segReady: tourSegReady, speedField: tourSpeedField, applyCut: tourApplyCut, mergeCuts: tourMergeCuts, clipCuts: tourClipCutsToBounds, keptRanges: tourKeptRanges, netLength: tourNetLength };")();
   ok("fmt 0 -> 0:00", api.fmt(0) === "0:00");
   ok("fmt 65 -> 1:05", api.fmt(65) === "1:05");
   ok("fmt neg -> 0:00", api.fmt(-5) === "0:00");
@@ -2519,6 +2519,45 @@ section("tour media transport (pure)");
   ok("segReady both + in<out", api.segReady(2, 8) === true);
   ok("segReady needs both", api.segReady(2, null) === false && api.segReady(null, 8) === false);
   ok("segReady rejects out<=in", api.segReady(8, 2) === false && api.segReady(5, 5) === false);
+  // speed preset -> provenance field: 1x (or junk) = default = no field; other rates persist the number
+  ok("speedField 1x -> null (default)", api.speedField(1) === null && api.speedField("1") === null);
+  ok("speedField omits undefined/0/NaN", api.speedField(undefined) === null && api.speedField(0) === null && api.speedField("x") === null);
+  ok("speedField keeps 0.5 / 2 / 1.25", api.speedField("0.5") === 0.5 && api.speedField(2) === 2 && api.speedField("1.25") === 1.25);
+})();
+
+// ---- ripple cuts: T1 pure model + logic ----------------------------------
+section("tour ripple cuts (pure)");
+(function () {
+  var etxt = src("src/editor.js");
+  var a = etxt.indexOf("/* __TOUR_MEDIA_PURE__ start"), b = etxt.indexOf("/* __TOUR_MEDIA_PURE__ end");
+  var block = etxt.slice(etxt.indexOf("\n", a) + 1, b);
+  var api = new Function(block + "; return { applyCut: tourApplyCut, mergeCuts: tourMergeCuts, clipCuts: tourClipCutsToBounds, keptRanges: tourKeptRanges, netLength: tourNetLength, segReady: tourSegReady };")();
+  // applyCut: commit a pending cut-in + playhead into an ordered removed range; reject crossings
+  ok("applyCut forms ordered cut", (function () { var c = api.applyCut(3, 8); return c && c.start === 3 && c.end === 8; })());
+  ok("applyCut rejects out<=in", api.applyCut(8, 3) === null && api.applyCut(5, 5) === null);
+  ok("applyCut rejects null end", api.applyCut(null, 8) === null && api.applyCut(3, null) === null);
+  // mergeCuts: sort + merge overlap AND adjacency; drop zero-length
+  ok("mergeCuts sorts ascending", (function () { var m = api.mergeCuts([{ start: 8, end: 10 }, { start: 2, end: 4 }]); return m.length === 2 && m[0].start === 2 && m[1].start === 8; })());
+  ok("mergeCuts merges overlap", (function () { var m = api.mergeCuts([{ start: 2, end: 6 }, { start: 4, end: 9 }]); return m.length === 1 && m[0].start === 2 && m[0].end === 9; })());
+  ok("mergeCuts merges adjacency", (function () { var m = api.mergeCuts([{ start: 2, end: 5 }, { start: 5, end: 8 }]); return m.length === 1 && m[0].end === 8; })());
+  ok("mergeCuts drops zero-length", api.mergeCuts([{ start: 3, end: 3 }, { start: 4, end: 4 }]).length === 0);
+  // clipCutsToBounds: drop-outside + trim-straddling; empty without valid bounds
+  ok("clipCuts drops outside", api.clipCuts([{ start: 20, end: 25 }], 5, 15).length === 0);
+  ok("clipCuts trims straddle", (function () { var c = api.clipCuts([{ start: 3, end: 8 }], 5, 15); return c.length === 1 && c[0].start === 5 && c[0].end === 8; })());
+  ok("clipCuts empty on bad bounds", api.clipCuts([{ start: 3, end: 8 }], null, 15).length === 0 && api.clipCuts([{ start: 3, end: 8 }], 15, 5).length === 0);
+  // keptRanges: decompose in->out minus cuts into surviving pieces
+  ok("keptRanges no cuts = whole", (function () { var k = api.keptRanges(0, 10, []); return k.length === 1 && k[0].in === 0 && k[0].out === 10; })());
+  ok("keptRanges middle cut -> two pieces", (function () { var k = api.keptRanges(0, 10, [{ start: 3, end: 6 }]); return k.length === 2 && k[0].in === 0 && k[0].out === 3 && k[1].in === 6 && k[1].out === 10; })());
+  ok("keptRanges cut on in pulls bound", (function () { var k = api.keptRanges(0, 10, [{ start: 0, end: 3 }]); return k.length === 1 && k[0].in === 3 && k[0].out === 10; })());
+  ok("keptRanges swallow-all -> empty", api.keptRanges(0, 10, [{ start: 0, end: 10 }]).length === 0);
+  // netLength: sum of kept ranges
+  ok("netLength subtracts cuts", api.netLength(0, 10, [{ start: 3, end: 6 }]) === 7);
+  ok("netLength no cuts = span", api.netLength(2, 8, []) === 6);
+  ok("netLength swallow-all = 0", api.netLength(0, 10, [{ start: 0, end: 10 }]) === 0);
+  // segReady extended: net kept length > 0 (backward-compatible with no cuts arg)
+  ok("segReady harmless cut still ready", api.segReady(0, 10, [{ start: 3, end: 6 }]) === true);
+  ok("segReady swallow-all not ready", api.segReady(0, 10, [{ start: 0, end: 10 }]) === false);
+  ok("segReady no-cuts arg still ready", api.segReady(2, 8) === true);
 })();
 
 // ---- assetSrc resolver hook ----------------------------------------------

@@ -1806,6 +1806,7 @@
     } else {
       mount();
     }
+    if (typeof rebindTourBuilderToLiveDoc === "function") rebindTourBuilderToLiveDoc(); // keep an open builder bound to the restored doc
     updateHistoryButtons();
   }
   function undo() {
@@ -7388,6 +7389,7 @@
 
   function closeTourBuilder() {
     if (!tourUI) return;
+    try { flushSave(); } catch (_) {} // don't let the 600ms autosave debounce drop builder edits on exit
     tourUI.overlay.hidden = true;
     document.body.classList.remove("tour-builder-open");
     tourConnect = null; tourSetPlacing(false);
@@ -7396,16 +7398,32 @@
     if (ret && ret.focus) { try { ret.focus(); } catch (_) {} }
   }
 
+  // Find the hotspot block with this id anywhere in the LIVE doc (nested containers included).
+  function tourFindHotspotById(id) {
+    if (!id) return null;
+    var found = null;
+    (function scan(blocks) { (blocks || []).forEach(function (b) { if (!b || found) return; if (b.type === "hotspot" && b.id === id) { found = b; return; } if (b.blocks) scan(b.blocks); if (b.children) scan(b.children); if (b.columns) b.columns.forEach(scan); }); })(
+      (doc.pages || []).reduce(function (acc, p) { return acc.concat(p.blocks || []); }, [])
+    );
+    return found;
+  }
+  // Data-loss guard: `doc` is a fresh object graph after undo/redo, a programmatic setDoc, or a
+  // collab sync -- which orphans the builder's captured `tourBlock` reference, so subsequent edits
+  // land on a detached copy and vanish on close. Whenever the doc is replaced while the board is
+  // open, RE-BIND tourBlock to the same-id block in the new doc (or close if it's genuinely gone).
+  function rebindTourBuilderToLiveDoc() {
+    if (!tourUI || tourUI.overlay.hidden || !tourBlock || !tourBlock.id) return;
+    var live = tourFindHotspotById(tourBlock.id);
+    if (live) { if (live !== tourBlock) { tourBlock = live; syncTourBoard(); } }
+    else closeTourBuilder(); // its block is gone from the new doc -> nothing to edit
+  }
   // Boot: if the builder was open when the page was last refreshed, re-open it on the
   // same hotspot block (found by its persisted id in the current doc). Silent no-op if
   // the block is gone (e.g. a different course is now loaded).
   function maybeReopenTourBuilder() {
     var id; try { id = localStorage.getItem(TOUR_OPEN_KEY); } catch (_) { id = null; }
     if (!id) return;
-    var found = null;
-    (function scan(blocks) { (blocks || []).forEach(function (b) { if (!b || found) return; if (b.type === "hotspot" && b.id === id) { found = b; return; } if (b.blocks) scan(b.blocks); if (b.children) scan(b.children); if (b.columns) b.columns.forEach(scan); }); })(
-      (doc.pages || []).reduce(function (acc, p) { return acc.concat(p.blocks || []); }, [])
-    );
+    var found = tourFindHotspotById(id);
     if (found) openTourBuilder(found);
     else { try { localStorage.removeItem(TOUR_OPEN_KEY); } catch (_) {} }
   }
@@ -7687,6 +7705,7 @@
   }
   function renderTourSources() {
     if (!tourUI || !tourUI.sources) return;
+    tourActiveCutCancel = null; tourActiveCutSel = null; // transports rebuilt below -> drop any open pending cut / selection
     tourUI.sources.innerHTML = "";
     tourSources().forEach(function (src, si) {
       if (!src) return;
@@ -7774,12 +7793,77 @@
     var sw = Math.max(1, Math.round(w * natW)), sh = Math.max(1, Math.round(hh * natH));
     return { sx: Math.round(x * natW), sy: Math.round(y * natH), sw: sw, sh: sh, w: sw, h: sh };
   }
-  // A segment is harvestable only when both ends are marked and in < out.
-  function tourSegReady(inP, outP) { return inP != null && outP != null && outP > inP; }
+  // A segment is harvestable only when both ends are marked and the NET kept length is > 0
+  // (cuts may punch the middle out; a cut swallowing the whole clip -> not ready). cuts optional.
+  function tourSegReady(inP, outP, cuts) { return inP != null && outP != null && tourNetLength(inP, outP, cuts) > 0; }
+  // Speed preset -> the value to persist on provenance. 1x (or invalid) is the default and stores
+  // as NO field (clean provenance, ignored by render like bx/by); any other rate stores the number.
+  function tourSpeedField(speed) { var n = parseFloat(speed); return (n && n !== 1 && isFinite(n)) ? n : null; }
+
+  // ---- Ripple cuts (T1): pure model + logic ---------------------------------
+  // A segment is [in,out] with zero or more removed CUT ranges punched out of the middle;
+  // the kept clip is [in,out] minus the cuts, its pieces stitched. All helpers are pure +
+  // side-effect-free (mirror tourApplyMark) — no DOM, no bake, no provenance here.
+
+  // Commit a pending cut: given a pending cut-in and the playhead t, form the removed range.
+  // Mirrors the outer-mark crossing guard — a cut-out at/before the cut-in is invalid -> null
+  // (the caller keeps the pending open or cancels). `cuts` is accepted for call-site parity with
+  // tourApplyMark; committing/merging into the list is the caller's separate step (tourMergeCuts).
+  function tourApplyCut(pending, t, cuts) {
+    if (pending == null || t == null) return null;
+    if (!(t > pending)) return null; // cut-out must land strictly after cut-in
+    return { start: pending, end: t };
+  }
+  // Sort ascending by start and auto-merge overlapping OR adjacent ranges (end === next.start)
+  // into a clean, non-overlapping list so the rail reads as one band per removed region.
+  function tourMergeCuts(cuts) {
+    var list = (cuts || []).filter(function (c) { return c && c.end > c.start; })
+      .map(function (c) { return { start: c.start, end: c.end }; })
+      .sort(function (a, b) { return a.start - b.start; });
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i], last = out[out.length - 1];
+      if (last && c.start <= last.end) { if (c.end > last.end) last.end = c.end; }
+      else out.push(c);
+    }
+    return out;
+  }
+  // Drop cuts fully outside [in,out]; trim cuts that straddle a bound. Called when in/out moves.
+  // Returns a merged, in-bounds list.
+  function tourClipCutsToBounds(cuts, inP, outP) {
+    if (inP == null || outP == null || !(outP > inP)) return [];
+    var trimmed = [];
+    (cuts || []).forEach(function (c) {
+      if (!c || !(c.end > c.start)) return;
+      var s = Math.max(inP, c.start), e = Math.min(outP, c.end);
+      if (e > s) trimmed.push({ start: s, end: e });
+    });
+    return tourMergeCuts(trimmed);
+  }
+  // Decompose [in,out] minus the cuts into the surviving kept pieces, in order. Returns
+  // [{in,out}...] (same shape as an outer segment) so the stitched bake (T2) can walk them.
+  function tourKeptRanges(inP, outP, cuts) {
+    if (inP == null || outP == null || !(outP > inP)) return [];
+    var cs = tourClipCutsToBounds(cuts, inP, outP), ranges = [], cursor = inP;
+    for (var i = 0; i < cs.length; i++) {
+      if (cs[i].start > cursor) ranges.push({ in: cursor, out: cs[i].start });
+      cursor = Math.max(cursor, cs[i].end);
+    }
+    if (cursor < outP) ranges.push({ in: cursor, out: outP });
+    return ranges;
+  }
+  // Net kept length = sum of kept ranges (drives the readout + the ＋Segment bake gate).
+  function tourNetLength(inP, outP, cuts) {
+    return tourKeptRanges(inP, outP, cuts).reduce(function (n, r) { return n + (r.out - r.in); }, 0);
+  }
   /* __TOUR_MEDIA_PURE__ end */
 
   var tourPlayingVideo = null; // only one source plays at a time
   var tourCropEditSrc = null;  // id of the source whose crop overlay is open (one at a time)
+  var tourActiveCutCancel = null; // canceller for an OPEN pending ripple cut (editor-only), if any;
+                                  // the board Escape ladder dismisses it first (see the global keydown)
+  var tourActiveCutSel = null;    // deselector for a SELECTED committed cut band (editor-only), if any;
+                                  // Escape (after any pending cancel) clears the selection before stepping out
   function tourPauseAllSources(except) {
     if (tourPlayingVideo && tourPlayingVideo !== except) { try { tourPlayingVideo.pause(); } catch (_) {} }
   }
@@ -7792,6 +7876,9 @@
     var rail = h("div", "tourb-transport__rail");
     var range = h("div", "tourb-transport__range"); rail.appendChild(range);
     var fill = h("div", "tourb-transport__fill"); rail.appendChild(fill);
+    // ripple cuts: removed bands punched out of the kept tint (rebuilt each paint), above the tint
+    // but below the ticks/knob. Pending cut renders here too as a dashed bracket.
+    var cutLayer = h("div", "tourb-transport__cuts"); rail.appendChild(cutLayer);
     var inTick = h("div", "tourb-transport__tick tourb-transport__tick--in"); rail.appendChild(inTick);
     var outTick = h("div", "tourb-transport__tick tourb-transport__tick--out"); rail.appendChild(outTick);
     var knob = h("div", "tourb-transport__knob"); rail.appendChild(knob);
@@ -7826,12 +7913,91 @@
     row.appendChild(seg);
     wrap.appendChild(row);
 
+    // --- cut sub-row (ripple T3): Set cut-in / Set cut-out, disclosed once in<out exists. ---
+    // pendingCut = seconds of an open cut-in awaiting its cut-out (ephemeral, editor-only).
+    // Committed cuts live on src.cuts (T1 model); the bake (T2) stitches the kept ranges.
+    var pendingCut = null;
+    var cutRow = h("div", "tourb-transport__cutrow");
+    cutRow.appendChild(h("span", "tourb-transport__speed-label", "Cut"));
+    var cutIn = h("button", "tourb-transport__mark", "Cut in"); cutIn.type = "button"; cutIn.title = "Drop a cut-in at the playhead (carve a section out of the segment)";
+    var cutOut = h("button", "tourb-transport__mark", "Cut out"); cutOut.type = "button"; cutOut.title = "Set the cut-out at the playhead to remove the section";
+    cutRow.appendChild(cutIn); cutRow.appendChild(cutOut);
+    // ✕ remove the selected cut (T4) — appears only when a committed band is selected; undo-reversible, no Modal.
+    var cutRemove = iconBtn("x", "Remove the selected cut (restore that section)"); cutRemove.classList.add("tourb-transport__cutrm");
+    cutRemove.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cutRemove.addEventListener("click", function (e) { e.stopPropagation(); removeSelectedCut(); });
+    cutRow.appendChild(cutRemove);
+    wrap.appendChild(cutRow);
+    var selCutIdx = null; // index into src.cuts of the SELECTED committed band (editor-only), or null
+    function hasSpan() { return src.in != null && src.out != null && dur() > 0 && src.out > src.in; }
+    // Open / clear a pending cut-in. The canceller is published module-side so the board's Escape
+    // ladder can dismiss an open cut FIRST (before stepping out of any other board mode).
+    function openPending(t) { pendingCut = t; tourActiveCutCancel = clearPending; clearCutSel(false); paint(); }
+    function clearPending(repaint) { pendingCut = null; if (tourActiveCutCancel === clearPending) tourActiveCutCancel = null; if (repaint !== false) paint(); }
+    // T4: select / deselect / remove a committed cut band. One selected at a time.
+    function selectCut(i) { selCutIdx = i; tourActiveCutSel = clearCutSel; clearPending(false); paint(); }
+    function clearCutSel(repaint) { if (selCutIdx == null) { if (repaint === true) paint(); return; } selCutIdx = null; if (tourActiveCutSel === clearCutSel) tourActiveCutSel = null; if (repaint !== false) paint(); }
+    function removeSelectedCut() {
+      if (selCutIdx == null || !Array.isArray(src.cuts) || !src.cuts[selCutIdx]) return;
+      pushHistory(); // undo-reversible (no Modal — low-stakes, restorable)
+      src.cuts.splice(selCutIdx, 1);
+      if (!src.cuts.length) delete src.cuts;
+      clearCutSel(false);
+      scheduleSave(); paint();
+    }
+    function reclipCuts() { // called when in/out move: drop/trim cuts outside the new bounds
+      if (Array.isArray(src.cuts) && src.cuts.length) {
+        src.cuts = tourClipCutsToBounds(src.cuts, src.in, src.out);
+        if (!src.cuts.length) delete src.cuts;
+      }
+      if (pendingCut != null && (!hasSpan() || pendingCut < src.in || pendingCut > src.out)) clearPending(false);
+      clearCutSel(false); // indices may have shifted -> drop any selection
+    }
+    function markCut(kind) {
+      var t = vid.currentTime || 0;
+      if (kind === "in") { openPending(t); return; } // open a pending cut-in (no model change)
+      if (pendingCut == null) return; // guarded by the disabled state
+      var cut = tourApplyCut(pendingCut, t, src.cuts); // ordered {start,end} or null if t<=cut-in
+      if (!cut) { paint(); return; } // invalid crossing -> keep the pending open
+      pushHistory();
+      var merged = tourMergeCuts(tourClipCutsToBounds((src.cuts || []).concat([cut]), src.in, src.out));
+      if (merged.length) src.cuts = merged; else delete src.cuts;
+      clearPending(false); clearCutSel(false); // a fresh commit can re-index cuts
+      scheduleSave(); paint();
+    }
+    cutIn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cutOut.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cutIn.addEventListener("click", function (e) { e.stopPropagation(); markCut("in"); });
+    cutOut.addEventListener("click", function (e) { e.stopPropagation(); markCut("out"); });
+
+    // --- speed sub-row: pick a playback-speed preset for the baked clip (0.5x .. 2x). ---
+    // Editor-only intent stored on src.speed; the bake re-times via vid.playbackRate. Progressively
+    // disclosed with the segment tools -- shown only once a valid in<out exists (like +Segment enabling).
+    var speedRow = h("div", "tourb-transport__speed");
+    speedRow.appendChild(h("span", "tourb-transport__speed-label", "Speed"));
+    var speedOpts = [
+      { value: "0.5", label: "0.5×" }, { value: "0.75", label: "0.75×" },
+      { value: "1", label: "1×" }, { value: "1.25", label: "1.25×" },
+      { value: "1.5", label: "1.5×" }, { value: "2", label: "2×" }
+    ];
+    var speedSeg = window.VersoUI.SegmentedControl({
+      size: "sm", value: String(src.speed || 1), options: speedOpts,
+      onChange: function (v) {
+        pushHistory();
+        var n = tourSpeedField(v); // 1x = default = no field (clean provenance)
+        if (n) src.speed = n; else delete src.speed;
+        scheduleSave();
+      }
+    });
+    speedSeg.style.flex = "1 1 auto"; speedSeg.title = "Playback speed of the baked segment (bake time follows the baked length)";
+    speedRow.appendChild(speedSeg);
+    wrap.appendChild(speedRow);
+
     function dur() { var d = vid.duration; return (d && isFinite(d) && d > 0) ? d : 0; }
     function paint() {
       var d = dur(), t = vid.currentTime || 0;
       var pct = d ? Math.max(0, Math.min(100, t / d * 100)) : 0;
       knob.style.left = pct + "%"; fill.style.width = pct + "%";
-      time.textContent = tourFormatTime(t) + " / " + tourFormatTime(d);
       var hasIn = src.in != null && d, hasOut = src.out != null && d;
       inTick.hidden = !hasIn; outTick.hidden = !hasOut;
       if (hasIn) inTick.style.left = Math.max(0, Math.min(100, src.in / d * 100)) + "%";
@@ -7841,7 +8007,39 @@
       if ((hasIn || hasOut) && hi > lo) { range.hidden = false; range.style.left = lo + "%"; range.style.width = (hi - lo) + "%"; }
       else range.hidden = true;
       play.innerHTML = (window.Icon ? window.Icon(vid.paused ? "play" : "pause") : "");
-      seg.disabled = !tourSegReady(src.in, src.out); // a clip needs a valid in < out
+      // ripple cuts: punch-out bands + pending bracket on the rail, and the net-length readout
+      var span = hasSpan(), cuts = Array.isArray(src.cuts) ? src.cuts : [];
+      cutLayer.innerHTML = "";
+      if (d) {
+        cuts.forEach(function (c, i) {
+          var band = h("div", "tourb-transport__cut" + (i === selCutIdx ? " is-sel" : ""));
+          band.style.left = Math.max(0, Math.min(100, c.start / d * 100)) + "%";
+          band.style.width = Math.max(0, Math.min(100, (c.end - c.start) / d * 100)) + "%";
+          band.title = "Removed " + tourFormatTime(c.start) + "-" + tourFormatTime(c.end) + " (click to select)";
+          band.addEventListener("pointerdown", function (e) { e.stopPropagation(); }); // select, don't seek the rail
+          band.addEventListener("click", function (e) { e.stopPropagation(); selectCut(i); });
+          cutLayer.appendChild(band);
+        });
+        if (pendingCut != null) {
+          var pa = Math.min(pendingCut, t), pb = Math.max(pendingCut, t);
+          var pend = h("div", "tourb-transport__cut tourb-transport__cut--pending");
+          pend.style.left = Math.max(0, Math.min(100, pa / d * 100)) + "%";
+          pend.style.width = Math.max(0, Math.min(100, (pb - pa) / d * 100)) + "%";
+          cutLayer.appendChild(pend);
+        }
+      }
+      var netTxt = (span && cuts.length) ? (" · clip " + tourFormatTime(tourNetLength(src.in, src.out, cuts))) : "";
+      time.textContent = tourFormatTime(t) + " / " + tourFormatTime(d) + netTxt;
+      // ＋Segment needs a valid clip with net kept length > 0 (a cut can swallow it)
+      seg.disabled = !tourSegReady(src.in, src.out, cuts);
+      // cut + speed tools disclosed once a span exists; cut-out waits for a pending cut-in
+      // speed is a bake-time choice you set BEFORE marking, so show it whenever the video has loaded;
+      // cut controls are meaningless without a segment, so they stay gated on a valid in<out (Q11).
+      speedRow.hidden = !(d > 0);
+      cutRow.hidden = !span;
+      cutOut.disabled = pendingCut == null;
+      cutIn.classList.toggle("is-on", pendingCut != null);
+      cutRemove.hidden = selCutIdx == null || !(cuts[selCutIdx]); // ✕ only with a live selection
     }
     function seekTo(clientX) {
       var d = dur(); if (!d) return;
@@ -7852,6 +8050,7 @@
     // click / drag the rail to seek
     rail.addEventListener("pointerdown", function (e) {
       e.stopPropagation(); e.preventDefault();
+      clearCutSel(); // clicking the rail body (not a band -> those stopPropagation) deselects
       try { rail.setPointerCapture(e.pointerId); } catch (_) {}
       seekTo(e.clientX);
       function mv(ev) { seekTo(ev.clientX); }
@@ -7868,6 +8067,7 @@
       var r = tourApplyMark(kind, vid.currentTime || 0, { in: src.in, out: src.out });
       if (r.in == null) delete src.in; else src.in = r.in;
       if (r.out == null) delete src.out; else src.out = r.out;
+      reclipCuts(); // moving a bound drops/trims cuts now outside [in,out]
       scheduleSave(); paint();
     }
     setIn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
@@ -7933,8 +8133,15 @@
   }
   function tourHarvestSegment(src, vid, replace, inOut) {
     var inMark = inOut ? inOut.in : src.in, outMark = inOut ? inOut.out : src.out;
-    if (tourSegRecording || !vid || !tourSegReady(inMark, outMark)) return;
+    // speed preset: re-bake replays inOut.speed, a fresh bake reads src.speed (default 1x)
+    var speed = (inOut && inOut.speed) || src.speed || 1;
+    // ripple cuts: re-bake replays inOut.cuts, a fresh bake reads src.cuts. The bake walks the
+    // KEPT ranges (T1) and splices them; the removed bands are never recorded.
+    var cuts = tourClipCutsToBounds(inOut ? inOut.cuts : src.cuts, inMark, outMark);
+    if (tourSegRecording || !vid || !tourSegReady(inMark, outMark, cuts)) return;
     if (typeof MediaRecorder === "undefined") return;
+    var kept = tourKeptRanges(inMark, outMark, cuts);
+    if (!kept.length) return;
     var r = tourCropRect(src.crop, vid.videoWidth || 1280, vid.videoHeight || 720);
     var cv = document.createElement("canvas"); cv.width = r.w; cv.height = r.h;
     var ctx = cv.getContext("2d");
@@ -7942,11 +8149,28 @@
     if (!stream) return;
     var mime = tourPickWebmMime(), rec;
     try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); } catch (_) { return; }
-    var chunks = [], raf = null, inPt = inMark, outPt = outMark;
-    function stopDraw() { if (raf) { cancelAnimationFrame(raf); raf = null; } try { vid.pause(); } catch (_) {} }
+    var chunks = [], raf = null, inPt = inMark, outPt = outMark, pi = 0; // pi = index of the kept piece being captured
+    function stopDraw() { if (raf) { cancelAnimationFrame(raf); raf = null; } try { vid.pause(); } catch (_) {} try { vid.playbackRate = 1; } catch (_) {} }
+    // Walk to the next kept piece: pause the recorder BEFORE the seek so the gap isn't captured,
+    // resume on `seeked` -> MediaRecorder splices the pieces with no frozen-frame smear.
+    function advance() {
+      pi++;
+      if (pi >= kept.length) { try { rec.stop(); } catch (_) {} return; } // all pieces captured
+      try { rec.pause(); } catch (_) {}
+      try { vid.pause(); } catch (_) {}
+      var onSeam = function () {
+        vid.removeEventListener("seeked", onSeam);
+        try { rec.resume(); } catch (_) {}
+        try { vid.playbackRate = speed; } catch (_) {}
+        vid.play().catch(function () {});
+        draw();
+      };
+      vid.addEventListener("seeked", onSeam);
+      try { vid.currentTime = kept[pi].in; } catch (_) { onSeam(); }
+    }
     function draw() {
       try { ctx.drawImage(vid, r.sx, r.sy, r.sw, r.sh, 0, 0, r.w, r.h); } catch (_) {}
-      if ((vid.currentTime || 0) >= outPt) { try { rec.stop(); } catch (_) {} return; }
+      if ((vid.currentTime || 0) >= kept[pi].out) { if (raf) { cancelAnimationFrame(raf); raf = null; } advance(); return; }
       raf = requestAnimationFrame(draw);
     }
     rec.ondataavailable = function (e) { if (e && e.data && e.data.size) chunks.push(e.data); };
@@ -7954,7 +8178,7 @@
       stopDraw();
       var blob = new Blob(chunks, { type: mime || "video/webm" });
       var fr = new FileReader();
-      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace); };
+      fr.onload = function () { tourFinishSegment(src, fr.result, inPt, outPt, replace, speed, cuts); };
       fr.onerror = function () { tourSegRecording = false; };
       fr.readAsDataURL(blob);
     };
@@ -7962,21 +8186,25 @@
     var onSeeked = function () {
       vid.removeEventListener("seeked", onSeeked);
       try { rec.start(); } catch (_) { tourSegRecording = false; return; }
+      try { vid.playbackRate = speed; } catch (_) {} // re-time the capture: 2x -> half-length clip, 0.5x -> double
       vid.play().catch(function () {});
       draw();
     };
     vid.addEventListener("seeked", onSeeked);
-    try { vid.currentTime = inPt; } catch (_) { onSeeked(); }
+    try { vid.currentTime = kept[0].in; } catch (_) { onSeeked(); }
   }
-  function tourFinishSegment(src, dataUrl, inPt, outPt, replace) {
+  function tourFinishSegment(src, dataUrl, inPt, outPt, replace, speed, cuts) {
     tourSegRecording = false;
     if (!dataUrl || typeof dataUrl !== "string" || dataUrl.indexOf("data:") !== 0) return;
+    var sp = tourSpeedField(speed); // 1x = default -> omit (clean provenance, ignored by render)
+    var cx = (Array.isArray(cuts) && cuts.length) ? cuts.map(function (c) { return { start: c.start, end: c.end }; }) : null;
     pushHistory();
     var label0 = (src.name ? src.name + " " : "") + tourFormatTime(inPt) + "-" + tourFormatTime(outPt);
     // RE-BAKE: replace an existing screen's clip in place -> id + markers/nav survive.
     if (replace) {
       replace.visual = assetRef(dataUrl, { type: "video/webm", name: label0 });
-      replace.kind = "video"; if (!replace.playback) replace.playback = "once"; replace.source = { id: src.id, in: inPt, out: outPt };
+      replace.kind = "video"; if (!replace.playback) replace.playback = "once";
+      replace.source = { id: src.id, in: inPt, out: outPt }; if (sp) replace.source.speed = sp; if (cx) replace.source.cuts = cx;
       tourSelKind = "node"; hotspotEditScreenId = replace.id; hotspotEditId = null; tourLoopSel = null;
       scheduleSave(); reapplyStructural(findPageOfBlock(tourBlock)); reselectBlockNode(tourBlock, "block");
       return;
@@ -7991,6 +8219,8 @@
       bx: (src.bx || 0) + TOUR_SOURCE_W + 60, by: (src.by || 0) + sibs * (TOUR_THUMB_H + 130),
       source: { id: src.id, in: inPt, out: outPt } // provenance -> re-cut (tick 6)
     };
+    if (sp) scr.source.speed = sp;
+    if (cx) scr.source.cuts = cx;
     scr.name = label;
     tourBlock.screens.push(scr);
     tourSelKind = "node"; hotspotEditScreenId = sid; hotspotEditId = null; tourLoopSel = null;
@@ -8005,7 +8235,7 @@
     var src = tourSourceById(s.source.id); if (!src) return; // source gone -> nothing to re-bake from
     var vid = (tourUI && tourUI.sources) ? tourUI.sources.querySelector('.tourb-source[data-source-id="' + src.id + '"] video') : null;
     if (!vid || !vid.videoWidth) return;
-    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out }); return; }
+    if (s.source.in != null && s.source.out != null) { tourHarvestSegment(src, vid, s, { in: s.source.in, out: s.source.out, speed: s.source.speed, cuts: s.source.cuts }); return; }
     var t = s.source.t || 0;
     var grab = function () { tourHarvestScreenshot(src, vid, s); };
     if (Math.abs((vid.currentTime || 0) - t) < 0.06) { grab(); return; }
@@ -8799,6 +9029,10 @@
       // Esc while typing in a card / title first blurs the field (don't exit the builder).
       var inField = e.target && e.target.closest && e.target.closest(".tourb-node__title, .tourb-node__caption, [contenteditable=true]");
       if (inField) { e.preventDefault(); try { e.target.blur(); } catch (_) {} return; }
+      // an OPEN pending ripple cut cancels first (the most transient mode) and stops there.
+      if (tourActiveCutCancel) { e.preventDefault(); e.stopPropagation(); tourActiveCutCancel(); return; }
+      // then a SELECTED cut band deselects (before stepping out of any other board mode).
+      if (tourActiveCutSel) { e.preventDefault(); e.stopPropagation(); tourActiveCutSel(); return; }
       // armed click-to-drop disarms first (a mode you can back out of before it closes anything).
       if (tourPlacing) { e.preventDefault(); tourSetPlacing(false); return; }
       // an open Properties drawer closes next (on-demand surface, easy to dismiss).
@@ -8810,7 +9044,7 @@
       if (tourLoopSel) { e.preventDefault(); tourLoopSel = null; renderTourLoops(); renderTourInspector(); return; }
       if (tourLinkSel) { e.preventDefault(); tourLinkSel = null; renderTourEdges(); tourClearPinSel(); return; }
       if (tourNodeSel.length) { e.preventDefault(); tourNodeSel = []; tourApplyNodeSelClasses(); return; }
-      e.preventDefault(); closeTourBuilder();
+      e.preventDefault(); e.stopPropagation(); closeTourBuilder(); // don't let the close Esc reach main-editor handlers
     }
   });
   // Fine-tune placement: arrow keys nudge the selected marker (0.5% / 2% with Shift). Gives
@@ -15750,6 +15984,9 @@
       if (!loc) return;
       doc.pages[loc.pi].blocks[loc.bi] = patch;
       try { reapplyStructural(loc.pi); } catch (e) { try { mount(); } catch (e2) {} } // re-render just that page (mount() if previewing)
+      // a remote block.change swaps the block OBJECT -> if the tour builder is open on that same
+      // block, its captured reference just went stale; re-bind it to the live doc (same guard as undo/setDoc).
+      if (typeof rebindTourBuilderToLiveDoc === "function") { try { rebindTourBuilderToLiveDoc(); } catch (e) {} }
       reproject();
     }
     function flushPending() {
@@ -17633,6 +17870,7 @@
       registry[activeDocId] = next;
       saveRegistry(registry);
       mount();
+      rebindTourBuilderToLiveDoc(); // if the builder is open, re-bind it to the replaced doc (no orphaned edits)
     },
     // follow-the-edit: navigate to + highlight what a change just touched. target =
     // { blockId? , pageId? , chapterId? }. Called after setDoc (the canvas is freshly mounted),
