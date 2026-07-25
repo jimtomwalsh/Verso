@@ -1808,10 +1808,13 @@
     for (var j = 0; j < pp.length; j++) if (JSON.stringify(pp[j]) !== JSON.stringify(np[j])) changed.push(j);
     return changed;
   }
+  // #50: mirrors setDoc's doc/registry pair-write — undo/redo used to touch only `doc`,
+  // leaving registry[activeDocId] stale so the next save persisted the pre-undo doc.
   function restoreSnapshot(next) {
     var prev = doc;
     var changed = isPreview() ? null : isolatedPageChanges(prev, next);
     doc = next;
+    registry[activeDocId] = next;
     if (changed) {
       clearSelection();
       if (changed.length) reapplyStructural(changed); else { renderStructure(); renderModelView(); }

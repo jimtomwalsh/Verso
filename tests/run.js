@@ -7559,6 +7559,10 @@ section("PERF one-page re-render");
     /function reapplyStructural\(pi\) \{[\s\S]{0,220}if \(!ok \|\| isPreview\(\)\) \{ mount\(\); return; \}[\s\S]{0,120}reapplyPage\(i\);[\s\S]{0,600}renderStructure\(\);[\s\S]{0,60}renderModelView\(\);[\s\S]{0,60}renderCommentPins\(\);/.test(e));
   ok("reapplyStructural accepts one index OR an array (drag = source+dest pages)", /var list = Array\.isArray\(pi\) \? pi : \[pi\];/.test(e));
   ok("undo/redo restore reapplies only the changed pages (isolatedPageChanges), full mount otherwise", /function isolatedPageChanges\(prev, next\)[\s\S]{0,400}return null;[\s\S]{0,400}changed\.push\(j\)/.test(e) && /function restoreSnapshot\(next\)[\s\S]{0,220}reapplyStructural\(changed\)/.test(e));
+  // #50: undo/redo used to reassign only `doc`, leaving registry[activeDocId] stale — the
+  // next save (e.g. closeTourBuilder -> flushSave) persisted the pre-undo doc, dropping any
+  // edits made after the undo. restoreSnapshot must pair-write doc + registry like setDoc.
+  ok("restoreSnapshot #50 keeps registry[activeDocId] in sync with doc (undo/redo no longer diverges)", /function restoreSnapshot\(next\) \{[\s\S]{0,200}doc = next;\s*registry\[activeDocId\] = next;/.test(e));
   ok("handleDrop rebuilds source+dest pages, not the world", /var destPi = findPageOfBlock\(draggedBlock\);[\s\S]{0,320}reapplyStructural\(affected\.length \? affected : -1\);/.test(e));
   // #171: deletePage re-anchors the viewport by page IDENTITY (keepId -> pageIndexById),
   // so deleting a page BEFORE the active one no longer jumps the view to a random page.
