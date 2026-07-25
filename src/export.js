@@ -338,9 +338,16 @@
   // (storage invariant intact). A course with 0-1 versions is byte-identical to before (no wrapper).
   function serializeVersionedPages(doc, ctx, opts) {
     var versions = window.getVersions ? window.getVersions(doc) : (doc.versions || []);
-    if (!versions || versions.length < 2 || !window.resolveVersion) return serializePages(doc, ctx, opts);
+    if (!versions || versions.length < 2 || !window.resolveVersion) {
+      // #23: even the no-wrapper path has an EFFECTIVE version key (base/first, or none
+      // at all) -- keep the library-axis hook accurate here too, so a libraryInstance
+      // placement resolves the right version content.
+      if (window.__libraryAxisContext) window.__libraryAxisContext.version = (versions && versions[0]) || null;
+      return serializePages(doc, ctx, opts);
+    }
     var latest = versions[versions.length - 1]; // default = latest = last-created (SPEC §3)
     return versions.map(function (v) {
+      if (window.__libraryAxisContext) window.__libraryAxisContext.version = v; // #23: this pass bakes version v
       var markup = serializePages(window.resolveVersion(doc, v), ctx, opts); // per-version nav/interactions bake fresh (serializePages resets the render globals per call)
       var isDefault = v === latest;
       return '<div class="scorm-version' + (isDefault ? " is-version-current" : "") + '" data-version="' + escapeAttr(v) + '"' +
@@ -785,6 +792,11 @@
     // exported markup is exactly what this variant ships — one hero course, N
     // clean packages, no forked copies (kills the V002 contamination class).
     var doc = window.resolveVariant ? window.resolveVariant(baseDoc, opts.variant) : baseDoc;
+    // #23: this package builds for one EFFECTIVE variant key (never null -- falls back to
+    // hero/identity, same as resolveVariant's own default) -- keep the library-axis hook
+    // in sync so a libraryInstance placement's master template resolves the SAME variant.
+    // version is set per-pass by serializeVersionedPages below.
+    window.__libraryAxisContext = { variant: opts.variant || (baseDoc.heroVariant || "hero"), version: null };
     var themes = window.Editor.getThemes();
     opts._activeMode = (window.Editor.getTheme() === themes.light) ? "light" : "dark";
     var ctx = { net: [], dropped: [] };

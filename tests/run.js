@@ -2152,6 +2152,16 @@ section("#69 migration cutover");
   ok("verify missing doc -> fail", M.verifyRegistries(reg3, JSON.stringify({ "C-1": {}, "C-2": {}, "C-3": null })).ok === false);
   ok("verify unparseable read-back -> fail", M.verifyRegistries(reg3, "{not json").ok === false);
 
+  // verifyLibrary (#18: same read-back gate, for the shared component library) --------
+  var lib2 = JSON.stringify({ components: { "comp-1": { name: "A" }, "comp-2": { name: "B" } } });
+  ok("verifyLibrary loaded", typeof M.verifyLibrary === "function");
+  ok("verifyLibrary identical -> ok", M.verifyLibrary(lib2, lib2).ok === true && M.verifyLibrary(lib2, lib2).count === 2);
+  ok("verifyLibrary empty read-back -> fail", M.verifyLibrary(lib2, null).ok === false);
+  ok("verifyLibrary key count mismatch -> fail", M.verifyLibrary(lib2, JSON.stringify({ components: { "comp-1": {} } })).ok === false);
+  ok("verifyLibrary key mismatch -> fail", M.verifyLibrary(lib2, JSON.stringify({ components: { "comp-1": {}, "comp-9": {} } })).ok === false);
+  ok("verifyLibrary unparseable read-back -> fail", M.verifyLibrary(lib2, "{not json").ok === false);
+  ok("verifyLibrary missing components key treated as empty -> matches empty", M.verifyLibrary(JSON.stringify({}), JSON.stringify({})).ok === true);
+
   // Fakes: a browser source + a file store, with injectable failure hooks.
   function fakeBrowser(json) { return { readRegistry: function () { return json; } }; }
   function fakeFile(opts) {
@@ -2308,21 +2318,36 @@ section("#69 migration cutover");
   ok("migrateToFileBackend is async", /async function migrateToFileBackend\(opts\)/.test(ed));
   ok("migrateToFileBackend requires the browser backend", /async function migrateToFileBackend\(opts\)[\s\S]{0,700}backend !== "browser"[\s\S]{0,80}return fail\("precondition"/.test(ed));
   ok("migrateToFileBackend requires the native store glue", /if \(!ns\) return fail\("precondition", "native file storage is not available/.test(ed));
-  ok("migrateToFileBackend backup-gates before suppress", /window\.Migration\.runBackupsAsync\(src[\s\S]{0,700}bk\.count !== codes\.length[\s\S]{0,300}window\.Migration\.suppress\(\)/.test(ed));
+  ok("migrateToFileBackend backup-gates before suppress", /window\.Migration\.runBackupsAsync\(src[\s\S]{0,700}bk\.count !== codes\.length[\s\S]{0,1900}window\.Migration\.suppress\(\)/.test(ed));
   ok("migrateToFileBackend writes then verifies from disk", /await putRegistry\(srcJson\)[\s\S]{0,400}await getRegistry\(\)[\s\S]{0,200}window\.Migration\.verifyRegistries\(srcJson, back\)/.test(ed));
-  ok("migrateToFileBackend flips flag ONLY after verify passes", /if \(!v\.ok\) \{ window\.Migration\.resume\(\); return fail\("verify"[\s\S]{0,500}setFlag\("file"\)/.test(ed));
+  ok("migrateToFileBackend flips flag ONLY after verify passes", /if \(!v\.ok\) \{ window\.Migration\.resume\(\); return fail\("verify"[\s\S]{0,1500}setFlag\("file"\)/.test(ed));
   ok("migrateToFileBackend resumes saves on write/verify failure", /window\.Migration\.resume\(\); return fail\("write"[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify"/.test(ed));
+  // #18: the shared component library rides the SAME guarded cutover as the registry --
+  // one flag flip must move both, or neither (never straddle backends).
+  ok("migrateToFileBackend requires put/getLibrary too", /if \(!putLibrary \|\| !getLibrary\) return fail\("precondition", "native store is missing put\/getLibrary"\)/.test(ed));
+  ok("migrateToFileBackend reads the browser library (optional source)", /libJson;[\s\S]{0,40}try \{ libJson = browserLibAdapter\.readLibrary\(\); \}/.test(ed));
+  ok("migrateToFileBackend backs up the library before suppress", /if \(libJson\) \{[\s\S]{0,1200}window\.Migration\.suppress\(\)/.test(ed));
+  ok("migrateToFileBackend writes+verifies the library after the registry, same suppression window", /window\.Migration\.verifyRegistries\(srcJson, back\)[\s\S]{0,600}if \(libJson\) \{[\s\S]{0,700}await putLibrary\(libJson\)[\s\S]{0,300}await getLibrary\(\)[\s\S]{0,300}window\.Migration\.verifyLibrary\(libJson, libBack\)/.test(ed));
+  ok("migrateToFileBackend resumes saves on library write/verify failure too", /window\.Migration\.resume\(\); return fail\("write", "library:[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify", "library:/.test(ed));
   ok("Editor exposes migrateToFileBackend", /migrateToFileBackend: migrateToFileBackend/.test(ed));
+  // WIRING (#18): the library storage seam mirrors the registry's -- same pickStorageAdapter,
+  // same flag, and loadLibrary/saveLibrary route through it (not a hardcoded localStorage call).
+  ok("libraryAdapter uses the same pickStorageAdapter seam as the registry", /function libraryAdapter\(\) \{ return pickStorageAdapter\(storageBackend\(\), window\.__storageAdapter, browserLibraryAdapter\); \}/.test(ed));
+  ok("loadLibrary reads via libraryAdapter, not a hardcoded localStorage call", /function loadLibrary\(\) \{[\s\S]{0,200}libraryAdapter\(\)\.readLibrary\(\)/.test(ed));
+  ok("saveLibrary writes via libraryAdapter, not a hardcoded localStorage call", /function saveLibrary\(\) \{ try \{ libraryAdapter\(\)\.writeLibrary\(JSON\.stringify\(window\.LibraryStore\)\); \} catch \(e\) \{\} \}/.test(ed));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
   ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(ed));
   ok("migrate button registered only when __nativeStore present", /if \(window\.__nativeStore\) window\.Editor\.registerPipelineButton\("Migrate to file storage \(beta\)", migrateToFileBackendPrompt/.test(ed));
   // WIRING: the Swift bridge grew the ops the native store glue posts.
   var swift = src("desktop/AuthoringTool.swift");
-  ["storePutRegistry", "storeGetRegistry", "storePutBackupB64", "storeFileSize", "storeReload"].forEach(function (op) {
+  ["storePutRegistry", "storeGetRegistry", "storePutLibrary", "storeGetLibrary", "storePutBackupB64", "storeFileSize", "storeReload"].forEach(function (op) {
     ok("Swift handleBackup handles op " + op, swift.indexOf('op == "' + op + '"') !== -1);
   });
   ok("Swift injects the on-disk registry at document-start", /addUserScript\(registryInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskRegistryB64/.test(swift));
+  ok("Swift injects the on-disk library at document-start (#18)", /addUserScript\(libraryInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskLibraryB64/.test(swift));
   ok("Swift reload refreshes the registry injection", /@objc func reload\(\) \{ refreshRegistryInjection\(\)/.test(swift));
+  ok("Swift refreshRegistryInjection rebuilds BOTH the registry and library scripts", /func refreshRegistryInjection\(\) \{[\s\S]{0,200}addUserScript\(registryInjectionScript\(\)\)[\s\S]{0,100}addUserScript\(libraryInjectionScript\(\)\)/.test(swift));
+  ok("Swift storePutLibrary writes library.json and refreshes injections", /op == "storePutLibrary"[\s\S]{0,600}library\.json[\s\S]{0,300}refreshRegistryInjection\(\)/.test(swift));
   ok("Swift storePath rejects absolute / parent-escape paths", /func storePath[\s\S]{0,160}hasPrefix\("\/"\)[\s\S]{0,40}contains\("\.\."\)/.test(swift));
   // REGRESSION: editor.js's __versoBackupReply must CHAIN store-native's, not clobber it.
   ok("editor.js chains a prior __versoBackupReply owner", /__prevBackupReply = window\.__versoBackupReply[\s\S]{0,320}typeof __prevBackupReply === "function"\) __prevBackupReply\(id, result\)/.test(ed));
@@ -2355,6 +2380,11 @@ section("#69 migration cutover");
     var wr = w2.__storageAdapter.writeRegistry('{"C-1":{}}');
     ok("writeRegistry returns ok + caches synchronously", wr.ok === true && w2.__storageAdapter.readRegistry() === '{"C-1":{}}');
     ok("writeRegistry posts storePutRegistry with a reqId", posted.length === 1 && posted[0].op === "storePutRegistry" && typeof posted[0].reqId === "string");
+    // #18: the library gets the identical adapter shape, on a separate op/cache.
+    var wl = w2.__storageAdapter.writeLibrary('{"components":{"c1":{}}}');
+    ok("writeLibrary returns ok + caches synchronously", wl.ok === true && w2.__storageAdapter.readLibrary() === '{"components":{"c1":{}}}');
+    ok("writeLibrary posts storePutLibrary with a reqId, separate from the registry op", posted.length === 2 && posted[1].op === "storePutLibrary" && typeof posted[1].reqId === "string" && posted[1].reqId !== posted[0].reqId);
+    ok("registry cache untouched by a library write", w2.__storageAdapter.readRegistry() === '{"C-1":{}}');
     // A failed disk reply surfaces via Editor.reportSaveFailure (not lost fire-and-forget).
     var failMsg = null; w2.Editor = { reportSaveFailure: function (m) { failMsg = m; } };
     w2.__versoBackupReply(posted[0].reqId, { ok: false, error: "disk full" });
@@ -2372,7 +2402,7 @@ section("#69 migration cutover");
     // __nativeStore async glue: the live deps for Editor.migrateToFileBackend. Driven
     // LAST so its request()->reply posts don't perturb the sync writeRegistry checks above.
     var ns = w2.__nativeStore;
-    ok("store-native exposes __nativeStore with the live deps", !!ns && ["putRegistry", "getRegistry", "writeFile", "verifySize", "reload", "tsLabel"].every(function (k) { return typeof ns[k] === "function"; }));
+    ok("store-native exposes __nativeStore with the live deps", !!ns && ["putRegistry", "getRegistry", "putLibrary", "getLibrary", "writeFile", "verifySize", "reload", "tsLabel"].every(function (k) { return typeof ns[k] === "function"; }));
     ok("tsLabel is a filesystem-safe timestamp", /^\d{8}-\d{6}$/.test(ns.tsLabel()));
     __async.push((async function () {
       var pv = ns.verifySize("backups/pre-cutover-T/C-1.verso");
@@ -2389,8 +2419,69 @@ section("#69 migration cutover");
       var lg = posted[posted.length - 1];
       w2.__versoBackupReply(lg.reqId, { ok: true, text: '{"A":{}}' });
       ok("getRegistry resolves the on-disk text", (await pg) === '{"A":{}}');
+      // #18: same async glue, targeting the library ops.
+      var ppl = ns.putLibrary('{"components":{"c1":{}}}');
+      var lpl = posted[posted.length - 1];
+      ok("putLibrary posts storePutLibrary", lpl.op === "storePutLibrary" && lpl.text === '{"components":{"c1":{}}}');
+      w2.__versoBackupReply(lpl.reqId, { ok: true, path: "/x/library.json" });
+      ok("putLibrary resolves the confirmation", (await ppl).ok === true);
+      var pgl = ns.getLibrary();
+      var lgl = posted[posted.length - 1];
+      ok("getLibrary posts storeGetLibrary", lgl.op === "storeGetLibrary");
+      w2.__versoBackupReply(lgl.reqId, { ok: true, text: '{"components":{"c1":{}}}' });
+      ok("getLibrary resolves the on-disk text", (await pgl) === '{"components":{"c1":{}}}');
     })());
   })();
+})();
+
+// ---- #19: component-library stable-id master snapshot model ---------------
+section("#19 stable-id master snapshot");
+(function () {
+  var etxt = src("src/editor.js");
+
+  // 1. CAPTURE mints ids ONCE: saveBlockAsComponent's template is remintIds(clone(block)).
+  // From that moment the ids are the component's permanent identity.
+  ok("saveBlockAsComponent mints fresh ids once at capture", /comps\[id\] = \{ name: name, kind: "composed", template: remintIds\(clone\(block\)\) \};/.test(etxt));
+
+  // 2. PRESERVE discipline: promoting to the shared library and detaching a local copy
+  // must NEVER remint -- a regex catches a future edit that adds a stray remintIds()
+  // call to either handler, which would silently break every existing instance's
+  // ability to key an override against the master's (now-drifted) block ids.
+  var copyIdx = etxt.indexOf("getComponents()[k] = clone(comp); saveRegistry(registry); mount();");
+  ok("'Copy to course' handler found", copyIdx !== -1);
+  ok("'Copy to course' preserves ids (no remint)", copyIdx !== -1 && etxt.slice(copyIdx - 20, copyIdx + 80).indexOf("remintIds") === -1);
+  var saveIdx = etxt.indexOf("window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);");
+  ok("'Save to library' handler found", saveIdx !== -1);
+  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 100).indexOf("remintIds") === -1);
+
+  // 3. The contract is documented at remintIds' own definition, so #20/#21/#24 don't
+  // add a 5th call site that touches library-resident content.
+  ok("remintIds documents the #19 library-preservation contract", /NEVER call remintIds on content already\s*\n\s*\/\/ resident in doc\.components or LibraryStore\.components/.test(etxt));
+
+  // 4. ROUND-TRIP STABILITY (JSON save/load, e.g. through the #18 storage seam): a
+  // captured component's nested block ids survive byte-identical.
+  var comp = { name: "Probe", kind: "composed", template: { id: "b_1", type: "frame", children: [{ id: "b_2", type: "paragraph" }, { id: "b_3", type: "columns", columns: [[{ id: "b_4", type: "image" }]] }] } };
+  var savedJson = JSON.stringify({ components: { probe: comp } });
+  var loaded = JSON.parse(savedJson);
+  ok("library JSON save/load preserves a master's ids byte-identical", JSON.stringify(loaded.components.probe) === JSON.stringify(comp));
+  ok("nested child id specifically unchanged", loaded.components.probe.template.children[0].id === "b_2");
+  ok("nested column-child id specifically unchanged", loaded.components.probe.template.children[1].columns[0][0].id === "b_4");
+  // a second round-trip (save -> load -> save -> load) must be a no-op (idempotent).
+  var loaded2 = JSON.parse(JSON.stringify(loaded));
+  ok("a second save/load cycle is idempotent", JSON.stringify(loaded2) === JSON.stringify(loaded));
+
+  // 5. .verso EXPORT/IMPORT STABILITY: a doc-local composed component's nested ids
+  // survive VersoFormat.buildPackage/readPackage untouched (no id processing there).
+  var vfWin = {};
+  new Function("window", src("src/verso-format.js"))(vfWin);
+  var VF = vfWin.VersoFormat;
+  if (!VF) { ok("VersoFormat loaded for #19 round-trip", false); }
+  else {
+    var doc = { meta: { code: "C-1", title: "Probe course" }, pages: [{ blocks: [] }], components: { probe: comp } };
+    var pkg = VF.buildPackage(doc, {}, {});
+    var back = VF.readPackage(pkg);
+    ok(".verso round-trip preserves a doc component's nested ids byte-identical", JSON.stringify(back.doc.components) === JSON.stringify(doc.components));
+  }
 })();
 
 // ---- YY: asset walk helpers + store --------------------------------------
@@ -4278,18 +4369,329 @@ section("WWW retroactive auto-clean");
   ok("normalizeDoc runs the retroactive clean", /stripStyledColorsDeep\(d\);/.test(etxt));
 })();
 
-// ---- §10b shared component library slice 2: "Shared Library" palette insert ----
+// ---- §10b shared component library slice 2: "Blocks" palette insert ----
+// (moved from the Blocks palette's "Shared Library" asset-group into the dedicated
+// Components left-pane twirl's "Blocks" group as part of the left-panel reorg)
 section("shared-library palette insert");
 (function () {
   var etxt = src("src/editor.js");
   var reg = etxt.indexOf("SHARED component library (cross-course");
-  ok("renderAssets adds a Shared Library palette section", reg > -1);
-  var body = etxt.slice(reg, reg + 2200);
+  ok("renderComponentsPalette adds a Blocks palette section", reg > -1);
+  var body = etxt.slice(reg, reg + 1400);
   ok("sources it from the cross-course libComponents(), not doc components", /var lib = libComponents\(\)/.test(body));
   ok("only surfaces composed defs (slot-def render fns aren't serialisable)", /kind === "composed" && lib\[k\]\.template/.test(body));
-  ok("titles the section \"Shared Library\"", /"asset-group__title", "Shared Library"/.test(body));
-  ok("insert drops a COPY of the template via insertBlock", /insertBlock\(clone\(comp\.template\)\)/.test(body));
-  ok("collapse state persists like other palette groups", /setGroupCollapsed\("Shared Library"/.test(body));
+  ok("titles the section \"Blocks\"", /renderGroup\("Blocks"/.test(body));
+  // #20: insert now places a LIVE-LINKED libraryInstance wrapper, not a detached copy
+  // (a deliberate behavior change from the original slice-2 copy-insert -- "My Components"
+  // below/elsewhere keeps copy-insert, this only applies to the cross-course shared library).
+  ok("insert places a live-linked libraryInstance wrapper (not a copy)", /insertBlock\(\{ type: "libraryInstance", id: mintId\(\), ref: k \}\)/.test(body));
+  var groupFn = etxt.slice(etxt.indexOf("function renderGroup(title, rows, emptyHint)"), etxt.indexOf("function renderGroup(title, rows, emptyHint)") + 500);
+  ok("collapse state persists like other palette groups", /setGroupCollapsed\(title, !det\.open\)/.test(groupFn));
+})();
+
+// ---- #20: library-instance mirror (live-linked, promote ANY composed block) -----
+section("#20 library-instance mirror");
+(function () {
+  var etxt = src("src/editor.js");
+  var rtxt = src("src/render.js");
+
+  // 1. render.js resolves the CURRENT master live (doc override -> library -> built-in),
+  // same order as componentGrid's resolveComponentDef -- single-source, bakes at export.
+  var libStart = rtxt.indexOf("libraryInstance: function (block)");
+  ok("render.js defines BLOCKS.libraryInstance", libStart !== -1);
+  var libBody = rtxt.slice(libStart, libStart + 1400);
+  ok("resolves doc override -> shared library -> built-in", /docComps && docComps\[block\.ref\]\) \|\| libComps\[block\.ref\] \|\| \(window\.COMPONENTS \|\| \{\}\)\[block\.ref\]/.test(libBody));
+  ok("renders a cloneData() COPY of the master, never the live object (editor-safety)", /var content = cloneData\(def\.template\);[\s\S]{0,600}var node = renderBlock\(content\)/.test(libBody));
+  ok("applies #21 overrides onto the CLONE, not the live master", /if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody));
+  ok("marks the wrapper node for the editor-only opacity rule", /data-library-instance/.test(libBody));
+
+  // 2. editor.js: selection routing, contentless inspector, tree label/icon, all mirror
+  // componentGrid's existing precedent for a def-resolving block type.
+  ok("TWO_LEVEL_TYPES includes libraryInstance (contentless like componentGrid)", /TWO_LEVEL_TYPES = \{[^}]*libraryInstance: 1/.test(etxt));
+  ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(etxt));
+  ok("inspector dispatch reuses renderContentlessBlock", /if \(block\.type === "libraryInstance"\) \{ renderContentlessBlock\(node, "Library instance", renderLibraryInstanceBody\); return; \}/.test(etxt));
+  ok("block-icon map has a libraryInstance glyph", /libraryInstance: "component"/.test(etxt));
+  ok("tree label resolves the master's name via resolveComponentDef", /if \(b\.type === "libraryInstance"\) \{ var libDef = resolveComponentDef\(b\.ref\)/.test(etxt));
+
+  // 3. the inspector body reuses componentGrid card's OWN "instance" header language
+  // (prop-component--instance), and offers Detach as the only structural action in v1.
+  var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
+  ok("renderLibraryInstanceBody found", lbStart !== -1);
+  var lbBody = etxt.slice(lbStart, lbStart + 2800);
+  ok("reuses the canonical instance header (same class componentGrid cards use)", /"prop-component prop-component--instance"/.test(lbBody));
+  ok("offers a Detach action, disabled when the master is missing", /detachB\.disabled = !def/.test(lbBody));
+
+  // 4. Detach: #19 says preserve on promote/copy but REMINT on a genuine new landed
+  // copy -- a detach IS that case, so (unlike Copy-to-course/Save-to-library) it MUST
+  // call remintIds, or every detached instance of the same master would collide.
+  var daStart = etxt.indexOf("function detachLibraryInstance(block)");
+  ok("detachLibraryInstance found", daStart !== -1);
+  var daBody = etxt.slice(daStart, daStart + 1300);
+  ok("detach mints a FRESH remint of the master's current (override-baked) template", /var fresh = remintIds\(withOverrides\)/.test(daBody));
+  ok("detach bakes in the author's overrides, not the master's raw content", /if \(block\.overrides && window\.applyInstanceOverrides\) window\.applyInstanceOverrides\(withOverrides, block\.overrides\)/.test(daBody));
+  ok("detach replaces the wrapper's fields in place (stays the same page-tree node)", /Object\.keys\(block\)\.forEach\(function \(k\) \{ delete block\[k\]; \}\)/.test(daBody));
+
+  // 5. editor.css scopes the "opaque instance" rule to the marker attribute, and never
+  // applies to course.css/render output (editor-only chrome, per the pure-render invariant).
+  var css = src("editor.css");
+  ok("editor.css disables pointer-events on nested canvas-blocks inside a library instance", /\[data-library-instance\] \.canvas-block \{ pointer-events: none; \}/.test(css));
+  ok("course.css does not reference the library-instance marker (editor-chrome only)", src("src/course.css").indexOf("data-library-instance") === -1);
+})();
+
+// ---- #21: instance local overrides + structure reconciliation + detach/relink ----
+section("#21 instance overrides + reconciliation + relink");
+(function () {
+  var etxt = src("src/editor.js");
+  var rtxt = src("src/render.js");
+
+  // 1. PURE: reconcileOverrides / collectOverridableTextFields, extracted headlessly.
+  var pStart = etxt.indexOf("var TEXT_STYLE_TYPES = {");
+  var pEnd = etxt.indexOf("/* @overrides-end */");
+  var pureBody = etxt.slice(pStart, pEnd);
+  var mod = new Function(pureBody + "\nreturn { collectOverridableTextFields: collectOverridableTextFields, reconcileOverrides: reconcileOverrides };")();
+  ok("pure functions extracted", typeof mod.reconcileOverrides === "function" && typeof mod.collectOverridableTextFields === "function");
+
+  var master = { id: "b_ROOT", type: "frame", children: [
+    { id: "b_H", type: "heading", text: "Title" },
+    { id: "b_P", type: "paragraph", text: "Body" },
+    { id: "b_IMG", type: "image", src: "asset:x" } // not text-bearing -- must be excluded
+  ] };
+  var fields = mod.collectOverridableTextFields(master);
+  ok("collects only text-bearing fields (heading+paragraph, not image)", fields.length === 2 && fields.map(function (f) { return f.id; }).sort().join(",") === "b_H,b_P");
+  ok("captures the master's CURRENT text as context", fields.filter(function (f) { return f.id === "b_H"; })[0].text === "Title");
+
+  var rec1 = mod.reconcileOverrides(master, { b_H: { text: "Override" }, b_P: { text: "Also" } });
+  ok("reconcile: all-surviving overrides are all living, none dropped", Object.keys(rec1.living).length === 2 && rec1.dropped.length === 0);
+
+  var rec2 = mod.reconcileOverrides(master, { b_H: { text: "Override" }, b_GONE: { text: "Stale" } });
+  ok("reconcile: a field removed from the master -> that override is DROPPED", rec2.dropped.length === 1 && rec2.dropped[0] === "b_GONE");
+  ok("reconcile: a still-existing field's override is KEPT (living)", rec2.living.b_H && rec2.living.b_H.text === "Override" && !rec2.living.b_GONE);
+
+  // Reorder must never drop anything -- overrides key to a stable id, not a position.
+  var reordered = { id: "b_ROOT", type: "frame", children: [master.children[2], master.children[1], master.children[0]] };
+  var rec3 = mod.reconcileOverrides(reordered, { b_H: { text: "Override" }, b_P: { text: "Also" } });
+  ok("reconcile: reordering the master's children drops nothing", rec3.dropped.length === 0 && Object.keys(rec3.living).length === 2);
+
+  // 2. render.js: applyInstanceOverrides walks the SAME shape reconcile/collect do, and
+  // is applied to the CLONE (never the live master) before render.
+  var aoStart = rtxt.indexOf("function applyInstanceOverrides(node, overrides)");
+  ok("render.js defines applyInstanceOverrides", aoStart !== -1);
+  var aoBody = rtxt.slice(aoStart, aoStart + 900);
+  ["node.children.forEach", "node.columns.forEach", "node.items.forEach", "node.screens.forEach"].forEach(function (needle) {
+    ok("applyInstanceOverrides descends " + needle.split(".")[1], aoBody.indexOf(needle) !== -1);
+  });
+
+  // 3. editor.js wiring: renderLibraryInstanceBody reconciles-on-open (prunes + persists +
+  // surfaces a drop), then lists override fields via the canonical fieldRow control.
+  var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
+  var lbBody2 = etxt.slice(lbStart, lbStart + 2800);
+  ok("reconciles on open via reconcileOverrides(def.template, ...)", /var rec = reconcileOverrides\(def\.template, block\.overrides \|\| \{\}\)/.test(lbBody2));
+  ok("prunes the block's overrides to the living set", /block\.overrides = rec\.living/.test(lbBody2));
+  ok("surfaces a drop with the warn hint class", /insp-hint insp-hint--warn/.test(lbBody2));
+  ok("lists override fields via the canonical fieldRow control", /fields\.forEach\(function \(f\) \{[\s\S]{0,150}fieldRow\(/.test(lbBody2));
+  ok("an empty override reverts to inherit (delete, not empty-string store)", /if \(v\) block\.overrides\[f\.id\] = \{ text: v \}; else delete block\.overrides\[f\.id\]/.test(lbBody2));
+  // #163 gate: must NOT reintroduce a raw sub() section header for the new Overrides group.
+  ok("Overrides label uses the stacked-label pattern, not a new sub() header", /"insp-row__label insp-row__label--stacked", "Overrides"/.test(lbBody2) && lbBody2.indexOf('sub("Overrides")') === -1);
+
+  // 4. Detach discards overrides (they were keyed to the mirror) and leaves a __linkedFrom
+  // breadcrumb; Relink is gated on it and gives a lossy-edit warning before acting.
+  var daStart2 = etxt.indexOf("function detachLibraryInstance(block)");
+  var daBody2 = etxt.slice(daStart2, daStart2 + 1350);
+  ok("detach records __linkedFrom for a future relink", /block\.__linkedFrom = ref/.test(daBody2));
+
+  var rlStart = etxt.indexOf("function relinkToLibrary(block, ref)");
+  ok("relinkToLibrary found", rlStart !== -1);
+  var rlBody = etxt.slice(rlStart, rlStart + 400);
+  ok("relink rebuilds a fresh libraryInstance wrapper (fresh id, same ref)", /block\.type = "libraryInstance";[\s\S]{0,60}block\.id = mintId\(\);[\s\S]{0,60}block\.ref = ref;/.test(rlBody));
+
+  var frStart = etxt.indexOf("function renderFrameOrGroupTwoLevel(node)");
+  var frBody = etxt.slice(frStart, frStart + 3200);
+  ok("Relink button is gated on __linkedFrom (never shown on an ordinary frame)", /if \(block\.__linkedFrom\) \{/.test(frBody));
+  ok("Relink warns that local edits since detach are discarded", /discarded/.test(frBody));
+})();
+
+// ---- #24: where-used + impact preview + push-update ------------------------
+section("#24 where-used + impact preview + push-update");
+(function () {
+  var etxt = src("src/editor.js");
+
+  // 1. PURE: libraryWhereUsed against a fixture multi-course registry. Extracted as TWO
+  // pieces (walkBlocks, then the @where-used fence) so the concatenation skips the
+  // @comment-guest fence's own window.__commentModel line sitting between them.
+  var wbStart = etxt.indexOf("function walkBlocks(doc, visit)");
+  var wbEnd = etxt.indexOf("function docCids(doc, acc)");
+  var wuStart = etxt.indexOf("/* @where-used-start */");
+  var wuEnd = etxt.indexOf("/* @where-used-end */");
+  var pureBody = etxt.slice(wbStart, wbEnd) + etxt.slice(wuStart, wuEnd);
+  var mod = new Function(pureBody + "\nreturn { libraryWhereUsed: libraryWhereUsed };")();
+  ok("libraryWhereUsed extracted", typeof mod.libraryWhereUsed === "function");
+
+  function mkCourse(refs) {
+    return { pages: [{ blocks: refs.map(function (ref) { return { type: "libraryInstance", ref: ref }; }) }] };
+  }
+  var registry = {
+    "C-1": mkCourse(["comp-a", "comp-a", "comp-b"]), // 2 instances of comp-a, 1 of comp-b
+    "C-2": mkCourse(["comp-a"]),                     // 1 more instance of comp-a, different course
+    "C-3": mkCourse([])                              // no instances at all
+  };
+  var wu = mod.libraryWhereUsed("comp-a", registry);
+  ok("counts courses correctly (comp-a used in C-1 + C-2)", wu.courses === 2);
+  ok("counts instances correctly (2 in C-1 + 1 in C-2)", wu.instances === 3);
+  var wuNone = mod.libraryWhereUsed("comp-nowhere", registry);
+  ok("a ref used nowhere -> 0/0", wuNone.courses === 0 && wuNone.instances === 0);
+  // nested placement (inside a frame's children) must still be found -- walkBlocks descends.
+  var nested = { "C-4": { pages: [{ blocks: [{ type: "frame", children: [{ type: "libraryInstance", ref: "comp-c" }] }] }] } };
+  ok("finds a nested libraryInstance (inside a frame's children)", mod.libraryWhereUsed("comp-c", nested).instances === 1);
+
+  // 2. WIRING: the Component Library panel shows the where-used count per master.
+  var lStart = etxt.indexOf("function buildLibraryBody(c)");
+  var lBody = etxt.slice(lStart, lStart + 10900);
+  ok("buildLibraryBody computes where-used per master via the registry", /var usage = libraryWhereUsed\(k, getRegistry\(\)\)/.test(lBody));
+  ok("shows a 'Used in N course(s) / M instance(s)' meta line", /"Used in " \+ usage\.courses/.test(lBody));
+  ok("shows 'Not placed anywhere yet' when usage is zero", /Not placed anywhere yet/.test(lBody));
+
+  // 3. WIRING: Push update — confirms + durably saves, does NOT claim to mutate other
+  // courses' stored data (architecturally, #20 live instances need no push to be current).
+  ok("Push update button present", /h\("button", "prop-btn", "Push update"\)/.test(lBody));
+  ok("Push update calls saveLibrary() (durable save) before reporting", /pushB\.addEventListener\("click", function \(\) \{\s*\n\s*saveLibrary\(\);/.test(lBody));
+  ok("Push update reports the FRESH where-used count as the result", /var fresh = libraryWhereUsed\(k, getRegistry\(\)\)/.test(lBody));
+
+  // 4. WIRING: impact preview on the two places a master's blast radius actually matters
+  // — overwriting it (the one place its content changes) and removing it.
+  ok("'Save to library' overwrite confirm shows an impact preview", /libraryWhereUsed\(selectedKey, getRegistry\(\)\)[\s\S]{0,400}confirmModal\("Overwrite component"/.test(lBody));
+  ok("'Remove' confirm shows the current usage before a destructive action", /var impact = libraryWhereUsed\(k, getRegistry\(\)\)[\s\S]{0,400}confirmModal\("Remove component"/.test(lBody));
+})();
+
+// ---- #23: axis-owning library masters (variant + software-version inheritance) ----
+section("#23 axis-owning library masters");
+(function () {
+  var rtxt = src("src/render.js");
+  var etxt = src("src/editor.js");
+  var extxt = src("src/export.js");
+
+  // 1. PURE: resolveLibraryAxisContent, extracted with the whole axis engine it depends on.
+  var axStart = rtxt.indexOf("var VARIANT_AXIS = {");
+  var axEnd = rtxt.indexOf("window.resolveLibraryAxisContent = resolveLibraryAxisContent;");
+  var axBody = rtxt.slice(axStart, axEnd);
+  var mod = new Function(axBody + "\nreturn { resolveLibraryAxisContent: resolveLibraryAxisContent };")();
+  ok("resolveLibraryAxisContent extracted", typeof mod.resolveLibraryAxisContent === "function");
+
+  var master = {
+    id: "b_ROOT", type: "frame", children: [
+      { id: "b_H", type: "heading", text: "Base text", overrides: { pro: { text: "Pro text" } }, versionOverrides: { v2: { text: "V2 text" } } }
+    ]
+  };
+  ok("no axis context -> unresolved (base/raw content)", mod.resolveLibraryAxisContent(master, {}).children[0].text === "Base text");
+  ok("variant context resolves the variant override", mod.resolveLibraryAxisContent(master, { variant: "pro" }).children[0].text === "Pro text");
+  ok("a variant with no override for this node falls through to base (no crash)", mod.resolveLibraryAxisContent(master, { variant: "lite" }).children[0].text === "Base text");
+  ok("version context resolves the version override", mod.resolveLibraryAxisContent(master, { version: "v2" }).children[0].text === "V2 text");
+  ok("BOTH axes compose (variant then version, independent namespaces)", mod.resolveLibraryAxisContent(master, { variant: "pro", version: "v2" }).children[0].text === "V2 text");
+  // visibility: a node tagged only:["pro"] must be dropped from a NON-pro variant's children.
+  var withVis = { id: "b_ROOT2", type: "frame", children: [{ id: "b_only", type: "paragraph", text: "only pro", variantVis: { only: ["pro"] } }] };
+  ok("variantVis only:[...] hides the node for a non-matching variant", mod.resolveLibraryAxisContent(withVis, { variant: "lite" }).children.length === 0);
+  ok("variantVis only:[...] keeps the node for a matching variant", mod.resolveLibraryAxisContent(withVis, { variant: "pro" }).children.length === 1);
+
+  // 2. render.js wiring: BLOCKS.libraryInstance resolves axis content BEFORE instance
+  // overrides (axis first, instance override wins on top -- the agreed precedence).
+  var libStart = rtxt.indexOf("libraryInstance: function (block)");
+  var libBody2 = rtxt.slice(libStart, libStart + 1100);
+  ok("axis-resolves via the per-pass hook before applying instance overrides", /content = resolveLibraryAxisContent\(content, window\.__libraryAxisContext\);[\s\S]{0,150}if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody2));
+
+  // 3. editor.js wiring: currentDoc() keeps the hook in sync (variant never null --
+  // falls back to hero/identity; version null when the doc has no version axis).
+  var cdStart = etxt.indexOf("function currentDoc()");
+  var cdBody = etxt.slice(cdStart, cdStart + 1200);
+  ok("currentDoc sets window.__libraryAxisContext", /window\.__libraryAxisContext = \{/.test(cdBody));
+  ok("variant falls back to hero/identity, never null", /variant: activeVariant \|\| \(d\.heroVariant \|\| "hero"\)/.test(cdBody));
+  ok("version falls back to the doc's base version, or null if none", /version: activeVersion \|\| \(d\.versions && d\.versions\[0\]\) \|\| null/.test(cdBody));
+
+  // 4. editor.js wiring: detach bakes axis content (same principle as #21's override bake),
+  // BEFORE instance overrides -- same precedence as render.js.
+  var daStart = etxt.indexOf("function detachLibraryInstance(block)");
+  var daBody = etxt.slice(daStart, daStart + 1300);
+  ok("detach bakes axis content via resolveLibraryAxisContent", /withOverrides = window\.resolveLibraryAxisContent\(withOverrides, window\.__libraryAxisContext\)/.test(daBody));
+  var axisIdx = daBody.indexOf("resolveLibraryAxisContent(withOverrides");
+  var ovIdx = daBody.indexOf("applyInstanceOverrides(withOverrides");
+  ok("detach resolves axis content BEFORE instance overrides (same precedence as render)", axisIdx !== -1 && ovIdx !== -1 && axisIdx < ovIdx);
+
+  // 5. export.js wiring: both build paths (variant N-packages, per-version bake-into-one)
+  // keep the hook in sync with the EFFECTIVE key being built for.
+  ok("buildPackage sets the variant half of the hook (never null)", /window\.__libraryAxisContext = \{ variant: opts\.variant \|\| \(baseDoc\.heroVariant \|\| "hero"\), version: null \}/.test(extxt));
+  ok("serializeVersionedPages sets version per-pass in the multi-version loop", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = v; \/\/ #23/.test(extxt));
+  ok("serializeVersionedPages sets version on the no-wrapper (<2 versions) path too", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = \(versions && versions\[0\]\) \|\| null;/.test(extxt));
+})();
+
+// ---- #22: section + page library masters ------------------------------------
+section("#22 section + page library masters");
+(function () {
+  var rtxt = src("src/render.js");
+  var etxt = src("src/editor.js");
+  var css = src("editor.css");
+
+  // 1. SECTION masters: groupMulti + saveBlockAsComponent, reused verbatim.
+  ok("groupMulti returns the resulting group block", /return frame; \/\/ #22/.test(etxt));
+  var ssStart = etxt.indexOf("function saveSelectionAsSectionMaster()");
+  ok("saveSelectionAsSectionMaster found", ssStart !== -1);
+  var ssBody = etxt.slice(ssStart, ssStart + 200);
+  ok("reuses groupMulti + saveBlockAsComponent, no new capture logic", /var frame = groupMulti\(\);[\s\S]{0,40}if \(frame\) saveBlockAsComponent\(frame\)/.test(ssBody));
+  ok("'Save selection to library…' wired into the outliner context menu", /label: "Save selection to library…", onClick: function \(\) \{ saveSelectionAsSectionMaster\(\); \}/.test(etxt));
+  var multiMenuCount = (etxt.match(/label: "Save selection to library…"/g) || []).length;
+  ok("wired into BOTH multi-select context menus (outliner + canvas)", multiMenuCount === 2);
+
+  // 2. render.js: page masters resolve live, same shape as #20's block resolve.
+  var rpStart = rtxt.indexOf("function resolvePageLibraryContent(page)");
+  ok("resolvePageLibraryContent found", rpStart !== -1);
+  var rpBody = rtxt.slice(rpStart, rpStart + 800);
+  ok("resolves doc override -> shared library (page kind)", /docComps && docComps\[page\.libraryRef\]\) \|\| libComps\[page\.libraryRef\]/.test(rpBody));
+  ok("resolves axis content THEN instance overrides per block (same precedence as #23)", /content = resolveLibraryAxisContent\(content, window\.__libraryAxisContext\);[\s\S]{0,80}if \(page\.overrides\) applyInstanceOverrides\(content, page\.overrides\)/.test(rpBody));
+  var bpStart = rtxt.indexOf("function buildPageSection(page)");
+  var bpBody = rtxt.slice(bpStart, bpStart + 1600);
+  ok("buildPageSection marks a page instance for the editor-only opacity rule", /data-library-page-instance/.test(bpBody));
+  ok("a missing master renders an empty (not broken) page", /if \(!blocks\) blocks = \[\];/.test(bpBody));
+
+  // 3. editor.js: capture / insert / detach / where-used, all mirroring the block-level
+  // (#19/#20/#21/#24) conventions at page scope.
+  var spStart = etxt.indexOf("function savePageAsLibraryMaster(pi)");
+  var spBody = etxt.slice(spStart, spStart + 900);
+  ok("savePageAsLibraryMaster found", spStart !== -1);
+  ok("page capture mints every block's id ONCE (remintIds per block, #19's contract)", /var blocks = \(page\.blocks \|\| \[\]\)\.map\(function \(b\) \{ return remintIds\(clone\(b\)\); \}\)/.test(spBody));
+  ok("saves kind:\"page\" directly to the shared library (no doc.components staging step)", /kind: "page", template: \{ blocks: blocks \}/.test(spBody));
+
+  var ipStart = etxt.indexOf("function insertPageFromLibrary(key)");
+  ok("insertPageFromLibrary found", ipStart !== -1);
+  var ipBody = etxt.slice(ipStart, ipStart + 700);
+  ok("mints a fresh page id (never reused from the master)", /id: "page-" \+ Date\.now\(\) \+ "-" \+ Math\.random\(\)/.test(ipBody));
+  ok("syncs courseNav section membership like duplicatePage does", /eachCourseNav\(function \(nav\)/.test(ipBody));
+
+  var dpStart = etxt.indexOf("function detachPageLibraryInstance(pi)");
+  var dpBody = etxt.slice(dpStart, dpStart + 900);
+  ok("detachPageLibraryInstance found", dpStart !== -1);
+  var dpAxisIdx = dpBody.indexOf("resolveLibraryAxisContent(withOverrides");
+  var dpOvIdx = dpBody.indexOf("applyInstanceOverrides(withOverrides");
+  var dpRemintIdx = dpBody.indexOf("return remintIds(withOverrides)");
+  ok("detach resolves axis, THEN overrides, THEN remints -- same order as blocks (#21/#23)", dpAxisIdx !== -1 && dpOvIdx !== -1 && dpRemintIdx !== -1 && dpAxisIdx < dpOvIdx && dpOvIdx < dpRemintIdx);
+  ok("detach leaves a __linkedFrom breadcrumb (no page-level Relink in this ticket's scope)", /page\.__linkedFrom = ref/.test(dpBody));
+
+  ok("libraryWhereUsed also counts PAGE instances, not just libraryInstance blocks", /if \(p && p\.libraryRef === ref\) count\+\+/.test(etxt));
+
+  // 4. editor.js wiring: the page Inspector's Library section (mirrors renderLibraryInstanceBody).
+  var piStart = etxt.indexOf("function renderPageInspector(pi)");
+  var piBody = etxt.slice(piStart, piStart + 9200);
+  ok("page Inspector reconciles on open (page-level reconcile fn, not the block-level one)", /var prec = reconcilePageOverrides\(pdef\.template\.blocks, page\.overrides \|\| \{\}\)/.test(piBody));
+  ok("lists override fields via the canonical fieldRow control", /pfields\.forEach\(function \(f\) \{[\s\S]{0,200}fieldRow\(/.test(piBody));
+  ok("offers Detach when linked, Save-to-library when not", /pDetachB\.disabled = !pdef/.test(piBody) && /pSaveB\.addEventListener\("click", function \(\) \{ savePageAsLibraryMaster\(pi\); \}\)/.test(piBody));
+
+  // 5. Library panel lists pages separately, typed/labelled per the acceptance criteria.
+  var lStart = etxt.indexOf("function buildLibraryBody(c)");
+  var lBody = etxt.slice(lStart, lStart + 12000);
+  ok("block-master list excludes page-kind entries", /var keys = Object\.keys\(lib\)\.filter\(function \(k\) \{ return lib\[k\]\.kind !== "page"; \}\)/.test(lBody));
+  ok("a separate 'Pages' panelSection lists page-kind masters", /var pageSecBody = panelSection\(c, "Pages"\)/.test(lBody));
+  ok("page rows offer Insert page (not Copy to course)", /"prop-btn prop-btn--accent", "Insert page"/.test(lBody));
+
+  // 6. editor.css: the page-scope opacity guard mirrors #20's block-scope one, and never
+  // leaks into course.css (editor-only chrome, same invariant as #20).
+  ok("pointer-events guard at page scope", /\[data-library-page-instance\] \.canvas-block \{ pointer-events: none; \}/.test(css));
+  ok("course.css does not reference the page-instance marker", src("src/course.css").indexOf("data-library-page-instance") === -1);
 })();
 
 // ---- outliner multi-select spans columns / containers / pages (Shift + Cmd) ----
@@ -6723,7 +7125,7 @@ section("LeftPanel DS re-skin (issue #13)");
   // Wiring hooks preserved (re-skin, never re-wire): the tests/queries that key off
   // these class names keep matching.
   ok("wiring hooks preserved (tree-page__name / tree-block / asset-group__title)",
-     /tree-page__name"/.test(e) && /"tree-block"/.test(e) && /"asset-group__title", "Shared Library"/.test(e));
+     /tree-page__name"/.test(e) && /"tree-block"/.test(e) && /"asset-group__title", g\)/.test(e) && /"asset-group__title", title\)/.test(e));
   // The DS Lucide glyphs the LeftPanel uses are inlined offline in the accessor.
   ["file-text", "heading", "type", "list-checks", "layout-grid", "component", "target"].forEach(function (n) {
     ok("icons.js provides the DS glyph: " + n, new RegExp('"' + n + '":').test(icons));
@@ -7157,6 +7559,10 @@ section("PERF one-page re-render");
     /function reapplyStructural\(pi\) \{[\s\S]{0,220}if \(!ok \|\| isPreview\(\)\) \{ mount\(\); return; \}[\s\S]{0,120}reapplyPage\(i\);[\s\S]{0,600}renderStructure\(\);[\s\S]{0,60}renderModelView\(\);[\s\S]{0,60}renderCommentPins\(\);/.test(e));
   ok("reapplyStructural accepts one index OR an array (drag = source+dest pages)", /var list = Array\.isArray\(pi\) \? pi : \[pi\];/.test(e));
   ok("undo/redo restore reapplies only the changed pages (isolatedPageChanges), full mount otherwise", /function isolatedPageChanges\(prev, next\)[\s\S]{0,400}return null;[\s\S]{0,400}changed\.push\(j\)/.test(e) && /function restoreSnapshot\(next\)[\s\S]{0,220}reapplyStructural\(changed\)/.test(e));
+  // #50: undo/redo used to reassign only `doc`, leaving registry[activeDocId] stale — the
+  // next save (e.g. closeTourBuilder -> flushSave) persisted the pre-undo doc, dropping any
+  // edits made after the undo. restoreSnapshot must pair-write doc + registry like setDoc.
+  ok("restoreSnapshot #50 keeps registry[activeDocId] in sync with doc (undo/redo no longer diverges)", /function restoreSnapshot\(next\) \{[\s\S]{0,200}doc = next;\s*registry\[activeDocId\] = next;/.test(e));
   ok("handleDrop rebuilds source+dest pages, not the world", /var destPi = findPageOfBlock\(draggedBlock\);[\s\S]{0,320}reapplyStructural\(affected\.length \? affected : -1\);/.test(e));
   // #171: deletePage re-anchors the viewport by page IDENTITY (keepId -> pageIndexById),
   // so deleting a page BEFORE the active one no longer jumps the view to a random page.
@@ -9100,6 +9506,67 @@ section("#215 hotspot unified screen-graph");
   ok("loops: no modal when no marker targets a loop", ser(makeHotspot({ type: "hotspot", entry: "s0",
     screens: [{ id: "s0", visual: "a.png", markers: [{ id: "m0", x: 1, y: 1, action: "navigate", target: "s1" }] }, { id: "s1", visual: "b.png", markers: [] }],
     loops: [{ id: "loopA", screens: ["s1"] }] })).indexOf("hotspot-loop-modal") < 0);
+})();
+
+// ---- Left-panel "Components" reorg ---------------------------------------
+// Third stacked .lpane twirl (peer to Structure/Blocks) becomes the SOLE browse/
+// insert surface for reusable components: My Components (course-local copies),
+// Blocks + Pages (shared cross-course library, live-linked). Replaces the old
+// static Components stub (window.COMPONENTS usage-count list) and the "My
+// Components"/"Shared Library" asset-groups that used to live in the Blocks palette.
+section("left-panel Components reorg");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+
+  // old static stub fully removed
+  ok("old #components-list stub removed from index.html", html.indexOf("components-list") === -1);
+  ok("renderComponentsList() removed from editor.js", e.indexOf("renderComponentsList") === -1);
+  ok("componentsList DOM var removed", e.indexOf('getElementById("components-list")') === -1);
+
+  // new twirl markup: a third .lpane peer to Structure/Blocks, with two split handles
+  ok("index.html has the new Components .lpane peer to Structure/Blocks",
+     /lpane lpane--components" id="lpane-components"/.test(html) && /lpane__title">Components</.test(html));
+  ok("two lpane-split handles bracket the three panes", /id="lpane-split-0"/.test(html) && /id="lpane-split-1"/.test(html));
+  ok("Components twirl hosts the new insert list", /id="components-palette-list"/.test(html));
+
+  // wireLeftPanes() generalized to N panes (not hard-coded to exactly two)
+  var wlpStart = e.indexOf("var LPANE_ORDER = [");
+  ok("wireLeftPanes has an LPANE_ORDER config (structure/blocks/components)", wlpStart > -1);
+  var wlpBody = e.slice(wlpStart, e.indexOf("function wireLeftPanes(") + 2600);
+  ok("LPANE_ORDER lists all three panes", /"lpane-structure"/.test(wlpBody) && /"lpane-blocks"/.test(wlpBody) && /"lpane-components"/.test(wlpBody));
+  ok("split visibility is computed per adjacent pair, not a single bothOpen bool", /function syncSplits\(\)/.test(wlpBody) && /splits\.forEach\(function \(split, i\)/.test(wlpBody));
+  ok("a split's drag only redistributes its OWN two adjacent panes (independent ratios)", /var storeKey = "authoring\.lpane\.split\." \+ i/.test(wlpBody));
+  ok("wireLeftPanes bails out gracefully with fewer than 2 panes present", /panes\.length < 2/.test(wlpBody));
+
+  // setLeftPanelView must know about the new pane + both split ids, or it stays hidden
+  ok("setLeftPanelView un-hides the new pane + both splits", /"lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"/.test(e));
+
+  // renderComponentsPalette(): three groups, in the documented order
+  var rcpStart = e.indexOf("function renderComponentsPalette()");
+  ok("renderComponentsPalette() is defined", rcpStart > -1);
+  var rcpBody = e.slice(rcpStart, rcpStart + 3800);
+  var myOrder = rcpBody.indexOf('renderGroup("My Components"');
+  var blocksOrder = rcpBody.indexOf('renderGroup("Blocks"');
+  var pagesOrder = rcpBody.indexOf('renderGroup("Pages"');
+  ok("three groups present", myOrder > -1 && blocksOrder > -1 && pagesOrder > -1);
+  ok("group order: My Components, then Blocks, then Pages", myOrder < blocksOrder && blocksOrder < pagesOrder);
+  ok("My Components stays course-local + copy-insert (doc.components, clone)", /var comps = getComponents\(\)/.test(rcpBody) && /insertBlock\(clone\(comp\.template\)\)/.test(rcpBody));
+  ok("Blocks group inserts a live-linked libraryInstance (shared cross-course library)", /insertBlock\(\{ type: "libraryInstance", id: mintId\(\), ref: k \}\)/.test(rcpBody));
+  ok("Pages group inserts via insertPageFromLibrary (shared cross-course page masters)", /onInsert: function \(\) \{ insertPageFromLibrary\(k\); \}/.test(rcpBody));
+  ok("rows reuse the canonical paletteEntry() (no bespoke row markup)", (rcpBody.match(/paletteEntry\(view, \{/g) || []).length === 3);
+
+  // mount() keeps the new pane in sync on every render, same as the Blocks palette
+  ok("mount() re-renders the Components pane alongside the Blocks palette", /renderAssets\(\); \/\/ keep the Blocks palette current[\s\S]{0,20}renderComponentsPalette\(\);/.test(e));
+  ok("wireLeftPanes() renders both panels on boot", /renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
+
+  // context-menu additions (Tier 1 per the /verso-frontend ruling): single-block
+  // "Save as component…" (canvas + outliner) and page "Save page to library…"
+  // (canvas frame-label + outliner), mirroring the existing Inspector buttons.
+  var saveAsComponentCount = (e.match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length;
+  ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
+  var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
+  ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

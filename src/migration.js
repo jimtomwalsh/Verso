@@ -53,6 +53,23 @@
     return { ok: true, count: ka.length };
   }
 
+  // Same read-back gate as verifyRegistries, but for the shared component library (#18):
+  // { components: { key: def } } instead of { courseCode: doc }. A library is optional (a
+  // fresh install has none), so callers only run this when there was source JSON to migrate.
+  function verifyLibrary(writtenJson, readBackJson) {
+    if (!readBackJson) return { ok: false, reason: "file store read back empty" };
+    var a, b;
+    try { a = JSON.parse(writtenJson); } catch (e) { return { ok: false, reason: "source unparseable" }; }
+    try { b = JSON.parse(readBackJson); } catch (e) { return { ok: false, reason: "read-back unparseable" }; }
+    var ca = (a && a.components) || {}, cb = (b && b.components) || {};
+    var ka = Object.keys(ca).sort(), kb = Object.keys(cb).sort();
+    if (ka.length !== kb.length) return { ok: false, reason: "component count mismatch: wrote " + ka.length + ", read " + kb.length };
+    for (var i = 0; i < ka.length; i++) {
+      if (ka[i] !== kb[i]) return { ok: false, reason: "component key mismatch: " + ka[i] + " vs " + kb[i] };
+    }
+    return { ok: true, count: ka.length };
+  }
+
   // ---- 2b. Backup builder (the HARD gate) -----------------------------------
   // Before a single write to the target store, every course is written to a
   // `store/backups/pre-cutover-<ts>/` directory as a `.verso` (#64) and each is
@@ -200,6 +217,7 @@
     suppress: suppress,
     resume: resume,
     verifyRegistries: verifyRegistries,
+    verifyLibrary: verifyLibrary,
     makeBackupFn: makeBackupFn,
     runBackupsAsync: runBackupsAsync,
     run: run

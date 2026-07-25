@@ -89,6 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // injection is refreshed from disk before every reload (see reload/forceReload) so a
         // Cmd+R re-reads the CURRENT registry, not the stale launch-time snapshot.
         config.userContentController.addUserScript(registryInjectionScript())
+        // Same treatment for the shared component library (#18): a second on-disk file
+        // (library.json), injected + refreshed in lockstep with the registry so the web
+        // layer's synchronous LibraryStore boot read works under the 'file' backend too.
+        config.userContentController.addUserScript(libraryInjectionScript())
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -488,13 +492,23 @@ extension AppDelegate: WKScriptMessageHandler {
         return WKUserScript(source: "window.__versoDiskRegistryB64 = \"\(regB64)\";",
                             injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
-    // Re-read the on-disk registry into the injection before a reload, so Cmd+R (and the
-    // #69 controlled reload) reflects the latest saved state (only the registry injection
-    // is ever added via addUserScript).
+    // Re-read the on-disk registry AND library into their injections before a reload, so
+    // Cmd+R (and the #69/#18 controlled reloads) reflect the latest saved state.
     func refreshRegistryInjection() {
         let ucc = webView.configuration.userContentController
         ucc.removeAllUserScripts()
         ucc.addUserScript(registryInjectionScript())
+        ucc.addUserScript(libraryInjectionScript())
+    }
+    // #18: same pattern as registryInjectionScript, for the shared component library
+    // (store/library.json). Kept as a SEPARATE file from the registry -- courses and
+    // the library are independent content, and a course-only .verso restore should
+    // never touch it.
+    func libraryInjectionScript() -> WKUserScript {
+        let libText = (try? String(contentsOf: storeDir().appendingPathComponent("library.json"), encoding: .utf8)) ?? ""
+        let libB64 = Data(libText.utf8).base64EncodedString()
+        return WKUserScript(source: "window.__versoDiskLibraryB64 = \"\(libB64)\";",
+                            injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
 
     // Native project-backup ops. JS posts
@@ -558,6 +572,23 @@ extension AppDelegate: WKScriptMessageHandler {
             let url = storeDir().appendingPathComponent("registry.json")
             if let text = try? String(contentsOf: url, encoding: .utf8) { reply(["ok": true, "text": text]) }
             else { reply(["ok": true, "text": NSNull()]) } // absent = not-yet-migrated, not an error
+        } else if op == "storePutLibrary" {
+            // #18: durable, atomic write of the shared component library to disk, alongside
+            // (but separate from) the registry. Same lockstep-injection-refresh rationale as
+            // storePutRegistry above -- any reload path must boot the CURRENT library.
+            guard let text = body["text"] as? String else { reply(["ok": false, "error": "bad args"]); return }
+            let url = storeDir().appendingPathComponent("library.json")
+            do {
+                try Data(text.utf8).write(to: url, options: .atomic)
+                DispatchQueue.main.async { self.refreshRegistryInjection() }
+                reply(["ok": true, "path": url.path])
+            }
+            catch { reply(["ok": false, "error": error.localizedDescription]) }
+        } else if op == "storeGetLibrary" {
+            // Read the on-disk library back (the #18 migration's verify-from-disk step).
+            let url = storeDir().appendingPathComponent("library.json")
+            if let text = try? String(contentsOf: url, encoding: .utf8) { reply(["ok": true, "text": text]) }
+            else { reply(["ok": true, "text": NSNull()]) } // absent = no shared components yet, not an error
         } else if op == "storePutBackupB64" {
             // #69 backup gate: write one binary artifact (base64) under store/<path>, atomic,
             // creating intermediate dirs (e.g. backups/pre-cutover-<ts>/<code>.verso).

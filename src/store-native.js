@@ -1,19 +1,22 @@
 /*
- * src/store-native.js -- native-file REGISTRY adapter for the 'file' storage backend
- * (#68, phase-1a of the local-first re-home). Loaded BEFORE editor.js so the storage seam
- * (pickStorageAdapter) can select it at editor's synchronous boot read.
+ * src/store-native.js -- native-file adapter for the 'file' storage backend (#68, phase-1a
+ * of the local-first re-home). Loaded BEFORE editor.js so the storage seam (pickStorageAdapter)
+ * can select it at editor's synchronous boot read.
  *
  * The registry (all docs; media stays as asset:<id> refs) persists to a real file on disk
  * via the Swift versoBackup bridge -- NO localStorage ~5MB cap (the ADR-0001 data-loss root).
- * The shell injects the on-disk registry at document-start as window.__versoDiskRegistryB64,
- * so readRegistry() is synchronous. writeRegistry() updates the in-page cache synchronously
- * and posts the durable disk write asynchronously, but now CONFIRMS the write via the bridge
- * reply (window.__versoBackupReply) -- a failed disk write surfaces through the shared
- * save-state (Editor.reportSaveFailure) instead of being lost fire-and-forget.
+ * The shared component library (#18) gets the identical treatment as a SEPARATE file
+ * (library.json), so a course-only .verso restore never touches it. The shell injects each
+ * on-disk file at document-start (window.__versoDiskRegistryB64 / __versoDiskLibraryB64), so
+ * readRegistry()/readLibrary() are synchronous. The write* methods update the in-page cache
+ * synchronously and post the durable disk write asynchronously, but now CONFIRM the write via
+ * the bridge reply (window.__versoBackupReply) -- a failed disk write surfaces through the
+ * shared save-state (Editor.reportSaveFailure) instead of being lost fire-and-forget.
  *
- * PHASE-1a BOUNDARY: only the REGISTRY moves to disk here; media assets stay in the uncapped
- * IndexedDB AssetStore. Asset-on-disk + the guarded backup-file writes used by the #69 cutover
- * (store/backups/pre-cutover-<ts>/) are phase-1b/Swift follow-ups (async bridge ops).
+ * PHASE-1a BOUNDARY: only the registry + library move to disk here; media assets stay in the
+ * uncapped IndexedDB AssetStore. Asset-on-disk + the guarded backup-file writes used by the
+ * #69/#18 cutovers (store/backups/pre-cutover-<ts>/) are phase-1b/Swift follow-ups (async
+ * bridge ops).
  *
  * Inert unless the native bridge is present; and even then pickStorageAdapter only USES this
  * when authoring.storageBackend == 'file', so under the default 'browser' backend nothing changes.
@@ -50,6 +53,9 @@
 
   // Seed the in-page cache from the shell's document-start injection (the on-disk registry).
   var cache = b64ToText(window.__versoDiskRegistryB64);
+  // #18: same seeding for the shared component library, a SEPARATE on-disk file
+  // (store/library.json) injected as window.__versoDiskLibraryB64.
+  var libCache = b64ToText(window.__versoDiskLibraryB64);
 
   window.__storageAdapter = {
     name: "file",
@@ -70,6 +76,23 @@
       try { br.postMessage({ op: "storePutRegistry", reqId: reqId, text: json }); } // durable, async + confirmed
       catch (e) { delete pending[reqId]; return { ok: false, quota: false, error: e }; }
       return { ok: true }; // the synchronous cache write succeeded; disk write is confirmed via the reply
+    },
+    // #18: same read/write/confirm shape as the registry above, targeting library.json.
+    readLibrary: function () { return libCache; },
+    writeLibrary: function (json) {
+      libCache = json;
+      var br = bridge(); if (!br) return { ok: false, quota: false, error: new Error("no bridge") };
+      var reqId = "storeLib:" + (++seq);
+      pending[reqId] = function (res) {
+        if (res && res.ok) return;
+        var msg = "The shared component library could not be saved to disk" + (res && res.error ? " (" + res.error + ")" : "") +
+          ". Your latest library changes are NOT durably saved.";
+        if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure(msg);
+        else if (window.console && console.error) console.error("[store-native] " + msg);
+      };
+      try { br.postMessage({ op: "storePutLibrary", reqId: reqId, text: json }); }
+      catch (e) { delete pending[reqId]; return { ok: false, quota: false, error: e }; }
+      return { ok: true };
     }
   };
   window.__storeNativeTextCodec = { toB64: textToB64, fromB64: b64ToText }; // test seam
@@ -96,6 +119,9 @@
     putRegistry: function (json) { return request("storePutRegistry", { text: json }); },
     // read the registry back FROM DISK (not the in-page cache) — the migration's verify.
     getRegistry: function () { return request("storeGetRegistry").then(function (r) { return r && r.ok ? (r.text != null ? r.text : null) : null; }); },
+    // #18: same durable-write + read-back-from-disk pair, for the shared component library.
+    putLibrary: function (json) { return request("storePutLibrary", { text: json }); },
+    getLibrary: function () { return request("storeGetLibrary").then(function (r) { return r && r.ok ? (r.text != null ? r.text : null) : null; }); },
     // write one backup artifact (bytes) under store/<path>; returns { ok, size }.
     writeFile: function (path, bytes) { return request("storePutBackupB64", { path: path, b64: bytesToB64(bytes) }); },
     // on-disk size of store/<path> (0 if absent) — the backup "verified written" gate.
