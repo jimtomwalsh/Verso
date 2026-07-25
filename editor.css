@@ -2981,7 +2981,7 @@ body.is-col-resizing { cursor: col-resize; user-select: none; }
 .tourb-transport__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: var(--radius-pill); background: var(--accent); pointer-events: none; }
 .tourb-transport__tick { position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px; background: var(--accent); transform: translateX(-1px); pointer-events: none; }
 .tourb-transport__knob { position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: var(--radius-pill); background: var(--accent); box-shadow: var(--shadow-100); transform: translateY(-50%); pointer-events: none; }
-.tourb-transport__row { display: flex; align-items: center; gap: var(--space-2); }
+.tourb-transport__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); row-gap: var(--space-2); }
 .tourb-transport__play { flex: none; width: 28px; height: 28px; }
 .tourb-transport__time { flex: none; font-variant-numeric: tabular-nums; font: var(--type-caption); color: var(--text-secondary); }
 .tourb-transport__spacer { flex: 1 1 auto; }

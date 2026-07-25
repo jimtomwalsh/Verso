@@ -1806,6 +1806,7 @@
     } else {
       mount();
     }
+    if (typeof rebindTourBuilderToLiveDoc === "function") rebindTourBuilderToLiveDoc(); // keep an open builder bound to the restored doc
     updateHistoryButtons();
   }
   function undo() {
@@ -7388,6 +7389,7 @@
 
   function closeTourBuilder() {
     if (!tourUI) return;
+    try { flushSave(); } catch (_) {} // don't let the 600ms autosave debounce drop builder edits on exit
     tourUI.overlay.hidden = true;
     document.body.classList.remove("tour-builder-open");
     tourConnect = null; tourSetPlacing(false);
@@ -7396,16 +7398,32 @@
     if (ret && ret.focus) { try { ret.focus(); } catch (_) {} }
   }
 
+  // Find the hotspot block with this id anywhere in the LIVE doc (nested containers included).
+  function tourFindHotspotById(id) {
+    if (!id) return null;
+    var found = null;
+    (function scan(blocks) { (blocks || []).forEach(function (b) { if (!b || found) return; if (b.type === "hotspot" && b.id === id) { found = b; return; } if (b.blocks) scan(b.blocks); if (b.children) scan(b.children); if (b.columns) b.columns.forEach(scan); }); })(
+      (doc.pages || []).reduce(function (acc, p) { return acc.concat(p.blocks || []); }, [])
+    );
+    return found;
+  }
+  // Data-loss guard: `doc` is a fresh object graph after undo/redo, a programmatic setDoc, or a
+  // collab sync -- which orphans the builder's captured `tourBlock` reference, so subsequent edits
+  // land on a detached copy and vanish on close. Whenever the doc is replaced while the board is
+  // open, RE-BIND tourBlock to the same-id block in the new doc (or close if it's genuinely gone).
+  function rebindTourBuilderToLiveDoc() {
+    if (!tourUI || tourUI.overlay.hidden || !tourBlock || !tourBlock.id) return;
+    var live = tourFindHotspotById(tourBlock.id);
+    if (live) { if (live !== tourBlock) { tourBlock = live; syncTourBoard(); } }
+    else closeTourBuilder(); // its block is gone from the new doc -> nothing to edit
+  }
   // Boot: if the builder was open when the page was last refreshed, re-open it on the
   // same hotspot block (found by its persisted id in the current doc). Silent no-op if
   // the block is gone (e.g. a different course is now loaded).
   function maybeReopenTourBuilder() {
     var id; try { id = localStorage.getItem(TOUR_OPEN_KEY); } catch (_) { id = null; }
     if (!id) return;
-    var found = null;
-    (function scan(blocks) { (blocks || []).forEach(function (b) { if (!b || found) return; if (b.type === "hotspot" && b.id === id) { found = b; return; } if (b.blocks) scan(b.blocks); if (b.children) scan(b.children); if (b.columns) b.columns.forEach(scan); }); })(
-      (doc.pages || []).reduce(function (acc, p) { return acc.concat(p.blocks || []); }, [])
-    );
+    var found = tourFindHotspotById(id);
     if (found) openTourBuilder(found);
     else { try { localStorage.removeItem(TOUR_OPEN_KEY); } catch (_) {} }
   }
@@ -8015,7 +8033,10 @@
       // ＋Segment needs a valid clip with net kept length > 0 (a cut can swallow it)
       seg.disabled = !tourSegReady(src.in, src.out, cuts);
       // cut + speed tools disclosed once a span exists; cut-out waits for a pending cut-in
-      cutRow.hidden = !span; speedRow.hidden = !span;
+      // speed is a bake-time choice you set BEFORE marking, so show it whenever the video has loaded;
+      // cut controls are meaningless without a segment, so they stay gated on a valid in<out (Q11).
+      speedRow.hidden = !(d > 0);
+      cutRow.hidden = !span;
       cutOut.disabled = pendingCut == null;
       cutIn.classList.toggle("is-on", pendingCut != null);
       cutRemove.hidden = selCutIdx == null || !(cuts[selCutIdx]); // ✕ only with a live selection
@@ -9023,7 +9044,7 @@
       if (tourLoopSel) { e.preventDefault(); tourLoopSel = null; renderTourLoops(); renderTourInspector(); return; }
       if (tourLinkSel) { e.preventDefault(); tourLinkSel = null; renderTourEdges(); tourClearPinSel(); return; }
       if (tourNodeSel.length) { e.preventDefault(); tourNodeSel = []; tourApplyNodeSelClasses(); return; }
-      e.preventDefault(); closeTourBuilder();
+      e.preventDefault(); e.stopPropagation(); closeTourBuilder(); // don't let the close Esc reach main-editor handlers
     }
   });
   // Fine-tune placement: arrow keys nudge the selected marker (0.5% / 2% with Shift). Gives
@@ -17846,6 +17867,7 @@
       registry[activeDocId] = next;
       saveRegistry(registry);
       mount();
+      rebindTourBuilderToLiveDoc(); // if the builder is open, re-bind it to the replaced doc (no orphaned edits)
     },
     // follow-the-edit: navigate to + highlight what a change just touched. target =
     // { blockId? , pageId? , chapterId? }. Called after setDoc (the canvas is freshly mounted),
