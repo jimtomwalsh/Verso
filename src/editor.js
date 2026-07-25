@@ -7687,7 +7687,7 @@
   }
   function renderTourSources() {
     if (!tourUI || !tourUI.sources) return;
-    tourActiveCutCancel = null; // transports are rebuilt below -> any open pending cut is discarded
+    tourActiveCutCancel = null; tourActiveCutSel = null; // transports rebuilt below -> drop any open pending cut / selection
     tourUI.sources.innerHTML = "";
     tourSources().forEach(function (src, si) {
       if (!src) return;
@@ -7844,6 +7844,8 @@
   var tourCropEditSrc = null;  // id of the source whose crop overlay is open (one at a time)
   var tourActiveCutCancel = null; // canceller for an OPEN pending ripple cut (editor-only), if any;
                                   // the board Escape ladder dismisses it first (see the global keydown)
+  var tourActiveCutSel = null;    // deselector for a SELECTED committed cut band (editor-only), if any;
+                                  // Escape (after any pending cancel) clears the selection before stepping out
   function tourPauseAllSources(except) {
     if (tourPlayingVideo && tourPlayingVideo !== except) { try { tourPlayingVideo.pause(); } catch (_) {} }
   }
@@ -7902,18 +7904,36 @@
     var cutIn = h("button", "tourb-transport__mark", "Cut in"); cutIn.type = "button"; cutIn.title = "Drop a cut-in at the playhead (carve a section out of the segment)";
     var cutOut = h("button", "tourb-transport__mark", "Cut out"); cutOut.type = "button"; cutOut.title = "Set the cut-out at the playhead to remove the section";
     cutRow.appendChild(cutIn); cutRow.appendChild(cutOut);
+    // ✕ remove the selected cut (T4) — appears only when a committed band is selected; undo-reversible, no Modal.
+    var cutRemove = iconBtn("x", "Remove the selected cut (restore that section)"); cutRemove.classList.add("tourb-transport__cutrm");
+    cutRemove.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
+    cutRemove.addEventListener("click", function (e) { e.stopPropagation(); removeSelectedCut(); });
+    cutRow.appendChild(cutRemove);
     wrap.appendChild(cutRow);
+    var selCutIdx = null; // index into src.cuts of the SELECTED committed band (editor-only), or null
     function hasSpan() { return src.in != null && src.out != null && dur() > 0 && src.out > src.in; }
     // Open / clear a pending cut-in. The canceller is published module-side so the board's Escape
     // ladder can dismiss an open cut FIRST (before stepping out of any other board mode).
-    function openPending(t) { pendingCut = t; tourActiveCutCancel = clearPending; paint(); }
+    function openPending(t) { pendingCut = t; tourActiveCutCancel = clearPending; clearCutSel(false); paint(); }
     function clearPending(repaint) { pendingCut = null; if (tourActiveCutCancel === clearPending) tourActiveCutCancel = null; if (repaint !== false) paint(); }
+    // T4: select / deselect / remove a committed cut band. One selected at a time.
+    function selectCut(i) { selCutIdx = i; tourActiveCutSel = clearCutSel; clearPending(false); paint(); }
+    function clearCutSel(repaint) { if (selCutIdx == null) { if (repaint === true) paint(); return; } selCutIdx = null; if (tourActiveCutSel === clearCutSel) tourActiveCutSel = null; if (repaint !== false) paint(); }
+    function removeSelectedCut() {
+      if (selCutIdx == null || !Array.isArray(src.cuts) || !src.cuts[selCutIdx]) return;
+      pushHistory(); // undo-reversible (no Modal — low-stakes, restorable)
+      src.cuts.splice(selCutIdx, 1);
+      if (!src.cuts.length) delete src.cuts;
+      clearCutSel(false);
+      scheduleSave(); paint();
+    }
     function reclipCuts() { // called when in/out move: drop/trim cuts outside the new bounds
       if (Array.isArray(src.cuts) && src.cuts.length) {
         src.cuts = tourClipCutsToBounds(src.cuts, src.in, src.out);
         if (!src.cuts.length) delete src.cuts;
       }
       if (pendingCut != null && (!hasSpan() || pendingCut < src.in || pendingCut > src.out)) clearPending(false);
+      clearCutSel(false); // indices may have shifted -> drop any selection
     }
     function markCut(kind) {
       var t = vid.currentTime || 0;
@@ -7924,7 +7944,7 @@
       pushHistory();
       var merged = tourMergeCuts(tourClipCutsToBounds((src.cuts || []).concat([cut]), src.in, src.out));
       if (merged.length) src.cuts = merged; else delete src.cuts;
-      clearPending(false);
+      clearPending(false); clearCutSel(false); // a fresh commit can re-index cuts
       scheduleSave(); paint();
     }
     cutIn.addEventListener("pointerdown", function (e) { e.stopPropagation(); });
@@ -7973,10 +7993,13 @@
       var span = hasSpan(), cuts = Array.isArray(src.cuts) ? src.cuts : [];
       cutLayer.innerHTML = "";
       if (d) {
-        cuts.forEach(function (c) {
-          var band = h("div", "tourb-transport__cut");
+        cuts.forEach(function (c, i) {
+          var band = h("div", "tourb-transport__cut" + (i === selCutIdx ? " is-sel" : ""));
           band.style.left = Math.max(0, Math.min(100, c.start / d * 100)) + "%";
           band.style.width = Math.max(0, Math.min(100, (c.end - c.start) / d * 100)) + "%";
+          band.title = "Removed " + tourFormatTime(c.start) + "-" + tourFormatTime(c.end) + " (click to select)";
+          band.addEventListener("pointerdown", function (e) { e.stopPropagation(); }); // select, don't seek the rail
+          band.addEventListener("click", function (e) { e.stopPropagation(); selectCut(i); });
           cutLayer.appendChild(band);
         });
         if (pendingCut != null) {
@@ -7995,6 +8018,7 @@
       cutRow.hidden = !span; speedRow.hidden = !span;
       cutOut.disabled = pendingCut == null;
       cutIn.classList.toggle("is-on", pendingCut != null);
+      cutRemove.hidden = selCutIdx == null || !(cuts[selCutIdx]); // ✕ only with a live selection
     }
     function seekTo(clientX) {
       var d = dur(); if (!d) return;
@@ -8005,6 +8029,7 @@
     // click / drag the rail to seek
     rail.addEventListener("pointerdown", function (e) {
       e.stopPropagation(); e.preventDefault();
+      clearCutSel(); // clicking the rail body (not a band -> those stopPropagation) deselects
       try { rail.setPointerCapture(e.pointerId); } catch (_) {}
       seekTo(e.clientX);
       function mv(ev) { seekTo(ev.clientX); }
@@ -8985,6 +9010,8 @@
       if (inField) { e.preventDefault(); try { e.target.blur(); } catch (_) {} return; }
       // an OPEN pending ripple cut cancels first (the most transient mode) and stops there.
       if (tourActiveCutCancel) { e.preventDefault(); e.stopPropagation(); tourActiveCutCancel(); return; }
+      // then a SELECTED cut band deselects (before stepping out of any other board mode).
+      if (tourActiveCutSel) { e.preventDefault(); e.stopPropagation(); tourActiveCutSel(); return; }
       // armed click-to-drop disarms first (a mode you can back out of before it closes anything).
       if (tourPlacing) { e.preventDefault(); tourSetPlacing(false); return; }
       // an open Properties drawer closes next (on-demand surface, easy to dismiss).
