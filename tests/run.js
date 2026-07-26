@@ -2044,7 +2044,7 @@ section("#71 recents");
   if (!m) { ok("locate @pure-recents fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { stampDocUpdatedAt: stampDocUpdatedAt, stampDocOpenedAt: stampDocOpenedAt, recentsCompare: recentsCompare," +
-    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime };")();
+    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime, stampMasterVersion: stampMasterVersion };")();
 
   // stampers: write the scalar onto meta, create meta if absent, never touch media.
   var d = { meta: { title: "A", code: "A" }, pages: [{ blocks: [{ type: "image", src: "data:image/png;base64,AAA" }] }] };
@@ -2092,6 +2092,17 @@ section("#71 recents");
   ok("one hour singular", g.formatRelativeTime(NOW - 60 * 60 * 1000, NOW) === "1 hour ago");
   ok("days", g.formatRelativeTime(NOW - 3 * 24 * 3600 * 1000, NOW) === "3 days ago");
   ok("future clamps to just now", g.formatRelativeTime(NOW + 5000, NOW) === "just now");
+
+  // Product Rail: master version/updatedAt stamp -- bumps on the stamp call, stable
+  // (unchanged) across any read that doesn't call it.
+  var master = { name: "Topic" };
+  g.stampMasterVersion(master, 1000);
+  ok("stamps updatedAt onto the master", master.updatedAt === 1000);
+  var readOnly = master.updatedAt; // a "read" -- must not itself bump anything
+  ok("a read is stable (unchanged) until the next stamp call", master.updatedAt === readOnly && master.updatedAt === 1000);
+  g.stampMasterVersion(master, 2000);
+  ok("re-stamping bumps to the new value (content changed again)", master.updatedAt === 2000);
+  ok("stampMasterVersion is null-safe", g.stampMasterVersion(null, 1000) === null);
 })();
 
 // ---- #67: .verso portable package (zip codec + round-trip) ----------------
@@ -2450,9 +2461,13 @@ section("#19 stable-id master snapshot");
   var copyIdx = etxt.indexOf("getComponents()[k] = clone(comp); saveRegistry(registry); mount();");
   ok("'Copy to course' handler found", copyIdx !== -1);
   ok("'Copy to course' preserves ids (no remint)", copyIdx !== -1 && etxt.slice(copyIdx - 20, copyIdx + 80).indexOf("remintIds") === -1);
-  var saveIdx = etxt.indexOf("window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);");
+  var saveIdx = etxt.indexOf("var promoted = clone(doc.components[selectedKey]);");
   ok("'Save to library' handler found", saveIdx !== -1);
-  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 100).indexOf("remintIds") === -1);
+  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 220).indexOf("remintIds") === -1);
+  // Product Rail: the SAME handler is the sole content-mutation site, so it's where the
+  // version stamp bumps -- stamped BEFORE the master lands in the shared store.
+  var psaveBody = etxt.slice(saveIdx, saveIdx + 300);
+  ok("'Save to library' stamps the version BEFORE the master lands in the shared store", /stampMasterVersion\(promoted, Date\.now\(\)\)[\s\S]{0,150}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
 
   // 3. The contract is documented at remintIds' own definition, so #20/#21/#24 don't
   // add a 5th call site that touches library-resident content.
