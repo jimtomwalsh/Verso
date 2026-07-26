@@ -1,0 +1,76 @@
+name: Deploy (staging + production)
+
+# One GitHub Pages site serves BOTH environments from one deploy:
+#   production -> https://jimtomwalsh.github.io/Verso/            (built from `main`)
+#   staging    -> https://jimtomwalsh.github.io/Verso/staging/    (built from `staging`)
+#
+# Every push to either branch rebuilds and redeploys BOTH folders from their current
+# branch tip, gated on that branch's own test run. If either branch's tests fail, the
+# whole deploy is skipped and the previously-deployed site (both folders) stays live —
+# a broken staging push never risks pulling down a working production site, and vice
+# versa. Pages content has no build step (classic-script app, opens from file:// too),
+# so "build" here is just: checkout + test + copy into the right folder.
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        branch: [main, staging]
+    name: Test (${{ matrix.branch }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: node tests/run.js
+        run: node tests/run.js
+
+  deploy:
+    name: Build + deploy Pages
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: site/
+
+      - name: Checkout staging into /staging
+        uses: actions/checkout@v7
+        with:
+          ref: staging
+          path: site/staging
+
+      - name: Strip VCS metadata from the nested checkout
+        run: rm -rf site/staging/.git
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
