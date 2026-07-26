@@ -4705,7 +4705,7 @@ section("outliner multi-select any-scope");
   ok("cmd/ctrl toggles multi at any depth", /e\.metaKey \|\| e\.ctrlKey[\s\S]*?toggleMulti\(block\)/.test(h));
   ok("BOTH top-level AND nested rows use the shared handler", (etxt.match(/handleBlockRowClick\(e, pi, block, bi, 0\)/) && etxt.match(/handleBlockRowClick\(e, pi, block, bi, depth\)/)) != null);
   // the pre-existing filter that dropped nested blocks on re-render is now nesting-aware
-  ok("renderStructure keeps nested selections (findBlockParent, not top-level-only)", /multiSel = multiSel\.filter\(function \(b\) \{\s*\n\s*for \(var pi = 0; pi < doc\.pages\.length; pi\+\+\) if \(findBlockParent/.test(etxt));
+  ok("renderStructure keeps nested selections (findBlockParent, not top-level-only)", /multiSel = multiSel\.filter\(function \(b\) \{\s*\n\s*for \(var pi = 0; pi < doc\.pages\.length; pi\+\+\) \{ var pg = doc\.pages\[pi\]; if \(pg && findBlockParent/.test(etxt));
   // actions on the whole set: delete + group resolve nested via findBlockParent
   var del = etxt.slice(etxt.indexOf("function deleteSelection"), etxt.indexOf("function deleteSelection") + 900);
   ok("multi-delete removes NESTED blocks too (findBlockParent)", /if \(multiSel\.length\)[\s\S]*?findBlockParent\(doc\.pages\[pi\]\.blocks, b\)[\s\S]*?parentArray\.splice/.test(del));
