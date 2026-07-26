@@ -1543,7 +1543,9 @@
     menu.appendChild(h("div", "vsavemenu__path", storeLocationText()));
     document.body.appendChild(menu);
     var r = anchor.getBoundingClientRect();
-    menu.style.top = (r.bottom + 6) + "px";
+    var top = r.bottom + 6;
+    if (top + menu.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - menu.offsetHeight - 6);
+    menu.style.top = top + "px";
     menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + "px";
     saveMenuEl = menu;
     setTimeout(function () { document.addEventListener("mousedown", onSaveMenuOutside, true); }, 0);
