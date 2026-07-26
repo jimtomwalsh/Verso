@@ -592,6 +592,22 @@
     probeStorageQuota();
     refreshStorageDot();
   }
+  // Environment cue (2026-07-26): the staging Pages deploy serves at .../staging/ (see
+  // .github/workflows/deploy.yml) -- flag it so a staging session is never mistaken for
+  // production. Matches ONLY that exact deployed path (not a local folder that merely
+  // happens to have "staging" somewhere in it, and never a file:// local open). Editor
+  // chrome only -- editor.js never ships in the SCORM export, so a learner never sees this.
+  function mountStagingBanner() {
+    try {
+      if (location.protocol.indexOf("http") !== 0) return;
+      if (!/\/staging\/(index\.html)?$/.test(location.pathname)) return;
+    } catch (e) { return; }
+    var b = document.createElement("div");
+    b.id = "staging-banner";
+    b.textContent = "STAGING";
+    b.title = "Pre-release test build — not production";
+    document.body.appendChild(b);
+  }
   function flushSave() {
     if (savesSuppressed()) return;
     if (saveDebounceT) { clearTimeout(saveDebounceT); saveDebounceT = null; }
@@ -19547,6 +19563,7 @@
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
+  mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
   refreshCourseWeight(); // §308: initial course-weight readout
   wireLeftPanes();
   wireRightTabs();
