@@ -2450,9 +2450,9 @@ section("#19 stable-id master snapshot");
   var copyIdx = etxt.indexOf("getComponents()[k] = clone(comp); saveRegistry(registry); mount();");
   ok("'Copy to course' handler found", copyIdx !== -1);
   ok("'Copy to course' preserves ids (no remint)", copyIdx !== -1 && etxt.slice(copyIdx - 20, copyIdx + 80).indexOf("remintIds") === -1);
-  var saveIdx = etxt.indexOf("window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);");
+  var saveIdx = etxt.indexOf("var promoted = clone(doc.components[selectedKey]);");
   ok("'Save to library' handler found", saveIdx !== -1);
-  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 100).indexOf("remintIds") === -1);
+  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 220).indexOf("remintIds") === -1);
 
   // 3. The contract is documented at remintIds' own definition, so #20/#21/#24 don't
   // add a 5th call site that touches library-resident content.
@@ -4438,6 +4438,58 @@ section("#20 library-instance mirror");
   ok("course.css does not reference the library-instance marker (editor-chrome only)", src("src/course.css").indexOf("data-library-instance") === -1);
 })();
 
+// ---- Product Rail: tag vocabulary + reserved owning-Product tag --------------
+section("product-rail tag vocabulary");
+(function () {
+  var etxt = src("src/editor.js");
+
+  // 1. PURE: the tag-vocab fence, extracted headlessly.
+  var tStart = etxt.indexOf("/* @tag-vocab-start */");
+  var tEnd = etxt.indexOf("/* @tag-vocab-end */");
+  var mod = new Function(etxt.slice(tStart, tEnd) +
+    "\nreturn { ownerProductTagValue: ownerProductTagValue, stampOwnerProductTag: stampOwnerProductTag," +
+    " addTechnologyTag: addTechnologyTag, removeMasterTag: removeMasterTag, matchTagVocabulary: matchTagVocabulary };")();
+  ok("tag-vocab functions extracted", typeof mod.stampOwnerProductTag === "function");
+
+  // stampOwnerProductTag: stamped once, from a Product context; absent when there is none.
+  var m1 = { name: "Topic" };
+  mod.stampOwnerProductTag(m1, "prod-a");
+  ok("stamps a reserved tag from the given productId", m1.tags.length === 1 && m1.tags[0].value === "product:prod-a" && m1.tags[0].reserved === true);
+  mod.stampOwnerProductTag(m1, "prod-b");
+  ok("never re-stamps once a reserved tag already exists", m1.tags.filter(function (t) { return t.reserved; }).length === 1 && m1.tags[0].value === "product:prod-a");
+  var m2 = {};
+  mod.stampOwnerProductTag(m2, null);
+  ok("no Product context -> tags initialised but no reserved tag (nothing to attribute)", Array.isArray(m2.tags) && m2.tags.length === 0);
+  ok("stampOwnerProductTag is null-safe", mod.stampOwnerProductTag(null, "prod-a") === null);
+
+  // addTechnologyTag / removeMasterTag: freeform, no dupes, reserved tag is protected.
+  var m3 = { tags: [{ value: "product:prod-a", reserved: true }] };
+  mod.addTechnologyTag(m3, "radar");
+  mod.addTechnologyTag(m3, "radar"); // duplicate, ignored
+  ok("adds a freeform technology tag, de-duped", m3.tags.length === 2 && m3.tags.filter(function (t) { return t.value === "radar"; }).length === 1);
+  mod.removeMasterTag(m3, "product:prod-a");
+  ok("ordinary tag-editing CANNOT remove the reserved tag", m3.tags.some(function (t) { return t.reserved; }));
+  mod.removeMasterTag(m3, "radar");
+  ok("a freeform tag CAN be removed", !m3.tags.some(function (t) { return t.value === "radar"; }));
+
+  // matchTagVocabulary: autocomplete-first, "propose new" only on a genuine non-match.
+  var vocab = ["radar", "radar-jamming", "acoustic"];
+  ok("empty query -> no matches, not exact (nothing to propose either)", mod.matchTagVocabulary(vocab, "").matches.length === 0 && mod.matchTagVocabulary(vocab, "").exact === false);
+  ok("a substring query surfaces autocomplete matches", mod.matchTagVocabulary(vocab, "radar").matches.length === 2);
+  ok("an exact existing tag is flagged exact (never proposed as new)", mod.matchTagVocabulary(vocab, "acoustic").exact === true);
+  ok("a genuine non-match has no matches and is not exact -> caller falls back to propose-new", mod.matchTagVocabulary(vocab, "thermal").matches.length === 0 && mod.matchTagVocabulary(vocab, "thermal").exact === false);
+
+  // 2. editor.js wiring: promotion to the shared library stamps the reserved tag from
+  // THIS course's Product context (doc.meta.productId), exactly once, at promotion time.
+  var doSaveIdx = etxt.indexOf("function doSave() {\n          pushHistory();\n          // #19: plain clone()");
+  ok("promote-to-library doSave() found", doSaveIdx !== -1);
+  var doSaveBody = etxt.slice(doSaveIdx, doSaveIdx + 900);
+  ok("stamps the reserved owning-Product tag from doc.meta.productId at promotion time", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)/.test(doSaveBody));
+  var stampIdx = doSaveBody.indexOf("stampOwnerProductTag(promoted");
+  var storeIdx = doSaveBody.indexOf("window.LibraryStore.components[selectedKey] = promoted;");
+  ok("stamping happens BEFORE the master lands in the shared store", stampIdx !== -1 && storeIdx !== -1 && stampIdx < storeIdx);
+})();
+
 // ---- #21: instance local overrides + structure reconciliation + detach/relink ----
 section("#21 instance overrides + reconciliation + relink");
 (function () {
@@ -4545,7 +4597,7 @@ section("#24 where-used + impact preview + push-update");
 
   // 2. WIRING: the Component Library panel shows the where-used count per master.
   var lStart = etxt.indexOf("function buildLibraryBody(c)");
-  var lBody = etxt.slice(lStart, lStart + 10900);
+  var lBody = etxt.slice(lStart, lStart + 11200);
   ok("buildLibraryBody computes where-used per master via the registry", /var usage = libraryWhereUsed\(k, getRegistry\(\)\)/.test(lBody));
   ok("shows a 'Used in N course(s) / M instance(s)' meta line", /"Used in " \+ usage\.courses/.test(lBody));
   ok("shows 'Not placed anywhere yet' when usage is zero", /Not placed anywhere yet/.test(lBody));

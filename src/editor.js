@@ -1133,6 +1133,60 @@
   function saveLibrary() { try { libraryAdapter().writeLibrary(JSON.stringify(window.LibraryStore)); } catch (e) {} }
   function libComponents() { return (window.LibraryStore && window.LibraryStore.components) || {}; }
   function isLibraryComponent(key) { return !!libComponents()[key]; }
+
+  // ---- Product Rail: tag vocabulary + reserved owning-Product tag ---------------
+  // A master's tags: [{value, reserved}]. At most one entry is reserved:true -- the
+  // "owning Product" tag, stamped ONCE at promotion time from the active doc's Product
+  // context (birthplace, not ownership -- a master promoted from an untagged doc simply
+  // gets no reserved tag, nothing to attribute). Every other entry is a freeform
+  // technology tag, global across Products (never scoped per Product). Pure; callers own
+  // persistence (saveLibrary()) after mutating the master object passed in.
+  /* @tag-vocab-start */
+  function ownerProductTagValue(productId) { return productId ? ("product:" + productId) : null; }
+  function stampOwnerProductTag(master, productId) {
+    if (!master) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (!productId) return master; // no Product context at promotion time -- nothing to attribute
+    if (master.tags.some(function (t) { return t && t.reserved; })) return master; // stamped once, never re-stamped
+    master.tags.push({ value: ownerProductTagValue(productId), reserved: true });
+    return master;
+  }
+  function addTechnologyTag(master, value) {
+    if (!master) return master;
+    var v = String(value || "").trim(); if (!v) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (master.tags.some(function (t) { return t && t.value === v; })) return master; // no dupes
+    master.tags.push({ value: v, reserved: false });
+    return master;
+  }
+  // Ordinary tag-editing can never remove the reserved tag -- matches on a non-reserved value only.
+  function removeMasterTag(master, value) {
+    if (!master || !Array.isArray(master.tags)) return master;
+    master.tags = master.tags.filter(function (t) { return !(t && t.value === value && !t.reserved); });
+    return master;
+  }
+  // Autocomplete-first matching against the global technology-tag vocabulary. "propose
+  // new" is the caller's fallback when exact is false -- never the default typing path.
+  function matchTagVocabulary(vocab, query) {
+    var q = String(query || "").trim().toLowerCase();
+    if (!q) return { matches: [], exact: false };
+    var matches = (vocab || []).filter(function (t) { return t && t.toLowerCase().indexOf(q) !== -1; });
+    var exact = (vocab || []).some(function (t) { return t && t.toLowerCase() === q; });
+    return { matches: matches, exact: exact };
+  }
+  /* @tag-vocab-end */
+  // The global technology-tag vocabulary: every non-reserved tag value already used by
+  // any master in the shared library (not scoped per Product, per the ticket's spec).
+  function collectTagVocabulary() {
+    var seen = {}, out = [];
+    var comps = libComponents();
+    Object.keys(comps).forEach(function (k) {
+      ((comps[k] && comps[k].tags) || []).forEach(function (t) {
+        if (t && !t.reserved && t.value && !seen[t.value]) { seen[t.value] = true; out.push(t.value); }
+      });
+    });
+    return out;
+  }
   // doc override -> shared library -> built-in. Shared by the editor + render.
   function resolveComponentDef(key) {
     return (doc.components && doc.components[key]) || libComponents()[key] || (window.COMPONENTS || {})[key];
@@ -10188,7 +10242,13 @@
           // #19: plain clone(), NOT remintIds — promoting to the shared library keeps the
           // exact ids this course-local component was captured with (see the contract on
           // remintIds); they become the master's permanent cross-course identity.
-          window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);
+          var promoted = clone(doc.components[selectedKey]);
+          // Product Rail: stamp the reserved owning-Product tag from THIS course's Product
+          // context, if it has one -- birthplace, not ownership; an untagged course simply
+          // promotes with no reserved tag (nothing to attribute). Stamped once, here, at
+          // the moment of promotion -- never re-stamped on a later overwrite.
+          stampOwnerProductTag(promoted, doc.meta && doc.meta.productId);
+          window.LibraryStore.components[selectedKey] = promoted;
           delete doc.components[selectedKey]; // single-source: this course now references the library copy
           saveLibrary(); saveRegistry(registry); mount(); renderInspector();
         }
