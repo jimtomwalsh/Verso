@@ -2662,8 +2662,11 @@
       var docComps = (window.Editor && window.Editor.getDoc && window.Editor.getDoc().components);
       var libComps = (window.LibraryStore && window.LibraryStore.components) || {};
       var def = (docComps && docComps[block.ref]) || libComps[block.ref] || (window.COMPONENTS || {})[block.ref];
-      if (!def || !def.template) return el("div", "block-unknown", "[missing library component: " + block.ref + "]");
-      var content = cloneData(def.template);
+      // Product Rail: a topic master may carry multiple named facets; block.facet
+      // points at which one this placement shows (absent -> def.template, unchanged).
+      var facetTemplate = resolveFacetTemplate(def, block.facet);
+      if (!def || !facetTemplate) return el("div", "block-unknown", "[missing library component: " + block.ref + "]");
+      var content = cloneData(facetTemplate);
       // #23: resolve the master's OWN per-axis content (variant, then software-version)
       // for the HOST course's current axis selection, BEFORE instance overrides -- an
       // instance override is the most specific layer and always wins (see
@@ -3192,6 +3195,25 @@
     return out;
   }
   window.resolveLibraryAxisContent = resolveLibraryAxisContent; // exposed for editor.js's detachLibraryInstance (#21's "bake what you see" principle applies here too)
+
+  // Product Rail: facet pointer + {topic×variant×facet} schema. A master MAY carry
+  // def.facets = { <name>: {template} } (detail-level facets on a Ground Truth topic --
+  // e.g. technical/digestible/dotpoint) OR def.docTypeRenderings = { <name>: {template} }
+  // (doc-type renderings for a visual topic) -- the two are mutually exclusive on one
+  // master and structurally distinct on purpose: docTypeRenderings is resolved only by
+  // export-time doc-type plumbing, never surfaced as an author-facing picker (facets is
+  // the one instances point at). Each facet/rendering's OWN template nests the SAME
+  // variant/version override shape any ordinary master template does -- resolveLibraryAxisContent
+  // resolves them identically either way, no separate axis engine needed. A master with
+  // neither carries on exactly as it does today (def.template is the sole content).
+  // Pure: never mutates def; an unresolvable/absent pointer falls back to def.template.
+  function resolveFacetTemplate(def, facetPointer) {
+    if (!def) return null;
+    var facets = def.facets;
+    if (facets && facetPointer && facets[facetPointer] && facets[facetPointer].template) return facets[facetPointer].template;
+    return def.template || null;
+  }
+  window.resolveFacetTemplate = resolveFacetTemplate; // exposed for editor.js's detachLibraryInstance (bake the facet actually showing)
 
   // Product-variant axis: build-time split (N packages). resolveVariant(doc, v) returns the
   // doc as it renders/exports for variant `v`. Hero is identity where nothing is tagged.

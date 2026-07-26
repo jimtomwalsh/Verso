@@ -6267,6 +6267,26 @@
       ? "Live library instance, linked to “" + (def.name || block.ref) + "”. Edit the master in Settings → System → Component Library and every placement updates automatically."
       : "This instance's library master (“" + block.ref + "”) no longer exists. Detach to keep this placement as an editable copy, or remove it."));
 
+    // Product Rail: a facet switcher, shown only when the master carries named facets
+    // (never for docTypeRenderings -- that's export-time-only, structurally never a
+    // picker here). Switching only changes what THIS placement resolves to; it never
+    // touches the master or the link status, so there's no confirmation dialog.
+    if (def && def.facets && typeof def.facets === "object") {
+      var facetKeys = Object.keys(def.facets);
+      if (facetKeys.length) {
+        inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Facet"));
+        var facetOpts = facetKeys.map(function (k) { return [(def.facets[k].name || k), k]; });
+        var curFacet = (block.facet && def.facets[block.facet]) ? block.facet : facetKeys[0];
+        var fSel = dsSelect(facetOpts, curFacet, function (v) {
+          pushHistory();
+          if (v) block.facet = v; else delete block.facet;
+          saveRegistry(registry); mount(); reselectBlockNode(block, "block");
+        });
+        fSel.title = "Which facet of this topic this placement shows.";
+        inspector.appendChild(fSel);
+      }
+    }
+
     if (def && def.template) {
       // #21 RECONCILE: prune + surface any override whose field the master no longer
       // has (a structural change since this override was set). Runs whenever the
@@ -6296,7 +6316,7 @@
 
     var detachB = h("button", "prop-btn", "Detach"); detachB.style.marginTop = "6px";
     detachB.title = "Convert to an independent, editable copy — this placement stops receiving master updates.";
-    detachB.disabled = !def;
+    detachB.disabled = !def || !(window.resolveFacetTemplate ? window.resolveFacetTemplate(def, block.facet) : def.template);
     detachB.addEventListener("click", function () { detachLibraryInstance(block); });
     inspector.appendChild(detachB);
   }
@@ -6312,10 +6332,14 @@
   // re-attach it later.
   function detachLibraryInstance(block) {
     var def = resolveComponentDef(block.ref);
-    if (!def || !def.template) return;
+    // Product Rail: bake whatever facet this placement was actually pointing at (falls
+    // back to def.template when the master carries no facets) -- the fork snapshots the
+    // resolved facet+variant+token combo; there's no live pointer afterward.
+    var facetTemplate = window.resolveFacetTemplate ? window.resolveFacetTemplate(def, block.facet) : (def && def.template);
+    if (!def || !facetTemplate) return;
     pushHistory();
     var ref = block.ref;
-    var withOverrides = clone(def.template);
+    var withOverrides = clone(facetTemplate);
     // #23: bake the CURRENT axis content first (same "detach bakes what you see"
     // principle #21 established for instance overrides) -- axis resolves, THEN the
     // instance's own field overrides apply on top (most specific wins, matches the
