@@ -766,6 +766,11 @@
 
   function normalizeDoc(d) {
     if (!d || typeof d !== "object") return d;
+    // A stray null/malformed entry in d.pages (seen from a live-session page-array bug)
+    // crashes every walker below it (and everywhere else the doc is read) the moment it's
+    // hit -- strip it before any of those walkers run, so a doc that got corrupted mid-
+    // session self-heals on next load instead of crashing on it.
+    if (Array.isArray(d.pages)) d.pages = d.pages.filter(function (p) { return p && typeof p === "object"; });
     var v = d.schemaVersion || 0;
     // v0 -> v1: course header/footer field renamed chrome -> headerFooter.
     if (v < 1 && d.chrome && !d.headerFooter) { d.headerFooter = d.chrome; delete d.chrome; }
@@ -2067,8 +2072,9 @@
   // pickers. getBlockPageIndexAndIndex only sees top-level blocks.
   function findPageOfBlock(block) {
     for (var pi = 0; pi < doc.pages.length; pi++) {
+      var pg = doc.pages[pi]; if (!pg) continue; // a stray null/malformed page entry must not abort every later page's lookup
       var hit = false;
-      walkPageBlocks(doc.pages[pi].blocks, function (b) { if (b === block) hit = true; });
+      walkPageBlocks(pg.blocks, function (b) { if (b === block) hit = true; });
       if (hit) return pi;
     }
     return -1;
@@ -3876,7 +3882,7 @@
         if (!found && b.columns) for (var c = 0; c < b.columns.length && !found; c++) walk(b.columns[c], chain.concat(b));
       }
     }
-    (doc.pages || []).forEach(function (p) { if (!found) walk(p.blocks, []); });
+    (doc.pages || []).forEach(function (p) { if (!found && p) walk(p.blocks, []); });
     return found || [];
   }
   function syncStructureToSelection() {
@@ -4810,7 +4816,8 @@
   }
   function getBlockPageIndexAndIndex(block) {
     for (var pi = 0; pi < doc.pages.length; pi++) {
-      var idx = doc.pages[pi].blocks.indexOf(block);
+      var pg = doc.pages[pi]; if (!pg || !pg.blocks) continue; // a stray null/malformed page entry must not abort every later page's lookup
+      var idx = pg.blocks.indexOf(block);
       if (idx >= 0) return { pageIndex: pi, blockIndex: idx };
     }
     return null;
@@ -14921,12 +14928,12 @@
     // only sees TOP-LEVEL blocks, so it was silently dropping every NESTED (column / child)
     // block from the multi-selection on each re-render, breaking cross-column select.
     multiSel = multiSel.filter(function (b) {
-      for (var pi = 0; pi < doc.pages.length; pi++) if (findBlockParent(doc.pages[pi].blocks, b)) return true;
+      for (var pi = 0; pi < doc.pages.length; pi++) { var pg = doc.pages[pi]; if (pg && findBlockParent(pg.blocks, b)) return true; }
       return false;
     });
     // module G: group the page rows under their CHAPTER (a twirl-able header row),
     // mirroring the canvas columns. `pi` stays the real doc.pages index everywhere.
-    var idxOf = {}; doc.pages.forEach(function (p, i) { idxOf[p.id] = i; });
+    var idxOf = {}; doc.pages.forEach(function (p, i) { if (p) idxOf[p.id] = i; });
     var groups = (window.groupPagesByChapter && Array.isArray(doc.chapters) && doc.chapters.length)
       ? window.groupPagesByChapter(doc) : null;
     if (groups) {
@@ -14951,7 +14958,7 @@
         if (cOpen) (ch.pages || []).forEach(function (page) { emitPage(page, idxOf[page.id]); });
       });
     } else {
-      doc.pages.forEach(emitPage);
+      doc.pages.forEach(function (page, pi) { if (page) emitPage(page, pi); });
     }
     function emitPage(page, pi) {
       var open = !!openPages[page.id];

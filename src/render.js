@@ -3279,7 +3279,7 @@
     var byId = {};
     chapters.forEach(function (c) { byId[c.id] = { id: c.id, name: c.name, order: c.order || 0, pages: [] }; });
     var fallback = byId[chapters[0].id];
-    pages.forEach(function (p) { (byId[p.chapterId] || fallback).pages.push(p); });
+    pages.forEach(function (p) { if (p) (byId[p.chapterId] || fallback).pages.push(p); });
     return chapters.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); }).map(function (c) { return byId[c.id]; });
   };
 
@@ -3293,7 +3293,7 @@
     // the outline when the chapters array drifts out of c.order sync (reorderChapter
     // swaps order values, not array position) → Next skips a chapter. (Bug 2026-07-08.)
     var order = {}; (chapters || []).slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); }).forEach(function (c, i) { order[c.id] = i; });
-    var tagged = (pages || []).map(function (p, i) { return { p: p, i: i, c: (order[p.chapterId] != null ? order[p.chapterId] : 1e9) }; });
+    var tagged = (pages || []).filter(Boolean).map(function (p, i) { return { p: p, i: i, c: (order[p.chapterId] != null ? order[p.chapterId] : 1e9) }; });
     tagged.sort(function (a, b) { return (a.c - b.c) || (a.i - b.i); });
     return tagged.map(function (t) { return t.p; });
   };
