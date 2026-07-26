@@ -11695,6 +11695,92 @@
   }
   window.__buildFontPicker = buildFontPicker; // headless test hook
 
+  // #170/#158: ONE canonical, config-driven formatting toggle-bar builder, shared by the
+  // block inspector's field editor AND the Course Copy Editor -- replacing their two
+  // bespoke prop-toggle-row "biu" rows. Behaviour is unchanged (inline execCommand for
+  // B/I/U/Link, active state via queryCommandState/an anchor check); only the surfaces
+  // now share one implementation. `io` decouples the bar from which surface it's in:
+  //   io.getNode() -> the current contentEditable element to focus/act on (or null/undefined
+  //                   when nothing is active -- the bar simply no-ops on click)
+  //   io.onChange() -> called after a toggle mutates content; the caller owns persistence
+  //                    (inspector: obj[field] = sanitizeFieldHtml(...) + renderModelView();
+  //                    copy editor: commitCopyRow(...))
+  // Config-driven so a future kind (e.g. the List ticket's block-level toggle) is a new
+  // branch here, not a new bar -- today only "inline-exec" (B/I/U) and "link" exist.
+  var FORMAT_TOGGLES = [
+    { kind: "inline-exec", label: "B", cmd: "bold", title: "Bold (selected text)" },
+    { kind: "inline-exec", label: "I", cmd: "italic", title: "Italic (selected text)" },
+    { kind: "inline-exec", label: "U", cmd: "underline", title: "Underline (selected text)" },
+    { kind: "link" }
+  ];
+  function formatCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
+  function formatSelectionAnchor() {
+    var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
+    var c = sel.getRangeAt(0).commonAncestorContainer;
+    c = c.nodeType === 1 ? c : c.parentNode;
+    return (c && c.closest) ? c.closest("a[href]") : null;
+  }
+  function buildFormatToggleBar(io) {
+    var bar = h("div", "prop-toggle-row");
+    var execBtns = [];
+    FORMAT_TOGGLES.forEach(function (t) {
+      if (t.kind === "inline-exec") {
+        var b = h("button", "prop-toggle" + (formatCmdOn(t.cmd) ? " is-on" : ""), t.label);
+        if (t.title) b.title = t.title;
+        b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's text selection
+        b.addEventListener("click", function () {
+          var node = io.getNode(); if (!node) return;
+          node.focus();
+          document.execCommand(t.cmd, false, null);
+          io.onChange();
+          b.classList.toggle("is-on", formatCmdOn(t.cmd));
+        });
+        bar.appendChild(b);
+        execBtns.push({ el: b, cmd: t.cmd });
+      } else if (t.kind === "link") {
+        // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
+        // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
+        // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
+        var linkB = h("button", "prop-toggle" + (formatSelectionAnchor() ? " is-on" : ""), "Link");
+        linkB.title = "Link the selected text to an external URL (opens in a new tab)";
+        linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        linkB.addEventListener("click", function () {
+          var node = io.getNode(); if (!node) return;
+          var a = formatSelectionAnchor(), sel = window.getSelection();
+          if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
+          // Save the text selection — the modal steals focus, so restore the Range before execCommand.
+          var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
+          promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
+            var n2 = io.getNode(); if (!n2) return;
+            n2.focus();
+            if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
+            url = (url || "").trim();
+            if (!url) { document.execCommand("unlink", false, null); }
+            else {
+              document.execCommand("createLink", false, url);
+              Array.prototype.forEach.call(n2.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
+            }
+            io.onChange();
+          });
+        });
+        bar.appendChild(linkB);
+        var unlinkB = iconBtn("unlink", "Remove the link");
+        unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        unlinkB.addEventListener("click", function () { var n3 = io.getNode(); if (!n3) return; n3.focus(); document.execCommand("unlink", false, null); io.onChange(); });
+        bar.appendChild(unlinkB);
+      }
+    });
+    // Resync every inline-exec button's active state against the CURRENT selection --
+    // callers that persist across re-focus (the copy editor's format bar, built once)
+    // use this instead of rebuilding; a surface that rebuilds the bar every render doesn't need it.
+    bar.refresh = function () {
+      var active = !!io.getNode();
+      execBtns.forEach(function (o) { o.el.classList.toggle("is-on", active && formatCmdOn(o.cmd)); });
+    };
+    return bar;
+  }
+  window.__buildFormatToggleBar = buildFormatToggleBar; // headless test hook
+
   // Panel System v2 (James 2026-07-08): the generalised custom listbox. Same shape as
   // buildFontPicker (a button + popup, exposes `.value` get/set, fires 'change' on pick)
   // but each option can carry a live PREVIEW instead of a bare word — a CSS style applied
@@ -12662,51 +12748,13 @@
       }
     });
 
-    // Row 4: Inline style (B / I / U)
+    // Row 4: Inline style (B / I / U / Link) — #170/#158: the shared canonical toggle-bar
+    // builder, also used by the Course Copy Editor (buildCopyFormatBar).
     inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Style"));
-    var biu = h("div", "prop-toggle-row");
-    function cmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-    [["B", "bold"], ["I", "italic"], ["U", "underline"]].forEach(function (o) {
-      // J: reflect the current selection's formatting (active state).
-      var b = h("button", "prop-toggle" + (cmdOn(o[1]) ? " is-on" : ""), o[0]);
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      b.addEventListener("click", function () { document.execCommand(o[1], false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); b.classList.toggle("is-on", cmdOn(o[1])); });
-      biu.appendChild(b);
+    var biu = buildFormatToggleBar({
+      getNode: function () { return node; },
+      onChange: function () { obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); }
     });
-    // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
-    // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
-    // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
-    function selectionAnchor() {
-      var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
-      var c = sel.getRangeAt(0).commonAncestorContainer;
-      c = c.nodeType === 1 ? c : c.parentNode;
-      return (c && c.closest) ? c.closest("a[href]") : null;
-    }
-    var linkB = h("button", "prop-toggle" + (selectionAnchor() ? " is-on" : ""), "Link");
-    linkB.title = "Link the selected text to an external URL (opens in a new tab)";
-    linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    linkB.addEventListener("click", function () {
-      var a = selectionAnchor(), sel = window.getSelection();
-      if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
-      // Save the text selection — the modal steals focus, so restore the Range before execCommand.
-      var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
-      promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
-        node.focus();
-        if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
-        url = (url || "").trim();
-        if (!url) { document.execCommand("unlink", false, null); }
-        else {
-          document.execCommand("createLink", false, url);
-          Array.prototype.forEach.call(node.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
-        }
-        obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView();
-      });
-    });
-    biu.appendChild(linkB);
-    var unlinkB = iconBtn("unlink", "Remove the link");
-    unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    unlinkB.addEventListener("click", function () { document.execCommand("unlink", false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); });
-    biu.appendChild(unlinkB);
     // List — #9: folded INTO this inline-format toggle bar (was a separate switchEl below).
     // As a prop-toggle it shares B/I/U's mousedown-preventDefault, so the field keeps its
     // text selection and execCommand acts on the right range. The old switch had no such
@@ -17778,14 +17826,8 @@
   // is the missing control the reporter needed: re-apply/repair the flagship's inline
   // weight boundary (e.g. lighter 'Rf') on shortened variant text. Built from canonical
   // prop-toggle buttons + the shared dsSelect weight picker (no bespoke controls).
-  var _copyFmtBtns = [];
-  function copyCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-  function refreshCopyFormatState() {
-    for (var i = 0; i < _copyFmtBtns.length; i++) {
-      var b = _copyFmtBtns[i];
-      b.el.classList.toggle("is-on", !!_activeCopyRow && copyCmdOn(b.cmd));
-    }
-  }
+  var _copyFormatBar = null; // the shared toggle-bar instance (has .refresh()) once built
+  function refreshCopyFormatState() { if (_copyFormatBar) _copyFormatBar.refresh(); }
   // Apply an inline font-weight span to the active row's selection (or the whole row when
   // nothing is selected) — mirrors the field inspector's applyWeightToSelection: raw
   // font-weight span => literal HTML that survives sanitizeFieldHtml and round-trips
@@ -17810,22 +17852,14 @@
     var host = document.getElementById("copyedit-tools");
     if (!host || !host.parentNode) return null;
     bar = h("div", "copyedit__format"); bar.id = "copyedit-format";
-    _copyFmtBtns = [];
-    var biu = h("div", "prop-toggle-row");
-    [["B", "bold"], ["I", "italic"], ["U", "underline"]].forEach(function (o) {
-      var b = h("button", "prop-toggle", o[0]);
-      b.title = o[1].charAt(0).toUpperCase() + o[1].slice(1) + " (selected text)";
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the row's selection
-      b.addEventListener("click", function () {
-        if (!_activeCopyRow) return;
-        _activeCopyRow.tx.focus();
-        document.execCommand(o[1], false, null); // fires input -> commitCopyRow writes through
-        commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant);
-        b.classList.toggle("is-on", copyCmdOn(o[1]));
-      });
-      _copyFmtBtns.push({ el: b, cmd: o[1] });
-      biu.appendChild(b);
+    // #170/#158: the shared canonical toggle-bar builder (B/I/U/Link) -- the same one the
+    // field inspector's Style row uses. The copy editor gains Link as a side effect of
+    // sharing one implementation (it had none before); same execCommand/createLink mechanic.
+    var biu = buildFormatToggleBar({
+      getNode: function () { return _activeCopyRow && _activeCopyRow.tx; },
+      onChange: function () { if (!_activeCopyRow) return; commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant); }
     });
+    _copyFormatBar = biu;
     bar.appendChild(biu);
     // Inline weight — capture the row's live range on mousedown (opening the select steals
     // focus + collapses the selection, same trick the field inspector's Weight uses).

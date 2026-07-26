@@ -425,7 +425,9 @@ top, so unchanged copy stays shared and you maintain one source.
 full-screen, plain-text view of all course copy. With variants, a **Single | Side by side**
 toggle appears: **Side by side** adds one column per variant. A held variant cell is read-only
 behind a lock — click the lock to edit it; a block with no variant yet shows a **+** to create
-its copy from the flagship.
+its copy from the flagship. Click into any row to select some text and use the **B / I / U /
+Link** toolbar plus the **Weight** dropdown — the same formatting controls the canvas Inspector's
+Style row uses.
 
 **Shared Library masters inherit variants and software versions too.** If you gave a block
 per-variant or per-software-version wording *before* saving it to the Shared Library (§9), every
