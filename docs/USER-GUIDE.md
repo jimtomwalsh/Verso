@@ -160,6 +160,8 @@ Every block you can insert, grouped by type. Software tours have their own secti
 
 - **Card (container)** — a styled box holding child blocks (fill, border, radius, padding).
 - **Columns** — a multi-column row; drop blocks into each column. Collapses to a stack on mobile.
+  Drag the gap between two columns to resize them; hover a gap for a **swap** glyph that
+  exchanges those two columns' content in place.
 - **Table** — a native table: header row, borders, zebra striping, cell padding, and per-column
   alignment. Edit cells directly on the canvas.
 - **Divider / Spacer** — a rule, and vertical space.
