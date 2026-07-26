@@ -2389,6 +2389,17 @@ section("#69 migration cutover");
   ok("loadProducts reads via productsAdapter, not a hardcoded localStorage call", /function loadProducts\(\) \{[\s\S]{0,200}productsAdapter\(\)\.readProducts\(\)/.test(ed));
   ok("saveProducts writes via productsAdapter, not a hardcoded localStorage call", /function saveProducts\(\) \{ try \{ productsAdapter\(\)\.writeProducts\(JSON\.stringify\(window\.ProductsStore\)\); \} catch \(e\) \{\} \}/.test(ed));
   ok("store-native.js carries the same readProducts/writeProducts pair as readLibrary/writeLibrary", /readProducts: function \(\) \{ return productsCache; \}/.test(src("src/store-native.js")) && /writeProducts: function \(json\)/.test(src("src/store-native.js")));
+  // WIRING (Product Rail): "Promote to Product" -- a per-course-only save-menu action
+  // that writes ONLY doc.meta.productId/stage, never content, never a bulk variant.
+  ok("'Promote to Product…' is wired into the save menu's action list", /action\("Promote to Product…", function \(\) \{ promoteToProductModal\(\); \}\)/.test(ed));
+  ok("no bulk/batch variant exists anywhere (only ever operates on the single `doc`)", (ed.match(/promoteToProductModal\(/g) || []).length === 2); // definition + the one call site above
+  var ptmStart = ed.indexOf("function promoteToProductModal()");
+  ok("promoteToProductModal found", ptmStart !== -1);
+  var ptmBody = ed.slice(ptmStart, ptmStart + 1700);
+  ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
+  ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Stage"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
+  ok("writes ONLY doc.meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(doc, pid, stage\);\s*\n\s*saveRegistry\(registry\);/.test(ptmBody));
+  ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
   ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(ed));
   ok("migrate button registered only when __nativeStore present", /if \(window\.__nativeStore\) window\.Editor\.registerPipelineButton\("Migrate to file storage \(beta\)", migrateToFileBackendPrompt/.test(ed));
