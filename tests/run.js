@@ -2531,6 +2531,16 @@ section("YY asset-seam");
   srestore();
   ok("source KEPT for GC (persists across sessions)", rw.collectAssetRefs(sdoc).sort().join(",") === "SCR,SRCVID");
 
+  // Bulk "Purge all sources" (editor Advanced section) deletes block.sources wholesale.
+  // Once gone, collectAssetRefs must stop keeping the purged ids -- same GC contract as the
+  // per-source Remove above, but for every source on the board at once.
+  var pgdoc = { pages: [{ blocks: [
+    { type: "hotspot", screens: [{ visual: "asset:SCR" }], sources: [{ id: "src1", visual: "asset:SRCVID" }, { id: "src2", visual: "asset:SRCVID2" }] }
+  ] }] };
+  ok("purge: sources present before purge", rw.collectAssetRefs(pgdoc).sort().join(",") === "SCR,SRCVID,SRCVID2");
+  delete pgdoc.pages[0].blocks[0].sources;
+  ok("purge: sources gone from GC refs after purge", rw.collectAssetRefs(pgdoc).join(",") === "SCR");
+
   // A harvested screen carries provenance `source:{id,t}` (which source frame it came from).
   // That's inert data (id string + number) — it must add NO asset ref (no export/GC impact);
   // only the screen's own visual counts.
@@ -3715,7 +3725,7 @@ section("#159/#163 frontend conformance gate");
     // (panel-ia §3: sub() is allowed as an in-section label, never as a section header) — that
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
-    sectionGroup: { base: 41, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens)" },
+    sectionGroup: { base: 42, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section)" },
     subHeader:    { base: 28, dir: "down", enforce: true,  ticket: "#163 (residual = legit in-section sub-labels)" },
     disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "#163 (ad-hoc collapsibles capped)" },
     rawDialog:    { base: 0,  dir: "down", enforce: true,  ticket: "#163 (#156 landed — no native dialogs)" },

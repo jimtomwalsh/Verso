@@ -306,7 +306,10 @@ board where every screen is a node laid out in 2D.
   on the scrub bar). A source is **author-time only: it is never included in the exported course**, so
   a long screen-recording never bloats your package. It stays saved with the course so you can come
   back and keep working from it; the **trash** button on the node removes it (screens you've already
-  made from it are kept).
+  made from it are kept). To clear every source at once (e.g. once you've finished harvesting and
+  want to slim the save file), open the Properties panel with nothing selected and use **Purge all
+  sources** near the bottom — it removes all source recordings in one step; screens you've already
+  harvested stay.
 - **Crop the source (uniform size).** The **crop** button on a source's player shows a crop frame over
   the video — drag it to move, the corners to resize. Every screen you then harvest from that source
   comes out at that **same size**, so a set of screens lines up perfectly. Re-cropping only affects

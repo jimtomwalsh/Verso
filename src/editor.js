@@ -7432,6 +7432,29 @@
     } finally { inspector = _hins; }
     });
 
+    // Advanced: bulk source-video purge (tour builder only). Harvested screens are
+    // author-time scratch (never exported) but the recordings themselves can be heavy —
+    // this is the all-at-once pressure valve alongside the per-source Remove on each card.
+    if (Array.isArray(block.sources) && block.sources.length) {
+      sectionGroup("Advanced", "Source videos", function (_asb) {
+        var _ains = inspector; inspector = _asb;
+        try {
+          var n = block.sources.length;
+          inspector.appendChild(h("div", "insp-hint", n + " source video" + (n === 1 ? "" : "s") + " on the board. Author-time scratch — never exported."));
+          var purge = h("button", "prop-btn prop-btn--danger", "Purge all sources");
+          purge.addEventListener("click", function () {
+            confirmModal("Purge all sources", "Remove all " + block.sources.length + " source video" + (block.sources.length === 1 ? "" : "s") + "? Screens you've already harvested from them are kept.", function () {
+              pushHistory();
+              delete block.sources;
+              scheduleSave(); renderTourNodes(); renderTourInspector();
+              try { sweepAllAssets(); } catch (_) {} // free the purged blobs now (unreferenced)
+            }, { okLabel: "Purge all", danger: true });
+          });
+          inspector.appendChild(purge);
+        } finally { inspector = _ains; }
+      });
+    }
+
     endSections(inspector);
     // reveal the active hotspot on the canvas for in-place editing (after layout)
     var revealId = hotspotEditId;
