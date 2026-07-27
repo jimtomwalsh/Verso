@@ -6064,7 +6064,11 @@ section("richer bullet lists");
   // genuine top-level list block (gated separately, in the shared bar, on obj.type).
   ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
   ok("List toggle visibility is gated on obj.type in TEXT_CONTENT_TYPES, not rootIsList directly", /isListToggleable: function \(\) \{ return field === "text" && !!obj && !!obj\.type && !!TEXT_CONTENT_TYPES\[obj\.type\]; \}/.test(e));
-  ok("no execCommand/queryCommandState List path remains (block-type conversion replaced it)", !/insertUnorderedList/.test(e) && !/insertOrderedList/.test(e));
+  // The canvas's own removed switchRow pair (line above) stays the precise regression
+  // guard for THIS bar. source-stage-wysiwyg-editing later gave Source stage's own,
+  // separate topic-body toolbar a legitimate execCommand("insertUnorderedList") --
+  // free-flowing wiki prose has no block-type system to convert, unlike a canvas text
+  // block, so inline execCommand is the correct fit there, not a regression of this one.
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
@@ -8344,7 +8348,12 @@ section("Product Rail: Source stage nav + article");
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { isValidFacet: isValidFacet, topicMatchesQuery: topicMatchesQuery, filterTopics: filterTopics," +
-    " groupTopicsByProduct: groupTopicsByProduct, resolveSectionFacetText: resolveSectionFacetText };")();
+    " groupTopicsByProduct: groupTopicsByProduct, canonicalizeTopicOrder: canonicalizeTopicOrder," +
+    " resolveSectionFacetText: resolveSectionFacetText };")();
+  // structMoveTopic itself isn't extracted here (unlike structMoveSection) -- it reads/
+  // writes the real libComponents()/saveLibrary() globals to look up drag/ref topics by id
+  // across the whole library, so it's exercised via the browser-verify pass instead, the
+  // same tier createTopic and its siblings already use.
 
   ok("isValidFacet accepts technical/digestible/dotpoint", g.isValidFacet("technical") && g.isValidFacet("digestible") && g.isValidFacet("dotpoint"));
   ok("isValidFacet rejects anything else", g.isValidFacet("flagship") === false && g.isValidFacet() === false);
@@ -8371,7 +8380,34 @@ section("Product Rail: Source stage nav + article");
   var groups = g.groupTopicsByProduct(g.filterTopics(comps, "", ""), products);
   ok("groupTopicsByProduct: one group per productId + an Unassigned bucket", groups.length === 3);
   ok("groupTopicsByProduct: groups sorted by product name, Unassigned last", groups[0].label === "Alpha" && groups[1].label === "Beta" && groups[2].label === "Unassigned");
-  ok("groupTopicsByProduct: topics within a group sorted by name", groups[0].topics[0].name === "Battery life" && groups[0].topics[1].name === "Radar overview");
+  // source-stage-topic-reorder: within a group, topics sort by their canonical drag `order`
+  // (author-chosen), not by name -- callers canonicalize order first (see below).
+  var orderedComps = {
+    o1: { id: "o1", kind: "topic", name: "Radar overview", productId: "prod-a", order: 1 },
+    o2: { id: "o2", kind: "topic", name: "Battery life", productId: "prod-a", order: 0 }
+  };
+  var orderedGroups = g.groupTopicsByProduct(g.filterTopics(orderedComps, "", ""), products);
+  ok("groupTopicsByProduct: topics within a group sorted by order, not name", orderedGroups[0].topics[0].name === "Battery life" && orderedGroups[0].topics[1].name === "Radar overview");
+
+  // canonicalizeTopicOrder: assigns a stable, dense order per Product group -- a topic
+  // with no order yet sorts to the end of ITS group, alphabetically among its equally-
+  // unordered siblings, so a freshly created/imported topic appends rather than jumping
+  // into an author's chosen order. Order is scoped per-group (cross-group position is
+  // meaningless), and restamped to a dense 0..n-1 range after sorting.
+  var unordered = [
+    { id: "u1", name: "Zebra", productId: "prod-a" },
+    { id: "u2", name: "Alpha topic", productId: "prod-a" },
+    { id: "u3", name: "Only one", productId: "prod-b" }
+  ];
+  g.canonicalizeTopicOrder(unordered);
+  ok("canonicalizeTopicOrder: no-order topics fall back to alpha order within their group", unordered[0].order === 1 && unordered[1].order === 0);
+  ok("canonicalizeTopicOrder: a lone topic in its own group still gets order 0", unordered[2].order === 0);
+  var mixed = [
+    { id: "m1", name: "Has an order", productId: "prod-a", order: 5 },
+    { id: "m2", name: "No order yet", productId: "prod-a" }
+  ];
+  g.canonicalizeTopicOrder(mixed);
+  ok("canonicalizeTopicOrder: an explicit order always sorts before a topic with none", mixed[0].order === 0 && mixed[1].order === 1);
 
   var sec = { heading: "H", facets: { technical: "tech text", dotpoint: "dot text" } };
   ok("resolveSectionFacetText: returns the requested facet when present", g.resolveSectionFacetText(sec, "dotpoint") === "dot text");
@@ -8622,10 +8658,9 @@ section("Product Rail: Source topic content authoring");
   var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
-    "\nreturn { addSection: addSection, removeSection: removeSection, moveSection: moveSection," +
-    " divergeSectionVariant: divergeSectionVariant, wrapSelectionWithMarker: wrapSelectionWithMarker," +
-    " toggleBulletLines: toggleBulletLines, sourceCommentsForSection: sourceCommentsForSection," +
-    " sourceCommentIsOrphaned: sourceCommentIsOrphaned };")();
+    "\nreturn { addSection: addSection, removeSection: removeSection," +
+    " structMoveSection: structMoveSection, divergeSectionVariant: divergeSectionVariant," +
+    " sourceCommentsForSection: sourceCommentsForSection, sourceCommentIsOrphaned: sourceCommentIsOrphaned };")();
 
   // Section CRUD -- plain array ops, callers own the updatedAt stamp + save.
   var topic = { sections: [{ id: "s1", heading: "One" }, { id: "s2", heading: "Two" }] };
@@ -8634,13 +8669,17 @@ section("Product Rail: Source topic content authoring");
   ok("a freshly added section has a technical facet ready to type into", added.facets && added.facets.technical === "");
   g.removeSection(topic, 0);
   ok("removeSection removes exactly the section at that index", topic.sections.length === 2 && topic.sections[0].id === "s2");
+  // structMoveSection: the drag-handle reorder, keyed on section id (not index) since
+  // that's what a real drag/drop event hands back.
   var topic2 = { sections: [{ id: "a" }, { id: "b" }, { id: "c" }] };
-  g.moveSection(topic2, 1, -1);
-  ok("moveSection(-1) swaps with the previous section", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
-  g.moveSection(topic2, 0, -1);
-  ok("moveSection at the top is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
-  g.moveSection(topic2, 2, 1);
-  ok("moveSection at the bottom is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
+  g.structMoveSection(topic2, "c", "a", false);
+  ok("structMoveSection drops BEFORE the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "c,a,b");
+  g.structMoveSection(topic2, "c", "b", true);
+  ok("structMoveSection drops AFTER the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
+  g.structMoveSection(topic2, "a", "a", true);
+  ok("structMoveSection self-drop is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
+  g.structMoveSection(topic2, "missing", "a", true);
+  ok("structMoveSection with an unknown drag id is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
 
   // divergeSectionVariant: copies Flagship's CURRENT facets in, once -- never resets an
   // existing override back to Flagship on a second call.
@@ -8669,57 +8708,50 @@ section("Product Rail: Source topic content authoring");
   ok("sourceCommentIsOrphaned is true once its section no longer exists (e.g. deleted)", g.sourceCommentIsOrphaned(ctopic.comments[3], ctopic) === true);
   ok("sourceCommentIsOrphaned is false for a comment with no anchor at all", g.sourceCommentIsOrphaned({ id: "c5" }, ctopic) === false);
 
-  // wrapSelectionWithMarker: bold/inline-code toggle, both directions.
-  var r1 = g.wrapSelectionWithMarker("hello world", 6, 11, "**");
-  ok("wraps a selection in the marker", r1.text === "hello **world**" && r1.start === 8 && r1.end === 13);
-  var r2 = g.wrapSelectionWithMarker("hello **world**", 8, 13, "**");
-  ok("wrapping an ALREADY-wrapped-in-exactly-that-marker selection unwraps it (true toggle)", r2.text === "hello world" && r2.start === 6 && r2.end === 11);
-  var r3 = g.wrapSelectionWithMarker("hello ", 6, 6, "`");
-  ok("a collapsed (empty) selection inserts an empty marker pair with the cursor between them", r3.text === "hello ``" && r3.start === 7 && r3.end === 7);
-
-  // toggleBulletLines: per-line toggle over whatever lines the selection spans.
-  var b1 = g.toggleBulletLines("one\ntwo\nthree", 0, 13);
-  ok("bullets every non-empty line the selection spans", b1.text === "- one\n- two\n- three");
-  var b2 = g.toggleBulletLines("- one\n- two\n- three", 0, 20);
-  ok("toggling an ALREADY-fully-bulleted block strips every bullet (true toggle)", b2.text === "one\ntwo\nthree");
-  var b3 = g.toggleBulletLines("one\n- two", 0, 9);
-  ok("a MIXED block (only some lines bulleted) bullets the rest rather than stripping", b3.text === "- one\n- two");
-  var b4 = g.toggleBulletLines("just one line", 4, 4);
-  ok("a collapsed selection still resolves to the line it sits on", b4.text === "- just one line");
-
-  // index.html / wiring: the article is directly editable (wiki-not-document framing --
-  // /verso-frontend design consult: a plain textarea + local toolbar, not the rich-text
-  // execCommand bar, since MarkdownLite.render() already treats storage as a plain string).
+  // index.html / wiring: the article is directly editable (wiki-not-document framing).
   ok("topic title is a real input, not read-only text", /source-stage__title-input/.test(e));
   ok("section heading is a real input, not read-only text", /source-stage__heading-input/.test(e));
-  ok("each section has move-up/move-down/delete actions", /iconBtn\("arrow-up", "Move up"\)/.test(e) && /iconBtn\("arrow-down", "Move down"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
+  // source-stage-section-disclosure: up/down arrow buttons replaced by a single drag
+  // handle (drag IS the reorder affordance); actions are hover/focus-disclosed via CSS,
+  // not permanently visible.
+  ok("each section has a drag handle and a delete action", /iconBtn\("grip", "Drag to reorder"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
+  ok("section actions are hover/focus-disclosed, not permanently visible", /\.source-stage__section-actions\s*\{[^}]*opacity:\s*0/.test(src("editor.css")) || /\.source-stage__section:hover \.source-stage__section-actions/.test(src("editor.css")));
+  ok("the drag handle is draggable and wires dragstart/drop for reorder", /gripBtn\.setAttribute\("draggable", "true"\)/.test(e) && /structMoveSection\(topic, dragId, sec\.id, after\)/.test(e));
   ok("deleting a section confirms first (destructive action)", /confirmModal\("Delete section"/.test(e));
   ok("an 'Add section' affordance exists at the end of the article", /source-stage__add-section/.test(e) && /\+ Add section/.test(e));
 
-  // Click-to-edit: a body reads as normal MarkdownLite output until clicked, THEN swaps
-  // to a raw textarea -- browsing a topic never shows raw ** markers, only the one cell
-  // actively being edited. This is the fix for an initial always-raw-textarea approach
-  // that would have regressed the read experience source-stage-nav-article already shipped.
-  ok("a body cell starts as rendered MarkdownLite output, not a textarea, until clicked", /bodyEl\.addEventListener\("click", function \(\) \{ __sourceEditingCell = \{ sectionId: sec\.id, variant: c\.variant \}; renderSourceArticle\(\); \}\);/.test(e));
-  ok("blurring the textarea commits the edit AND swaps back to rendered view", /ta\.addEventListener\("blur", function \(\) \{[\s\S]{0,200}__sourceEditingCell = null;\s*\n\s*renderSourceArticle\(\);/.test(e));
+  // source-stage-wysiwyg-editing: click-to-edit swaps a rendered body for a real
+  // contentEditable seeded with the SAME rendered HTML, not a raw markdown-lite
+  // textarea -- browsing OR editing a topic never shows raw ** markers.
+  ok("a body cell starts as rendered MarkdownLite output until clicked", /bodyEl\.addEventListener\("click", function \(\) \{ __sourceEditingCell = \{ sectionId: sec\.id, variant: c\.variant \}; renderSourceArticle\(\); \}\);/.test(e));
+  ok("the editing surface is a real contentEditable, not a textarea", /editEl\.contentEditable = "true";/.test(e) && e.indexOf('h("textarea", "source-stage__body-input")') === -1);
+  ok("the contentEditable is seeded with rendered HTML, so entering edit mode never flashes raw markdown", /editEl\.innerHTML = window\.MarkdownLite \? window\.MarkdownLite\.render\(c\.text\) : "";/.test(e));
+  ok("blurring the contentEditable commits via commitEditableCell AND swaps back to rendered view", /editEl\.addEventListener\("blur", function \(\) \{\s*\n\s*commitEditableCell\(topic, sec, c\.variant, editEl\);\s*\n\s*__sourceEditingCell = null;\s*\n\s*renderSourceArticle\(\);/.test(e));
   ok("editing state resets when switching topics (no stray in-progress edit carried over)", /__sourceEditingCell = null; \/\/ don't carry an in-progress edit across topics/.test(e));
+  ok("the section widens while a cell within it is being edited, so the full block stays visible", /secEl\.classList\.add\("source-stage__section--editing"\);/.test(e));
 
-  // Shared format toolbar: mousedown+preventDefault (mirrors the copy editor's own
-  // formatting bar -- clicking a toolbar button must never steal the textarea's
-  // selection), and it targets whichever field last received focus.
-  ok("format toolbar buttons preventDefault on mousedown to preserve the textarea's selection (same trick the copy-editor bar uses)", /btn\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\); \/\/ keep the textarea's selection/.test(e));
-  ok("toolbar acts on __sourceActiveEditField (the last-focused field), mirroring the copy editor's _activeCopyRow pattern", /var f = __sourceActiveEditField; if \(!f\) return;/.test(e));
-  // Regression guard: wrapSelectionWithMarker's marker is its 4th param, not 1st --
-  // an earlier build used .bind(null, "**") here, which silently binds "**" to the
-  // FIRST param (text) instead, corrupting every call via type coercion (caught only
-  // by browser-verify, not by any source-string check, since the wiring still LOOKED
-  // plausible). Guard against that exact regression: the call site must pass the
-  // marker as its own explicit 4th argument, not via .bind().
-  ok("no .bind() shortcut on wrapSelectionWithMarker (parameter-order footgun -- marker is arg 4, not arg 1)", e.indexOf("wrapSelectionWithMarker.bind(") === -1);
-  ok("the toolbar wraps the marker in its own closure, calling wrapSelectionWithMarker with marker as the explicit 4th argument", /function wrapWith\(marker\) \{ return function \(text, start, end\) \{ return wrapSelectionWithMarker\(text, start, end, marker\); \}; \}/.test(e));
-  // /verso-frontend Tier 2 fix: code/bullet toolbar buttons must match the existing
-  // B/I/U bar's OWN list-toggle convention (a real Icon(), prop-toggle--icon) rather
-  // than a text glyph -- "B" correctly stays plain text (matches that bar's B/I/U).
+  // commitEditableCell: serializes via MarkdownLite.serialize, and guards a purely
+  // cosmetic open/close (nothing typed) from ever rewriting the stored string -- a
+  // naive round-trip could otherwise look like a change (render() itself is lossy in
+  // one direction, e.g. collapsing un-blank-line-separated newlines to spaces), which
+  // would falsely trip the re-import reconcile system's (#87) lastImportedText compare.
+  ok("commitEditableCell serializes the live contentEditable via MarkdownLite.serialize", /var newText = window\.MarkdownLite\.serialize\(editEl\);/.test(e));
+  ok("commitEditableCell compares against a re-serialize of the OLD text's own rendered form before writing (no-op guard)", /probe\.innerHTML = window\.MarkdownLite\.render\(oldText\);[\s\S]{0,80}var normalizedOld = window\.MarkdownLite\.serialize\(probe\);[\s\S]{0,120}if \(newText !== normalizedOld\)/.test(e));
+
+  // Contextual per-cell toolbar (source-stage-wysiwyg-editing): built fresh per editing
+  // cell via the SAME io.getNode()/io.onChange() adapter shape the canvas inspector's
+  // buildFormatToggleBar uses, rendered only next to the ONE cell being edited -- never
+  // a permanent fixture pinned to the top of the article regardless of what's active.
+  ok("no permanent top-of-article toolbar remains (it's per-editing-cell now)", e.indexOf('host.appendChild(toolbar);') === -1);
+  ok("the toolbar is built fresh per editing cell via buildSourceEditToolbar, closing over that cell's own element", /var toolbar = buildSourceEditToolbar\(\{ getNode: function \(\) \{ return editEl; \}, onChange: function \(\) \{\} \}\);/.test(e));
+  ok("Bold uses execCommand, not string-splicing", /execAndCommit\("bold"\)/.test(e) && /document\.execCommand\(cmd, false, arg \|\| null\);/.test(e));
+  ok("Bullet list uses execCommand('insertUnorderedList'), a real list toggle on the live selection", /execAndCommit\("insertUnorderedList"\)/.test(e));
+  ok("Inline code surrounds the live selection in a real <code> element (no native execCommand for it) and no-ops on a collapsed selection", /function wrapInlineCode\(\) \{[\s\S]{0,300}if \(range\.collapsed\) return;/.test(e));
+  ok("format toolbar buttons preventDefault on mousedown to preserve the field's selection (same trick the copy-editor bar uses)", /btn\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\); \/\/ keep the field's selection/.test(e));
+  // /verso-frontend Tier 2 (prior session): code/bullet toolbar buttons must match the
+  // existing B/I/U bar's OWN list-toggle convention (a real Icon(), prop-toggle--icon)
+  // rather than a text glyph -- "B" correctly stays plain text (matches that bar's B/I/U).
+  // Still true after the execCommand rewire -- same button shell, new wiring underneath.
   ok("inline-code toolbar button uses the real code-xml icon, not a '<>' text glyph", /icon: "code-xml", title: "Inline code"/.test(e));
   ok("bullet toolbar button uses the real list icon (matches the existing B/I/U bar's own list-toggle), not a '•' text glyph", /icon: "list", title: "Bullet list"/.test(e));
   ok("icon toolbar buttons get the prop-toggle--icon class, same as the existing list-toggle button", /h\("button", "prop-toggle" \+ \(t\.icon \? " prop-toggle--icon" : ""\)\)/.test(e));
@@ -8746,10 +8778,10 @@ section("Product Rail: Source topic content authoring");
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
-  ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1 && renderJs.indexOf("__sourceActiveEditField") === -1);
+  ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1);
   ok("render() never reads Source-stage comment state either", renderJs.indexOf("__sourceOpenCommentSectionId") === -1);
   var courseCss2 = src("src/course.css");
-  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body-input") === -1 && courseCss2.indexOf("source-stage__diverge") === -1 && courseCss2.indexOf("source-stage__comment") === -1);
+  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body--editing") === -1 && courseCss2.indexOf("source-stage__diverge") === -1 && courseCss2.indexOf("source-stage__comment") === -1);
 })();
 
 // ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
@@ -8836,6 +8868,13 @@ section("markdown-lite content render");
   var M;
   try { M = require(path.join(ROOT, "src/markdown-lite.js")); } catch (e) { ok("require src/markdown-lite.js", false); return; }
   ok("require src/markdown-lite.js", !!M && !!M._pure && typeof M.render === "function");
+  // serialize(node) is the reverse of render() (DOM-in, markdown-lite string-out) for
+  // the Source-stage contentEditable editing surface (source-stage-wysiwyg-editing).
+  // It needs a real DOM (document.createElement etc.), which this Node test harness
+  // doesn't have (no jsdom -- the app is dependency-free) -- so beyond confirming it's
+  // exported, its actual round-trip fidelity is verified via real browser-verify, not
+  // a pure-logic fixture here.
+  ok("MarkdownLite.serialize is exported", typeof M.serialize === "function");
   if (!M || !M._pure) return;
   var P = M._pure;
 
@@ -8846,6 +8885,20 @@ section("markdown-lite content render");
   ok("mixed: paragraph then bullets", M.render("Intro **text**.\n\n- `a`\n- b") ===
     '<p>Intro <strong>text</strong>.</p><ul><li><code class="md-lite-code">a</code></li><li>b</li></ul>');
   ok("multi-line paragraph collapses newlines to spaces", M.render("line one\nline two") === "<p>line one line two</p>");
+
+  // Ordered (numbered) lists -- consecutive "N. " lines group into one <ol>, exactly
+  // like "- " bullets group into <ul>. Root cause of a real reported bug: without this,
+  // numbered lines fell into the generic paragraph path and collapsed their newlines
+  // into spaces in VIEW mode while a raw-textarea EDIT surface still showed every \n,
+  // so a manual's numbered steps looked like one run-on line to a reader.
+  ok("numbered list", M.render("1. one\n2. two\n3. three") === '<ol start="1"><li>one</li><li>two</li><li>three</li></ol>');
+  ok("numbered list starting past 1 keeps its own start", M.render("5. five\n6. six") === '<ol start="5"><li>five</li><li>six</li></ol>');
+  ok("numbered list items render inline formatting", M.render("1. **bold** item\n2. `code` item") ===
+    '<ol start="1"><li><strong>bold</strong> item</li><li><code class="md-lite-code">code</code> item</li></ol>');
+  ok("a bullet run and a numbered run don't merge into each other", M.render("- a\n- b\n1. c\n2. d") ===
+    "<ul><li>a</li><li>b</li></ul>" + '<ol start="1"><li>c</li><li>d</li></ol>');
+  ok("mixed: paragraph then numbered list", M.render("Steps:\n\n1. first\n2. second") ===
+    "<p>Steps:</p>" + '<ol start="1"><li>first</li><li>second</li></ol>');
   ok("empty input -> empty string", M.render("") === "" && M.render(null) === "" && M.render(undefined) === "");
 
   // Malformed/unmatched markers degrade to literal text, never throw or break markup.

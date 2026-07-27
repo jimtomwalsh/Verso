@@ -472,11 +472,12 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    now a container (checkbox + label button) rather than one bare button -- md-topic-import
    bulk-delete needs a click target for selection that's independent of "open this topic". */
 .source-stage__topic-row {
-  display: flex; align-items: center; gap: 6px; width: 100%;
+  display: flex; align-items: center; gap: 6px; width: 100%; position: relative;
   height: 26px; padding: 0 8px 0 4px; border-radius: var(--radius-xs);
   color: var(--text-secondary); font: var(--type-label);
 }
 .source-stage__topic-row:hover { background: var(--surface-hover); color: var(--text-primary); }
+.source-stage__topic-row[draggable="true"] { cursor: grab; }
 .source-stage__topic-row.is-active { background: var(--accent-quiet); color: var(--accent); }
 .source-stage__topic-checkbox { flex: 0 0 auto; }
 .source-stage__topic-label {
@@ -491,11 +492,11 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    the longest label ("Digestible") never truncates via .prop-toggle's ellipsis. */
 .source-stage__article-head .prop-toggle-row { min-width: 300px; }
 .source-stage__title { font-size: var(--text-lg, 18px); font-weight: 600; color: var(--text-primary); margin: 0; }
-.source-stage__section { max-width: 640px; margin-bottom: 24px; }
+.source-stage__section { max-width: 640px; margin-bottom: 24px; position: relative; }
 .source-stage__heading { font-size: var(--text-md, 14px); font-weight: 600; color: var(--text-primary); margin: 0 0 6px; }
 .source-stage__body { font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary); }
 .source-stage__body p { margin: 0 0 10px; }
-.source-stage__body ul { margin: 0 0 10px; padding-left: 20px; }
+.source-stage__body ul, .source-stage__body ol { margin: 0 0 10px; padding-left: 20px; }
 .source-stage__body .md-lite-code {
   font-family: var(--font-mono, "JetBrains Mono", monospace); font-size: 0.9em;
   background: var(--surface-raised, #262626); border: 1px solid var(--border-subtle);
@@ -556,8 +557,6 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   font-size: var(--text-lg, 18px); font-weight: 600; color: var(--text-primary); padding: 2px 0;
 }
 .source-stage__title-input:hover, .source-stage__title-input:focus { background: var(--surface-hover); border-radius: var(--radius-sm, 4px); }
-.source-stage__edit-toolbar { margin-bottom: 14px; }
-.source-stage__edit-toolbar .prop-toggle-row { width: fit-content; }
 .source-stage__heading-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .source-stage__heading-input {
   flex: 1 1 auto; border: none; background: transparent; outline: none;
@@ -565,15 +564,29 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .source-stage__heading-input:hover, .source-stage__heading-input:focus { background: var(--surface-hover); border-radius: var(--radius-sm, 4px); }
 .source-stage__heading-input::placeholder { color: var(--text-tertiary); font-weight: 500; }
-.source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; }
-.source-stage__body-input {
-  display: block; width: 100%; resize: vertical;
-  border: 1px solid transparent; background: transparent; outline: none;
-  font: inherit; font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary);
+/* source-stage-section-disclosure: hidden until the section is hovered/focused, so the
+   article reads as content first, not a permanent wall of controls (a drag handle +
+   delete, replacing the old always-visible up/down/delete trio). */
+.source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; opacity: 0; transition: opacity var(--dur-fast, 120ms) var(--ease-standard); }
+.source-stage__section:hover .source-stage__section-actions,
+.source-stage__section:focus-within .source-stage__section-actions { opacity: 1; }
+.source-stage__section [draggable="true"] { cursor: grab; }
+/* source-stage-wysiwyg-editing: the toolbar is now CONTEXTUAL, rendered only next to
+   the one cell being edited (never a permanent fixture pinned to the article head
+   regardless of what's active) -- a small gap above the contentEditable it belongs to. */
+.source-stage__edit-toolbar { display: flex; align-items: center; gap: 2px; margin: 0 0 6px; }
+/* A never-clipping contentEditable: no fixed rows/height (it grows with content
+   naturally, unlike the old textarea's rows-at-open-time sizing), and the section
+   widens past its usual reading-width cap while a cell inside it is being edited (see
+   .source-stage__section--editing) so the full block stays visible while typing. */
+.source-stage__body--editing {
+  display: block; min-height: 1.6em;
+  border: 1px solid var(--border-focus, var(--accent)); background: var(--surface-input);
   padding: 4px 6px; margin: -4px -6px; border-radius: var(--radius-sm, 4px);
+  cursor: text;
 }
-.source-stage__body-input:hover { border-color: var(--border-subtle); }
-.source-stage__body-input:focus { border-color: var(--border-focus, var(--accent)); background: var(--surface-input); }
+.source-stage__body--editing:focus { outline: none; }
+.source-stage__section--editing { max-width: none; }
 /* md-topic-import re-import safety: a section that changed both here and in a
    re-imported source since the last import -- never auto-overwritten, flagged instead
    (see MarkdownImport.reconcileSection). The canonical Badge (tone="warning") supplies

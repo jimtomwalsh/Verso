@@ -10520,7 +10520,11 @@
     });
   }
   // Groups topics by owning Product (label from ProductsStore; "" bucket -> "Unassigned",
-  // sorted last), each group's topics sorted by name.
+  // sorted last), each group's topics sorted by their canonical drag order (author-chosen,
+  // via the topic-row drag handle -- see canonicalizeTopicOrder/structMoveTopic). Callers
+  // must canonicalize order on the topic's FULL per-product population before calling this
+  // (see renderSourceTopicList) so order stays stable independent of any transient
+  // search/review filter narrowing what's actually passed in here.
   function groupTopicsByProduct(topics, products) {
     var groups = {};
     (topics || []).forEach(function (t) {
@@ -10536,9 +10540,56 @@
       return {
         productId: pid,
         label: pid ? ((products[pid] && products[pid].name) || pid) : "Unassigned",
-        topics: groups[pid].slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); })
+        topics: groups[pid].slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); })
       };
     });
+  }
+  // Assigns a stable, dense integer `order` to every topic within its own Product group
+  // (order is meaningful only WITHIN a group -- cross-group position doesn't exist). A
+  // topic with no order yet (never dragged) sorts to the end of its group, alphabetically
+  // among its equally-unordered siblings, so a freshly created/imported topic appends
+  // rather than jumping into the middle of an author's chosen order. Same canonicalize-
+  // then-restamp idiom `doc.chapters` already uses (editor.js ~1044-1045).
+  function canonicalizeTopicOrder(topics) {
+    var byProduct = {};
+    (topics || []).forEach(function (t) {
+      var pid = t.productId || "";
+      (byProduct[pid] = byProduct[pid] || []).push(t);
+    });
+    Object.keys(byProduct).forEach(function (pid) {
+      var group = byProduct[pid].slice().sort(function (a, b) {
+        var ao = a.order, bo = b.order;
+        if (ao == null && bo == null) return (a.name || "").localeCompare(b.name || "");
+        if (ao == null) return 1;
+        if (bo == null) return -1;
+        return ao - bo;
+      });
+      group.forEach(function (t, i) { t.order = i; });
+    });
+  }
+  // Drag-and-drop reorder for the topic-nav rail's drag handle -- move dragId to just
+  // before/after refId, WITHIN the same Product group only (dropping across groups is a
+  // no-op; reassigning Product stays "Promote to Product…"/"Move to Product…"'s job, not
+  // this drag). Same splice-out/find-ref/splice-in shape as structMoveSection/
+  // structMoveChapter.
+  function structMoveTopic(dragId, refId, after) {
+    var comps = libComponents();
+    var drag = comps[dragId], ref = comps[refId];
+    if (!drag || !ref || drag.kind !== "topic" || ref.kind !== "topic" || dragId === refId) return;
+    var pid = drag.productId || "";
+    if (pid !== (ref.productId || "")) return;
+    var group = Object.keys(comps).map(function (k) { return comps[k]; })
+      .filter(function (t) { return t && t.kind === "topic" && (t.productId || "") === pid; });
+    canonicalizeTopicOrder(group);
+    var sorted = group.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    var di = sorted.findIndex(function (t) { return t.id === dragId; });
+    if (di < 0) return;
+    var item = sorted.splice(di, 1)[0];
+    var ri = sorted.findIndex(function (t) { return t.id === refId; });
+    var at = ri < 0 ? sorted.length : (after ? ri + 1 : ri);
+    sorted.splice(at, 0, item);
+    sorted.forEach(function (t, i) { t.order = i; });
+    saveLibrary();
   }
   // A section's text for the requested facet, falling back to "technical" then to
   // whichever facet IS present -- a section never renders blank just because the
@@ -10593,13 +10644,19 @@
     if (!topic || !topic.sections) return;
     topic.sections.splice(index, 1);
   }
-  // dir: -1 (up) or 1 (down). No-ops silently at either end -- the caller doesn't need
-  // to compute bounds itself.
-  function moveSection(topic, index, dir) {
-    if (!topic || !topic.sections) return;
-    var arr = topic.sections, j = index + dir;
-    if (index < 0 || index >= arr.length || j < 0 || j >= arr.length) return;
-    var tmp = arr[index]; arr[index] = arr[j]; arr[j] = tmp;
+  // Drag-and-drop reorder (the section grip handle) -- move dragId to just before/after
+  // refId within the same topic.sections array. Same shape as the outliner's
+  // structMoveChapter (editor.js ~16341): splice out, find the reference's new index,
+  // splice back in before/after it. Self-drop is a no-op.
+  function structMoveSection(topic, dragId, refId, after) {
+    if (!topic || !topic.sections || dragId === refId) return;
+    var arr = topic.sections;
+    var di = arr.findIndex(function (s) { return s.id === dragId; });
+    if (di < 0) return;
+    var drag = arr.splice(di, 1)[0];
+    var ri = arr.findIndex(function (s) { return s.id === refId; });
+    var at = ri < 0 ? arr.length : (after ? ri + 1 : ri);
+    arr.splice(at, 0, drag);
   }
   // Diverge-for-<variant>: copies Flagship's CURRENT facets into an independently-
   // editable override, once -- mirrors the shipped "own image vs inherits flagship"
@@ -10610,42 +10667,6 @@
     section.overrides = section.overrides || {};
     if (section.overrides[variant]) return;
     section.overrides[variant] = { facets: cloneFn(section.facets || {}) };
-  }
-  // Bold/inline-code toggle: wraps the selection in `marker` on each side, or unwraps
-  // it if the selection is ALREADY wrapped in exactly that marker (a true toggle, not
-  // just an insert). An empty (collapsed) selection inserts an empty marker pair with
-  // the cursor placed between them, ready to type.
-  function wrapSelectionWithMarker(text, start, end, marker) {
-    text = text || ""; start = start || 0; end = end == null ? start : end;
-    var m = marker.length;
-    // "Already wrapped" means the markers sit immediately OUTSIDE the selection (the
-    // normal case: an author selects just the word, not the ** themselves) -- not
-    // inside it. Strip those surrounding markers instead of adding a second pair.
-    if (start - m >= 0 && end + m <= text.length && text.slice(start - m, start) === marker && text.slice(end, end + m) === marker) {
-      var newText = text.slice(0, start - m) + text.slice(start, end) + text.slice(end + m);
-      return { text: newText, start: start - m, end: end - m };
-    }
-    var before = text.slice(0, start), sel = text.slice(start, end), after = text.slice(end);
-    return { text: before + marker + sel + marker + after, start: start + m, end: start + m + sel.length };
-  }
-  // Bullet-list toggle: prefixes/strips "- " on every non-empty line the selection
-  // spans (a true per-line toggle -- if EVERY spanned line is already bulleted, it
-  // strips them all; otherwise it bullets every non-bulleted line).
-  function toggleBulletLines(text, start, end) {
-    text = text || ""; start = start || 0; end = end == null ? start : end;
-    var lineStart = text.lastIndexOf("\n", start - 1) + 1;
-    var lineEndIdx = text.indexOf("\n", end); if (lineEndIdx === -1) lineEndIdx = text.length;
-    var block = text.slice(lineStart, lineEndIdx);
-    var lines = block.split("\n");
-    var nonEmpty = lines.filter(function (l) { return l !== ""; });
-    var allBulleted = nonEmpty.length > 0 && nonEmpty.every(function (l) { return l.slice(0, 2) === "- "; });
-    var newLines = lines.map(function (l) {
-      if (l === "") return l;
-      if (allBulleted) return l.slice(0, 2) === "- " ? l.slice(2) : l;
-      return l.slice(0, 2) === "- " ? l : "- " + l;
-    });
-    var newBlock = newLines.join("\n");
-    return { text: text.slice(0, lineStart) + newBlock + text.slice(lineEndIdx), start: lineStart, end: lineStart + newBlock.length };
   }
   // source-stage-comments: which of a topic's comments anchor to this section.
   function sourceCommentsForSection(topic, sectionId) {
@@ -10676,6 +10697,9 @@
   // shows (and only ever applies) when the current Product+search scope actually has
   // 1+ flagged topics; auto-clears itself once nothing is left to review.
   var __sourceReviewFilterActive = false;
+  // Drag state for the topic-nav rail's row drag (source-stage-topic-reorder) -- same
+  // shape as the outliner's treeDrag/the section grip's __sourceSectionDrag.
+  var __sourceTopicDrag = null; // { id } | null
 
   function exitSelectMode() {
     __sourceSelectModeActive = false;
@@ -10815,6 +10839,10 @@
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-topic-list"); if (!host) return;
     host.innerHTML = "";
+    // Canonicalize drag order across the FULL topic population (every Product, no search/
+    // review filter applied) so a topic's order stays stable regardless of what the current
+    // view happens to be scoped to -- see canonicalizeTopicOrder.
+    canonicalizeTopicOrder(filterTopics(libComponents(), null, ""));
     var scopedTopics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
     var reviewCount = scopedTopics.filter(topicNeedsReview).length;
     if (!reviewCount) __sourceReviewFilterActive = false; // nothing left to review -> never leave a stale filter engaged
@@ -10862,6 +10890,36 @@
           renderSourceArticle();
         });
         row.appendChild(label);
+        // Drag-to-reorder (source-stage-topic-reorder): the whole row drags, same shape as
+        // the outliner's page/chapter rows (they have no inline-editable content either, so
+        // unlike the section grip handle, no separate handle is needed here). Disabled while
+        // select mode is active -- bulk-select and reorder are different modes, not mixed.
+        if (!__sourceSelectModeActive) {
+          row.setAttribute("draggable", "true");
+          row.addEventListener("dragstart", function (e) {
+            __sourceTopicDrag = { id: t.id };
+            try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
+            e.stopPropagation();
+          });
+          row.addEventListener("dragend", function () { __sourceTopicDrag = null; clearTreeMarks(); });
+          row.addEventListener("dragover", function (e) {
+            if (!__sourceTopicDrag || __sourceTopicDrag.id === t.id) return;
+            e.preventDefault(); e.stopPropagation();
+            var r = row.getBoundingClientRect();
+            row.__after = (e.clientY - r.top) > r.height / 2;
+            clearTreeMarks();
+            row.classList.add(row.__after ? "tree-drop-after" : "tree-drop-before");
+          });
+          row.addEventListener("dragleave", function () { row.classList.remove("tree-drop-before", "tree-drop-after"); });
+          row.addEventListener("drop", function (e) {
+            if (!__sourceTopicDrag) return;
+            e.preventDefault(); e.stopPropagation();
+            var dragId = __sourceTopicDrag.id, after = row.__after;
+            __sourceTopicDrag = null; clearTreeMarks();
+            structMoveTopic(dragId, t.id, after);
+            renderSourceTopicList();
+          });
+        }
         host.appendChild(row);
       });
     });
@@ -10903,16 +10961,91 @@
   }
   function stampTopicUpdated(topic) { topic.updatedAt = Date.now(); saveLibrary(); }
 
-  // Currently-focused editable field (heading input or a facet-body textarea) --
-  // mirrors the copy editor's _activeCopyRow: a `focus` listener on each field sets
-  // this, and the shared format toolbar's buttons (mousedown+preventDefault, so
-  // clicking them never steals the field's selection) act on whichever one is live.
-  var __sourceActiveEditField = null; // { textarea, sec, variant } | null
+  // Drag state for the section grip handle (source-stage-section-disclosure) -- only the
+  // handle itself is draggable=true (the section box holds an editable heading input and
+  // body text, so making the whole box draggable would fight text selection); the
+  // surrounding .source-stage__section box is the drop target. Same shape as the
+  // outliner's `treeDrag` (editor.js ~16310), reusing its drop-marker classes.
+  var __sourceSectionDrag = null; // { id } | null
   // Which single (section, variant) body cell is currently in edit mode -- click a
-  // rendered body to swap it for a raw textarea; blur commits + swaps back. Everything
-  // else keeps reading as normal MarkdownLite output, so browsing a topic never shows
-  // raw ** markers -- only the one cell an author is actively typing into.
+  // rendered body to swap it for a real contentEditable surface (seeded with the SAME
+  // MarkdownLite.render() HTML the view shows, so entering edit mode never flashes raw
+  // ** markers); blur commits + swaps back. Everything else keeps reading as normal
+  // MarkdownLite output, so browsing a topic never shows raw markdown -- only the one
+  // cell an author is actively typing into, and even that cell reads as formatted text.
   var __sourceEditingCell = null; // { sectionId, variant } | null
+
+  // Bold/inline-code/bullet-list toolbar for the ACTIVE contentEditable cell -- built
+  // fresh per editing cell (closes over that cell's own element directly, so no shared
+  // "active field" global is needed the way the old textarea-splicing toolbar used).
+  // Same io.getNode()/io.onChange() adapter SHAPE as the canvas inspector's
+  // buildFormatToggleBar (editor.js ~13223) for consistency, though Source stage keeps
+  // its own smaller button set (Bold/code/bullet, not italic/underline/link) since
+  // "list" here means an inline execCommand bullet toggle, not FORMAT_TOGGLES'
+  // "list-block" whole-block-type conversion -- a different operation entirely.
+  function buildSourceEditToolbar(io) {
+    var toolbar = h("div", "source-stage__edit-toolbar");
+    function execAndCommit(cmd, arg) {
+      return function () {
+        var node = io.getNode(); if (!node) return;
+        node.focus();
+        document.execCommand(cmd, false, arg || null);
+        io.onChange();
+      };
+    }
+    // No native execCommand wraps a selection in <code> -- surround it manually. A
+    // collapsed (empty) selection is a no-op (nothing to wrap), same guard the old
+    // marker-toggle had for an insertion point with no text selected.
+    function wrapInlineCode() {
+      var node = io.getNode(); if (!node) return;
+      node.focus();
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (range.collapsed) return;
+      var codeEl = document.createElement("code");
+      try { range.surroundContents(codeEl); }
+      catch (e) { codeEl.appendChild(range.extractContents()); range.insertNode(codeEl); }
+      sel.removeAllRanges();
+      var after = document.createRange(); after.selectNodeContents(codeEl); after.collapse(false);
+      sel.addRange(after);
+      io.onChange();
+    }
+    [{ label: "B", icon: null, title: "Bold", action: execAndCommit("bold") },
+     { label: null, icon: "code-xml", title: "Inline code", action: wrapInlineCode },
+     { label: null, icon: "list", title: "Bullet list", action: execAndCommit("insertUnorderedList") }]
+      .forEach(function (t) {
+        var btn = h("button", "prop-toggle" + (t.icon ? " prop-toggle--icon" : ""));
+        btn.type = "button"; btn.title = t.title;
+        if (t.icon) btn.innerHTML = Icon(t.icon); else btn.textContent = t.label;
+        btn.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
+        btn.addEventListener("click", t.action);
+        toolbar.appendChild(btn);
+      });
+    return toolbar;
+  }
+  // Commits an edited cell's contentEditable content back to markdown-lite text. Guards
+  // against a purely cosmetic open/close (click in, click away, nothing typed) ever
+  // rewriting the stored string: some of render()'s own behaviour is lossy in one
+  // direction (e.g. a multi-line paragraph with no blank-line separators collapses its
+  // newlines to spaces), so a naive round-trip of UNCHANGED content could still come out
+  // textually different from the original -- which would falsely look like an edit to
+  // the re-import reconcile system (#87/#88's lastImportedText comparisons). Comparing
+  // against a re-serialize of the OLD text's own rendered form (not the old text
+  // itself) means "no real edit happened" is judged the same lossy way render() itself
+  // already behaves, so it never fires on a no-op.
+  function commitEditableCell(topic, sec, variant, editEl) {
+    var ref = facetsRefFor(sec, variant);
+    var oldText = ref[__sourceActiveFacet] || "";
+    var newText = window.MarkdownLite.serialize(editEl);
+    var probe = document.createElement("div");
+    probe.innerHTML = window.MarkdownLite.render(oldText);
+    var normalizedOld = window.MarkdownLite.serialize(probe);
+    if (newText !== normalizedOld) {
+      ref[__sourceActiveFacet] = newText;
+      stampTopicUpdated(topic);
+    }
+  }
 
   // md-topic-import: lets the author compare their current (Flagship) text against a
   // re-imported source's version once reconcileSection has flagged a real conflict, and
@@ -11040,7 +11173,6 @@
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-article"); if (!host) return;
     host.innerHTML = "";
-    __sourceActiveEditField = null;
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
@@ -11067,41 +11199,18 @@
     }
     host.appendChild(headEl);
 
-    // Shared Bold/Code/Bullet toolbar: operates on __sourceActiveEditField, string-
-    // manipulating its raw markdown-lite text (no contentEditable/execCommand -- the
-    // storage format is a plain string, so the edit surface is a plain <textarea>).
-    var toolbar = h("div", "source-stage__edit-toolbar");
-    function toolbarApply(fn) {
-      return function () {
-        var f = __sourceActiveEditField; if (!f) return;
-        var ta = f.textarea, res = fn(ta.value, ta.selectionStart, ta.selectionEnd);
-        ta.value = res.text;
-        ta.dispatchEvent(new Event("change"));
-        ta.focus(); ta.setSelectionRange(res.start, res.end);
-      };
-    }
-    function wrapWith(marker) { return function (text, start, end) { return wrapSelectionWithMarker(text, start, end, marker); }; }
-    // "B" stays a plain letter (matches the existing B/I/U inline-exec convention
-    // exactly); code/bullet use real icons, matching that SAME bar's own list-toggle
-    // button (Icon("list"), prop-toggle--icon) rather than a text glyph like "<>"/"•".
-    [{ label: "B", icon: null, title: "Bold", fn: wrapWith("**") },
-     { label: null, icon: "code-xml", title: "Inline code", fn: wrapWith("`") },
-     { label: null, icon: "list", title: "Bullet list", fn: null }]
-      .forEach(function (t) {
-        var btn = h("button", "prop-toggle" + (t.icon ? " prop-toggle--icon" : ""));
-        btn.type = "button"; btn.title = t.title;
-        if (t.icon) btn.innerHTML = Icon(t.icon); else btn.textContent = t.label;
-        btn.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the textarea's selection
-        btn.addEventListener("click", toolbarApply(t.fn || toggleBulletLines));
-        toolbar.appendChild(btn);
-      });
-    host.appendChild(toolbar);
-
     var pillsRow = buildVariantPillsRow(topic);
     if (pillsRow) host.appendChild(pillsRow);
 
     (topic.sections || []).forEach(function (sec, secIdx) {
       var secEl = h("div", "source-stage__section");
+      // Attach BEFORE building children (not at the end of the loop body) -- a
+      // contentEditable can only receive real focus once it's actually in the live
+      // document, and editEl.focus() below runs while this section is still being
+      // constructed. Latent in the old textarea version too (ta.focus() there was
+      // silently a no-op for the same reason); surfaced now by the no-op commit guard's
+      // own browser-verify, worth fixing properly rather than carrying forward.
+      host.appendChild(secEl);
 
       var headingRow = h("div", "source-stage__heading-row");
       var headingInput = h("input", "source-stage__heading source-stage__heading-input");
@@ -11120,11 +11229,37 @@
         flagPill.addEventListener("click", function () { openSourceUpdateModal(topic, sec); });
         headingRow.appendChild(flagPill);
       }
+      // Hover/focus-disclosed (source-stage-section-disclosure): hidden until you're
+      // actually looking at this section, so the article reads as content first, not a
+      // wall of controls. A drag handle replaces the old up/down button pair (drag IS the
+      // reorder affordance); delete stays behind its existing confirm, just no longer
+      // permanently on display.
       var actions = h("div", "source-stage__section-actions");
-      var upBtn = iconBtn("arrow-up", "Move up"); upBtn.disabled = secIdx === 0;
-      upBtn.addEventListener("click", function () { moveSection(topic, secIdx, -1); stampTopicUpdated(topic); renderSourceArticle(); });
-      var downBtn = iconBtn("arrow-down", "Move down"); downBtn.disabled = secIdx === (topic.sections.length - 1);
-      downBtn.addEventListener("click", function () { moveSection(topic, secIdx, 1); stampTopicUpdated(topic); renderSourceArticle(); });
+      var gripBtn = iconBtn("grip", "Drag to reorder");
+      gripBtn.setAttribute("draggable", "true");
+      gripBtn.addEventListener("dragstart", function (e) {
+        __sourceSectionDrag = { id: sec.id };
+        try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
+        e.stopPropagation();
+      });
+      gripBtn.addEventListener("dragend", function () { __sourceSectionDrag = null; clearTreeMarks(); });
+      secEl.addEventListener("dragover", function (e) {
+        if (!__sourceSectionDrag || __sourceSectionDrag.id === sec.id) return;
+        e.preventDefault(); e.stopPropagation();
+        var r = secEl.getBoundingClientRect();
+        secEl.__after = (e.clientY - r.top) > r.height / 2;
+        clearTreeMarks();
+        secEl.classList.add(secEl.__after ? "tree-drop-after" : "tree-drop-before");
+      });
+      secEl.addEventListener("dragleave", function () { secEl.classList.remove("tree-drop-before", "tree-drop-after"); });
+      secEl.addEventListener("drop", function (e) {
+        if (!__sourceSectionDrag) return;
+        e.preventDefault(); e.stopPropagation();
+        var dragId = __sourceSectionDrag.id, after = secEl.__after;
+        __sourceSectionDrag = null; clearTreeMarks();
+        structMoveSection(topic, dragId, sec.id, after);
+        stampTopicUpdated(topic); renderSourceArticle();
+      });
       // source-stage-comments: always clickable (starting the first comment needs an
       // affordance even at zero), a count Badge overlays it only once there's something
       // to show -- same iconButtonWithBadge (notification-bell) convention the Needs-
@@ -11142,7 +11277,7 @@
           removeSection(topic, secIdx); stampTopicUpdated(topic); renderSourceArticle();
         });
       });
-      actions.appendChild(upBtn); actions.appendChild(downBtn);
+      actions.appendChild(gripBtn);
       actions.appendChild(iconButtonWithBadge(commentBtn, openCommentCount));
       actions.appendChild(delBtn);
       headingRow.appendChild(actions);
@@ -11158,17 +11293,26 @@
         if (columned) wrap.appendChild(h("div", "source-stage__col-label", c.variant == null ? "Flagship" : c.variant));
         var editing = __sourceEditingCell && __sourceEditingCell.sectionId === sec.id && __sourceEditingCell.variant === c.variant;
         if (editing) {
-          var ta = h("textarea", "source-stage__body-input");
-          ta.value = c.text; ta.rows = Math.max(3, c.text.split("\n").length);
-          ta.addEventListener("focus", function () { __sourceActiveEditField = { textarea: ta, sec: sec, variant: c.variant }; });
-          ta.addEventListener("blur", function () {
-            facetsRefFor(sec, c.variant)[__sourceActiveFacet] = ta.value;
-            stampTopicUpdated(topic);
+          // A real contentEditable, seeded with the SAME rendered HTML the view shows --
+          // never a raw markdown-lite string in a textarea. Widen the section while
+          // editing so the whole block stays visible instead of clipping to the normal
+          // reading-width column.
+          secEl.classList.add("source-stage__section--editing");
+          var editEl = h("div", "source-stage__body source-stage__body--editing");
+          editEl.contentEditable = "true";
+          editEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
+          var toolbar = buildSourceEditToolbar({ getNode: function () { return editEl; }, onChange: function () {} });
+          wrap.appendChild(toolbar);
+          editEl.addEventListener("blur", function () {
+            commitEditableCell(topic, sec, c.variant, editEl);
             __sourceEditingCell = null;
             renderSourceArticle();
           });
-          wrap.appendChild(ta);
-          ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); // land the cursor at the end, ready to type
+          wrap.appendChild(editEl);
+          editEl.focus();
+          // land the cursor at the end, ready to type
+          var range = document.createRange(); range.selectNodeContents(editEl); range.collapse(false);
+          var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
         } else {
           var bodyEl = h("div", "source-stage__body");
           bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
@@ -11200,8 +11344,6 @@
       }
 
       if (__sourceOpenCommentSectionId === sec.id) secEl.appendChild(buildSourceCommentPanel(topic, sec));
-
-      host.appendChild(secEl);
     });
 
     var addBtn = h("button", "source-stage__add-section", "+ Add section");

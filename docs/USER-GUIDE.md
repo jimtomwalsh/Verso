@@ -584,14 +584,18 @@ dropdown then lets you switch between every course, and the Source wiki, for tha
 then use the icon toolbar above the topic list (hover any icon for its name):
 
 - **New topic** — creates a blank topic you write directly, the same click-to-edit way as a
-  course's text blocks: click a heading or body to edit it, click away to save.
+  course's text blocks: click a heading or body to edit it, click away to save. Editing a body
+  is real formatted text, not raw Markdown — bold/code/bullets show as themselves while you
+  type, never as `**`/`` ` ``/`- ` marks. A small toolbar (Bold, inline code, bullet list)
+  appears next to whichever block you're actively editing; the section widens while you're in
+  it so you can see the whole thing.
 - **Import from Markdown…** — creates topics straight from a Markdown file (e.g. a manual you've
   converted to `.md`). Numbered headings (`# 1`, `## 1.1`, `### 1.1.1`) split into topics and
   sections by their number — the number itself decides the split even if the file's own `#`/`##`
   levels are inconsistent (common in converted manuals); the number is never shown in the wiki
   itself, only used to organise it. A `1` becomes a topic, its `1.1` headings become that topic's
   sections, and anything numbered deeper folds into the section text as a bold line. Bold, inline
-  code, bullet lists, and Markdown tables in the file all carry over. If the Product has no
+  code, bullet lists, numbered lists, and Markdown tables in the file all carry over. If the Product has no
   declared variants, this opens your file picker directly; if it does, a small dialog lets you
   add one optional file per variant, whose matching sections become that variant's own text (via
   the same "Diverge for `<variant>`" mechanism described in §10) — a section that only exists in a
@@ -615,10 +619,17 @@ match ones already imported from a different filename for this Product, you're a
 the same manual (updates the existing topics under the new filename) or a genuinely separate one
 (imports as new topics instead) — nothing is guessed silently.
 
+**Reordering topics.** Drag a topic in the left list to put it wherever you want — order is
+remembered per Product and stays put across sessions. (Not available while Select mode is on.)
+
 **Cleaning up.** Click **Select** above the topic list to reveal a checkbox on each topic; check
 one or more (or use "Select all"), then **Delete selected** to remove them — useful after a test
 import — or **Move to Product…** to reassign them elsewhere (content untouched). Click **Done** to
 leave selection mode.
+
+**Reordering and removing sections.** Hover a section to reveal its controls: drag the grip handle
+to reorder it within the topic, or click the trash icon to delete it (you'll be asked to confirm).
+Controls stay out of the way until you're actually looking at that section.
 
 **A topic's history.** The info panel's History section shows every import and re-import that
 touched a topic as a timeline, newest first — file, version, publish date, and what changed each
