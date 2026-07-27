@@ -10314,7 +10314,7 @@
   function mountTopBar() {
     if (typeof document === "undefined") return;
     var Ic = window.Icon; if (!Ic) return;
-    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide]");
+    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
     Array.prototype.forEach.call(hosts, function (el) {
       var name = el.getAttribute("data-lucide");
       if (!name) return;
@@ -10332,13 +10332,55 @@
     }
   }
 
-  // #89 left rail. The Document tab shows the Structure + Blocks
-  // panes; the pinned bottom glyphs are global actions.
-  var __leftView = "document";
-  function setLeftPanelView(view) {
+  // Product Rail (2026-07-27 DaVinci pivot): left rail is three fixed, ungated,
+  // free-form segments -- Source, Edit, Publish -- replacing the old single
+  // Document tab. Edit shows exactly today's document-editing workspace
+  // (Structure/Blocks/Components + canvas + inspector), byte-for-byte unchanged.
+  // Source/Publish are placeholder regions until Epics 2/3/6 build their real
+  // content -- this ticket only owns the segment switch + the shared product
+  // context, not what renders inside each stage.
+  /* @stage-rail-start */
+  var STAGE_IDS = ["source", "edit", "publish"];
+  function isValidStage(s) { return STAGE_IDS.indexOf(s) !== -1; }
+  // Edit renders through the workspace's ORIGINAL grid (no extra class) so today's
+  // editing experience never changes; Source/Publish get a modifier class that hides
+  // the edit-only grid items and reveals their own placeholder (same "hide the grid
+  // items, span the leftover column" approach as .workspace.is-panels-hidden).
+  function stageWorkspaceClass(stage) {
+    if (stage === "source") return "workspace--stage-source";
+    if (stage === "publish") return "workspace--stage-publish";
+    return null;
+  }
+  // ProductsStore ({id: {id,name,...}}) -> dropdown options, "All products" first.
+  function productSelectOptions(store) {
+    var opts = [{ value: "", label: "All products" }];
+    Object.keys(store || {}).sort(function (a, b) {
+      return ((store[a] && store[a].name) || "").localeCompare((store[b] && store[b].name) || "");
+    }).forEach(function (id) {
+      opts.push({ value: id, label: (store[id] && store[id].name) || id });
+    });
+    return opts;
+  }
+  /* @stage-rail-end */
+
+  var __activeStage = "edit";
+  function setStage(stage) {
+    if (!isValidStage(stage)) return;
+    __activeStage = stage;
+    if (typeof document === "undefined") return;
     ["lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
-    var dt = document.getElementById("rail-tab-document"); if (dt) dt.classList.toggle("is-active", true);
-    __leftView = view;
+    var ws = document.getElementById("workspace");
+    if (ws) {
+      ws.classList.remove("workspace--stage-source", "workspace--stage-publish");
+      var cls = stageWorkspaceClass(stage);
+      if (cls) ws.classList.add(cls);
+    }
+    var srcEl = document.getElementById("stage-source"); if (srcEl) srcEl.hidden = stage !== "source";
+    var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
+    STAGE_IDS.forEach(function (s) {
+      var btn = document.getElementById("rail-tab-" + s);
+      if (btn) btn.classList.toggle("is-active", s === stage);
+    });
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
@@ -10348,10 +10390,31 @@
     var tabs = rail.querySelectorAll(".rail-tab");
     Array.prototype.forEach.call(tabs, function (t) {
       if (t.__navWired) return; t.__navWired = true;
-      t.addEventListener("click", function () { setLeftPanelView(t.getAttribute("data-rail-tab")); });
+      t.addEventListener("click", function () { setStage(t.getAttribute("data-rail-tab")); });
     });
+    setStage(__activeStage);
   }
-  window.__leftRail = { mount: mountLeftRail, setView: setLeftPanelView }; // boot + settings
+  window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; } }; // boot + settings
+
+  // Persistent top-bar product context (Product Rail): "" = All products. In-memory
+  // only for now -- every stage reads it through window.__productRail.getActiveProduct().
+  var __activeProduct = "";
+  function setActiveProduct(id) { __activeProduct = id || ""; }
+  function getActiveProduct() { return __activeProduct; }
+  function mountProductPicker() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("product-picker-host"); if (!host) return;
+    host.innerHTML = "";
+    var U = window.VersoUI; if (!U || !U.Select) return;
+    host.appendChild(U.Select({
+      options: productSelectOptions(window.ProductsStore),
+      value: __activeProduct,
+      onChange: function (v) { setActiveProduct(v); }
+    }));
+  }
+  window.__productRail.getActiveProduct = getActiveProduct;
+  window.__productRail.setActiveProduct = setActiveProduct;
+  window.__productRail.mountProductPicker = mountProductPicker; // boot hook
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {
@@ -19943,6 +20006,7 @@
   wireCopyEditor(); // #116: full-screen copy-editor view (rail glyph opens, Close/Esc returns)
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
+  mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
   mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
   refreshCourseWeight(); // §308: initial course-weight readout

@@ -16,6 +16,10 @@
   <header class="toolbar">
     <div class="toolbar__group toolbar__group--left" style="flex: 1 1 auto; align-self: stretch; align-items: flex-end; padding-top: 6px;">
       <span class="toolbar__brand" aria-hidden="true">Verso<span class="toolbar__brand-dot">.</span></span>
+      <!-- Product Rail: persistent product context for all three rail stages (Source/Edit/
+           Publish). Populated from window.ProductsStore + "All products" by mountProductPicker()
+           (a VersoUI.Select instance — see the editor script). -->
+      <div class="product-picker" id="product-picker-host" title="Active product — filters Source, Edit and Publish"></div>
       <button class="tool toolbar__home" id="home-btn" data-lucide="layout-grid" title="Home — all courses"></button>
       <div class="toolbar-tabs" id="toolbar-tabs"></div>
     </div>
@@ -51,13 +55,21 @@
   </header>
 
   <!-- ==================== workspace ==================== -->
-  <main class="workspace">
+  <main class="workspace" id="workspace">
     <!-- #89 left icon rail: top nav-tab glyphs swap the
          adjacent left panel; bottom pinned glyphs are global actions relocated off the
-         top bar (Export / Help / Settings / recents). Glyphs hydrated in mountTopBar. -->
+         top bar (Export / Help / Settings / recents). Glyphs hydrated in mountTopBar.
+         Product Rail (2026-07-27 DaVinci pivot): three fixed, ungated, free-form
+         segments -- Source, Edit, Publish -- replacing the old single Document tab.
+         Edit shows exactly today's document-editing workspace (Structure/Blocks/
+         Components + canvas + inspector), unchanged. Source/Publish are placeholder
+         regions until Epics 2/3/6 build their real content; this rail only owns the
+         segment switch (setStage(), in the editor script). -->
     <nav class="left-rail" id="left-rail" aria-label="Editor rail">
       <div class="left-rail__group left-rail__nav">
-        <button class="rail-btn rail-tab is-active" id="rail-tab-document" data-rail-tab="document" data-lucide="panel-left" title="Document" aria-label="Document"></button>
+        <button class="rail-btn rail-tab" id="rail-tab-source" data-rail-tab="source" data-lucide="layers" title="Source" aria-label="Source"></button>
+        <button class="rail-btn rail-tab is-active" id="rail-tab-edit" data-rail-tab="edit" data-lucide="panel-left" title="Edit" aria-label="Edit"></button>
+        <button class="rail-btn rail-tab" id="rail-tab-publish" data-rail-tab="publish" data-lucide="upload" title="Publish" aria-label="Publish"></button>
         <!-- #116 Copy Editor v1 (1/4): opens the full-screen copy-editing view (an
              alternate canvas over the layout canvas; you are in one view at a time). -->
         <button class="rail-btn" id="copy-editor-btn" data-lucide="file-text" title="Copy editor" aria-label="Copy editor"></button>
@@ -70,6 +82,23 @@
         <button class="rail-btn" id="save-menu-btn" data-lucide="history" title="Recent courses & file actions"></button>
       </div>
     </nav>
+
+    <!-- Product Rail Source stage: placeholder only -- Epic 2 (source-stage-nav-article)
+         owns the real left-nav + flowing markdown-lite article. This ticket only owns
+         the segment switch that reveals/hides it. -->
+    <div class="stage-placeholder" id="stage-source" hidden>
+      <span data-lucide="layers"></span>
+      <span class="stage-placeholder__title">Source</span>
+      <span class="stage-placeholder__desc">You'll browse and write topic content here — this stage isn't built yet.</span>
+    </div>
+
+    <!-- Product Rail Publish stage: placeholder only -- Epic 6 (publish-stage-pick-configure-queue)
+         owns the real pick/configure/queue panes. -->
+    <div class="stage-placeholder" id="stage-publish" hidden>
+      <span data-lucide="upload"></span>
+      <span class="stage-placeholder__title">Publish</span>
+      <span class="stage-placeholder__desc">You'll pick, configure and queue documents here — this stage isn't built yet.</span>
+    </div>
 
     <!-- left: layers / pages / components -->
     <aside class="panel panel--left">
