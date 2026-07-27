@@ -2206,6 +2206,22 @@
     });
     return { courses: courses, instances: instances };
   }
+  // Product Rail (source-stage-info-panel): the detailed, per-usage sibling of
+  // libraryWhereUsed's counts -- one entry per referencing block, with enough to
+  // both label it (document title) and jump to it (docCode + blockId). Generic over
+  // any LibraryStore ref (topics included -- a topic is just a kind:"topic" master).
+  function libraryWhereUsedDetail(ref, registryObj) {
+    var entries = [];
+    Object.keys(registryObj || {}).forEach(function (code) {
+      var doc = registryObj[code];
+      walkBlocks(doc, function (b) {
+        if (b.type === "libraryInstance" && b.ref === ref) {
+          entries.push({ docCode: code, docTitle: (doc.meta && doc.meta.title) || code, blockId: b.id });
+        }
+      });
+    });
+    return entries;
+  }
   /* @where-used-end */
   window.__libraryWhereUsed = libraryWhereUsed; // test hook
   // Re-mint on duplicate: a cloned subtree must never reuse ids, or a copy's
@@ -10552,6 +10568,7 @@
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
+      renderSourceInfoPanel(null);
       return;
     }
     var headEl = h("div", "source-stage__article-head");
@@ -10573,6 +10590,39 @@
       secEl.appendChild(bodyEl);
       host.appendChild(secEl);
     });
+    renderSourceInfoPanel(topic);
+  }
+
+  // Product Rail (source-stage-info-panel): "Linked in" (where-used, jumps to the
+  // referencing document -- Epic 4's lock/fork tickets are what will ever populate
+  // this list; the panel + its empty state are correct before that data exists) +
+  // "History" (created/last-updated, reusing the same relative-time formatter recents
+  // already uses). Reuses the canonical panelSection() helper, not a one-off block --
+  // this is a plain info panel, not a block-inspector taxonomy section (sectionGroup's
+  // TAXONOMY/reorder system is specific to that surface, not this one).
+  function renderSourceInfoPanel(topic) {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-info"); if (!host) return;
+    host.innerHTML = "";
+    if (!topic) return;
+    var used = libraryWhereUsedDetail(topic.id, getRegistry());
+    var linkedBody = panelSection(host, "Linked in (" + used.length + ")");
+    if (!used.length) {
+      linkedBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
+    } else {
+      used.forEach(function (u) {
+        var row = h("button", "source-stage__linked-row", u.docTitle);
+        row.type = "button";
+        row.title = "Open " + u.docTitle;
+        row.addEventListener("click", function () { openCourseFromBrowser(u.docCode); setStage("edit"); });
+        linkedBody.appendChild(row);
+      });
+    }
+    var historyBody = panelSection(host, "History");
+    var created = topic.createdAt ? new Date(topic.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+    historyBody.appendChild(h("div", "insp-hint", "Created " + created));
+    var updatedLabel = topic.updatedAt ? formatRelativeTime(topic.updatedAt, Date.now()) : "—";
+    historyBody.appendChild(h("div", "insp-hint", "Updated " + updatedLabel + (topic.author ? " by " + topic.author : "")));
   }
 
   // Matches the established search-field sibling (.vbrowser__search, also reused as
@@ -10608,8 +10658,9 @@
     var comps = libComponents();
     var id = "topic-" + Math.random().toString(36).slice(2, 8);
     while (comps[id]) id = "topic-" + Math.random().toString(36).slice(2, 8);
+    var now = Date.now();
     var topic = { id: id, kind: "topic", name: (String(name || "").trim() || "Untitled topic"),
-      productId: productId || undefined, sections: sections || [], createdAt: Date.now() };
+      productId: productId || undefined, sections: sections || [], createdAt: now, updatedAt: now };
     window.LibraryStore.components[id] = topic;
     saveLibrary();
     return topic;
