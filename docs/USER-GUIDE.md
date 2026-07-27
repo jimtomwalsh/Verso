@@ -591,7 +591,7 @@ then use the icon toolbar above the topic list (hover any icon for its name):
   levels are inconsistent (common in converted manuals); the number is never shown in the wiki
   itself, only used to organise it. A `1` becomes a topic, its `1.1` headings become that topic's
   sections, and anything numbered deeper folds into the section text as a bold line. Bold, inline
-  code, bullet lists, and Markdown tables in the file all carry over. If the Product has no
+  code, bullet lists, numbered lists, and Markdown tables in the file all carry over. If the Product has no
   declared variants, this opens your file picker directly; if it does, a small dialog lets you
   add one optional file per variant, whose matching sections become that variant's own text (via
   the same "Diverge for `<variant>`" mechanism described in §10) — a section that only exists in a

@@ -63,16 +63,24 @@
     return '<table class="md-lite-table">' + thead + tbody + "</table>";
   }
 
-  // Splits raw text into blocks: consecutive "- " lines become one <ul>; a
+  var ORDERED_RE = /^(\d+)\.\s+(.*)$/;
+
+  // Splits raw text into blocks: consecutive "- " lines become one <ul>;
+  // consecutive "N. " lines become one <ol start="N"> (N = the run's first
+  // number, so a manual's list that doesn't start at 1 stays correct); a
   // header+separator pipe-row run becomes one <table>; other non-blank lines
   // separated by a blank line become one <p> (internal single newlines
-  // collapse to a space, matching common markdown-lite feel).
+  // collapse to a space, matching common markdown-lite feel). A bullet run
+  // and a numbered run never merge into each other -- switching marker style
+  // flushes the current list first.
   function render(text) {
     if (text == null || text === "") return "";
     var lines = String(text).replace(/\r\n/g, "\n").split("\n");
     var html = [];
     var para = [];
     var list = [];
+    var listType = null; // "ul" | "ol" | null
+    var listStart = null;
     var tableRows = [];
     var inTable = false;
 
@@ -83,10 +91,17 @@
     }
     function flushList() {
       if (!list.length) return;
-      html.push("<ul>" + list.map(function (item) {
+      var items = list.map(function (item) {
         return "<li>" + renderInline(item) + "</li>";
-      }).join("") + "</ul>");
+      }).join("");
+      if (listType === "ol") {
+        html.push('<ol start="' + listStart + '">' + items + "</ol>");
+      } else {
+        html.push("<ul>" + items + "</ul>");
+      }
       list = [];
+      listType = null;
+      listStart = null;
     }
     function flushTable() {
       if (!tableRows.length) return;
@@ -110,9 +125,18 @@
         continue;
       }
       var bullet = /^-\s+(.*)$/.exec(line);
+      var ordered = bullet ? null : ORDERED_RE.exec(line);
       if (bullet) {
+        if (listType !== "ul") flushList();
         flushPara();
+        listType = "ul";
         list.push(bullet[1]);
+      } else if (ordered) {
+        if (listType !== "ol") flushList();
+        flushPara();
+        if (listType !== "ol") listStart = parseInt(ordered[1], 10);
+        listType = "ol";
+        list.push(ordered[2]);
       } else if (line.trim() === "") {
         flushPara();
         flushList();
