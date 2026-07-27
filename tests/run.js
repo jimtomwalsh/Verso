@@ -8807,6 +8807,20 @@ section("markdown-lite content render");
   ok("mixed: paragraph then bullets", M.render("Intro **text**.\n\n- `a`\n- b") ===
     '<p>Intro <strong>text</strong>.</p><ul><li><code class="md-lite-code">a</code></li><li>b</li></ul>');
   ok("multi-line paragraph collapses newlines to spaces", M.render("line one\nline two") === "<p>line one line two</p>");
+
+  // Ordered (numbered) lists -- consecutive "N. " lines group into one <ol>, exactly
+  // like "- " bullets group into <ul>. Root cause of a real reported bug: without this,
+  // numbered lines fell into the generic paragraph path and collapsed their newlines
+  // into spaces in VIEW mode while a raw-textarea EDIT surface still showed every \n,
+  // so a manual's numbered steps looked like one run-on line to a reader.
+  ok("numbered list", M.render("1. one\n2. two\n3. three") === '<ol start="1"><li>one</li><li>two</li><li>three</li></ol>');
+  ok("numbered list starting past 1 keeps its own start", M.render("5. five\n6. six") === '<ol start="5"><li>five</li><li>six</li></ol>');
+  ok("numbered list items render inline formatting", M.render("1. **bold** item\n2. `code` item") ===
+    '<ol start="1"><li><strong>bold</strong> item</li><li><code class="md-lite-code">code</code> item</li></ol>');
+  ok("a bullet run and a numbered run don't merge into each other", M.render("- a\n- b\n1. c\n2. d") ===
+    "<ul><li>a</li><li>b</li></ul>" + '<ol start="1"><li>c</li><li>d</li></ol>');
+  ok("mixed: paragraph then numbered list", M.render("Steps:\n\n1. first\n2. second") ===
+    "<p>Steps:</p>" + '<ol start="1"><li>first</li><li>second</li></ol>');
   ok("empty input -> empty string", M.render("") === "" && M.render(null) === "" && M.render(undefined) === "");
 
   // Malformed/unmatched markers degrade to literal text, never throw or break markup.
