@@ -568,7 +568,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 /* source-stage-section-disclosure: hidden until the section is hovered/focused, so the
    article reads as content first, not a permanent wall of controls (a drag handle +
    delete, replacing the old always-visible up/down/delete trio). */
-.source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; opacity: 0; transition: opacity 0.1s ease; }
+.source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; opacity: 0; transition: opacity var(--dur-fast, 120ms) var(--ease-standard); }
 .source-stage__section:hover .source-stage__section-actions,
 .source-stage__section:focus-within .source-stage__section-actions { opacity: 1; }
 .source-stage__section [draggable="true"] { cursor: grab; }
