@@ -1232,10 +1232,20 @@
     saveProducts();
     return prod;
   }
+  // Product Rail (source-stage-variant-columns): the hardware-variant axis a Product's
+  // Source topics carry, declared once per Product (not per-document -- topics are
+  // Product-scoped library content). No declaring UI exists yet; this is a fixture/
+  // future-authoring write path, same precedent as createProduct/createTopic.
+  function setProductVariants(productId, variants) {
+    var p = productId && window.ProductsStore[productId]; if (!p) return null;
+    p.variants = (variants || []).slice();
+    saveProducts();
+    return p;
+  }
   // Foundational tagging-layer API (Product Rail #1) — the surface every downstream
   // Product Rail ticket (bottom-rail nav, +New Product, Promote to Product, browser
   // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
-  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage };
+  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants };
   // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
   // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
   // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
@@ -10515,11 +10525,42 @@
     var firstKey = Object.keys(facets)[0];
     return firstKey ? facets[firstKey] : "";
   }
+  // Product Rail (source-stage-variant-columns): variants are declared per-Product
+  // (ProductsStore[id].variants), not per-document -- a Source topic is Product-scoped
+  // library content, not tied to whatever course happens to be open.
+  function declaredVariantsForProduct(products, productId) {
+    var p = productId && products && products[productId];
+    return (p && Array.isArray(p.variants)) ? p.variants.slice() : [];
+  }
+  // A section only carries a variant's own content when section.overrides[v] exists --
+  // mirrors the shipped per-variant image-override mechanic (own image vs inherits
+  // flagship, src/editor.js's renderImageVariantVersions), applied to section text.
+  function sectionOverrideVariants(section) {
+    return Object.keys((section && section.overrides) || {});
+  }
+  // Of the currently-toggled variants, only the ones THIS section actually diverges
+  // for -- a section with no override for any toggled variant stays single-column.
+  function sectionActiveVariants(section, activeVariants) {
+    var present = sectionOverrideVariants(section);
+    return (activeVariants || []).filter(function (v) { return present.indexOf(v) !== -1; });
+  }
+  // [{variant:null, text:<flagship>}, {variant:"coastal", text:<override>}, ...] in
+  // toggle order. Length 1 (Flagship only) when nothing toggled diverges here --
+  // callers render that case as a plain single body, no column chrome at all.
+  function sectionColumns(section, activeVariants, facet) {
+    var cols = [{ variant: null, text: resolveSectionFacetText(section, facet) }];
+    sectionActiveVariants(section, activeVariants).forEach(function (v) {
+      var ov = (section.overrides && section.overrides[v]) || {};
+      cols.push({ variant: v, text: resolveSectionFacetText({ facets: ov.facets }, facet) });
+    });
+    return cols;
+  }
   /* @source-stage-end */
 
   var __sourceActiveTopicId = null;
   var __sourceActiveFacet = "technical";
   var __sourceSearchQuery = "";
+  var __sourceActiveVariants = []; // reset whenever a different topic is selected
 
   function renderSourceTopicList() {
     if (typeof document === "undefined") return;
@@ -10536,13 +10577,39 @@
         var row = h("button", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""), t.name || "Untitled topic");
         row.type = "button";
         row.addEventListener("click", function () {
+          if (t.id === __sourceActiveTopicId) return;
           __sourceActiveTopicId = t.id;
+          __sourceActiveVariants = []; // a different topic may have a different variant set
           renderSourceTopicList();
           renderSourceArticle();
         });
         host.appendChild(row);
       });
     });
+  }
+
+  // The Flagship chip (always on, non-interactive) + one VersoUI.ToggleChip per variant
+  // declared for the topic's Product -- a MULTI-select toggle row (several variants can
+  // be active at once), unlike SegmentedControl's one-of-N. Returns null (append
+  // nothing) when the Product has no declared variants at all.
+  function buildVariantPillsRow(topic) {
+    var declared = declaredVariantsForProduct(window.ProductsStore || {}, topic.productId);
+    if (!declared.length) return null;
+    var U = window.VersoUI; if (!U || !U.ToggleChip) return null;
+    var row = h("div", "source-stage__variant-pills");
+    row.appendChild(U.ToggleChip({ label: "Flagship", active: true, disabled: true }));
+    declared.forEach(function (v) {
+      row.appendChild(U.ToggleChip({
+        label: v,
+        active: __sourceActiveVariants.indexOf(v) !== -1,
+        onClick: function () {
+          var idx = __sourceActiveVariants.indexOf(v);
+          if (idx === -1) __sourceActiveVariants.push(v); else __sourceActiveVariants.splice(idx, 1);
+          renderSourceArticle();
+        }
+      }));
+    });
+    return row;
   }
 
   function renderSourceArticle() {
@@ -10565,12 +10632,30 @@
       }));
     }
     host.appendChild(headEl);
+    var pillsRow = buildVariantPillsRow(topic);
+    if (pillsRow) host.appendChild(pillsRow);
     (topic.sections || []).forEach(function (sec) {
       var secEl = h("div", "source-stage__section");
       secEl.appendChild(h("h3", "source-stage__heading", sec.heading || ""));
-      var bodyEl = h("div", "source-stage__body");
-      bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(resolveSectionFacetText(sec, __sourceActiveFacet)) : "";
-      secEl.appendChild(bodyEl);
+      var cols = sectionColumns(sec, __sourceActiveVariants, __sourceActiveFacet);
+      if (cols.length > 1) {
+        secEl.classList.add("source-stage__section--columns");
+        var grid = h("div", "source-stage__col-grid");
+        grid.style.gridTemplateColumns = "repeat(" + cols.length + ", minmax(0, 1fr))";
+        cols.forEach(function (c) {
+          var colEl = h("div", "source-stage__col");
+          colEl.appendChild(h("div", "source-stage__col-label", c.variant == null ? "Flagship" : c.variant));
+          var bodyEl = h("div", "source-stage__body");
+          bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
+          colEl.appendChild(bodyEl);
+          grid.appendChild(colEl);
+        });
+        secEl.appendChild(grid);
+      } else {
+        var bodyEl = h("div", "source-stage__body");
+        bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(cols[0].text) : "";
+        secEl.appendChild(bodyEl);
+      }
       host.appendChild(secEl);
     });
   }

@@ -495,6 +495,32 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   border-radius: var(--radius-sm, 3px); padding: 1px 5px;
 }
 
+/* source-stage-variant-columns: Flagship (always-on, non-interactive) + one
+   VersoUI.ToggleChip per variant declared for the topic's Product. */
+.source-stage__variant-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 20px; }
+/* ToggleChip (DS canonical control, controls/ToggleChip.d.ts) -- a MULTI-select toggle
+   pill; several can be active at once, unlike .prop-toggle's single-select row. */
+.vds-chip {
+  height: 24px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-full, 999px);
+  background: transparent; color: var(--text-secondary); font-size: var(--text-xs, 11px); font-weight: 500;
+  cursor: pointer;
+}
+.vds-chip:hover { border-color: var(--border-input); color: var(--text-primary); }
+.vds-chip.is-on { background: var(--accent-quiet); border-color: transparent; color: var(--accent); font-weight: 600; }
+.vds-chip.is-disabled { cursor: default; }
+.vds-chip.is-disabled:hover { border-color: var(--border-subtle); color: var(--text-secondary); }
+.vds-chip.is-on.is-disabled:hover { border-color: transparent; color: var(--accent); }
+
+/* A section only becomes a column grid where at least one TOGGLED variant actually
+   diverges from Flagship there; everything else stays the plain single-body layout
+   above. Widens past the article's usual single-column max-width to fit N columns. */
+.source-stage__section--columns { max-width: none; }
+.source-stage__col-grid { display: grid; gap: 24px; }
+.source-stage__col-label {
+  font-size: var(--text-2xs, 10px); font-weight: 600; text-transform: uppercase;
+  letter-spacing: var(--tracking-caps, 0.04em); color: var(--text-tertiary); margin-bottom: 6px;
+}
+
 /* Product Rail top-bar dropdown (next to the brand) -- a plain VersoUI.Select host. */
 .product-picker { align-self: center; width: 140px; margin: 0 6px 0 2px; }
 .product-picker .vds-select { width: 100%; }

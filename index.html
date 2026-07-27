@@ -83,12 +83,14 @@
       </div>
     </nav>
 
-    <!-- Product Rail Source stage (source-stage-nav-article): left nav (search + topic
-         list grouped by Product) + a flowing markdown-lite article for the selected
-         topic, with a page-level Technical/Digestible/Dot-point facet switch. No
-         variant-column support yet (Flagship/base facet only) -- that's the next
-         ticket. Populated by renderSourceStage() in the editor script; search + facet
-         controls mounted as VersoUI canonical controls. -->
+    <!-- Product Rail Source stage: left nav (search + topic list grouped by Product) +
+         a flowing markdown-lite article for the selected topic (source-stage-nav-article),
+         with a page-level Technical/Digestible/Dot-point facet switch, plus a Flagship +
+         per-declared-variant pill row that adds a column only to sections that actually
+         diverge for a toggled variant (source-stage-variant-columns). Populated by
+         renderSourceStage()/renderSourceArticle() in the editor script, which rebuilds
+         head + pills + sections together on every render (topic switch, facet toggle,
+         variant toggle) -- one container, one source of render truth. -->
     <div class="source-stage" id="stage-source" hidden>
       <nav class="source-stage__nav" aria-label="Source topics">
         <div class="source-stage__search" id="source-stage-search"></div>

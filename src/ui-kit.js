@@ -91,7 +91,12 @@
     // Tri-state checkbox aria-checked value.
     checkAria: function (checked, mixed) { return mixed ? "mixed" : (checked ? "true" : "false"); },
     // TreeItem indent (px) by depth — 8px base + 12px per level.
-    treeIndent: function (depth) { return 8 + Math.max(0, (depth | 0)) * 12; }
+    treeIndent: function (depth) { return 8 + Math.max(0, (depth | 0)) * 12; },
+    // ToggleChip: an independently-toggleable pill (several can be active at once,
+    // unlike SegmentedControl's one-of-N). `disabled` reads as a permanent baseline.
+    toggleChipClass: function (active, disabled) {
+      return "vds-chip" + (active ? " is-on" : "") + (disabled ? " is-disabled" : "");
+    }
   };
 
   // ==========================================================================
@@ -453,6 +458,17 @@
     appendChildren(b, props.children);
     return b;
   }
+  // ToggleChip — a row of these is a MULTI-select toggle (several active at once);
+  // for a single-select "pick exactly one" row, use SegmentedControl instead.
+  function ToggleChip(props) {
+    props = props || {};
+    var b = h("button", _pure.toggleChipClass(props.active, props.disabled), props.label != null ? String(props.label) : "");
+    b.type = "button";
+    if (props.disabled) b.disabled = true;
+    if (props.title) b.title = props.title;
+    b.addEventListener("click", function () { if (!props.disabled && typeof props.onClick === "function") props.onClick(); });
+    return b;
+  }
 
   // ==========================================================================
   // OVERLAYS
@@ -530,7 +546,7 @@
     Select: Select, Checkbox: Checkbox, ColorField: ColorField,
     Panel: Panel, PanelSection: PanelSection, Breadcrumb: Breadcrumb,
     Tabs: Tabs, DocumentTab: DocumentTab,
-    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge,
+    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, ToggleChip: ToggleChip,
     Modal: Modal, ContextMenu: ContextMenu, Tooltip: Tooltip,
     _pure: _pure
   };
