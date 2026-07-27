@@ -4453,9 +4453,9 @@ section("#20 library-instance mirror");
   // same order as componentGrid's resolveComponentDef -- single-source, bakes at export.
   var libStart = rtxt.indexOf("libraryInstance: function (block)");
   ok("render.js defines BLOCKS.libraryInstance", libStart !== -1);
-  var libBody = rtxt.slice(libStart, libStart + 1400);
+  var libBody = rtxt.slice(libStart, libStart + 1700);
   ok("resolves doc override -> shared library -> built-in", /docComps && docComps\[block\.ref\]\) \|\| libComps\[block\.ref\] \|\| \(window\.COMPONENTS \|\| \{\}\)\[block\.ref\]/.test(libBody));
-  ok("renders a cloneData() COPY of the master, never the live object (editor-safety)", /var content = cloneData\(def\.template\);[\s\S]{0,600}var node = renderBlock\(content\)/.test(libBody));
+  ok("renders a cloneData() COPY of the master, never the live object (editor-safety)", /var content = cloneData\(facetTemplate\);[\s\S]{0,600}var node = renderBlock\(content\)/.test(libBody));
   ok("applies #21 overrides onto the CLONE, not the live master", /if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody));
   ok("marks the wrapper node for the editor-only opacity rule", /data-library-instance/.test(libBody));
 
@@ -4471,7 +4471,7 @@ section("#20 library-instance mirror");
   // (prop-component--instance), and offers Detach as the only structural action in v1.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
   ok("renderLibraryInstanceBody found", lbStart !== -1);
-  var lbBody = etxt.slice(lbStart, lbStart + 2800);
+  var lbBody = etxt.slice(lbStart, lbStart + 4000);
   ok("reuses the canonical instance header (same class componentGrid cards use)", /"prop-component prop-component--instance"/.test(lbBody));
   ok("offers a Detach action, disabled when the master is missing", /detachB\.disabled = !def/.test(lbBody));
 
@@ -4480,7 +4480,7 @@ section("#20 library-instance mirror");
   // call remintIds, or every detached instance of the same master would collide.
   var daStart = etxt.indexOf("function detachLibraryInstance(block)");
   ok("detachLibraryInstance found", daStart !== -1);
-  var daBody = etxt.slice(daStart, daStart + 1300);
+  var daBody = etxt.slice(daStart, daStart + 1600);
   ok("detach mints a FRESH remint of the master's current (override-baked) template", /var fresh = remintIds\(withOverrides\)/.test(daBody));
   ok("detach bakes in the author's overrides, not the master's raw content", /if \(block\.overrides && window\.applyInstanceOverrides\) window\.applyInstanceOverrides\(withOverrides, block\.overrides\)/.test(daBody));
   ok("detach replaces the wrapper's fields in place (stays the same page-tree node)", /Object\.keys\(block\)\.forEach\(function \(k\) \{ delete block\[k\]; \}\)/.test(daBody));
@@ -4538,7 +4538,7 @@ section("#21 instance overrides + reconciliation + relink");
   // 3. editor.js wiring: renderLibraryInstanceBody reconciles-on-open (prunes + persists +
   // surfaces a drop), then lists override fields via the canonical fieldRow control.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
-  var lbBody2 = etxt.slice(lbStart, lbStart + 2800);
+  var lbBody2 = etxt.slice(lbStart, lbStart + 4000);
   ok("reconciles on open via reconcileOverrides(def.template, ...)", /var rec = reconcileOverrides\(def\.template, block\.overrides \|\| \{\}\)/.test(lbBody2));
   ok("prunes the block's overrides to the living set", /block\.overrides = rec\.living/.test(lbBody2));
   ok("surfaces a drop with the warn hint class", /insp-hint insp-hint--warn/.test(lbBody2));
@@ -4550,7 +4550,7 @@ section("#21 instance overrides + reconciliation + relink");
   // 4. Detach discards overrides (they were keyed to the mirror) and leaves a __linkedFrom
   // breadcrumb; Relink is gated on it and gives a lossy-edit warning before acting.
   var daStart2 = etxt.indexOf("function detachLibraryInstance(block)");
-  var daBody2 = etxt.slice(daStart2, daStart2 + 1350);
+  var daBody2 = etxt.slice(daStart2, daStart2 + 1600);
   ok("detach records __linkedFrom for a future relink", /block\.__linkedFrom = ref/.test(daBody2));
 
   var rlStart = etxt.indexOf("function relinkToLibrary(block, ref)");
@@ -4648,7 +4648,7 @@ section("#23 axis-owning library masters");
   // 2. render.js wiring: BLOCKS.libraryInstance resolves axis content BEFORE instance
   // overrides (axis first, instance override wins on top -- the agreed precedence).
   var libStart = rtxt.indexOf("libraryInstance: function (block)");
-  var libBody2 = rtxt.slice(libStart, libStart + 1100);
+  var libBody2 = rtxt.slice(libStart, libStart + 1300);
   ok("axis-resolves via the per-pass hook before applying instance overrides", /content = resolveLibraryAxisContent\(content, window\.__libraryAxisContext\);[\s\S]{0,150}if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody2));
 
   // 3. editor.js wiring: currentDoc() keeps the hook in sync (variant never null --
@@ -4662,7 +4662,7 @@ section("#23 axis-owning library masters");
   // 4. editor.js wiring: detach bakes axis content (same principle as #21's override bake),
   // BEFORE instance overrides -- same precedence as render.js.
   var daStart = etxt.indexOf("function detachLibraryInstance(block)");
-  var daBody = etxt.slice(daStart, daStart + 1300);
+  var daBody = etxt.slice(daStart, daStart + 1600);
   ok("detach bakes axis content via resolveLibraryAxisContent", /withOverrides = window\.resolveLibraryAxisContent\(withOverrides, window\.__libraryAxisContext\)/.test(daBody));
   var axisIdx = daBody.indexOf("resolveLibraryAxisContent(withOverrides");
   var ovIdx = daBody.indexOf("applyInstanceOverrides(withOverrides");
@@ -4673,6 +4673,64 @@ section("#23 axis-owning library masters");
   ok("buildPackage sets the variant half of the hook (never null)", /window\.__libraryAxisContext = \{ variant: opts\.variant \|\| \(baseDoc\.heroVariant \|\| "hero"\), version: null \}/.test(extxt));
   ok("serializeVersionedPages sets version per-pass in the multi-version loop", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = v; \/\/ #23/.test(extxt));
   ok("serializeVersionedPages sets version on the no-wrapper (<2 versions) path too", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = \(versions && versions\[0\]\) \|\| null;/.test(extxt));
+})();
+
+// ---- Product Rail: facet pointer + {topic×variant×facet} schema --------------
+section("product-rail facet pointer schema");
+(function () {
+  var rtxt = src("src/render.js");
+  var etxt = src("src/editor.js");
+
+  // 1. PURE: resolveFacetTemplate.
+  var fStart = rtxt.indexOf("function resolveFacetTemplate(def, facetPointer)");
+  var fEnd = rtxt.indexOf("window.resolveFacetTemplate = resolveFacetTemplate;");
+  var fBody = rtxt.slice(fStart, fEnd);
+  var mod = new Function(fBody + "\nreturn { resolveFacetTemplate: resolveFacetTemplate };")();
+  ok("resolveFacetTemplate extracted", typeof mod.resolveFacetTemplate === "function");
+
+  var master = {
+    template: { id: "root", type: "frame", children: [{ id: "t", type: "heading", text: "Base" }] },
+    facets: {
+      technical: { name: "Technical", template: { id: "root-t", type: "frame", children: [{ id: "tt", type: "heading", text: "Technical detail" }] } },
+      dotpoint: { name: "Dot-point", template: { id: "root-d", type: "frame", children: [{ id: "dd", type: "heading", text: "Dot points" }] } }
+    }
+  };
+  ok("no pointer -> falls back to def.template", mod.resolveFacetTemplate(master, undefined).children[0].text === "Base");
+  ok("a matching pointer resolves that facet's own template", mod.resolveFacetTemplate(master, "technical").children[0].text === "Technical detail");
+  ok("a different pointer resolves a DIFFERENT facet", mod.resolveFacetTemplate(master, "dotpoint").children[0].text === "Dot points");
+  ok("an unknown pointer falls back to def.template (no crash)", mod.resolveFacetTemplate(master, "no-such-facet").children[0].text === "Base");
+  var plain = { template: { id: "root2", type: "frame", children: [] } };
+  ok("a master with no facets at all behaves exactly as before", mod.resolveFacetTemplate(plain, "technical") === plain.template);
+  ok("null def -> null (no crash)", mod.resolveFacetTemplate(null, "technical") === null);
+
+  // Purity: resolving never mutates the master (it's a pure function of (topic, pointer)).
+  var before = JSON.stringify(master);
+  mod.resolveFacetTemplate(master, "technical");
+  ok("resolving a facet never mutates the master", JSON.stringify(master) === before);
+
+  // docTypeRenderings is a structurally distinct field from facets -- the resolver only
+  // ever reads def.facets, so a doc-type rendering is never reachable via a facet pointer.
+  var visualMaster = { template: { id: "vroot", type: "frame", children: [] }, docTypeRenderings: { interactive: { template: { id: "vi", type: "frame", children: [{ id: "vit", type: "heading", text: "Interactive" }] } } } };
+  ok("docTypeRenderings is never read by the facet resolver (structurally distinct)", mod.resolveFacetTemplate(visualMaster, "interactive") === visualMaster.template);
+
+  // 2. render.js wiring: BLOCKS.libraryInstance resolves the facet pointer before cloning.
+  var libStart = rtxt.indexOf("libraryInstance: function (block)");
+  var libBody = rtxt.slice(libStart, libStart + 900);
+  ok("libraryInstance resolves block.facet via resolveFacetTemplate before cloning", /var facetTemplate = resolveFacetTemplate\(def, block\.facet\);[\s\S]{0,200}var content = cloneData\(facetTemplate\);/.test(libBody));
+
+  // 3. editor.js wiring: detach bakes the resolved facet (not unconditionally def.template),
+  // and drops the pointer along with every other own key -- no live pointer survives a fork.
+  var daStart = etxt.indexOf("function detachLibraryInstance(block)");
+  var daBody = etxt.slice(daStart, daStart + 1600);
+  ok("detach resolves the facet actually showing before baking", /var facetTemplate = window\.resolveFacetTemplate \? window\.resolveFacetTemplate\(def, block\.facet\) : \(def && def\.template\);/.test(daBody));
+  ok("detach clones the RESOLVED facet template", /var withOverrides = clone\(facetTemplate\);/.test(daBody));
+  ok("detach drops block.facet along with every other own key (no live pointer survives a fork)", /Object\.keys\(block\)\.forEach\(function \(k\) \{ delete block\[k\]; \}\);/.test(daBody));
+
+  // 4. editor.js wiring: the facet switcher only ever reads def.facets, never
+  // def.docTypeRenderings -- so a doc-type rendering can never appear as an author picker.
+  ok("facet picker is gated on def.facets", etxt.indexOf('if (def && def.facets && typeof def.facets === "object")') !== -1);
+  ok("no picker anywhere reads def.docTypeRenderings (structurally distinct, export-time only)", etxt.indexOf("def.docTypeRenderings") === -1);
+  ok("switching the facet select applies immediately (dsSelect onChange), no confirmModal", /var fSel = dsSelect\(facetOpts, curFacet, function \(v\) \{[\s\S]{0,150}if \(v\) block\.facet = v; else delete block\.facet;/.test(etxt));
 })();
 
 // ---- #22: section + page library masters ------------------------------------
