@@ -8344,7 +8344,12 @@ section("Product Rail: Source stage nav + article");
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { isValidFacet: isValidFacet, topicMatchesQuery: topicMatchesQuery, filterTopics: filterTopics," +
-    " groupTopicsByProduct: groupTopicsByProduct, resolveSectionFacetText: resolveSectionFacetText };")();
+    " groupTopicsByProduct: groupTopicsByProduct, canonicalizeTopicOrder: canonicalizeTopicOrder," +
+    " resolveSectionFacetText: resolveSectionFacetText };")();
+  // structMoveTopic itself isn't extracted here (unlike structMoveSection) -- it reads/
+  // writes the real libComponents()/saveLibrary() globals to look up drag/ref topics by id
+  // across the whole library, so it's exercised via the browser-verify pass instead, the
+  // same tier createTopic and its siblings already use.
 
   ok("isValidFacet accepts technical/digestible/dotpoint", g.isValidFacet("technical") && g.isValidFacet("digestible") && g.isValidFacet("dotpoint"));
   ok("isValidFacet rejects anything else", g.isValidFacet("flagship") === false && g.isValidFacet() === false);
@@ -8371,7 +8376,34 @@ section("Product Rail: Source stage nav + article");
   var groups = g.groupTopicsByProduct(g.filterTopics(comps, "", ""), products);
   ok("groupTopicsByProduct: one group per productId + an Unassigned bucket", groups.length === 3);
   ok("groupTopicsByProduct: groups sorted by product name, Unassigned last", groups[0].label === "Alpha" && groups[1].label === "Beta" && groups[2].label === "Unassigned");
-  ok("groupTopicsByProduct: topics within a group sorted by name", groups[0].topics[0].name === "Battery life" && groups[0].topics[1].name === "Radar overview");
+  // source-stage-topic-reorder: within a group, topics sort by their canonical drag `order`
+  // (author-chosen), not by name -- callers canonicalize order first (see below).
+  var orderedComps = {
+    o1: { id: "o1", kind: "topic", name: "Radar overview", productId: "prod-a", order: 1 },
+    o2: { id: "o2", kind: "topic", name: "Battery life", productId: "prod-a", order: 0 }
+  };
+  var orderedGroups = g.groupTopicsByProduct(g.filterTopics(orderedComps, "", ""), products);
+  ok("groupTopicsByProduct: topics within a group sorted by order, not name", orderedGroups[0].topics[0].name === "Battery life" && orderedGroups[0].topics[1].name === "Radar overview");
+
+  // canonicalizeTopicOrder: assigns a stable, dense order per Product group -- a topic
+  // with no order yet sorts to the end of ITS group, alphabetically among its equally-
+  // unordered siblings, so a freshly created/imported topic appends rather than jumping
+  // into an author's chosen order. Order is scoped per-group (cross-group position is
+  // meaningless), and restamped to a dense 0..n-1 range after sorting.
+  var unordered = [
+    { id: "u1", name: "Zebra", productId: "prod-a" },
+    { id: "u2", name: "Alpha topic", productId: "prod-a" },
+    { id: "u3", name: "Only one", productId: "prod-b" }
+  ];
+  g.canonicalizeTopicOrder(unordered);
+  ok("canonicalizeTopicOrder: no-order topics fall back to alpha order within their group", unordered[0].order === 1 && unordered[1].order === 0);
+  ok("canonicalizeTopicOrder: a lone topic in its own group still gets order 0", unordered[2].order === 0);
+  var mixed = [
+    { id: "m1", name: "Has an order", productId: "prod-a", order: 5 },
+    { id: "m2", name: "No order yet", productId: "prod-a" }
+  ];
+  g.canonicalizeTopicOrder(mixed);
+  ok("canonicalizeTopicOrder: an explicit order always sorts before a topic with none", mixed[0].order === 0 && mixed[1].order === 1);
 
   var sec = { heading: "H", facets: { technical: "tech text", dotpoint: "dot text" } };
   ok("resolveSectionFacetText: returns the requested facet when present", g.resolveSectionFacetText(sec, "dotpoint") === "dot text");
