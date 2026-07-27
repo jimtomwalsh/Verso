@@ -83,18 +83,19 @@
       </div>
     </nav>
 
-    <!-- Product Rail Source stage (source-stage-nav-article): left nav (search + topic
-         list grouped by Product) + a flowing markdown-lite article for the selected
-         topic, with a page-level Technical/Digestible/Dot-point facet switch. No
-         variant-column support yet (Flagship/base facet only) -- that's the next
-         ticket. Populated by renderSourceStage() in the editor script; search + facet
-         controls mounted as VersoUI canonical controls. -->
+    <!-- Product Rail Source stage: left nav (search + topic list grouped by Product,
+         source-stage-nav-article) + a flowing markdown-lite article for the selected
+         topic with a page-level Technical/Digestible/Dot-point facet switch, plus a
+         right info panel (Linked in / History, source-stage-info-panel). Populated by
+         renderSourceStage() in the editor script; search/facet/info controls mounted
+         as VersoUI canonical controls where one exists. -->
     <div class="source-stage" id="stage-source" hidden>
       <nav class="source-stage__nav" aria-label="Source topics">
         <div class="source-stage__search" id="source-stage-search"></div>
         <div class="source-stage__topics" id="source-topic-list"></div>
       </nav>
       <div class="source-stage__article" id="source-stage-article"></div>
+      <aside class="source-stage__info" id="source-stage-info" aria-label="Topic info"></aside>
     </div>
 
     <!-- Product Rail Publish stage: placeholder only -- Epic 6 (publish-stage-pick-configure-queue)
