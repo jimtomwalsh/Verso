@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/jimtomwalsh/Verso/actions/workflows/ci.yml/badge.svg)](https://github.com/jimtomwalsh/Verso/actions/workflows/ci.yml)
 
-A **self-hosted, offline, private** browser-based eLearning authoring tool. Authors
-build interactive courses on a canvas editor and export them as **SCORM 1.2** packages
-that run in an LMS.
+A **self-hosted, offline, private** browser-based tool for creating **technical documentation
+and learning materials**. You build content on a canvas editor, reuse blocks across documents,
+and publish in different formats — including interactive **SCORM 1.2** courses that run in an LMS.
 
 Vanilla JavaScript, no build step, no dependencies. The editor opens straight
 from `file://` — it runs entirely on your own machine.
@@ -101,6 +101,8 @@ the app, runs an in-page probe, and inspects both the editor render **and** a re
 `SCORMExport.buildPackage(...)`.
 
 ## Authoring model
+
+Build content once, reuse it across documents, and publish it in different formats.
 
 - **Document** → chapters → pages → blocks. Blocks are the content units
   (headings, text, images, columns, cards, quizzes, hotspots, HTML/web embeds, …).
