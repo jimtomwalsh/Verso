@@ -12,7 +12,7 @@ This system encodes the editor's full set of controls, grouped by concern:
 
 **foundation/** · `Icon`
 **actions/** · `Button` · `IconButton`
-**controls/** · `IconField` · `TextField` · `FieldRow` + `TwoUp` · `SegmentedControl` · `Switch` + `SwitchRow` · `Select` · `Checkbox` · `ColorField`
+**controls/** · `IconField` · `TextField` · `FieldRow` + `TwoUp` · `SegmentedControl` · `Switch` + `SwitchRow` · `Select` · `Checkbox` · `ColorField` · `ToggleChip`
 **panels/** · `Panel` · `PanelSection` · `Breadcrumb` · `LeftRail`
 **navigation/** · `Tabs` · `DocumentTab`
 **structure/** · `TreeItem` · `BlockPaletteItem` · `BlockTile` + `BlockGrid` · `Badge`
@@ -28,6 +28,9 @@ Direct mapping to the editor's canonical helpers: `IconField`←`iconField` (55 
 ### Surfaces
 - `Icon` — a glyph wrapper giving components a consistent icon API (line icons, kebab-case names).
 - `TextField` — free-text entry (captions, alt text, URLs, disclaimers).
+- `ToggleChip` — an independently-toggleable pill for a row where several can be active at
+  once (variant/tag/technology filters). `SegmentedControl` is the single-select counterpart
+  ("pick exactly one"); reach for `ToggleChip` whenever the choice is genuinely multi-select.
 - `BlockTile` + `BlockGrid` — an icon-tile grid layout for the Blocks palette.
 - `LeftRail` + `CanvasOverlayBar` — the editor-shell surfaces. `LeftRail` is the far-left icon
   rail (nav-tab glyphs swap the sibling `Panel`'s content; pinned glyphs fire global actions).

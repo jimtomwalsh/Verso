@@ -8208,11 +8208,11 @@ section("ui-kit #10 DS control set");
   if (!U || !U._pure) return;
   var P = U._pure;
 
-  // All 23 named DS primitives (+ BlockGrid) are exported as factories.
+  // All 24 named DS primitives (+ BlockGrid) are exported as factories.
   var NAMES = ["Icon", "Button", "IconButton", "IconField", "TextField", "FieldRow", "TwoUp",
     "SegmentedControl", "Switch", "SwitchRow", "Select", "Checkbox", "ColorField",
     "Panel", "PanelSection", "Breadcrumb", "Tabs", "DocumentTab",
-    "TreeItem", "BlockPaletteItem", "BlockTile", "BlockGrid", "Badge",
+    "TreeItem", "BlockPaletteItem", "BlockTile", "BlockGrid", "Badge", "ToggleChip",
     "Modal", "ContextMenu", "Tooltip"];
   NAMES.forEach(function (n) { ok("VersoUI exports " + n + "()", typeof U[n] === "function"); });
 
@@ -8242,6 +8242,9 @@ section("ui-kit #10 DS control set");
   ok("iconBtnClass lg/active/danger", P.iconBtnClass("lg", true, true) === "vds-iconbtn vds-iconbtn--lg is-active is-danger");
   ok("badgeClass neutral/md default", P.badgeClass() === "vds-badge vds-badge--neutral vds-badge--md");
   ok("badgeClass component/sm", P.badgeClass("component", "sm") === "vds-badge vds-badge--component vds-badge--sm");
+  ok("toggleChipClass at rest", P.toggleChipClass() === "vds-chip");
+  ok("toggleChipClass active", P.toggleChipClass(true) === "vds-chip is-on");
+  ok("toggleChipClass active + disabled (a permanent baseline, e.g. Flagship)", P.toggleChipClass(true, true) === "vds-chip is-on is-disabled");
 
   // Tri-state checkbox aria + tree indent maths.
   ok("checkAria mixed wins over checked", P.checkAria(true, true) === "mixed");
@@ -8382,13 +8385,172 @@ section("Product Rail: Source stage nav + article");
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{ __sourceSearchQuery = input\.value; renderSourceTopicList\(\); \}\);/.test(e));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
   ok("the facet SegmentedControl re-renders the article, gated through isValidFacet", /onChange: function \(v\) \{ if \(!isValidFacet\(v\)\) return; __sourceActiveFacet = v; renderSourceArticle\(\); \}/.test(e));
-  ok("each section's body is rendered through the shared MarkdownLite primitive, not re-parsed", /window\.MarkdownLite \? window\.MarkdownLite\.render\(resolveSectionFacetText\(sec, __sourceActiveFacet\)\)/.test(e));
+  ok("every column's body (single or multi) is rendered through the shared MarkdownLite primitive, not re-parsed", /window\.MarkdownLite \? window\.MarkdownLite\.render\(c\.text\)/.test(e));
 
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
   var renderJs = src("src/render.js");
   ok("render() never reads Source-stage state", renderJs.indexOf("__sourceActiveTopicId") === -1 && renderJs.indexOf("renderSourceStage") === -1);
   var courseCss = src("src/course.css");
   ok("course.css carries no source-stage chrome classes", courseCss.indexOf("source-stage") === -1);
+})();
+
+// ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
+section("Product Rail: Source stage variant columns");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
+  if (!m) { ok("locate @source-stage fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { declaredVariantsForProduct: declaredVariantsForProduct, sectionOverrideVariants: sectionOverrideVariants," +
+    " sectionActiveVariants: sectionActiveVariants, sectionColumns: sectionColumns };")();
+
+  var products = { "prod-a": { id: "prod-a", name: "Alpha", variants: ["coastal", "desert"] }, "prod-b": { id: "prod-b", name: "Beta" } };
+  ok("declaredVariantsForProduct returns the Product's own declared list", JSON.stringify(g.declaredVariantsForProduct(products, "prod-a")) === JSON.stringify(["coastal", "desert"]));
+  ok("declaredVariantsForProduct: a Product with no variants field -> empty", g.declaredVariantsForProduct(products, "prod-b").length === 0);
+  ok("declaredVariantsForProduct: unknown/absent product -> empty, never throws", g.declaredVariantsForProduct(products, "prod-z").length === 0 && g.declaredVariantsForProduct(products, null).length === 0);
+
+  var secWithOverride = { heading: "H", facets: { technical: "flagship text" }, overrides: { coastal: { facets: { technical: "coastal text" } } } };
+  var secPlain = { heading: "H2", facets: { technical: "same everywhere" } };
+  ok("sectionOverrideVariants lists exactly the variants a section has its OWN content for", JSON.stringify(g.sectionOverrideVariants(secWithOverride)) === JSON.stringify(["coastal"]));
+  ok("sectionOverrideVariants: a section with no overrides at all -> empty", g.sectionOverrideVariants(secPlain).length === 0);
+
+  ok("sectionActiveVariants: only the toggled variants THIS section actually diverges for", JSON.stringify(g.sectionActiveVariants(secWithOverride, ["coastal", "desert"])) === JSON.stringify(["coastal"]));
+  ok("sectionActiveVariants: a plain section stays empty regardless of what's toggled", g.sectionActiveVariants(secPlain, ["coastal", "desert"]).length === 0);
+  ok("sectionActiveVariants: nothing toggled -> empty", g.sectionActiveVariants(secWithOverride, []).length === 0);
+
+  // sectionColumns: length 1 (Flagship only, no column chrome) when nothing toggled
+  // diverges here; length >1 (Flagship + each diverging toggled variant, in order)
+  // otherwise. Two variants toggled together -> exactly Flagship + the two, in order.
+  var oneCol = g.sectionColumns(secPlain, ["coastal", "desert"], "technical");
+  ok("a section with no divergence for anything toggled stays single-column", oneCol.length === 1 && oneCol[0].variant === null && oneCol[0].text === "same everywhere");
+  var twoCol = g.sectionColumns(secWithOverride, ["coastal"], "technical");
+  ok("toggling the ONE variant this section diverges for -> Flagship + that variant", twoCol.length === 2 && twoCol[0].variant === null && twoCol[0].text === "flagship text" && twoCol[1].variant === "coastal" && twoCol[1].text === "coastal text");
+  var secBoth = { heading: "H3", facets: { technical: "flagship" }, overrides: { coastal: { facets: { technical: "coastal" } }, desert: { facets: { technical: "desert" } } } };
+  var threeCol = g.sectionColumns(secBoth, ["coastal", "desert"], "technical");
+  ok("two variants toggled together -> exactly Flagship + the two, in toggle order", threeCol.length === 3 && threeCol.map(function (c) { return c.variant; }).join(",") === ",coastal,desert");
+  ok("a toggled variant this section has no override for is excluded from its columns", g.sectionColumns(secWithOverride, ["coastal", "desert"], "technical").length === 2);
+  var secOverrideMissingFacet = { heading: "H4", facets: { technical: "flagship tech" }, overrides: { coastal: { facets: { dotpoint: "coastal dots" } } } };
+  ok("an override column falls back through the same facet-fallback rule as Flagship", g.sectionColumns(secOverrideMissingFacet, ["coastal"], "digestible")[1].text === "coastal dots");
+
+  // index.html / wiring.
+  var idx = src("index.html");
+  ok("no separate variant-pills mount point -- the article rebuilds head+pills+sections together", idx.indexOf('id="source-stage-variant-pills"') === -1);
+  ok("switching topics resets the toggled-variant selection", /__sourceActiveVariants = \[\]; \/\/ a different topic may have a different variant set/.test(e));
+  ok("a Product with no declared variants renders no pill row at all", /if \(!declared\.length\) return null;/.test(e));
+  ok("setProductVariants writes onto the Product, never invents one", /function setProductVariants\(productId, variants\) \{\s*var p = productId && window\.ProductsStore\[productId\]; if \(!p\) return null;/.test(e));
+  ok("__productRail exposes setProductVariants (fixture/future-authoring write path)", /window\.__productRail = \{ createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants \};/.test(e));
+
+  // Chrome-only invariant.
+  var renderJs = src("src/render.js");
+  ok("render() never reads variant-column pill state", renderJs.indexOf("__sourceActiveVariants") === -1 && renderJs.indexOf("buildVariantPillsRow") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no variant-column/toggle-chip chrome classes", courseCss.indexOf("vds-chip") === -1 && courseCss.indexOf("source-stage__col") === -1);
+})();
+
+// ---- product-rail-source-topic-content-authoring: section CRUD + markdown-lite toolbar ----
+section("Product Rail: Source topic content authoring");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
+  if (!m) { ok("locate @source-stage fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { addSection: addSection, removeSection: removeSection, moveSection: moveSection," +
+    " divergeSectionVariant: divergeSectionVariant, wrapSelectionWithMarker: wrapSelectionWithMarker," +
+    " toggleBulletLines: toggleBulletLines };")();
+
+  // Section CRUD -- plain array ops, callers own the updatedAt stamp + save.
+  var topic = { sections: [{ id: "s1", heading: "One" }, { id: "s2", heading: "Two" }] };
+  var added = g.addSection(topic);
+  ok("addSection appends a new empty section and returns it", topic.sections.length === 3 && topic.sections[2] === added && added.heading === "");
+  ok("a freshly added section has a technical facet ready to type into", added.facets && added.facets.technical === "");
+  g.removeSection(topic, 0);
+  ok("removeSection removes exactly the section at that index", topic.sections.length === 2 && topic.sections[0].id === "s2");
+  var topic2 = { sections: [{ id: "a" }, { id: "b" }, { id: "c" }] };
+  g.moveSection(topic2, 1, -1);
+  ok("moveSection(-1) swaps with the previous section", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
+  g.moveSection(topic2, 0, -1);
+  ok("moveSection at the top is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
+  g.moveSection(topic2, 2, 1);
+  ok("moveSection at the bottom is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
+
+  // divergeSectionVariant: copies Flagship's CURRENT facets in, once -- never resets an
+  // existing override back to Flagship on a second call.
+  var sec = { facets: { technical: "flagship text" } };
+  var cloneFn = function (o) { return JSON.parse(JSON.stringify(o)); };
+  g.divergeSectionVariant(sec, "coastal", cloneFn);
+  ok("divergeSectionVariant copies Flagship's facets into a new override", sec.overrides.coastal.facets.technical === "flagship text");
+  sec.overrides.coastal.facets.technical = "author's coastal edit";
+  g.divergeSectionVariant(sec, "coastal", cloneFn);
+  ok("diverging an ALREADY-diverged variant is a no-op (never clobbers an existing edit)", sec.overrides.coastal.facets.technical === "author's coastal edit");
+  ok("divergeSectionVariant is a deep copy, not a shared reference", sec.overrides.coastal.facets !== sec.facets);
+
+  // wrapSelectionWithMarker: bold/inline-code toggle, both directions.
+  var r1 = g.wrapSelectionWithMarker("hello world", 6, 11, "**");
+  ok("wraps a selection in the marker", r1.text === "hello **world**" && r1.start === 8 && r1.end === 13);
+  var r2 = g.wrapSelectionWithMarker("hello **world**", 8, 13, "**");
+  ok("wrapping an ALREADY-wrapped-in-exactly-that-marker selection unwraps it (true toggle)", r2.text === "hello world" && r2.start === 6 && r2.end === 11);
+  var r3 = g.wrapSelectionWithMarker("hello ", 6, 6, "`");
+  ok("a collapsed (empty) selection inserts an empty marker pair with the cursor between them", r3.text === "hello ``" && r3.start === 7 && r3.end === 7);
+
+  // toggleBulletLines: per-line toggle over whatever lines the selection spans.
+  var b1 = g.toggleBulletLines("one\ntwo\nthree", 0, 13);
+  ok("bullets every non-empty line the selection spans", b1.text === "- one\n- two\n- three");
+  var b2 = g.toggleBulletLines("- one\n- two\n- three", 0, 20);
+  ok("toggling an ALREADY-fully-bulleted block strips every bullet (true toggle)", b2.text === "one\ntwo\nthree");
+  var b3 = g.toggleBulletLines("one\n- two", 0, 9);
+  ok("a MIXED block (only some lines bulleted) bullets the rest rather than stripping", b3.text === "- one\n- two");
+  var b4 = g.toggleBulletLines("just one line", 4, 4);
+  ok("a collapsed selection still resolves to the line it sits on", b4.text === "- just one line");
+
+  // index.html / wiring: the article is directly editable (wiki-not-document framing --
+  // /verso-frontend design consult: a plain textarea + local toolbar, not the rich-text
+  // execCommand bar, since MarkdownLite.render() already treats storage as a plain string).
+  ok("topic title is a real input, not read-only text", /source-stage__title-input/.test(e));
+  ok("section heading is a real input, not read-only text", /source-stage__heading-input/.test(e));
+  ok("each section has move-up/move-down/delete actions", /iconBtn\("arrow-up", "Move up"\)/.test(e) && /iconBtn\("arrow-down", "Move down"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
+  ok("deleting a section confirms first (destructive action)", /confirmModal\("Delete section"/.test(e));
+  ok("an 'Add section' affordance exists at the end of the article", /source-stage__add-section/.test(e) && /\+ Add section/.test(e));
+
+  // Click-to-edit: a body reads as normal MarkdownLite output until clicked, THEN swaps
+  // to a raw textarea -- browsing a topic never shows raw ** markers, only the one cell
+  // actively being edited. This is the fix for an initial always-raw-textarea approach
+  // that would have regressed the read experience source-stage-nav-article already shipped.
+  ok("a body cell starts as rendered MarkdownLite output, not a textarea, until clicked", /bodyEl\.addEventListener\("click", function \(\) \{ __sourceEditingCell = \{ sectionId: sec\.id, variant: c\.variant \}; renderSourceArticle\(\); \}\);/.test(e));
+  ok("blurring the textarea commits the edit AND swaps back to rendered view", /ta\.addEventListener\("blur", function \(\) \{[\s\S]{0,200}__sourceEditingCell = null;\s*\n\s*renderSourceArticle\(\);/.test(e));
+  ok("editing state resets when switching topics (no stray in-progress edit carried over)", /__sourceEditingCell = null; \/\/ don't carry an in-progress edit across topics/.test(e));
+
+  // Shared format toolbar: mousedown+preventDefault (mirrors the copy editor's own
+  // formatting bar -- clicking a toolbar button must never steal the textarea's
+  // selection), and it targets whichever field last received focus.
+  ok("format toolbar buttons preventDefault on mousedown to preserve the textarea's selection (same trick the copy-editor bar uses)", /btn\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\); \/\/ keep the textarea's selection/.test(e));
+  ok("toolbar acts on __sourceActiveEditField (the last-focused field), mirroring the copy editor's _activeCopyRow pattern", /var f = __sourceActiveEditField; if \(!f\) return;/.test(e));
+  // Regression guard: wrapSelectionWithMarker's marker is its 4th param, not 1st --
+  // an earlier build used .bind(null, "**") here, which silently binds "**" to the
+  // FIRST param (text) instead, corrupting every call via type coercion (caught only
+  // by browser-verify, not by any source-string check, since the wiring still LOOKED
+  // plausible). Guard against that exact regression: the call site must pass the
+  // marker as its own explicit 4th argument, not via .bind().
+  ok("no .bind() shortcut on wrapSelectionWithMarker (parameter-order footgun -- marker is arg 4, not arg 1)", e.indexOf("wrapSelectionWithMarker.bind(") === -1);
+  ok("the toolbar wraps the marker in its own closure, calling wrapSelectionWithMarker with marker as the explicit 4th argument", /function wrapWith\(marker\) \{ return function \(text, start, end\) \{ return wrapSelectionWithMarker\(text, start, end, marker\); \}; \}/.test(e));
+  // /verso-frontend Tier 2 fix: code/bullet toolbar buttons must match the existing
+  // B/I/U bar's OWN list-toggle convention (a real Icon(), prop-toggle--icon) rather
+  // than a text glyph -- "B" correctly stays plain text (matches that bar's B/I/U).
+  ok("inline-code toolbar button uses the real code-xml icon, not a '<>' text glyph", /icon: "code-xml", title: "Inline code"/.test(e));
+  ok("bullet toolbar button uses the real list icon (matches the existing B/I/U bar's own list-toggle), not a '•' text glyph", /icon: "list", title: "Bullet list"/.test(e));
+  ok("icon toolbar buttons get the prop-toggle--icon class, same as the existing list-toggle button", /h\("button", "prop-toggle" \+ \(t\.icon \? " prop-toggle--icon" : ""\)\)/.test(e));
+
+  // Diverge affordance: a toggled-but-not-yet-diverged variant gets an explicit offer
+  // to start diverging, rather than silently having no column (which is correct, tested
+  // read-only behaviour from source-stage-variant-columns -- this ADDS to it, doesn't
+  // change it).
+  ok("a not-yet-diverged toggled variant offers a Diverge affordance per section", /var notDiverged = __sourceActiveVariants\.filter/.test(e) && /source-stage__diverge-btn/.test(e));
+  ok("clicking Diverge calls divergeSectionVariant then re-renders", /divergeSectionVariant\(sec, v, clone\);/.test(e));
+
+  // Chrome-only invariant.
+  var renderJs = src("src/render.js");
+  ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1 && renderJs.indexOf("__sourceActiveEditField") === -1);
+  var courseCss2 = src("src/course.css");
+  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body-input") === -1 && courseCss2.indexOf("source-stage__diverge") === -1);
 })();
 
 // ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----

@@ -495,6 +495,71 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   border-radius: var(--radius-sm, 3px); padding: 1px 5px;
 }
 
+/* source-stage-variant-columns: Flagship (always-on, non-interactive) + one
+   VersoUI.ToggleChip per variant declared for the topic's Product. */
+.source-stage__variant-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 20px; }
+/* ToggleChip (DS canonical control, controls/ToggleChip.d.ts) -- a MULTI-select toggle
+   pill; several can be active at once, unlike .prop-toggle's single-select row. */
+.vds-chip {
+  height: 24px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-full, 999px);
+  background: transparent; color: var(--text-secondary); font-size: var(--text-xs, 11px); font-weight: 500;
+  cursor: pointer;
+}
+.vds-chip:hover { border-color: var(--border-input); color: var(--text-primary); }
+.vds-chip.is-on { background: var(--accent-quiet); border-color: transparent; color: var(--accent); font-weight: 600; }
+.vds-chip.is-disabled { cursor: default; }
+.vds-chip.is-disabled:hover { border-color: var(--border-subtle); color: var(--text-secondary); }
+.vds-chip.is-on.is-disabled:hover { border-color: transparent; color: var(--accent); }
+
+/* A section only becomes a column grid where at least one TOGGLED variant actually
+   diverges from Flagship there; everything else stays the plain single-body layout
+   above. Widens past the article's usual single-column max-width to fit N columns. */
+.source-stage__section--columns { max-width: none; }
+.source-stage__col-grid { display: grid; gap: 24px; }
+.source-stage__col-label {
+  font-size: var(--text-2xs, 10px); font-weight: 600; text-transform: uppercase;
+  letter-spacing: var(--tracking-caps, 0.04em); color: var(--text-tertiary); margin-bottom: 6px;
+}
+
+/* source-topic-content-authoring: the article is directly editable (wiki-not-document
+   framing -- click text, it's editable, no separate edit-mode toggle). Inputs/textareas
+   are styled borderless/transparent so they read as the same text they replace, not as
+   form fields, until focused. */
+.source-stage__title-input {
+  flex: 1 1 auto; min-width: 200px; border: none; background: transparent; outline: none;
+  font-size: var(--text-lg, 18px); font-weight: 600; color: var(--text-primary); padding: 2px 0;
+}
+.source-stage__title-input:hover, .source-stage__title-input:focus { background: var(--surface-hover); border-radius: var(--radius-sm, 4px); }
+.source-stage__edit-toolbar { margin-bottom: 14px; }
+.source-stage__edit-toolbar .prop-toggle-row { width: fit-content; }
+.source-stage__heading-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.source-stage__heading-input {
+  flex: 1 1 auto; border: none; background: transparent; outline: none;
+  font-size: var(--text-md, 14px); font-weight: 600; color: var(--text-primary); padding: 2px 0; margin: 0;
+}
+.source-stage__heading-input:hover, .source-stage__heading-input:focus { background: var(--surface-hover); border-radius: var(--radius-sm, 4px); }
+.source-stage__heading-input::placeholder { color: var(--text-tertiary); font-weight: 500; }
+.source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; }
+.source-stage__body-input {
+  display: block; width: 100%; resize: vertical;
+  border: 1px solid transparent; background: transparent; outline: none;
+  font: inherit; font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary);
+  padding: 4px 6px; margin: -4px -6px; border-radius: var(--radius-sm, 4px);
+}
+.source-stage__body-input:hover { border-color: var(--border-subtle); }
+.source-stage__body-input:focus { border-color: var(--border-focus, var(--accent)); background: var(--surface-input); }
+.source-stage__diverge-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.source-stage__diverge-btn {
+  height: 22px; padding: 0 8px; border: 1px dashed var(--border-input); border-radius: var(--radius-sm, 4px);
+  background: transparent; color: var(--text-tertiary); font-size: var(--text-xs, 11px); cursor: pointer;
+}
+.source-stage__diverge-btn:hover { border-color: var(--accent); color: var(--accent); }
+.source-stage__add-section {
+  display: block; margin-top: 4px; padding: 8px 12px; border: 1px dashed var(--border-input); border-radius: var(--radius-sm, 4px);
+  background: transparent; color: var(--text-tertiary); font-size: var(--text-sm, 12px); cursor: pointer; max-width: 640px; width: 100%; text-align: left;
+}
+.source-stage__add-section:hover { border-color: var(--accent); color: var(--accent); }
+
 /* source-stage-info-panel: right pane, same width as the Edit stage's own right
    panel (--right-w) for visual consistency. Uses the canonical .panel-section /
    .panel-section__title classes (panelSection()) -- the same section chrome as

@@ -1232,10 +1232,20 @@
     saveProducts();
     return prod;
   }
+  // Product Rail (source-stage-variant-columns): the hardware-variant axis a Product's
+  // Source topics carry, declared once per Product (not per-document -- topics are
+  // Product-scoped library content). No declaring UI exists yet; this is a fixture/
+  // future-authoring write path, same precedent as createProduct/createTopic.
+  function setProductVariants(productId, variants) {
+    var p = productId && window.ProductsStore[productId]; if (!p) return null;
+    p.variants = (variants || []).slice();
+    saveProducts();
+    return p;
+  }
   // Foundational tagging-layer API (Product Rail #1) — the surface every downstream
   // Product Rail ticket (bottom-rail nav, +New Product, Promote to Product, browser
   // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
-  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage };
+  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants };
   // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
   // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
   // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
@@ -10531,11 +10541,109 @@
     var firstKey = Object.keys(facets)[0];
     return firstKey ? facets[firstKey] : "";
   }
+  // Product Rail (source-stage-variant-columns): variants are declared per-Product
+  // (ProductsStore[id].variants), not per-document -- a Source topic is Product-scoped
+  // library content, not tied to whatever course happens to be open.
+  function declaredVariantsForProduct(products, productId) {
+    var p = productId && products && products[productId];
+    return (p && Array.isArray(p.variants)) ? p.variants.slice() : [];
+  }
+  // A section only carries a variant's own content when section.overrides[v] exists --
+  // mirrors the shipped per-variant image-override mechanic (own image vs inherits
+  // flagship, src/editor.js's renderImageVariantVersions), applied to section text.
+  function sectionOverrideVariants(section) {
+    return Object.keys((section && section.overrides) || {});
+  }
+  // Of the currently-toggled variants, only the ones THIS section actually diverges
+  // for -- a section with no override for any toggled variant stays single-column.
+  function sectionActiveVariants(section, activeVariants) {
+    var present = sectionOverrideVariants(section);
+    return (activeVariants || []).filter(function (v) { return present.indexOf(v) !== -1; });
+  }
+  // [{variant:null, text:<flagship>}, {variant:"coastal", text:<override>}, ...] in
+  // toggle order. Length 1 (Flagship only) when nothing toggled diverges here --
+  // callers render that case as a plain single body, no column chrome at all.
+  function sectionColumns(section, activeVariants, facet) {
+    var cols = [{ variant: null, text: resolveSectionFacetText(section, facet) }];
+    sectionActiveVariants(section, activeVariants).forEach(function (v) {
+      var ov = (section.overrides && section.overrides[v]) || {};
+      cols.push({ variant: v, text: resolveSectionFacetText({ facets: ov.facets }, facet) });
+    });
+    return cols;
+  }
+  // Product Rail (source-topic-content-authoring): section CRUD -- plain array ops on
+  // topic.sections, mutating in place (callers stamp updatedAt + saveLibrary()).
+  function addSection(topic) {
+    if (!topic) return null;
+    topic.sections = topic.sections || [];
+    var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), heading: "", facets: { technical: "" } };
+    topic.sections.push(sec);
+    return sec;
+  }
+  function removeSection(topic, index) {
+    if (!topic || !topic.sections) return;
+    topic.sections.splice(index, 1);
+  }
+  // dir: -1 (up) or 1 (down). No-ops silently at either end -- the caller doesn't need
+  // to compute bounds itself.
+  function moveSection(topic, index, dir) {
+    if (!topic || !topic.sections) return;
+    var arr = topic.sections, j = index + dir;
+    if (index < 0 || index >= arr.length || j < 0 || j >= arr.length) return;
+    var tmp = arr[index]; arr[index] = arr[j]; arr[j] = tmp;
+  }
+  // Diverge-for-<variant>: copies Flagship's CURRENT facets into an independently-
+  // editable override, once -- mirrors the shipped "own image vs inherits flagship"
+  // convention (src/editor.js's renderImageVariantVersions). A no-op if already diverged
+  // (never silently resets an author's existing override back to Flagship's text).
+  function divergeSectionVariant(section, variant, cloneFn) {
+    if (!section || !variant) return;
+    section.overrides = section.overrides || {};
+    if (section.overrides[variant]) return;
+    section.overrides[variant] = { facets: cloneFn(section.facets || {}) };
+  }
+  // Bold/inline-code toggle: wraps the selection in `marker` on each side, or unwraps
+  // it if the selection is ALREADY wrapped in exactly that marker (a true toggle, not
+  // just an insert). An empty (collapsed) selection inserts an empty marker pair with
+  // the cursor placed between them, ready to type.
+  function wrapSelectionWithMarker(text, start, end, marker) {
+    text = text || ""; start = start || 0; end = end == null ? start : end;
+    var m = marker.length;
+    // "Already wrapped" means the markers sit immediately OUTSIDE the selection (the
+    // normal case: an author selects just the word, not the ** themselves) -- not
+    // inside it. Strip those surrounding markers instead of adding a second pair.
+    if (start - m >= 0 && end + m <= text.length && text.slice(start - m, start) === marker && text.slice(end, end + m) === marker) {
+      var newText = text.slice(0, start - m) + text.slice(start, end) + text.slice(end + m);
+      return { text: newText, start: start - m, end: end - m };
+    }
+    var before = text.slice(0, start), sel = text.slice(start, end), after = text.slice(end);
+    return { text: before + marker + sel + marker + after, start: start + m, end: start + m + sel.length };
+  }
+  // Bullet-list toggle: prefixes/strips "- " on every non-empty line the selection
+  // spans (a true per-line toggle -- if EVERY spanned line is already bulleted, it
+  // strips them all; otherwise it bullets every non-bulleted line).
+  function toggleBulletLines(text, start, end) {
+    text = text || ""; start = start || 0; end = end == null ? start : end;
+    var lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    var lineEndIdx = text.indexOf("\n", end); if (lineEndIdx === -1) lineEndIdx = text.length;
+    var block = text.slice(lineStart, lineEndIdx);
+    var lines = block.split("\n");
+    var nonEmpty = lines.filter(function (l) { return l !== ""; });
+    var allBulleted = nonEmpty.length > 0 && nonEmpty.every(function (l) { return l.slice(0, 2) === "- "; });
+    var newLines = lines.map(function (l) {
+      if (l === "") return l;
+      if (allBulleted) return l.slice(0, 2) === "- " ? l.slice(2) : l;
+      return l.slice(0, 2) === "- " ? l : "- " + l;
+    });
+    var newBlock = newLines.join("\n");
+    return { text: text.slice(0, lineStart) + newBlock + text.slice(lineEndIdx), start: lineStart, end: lineStart + newBlock.length };
+  }
   /* @source-stage-end */
 
   var __sourceActiveTopicId = null;
   var __sourceActiveFacet = "technical";
   var __sourceSearchQuery = "";
+  var __sourceActiveVariants = []; // reset whenever a different topic is selected
 
   function renderSourceTopicList() {
     if (typeof document === "undefined") return;
@@ -10552,7 +10660,10 @@
         var row = h("button", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""), t.name || "Untitled topic");
         row.type = "button";
         row.addEventListener("click", function () {
+          if (t.id === __sourceActiveTopicId) return;
           __sourceActiveTopicId = t.id;
+          __sourceActiveVariants = []; // a different topic may have a different variant set
+          __sourceEditingCell = null; // don't carry an in-progress edit across topics
           renderSourceTopicList();
           renderSourceArticle();
         });
@@ -10561,10 +10672,58 @@
     });
   }
 
+  // The Flagship chip (always on, non-interactive) + one VersoUI.ToggleChip per variant
+  // declared for the topic's Product -- a MULTI-select toggle row (several variants can
+  // be active at once), unlike SegmentedControl's one-of-N. Returns null (append
+  // nothing) when the Product has no declared variants at all.
+  function buildVariantPillsRow(topic) {
+    var declared = declaredVariantsForProduct(window.ProductsStore || {}, topic.productId);
+    if (!declared.length) return null;
+    var U = window.VersoUI; if (!U || !U.ToggleChip) return null;
+    var row = h("div", "source-stage__variant-pills");
+    row.appendChild(U.ToggleChip({ label: "Flagship", active: true, disabled: true }));
+    declared.forEach(function (v) {
+      row.appendChild(U.ToggleChip({
+        label: v,
+        active: __sourceActiveVariants.indexOf(v) !== -1,
+        onClick: function () {
+          var idx = __sourceActiveVariants.indexOf(v);
+          if (idx === -1) __sourceActiveVariants.push(v); else __sourceActiveVariants.splice(idx, 1);
+          renderSourceArticle();
+        }
+      }));
+    });
+    return row;
+  }
+
+  // Product Rail (source-topic-content-authoring): the facets object to read/write for
+  // a given column -- Flagship writes straight onto the section; a variant column
+  // writes into its (already-diverged, by the time this is called) override.
+  function facetsRefFor(sec, variant) {
+    if (variant == null) { sec.facets = sec.facets || {}; return sec.facets; }
+    sec.overrides = sec.overrides || {};
+    sec.overrides[variant] = sec.overrides[variant] || { facets: {} };
+    sec.overrides[variant].facets = sec.overrides[variant].facets || {};
+    return sec.overrides[variant].facets;
+  }
+  function stampTopicUpdated(topic) { topic.updatedAt = Date.now(); saveLibrary(); }
+
+  // Currently-focused editable field (heading input or a facet-body textarea) --
+  // mirrors the copy editor's _activeCopyRow: a `focus` listener on each field sets
+  // this, and the shared format toolbar's buttons (mousedown+preventDefault, so
+  // clicking them never steals the field's selection) act on whichever one is live.
+  var __sourceActiveEditField = null; // { textarea, sec, variant } | null
+  // Which single (section, variant) body cell is currently in edit mode -- click a
+  // rendered body to swap it for a raw textarea; blur commits + swaps back. Everything
+  // else keeps reading as normal MarkdownLite output, so browsing a topic never shows
+  // raw ** markers -- only the one cell an author is actively typing into.
+  var __sourceEditingCell = null; // { sectionId, variant } | null
+
   function renderSourceArticle() {
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-article"); if (!host) return;
     host.innerHTML = "";
+    __sourceActiveEditField = null;
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
@@ -10572,7 +10731,15 @@
       return;
     }
     var headEl = h("div", "source-stage__article-head");
-    headEl.appendChild(h("h2", "source-stage__title", topic.name || "Untitled topic"));
+    var titleInput = h("input", "source-stage__title source-stage__title-input");
+    titleInput.type = "text"; titleInput.value = topic.name || "";
+    titleInput.placeholder = "Untitled topic";
+    titleInput.addEventListener("change", function () {
+      topic.name = titleInput.value.trim();
+      stampTopicUpdated(topic);
+      renderSourceTopicList(); // the left-nav row label must stay in sync
+    });
+    headEl.appendChild(titleInput);
     var U = window.VersoUI;
     if (U && U.SegmentedControl) {
       headEl.appendChild(U.SegmentedControl({
@@ -10582,14 +10749,126 @@
       }));
     }
     host.appendChild(headEl);
-    (topic.sections || []).forEach(function (sec) {
+
+    // Shared Bold/Code/Bullet toolbar: operates on __sourceActiveEditField, string-
+    // manipulating its raw markdown-lite text (no contentEditable/execCommand -- the
+    // storage format is a plain string, so the edit surface is a plain <textarea>).
+    var toolbar = h("div", "source-stage__edit-toolbar");
+    function toolbarApply(fn) {
+      return function () {
+        var f = __sourceActiveEditField; if (!f) return;
+        var ta = f.textarea, res = fn(ta.value, ta.selectionStart, ta.selectionEnd);
+        ta.value = res.text;
+        ta.dispatchEvent(new Event("change"));
+        ta.focus(); ta.setSelectionRange(res.start, res.end);
+      };
+    }
+    function wrapWith(marker) { return function (text, start, end) { return wrapSelectionWithMarker(text, start, end, marker); }; }
+    // "B" stays a plain letter (matches the existing B/I/U inline-exec convention
+    // exactly); code/bullet use real icons, matching that SAME bar's own list-toggle
+    // button (Icon("list"), prop-toggle--icon) rather than a text glyph like "<>"/"•".
+    [{ label: "B", icon: null, title: "Bold", fn: wrapWith("**") },
+     { label: null, icon: "code-xml", title: "Inline code", fn: wrapWith("`") },
+     { label: null, icon: "list", title: "Bullet list", fn: null }]
+      .forEach(function (t) {
+        var btn = h("button", "prop-toggle" + (t.icon ? " prop-toggle--icon" : ""));
+        btn.type = "button"; btn.title = t.title;
+        if (t.icon) btn.innerHTML = Icon(t.icon); else btn.textContent = t.label;
+        btn.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the textarea's selection
+        btn.addEventListener("click", toolbarApply(t.fn || toggleBulletLines));
+        toolbar.appendChild(btn);
+      });
+    host.appendChild(toolbar);
+
+    var pillsRow = buildVariantPillsRow(topic);
+    if (pillsRow) host.appendChild(pillsRow);
+
+    (topic.sections || []).forEach(function (sec, secIdx) {
       var secEl = h("div", "source-stage__section");
-      secEl.appendChild(h("h3", "source-stage__heading", sec.heading || ""));
-      var bodyEl = h("div", "source-stage__body");
-      bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(resolveSectionFacetText(sec, __sourceActiveFacet)) : "";
-      secEl.appendChild(bodyEl);
+
+      var headingRow = h("div", "source-stage__heading-row");
+      var headingInput = h("input", "source-stage__heading source-stage__heading-input");
+      headingInput.type = "text"; headingInput.value = sec.heading || ""; headingInput.placeholder = "Section heading";
+      headingInput.addEventListener("change", function () { sec.heading = headingInput.value; stampTopicUpdated(topic); });
+      headingRow.appendChild(headingInput);
+      var actions = h("div", "source-stage__section-actions");
+      var upBtn = iconBtn("arrow-up", "Move up"); upBtn.disabled = secIdx === 0;
+      upBtn.addEventListener("click", function () { moveSection(topic, secIdx, -1); stampTopicUpdated(topic); renderSourceArticle(); });
+      var downBtn = iconBtn("arrow-down", "Move down"); downBtn.disabled = secIdx === (topic.sections.length - 1);
+      downBtn.addEventListener("click", function () { moveSection(topic, secIdx, 1); stampTopicUpdated(topic); renderSourceArticle(); });
+      var delBtn = iconBtn("trash-2", "Delete this section", true);
+      delBtn.addEventListener("click", function () {
+        confirmModal("Delete section", (sec.heading || "This section") + " will be removed from the topic.", function () {
+          removeSection(topic, secIdx); stampTopicUpdated(topic); renderSourceArticle();
+        });
+      });
+      actions.appendChild(upBtn); actions.appendChild(downBtn); actions.appendChild(delBtn);
+      headingRow.appendChild(actions);
+      secEl.appendChild(headingRow);
+
+      var cols = sectionColumns(sec, __sourceActiveVariants, __sourceActiveFacet);
+      var columned = cols.length > 1;
+      if (columned) secEl.classList.add("source-stage__section--columns");
+      var colHost = columned ? h("div", "source-stage__col-grid") : secEl;
+      if (columned) colHost.style.gridTemplateColumns = "repeat(" + cols.length + ", minmax(0, 1fr))";
+      cols.forEach(function (c) {
+        var wrap = columned ? h("div", "source-stage__col") : secEl;
+        if (columned) wrap.appendChild(h("div", "source-stage__col-label", c.variant == null ? "Flagship" : c.variant));
+        var editing = __sourceEditingCell && __sourceEditingCell.sectionId === sec.id && __sourceEditingCell.variant === c.variant;
+        if (editing) {
+          var ta = h("textarea", "source-stage__body-input");
+          ta.value = c.text; ta.rows = Math.max(3, c.text.split("\n").length);
+          ta.addEventListener("focus", function () { __sourceActiveEditField = { textarea: ta, sec: sec, variant: c.variant }; });
+          ta.addEventListener("blur", function () {
+            facetsRefFor(sec, c.variant)[__sourceActiveFacet] = ta.value;
+            stampTopicUpdated(topic);
+            __sourceEditingCell = null;
+            renderSourceArticle();
+          });
+          wrap.appendChild(ta);
+          ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); // land the cursor at the end, ready to type
+        } else {
+          var bodyEl = h("div", "source-stage__body");
+          bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
+          bodyEl.title = "Click to edit";
+          bodyEl.addEventListener("click", function () { __sourceEditingCell = { sectionId: sec.id, variant: c.variant }; renderSourceArticle(); });
+          wrap.appendChild(bodyEl);
+        }
+        if (columned) colHost.appendChild(wrap);
+      });
+      if (columned) secEl.appendChild(colHost);
+
+      // Diverge affordance: any variant currently toggled but NOT yet diverged for
+      // this section doesn't get a column from sectionColumns (by design -- see
+      // source-stage-variant-columns), so offer to start one instead of hiding it.
+      var notDiverged = __sourceActiveVariants.filter(function (v) { return sectionOverrideVariants(sec).indexOf(v) === -1; });
+      if (notDiverged.length) {
+        var divergeRow = h("div", "source-stage__diverge-row");
+        notDiverged.forEach(function (v) {
+          var dBtn = h("button", "source-stage__diverge-btn", "Diverge for " + v);
+          dBtn.type = "button";
+          dBtn.addEventListener("click", function () {
+            divergeSectionVariant(sec, v, clone);
+            stampTopicUpdated(topic);
+            renderSourceArticle();
+          });
+          divergeRow.appendChild(dBtn);
+        });
+        secEl.appendChild(divergeRow);
+      }
+
       host.appendChild(secEl);
     });
+
+    var addBtn = h("button", "source-stage__add-section", "+ Add section");
+    addBtn.type = "button";
+    addBtn.addEventListener("click", function () {
+      addSection(topic);
+      stampTopicUpdated(topic);
+      renderSourceArticle();
+    });
+    host.appendChild(addBtn);
+
     renderSourceInfoPanel(topic);
   }
 

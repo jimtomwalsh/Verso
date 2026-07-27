@@ -84,11 +84,16 @@
     </nav>
 
     <!-- Product Rail Source stage: left nav (search + topic list grouped by Product,
-         source-stage-nav-article) + a flowing markdown-lite article for the selected
-         topic with a page-level Technical/Digestible/Dot-point facet switch, plus a
-         right info panel (Linked in / History, source-stage-info-panel). Populated by
-         renderSourceStage() in the editor script; search/facet/info controls mounted
-         as VersoUI canonical controls where one exists. -->
+         source-stage-nav-article) + a flowing, directly-editable article for the
+         selected topic (source-topic-content-authoring: click a heading/body to edit
+         it in place, no edit-mode toggle) with a page-level Technical/Digestible/
+         Dot-point facet switch, a Flagship + per-declared-variant pill row that adds
+         a column only to sections that actually diverge for a toggled variant
+         (source-stage-variant-columns), and a right info panel (Linked in / History,
+         source-stage-info-panel). Populated by renderSourceStage()/renderSourceArticle()
+         in the editor script, which rebuilds head + pills + sections together on every
+         render (topic switch, facet toggle, variant toggle, section edit) -- one
+         container, one source of render truth. -->
     <div class="source-stage" id="stage-source" hidden>
       <nav class="source-stage__nav" aria-label="Source topics">
         <div class="source-stage__search" id="source-stage-search"></div>
