@@ -630,6 +630,15 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .source-stage__add-section:hover { border-color: var(--accent); color: var(--accent); }
 
+/* source-stage-comments: the expanded per-section thread panel. .comment-thread/
+   .comment-reply/.comment-row__dot/.comment-popover__row/.comment-popover__del are the
+   SAME classes the canvas comment system already defines above -- reused verbatim, no
+   canvas/position-specific styling in any of them, so nothing new is needed for the
+   thread's own rows. Only the panel's own spacing and per-comment grouping are new. */
+.source-stage__comment-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle); max-width: 640px; }
+.source-stage__comment-item { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-subtle); }
+.source-stage__comment-item:last-of-type { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
 /* source-stage-info-panel: right pane, same width as the Edit stage's own right
    panel (--right-w) for visual consistency. Uses the canonical .panel-section /
    .panel-section__title classes (panelSection()) -- the same section chrome as
@@ -2644,7 +2653,12 @@ details[open] .disc__caret {
 /* slice 4: preview comment mode */
 .demo__stage.is-comment-mode { cursor: crosshair; }
 #demo-comment.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
-/* slice 5: identity + threading */
+/* slice 5: identity + threading -- source-stage-comments (2026-07-27): .comment-thread/
+   .comment-reply/.comment-reply__body/.comment-row__dot/.comment-popover__row/
+   .comment-popover__del below are ALSO reused verbatim by Source stage's inline
+   comment-thread panel (a normal document-flow sibling, not a floating popover). Keep
+   these generic (no canvas/floating-popover-specific positioning) -- a change here
+   affects both surfaces. */
 .comment-identity { display: flex; align-items: center; gap: 8px; padding: 8px; }
 .comment-identity__field { flex: 1; min-width: 0; }
 .comment-popover__author { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-primary); }

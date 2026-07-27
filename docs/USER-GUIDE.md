@@ -636,6 +636,12 @@ touched a topic as a timeline, newest first — file, version, publish date, and
 time (new sections, sections updated from source, sections flagged for review). A topic you wrote
 by hand shows a single "Created" entry.
 
+**Comments.** The same comment/discussion feature as the canvas editor, for this wiki. Click the
+comment icon next to any section to open its thread — write a note, reply, mark it Resolved, or
+delete it. A count appears on the icon while a section has unresolved comments. The info panel's
+Comments section lists every comment on the topic (Open / Resolved), including any left
+"Orphaned" if the section they were on gets deleted — nothing is silently lost.
+
 ---
 
 *This guide reflects the app as built. When a screen doesn't match, the app — and the
