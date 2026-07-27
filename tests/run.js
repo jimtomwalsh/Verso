@@ -2408,7 +2408,7 @@ section("#69 migration cutover");
   ok("promoteToProductModal found", ptmStart !== -1);
   var ptmBody = ed.slice(ptmStart, ptmStart + 1700);
   ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
-  ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Stage"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
+  ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Format"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
   ok("writes ONLY doc.meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(doc, pid, stage\);\s*\n\s*saveRegistry\(registry\);/.test(ptmBody));
   ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
@@ -2416,14 +2416,19 @@ section("#69 migration cutover");
   ok("migrate button registered only when __nativeStore present", /if \(window\.__nativeStore\) window\.Editor\.registerPipelineButton\("Migrate to file storage \(beta\)", migrateToFileBackendPrompt/.test(ed));
   // WIRING: the Swift bridge grew the ops the native store glue posts.
   var swift = src("desktop/AuthoringTool.swift");
-  ["storePutRegistry", "storeGetRegistry", "storePutLibrary", "storeGetLibrary", "storePutBackupB64", "storeFileSize", "storeReload"].forEach(function (op) {
+  ["storePutRegistry", "storeGetRegistry", "storePutLibrary", "storeGetLibrary", "storePutProducts", "storePutBackupB64", "storeFileSize", "storeReload"].forEach(function (op) {
     ok("Swift handleBackup handles op " + op, swift.indexOf('op == "' + op + '"') !== -1);
   });
   ok("Swift injects the on-disk registry at document-start", /addUserScript\(registryInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskRegistryB64/.test(swift));
   ok("Swift injects the on-disk library at document-start (#18)", /addUserScript\(libraryInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskLibraryB64/.test(swift));
+  // REGRESSION (Product Rail data-loss bug, found via James's live testing): writeProducts
+  // posts storePutProducts, but the Swift shell never grew a case for it (nor a boot
+  // injection) -- every Product/topic was silently non-durable in the real app. Guards both halves.
+  ok("Swift injects the on-disk products store at document-start", /addUserScript\(productsInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskProductsB64/.test(swift));
   ok("Swift reload refreshes the registry injection", /@objc func reload\(\) \{ refreshRegistryInjection\(\)/.test(swift));
-  ok("Swift refreshRegistryInjection rebuilds BOTH the registry and library scripts", /func refreshRegistryInjection\(\) \{[\s\S]{0,200}addUserScript\(registryInjectionScript\(\)\)[\s\S]{0,100}addUserScript\(libraryInjectionScript\(\)\)/.test(swift));
+  ok("Swift refreshRegistryInjection rebuilds registry, library, AND products scripts", /func refreshRegistryInjection\(\) \{[\s\S]{0,300}addUserScript\(registryInjectionScript\(\)\)[\s\S]{0,100}addUserScript\(libraryInjectionScript\(\)\)[\s\S]{0,100}addUserScript\(productsInjectionScript\(\)\)/.test(swift));
   ok("Swift storePutLibrary writes library.json and refreshes injections", /op == "storePutLibrary"[\s\S]{0,600}library\.json[\s\S]{0,300}refreshRegistryInjection\(\)/.test(swift));
+  ok("Swift storePutProducts writes products.json and refreshes injections", /op == "storePutProducts"[\s\S]{0,600}products\.json[\s\S]{0,300}refreshRegistryInjection\(\)/.test(swift));
   ok("Swift storePath rejects absolute / parent-escape paths", /func storePath[\s\S]{0,160}hasPrefix\("\/"\)[\s\S]{0,40}contains\("\.\."\)/.test(swift));
   // REGRESSION: editor.js's __versoBackupReply must CHAIN store-native's, not clobber it.
   ok("editor.js chains a prior __versoBackupReply owner", /__prevBackupReply = window\.__versoBackupReply[\s\S]{0,320}typeof __prevBackupReply === "function"\) __prevBackupReply\(id, result\)/.test(ed));
