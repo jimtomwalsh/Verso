@@ -8624,7 +8624,8 @@ section("Product Rail: Source topic content authoring");
   var g = new Function(m[1] +
     "\nreturn { addSection: addSection, removeSection: removeSection, moveSection: moveSection," +
     " divergeSectionVariant: divergeSectionVariant, wrapSelectionWithMarker: wrapSelectionWithMarker," +
-    " toggleBulletLines: toggleBulletLines };")();
+    " toggleBulletLines: toggleBulletLines, sourceCommentsForSection: sourceCommentsForSection," +
+    " sourceCommentIsOrphaned: sourceCommentIsOrphaned };")();
 
   // Section CRUD -- plain array ops, callers own the updatedAt stamp + save.
   var topic = { sections: [{ id: "s1", heading: "One" }, { id: "s2", heading: "Two" }] };
@@ -8651,6 +8652,22 @@ section("Product Rail: Source topic content authoring");
   g.divergeSectionVariant(sec, "coastal", cloneFn);
   ok("diverging an ALREADY-diverged variant is a no-op (never clobbers an existing edit)", sec.overrides.coastal.facets.technical === "author's coastal edit");
   ok("divergeSectionVariant is a deep copy, not a shared reference", sec.overrides.coastal.facets !== sec.facets);
+
+  // source-stage-comments: sourceCommentsForSection / sourceCommentIsOrphaned.
+  var ctopic = {
+    sections: [{ id: "sec-1" }, { id: "sec-2" }],
+    comments: [
+      { id: "c1", anchor: { sectionId: "sec-1" } },
+      { id: "c2", anchor: { sectionId: "sec-2" } },
+      { id: "c3", anchor: { sectionId: "sec-1" } },
+      { id: "c4", anchor: { sectionId: "sec-deleted" } } // its section no longer exists
+    ]
+  };
+  ok("sourceCommentsForSection returns only comments anchored to that section", g.sourceCommentsForSection(ctopic, "sec-1").map(function (c) { return c.id; }).join(",") === "c1,c3");
+  ok("sourceCommentsForSection returns none for a section with no comments", g.sourceCommentsForSection({ sections: [], comments: [] }, "sec-x").length === 0);
+  ok("sourceCommentIsOrphaned is false for a comment anchored to a live section", g.sourceCommentIsOrphaned(ctopic.comments[0], ctopic) === false);
+  ok("sourceCommentIsOrphaned is true once its section no longer exists (e.g. deleted)", g.sourceCommentIsOrphaned(ctopic.comments[3], ctopic) === true);
+  ok("sourceCommentIsOrphaned is false for a comment with no anchor at all", g.sourceCommentIsOrphaned({ id: "c5" }, ctopic) === false);
 
   // wrapSelectionWithMarker: bold/inline-code toggle, both directions.
   var r1 = g.wrapSelectionWithMarker("hello world", 6, 11, "**");
@@ -8714,11 +8731,25 @@ section("Product Rail: Source topic content authoring");
   ok("a not-yet-diverged toggled variant offers a Diverge affordance per section", /var notDiverged = __sourceActiveVariants\.filter/.test(e) && /source-stage__diverge-btn/.test(e));
   ok("clicking Diverge calls divergeSectionVariant then re-renders", /divergeSectionVariant\(sec, v, clone\);/.test(e));
 
+  // source-stage-comments: the canvas editor's comment system (makeComment/makeReply,
+  // comment-popover/comment-thread CSS), ported to Source stage -- storage on the topic
+  // itself (topic.comments), not doc.comments, since Product Rail topics are library
+  // content, not part of any course doc.
+  ok("the per-section comment button is always present (an affordance to start a thread even at zero)", /var commentBtn = iconBtn\("message-square", "Comments"\);/.test(e));
+  ok("a comment count only shows via the SAME iconButtonWithBadge convention the Needs-review chip uses, not a new pattern", /actions\.appendChild\(iconButtonWithBadge\(commentBtn, openCommentCount\)\);/.test(e));
+  ok("only OPEN (not resolved) comments count toward the badge", /var openCommentCount = sourceCommentsForSection\(topic, sec\.id\)\.filter\(function \(c\) \{ return !c\.done; \}\)\.length;/.test(e));
+  ok("clicking the comment button toggles that section's thread panel open/closed", /__sourceOpenCommentSectionId = \(__sourceOpenCommentSectionId === sec\.id\) \? null : sec\.id;/.test(e));
+  ok("a new comment is anchored to {sectionId} only, no dx\/dy\/pageId (no canvas\/zoom here to project a pixel position from)", /topic\.comments\.push\(makeComment\(\{ sectionId: sec\.id \}, v\)\);/.test(e));
+  ok("the thread panel reuses the canvas's own comment-thread\/comment-reply CSS classes verbatim, not new ones", /h\("div", "comment-thread source-stage__comment-panel"\)/.test(e) && /h\("div", "comment-reply"\)/.test(e));
+  ok("resolving a comment reuses the canonical Checkbox, deleting reuses the canvas's own comment-popover__del styling", /label: "Resolved"/.test(e) && /h\("button", "comment-popover__del", "Delete"\)/.test(e));
+  ok("a reply appends via makeReply, same as the canvas system", /c\.replies\.push\(makeReply\(v\)\);/.test(e));
+
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
   ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1 && renderJs.indexOf("__sourceActiveEditField") === -1);
+  ok("render() never reads Source-stage comment state either", renderJs.indexOf("__sourceOpenCommentSectionId") === -1);
   var courseCss2 = src("src/course.css");
-  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body-input") === -1 && courseCss2.indexOf("source-stage__diverge") === -1);
+  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body-input") === -1 && courseCss2.indexOf("source-stage__diverge") === -1 && courseCss2.indexOf("source-stage__comment") === -1);
 })();
 
 // ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
@@ -8740,6 +8771,14 @@ section("Product Rail: Source stage info panel");
   // side panel in the app uses.
   ok("Linked in section uses the canonical panelSection() helper, titled with the count per the AC (\"Linked in (N)\")", /panelSection\(host, "Linked in \(" \+ used\.length \+ "\)"\)/.test(e));
   ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History"\)/.test(e));
+  // source-stage-comments: a topic-wide overview alongside the per-section thread
+  // panels, mirroring renderCommentList's own Open/Resolved/Orphaned split.
+  ok("Comments section uses the canonical panelSection() helper, titled with the count", /panelSection\(host, "Comments \(" \+ comments\.length \+ "\)"\)/.test(e));
+  ok("renderSourceInfoPanel calls renderSourceCommentsPanel after History, same render pass", /renderHistoryTimeline\(host, topic\);\s*\n\s*renderSourceCommentsPanel\(host, topic\);/.test(e));
+  ok("empty comments renders a named empty state, not a blank section", /No comments yet\./.test(e));
+  ok("comments split into Open\/Resolved\/Orphaned groups, reusing the same split shape as the canvas's renderCommentList", /group\("Open", open\);/.test(e) && /group\("Resolved", resolved\);/.test(e) && /group\("Orphaned", orphaned\);/.test(e));
+  ok("orphan classification reuses sourceCommentIsOrphaned (a section deleted out from under its comment)", /if \(sourceCommentIsOrphaned\(c, topic\)\) orphaned\.push\(c\);/.test(e));
+  ok("each comment row reuses the canvas's own comment-row\/comment-row__dot\/comment-row__snip classes verbatim", /h\("div", "comment-row" \+ \(sourceCommentIsOrphaned\(c, topic\) \? " is-orphan" : ""\)\)/.test(e) && /h\("span", "comment-row__dot"\)/.test(e) && /h\("div", "comment-row__snip"/.test(e));
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
   ok("clicking a Linked-in row opens that document AND switches to Edit (where the block actually lives)", /openCourseFromBrowser\(u\.docCode\); setStage\("edit"\); \}\);/.test(e));

@@ -10647,6 +10647,19 @@
     var newBlock = newLines.join("\n");
     return { text: text.slice(0, lineStart) + newBlock + text.slice(lineEndIdx), start: lineStart, end: lineStart + newBlock.length };
   }
+  // source-stage-comments: which of a topic's comments anchor to this section.
+  function sourceCommentsForSection(topic, sectionId) {
+    return (topic.comments || []).filter(function (c) { return c.anchor && c.anchor.sectionId === sectionId; });
+  }
+  // Mirrors commentIsOrphaned's block-cid-missing check (editor.js ~2153), keyed on a
+  // live section id instead of a canvas block's data-cid -- a section CAN be deleted out
+  // from under a comment (removeSection has no knowledge of topic.comments), so its
+  // thread needs a home to resurface in rather than silently vanishing.
+  function sourceCommentIsOrphaned(c, topic) {
+    var a = c && c.anchor;
+    if (!a || !a.sectionId) return false;
+    return !(topic.sections || []).some(function (s) { return s.id === a.sectionId; });
+  }
   /* @source-stage-end */
 
   var __sourceActiveTopicId = null;
@@ -10936,6 +10949,93 @@
     shell.body.appendChild(diffBlock);
   }
 
+  // source-stage-comments: the same feedback/discussion system the canvas editor already
+  // has (makeComment/makeReply, comment-popover/comment-thread/comment-row CSS), ported
+  // to Source stage. Storage lives on the topic itself (topic.comments), not doc.comments
+  // -- Product Rail topics are library content (window.LibraryStore), not part of any
+  // course doc. Anchor is section-scoped ({sectionId}, no dx/dy/pageId -- there's no
+  // canvas/zoom here to project a pixel position from). No floating pin/popover either:
+  // Source stage never uses floating overlays anywhere (the flag pill, diverge row,
+  // variant pills are all plain inline siblings, full-rerender on every state change) --
+  // an inline expand/collapse thread panel matches that established convention, not the
+  // canvas's own (structurally different: infinite pan/zoom needs a pin anchored in
+  // screen space; a normal scrolling document doesn't).
+  var __sourceOpenCommentSectionId = null; // which section's thread panel is expanded, or null
+
+  // One comment's rendered row: the SAME .comment-reply/.comment-row__dot/.comment-
+  // popover__row/.comment-popover__del classes the canvas comment system already
+  // defines in editor.css (plain flex rows, nothing canvas/position-specific), reused
+  // verbatim rather than styled twice.
+  function buildSourceCommentItem(topic, c) {
+    var UI = window.VersoUI;
+    var item = h("div", "source-stage__comment-item");
+    var line = h("div", "comment-reply");
+    var dot = h("span", "comment-row__dot"); dot.style.background = c.colour || "";
+    var body = h("span", "comment-reply__body");
+    body.textContent = (c.author ? c.author + ": " : "") + (c.body || "");
+    line.appendChild(dot); line.appendChild(body);
+    item.appendChild(line);
+    var row = h("div", "comment-popover__row");
+    if (UI && UI.Checkbox) {
+      var doneCheck = UI.Checkbox({
+        checked: !!c.done, label: "Resolved",
+        onChange: function (v) { c.done = v; stampTopicUpdated(topic); renderSourceArticle(); }
+      });
+      row.appendChild(doneCheck);
+    }
+    var del = h("button", "comment-popover__del", "Delete");
+    del.addEventListener("click", function () {
+      var i = (topic.comments || []).indexOf(c);
+      if (i !== -1) topic.comments.splice(i, 1);
+      stampTopicUpdated(topic);
+      renderSourceArticle();
+    });
+    row.appendChild(del);
+    item.appendChild(row);
+    (c.replies || []).forEach(function (rp) {
+      var rl = h("div", "comment-reply");
+      var rd = h("span", "comment-row__dot"); rd.style.background = rp.colour || "";
+      var rb = h("span", "comment-reply__body"); rb.textContent = (rp.author ? rp.author + ": " : "") + (rp.body || "");
+      rl.appendChild(rd); rl.appendChild(rb); item.appendChild(rl);
+    });
+    if (UI && UI.TextField && UI.Button) {
+      var replyField = UI.TextField({ value: "", placeholder: "Reply…" });
+      replyField.classList.add("comment-reply__input");
+      var replyBtn = UI.Button({
+        variant: "secondary", label: "Reply",
+        onClick: function () {
+          var v = (replyField.input.value || "").trim(); if (!v) return;
+          c.replies = c.replies || []; c.replies.push(makeReply(v));
+          stampTopicUpdated(topic); renderSourceArticle();
+        }
+      });
+      item.appendChild(replyField); item.appendChild(replyBtn);
+    }
+    return item;
+  }
+  // The expanded thread panel for one section: every comment anchored to it, then a
+  // fresh "Add a comment" field at the bottom.
+  function buildSourceCommentPanel(topic, sec) {
+    var UI = window.VersoUI;
+    var panel = h("div", "comment-thread source-stage__comment-panel");
+    sourceCommentsForSection(topic, sec.id).forEach(function (c) { panel.appendChild(buildSourceCommentItem(topic, c)); });
+    if (UI && UI.TextField && UI.Button) {
+      var newField = UI.TextField({ multiline: true, rows: 2, value: "", placeholder: "Add a comment…" });
+      newField.classList.add("comment-popover__body");
+      var addBtn = UI.Button({
+        variant: "primary", label: "Comment",
+        onClick: function () {
+          var v = (newField.input.value || "").trim(); if (!v) return;
+          topic.comments = topic.comments || [];
+          topic.comments.push(makeComment({ sectionId: sec.id }, v));
+          stampTopicUpdated(topic); renderSourceArticle();
+        }
+      });
+      panel.appendChild(newField); panel.appendChild(addBtn);
+    }
+    return panel;
+  }
+
   function renderSourceArticle() {
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-article"); if (!host) return;
@@ -11025,13 +11125,26 @@
       upBtn.addEventListener("click", function () { moveSection(topic, secIdx, -1); stampTopicUpdated(topic); renderSourceArticle(); });
       var downBtn = iconBtn("arrow-down", "Move down"); downBtn.disabled = secIdx === (topic.sections.length - 1);
       downBtn.addEventListener("click", function () { moveSection(topic, secIdx, 1); stampTopicUpdated(topic); renderSourceArticle(); });
+      // source-stage-comments: always clickable (starting the first comment needs an
+      // affordance even at zero), a count Badge overlays it only once there's something
+      // to show -- same iconButtonWithBadge (notification-bell) convention the Needs-
+      // review chip already established, not a new "only show when non-empty" pattern.
+      var openCommentCount = sourceCommentsForSection(topic, sec.id).filter(function (c) { return !c.done; }).length;
+      var commentBtn = iconBtn("message-square", "Comments");
+      commentBtn.classList.toggle("is-on", __sourceOpenCommentSectionId === sec.id);
+      commentBtn.addEventListener("click", function () {
+        __sourceOpenCommentSectionId = (__sourceOpenCommentSectionId === sec.id) ? null : sec.id;
+        renderSourceArticle();
+      });
       var delBtn = iconBtn("trash-2", "Delete this section", true);
       delBtn.addEventListener("click", function () {
         confirmModal("Delete section", (sec.heading || "This section") + " will be removed from the topic.", function () {
           removeSection(topic, secIdx); stampTopicUpdated(topic); renderSourceArticle();
         });
       });
-      actions.appendChild(upBtn); actions.appendChild(downBtn); actions.appendChild(delBtn);
+      actions.appendChild(upBtn); actions.appendChild(downBtn);
+      actions.appendChild(iconButtonWithBadge(commentBtn, openCommentCount));
+      actions.appendChild(delBtn);
       headingRow.appendChild(actions);
       secEl.appendChild(headingRow);
 
@@ -11085,6 +11198,8 @@
         });
         secEl.appendChild(divergeRow);
       }
+
+      if (__sourceOpenCommentSectionId === sec.id) secEl.appendChild(buildSourceCommentPanel(topic, sec));
 
       host.appendChild(secEl);
     });
@@ -11142,6 +11257,40 @@
       });
     }
     renderHistoryTimeline(host, topic);
+    renderSourceCommentsPanel(host, topic);
+  }
+
+  // source-stage-comments: a topic-wide overview alongside the per-section thread
+  // panels -- Open/Resolved/Orphaned, mirroring renderCommentList's own split
+  // (editor.js ~17819) and reusing its exact .comment-row/.comment-row__dot/
+  // .comment-row__snip classes.
+  function renderSourceCommentsPanel(host, topic) {
+    var comments = topic.comments || [];
+    var commentsBody = panelSection(host, "Comments (" + comments.length + ")");
+    if (!comments.length) {
+      commentsBody.appendChild(h("div", "insp-hint", "No comments yet."));
+      return;
+    }
+    var open = [], resolved = [], orphaned = [];
+    comments.forEach(function (c) {
+      if (sourceCommentIsOrphaned(c, topic)) orphaned.push(c);
+      else if (c.done) resolved.push(c);
+      else open.push(c);
+    });
+    function group(label, list) {
+      if (!list.length) return;
+      commentsBody.appendChild(h("div", "source-stage__group-label", label + " (" + list.length + ")"));
+      list.forEach(function (c) {
+        var row = h("div", "comment-row" + (sourceCommentIsOrphaned(c, topic) ? " is-orphan" : ""));
+        var dot = h("span", "comment-row__dot"); dot.style.background = c.colour || "";
+        var snip = h("div", "comment-row__snip" + (c.body ? "" : " is-empty"), c.body || "Empty note");
+        row.appendChild(dot); row.appendChild(snip);
+        commentsBody.appendChild(row);
+      });
+    }
+    group("Open", open);
+    group("Resolved", resolved);
+    group("Orphaned", orphaned);
   }
 
   // md-topic-import: a node-based vertical timeline tracing every change on this topic
