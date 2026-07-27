@@ -584,7 +584,11 @@ dropdown then lets you switch between every course, and the Source wiki, for tha
 then use the icon toolbar above the topic list (hover any icon for its name):
 
 - **New topic** — creates a blank topic you write directly, the same click-to-edit way as a
-  course's text blocks: click a heading or body to edit it, click away to save.
+  course's text blocks: click a heading or body to edit it, click away to save. Editing a body
+  is real formatted text, not raw Markdown — bold/code/bullets show as themselves while you
+  type, never as `**`/`` ` ``/`- ` marks. A small toolbar (Bold, inline code, bullet list)
+  appears next to whichever block you're actively editing; the section widens while you're in
+  it so you can see the whole thing.
 - **Import from Markdown…** — creates topics straight from a Markdown file (e.g. a manual you've
   converted to `.md`). Numbered headings (`# 1`, `## 1.1`, `### 1.1.1`) split into topics and
   sections by their number — the number itself decides the split even if the file's own `#`/`##`

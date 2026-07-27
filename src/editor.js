@@ -10668,42 +10668,6 @@
     if (section.overrides[variant]) return;
     section.overrides[variant] = { facets: cloneFn(section.facets || {}) };
   }
-  // Bold/inline-code toggle: wraps the selection in `marker` on each side, or unwraps
-  // it if the selection is ALREADY wrapped in exactly that marker (a true toggle, not
-  // just an insert). An empty (collapsed) selection inserts an empty marker pair with
-  // the cursor placed between them, ready to type.
-  function wrapSelectionWithMarker(text, start, end, marker) {
-    text = text || ""; start = start || 0; end = end == null ? start : end;
-    var m = marker.length;
-    // "Already wrapped" means the markers sit immediately OUTSIDE the selection (the
-    // normal case: an author selects just the word, not the ** themselves) -- not
-    // inside it. Strip those surrounding markers instead of adding a second pair.
-    if (start - m >= 0 && end + m <= text.length && text.slice(start - m, start) === marker && text.slice(end, end + m) === marker) {
-      var newText = text.slice(0, start - m) + text.slice(start, end) + text.slice(end + m);
-      return { text: newText, start: start - m, end: end - m };
-    }
-    var before = text.slice(0, start), sel = text.slice(start, end), after = text.slice(end);
-    return { text: before + marker + sel + marker + after, start: start + m, end: start + m + sel.length };
-  }
-  // Bullet-list toggle: prefixes/strips "- " on every non-empty line the selection
-  // spans (a true per-line toggle -- if EVERY spanned line is already bulleted, it
-  // strips them all; otherwise it bullets every non-bulleted line).
-  function toggleBulletLines(text, start, end) {
-    text = text || ""; start = start || 0; end = end == null ? start : end;
-    var lineStart = text.lastIndexOf("\n", start - 1) + 1;
-    var lineEndIdx = text.indexOf("\n", end); if (lineEndIdx === -1) lineEndIdx = text.length;
-    var block = text.slice(lineStart, lineEndIdx);
-    var lines = block.split("\n");
-    var nonEmpty = lines.filter(function (l) { return l !== ""; });
-    var allBulleted = nonEmpty.length > 0 && nonEmpty.every(function (l) { return l.slice(0, 2) === "- "; });
-    var newLines = lines.map(function (l) {
-      if (l === "") return l;
-      if (allBulleted) return l.slice(0, 2) === "- " ? l.slice(2) : l;
-      return l.slice(0, 2) === "- " ? l : "- " + l;
-    });
-    var newBlock = newLines.join("\n");
-    return { text: text.slice(0, lineStart) + newBlock + text.slice(lineEndIdx), start: lineStart, end: lineStart + newBlock.length };
-  }
   /* @source-stage-end */
 
   var __sourceActiveTopicId = null;
@@ -10984,11 +10948,6 @@
   }
   function stampTopicUpdated(topic) { topic.updatedAt = Date.now(); saveLibrary(); }
 
-  // Currently-focused editable field (heading input or a facet-body textarea) --
-  // mirrors the copy editor's _activeCopyRow: a `focus` listener on each field sets
-  // this, and the shared format toolbar's buttons (mousedown+preventDefault, so
-  // clicking them never steals the field's selection) act on whichever one is live.
-  var __sourceActiveEditField = null; // { textarea, sec, variant } | null
   // Drag state for the section grip handle (source-stage-section-disclosure) -- only the
   // handle itself is draggable=true (the section box holds an editable heading input and
   // body text, so making the whole box draggable would fight text selection); the
@@ -10996,10 +10955,84 @@
   // outliner's `treeDrag` (editor.js ~16310), reusing its drop-marker classes.
   var __sourceSectionDrag = null; // { id } | null
   // Which single (section, variant) body cell is currently in edit mode -- click a
-  // rendered body to swap it for a raw textarea; blur commits + swaps back. Everything
-  // else keeps reading as normal MarkdownLite output, so browsing a topic never shows
-  // raw ** markers -- only the one cell an author is actively typing into.
+  // rendered body to swap it for a real contentEditable surface (seeded with the SAME
+  // MarkdownLite.render() HTML the view shows, so entering edit mode never flashes raw
+  // ** markers); blur commits + swaps back. Everything else keeps reading as normal
+  // MarkdownLite output, so browsing a topic never shows raw markdown -- only the one
+  // cell an author is actively typing into, and even that cell reads as formatted text.
   var __sourceEditingCell = null; // { sectionId, variant } | null
+
+  // Bold/inline-code/bullet-list toolbar for the ACTIVE contentEditable cell -- built
+  // fresh per editing cell (closes over that cell's own element directly, so no shared
+  // "active field" global is needed the way the old textarea-splicing toolbar used).
+  // Same io.getNode()/io.onChange() adapter SHAPE as the canvas inspector's
+  // buildFormatToggleBar (editor.js ~13223) for consistency, though Source stage keeps
+  // its own smaller button set (Bold/code/bullet, not italic/underline/link) since
+  // "list" here means an inline execCommand bullet toggle, not FORMAT_TOGGLES'
+  // "list-block" whole-block-type conversion -- a different operation entirely.
+  function buildSourceEditToolbar(io) {
+    var toolbar = h("div", "source-stage__edit-toolbar");
+    function execAndCommit(cmd, arg) {
+      return function () {
+        var node = io.getNode(); if (!node) return;
+        node.focus();
+        document.execCommand(cmd, false, arg || null);
+        io.onChange();
+      };
+    }
+    // No native execCommand wraps a selection in <code> -- surround it manually. A
+    // collapsed (empty) selection is a no-op (nothing to wrap), same guard the old
+    // marker-toggle had for an insertion point with no text selected.
+    function wrapInlineCode() {
+      var node = io.getNode(); if (!node) return;
+      node.focus();
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      if (range.collapsed) return;
+      var codeEl = document.createElement("code");
+      try { range.surroundContents(codeEl); }
+      catch (e) { codeEl.appendChild(range.extractContents()); range.insertNode(codeEl); }
+      sel.removeAllRanges();
+      var after = document.createRange(); after.selectNodeContents(codeEl); after.collapse(false);
+      sel.addRange(after);
+      io.onChange();
+    }
+    [{ label: "B", icon: null, title: "Bold", action: execAndCommit("bold") },
+     { label: null, icon: "code-xml", title: "Inline code", action: wrapInlineCode },
+     { label: null, icon: "list", title: "Bullet list", action: execAndCommit("insertUnorderedList") }]
+      .forEach(function (t) {
+        var btn = h("button", "prop-toggle" + (t.icon ? " prop-toggle--icon" : ""));
+        btn.type = "button"; btn.title = t.title;
+        if (t.icon) btn.innerHTML = Icon(t.icon); else btn.textContent = t.label;
+        btn.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
+        btn.addEventListener("click", t.action);
+        toolbar.appendChild(btn);
+      });
+    return toolbar;
+  }
+  // Commits an edited cell's contentEditable content back to markdown-lite text. Guards
+  // against a purely cosmetic open/close (click in, click away, nothing typed) ever
+  // rewriting the stored string: some of render()'s own behaviour is lossy in one
+  // direction (e.g. a multi-line paragraph with no blank-line separators collapses its
+  // newlines to spaces), so a naive round-trip of UNCHANGED content could still come out
+  // textually different from the original -- which would falsely look like an edit to
+  // the re-import reconcile system (#87/#88's lastImportedText comparisons). Comparing
+  // against a re-serialize of the OLD text's own rendered form (not the old text
+  // itself) means "no real edit happened" is judged the same lossy way render() itself
+  // already behaves, so it never fires on a no-op.
+  function commitEditableCell(topic, sec, variant, editEl) {
+    var ref = facetsRefFor(sec, variant);
+    var oldText = ref[__sourceActiveFacet] || "";
+    var newText = window.MarkdownLite.serialize(editEl);
+    var probe = document.createElement("div");
+    probe.innerHTML = window.MarkdownLite.render(oldText);
+    var normalizedOld = window.MarkdownLite.serialize(probe);
+    if (newText !== normalizedOld) {
+      ref[__sourceActiveFacet] = newText;
+      stampTopicUpdated(topic);
+    }
+  }
 
   // md-topic-import: lets the author compare their current (Flagship) text against a
   // re-imported source's version once reconcileSection has flagged a real conflict, and
@@ -11040,7 +11073,6 @@
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-article"); if (!host) return;
     host.innerHTML = "";
-    __sourceActiveEditField = null;
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
@@ -11067,41 +11099,18 @@
     }
     host.appendChild(headEl);
 
-    // Shared Bold/Code/Bullet toolbar: operates on __sourceActiveEditField, string-
-    // manipulating its raw markdown-lite text (no contentEditable/execCommand -- the
-    // storage format is a plain string, so the edit surface is a plain <textarea>).
-    var toolbar = h("div", "source-stage__edit-toolbar");
-    function toolbarApply(fn) {
-      return function () {
-        var f = __sourceActiveEditField; if (!f) return;
-        var ta = f.textarea, res = fn(ta.value, ta.selectionStart, ta.selectionEnd);
-        ta.value = res.text;
-        ta.dispatchEvent(new Event("change"));
-        ta.focus(); ta.setSelectionRange(res.start, res.end);
-      };
-    }
-    function wrapWith(marker) { return function (text, start, end) { return wrapSelectionWithMarker(text, start, end, marker); }; }
-    // "B" stays a plain letter (matches the existing B/I/U inline-exec convention
-    // exactly); code/bullet use real icons, matching that SAME bar's own list-toggle
-    // button (Icon("list"), prop-toggle--icon) rather than a text glyph like "<>"/"•".
-    [{ label: "B", icon: null, title: "Bold", fn: wrapWith("**") },
-     { label: null, icon: "code-xml", title: "Inline code", fn: wrapWith("`") },
-     { label: null, icon: "list", title: "Bullet list", fn: null }]
-      .forEach(function (t) {
-        var btn = h("button", "prop-toggle" + (t.icon ? " prop-toggle--icon" : ""));
-        btn.type = "button"; btn.title = t.title;
-        if (t.icon) btn.innerHTML = Icon(t.icon); else btn.textContent = t.label;
-        btn.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the textarea's selection
-        btn.addEventListener("click", toolbarApply(t.fn || toggleBulletLines));
-        toolbar.appendChild(btn);
-      });
-    host.appendChild(toolbar);
-
     var pillsRow = buildVariantPillsRow(topic);
     if (pillsRow) host.appendChild(pillsRow);
 
     (topic.sections || []).forEach(function (sec, secIdx) {
       var secEl = h("div", "source-stage__section");
+      // Attach BEFORE building children (not at the end of the loop body) -- a
+      // contentEditable can only receive real focus once it's actually in the live
+      // document, and editEl.focus() below runs while this section is still being
+      // constructed. Latent in the old textarea version too (ta.focus() there was
+      // silently a no-op for the same reason); surfaced now by the no-op commit guard's
+      // own browser-verify, worth fixing properly rather than carrying forward.
+      host.appendChild(secEl);
 
       var headingRow = h("div", "source-stage__heading-row");
       var headingInput = h("input", "source-stage__heading source-stage__heading-input");
@@ -11171,17 +11180,26 @@
         if (columned) wrap.appendChild(h("div", "source-stage__col-label", c.variant == null ? "Flagship" : c.variant));
         var editing = __sourceEditingCell && __sourceEditingCell.sectionId === sec.id && __sourceEditingCell.variant === c.variant;
         if (editing) {
-          var ta = h("textarea", "source-stage__body-input");
-          ta.value = c.text; ta.rows = Math.max(3, c.text.split("\n").length);
-          ta.addEventListener("focus", function () { __sourceActiveEditField = { textarea: ta, sec: sec, variant: c.variant }; });
-          ta.addEventListener("blur", function () {
-            facetsRefFor(sec, c.variant)[__sourceActiveFacet] = ta.value;
-            stampTopicUpdated(topic);
+          // A real contentEditable, seeded with the SAME rendered HTML the view shows --
+          // never a raw markdown-lite string in a textarea. Widen the section while
+          // editing so the whole block stays visible instead of clipping to the normal
+          // reading-width column.
+          secEl.classList.add("source-stage__section--editing");
+          var editEl = h("div", "source-stage__body source-stage__body--editing");
+          editEl.contentEditable = "true";
+          editEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
+          var toolbar = buildSourceEditToolbar({ getNode: function () { return editEl; }, onChange: function () {} });
+          wrap.appendChild(toolbar);
+          editEl.addEventListener("blur", function () {
+            commitEditableCell(topic, sec, c.variant, editEl);
             __sourceEditingCell = null;
             renderSourceArticle();
           });
-          wrap.appendChild(ta);
-          ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); // land the cursor at the end, ready to type
+          wrap.appendChild(editEl);
+          editEl.focus();
+          // land the cursor at the end, ready to type
+          var range = document.createRange(); range.selectNodeContents(editEl); range.collapse(false);
+          var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
         } else {
           var bodyEl = h("div", "source-stage__body");
           bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
@@ -11211,8 +11229,6 @@
         });
         secEl.appendChild(divergeRow);
       }
-
-      host.appendChild(secEl);
     });
 
     var addBtn = h("button", "source-stage__add-section", "+ Add section");
