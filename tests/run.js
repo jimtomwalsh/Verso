@@ -2044,7 +2044,7 @@ section("#71 recents");
   if (!m) { ok("locate @pure-recents fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { stampDocUpdatedAt: stampDocUpdatedAt, stampDocOpenedAt: stampDocOpenedAt, recentsCompare: recentsCompare," +
-    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime," +
+    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime, stampMasterVersion: stampMasterVersion," +
     " docMatchesProductStage: docMatchesProductStage, tagDocProductStage: tagDocProductStage };")();
 
   // stampers: write the scalar onto meta, create meta if absent, never touch media.
@@ -2093,6 +2093,17 @@ section("#71 recents");
   ok("one hour singular", g.formatRelativeTime(NOW - 60 * 60 * 1000, NOW) === "1 hour ago");
   ok("days", g.formatRelativeTime(NOW - 3 * 24 * 3600 * 1000, NOW) === "3 days ago");
   ok("future clamps to just now", g.formatRelativeTime(NOW + 5000, NOW) === "just now");
+
+  // Product Rail: master version/updatedAt stamp -- bumps on the stamp call, stable
+  // (unchanged) across any read that doesn't call it.
+  var master = { name: "Topic" };
+  g.stampMasterVersion(master, 1000);
+  ok("stamps updatedAt onto the master", master.updatedAt === 1000);
+  var readOnly = master.updatedAt; // a "read" -- must not itself bump anything
+  ok("a read is stable (unchanged) until the next stamp call", master.updatedAt === readOnly && master.updatedAt === 1000);
+  g.stampMasterVersion(master, 2000);
+  ok("re-stamping bumps to the new value (content changed again)", master.updatedAt === 2000);
+  ok("stampMasterVersion is null-safe", g.stampMasterVersion(null, 1000) === null);
 
   // Product Rail #1: Product/Stage filter predicate + tagger, over a fixture mix of
   // tagged and untagged docs. Untagged docs must behave exactly as today (match any
@@ -2518,6 +2529,12 @@ section("#19 stable-id master snapshot");
   var saveIdx = etxt.indexOf("var promoted = clone(doc.components[selectedKey]);");
   ok("'Save to library' handler found", saveIdx !== -1);
   ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 220).indexOf("remintIds") === -1);
+  // Product Rail: the SAME handler is the sole content-mutation site, so it's where both
+  // the version stamp and the owner-Product tag stamp bump/land -- both BEFORE the master
+  // lands in the shared store.
+  var psaveBody = etxt.slice(saveIdx, saveIdx + 700);
+  ok("'Save to library' stamps the version BEFORE the master lands in the shared store", /stampMasterVersion\(promoted, Date\.now\(\)\)[\s\S]{0,600}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
+  ok("'Save to library' also stamps the owner-Product tag BEFORE the master lands", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)[\s\S]{0,300}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
 
   // 3. The contract is documented at remintIds' own definition, so #20/#21/#24 don't
   // add a 5th call site that touches library-resident content.
@@ -4558,7 +4575,7 @@ section("product-rail tag vocabulary");
   // THIS course's Product context (doc.meta.productId), exactly once, at promotion time.
   var doSaveIdx = etxt.indexOf("function doSave() {\n          pushHistory();\n          // #19: plain clone()");
   ok("promote-to-library doSave() found", doSaveIdx !== -1);
-  var doSaveBody = etxt.slice(doSaveIdx, doSaveIdx + 900);
+  var doSaveBody = etxt.slice(doSaveIdx, doSaveIdx + 1200);
   ok("stamps the reserved owning-Product tag from doc.meta.productId at promotion time", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)/.test(doSaveBody));
   var stampIdx = doSaveBody.indexOf("stampOwnerProductTag(promoted");
   var storeIdx = doSaveBody.indexOf("window.LibraryStore.components[selectedKey] = promoted;");

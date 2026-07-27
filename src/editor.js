@@ -308,6 +308,16 @@
     d.meta.lastOpenedAt = now;
     return d;
   }
+  // Product Rail: version/updatedAt stamp on a LibraryStore master, bumped on every
+  // content edit -- the primitive Deliver's staleness count and Ground Truth's change-
+  // tracking display both read, with no UI of its own. Promotion (the "Save to library"
+  // overwrite) is the ONLY content-mutation path today (#21: no in-place master editor
+  // yet), so that is the sole call site. A read never bumps it -- only this stamper does.
+  function stampMasterVersion(master, now) {
+    if (!master) return master;
+    master.updatedAt = now;
+    return master;
+  }
   function docUpdatedAt(d) {
     return (d && d.meta && typeof d.meta.updatedAt === "number") ? d.meta.updatedAt : -Infinity;
   }
@@ -10559,6 +10569,7 @@
           // exact ids this course-local component was captured with (see the contract on
           // remintIds); they become the master's permanent cross-course identity.
           var promoted = clone(doc.components[selectedKey]);
+          stampMasterVersion(promoted, Date.now()); // Product Rail: bump on this content edit
           // Product Rail: stamp the reserved owning-Product tag from THIS course's Product
           // context, if it has one -- birthplace, not ownership; an untagged course simply
           // promotes with no reserved tag (nothing to attribute). Stamped once, here, at
