@@ -9090,13 +9090,43 @@ section("#116 copy-editor shell");
 })();
 
 // ---- #175 copy-editor inline rich-format toolbar (B/I/U + inline weight on variant text) ----
+// ---- #170/#158: ONE shared, config-driven formatting toggle-bar --------------
+section("#170/#158 shared formatting toggle-bar");
+(function () {
+  var e = src("src/editor.js");
+  var body = slice(e, "function buildFormatToggleBar(io)", "window.__buildFormatToggleBar = buildFormatToggleBar;");
+  ok("buildFormatToggleBar found", body.indexOf("var bar = h(\"div\", \"prop-toggle-row\");") !== -1);
+  ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(e));
+  ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(e));
+  ok("inline-exec toggle calls io.getNode()/document.execCommand/io.onChange (behaviour unchanged)", /var node = io\.getNode\(\); if \(!node\) return;\s*\n\s*node\.focus\(\);\s*\n\s*document\.execCommand\(t\.cmd, false, null\);\s*\n\s*io\.onChange\(\);/.test(body));
+  ok("Link uses the SAME createLink\\/unlink + target=_blank mechanic as before", /document\.execCommand\("createLink", false, url\)[\s\S]{0,250}setAttribute\("target", "_blank"\)/.test(body));
+  ok("bar.refresh() resyncs is-on state against the CURRENT selection (for a bar that persists across re-focus)", /bar\.refresh = function \(\) \{/.test(body));
+  ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(e));
+
+  // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
+  var insStart = e.indexOf("function renderFieldInspector(node)");
+  var insBody = e.slice(insStart, insStart + 6000);
+  ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \}\s*\n\s*\}\);/.test(insBody));
+  ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
+  var cfStart = e.indexOf("function buildCopyFormatBar()");
+  var cfBody = e.slice(cfStart, cfStart + 700);
+  ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
+  ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
+  // exactly one config-driven toggle list in the whole file (no second duplicate copy).
+  ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (e.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1);
+})();
+
 section("#175 copy-editor format toolbar");
 (function () {
   var e = src("src/editor.js");
   var bar = slice(e, "function buildCopyFormatBar()", "return bar;\n  }");
   ok("toolbar built once + injected into the copy-editor bar", /getElementById\("copyedit-format"\)[\s\S]*?insertBefore\(bar, host\)/.test(bar));
-  ok("toolbar wires canonical B/I/U prop-toggles via execCommand", /\["B", "bold"\], \["I", "italic"\], \["U", "underline"\][\s\S]*?document\.execCommand\(o\[1\]/.test(bar));
-  ok("B/I/U commits through commitCopyRow (-> frWrite override layer)", /document\.execCommand\(o\[1\][\s\S]*?commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\)/.test(bar));
+  // #170/#158: B/I/U/Link now come from the ONE shared canonical toggle-bar builder
+  // (buildFormatToggleBar), not a bespoke row -- wired here via io.getNode/io.onChange.
+  ok("toolbar uses the shared canonical toggle-bar builder, not a bespoke B/I/U row", /var biu = buildFormatToggleBar\(\{[\s\S]{0,300}\}\);/.test(bar));
+  ok("getNode resolves the active copy row's field", /getNode: function \(\) \{ return _activeCopyRow && _activeCopyRow\.tx; \}/.test(bar));
+  ok("onChange commits through commitCopyRow (-> frWrite override layer)", /onChange: function \(\) \{ if \(!_activeCopyRow\) return; commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\); \}/.test(bar));
+  ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(e));
   ok("toolbar uses the shared dsSelect weight picker (no bespoke control)", /dsSelect\(\[\["Weight", ""\], \["Regular", "400"\][\s\S]*?applyCopyWeight/.test(bar));
   ok("weight captures the live row range on mousedown (select steals focus)", /mousedown[\s\S]*?savedRange = \(r && _activeCopyRow/.test(bar));
   // applyCopyWeight: an inline font-weight span (survives sanitizeFieldHtml) committed through commitCopyRow
