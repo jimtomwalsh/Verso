@@ -5127,6 +5127,47 @@
     });
   }
   window.__clearBlockContent = clearBlockContent; // #174 test hook (pure subtree clear)
+  // #170/#33: text<->list BLOCK-TYPE conversion (not an inline execCommand list -- a
+  // whole-block type swap between the dedicated "list" type and any other text-content
+  // type). Only block-level tags are treated as item breaks, so inline formatting
+  // (b/i/u/span/a) survives untouched inside each <li>.
+  /* @list-convert-start */
+  function htmlToListItems(html) {
+    var s = String(html == null ? "" : html);
+    s = s.replace(/<\/(p|div)>/gi, "\n").replace(/<(p|div)[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "\n");
+    var lines = s.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
+    if (!lines.length) return "<li></li>";
+    return lines.map(function (l) { return "<li>" + l + "</li>"; }).join("");
+  }
+  // Inverse: join <li> items back into one flowing field, each item's inline HTML kept
+  // intact, multiple items separated by <br> so nothing is silently dropped.
+  function listItemsToHtml(liHtml) {
+    var s = String(liHtml == null ? "" : liHtml);
+    var items = [], re = /<li[^>]*>([\s\S]*?)<\/li>/gi, m;
+    while ((m = re.exec(s))) items.push(m[1].trim());
+    if (!items.length) return s; // not actually <li>-shaped -- return untouched (defensive)
+    return items.join("<br>");
+  }
+  // Converts a text-content block to/from the dedicated "list" type IN PLACE. Remembers
+  // the PRIOR type on the block (__priorTextType) so a round-trip restores it (default
+  // "paragraph" if that memory is somehow absent) -- heading<->list<->heading is lossless
+  // on TYPE; content is lossless on inline formatting (see htmlToListItems above).
+  function convertTextListBlockType(block) {
+    if (!block) return block;
+    if (block.type === "list") {
+      var restore = block.__priorTextType || "paragraph";
+      block.text = listItemsToHtml(block.text);
+      block.type = restore;
+      delete block.__priorTextType;
+    } else {
+      block.__priorTextType = block.type;
+      block.text = htmlToListItems(block.text);
+      block.type = "list";
+    }
+    return block;
+  }
+  /* @list-convert-end */
+  window.__convertTextListBlockType = convertTextListBlockType; // test hook
   // Action wrapper: confirm (destructive), push history, clear one or more blocks, remount.
   function clearBlockContentAction(blocks) {
     var list = Array.isArray(blocks) ? blocks.filter(Boolean) : [blocks].filter(Boolean);
@@ -11978,12 +12019,14 @@
   //                    (inspector: obj[field] = sanitizeFieldHtml(...) + renderModelView();
   //                    copy editor: commitCopyRow(...))
   // Config-driven so a future kind (e.g. the List ticket's block-level toggle) is a new
-  // branch here, not a new bar -- today only "inline-exec" (B/I/U) and "link" exist.
+  // branch here, not a new bar -- today "inline-exec" (B/I/U), "link", and "list-block"
+  // (#170/#33: a whole block-TYPE conversion, not an inline execCommand list) exist.
   var FORMAT_TOGGLES = [
     { kind: "inline-exec", label: "B", cmd: "bold", title: "Bold (selected text)" },
     { kind: "inline-exec", label: "I", cmd: "italic", title: "Italic (selected text)" },
     { kind: "inline-exec", label: "U", cmd: "underline", title: "Underline (selected text)" },
-    { kind: "link" }
+    { kind: "link" },
+    { kind: "list-block" }
   ];
   function formatCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
   function formatSelectionAnchor() {
@@ -11995,6 +12038,7 @@
   function buildFormatToggleBar(io) {
     var bar = h("div", "prop-toggle-row");
     var execBtns = [];
+    var listBtn = null;
     FORMAT_TOGGLES.forEach(function (t) {
       if (t.kind === "inline-exec") {
         var b = h("button", "prop-toggle" + (formatCmdOn(t.cmd) ? " is-on" : ""), t.label);
@@ -12040,15 +12084,38 @@
         unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
         unlinkB.addEventListener("click", function () { var n3 = io.getNode(); if (!n3) return; n3.focus(); document.execCommand("unlink", false, null); io.onChange(); });
         bar.appendChild(unlinkB);
+      } else if (t.kind === "list-block") {
+        // #170/#33: converts the WHOLE block to/from the dedicated "list" type (on-state
+        // reads block.type, not queryCommandState). Not every surface/field supports this
+        // (e.g. a quiz sub-field can't become a top-level list block), so the button is
+        // hidden -- not just disabled -- when io.isListToggleable() says no. A persisting
+        // bar (copy editor) re-derives visibility on every bar.refresh(), since which row
+        // is focused changes without the bar itself being rebuilt.
+        if (!io.isListToggleable || !io.isListBlock || !io.toggleListBlock) return;
+        var listB = h("button", "prop-toggle prop-toggle--icon");
+        listB.type = "button";
+        listB.title = "List — converts this block to/from a bulleted list";
+        listB.innerHTML = Icon("list");
+        listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        listB.addEventListener("click", function () { io.toggleListBlock(); });
+        bar.appendChild(listB);
+        listBtn = listB;
       }
     });
-    // Resync every inline-exec button's active state against the CURRENT selection --
-    // callers that persist across re-focus (the copy editor's format bar, built once)
-    // use this instead of rebuilding; a surface that rebuilds the bar every render doesn't need it.
+    // Resync every inline-exec button's active state against the CURRENT selection, plus
+    // the list-block toggle's visibility/state -- callers that persist across re-focus
+    // (the copy editor's format bar, built once) use this instead of rebuilding; a surface
+    // that rebuilds the bar every render still gets a correct initial state (called below).
     bar.refresh = function () {
       var active = !!io.getNode();
       execBtns.forEach(function (o) { o.el.classList.toggle("is-on", active && formatCmdOn(o.cmd)); });
+      if (listBtn) {
+        var canList = !!(io.isListToggleable && io.isListToggleable());
+        listBtn.hidden = !canList;
+        if (canList) listBtn.classList.toggle("is-on", !!(io.isListBlock && io.isListBlock()));
+      }
     };
+    bar.refresh();
     return bar;
   }
   window.__buildFormatToggleBar = buildFormatToggleBar; // headless test hook
@@ -13020,51 +13087,36 @@
       }
     });
 
-    // Row 4: Inline style (B / I / U / Link) — #170/#158: the shared canonical toggle-bar
-    // builder, also used by the Course Copy Editor (buildCopyFormatBar).
+    // Row 4: Inline style (B / I / U / Link / List) — #170/#158/#33: the shared canonical
+    // toggle-bar builder, also used by the Course Copy Editor (buildCopyFormatBar). List is
+    // now a whole block-TYPE conversion (block.type <-> "list"), not an inline execCommand
+    // list -- on-state reads the model, and clicking converts the block in place via
+    // convertTextListBlockType, remembering the prior type for a lossless round-trip. Only
+    // genuine top-level text-content blocks (obj.type in TEXT_CONTENT_TYPES) can convert --
+    // a quiz sub-field (obj has no .type) never shows the List toggle.
     inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Style"));
+    var rootIsList = node.tagName === "UL" || node.tagName === "OL";
     var biu = buildFormatToggleBar({
       getNode: function () { return node; },
-      onChange: function () { obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); }
+      onChange: function () { obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); },
+      isListToggleable: function () { return field === "text" && !!obj && !!obj.type && !!TEXT_CONTENT_TYPES[obj.type]; },
+      isListBlock: function () { return !!obj && obj.type === "list"; },
+      toggleListBlock: function () {
+        pushHistory();
+        convertTextListBlockType(obj);
+        reapplyStructural(findPageOfBlock(obj));
+        reselectBlockNode(obj, "field"); // re-renders the inspector fresh (new type + marker section)
+      }
     });
-    // List — #9: folded INTO this inline-format toggle bar (was a separate switchEl below).
-    // As a prop-toggle it shares B/I/U's mousedown-preventDefault, so the field keeps its
-    // text selection and execCommand acts on the right range. The old switch had no such
-    // guard: clicking it blurred the field first -> collapsed caret -> the toggle "did
-    // nothing". A field whose editable ROOT is a list (#31: the quiz summary <ul>, the list
-    // block) is inherently a list, so it shows NO toggle here — its marker settings live in
-    // the List section below.
-    var rootIsList = node.tagName === "UL" || node.tagName === "OL";
-    function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
-    if (!rootIsList) {
-      var listB = h("button", "prop-toggle prop-toggle--icon" + (listOn() ? " is-on" : ""));
-      listB.type = "button";
-      listB.title = "List";
-      listB.innerHTML = Icon("list");
-      listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      listB.addEventListener("click", function () {
-        node.focus();
-        if (listOn()) {
-          if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null);
-          if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null);
-        } else {
-          document.execCommand("insertUnorderedList", false, null);
-        }
-        writeModel(node, node.innerHTML);
-        renderModelView();
-        renderInspector(); // reveals / hides the List marker section below
-      });
-      biu.appendChild(listB);
-    }
     inspector.appendChild(biu);
 
-    // List marker settings — the on/off toggle now lives in the inline-format bar above (#9).
-    // This section is purely the marker styling, shown only when the field IS a list: an
-    // inline list toggled on, OR a root-<ul>/<ol> field (#31: the quiz Chapter-summary <ul>,
-    // the list block). One <ul> renders disc / numbered / lettered alike (list-style-type is
-    // tag-agnostic), so the marker (incl. Numbered / Lettered / Roman) lives entirely in the
-    // Bullet-style dropdown; marker size stays a numeric iconField (exception).
-    if (rootIsList || listOn()) {
+    // List marker settings — the on/off toggle now lives in the inline-format bar above.
+    // Purely the marker styling, shown only when the field IS a list block (#31: the quiz
+    // Chapter-summary <ul> is its own root-<ul> field; the list block itself is rootIsList).
+    // One <ul> renders disc / numbered / lettered alike (list-style-type is tag-agnostic),
+    // so the marker (incl. Numbered / Lettered / Roman) lives entirely in the Bullet-style
+    // dropdown; marker size stays a numeric iconField (exception).
+    if (rootIsList) {
       inspector.appendChild(sub("List"));
       var MARKERS = [["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
       var MARK_GLYPH = { disc: "•", circle: "◦", square: "▪", dash: "–", arrow: "→", check: "✓", decimal: "1.", "lower-alpha": "a.", "lower-roman": "i.", custom: (obj.listMarkerChar || "✱") };
@@ -18124,12 +18176,26 @@
     var host = document.getElementById("copyedit-tools");
     if (!host || !host.parentNode) return null;
     bar = h("div", "copyedit__format"); bar.id = "copyedit-format";
-    // #170/#158: the shared canonical toggle-bar builder (B/I/U/Link) -- the same one the
-    // field inspector's Style row uses. The copy editor gains Link as a side effect of
-    // sharing one implementation (it had none before); same execCommand/createLink mechanic.
+    // #170/#158/#33: the shared canonical toggle-bar builder (B/I/U/Link/List) -- the same
+    // one the field inspector's Style row uses. The copy editor gains Link as a side effect
+    // of sharing one implementation (it had none before); same execCommand/createLink
+    // mechanic. List converts the FOCUSED row's underlying block type in place -- only
+    // shown when that row is a genuine top-level text-content block (t.host.type in
+    // TEXT_CONTENT_TYPES), never a quiz sub-field row (t.host has no .type). This bar is
+    // built ONCE and persists across every row focus, so visibility/state re-derive on
+    // every bar.refresh() (via refreshCopyFormatState, already wired to focus/keyup/mouseup).
     var biu = buildFormatToggleBar({
       getNode: function () { return _activeCopyRow && _activeCopyRow.tx; },
-      onChange: function () { if (!_activeCopyRow) return; commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant); }
+      onChange: function () { if (!_activeCopyRow) return; commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant); },
+      isListToggleable: function () { return !!(_activeCopyRow && _activeCopyRow.t.key === "text" && _activeCopyRow.t.host && _activeCopyRow.t.host.type && TEXT_CONTENT_TYPES[_activeCopyRow.t.host.type]); },
+      isListBlock: function () { return !!(_activeCopyRow && _activeCopyRow.t.host.type === "list"); },
+      toggleListBlock: function () {
+        if (!_activeCopyRow) return;
+        pushHistory();
+        convertTextListBlockType(_activeCopyRow.t.host);
+        copyEditDirty = true; scheduleSave();
+        renderCopyEditorDoc(); renderCopyEditorTools(); // rows rebuild -- the converted row now reflects the new content/type
+      }
     });
     _copyFormatBar = biu;
     bar.appendChild(biu);

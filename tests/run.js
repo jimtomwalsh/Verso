@@ -6010,15 +6010,18 @@ section("richer bullet lists");
   ok("css custom-glyph ::before markers", /\[data-list-marker="custom"\] li::before \{ content: var\(--li-marker/.test(css));
   ok("css applies to inline lists in any field", /\.body-copy ul, \.body-copy ol/.test(css));
   ok("css nested levels distinct markers", /\.body-list ul ul, \.body-copy ul ul ul \{ list-style-type: square/.test(css));
-  // #9: List is a single inline-format toggle BUTTON in the B/I/U/Link bar (was a switchEl).
+  // #170/#33: List is a single toggle BUTTON in the shared B/I/U/Link/List bar, whose
+  // on-state reads block.type (not queryCommandState) and whose click CONVERTS the whole
+  // block to/from the dedicated "list" type (was a switchEl, then an inline execCommand).
   ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
   ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
-  ok("editor list marker controls render when the list is on OR the field root is a list", /if \(rootIsList \|\| listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*inspector\.appendChild\(sub\("List"\)\);[\s\S]*?customSelectRow\("Bullet style"/.test(e));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
-  // detect it, drop the meaningless on/off toggle, and always surface the marker settings.
+  // marker settings always show for it; the TYPE-conversion toggle only shows for a
+  // genuine top-level list block (gated separately, in the shared bar, on obj.type).
   ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
-  ok("editor hides the List toggle for a root-list field", /if \(!rootIsList\) \{\s*var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e));
-  ok("editor list off-branch clears both ul and ol", /queryCommandState\("insertOrderedList"\)\) document\.execCommand\("insertOrderedList"[\s\S]*?queryCommandState\("insertUnorderedList"\)\) document\.execCommand\("insertUnorderedList"/.test(e));
+  ok("List toggle visibility is gated on obj.type in TEXT_CONTENT_TYPES, not rootIsList directly", /isListToggleable: function \(\) \{ return field === "text" && !!obj && !!obj\.type && !!TEXT_CONTENT_TYPES\[obj\.type\]; \}/.test(e));
+  ok("no execCommand/queryCommandState List path remains (block-type conversion replaced it)", !/insertUnorderedList/.test(e) && !/insertOrderedList/.test(e));
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
@@ -6066,11 +6069,12 @@ section("list discoverability + spacing");
   var e = src("src/editor.js");
   ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
-  // #9: the List TOGGLE folds into the inline-format bar; the sub("List") header now heads
-  // only the marker-settings section, shown when the field is a list (rootIsList || listOn).
-  ok("List toggle folded into the inline-format bar (prop-toggle) drives inline lists", /var listB = h\("button", "prop-toggle prop-toggle--icon"[\s\S]*?document\.execCommand\("insertUnorderedList"/.test(e));
-  ok("List marker section is gated on rootIsList || listOn() and headed by sub(List)", /if \(rootIsList \|\| listOn\(\)\) \{\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
-  ok("no paragraph<->list block-type conversion", !/textBlockToList/.test(e) && !/function listToTextBlock/.test(e));
+  // #170/#33: the List toggle folds into the shared inline-format bar as a whole
+  // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
+  // heads only the marker-settings section, shown when the field root is a list.
+  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(e));
+  ok("List marker section is gated on rootIsList and headed by sub(List)", /if \(rootIsList\) \{\s*\n\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
+  ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(e) && /block\.__priorTextType/.test(e));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();
 
@@ -9150,15 +9154,69 @@ section("#170/#158 shared formatting toggle-bar");
 
   // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
   var insStart = e.indexOf("function renderFieldInspector(node)");
-  var insBody = e.slice(insStart, insStart + 6000);
-  ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \}\s*\n\s*\}\);/.test(insBody));
+  var insBody = e.slice(insStart, insStart + 7000);
+  ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
+  ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   var cfStart = e.indexOf("function buildCopyFormatBar()");
-  var cfBody = e.slice(cfStart, cfStart + 700);
+  var cfBody = e.slice(cfStart, cfStart + 1500);
   ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
   ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   // exactly one config-driven toggle list in the whole file (no second duplicate copy).
   ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (e.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1);
+})();
+
+// ---- #170/#33: text<->list block-type conversion (pure) -----------------------
+section("#170/#33 text<->list block-type conversion");
+(function () {
+  var e = src("src/editor.js");
+  var a = e.indexOf("/* @list-convert-start */"), b = e.indexOf("/* @list-convert-end */");
+  if (a === -1 || b === -1) { ok("locate @list-convert fence", false); return; }
+  var g = new Function(e.slice(a, b) +
+    "\nreturn { htmlToListItems: htmlToListItems, listItemsToHtml: listItemsToHtml, convertTextListBlockType: convertTextListBlockType };")();
+
+  // htmlToListItems: block-level breaks become <li> boundaries; inline formatting survives.
+  ok("a single line becomes one <li>", g.htmlToListItems("Hello <b>world</b>") === "<li>Hello <b>world</b></li>");
+  ok("<br> splits into multiple <li>s, inline formatting kept per item", g.htmlToListItems("One<br><b>Two</b><br>Three") === "<li>One</li><li><b>Two</b></li><li>Three</li>");
+  ok("<p>/<div> block tags split into items too (block-level = item boundary)", g.htmlToListItems("<p>Alpha</p><p>Beta</p>") === "<li>Alpha</li><li>Beta</li>");
+  ok("blank lines are dropped, not turned into empty items", g.htmlToListItems("One<br><br>Two") === "<li>One</li><li>Two</li>");
+  ok("empty/whitespace-only input -> one empty <li> (never crashes, never null)", g.htmlToListItems("") === "<li></li>" && g.htmlToListItems("   ") === "<li></li>");
+  ok("inline tags (b/i/u/a/span) are NEVER treated as breaks", g.htmlToListItems('<span style="font-weight:600">Bold run</span> and <a href="https://x">a link</a>') === '<li><span style="font-weight:600">Bold run</span> and <a href="https://x">a link</a></li>');
+
+  // listItemsToHtml: the inverse -- items join with <br>, inline content intact.
+  ok("multiple <li>s join with <br>, formatting kept", g.listItemsToHtml("<li>One</li><li><b>Two</b></li><li>Three</li>") === "One<br><b>Two</b><br>Three");
+  ok("a single <li> round-trips to its bare inner content", g.listItemsToHtml("<li>Hello <b>world</b></li>") === "Hello <b>world</b>");
+  ok("non-<li>-shaped input is returned untouched (defensive)", g.listItemsToHtml("just text") === "just text");
+  // round-trip: html -> list items -> html recovers the original flowing content.
+  ok("htmlToListItems + listItemsToHtml round-trips a multi-line field", g.listItemsToHtml(g.htmlToListItems("One<br>Two<br>Three")) === "One<br>Two<br>Three");
+
+  // convertTextListBlockType: whole block-type swap, remembers prior type, round-trips.
+  var para = { type: "paragraph", text: "Hello <b>world</b>" };
+  g.convertTextListBlockType(para);
+  ok("paragraph -> list converts type + splits text into <li>s", para.type === "list" && para.text === "<li>Hello <b>world</b></li>");
+  ok("prior type is remembered on the block", para.__priorTextType === "paragraph");
+  g.convertTextListBlockType(para);
+  ok("list -> text restores the REMEMBERED prior type (not always paragraph)", para.type === "paragraph");
+  ok("__priorTextType is cleared after restoring (no stale memory)", para.__priorTextType === undefined);
+  ok("round-trip is lossless on content", para.text === "Hello <b>world</b>");
+
+  var heading = { type: "heading", text: "Title text" };
+  g.convertTextListBlockType(heading);
+  g.convertTextListBlockType(heading);
+  ok("heading<->list round-trips back to heading (not a hardcoded paragraph default)", heading.type === "heading");
+
+  var noMemory = { type: "list", text: "<li>Item</li>" };
+  g.convertTextListBlockType(noMemory);
+  ok("list -> text with NO remembered prior type defaults to paragraph", noMemory.type === "paragraph");
+
+  ok("convertTextListBlockType is null-safe", g.convertTextListBlockType(null) === null);
+
+  // purity: does not mutate anything beyond the block object passed in (no globals touched).
+  var before = JSON.stringify({ a: 1 });
+  var untouched = { a: 1 };
+  var block2 = { type: "paragraph", text: "x" };
+  g.convertTextListBlockType(block2);
+  ok("converting one block never touches an unrelated object", JSON.stringify(untouched) === before);
 })();
 
 section("#175 copy-editor format toolbar");
@@ -9168,7 +9226,7 @@ section("#175 copy-editor format toolbar");
   ok("toolbar built once + injected into the copy-editor bar", /getElementById\("copyedit-format"\)[\s\S]*?insertBefore\(bar, host\)/.test(bar));
   // #170/#158: B/I/U/Link now come from the ONE shared canonical toggle-bar builder
   // (buildFormatToggleBar), not a bespoke row -- wired here via io.getNode/io.onChange.
-  ok("toolbar uses the shared canonical toggle-bar builder, not a bespoke B/I/U row", /var biu = buildFormatToggleBar\(\{[\s\S]{0,300}\}\);/.test(bar));
+  ok("toolbar uses the shared canonical toggle-bar builder, not a bespoke B/I/U row", /var biu = buildFormatToggleBar\(\{[\s\S]{0,1200}\}\);/.test(bar));
   ok("getNode resolves the active copy row's field", /getNode: function \(\) \{ return _activeCopyRow && _activeCopyRow\.tx; \}/.test(bar));
   ok("onChange commits through commitCopyRow (-> frWrite override layer)", /onChange: function \(\) \{ if \(!_activeCopyRow\) return; commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\); \}/.test(bar));
   ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(e));
