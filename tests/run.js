@@ -8054,6 +8054,59 @@ section("ui-kit #10 DS control set");
   ok("index.html loads ui-kit.js before editor.js", idx.indexOf("src/ui-kit.js") !== -1 && idx.indexOf("src/ui-kit.js") < idx.indexOf("src/editor.js"));
 })();
 
+// ---- product-rail-left-rail-and-topbar-3-stage: rail segment switch + product context ----
+section("Product Rail: 3-stage rail + product dropdown");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @stage-rail-start \*\/([\s\S]*?)\/\* @stage-rail-end \*\//);
+  if (!m) { ok("locate @stage-rail fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { isValidStage: isValidStage, stageWorkspaceClass: stageWorkspaceClass, productSelectOptions: productSelectOptions };")();
+
+  ok("isValidStage accepts source/edit/publish", g.isValidStage("source") && g.isValidStage("edit") && g.isValidStage("publish"));
+  ok("isValidStage rejects anything else", g.isValidStage("document") === false && g.isValidStage("") === false && g.isValidStage() === false);
+
+  // Edit renders through the ORIGINAL grid (no modifier class) -- today's editing
+  // experience must be byte-for-byte unchanged; Source/Publish get their own class.
+  ok("stageWorkspaceClass('edit') -> no class (unchanged layout)", g.stageWorkspaceClass("edit") == null);
+  ok("stageWorkspaceClass('source')", g.stageWorkspaceClass("source") === "workspace--stage-source");
+  ok("stageWorkspaceClass('publish')", g.stageWorkspaceClass("publish") === "workspace--stage-publish");
+
+  // productSelectOptions: "All products" first, then every ProductsStore entry by name.
+  var opts = g.productSelectOptions({ b: { id: "b", name: "Beta" }, a: { id: "a", name: "Alpha" } });
+  ok("productSelectOptions leads with All products", opts[0].value === "" && opts[0].label === "All products");
+  ok("productSelectOptions sorts the rest by name", opts[1].label === "Alpha" && opts[2].label === "Beta");
+  ok("productSelectOptions handles an empty/missing store", g.productSelectOptions({}).length === 1 && g.productSelectOptions(undefined).length === 1);
+  ok("productSelectOptions falls back to id when a product has no name", g.productSelectOptions({ x: {} })[1].label === "x");
+
+  // index.html wiring: exactly 3 rail segments (Source/Edit/Publish free-form, no
+  // gating), Edit active by default (preserves today's boot-straight-into-canvas
+  // behaviour), the pinned bottom actions untouched, and a top-bar product-picker host.
+  var idx = src("index.html");
+  ok("rail has exactly the 3 new segments", /id="rail-tab-source"/.test(idx) && /id="rail-tab-edit"/.test(idx) && /id="rail-tab-publish"/.test(idx));
+  ok("old single Document tab is gone", idx.indexOf('id="rail-tab-document"') === -1);
+  ok("Edit is the default active segment", /id="rail-tab-edit" data-rail-tab="edit"[^>]*class="[^"]*"|class="rail-btn rail-tab is-active" id="rail-tab-edit"/.test(idx));
+  ok("pinned bottom rail actions unchanged (Settings, Help/Docs, Recents)", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && /id="save-menu-btn"/.test(idx));
+  ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
+  ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
+  ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
+
+  // setStage()/mountLeftRail() wiring: source-string checks (mirrors the ui-kit-#10
+  // "drop-in wiring" style above) since these functions are DOM-bound, not pure.
+  ok("setStage() gates on isValidStage before touching the DOM", /function setStage\(stage\) \{\s*if \(!isValidStage\(stage\)\) return;/.test(e));
+  ok("setStage() toggles is-active across all 3 rail-tab buttons", /STAGE_IDS\.forEach\(function \(s\) \{\s*var btn = document\.getElementById\("rail-tab-" \+ s\);/.test(e));
+  ok("setStage() shows/hides both placeholder regions", /document\.getElementById\("stage-source"\); if \(srcEl\) srcEl\.hidden = stage !== "source";/.test(e) && /document\.getElementById\("stage-publish"\); if \(pubEl\) pubEl\.hidden = stage !== "publish";/.test(e));
+  ok("mountLeftRail() reconciles to __activeStage on mount (single source of truth)", /setStage\(__activeStage\);/.test(e));
+  ok("mountProductPicker() builds a VersoUI.Select from ProductsStore", /U\.Select\(\{\s*options: productSelectOptions\(window\.ProductsStore\)/.test(e));
+  ok("boot mounts the product picker alongside the left rail", /mountLeftRail\(\);[^\n]*\n\s*mountProductPicker\(\);/.test(e));
+  ok("__productRail exposes the shared product-context getter/setter (read by every stage)", /window\.__productRail\.getActiveProduct = getActiveProduct;/.test(e) && /window\.__productRail\.setActiveProduct = setActiveProduct;/.test(e));
+
+  // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
+  var renderJs = src("src/render.js");
+  ok("render() never reads the rail/product-picker state", renderJs.indexOf("stageWorkspaceClass") === -1 && renderJs.indexOf("__activeStage") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no stage-placeholder/product-picker chrome classes", courseCss.indexOf("stage-placeholder") === -1 && courseCss.indexOf("product-picker") === -1);
+})();
+
 // resolveVariant must recurse into NESTED containers (columns / frame-group children /
 // cardReveal-accordion-sequence items / componentGrid instances) — a text override on a
 // nested block was previously dropped (variant preview showed the flagship copy).

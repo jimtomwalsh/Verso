@@ -423,6 +423,34 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    window looks dark. Pin the canvas to span every track so it always fills the row. */
 .workspace.is-panels-hidden .canvas { grid-column: 1 / -1; }
 
+/* Product Rail (2026-07-27 DaVinci pivot): the rail's Source/Publish segments swap
+   out the whole edit-only region (Structure/Blocks/Components + canvas + inspector)
+   for a placeholder, same "hide the grid items, span the leftover column" approach
+   as .is-panels-hidden above -- reused rather than a second bespoke mechanism. */
+.workspace--stage-source .panel,
+.workspace--stage-source #canvas-viewport,
+.workspace--stage-source .canvas-overlay-bar,
+.workspace--stage-publish .panel,
+.workspace--stage-publish #canvas-viewport,
+.workspace--stage-publish .canvas-overlay-bar { display: none; }
+.stage-placeholder {
+  display: none;
+  grid-column: 2 / -1;
+  flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: var(--surface-canvas);
+  color: var(--text-secondary);
+  text-align: center;
+}
+.workspace--stage-source #stage-source,
+.workspace--stage-publish #stage-publish { display: flex; }
+.stage-placeholder svg { width: 32px; height: 32px; color: var(--icon-idle); }
+.stage-placeholder__title { font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); }
+.stage-placeholder__desc { font-size: var(--text-sm, 11px); max-width: 320px; }
+
+/* Product Rail top-bar dropdown (next to the brand) -- a plain VersoUI.Select host. */
+.product-picker { align-self: center; width: 140px; margin: 0 6px 0 2px; }
+.product-picker .vds-select { width: 100%; }
+
 /* #89 left icon rail: a fixed-width glyph column.
    Top nav-tab glyphs (swap the adjacent panel) + bottom pinned action glyphs. */
 .left-rail {
