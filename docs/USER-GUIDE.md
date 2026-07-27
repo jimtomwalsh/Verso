@@ -138,10 +138,13 @@ Every block you can insert, grouped by type. Software tours have their own secti
 
 ### Text
 
-- **Heading / Subheading / Paragraph / Quote** — rich text. Select text to **Bold**, *Italic*,
-  or underline, add an inline **Link**, or turn it into a **List** — all from the one formatting
-  bar in the Text panel. Apply a saved text style (§9) for consistent type. When a field is a
-  list, its marker settings (bullet style, custom glyph, colour, size) appear just below.
+- **Heading / Subheading / Paragraph / Quote** — rich text. Select some text to **Bold**,
+  *Italic*, underline, or add an inline **Link** — same formatting bar in the Text panel and the
+  Copy editor. **List** in that same bar converts the WHOLE block to a bulleted list and back
+  (no text selection needed) — your wording carries over line by line, and converting back
+  restores the original block type (heading stays a heading, paragraph stays a paragraph). Apply
+  a saved text style (§9) for consistent type. When a field is a list, its marker settings
+  (bullet style, custom glyph, colour, size) appear just below.
 - **Bulleted list** — marker style, colour, custom glyphs, and nesting.
 - **Note / callout** — a highlighted aside.
 
@@ -160,6 +163,8 @@ Every block you can insert, grouped by type. Software tours have their own secti
 
 - **Card (container)** — a styled box holding child blocks (fill, border, radius, padding).
 - **Columns** — a multi-column row; drop blocks into each column. Collapses to a stack on mobile.
+  Drag the gap between two columns to resize them; hover a gap for a **swap** glyph that
+  exchanges those two columns' content in place.
 - **Table** — a native table: header row, borders, zebra striping, cell padding, and per-column
   alignment. Edit cells directly on the canvas.
 - **Divider / Spacer** — a rule, and vertical space.
@@ -306,7 +311,10 @@ board where every screen is a node laid out in 2D.
   on the scrub bar). A source is **author-time only: it is never included in the exported course**, so
   a long screen-recording never bloats your package. It stays saved with the course so you can come
   back and keep working from it; the **trash** button on the node removes it (screens you've already
-  made from it are kept).
+  made from it are kept). To clear every source at once (e.g. once you've finished harvesting and
+  want to slim the save file), open the Properties panel with nothing selected and use **Purge all
+  sources** near the bottom — it removes all source recordings in one step; screens you've already
+  harvested stay.
 - **Crop the source (uniform size).** The **crop** button on a source's player shows a crop frame over
   the video — drag it to move, the corners to resize. Every screen you then harvest from that source
   comes out at that **same size**, so a set of screens lines up perfectly. Re-cropping only affects
@@ -425,7 +433,9 @@ top, so unchanged copy stays shared and you maintain one source.
 full-screen, plain-text view of all course copy. With variants, a **Single | Side by side**
 toggle appears: **Side by side** adds one column per variant. A held variant cell is read-only
 behind a lock — click the lock to edit it; a block with no variant yet shows a **+** to create
-its copy from the flagship.
+its copy from the flagship. Click into any row to select some text and use the **B / I / U /
+Link** toolbar plus the **Weight** dropdown — the same formatting controls the canvas Inspector's
+Style row uses.
 
 **Shared Library masters inherit variants and software versions too.** If you gave a block
 per-variant or per-software-version wording *before* saving it to the Shared Library (§9), every

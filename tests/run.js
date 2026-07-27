@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -2389,6 +2389,17 @@ section("#69 migration cutover");
   ok("loadProducts reads via productsAdapter, not a hardcoded localStorage call", /function loadProducts\(\) \{[\s\S]{0,200}productsAdapter\(\)\.readProducts\(\)/.test(ed));
   ok("saveProducts writes via productsAdapter, not a hardcoded localStorage call", /function saveProducts\(\) \{ try \{ productsAdapter\(\)\.writeProducts\(JSON\.stringify\(window\.ProductsStore\)\); \} catch \(e\) \{\} \}/.test(ed));
   ok("store-native.js carries the same readProducts/writeProducts pair as readLibrary/writeLibrary", /readProducts: function \(\) \{ return productsCache; \}/.test(src("src/store-native.js")) && /writeProducts: function \(json\)/.test(src("src/store-native.js")));
+  // WIRING (Product Rail): "Promote to Product" -- a per-course-only save-menu action
+  // that writes ONLY doc.meta.productId/stage, never content, never a bulk variant.
+  ok("'Promote to Product…' is wired into the save menu's action list", /action\("Promote to Product…", function \(\) \{ promoteToProductModal\(\); \}\)/.test(ed));
+  ok("no bulk/batch variant exists anywhere (only ever operates on the single `doc`)", (ed.match(/promoteToProductModal\(/g) || []).length === 2); // definition + the one call site above
+  var ptmStart = ed.indexOf("function promoteToProductModal()");
+  ok("promoteToProductModal found", ptmStart !== -1);
+  var ptmBody = ed.slice(ptmStart, ptmStart + 1700);
+  ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
+  ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Stage"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
+  ok("writes ONLY doc.meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(doc, pid, stage\);\s*\n\s*saveRegistry\(registry\);/.test(ptmBody));
+  ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
   ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(ed));
   ok("migrate button registered only when __nativeStore present", /if \(window\.__nativeStore\) window\.Editor\.registerPipelineButton\("Migrate to file storage \(beta\)", migrateToFileBackendPrompt/.test(ed));
@@ -2504,9 +2515,9 @@ section("#19 stable-id master snapshot");
   var copyIdx = etxt.indexOf("getComponents()[k] = clone(comp); saveRegistry(registry); mount();");
   ok("'Copy to course' handler found", copyIdx !== -1);
   ok("'Copy to course' preserves ids (no remint)", copyIdx !== -1 && etxt.slice(copyIdx - 20, copyIdx + 80).indexOf("remintIds") === -1);
-  var saveIdx = etxt.indexOf("window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);");
+  var saveIdx = etxt.indexOf("var promoted = clone(doc.components[selectedKey]);");
   ok("'Save to library' handler found", saveIdx !== -1);
-  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 100).indexOf("remintIds") === -1);
+  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 220).indexOf("remintIds") === -1);
 
   // 3. The contract is documented at remintIds' own definition, so #20/#21/#24 don't
   // add a 5th call site that touches library-resident content.
@@ -2584,6 +2595,16 @@ section("YY asset-seam");
   ok("source ref left intact by resolve", sdoc.pages[0].blocks[0].sources[0].visual === "asset:SRCVID");
   srestore();
   ok("source KEPT for GC (persists across sessions)", rw.collectAssetRefs(sdoc).sort().join(",") === "SCR,SRCVID");
+
+  // Bulk "Purge all sources" (editor Advanced section) deletes block.sources wholesale.
+  // Once gone, collectAssetRefs must stop keeping the purged ids -- same GC contract as the
+  // per-source Remove above, but for every source on the board at once.
+  var pgdoc = { pages: [{ blocks: [
+    { type: "hotspot", screens: [{ visual: "asset:SCR" }], sources: [{ id: "src1", visual: "asset:SRCVID" }, { id: "src2", visual: "asset:SRCVID2" }] }
+  ] }] };
+  ok("purge: sources present before purge", rw.collectAssetRefs(pgdoc).sort().join(",") === "SCR,SRCVID,SRCVID2");
+  delete pgdoc.pages[0].blocks[0].sources;
+  ok("purge: sources gone from GC refs after purge", rw.collectAssetRefs(pgdoc).join(",") === "SCR");
 
   // A harvested screen carries provenance `source:{id,t}` (which source frame it came from).
   // That's inert data (id string + number) — it must add NO asset ref (no export/GC impact);
@@ -3769,7 +3790,7 @@ section("#159/#163 frontend conformance gate");
     // (panel-ia §3: sub() is allowed as an in-section label, never as a section header) — that
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
-    sectionGroup: { base: 41, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens)" },
+    sectionGroup: { base: 42, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section)" },
     subHeader:    { base: 28, dir: "down", enforce: true,  ticket: "#163 (residual = legit in-section sub-labels)" },
     disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "#163 (ad-hoc collapsibles capped)" },
     rawDialog:    { base: 0,  dir: "down", enforce: true,  ticket: "#163 (#156 landed — no native dialogs)" },
@@ -4453,9 +4474,9 @@ section("#20 library-instance mirror");
   // same order as componentGrid's resolveComponentDef -- single-source, bakes at export.
   var libStart = rtxt.indexOf("libraryInstance: function (block)");
   ok("render.js defines BLOCKS.libraryInstance", libStart !== -1);
-  var libBody = rtxt.slice(libStart, libStart + 1400);
+  var libBody = rtxt.slice(libStart, libStart + 1700);
   ok("resolves doc override -> shared library -> built-in", /docComps && docComps\[block\.ref\]\) \|\| libComps\[block\.ref\] \|\| \(window\.COMPONENTS \|\| \{\}\)\[block\.ref\]/.test(libBody));
-  ok("renders a cloneData() COPY of the master, never the live object (editor-safety)", /var content = cloneData\(def\.template\);[\s\S]{0,600}var node = renderBlock\(content\)/.test(libBody));
+  ok("renders a cloneData() COPY of the master, never the live object (editor-safety)", /var content = cloneData\(facetTemplate\);[\s\S]{0,600}var node = renderBlock\(content\)/.test(libBody));
   ok("applies #21 overrides onto the CLONE, not the live master", /if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody));
   ok("marks the wrapper node for the editor-only opacity rule", /data-library-instance/.test(libBody));
 
@@ -4471,7 +4492,7 @@ section("#20 library-instance mirror");
   // (prop-component--instance), and offers Detach as the only structural action in v1.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
   ok("renderLibraryInstanceBody found", lbStart !== -1);
-  var lbBody = etxt.slice(lbStart, lbStart + 2800);
+  var lbBody = etxt.slice(lbStart, lbStart + 4000);
   ok("reuses the canonical instance header (same class componentGrid cards use)", /"prop-component prop-component--instance"/.test(lbBody));
   ok("offers a Detach action, disabled when the master is missing", /detachB\.disabled = !def/.test(lbBody));
 
@@ -4480,7 +4501,7 @@ section("#20 library-instance mirror");
   // call remintIds, or every detached instance of the same master would collide.
   var daStart = etxt.indexOf("function detachLibraryInstance(block)");
   ok("detachLibraryInstance found", daStart !== -1);
-  var daBody = etxt.slice(daStart, daStart + 1300);
+  var daBody = etxt.slice(daStart, daStart + 1600);
   ok("detach mints a FRESH remint of the master's current (override-baked) template", /var fresh = remintIds\(withOverrides\)/.test(daBody));
   ok("detach bakes in the author's overrides, not the master's raw content", /if \(block\.overrides && window\.applyInstanceOverrides\) window\.applyInstanceOverrides\(withOverrides, block\.overrides\)/.test(daBody));
   ok("detach replaces the wrapper's fields in place (stays the same page-tree node)", /Object\.keys\(block\)\.forEach\(function \(k\) \{ delete block\[k\]; \}\)/.test(daBody));
@@ -4490,6 +4511,58 @@ section("#20 library-instance mirror");
   var css = src("editor.css");
   ok("editor.css disables pointer-events on nested canvas-blocks inside a library instance", /\[data-library-instance\] \.canvas-block \{ pointer-events: none; \}/.test(css));
   ok("course.css does not reference the library-instance marker (editor-chrome only)", src("src/course.css").indexOf("data-library-instance") === -1);
+})();
+
+// ---- Product Rail: tag vocabulary + reserved owning-Product tag --------------
+section("product-rail tag vocabulary");
+(function () {
+  var etxt = src("src/editor.js");
+
+  // 1. PURE: the tag-vocab fence, extracted headlessly.
+  var tStart = etxt.indexOf("/* @tag-vocab-start */");
+  var tEnd = etxt.indexOf("/* @tag-vocab-end */");
+  var mod = new Function(etxt.slice(tStart, tEnd) +
+    "\nreturn { ownerProductTagValue: ownerProductTagValue, stampOwnerProductTag: stampOwnerProductTag," +
+    " addTechnologyTag: addTechnologyTag, removeMasterTag: removeMasterTag, matchTagVocabulary: matchTagVocabulary };")();
+  ok("tag-vocab functions extracted", typeof mod.stampOwnerProductTag === "function");
+
+  // stampOwnerProductTag: stamped once, from a Product context; absent when there is none.
+  var m1 = { name: "Topic" };
+  mod.stampOwnerProductTag(m1, "prod-a");
+  ok("stamps a reserved tag from the given productId", m1.tags.length === 1 && m1.tags[0].value === "product:prod-a" && m1.tags[0].reserved === true);
+  mod.stampOwnerProductTag(m1, "prod-b");
+  ok("never re-stamps once a reserved tag already exists", m1.tags.filter(function (t) { return t.reserved; }).length === 1 && m1.tags[0].value === "product:prod-a");
+  var m2 = {};
+  mod.stampOwnerProductTag(m2, null);
+  ok("no Product context -> tags initialised but no reserved tag (nothing to attribute)", Array.isArray(m2.tags) && m2.tags.length === 0);
+  ok("stampOwnerProductTag is null-safe", mod.stampOwnerProductTag(null, "prod-a") === null);
+
+  // addTechnologyTag / removeMasterTag: freeform, no dupes, reserved tag is protected.
+  var m3 = { tags: [{ value: "product:prod-a", reserved: true }] };
+  mod.addTechnologyTag(m3, "radar");
+  mod.addTechnologyTag(m3, "radar"); // duplicate, ignored
+  ok("adds a freeform technology tag, de-duped", m3.tags.length === 2 && m3.tags.filter(function (t) { return t.value === "radar"; }).length === 1);
+  mod.removeMasterTag(m3, "product:prod-a");
+  ok("ordinary tag-editing CANNOT remove the reserved tag", m3.tags.some(function (t) { return t.reserved; }));
+  mod.removeMasterTag(m3, "radar");
+  ok("a freeform tag CAN be removed", !m3.tags.some(function (t) { return t.value === "radar"; }));
+
+  // matchTagVocabulary: autocomplete-first, "propose new" only on a genuine non-match.
+  var vocab = ["radar", "radar-jamming", "acoustic"];
+  ok("empty query -> no matches, not exact (nothing to propose either)", mod.matchTagVocabulary(vocab, "").matches.length === 0 && mod.matchTagVocabulary(vocab, "").exact === false);
+  ok("a substring query surfaces autocomplete matches", mod.matchTagVocabulary(vocab, "radar").matches.length === 2);
+  ok("an exact existing tag is flagged exact (never proposed as new)", mod.matchTagVocabulary(vocab, "acoustic").exact === true);
+  ok("a genuine non-match has no matches and is not exact -> caller falls back to propose-new", mod.matchTagVocabulary(vocab, "thermal").matches.length === 0 && mod.matchTagVocabulary(vocab, "thermal").exact === false);
+
+  // 2. editor.js wiring: promotion to the shared library stamps the reserved tag from
+  // THIS course's Product context (doc.meta.productId), exactly once, at promotion time.
+  var doSaveIdx = etxt.indexOf("function doSave() {\n          pushHistory();\n          // #19: plain clone()");
+  ok("promote-to-library doSave() found", doSaveIdx !== -1);
+  var doSaveBody = etxt.slice(doSaveIdx, doSaveIdx + 900);
+  ok("stamps the reserved owning-Product tag from doc.meta.productId at promotion time", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)/.test(doSaveBody));
+  var stampIdx = doSaveBody.indexOf("stampOwnerProductTag(promoted");
+  var storeIdx = doSaveBody.indexOf("window.LibraryStore.components[selectedKey] = promoted;");
+  ok("stamping happens BEFORE the master lands in the shared store", stampIdx !== -1 && storeIdx !== -1 && stampIdx < storeIdx);
 })();
 
 // ---- #21: instance local overrides + structure reconciliation + detach/relink ----
@@ -4538,7 +4611,7 @@ section("#21 instance overrides + reconciliation + relink");
   // 3. editor.js wiring: renderLibraryInstanceBody reconciles-on-open (prunes + persists +
   // surfaces a drop), then lists override fields via the canonical fieldRow control.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
-  var lbBody2 = etxt.slice(lbStart, lbStart + 2800);
+  var lbBody2 = etxt.slice(lbStart, lbStart + 4000);
   ok("reconciles on open via reconcileOverrides(def.template, ...)", /var rec = reconcileOverrides\(def\.template, block\.overrides \|\| \{\}\)/.test(lbBody2));
   ok("prunes the block's overrides to the living set", /block\.overrides = rec\.living/.test(lbBody2));
   ok("surfaces a drop with the warn hint class", /insp-hint insp-hint--warn/.test(lbBody2));
@@ -4550,7 +4623,7 @@ section("#21 instance overrides + reconciliation + relink");
   // 4. Detach discards overrides (they were keyed to the mirror) and leaves a __linkedFrom
   // breadcrumb; Relink is gated on it and gives a lossy-edit warning before acting.
   var daStart2 = etxt.indexOf("function detachLibraryInstance(block)");
-  var daBody2 = etxt.slice(daStart2, daStart2 + 1350);
+  var daBody2 = etxt.slice(daStart2, daStart2 + 1600);
   ok("detach records __linkedFrom for a future relink", /block\.__linkedFrom = ref/.test(daBody2));
 
   var rlStart = etxt.indexOf("function relinkToLibrary(block, ref)");
@@ -4599,7 +4672,7 @@ section("#24 where-used + impact preview + push-update");
 
   // 2. WIRING: the Component Library panel shows the where-used count per master.
   var lStart = etxt.indexOf("function buildLibraryBody(c)");
-  var lBody = etxt.slice(lStart, lStart + 10900);
+  var lBody = etxt.slice(lStart, lStart + 11200);
   ok("buildLibraryBody computes where-used per master via the registry", /var usage = libraryWhereUsed\(k, getRegistry\(\)\)/.test(lBody));
   ok("shows a 'Used in N course(s) / M instance(s)' meta line", /"Used in " \+ usage\.courses/.test(lBody));
   ok("shows 'Not placed anywhere yet' when usage is zero", /Not placed anywhere yet/.test(lBody));
@@ -4648,7 +4721,7 @@ section("#23 axis-owning library masters");
   // 2. render.js wiring: BLOCKS.libraryInstance resolves axis content BEFORE instance
   // overrides (axis first, instance override wins on top -- the agreed precedence).
   var libStart = rtxt.indexOf("libraryInstance: function (block)");
-  var libBody2 = rtxt.slice(libStart, libStart + 1100);
+  var libBody2 = rtxt.slice(libStart, libStart + 1300);
   ok("axis-resolves via the per-pass hook before applying instance overrides", /content = resolveLibraryAxisContent\(content, window\.__libraryAxisContext\);[\s\S]{0,150}if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody2));
 
   // 3. editor.js wiring: currentDoc() keeps the hook in sync (variant never null --
@@ -4662,7 +4735,7 @@ section("#23 axis-owning library masters");
   // 4. editor.js wiring: detach bakes axis content (same principle as #21's override bake),
   // BEFORE instance overrides -- same precedence as render.js.
   var daStart = etxt.indexOf("function detachLibraryInstance(block)");
-  var daBody = etxt.slice(daStart, daStart + 1300);
+  var daBody = etxt.slice(daStart, daStart + 1600);
   ok("detach bakes axis content via resolveLibraryAxisContent", /withOverrides = window\.resolveLibraryAxisContent\(withOverrides, window\.__libraryAxisContext\)/.test(daBody));
   var axisIdx = daBody.indexOf("resolveLibraryAxisContent(withOverrides");
   var ovIdx = daBody.indexOf("applyInstanceOverrides(withOverrides");
@@ -4673,6 +4746,64 @@ section("#23 axis-owning library masters");
   ok("buildPackage sets the variant half of the hook (never null)", /window\.__libraryAxisContext = \{ variant: opts\.variant \|\| \(baseDoc\.heroVariant \|\| "hero"\), version: null \}/.test(extxt));
   ok("serializeVersionedPages sets version per-pass in the multi-version loop", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = v; \/\/ #23/.test(extxt));
   ok("serializeVersionedPages sets version on the no-wrapper (<2 versions) path too", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = \(versions && versions\[0\]\) \|\| null;/.test(extxt));
+})();
+
+// ---- Product Rail: facet pointer + {topic×variant×facet} schema --------------
+section("product-rail facet pointer schema");
+(function () {
+  var rtxt = src("src/render.js");
+  var etxt = src("src/editor.js");
+
+  // 1. PURE: resolveFacetTemplate.
+  var fStart = rtxt.indexOf("function resolveFacetTemplate(def, facetPointer)");
+  var fEnd = rtxt.indexOf("window.resolveFacetTemplate = resolveFacetTemplate;");
+  var fBody = rtxt.slice(fStart, fEnd);
+  var mod = new Function(fBody + "\nreturn { resolveFacetTemplate: resolveFacetTemplate };")();
+  ok("resolveFacetTemplate extracted", typeof mod.resolveFacetTemplate === "function");
+
+  var master = {
+    template: { id: "root", type: "frame", children: [{ id: "t", type: "heading", text: "Base" }] },
+    facets: {
+      technical: { name: "Technical", template: { id: "root-t", type: "frame", children: [{ id: "tt", type: "heading", text: "Technical detail" }] } },
+      dotpoint: { name: "Dot-point", template: { id: "root-d", type: "frame", children: [{ id: "dd", type: "heading", text: "Dot points" }] } }
+    }
+  };
+  ok("no pointer -> falls back to def.template", mod.resolveFacetTemplate(master, undefined).children[0].text === "Base");
+  ok("a matching pointer resolves that facet's own template", mod.resolveFacetTemplate(master, "technical").children[0].text === "Technical detail");
+  ok("a different pointer resolves a DIFFERENT facet", mod.resolveFacetTemplate(master, "dotpoint").children[0].text === "Dot points");
+  ok("an unknown pointer falls back to def.template (no crash)", mod.resolveFacetTemplate(master, "no-such-facet").children[0].text === "Base");
+  var plain = { template: { id: "root2", type: "frame", children: [] } };
+  ok("a master with no facets at all behaves exactly as before", mod.resolveFacetTemplate(plain, "technical") === plain.template);
+  ok("null def -> null (no crash)", mod.resolveFacetTemplate(null, "technical") === null);
+
+  // Purity: resolving never mutates the master (it's a pure function of (topic, pointer)).
+  var before = JSON.stringify(master);
+  mod.resolveFacetTemplate(master, "technical");
+  ok("resolving a facet never mutates the master", JSON.stringify(master) === before);
+
+  // docTypeRenderings is a structurally distinct field from facets -- the resolver only
+  // ever reads def.facets, so a doc-type rendering is never reachable via a facet pointer.
+  var visualMaster = { template: { id: "vroot", type: "frame", children: [] }, docTypeRenderings: { interactive: { template: { id: "vi", type: "frame", children: [{ id: "vit", type: "heading", text: "Interactive" }] } } } };
+  ok("docTypeRenderings is never read by the facet resolver (structurally distinct)", mod.resolveFacetTemplate(visualMaster, "interactive") === visualMaster.template);
+
+  // 2. render.js wiring: BLOCKS.libraryInstance resolves the facet pointer before cloning.
+  var libStart = rtxt.indexOf("libraryInstance: function (block)");
+  var libBody = rtxt.slice(libStart, libStart + 900);
+  ok("libraryInstance resolves block.facet via resolveFacetTemplate before cloning", /var facetTemplate = resolveFacetTemplate\(def, block\.facet\);[\s\S]{0,200}var content = cloneData\(facetTemplate\);/.test(libBody));
+
+  // 3. editor.js wiring: detach bakes the resolved facet (not unconditionally def.template),
+  // and drops the pointer along with every other own key -- no live pointer survives a fork.
+  var daStart = etxt.indexOf("function detachLibraryInstance(block)");
+  var daBody = etxt.slice(daStart, daStart + 1600);
+  ok("detach resolves the facet actually showing before baking", /var facetTemplate = window\.resolveFacetTemplate \? window\.resolveFacetTemplate\(def, block\.facet\) : \(def && def\.template\);/.test(daBody));
+  ok("detach clones the RESOLVED facet template", /var withOverrides = clone\(facetTemplate\);/.test(daBody));
+  ok("detach drops block.facet along with every other own key (no live pointer survives a fork)", /Object\.keys\(block\)\.forEach\(function \(k\) \{ delete block\[k\]; \}\);/.test(daBody));
+
+  // 4. editor.js wiring: the facet switcher only ever reads def.facets, never
+  // def.docTypeRenderings -- so a doc-type rendering can never appear as an author picker.
+  ok("facet picker is gated on def.facets", etxt.indexOf('if (def && def.facets && typeof def.facets === "object")') !== -1);
+  ok("no picker anywhere reads def.docTypeRenderings (structurally distinct, export-time only)", etxt.indexOf("def.docTypeRenderings") === -1);
+  ok("switching the facet select applies immediately (dsSelect onChange), no confirmModal", /var fSel = dsSelect\(facetOpts, curFacet, function \(v\) \{[\s\S]{0,150}if \(v\) block\.facet = v; else delete block\.facet;/.test(etxt));
 })();
 
 // ---- #22: section + page library masters ------------------------------------
@@ -5879,15 +6010,18 @@ section("richer bullet lists");
   ok("css custom-glyph ::before markers", /\[data-list-marker="custom"\] li::before \{ content: var\(--li-marker/.test(css));
   ok("css applies to inline lists in any field", /\.body-copy ul, \.body-copy ol/.test(css));
   ok("css nested levels distinct markers", /\.body-list ul ul, \.body-copy ul ul ul \{ list-style-type: square/.test(css));
-  // #9: List is a single inline-format toggle BUTTON in the B/I/U/Link bar (was a switchEl).
+  // #170/#33: List is a single toggle BUTTON in the shared B/I/U/Link/List bar, whose
+  // on-state reads block.type (not queryCommandState) and whose click CONVERTS the whole
+  // block to/from the dedicated "list" type (was a switchEl, then an inline execCommand).
   ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
   ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
-  ok("editor list marker controls render when the list is on OR the field root is a list", /if \(rootIsList \|\| listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*inspector\.appendChild\(sub\("List"\)\);[\s\S]*?customSelectRow\("Bullet style"/.test(e));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
-  // detect it, drop the meaningless on/off toggle, and always surface the marker settings.
+  // marker settings always show for it; the TYPE-conversion toggle only shows for a
+  // genuine top-level list block (gated separately, in the shared bar, on obj.type).
   ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
-  ok("editor hides the List toggle for a root-list field", /if \(!rootIsList\) \{\s*var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e));
-  ok("editor list off-branch clears both ul and ol", /queryCommandState\("insertOrderedList"\)\) document\.execCommand\("insertOrderedList"[\s\S]*?queryCommandState\("insertUnorderedList"\)\) document\.execCommand\("insertUnorderedList"/.test(e));
+  ok("List toggle visibility is gated on obj.type in TEXT_CONTENT_TYPES, not rootIsList directly", /isListToggleable: function \(\) \{ return field === "text" && !!obj && !!obj\.type && !!TEXT_CONTENT_TYPES\[obj\.type\]; \}/.test(e));
+  ok("no execCommand/queryCommandState List path remains (block-type conversion replaced it)", !/insertUnorderedList/.test(e) && !/insertOrderedList/.test(e));
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
@@ -5935,11 +6069,12 @@ section("list discoverability + spacing");
   var e = src("src/editor.js");
   ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
-  // #9: the List TOGGLE folds into the inline-format bar; the sub("List") header now heads
-  // only the marker-settings section, shown when the field is a list (rootIsList || listOn).
-  ok("List toggle folded into the inline-format bar (prop-toggle) drives inline lists", /var listB = h\("button", "prop-toggle prop-toggle--icon"[\s\S]*?document\.execCommand\("insertUnorderedList"/.test(e));
-  ok("List marker section is gated on rootIsList || listOn() and headed by sub(List)", /if \(rootIsList \|\| listOn\(\)\) \{\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
-  ok("no paragraph<->list block-type conversion", !/textBlockToList/.test(e) && !/function listToTextBlock/.test(e));
+  // #170/#33: the List toggle folds into the shared inline-format bar as a whole
+  // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
+  // heads only the marker-settings section, shown when the field root is a list.
+  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(e));
+  ok("List marker section is gated on rootIsList and headed by sub(List)", /if \(rootIsList\) \{\s*\n\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
+  ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(e) && /block\.__priorTextType/.test(e));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();
 
@@ -6506,6 +6641,54 @@ section("columns colWidths guards");
   ok("col-resize handle uses col-resize cursor", /\.col-resize-handle\s*\{[^}]*cursor:\s*col-resize/.test(css));
   ok("handle line uses the accent token + hover reveal", /\.col-resize-handle__line\s*\{[^}]*var\(--accent\)/.test(css) && /:hover \.col-resize-handle__line/.test(css));
   ok("handles yield to edge bands while a block is dragged", /body\.is-dragging-block \.col-resize-handle\s*\{\s*pointer-events:\s*none/.test(css));
+})();
+
+// ---- swap-columns affordance (hover glyph, swaps adjacent columns) ------------
+section("swap-columns affordance");
+(function () {
+  var e = src("src/editor.js");
+
+  // 1. PURE: swapColumns, extracted headlessly.
+  var m = e.match(/\/\* @swap-columns-start \*\/([\s\S]*?)\/\* @swap-columns-end \*\//);
+  if (!m) { ok("locate @swap-columns fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { swapColumns: swapColumns };")();
+
+  var block = { type: "columns", columns: [["A"], ["B"], ["C"]] };
+  g.swapColumns(block, 0);
+  ok("swaps the first adjacent pair, leaves the third column untouched", JSON.stringify(block.columns) === JSON.stringify([["B"], ["A"], ["C"]]));
+  g.swapColumns(block, 1);
+  ok("swaps a DIFFERENT adjacent pair (index 1/2), not always the first", JSON.stringify(block.columns) === JSON.stringify([["B"], ["C"], ["A"]]));
+
+  var withWidths = { type: "columns", columns: [["A"], ["B"]], colWidths: [300, 500] };
+  g.swapColumns(withWidths, 0);
+  ok("colWidths swap alongside their columns (custom widths follow the content)", JSON.stringify(withWidths.colWidths) === JSON.stringify([500, 300]));
+
+  var mismatchedWidths = { type: "columns", columns: [["A"], ["B"], ["C"]], colWidths: [100, 200] }; // stale (count mismatch)
+  g.swapColumns(mismatchedWidths, 0);
+  ok("stale/mismatched colWidths are left untouched (never corrupted)", JSON.stringify(mismatchedWidths.colWidths) === JSON.stringify([100, 200]));
+
+  var noWidths = { type: "columns", columns: [["A"], ["B"]] };
+  g.swapColumns(noWidths, 0);
+  ok("a block with no colWidths at all swaps cleanly (no crash, no field invented)", noWidths.colWidths === undefined && JSON.stringify(noWidths.columns) === JSON.stringify([["B"], ["A"]]));
+
+  ok("swapColumns is null-safe", g.swapColumns(null, 0) === null);
+  ok("swapColumns no-ops on a non-columns block (defensive)", (function () { var b = { type: "paragraph" }; return g.swapColumns(b, 0) === b && !("columns" in b); })());
+
+  // 2. WIRING: the swap glyph is attached in the columns decorate branch, alongside the
+  // existing resize handles, and mutates via swapColumns (never a bespoke inline swap).
+  ok("swap glyph attached in the columns decorate branch", /attachColumnSwaps\(node, block\)/.test(e));
+  ok("swap button uses the canonical iconBtn + Icon(\"arrow-left-right\")", /iconBtn\("arrow-left-right", "Swap these two columns"\)/.test(e));
+  ok("swap click pushes history, mutates via swapColumns, then reapplies + reselects", /pushHistory\(\);\s*\n\s*swapColumns\(block, i\);\s*\n\s*reapplyStructural\(findPageOfBlock\(block\)\);\s*\n\s*reselectBlockNode\(block, "block"\);/.test(e));
+  ok("swap button keeps the field/gap pointer semantics (mousedown/pointerdown preventDefault + stopPropagation)", /btn\.addEventListener\("pointerdown", function \(e\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}\);/.test(e));
+
+  // 3. icons.js: a real vendored Lucide glyph, not a placeholder/ad-hoc SVG.
+  var icons = src("src/icons.js");
+  ok("arrow-left-right is a vendored Lucide glyph (icons.js), not an inline one-off <svg>", /"arrow-left-right":\s*"<path/.test(icons));
+
+  // 4. css: hover-revealed, positioned absolute, yields to drag/resize like its siblings.
+  var css = src("editor.css");
+  ok("col-swap-btn is absolutely positioned + hover-revealed (mirrors the resize handle's reveal pattern)", /\.col-swap-btn\s*\{[^}]*position:\s*absolute/.test(css) && /:hover \.col-swap-btn/.test(css));
+  ok("col-swap-btn yields to drag/resize (no competing pointer targets)", /body\.is-dragging-block \.col-swap-btn/.test(css) && /body\.is-col-resizing \.col-swap-btn/.test(css));
 })();
 
 // ---- Enter commits + blurs a single-line inspector field (not textarea) --------
@@ -8107,6 +8290,40 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("course.css carries no stage-placeholder/product-picker chrome classes", courseCss.indexOf("stage-placeholder") === -1 && courseCss.indexOf("product-picker") === -1);
 })();
 
+// ---- product-rail-markdown-lite-content-render: shared topic-copy render primitive ----
+// DOM-free (string in, HTML string out), so require it directly like ui-kit's _pure.
+section("markdown-lite content render");
+(function () {
+  var M;
+  try { M = require(path.join(ROOT, "src/markdown-lite.js")); } catch (e) { ok("require src/markdown-lite.js", false); return; }
+  ok("require src/markdown-lite.js", !!M && !!M._pure && typeof M.render === "function");
+  if (!M || !M._pure) return;
+  var P = M._pure;
+
+  ok("plain text with no markers", M.render("just plain text") === "<p>just plain text</p>");
+  ok("bold", M.render("this is **bold** text") === "<p>this is <strong>bold</strong> text</p>");
+  ok("inline code", M.render("run `verso build` now") === '<p>run <code class="md-lite-code">verso build</code> now</p>');
+  ok("bullets", M.render("- one\n- two\n- three") === "<ul><li>one</li><li>two</li><li>three</li></ul>");
+  ok("mixed: paragraph then bullets", M.render("Intro **text**.\n\n- `a`\n- b") ===
+    '<p>Intro <strong>text</strong>.</p><ul><li><code class="md-lite-code">a</code></li><li>b</li></ul>');
+  ok("multi-line paragraph collapses newlines to spaces", M.render("line one\nline two") === "<p>line one line two</p>");
+  ok("empty input -> empty string", M.render("") === "" && M.render(null) === "" && M.render(undefined) === "");
+
+  // Malformed/unmatched markers degrade to literal text, never throw or break markup.
+  ok("unclosed bold stays literal", M.render("an **unclosed bold") === "<p>an **unclosed bold</p>");
+  ok("unclosed inline code stays literal", M.render("an `unclosed code") === "<p>an `unclosed code</p>");
+  ok("stray single asterisks stay literal", M.render("2 * 3 * 4") === "<p>2 * 3 * 4</p>");
+
+  // HTML in stored text is escaped, never injected as markup (XSS/authoring-safety).
+  ok("HTML in input is escaped", M.render("<script>alert(1)</" + "script>") === "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
+  ok("escapeHtml is the seam used before marker parsing", P.escapeHtml("<b>&") === "&lt;b&gt;&amp;");
+
+  // One shared render path: index.html loads it, and it's declared DOM-free/chrome-agnostic
+  // (no hard-coded coupling to editor.js or render.js — callers wire it in per surface).
+  var idx = src("index.html");
+  ok("index.html loads markdown-lite.js", idx.indexOf("src/markdown-lite.js") !== -1);
+})();
+
 // resolveVariant must recurse into NESTED containers (columns / frame-group children /
 // cardReveal-accordion-sequence items / componentGrid instances) — a text override on a
 // nested block was previously dropped (variant preview showed the flagship copy).
@@ -8975,13 +9192,97 @@ section("#116 copy-editor shell");
 })();
 
 // ---- #175 copy-editor inline rich-format toolbar (B/I/U + inline weight on variant text) ----
+// ---- #170/#158: ONE shared, config-driven formatting toggle-bar --------------
+section("#170/#158 shared formatting toggle-bar");
+(function () {
+  var e = src("src/editor.js");
+  var body = slice(e, "function buildFormatToggleBar(io)", "window.__buildFormatToggleBar = buildFormatToggleBar;");
+  ok("buildFormatToggleBar found", body.indexOf("var bar = h(\"div\", \"prop-toggle-row\");") !== -1);
+  ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(e));
+  ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(e));
+  ok("inline-exec toggle calls io.getNode()/document.execCommand/io.onChange (behaviour unchanged)", /var node = io\.getNode\(\); if \(!node\) return;\s*\n\s*node\.focus\(\);\s*\n\s*document\.execCommand\(t\.cmd, false, null\);\s*\n\s*io\.onChange\(\);/.test(body));
+  ok("Link uses the SAME createLink\\/unlink + target=_blank mechanic as before", /document\.execCommand\("createLink", false, url\)[\s\S]{0,250}setAttribute\("target", "_blank"\)/.test(body));
+  ok("bar.refresh() resyncs is-on state against the CURRENT selection (for a bar that persists across re-focus)", /bar\.refresh = function \(\) \{/.test(body));
+  ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(e));
+
+  // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
+  var insStart = e.indexOf("function renderFieldInspector(node)");
+  var insBody = e.slice(insStart, insStart + 7000);
+  ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
+  ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
+  ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
+  var cfStart = e.indexOf("function buildCopyFormatBar()");
+  var cfBody = e.slice(cfStart, cfStart + 1500);
+  ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
+  ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
+  // exactly one config-driven toggle list in the whole file (no second duplicate copy).
+  ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (e.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1);
+})();
+
+// ---- #170/#33: text<->list block-type conversion (pure) -----------------------
+section("#170/#33 text<->list block-type conversion");
+(function () {
+  var e = src("src/editor.js");
+  var a = e.indexOf("/* @list-convert-start */"), b = e.indexOf("/* @list-convert-end */");
+  if (a === -1 || b === -1) { ok("locate @list-convert fence", false); return; }
+  var g = new Function(e.slice(a, b) +
+    "\nreturn { htmlToListItems: htmlToListItems, listItemsToHtml: listItemsToHtml, convertTextListBlockType: convertTextListBlockType };")();
+
+  // htmlToListItems: block-level breaks become <li> boundaries; inline formatting survives.
+  ok("a single line becomes one <li>", g.htmlToListItems("Hello <b>world</b>") === "<li>Hello <b>world</b></li>");
+  ok("<br> splits into multiple <li>s, inline formatting kept per item", g.htmlToListItems("One<br><b>Two</b><br>Three") === "<li>One</li><li><b>Two</b></li><li>Three</li>");
+  ok("<p>/<div> block tags split into items too (block-level = item boundary)", g.htmlToListItems("<p>Alpha</p><p>Beta</p>") === "<li>Alpha</li><li>Beta</li>");
+  ok("blank lines are dropped, not turned into empty items", g.htmlToListItems("One<br><br>Two") === "<li>One</li><li>Two</li>");
+  ok("empty/whitespace-only input -> one empty <li> (never crashes, never null)", g.htmlToListItems("") === "<li></li>" && g.htmlToListItems("   ") === "<li></li>");
+  ok("inline tags (b/i/u/a/span) are NEVER treated as breaks", g.htmlToListItems('<span style="font-weight:600">Bold run</span> and <a href="https://x">a link</a>') === '<li><span style="font-weight:600">Bold run</span> and <a href="https://x">a link</a></li>');
+
+  // listItemsToHtml: the inverse -- items join with <br>, inline content intact.
+  ok("multiple <li>s join with <br>, formatting kept", g.listItemsToHtml("<li>One</li><li><b>Two</b></li><li>Three</li>") === "One<br><b>Two</b><br>Three");
+  ok("a single <li> round-trips to its bare inner content", g.listItemsToHtml("<li>Hello <b>world</b></li>") === "Hello <b>world</b>");
+  ok("non-<li>-shaped input is returned untouched (defensive)", g.listItemsToHtml("just text") === "just text");
+  // round-trip: html -> list items -> html recovers the original flowing content.
+  ok("htmlToListItems + listItemsToHtml round-trips a multi-line field", g.listItemsToHtml(g.htmlToListItems("One<br>Two<br>Three")) === "One<br>Two<br>Three");
+
+  // convertTextListBlockType: whole block-type swap, remembers prior type, round-trips.
+  var para = { type: "paragraph", text: "Hello <b>world</b>" };
+  g.convertTextListBlockType(para);
+  ok("paragraph -> list converts type + splits text into <li>s", para.type === "list" && para.text === "<li>Hello <b>world</b></li>");
+  ok("prior type is remembered on the block", para.__priorTextType === "paragraph");
+  g.convertTextListBlockType(para);
+  ok("list -> text restores the REMEMBERED prior type (not always paragraph)", para.type === "paragraph");
+  ok("__priorTextType is cleared after restoring (no stale memory)", para.__priorTextType === undefined);
+  ok("round-trip is lossless on content", para.text === "Hello <b>world</b>");
+
+  var heading = { type: "heading", text: "Title text" };
+  g.convertTextListBlockType(heading);
+  g.convertTextListBlockType(heading);
+  ok("heading<->list round-trips back to heading (not a hardcoded paragraph default)", heading.type === "heading");
+
+  var noMemory = { type: "list", text: "<li>Item</li>" };
+  g.convertTextListBlockType(noMemory);
+  ok("list -> text with NO remembered prior type defaults to paragraph", noMemory.type === "paragraph");
+
+  ok("convertTextListBlockType is null-safe", g.convertTextListBlockType(null) === null);
+
+  // purity: does not mutate anything beyond the block object passed in (no globals touched).
+  var before = JSON.stringify({ a: 1 });
+  var untouched = { a: 1 };
+  var block2 = { type: "paragraph", text: "x" };
+  g.convertTextListBlockType(block2);
+  ok("converting one block never touches an unrelated object", JSON.stringify(untouched) === before);
+})();
+
 section("#175 copy-editor format toolbar");
 (function () {
   var e = src("src/editor.js");
   var bar = slice(e, "function buildCopyFormatBar()", "return bar;\n  }");
   ok("toolbar built once + injected into the copy-editor bar", /getElementById\("copyedit-format"\)[\s\S]*?insertBefore\(bar, host\)/.test(bar));
-  ok("toolbar wires canonical B/I/U prop-toggles via execCommand", /\["B", "bold"\], \["I", "italic"\], \["U", "underline"\][\s\S]*?document\.execCommand\(o\[1\]/.test(bar));
-  ok("B/I/U commits through commitCopyRow (-> frWrite override layer)", /document\.execCommand\(o\[1\][\s\S]*?commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\)/.test(bar));
+  // #170/#158: B/I/U/Link now come from the ONE shared canonical toggle-bar builder
+  // (buildFormatToggleBar), not a bespoke row -- wired here via io.getNode/io.onChange.
+  ok("toolbar uses the shared canonical toggle-bar builder, not a bespoke B/I/U row", /var biu = buildFormatToggleBar\(\{[\s\S]{0,1200}\}\);/.test(bar));
+  ok("getNode resolves the active copy row's field", /getNode: function \(\) \{ return _activeCopyRow && _activeCopyRow\.tx; \}/.test(bar));
+  ok("onChange commits through commitCopyRow (-> frWrite override layer)", /onChange: function \(\) \{ if \(!_activeCopyRow\) return; commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\); \}/.test(bar));
+  ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(e));
   ok("toolbar uses the shared dsSelect weight picker (no bespoke control)", /dsSelect\(\[\["Weight", ""\], \["Regular", "400"\][\s\S]*?applyCopyWeight/.test(bar));
   ok("weight captures the live row range on mousedown (select steals focus)", /mousedown[\s\S]*?savedRange = \(r && _activeCopyRow/.test(bar));
   // applyCopyWeight: an inline font-weight span (survives sanitizeFieldHtml) committed through commitCopyRow
