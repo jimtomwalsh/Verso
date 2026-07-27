@@ -7323,7 +7323,7 @@ section("SVG polarity classifier");
 })();
 
 // ---- panel-standards guardrail (SPEC-panel-cleanup) ----------------------
-// Positive space lives in UX-STYLE-GUIDE.md; here we machine-enforce the NEGATIVE
+// Positive space lives in design-system/readme.md; here we machine-enforce the NEGATIVE
 // space (retired patterns). Slice 1 = WARNING (Header & Footer clean; other panels
 // still use the old pattern). Slice 3 flips the app-wide count to a hard failure.
 section("panel-standards");
