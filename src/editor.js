@@ -2877,6 +2877,65 @@
     }
   }
 
+  // Pure swap of two adjacent columns' block arrays (+ colWidths, if custom and still
+  // matching the column count). i/i+1 must both be valid indices; the caller (the click
+  // handler below) guarantees that by construction (one button per adjacent pair).
+  /* @swap-columns-start */
+  function swapColumns(block, i) {
+    if (!block || !Array.isArray(block.columns)) return block;
+    var a = block.columns[i], b = block.columns[i + 1];
+    block.columns[i] = b; block.columns[i + 1] = a;
+    if (Array.isArray(block.colWidths) && block.colWidths.length === block.columns.length) {
+      var wa = block.colWidths[i], wb = block.colWidths[i + 1];
+      block.colWidths[i] = wb; block.colWidths[i + 1] = wa;
+    }
+    return block;
+  }
+  /* @swap-columns-end */
+  // Per-gap column-SWAP glyph (editor chrome only — never rendered/exported). A small
+  // hover-revealed icon button in each inter-column gap, mirroring attachColumnResizers'
+  // wiring exactly, that exchanges the two adjacent columns via swapColumns and
+  // re-renders. Unlike a resize (a live drag on flex ratios), a swap is a genuine
+  // structural change — content actually moves — so it goes through the normal
+  // pushHistory + reapplyStructural + reselectBlockNode path, not a live DOM mirror.
+  function attachColumnSwaps(columnsNode, block) {
+    var cols = Array.prototype.slice.call(columnsNode.children).filter(function (c) {
+      return c.classList && c.classList.contains("layout-column");
+    });
+    if (cols.length < 2) return; // nothing to swap between
+    var gap = block.gap == null ? 24 : block.gap;
+    var btns = [];
+
+    function positionSwaps() {
+      btns.forEach(function (btn, i) {
+        var left = cols[i].offsetLeft + cols[i].offsetWidth + gap / 2;
+        btn.style.left = left + "px";
+        btn.style.top = (columnsNode.offsetHeight / 2) + "px";
+      });
+    }
+
+    cols.slice(0, -1).forEach(function (_, i) {
+      var btn = iconBtn("arrow-left-right", "Swap these two columns");
+      btn.classList.add("col-swap-btn");
+      btn.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); });
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        pushHistory();
+        swapColumns(block, i);
+        reapplyStructural(findPageOfBlock(block));
+        reselectBlockNode(block, "block");
+      });
+      btns.push(btn);
+      columnsNode.appendChild(btn);
+    });
+
+    positionSwaps();
+    if (window.ResizeObserver) {
+      var ro2 = new ResizeObserver(function () { positionSwaps(); });
+      ro2.observe(columnsNode);
+    }
+  }
+
   // Legacy icon-button keys -> Lucide (kebab) names, resolved through the offline
   // Icon accessor (src/icons.js). Hand-drawn ICONS art retired; callers keep their
   // stable keys so wiring is untouched (re-skin, never re-wire).
@@ -13432,7 +13491,7 @@
 
       // A columns row gets page-level top/bottom edge bands (AA) but no box/drag
       // handle of its own; a group is an invisible container with neither.
-      if (block.type === "columns") { attachColumnsEdgeBands(node, block, pi); attachColumnResizers(node, block); attachEmptyColumnDrops(node, block); return; }
+      if (block.type === "columns") { attachColumnsEdgeBands(node, block, pi); attachColumnResizers(node, block); attachColumnSwaps(node, block); attachEmptyColumnDrops(node, block); return; }
       if (block.type === "group") return; // no box of its own
 
       // Hotspot popover-card content is a FULL editing container (parity with

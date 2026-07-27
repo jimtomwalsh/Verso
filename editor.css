@@ -2611,6 +2611,20 @@ body.is-dragging-block .columns-edge-band { pointer-events: auto; }
 body.is-dragging-block .col-resize-handle { pointer-events: none; }
 body.is-col-resizing { cursor: col-resize; user-select: none; }
 
+/* Per-gap column-SWAP glyph (editor chrome only; never exported). A small icon-btn
+   centred on the gap, vertically centred on the row, revealed on hover — mirrors the
+   resize handle's reveal pattern but as a real button (not a full-height grab strip),
+   so it never fights the resize handle for pointer events at the same coordinate. */
+.col-swap-btn {
+  position: absolute; z-index: 9;
+  transform: translate(-50%, -50%);
+  opacity: 0; transition: opacity 0.12s ease;
+}
+.layout-columns:hover .col-swap-btn { opacity: 0.55; }
+.col-swap-btn:hover { opacity: 1 !important; }
+body.is-dragging-block .col-swap-btn,
+body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important; }
+
 /* outliner block flags (hidden / locked) */
 .tree-block__flag {
   font-size: 9px; letter-spacing: var(--tracking-caps); text-transform: uppercase;

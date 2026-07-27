@@ -6618,6 +6618,54 @@ section("columns colWidths guards");
   ok("handles yield to edge bands while a block is dragged", /body\.is-dragging-block \.col-resize-handle\s*\{\s*pointer-events:\s*none/.test(css));
 })();
 
+// ---- swap-columns affordance (hover glyph, swaps adjacent columns) ------------
+section("swap-columns affordance");
+(function () {
+  var e = src("src/editor.js");
+
+  // 1. PURE: swapColumns, extracted headlessly.
+  var m = e.match(/\/\* @swap-columns-start \*\/([\s\S]*?)\/\* @swap-columns-end \*\//);
+  if (!m) { ok("locate @swap-columns fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { swapColumns: swapColumns };")();
+
+  var block = { type: "columns", columns: [["A"], ["B"], ["C"]] };
+  g.swapColumns(block, 0);
+  ok("swaps the first adjacent pair, leaves the third column untouched", JSON.stringify(block.columns) === JSON.stringify([["B"], ["A"], ["C"]]));
+  g.swapColumns(block, 1);
+  ok("swaps a DIFFERENT adjacent pair (index 1/2), not always the first", JSON.stringify(block.columns) === JSON.stringify([["B"], ["C"], ["A"]]));
+
+  var withWidths = { type: "columns", columns: [["A"], ["B"]], colWidths: [300, 500] };
+  g.swapColumns(withWidths, 0);
+  ok("colWidths swap alongside their columns (custom widths follow the content)", JSON.stringify(withWidths.colWidths) === JSON.stringify([500, 300]));
+
+  var mismatchedWidths = { type: "columns", columns: [["A"], ["B"], ["C"]], colWidths: [100, 200] }; // stale (count mismatch)
+  g.swapColumns(mismatchedWidths, 0);
+  ok("stale/mismatched colWidths are left untouched (never corrupted)", JSON.stringify(mismatchedWidths.colWidths) === JSON.stringify([100, 200]));
+
+  var noWidths = { type: "columns", columns: [["A"], ["B"]] };
+  g.swapColumns(noWidths, 0);
+  ok("a block with no colWidths at all swaps cleanly (no crash, no field invented)", noWidths.colWidths === undefined && JSON.stringify(noWidths.columns) === JSON.stringify([["B"], ["A"]]));
+
+  ok("swapColumns is null-safe", g.swapColumns(null, 0) === null);
+  ok("swapColumns no-ops on a non-columns block (defensive)", (function () { var b = { type: "paragraph" }; return g.swapColumns(b, 0) === b && !("columns" in b); })());
+
+  // 2. WIRING: the swap glyph is attached in the columns decorate branch, alongside the
+  // existing resize handles, and mutates via swapColumns (never a bespoke inline swap).
+  ok("swap glyph attached in the columns decorate branch", /attachColumnSwaps\(node, block\)/.test(e));
+  ok("swap button uses the canonical iconBtn + Icon(\"arrow-left-right\")", /iconBtn\("arrow-left-right", "Swap these two columns"\)/.test(e));
+  ok("swap click pushes history, mutates via swapColumns, then reapplies + reselects", /pushHistory\(\);\s*\n\s*swapColumns\(block, i\);\s*\n\s*reapplyStructural\(findPageOfBlock\(block\)\);\s*\n\s*reselectBlockNode\(block, "block"\);/.test(e));
+  ok("swap button keeps the field/gap pointer semantics (mousedown/pointerdown preventDefault + stopPropagation)", /btn\.addEventListener\("pointerdown", function \(e\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}\);/.test(e));
+
+  // 3. icons.js: a real vendored Lucide glyph, not a placeholder/ad-hoc SVG.
+  var icons = src("src/icons.js");
+  ok("arrow-left-right is a vendored Lucide glyph (icons.js), not an inline one-off <svg>", /"arrow-left-right":\s*"<path/.test(icons));
+
+  // 4. css: hover-revealed, positioned absolute, yields to drag/resize like its siblings.
+  var css = src("editor.css");
+  ok("col-swap-btn is absolutely positioned + hover-revealed (mirrors the resize handle's reveal pattern)", /\.col-swap-btn\s*\{[^}]*position:\s*absolute/.test(css) && /:hover \.col-swap-btn/.test(css));
+  ok("col-swap-btn yields to drag/resize (no competing pointer targets)", /body\.is-dragging-block \.col-swap-btn/.test(css) && /body\.is-col-resizing \.col-swap-btn/.test(css));
+})();
+
 // ---- Enter commits + blurs a single-line inspector field (not textarea) --------
 section("inspector Enter-to-blur");
 (function () {
