@@ -194,6 +194,21 @@
   };
   function libraryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserLibraryAdapter); }
 
+  // ---- Products storage adapter (Product Rail #1) — same seam/flag as the registry and
+  // library above. ProductsStore holds Product containers ({id,name,createdAt,groundTruthId})
+  // keyed by productId; a document only joins a Product when explicitly tagged via
+  // doc.meta.productId/stage (see docMatchesProductStage, @pure-recents fence) — untagged
+  // documents never touch this store and read/save through the registry exactly as today.
+  /* @products-adapter-start */
+  var PRODUCTS_STORAGE_KEY = "authoring.products";
+  var browserProductsAdapter = {
+    name: "browser",
+    readProducts: function () { return localStorage.getItem(PRODUCTS_STORAGE_KEY); },
+    writeProducts: function (json) { return writeStore(localStorage, PRODUCTS_STORAGE_KEY, json); }
+  };
+  /* @products-adapter-end */
+  function productsAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserProductsAdapter); }
+
   // ---- StorageBackend (platform-pivot 01/31 — EXPAND) -----------------------
   // The single, highest seam the whole platform pivot introduces. It unifies the
   // three storage choke points — the registry writer (saveRegistry), the low-level
@@ -332,6 +347,26 @@
     if (mos < 12) return mos + (mos === 1 ? " month ago" : " months ago");
     var yrs = Math.floor(days / 365);
     return yrs + (yrs === 1 ? " year ago" : " years ago");
+  }
+  // Product Rail #1: doc.meta.productId/stage are optional tagging fields (next to
+  // code/title/updatedAt) — an untagged doc has neither and behaves exactly as today.
+  // A falsy filter value means "no constraint on that dimension" (matches everything,
+  // tagged or not); a truthy one requires an exact match, so an untagged doc never
+  // matches a specific Product/Stage filter.
+  function docMatchesProductStage(d, productId, stage) {
+    var meta = (d && d.meta) || {};
+    if (productId && meta.productId !== productId) return false;
+    if (stage && meta.stage !== stage) return false;
+    return true;
+  }
+  // Tags (or clears, when passed a falsy value) a document's Product/Stage. Writes
+  // ONLY doc.meta — never touches pages/blocks, so promotion is lossless by construction.
+  function tagDocProductStage(d, productId, stage) {
+    if (!d) return d;
+    if (!d.meta) d.meta = {};
+    if (productId) d.meta.productId = productId; else delete d.meta.productId;
+    if (stage) d.meta.stage = stage; else delete d.meta.stage;
+    return d;
   }
   /* @pure-recents-end */
 
@@ -1132,6 +1167,30 @@
   window.LibraryStore = loadLibrary();
   function saveLibrary() { try { libraryAdapter().writeLibrary(JSON.stringify(window.LibraryStore)); } catch (e) {} }
   function libComponents() { return (window.LibraryStore && window.LibraryStore.components) || {}; }
+
+  // Product Rail #1 — ProductsStore: { [productId]: {id, name, createdAt, groundTruthId} }.
+  // Same load/save shape as the library above, through productsAdapter()'s adapter seam.
+  function loadProducts() {
+    var prods = {};
+    try { var raw = productsAdapter().readProducts(); if (raw) { var p = JSON.parse(raw); if (p && typeof p === "object") prods = p; } } catch (e) {}
+    return prods;
+  }
+  window.ProductsStore = loadProducts();
+  function saveProducts() { try { productsAdapter().writeProducts(JSON.stringify(window.ProductsStore)); } catch (e) {} }
+  // Creates a Product container and persists it; the sole write path other Product Rail
+  // tickets (new-product-flow, promote-to-product) build their UI on top of.
+  function createProduct(name) {
+    var id = "prod-" + Math.random().toString(36).slice(2, 8);
+    while (window.ProductsStore[id]) id = "prod-" + Math.random().toString(36).slice(2, 8);
+    var prod = { id: id, name: (String(name || "").trim() || "Untitled product"), createdAt: Date.now() };
+    window.ProductsStore[id] = prod;
+    saveProducts();
+    return prod;
+  }
+  // Foundational tagging-layer API (Product Rail #1) — the surface every downstream
+  // Product Rail ticket (bottom-rail nav, +New Product, Promote to Product, browser
+  // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
+  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage };
   function isLibraryComponent(key) { return !!libComponents()[key]; }
   // doc override -> shared library -> built-in. Shared by the editor + render.
   function resolveComponentDef(key) {

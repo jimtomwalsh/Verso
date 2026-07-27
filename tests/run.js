@@ -2044,7 +2044,8 @@ section("#71 recents");
   if (!m) { ok("locate @pure-recents fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { stampDocUpdatedAt: stampDocUpdatedAt, stampDocOpenedAt: stampDocOpenedAt, recentsCompare: recentsCompare," +
-    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime };")();
+    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime," +
+    " docMatchesProductStage: docMatchesProductStage, tagDocProductStage: tagDocProductStage };")();
 
   // stampers: write the scalar onto meta, create meta if absent, never touch media.
   var d = { meta: { title: "A", code: "A" }, pages: [{ blocks: [{ type: "image", src: "data:image/png;base64,AAA" }] }] };
@@ -2092,6 +2093,54 @@ section("#71 recents");
   ok("one hour singular", g.formatRelativeTime(NOW - 60 * 60 * 1000, NOW) === "1 hour ago");
   ok("days", g.formatRelativeTime(NOW - 3 * 24 * 3600 * 1000, NOW) === "3 days ago");
   ok("future clamps to just now", g.formatRelativeTime(NOW + 5000, NOW) === "just now");
+
+  // Product Rail #1: Product/Stage filter predicate + tagger, over a fixture mix of
+  // tagged and untagged docs. Untagged docs must behave exactly as today (match any
+  // "no constraint" filter, never a specific Product/Stage one).
+  var untagged = { meta: { title: "Legacy course", code: "LEGACY" } };
+  var tagged1 = { meta: { title: "Radar 101", code: "R101", productId: "prod-a", stage: "elearning" } };
+  var tagged2 = { meta: { title: "Radar deck", code: "R-DECK", productId: "prod-a", stage: "presentations" } };
+  var taggedOther = { meta: { title: "Other product", code: "OTHER", productId: "prod-b", stage: "elearning" } };
+  ok("no filter (both falsy) matches every doc, tagged or not", g.docMatchesProductStage(untagged, null, null) === true && g.docMatchesProductStage(tagged1, null, null) === true);
+  ok("productId filter excludes an untagged doc", g.docMatchesProductStage(untagged, "prod-a", null) === false);
+  ok("productId filter excludes a doc tagged to a different product", g.docMatchesProductStage(taggedOther, "prod-a", null) === false);
+  ok("productId filter matches a doc tagged to that product (any stage)", g.docMatchesProductStage(tagged1, "prod-a", null) === true && g.docMatchesProductStage(tagged2, "prod-a", null) === true);
+  ok("productId+stage filter narrows to the exact stage", g.docMatchesProductStage(tagged1, "prod-a", "elearning") === true && g.docMatchesProductStage(tagged2, "prod-a", "elearning") === false);
+  ok("stage-only filter (no productId) still excludes an untagged doc", g.docMatchesProductStage(untagged, null, "elearning") === false);
+
+  var freshDoc = { meta: { title: "New course", code: "NEW" } };
+  g.tagDocProductStage(freshDoc, "prod-a", "elearning");
+  ok("tagDocProductStage writes productId/stage onto meta only", freshDoc.meta.productId === "prod-a" && freshDoc.meta.stage === "elearning" && freshDoc.meta.title === "New course");
+  g.tagDocProductStage(freshDoc, null, null);
+  ok("tagDocProductStage(null,null) clears the tags back to untagged", freshDoc.meta.productId === undefined && freshDoc.meta.stage === undefined);
+  ok("tagDocProductStage is null-safe", g.tagDocProductStage(null, "x", "y") === null);
+})();
+
+// ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
+section("product-rail ProductsStore");
+(function () {
+  var ed = src("src/editor.js");
+  var pureFence = ed.match(/\/\* @pure-start \*\/([\s\S]*?)\/\* @pure-end \*\//);
+  if (!pureFence) { ok("locate @pure fence", false); return; }
+  var adapterFence = ed.match(/\/\* @products-adapter-start \*\/([\s\S]*?)\/\* @products-adapter-end \*\//);
+  if (!adapterFence) { ok("locate @products-adapter fence", false); return; }
+  var fake = {}; // a minimal Storage-like stub, isolated per test run
+  var fakeLocalStorage = {
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(fake, k) ? fake[k] : null; },
+    setItem: function (k, v) { fake[k] = v; }
+  };
+  // Extracted from the REAL source (not re-typed), so this can't silently drift from
+  // what actually ships: the durable-write core (writeStore) + the real adapter object.
+  var g = new Function("localStorage",
+    pureFence[1] + adapterFence[1] +
+    "\nreturn { browserProductsAdapter: browserProductsAdapter };"
+  )(fakeLocalStorage);
+  ok("readProducts is null before any write (no stray default)", g.browserProductsAdapter.readProducts() === null);
+  var payload = JSON.stringify({ "prod-a": { id: "prod-a", name: "Radar", createdAt: 1000 } });
+  var wr = g.browserProductsAdapter.writeProducts(payload);
+  ok("writeProducts reports ok", wr.ok === true);
+  ok("readProducts round-trips the exact JSON just written", g.browserProductsAdapter.readProducts() === payload);
+  ok("round-tripped JSON parses back to the same shape", JSON.parse(g.browserProductsAdapter.readProducts())["prod-a"].name === "Radar");
 })();
 
 // ---- #67: .verso portable package (zip codec + round-trip) ----------------
@@ -2335,6 +2384,11 @@ section("#69 migration cutover");
   ok("libraryAdapter uses the same pickStorageAdapter seam as the registry", /function libraryAdapter\(\) \{ return pickStorageAdapter\(storageBackend\(\), window\.__storageAdapter, browserLibraryAdapter\); \}/.test(ed));
   ok("loadLibrary reads via libraryAdapter, not a hardcoded localStorage call", /function loadLibrary\(\) \{[\s\S]{0,200}libraryAdapter\(\)\.readLibrary\(\)/.test(ed));
   ok("saveLibrary writes via libraryAdapter, not a hardcoded localStorage call", /function saveLibrary\(\) \{ try \{ libraryAdapter\(\)\.writeLibrary\(JSON\.stringify\(window\.LibraryStore\)\); \} catch \(e\) \{\} \}/.test(ed));
+  // WIRING (Product Rail #1): ProductsStore mirrors the exact same seam pattern.
+  ok("productsAdapter uses the same pickStorageAdapter seam as the registry/library", /function productsAdapter\(\) \{ return pickStorageAdapter\(storageBackend\(\), window\.__storageAdapter, browserProductsAdapter\); \}/.test(ed));
+  ok("loadProducts reads via productsAdapter, not a hardcoded localStorage call", /function loadProducts\(\) \{[\s\S]{0,200}productsAdapter\(\)\.readProducts\(\)/.test(ed));
+  ok("saveProducts writes via productsAdapter, not a hardcoded localStorage call", /function saveProducts\(\) \{ try \{ productsAdapter\(\)\.writeProducts\(JSON\.stringify\(window\.ProductsStore\)\); \} catch \(e\) \{\} \}/.test(ed));
+  ok("store-native.js carries the same readProducts/writeProducts pair as readLibrary/writeLibrary", /readProducts: function \(\) \{ return productsCache; \}/.test(src("src/store-native.js")) && /writeProducts: function \(json\)/.test(src("src/store-native.js")));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
   ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(ed));
   ok("migrate button registered only when __nativeStore present", /if \(window\.__nativeStore\) window\.Editor\.registerPipelineButton\("Migrate to file storage \(beta\)", migrateToFileBackendPrompt/.test(ed));

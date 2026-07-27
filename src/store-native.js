@@ -56,6 +56,9 @@
   // #18: same seeding for the shared component library, a SEPARATE on-disk file
   // (store/library.json) injected as window.__versoDiskLibraryB64.
   var libCache = b64ToText(window.__versoDiskLibraryB64);
+  // Product Rail #1: same seeding again for ProductsStore, a THIRD on-disk file
+  // (store/products.json) injected as window.__versoDiskProductsB64.
+  var productsCache = b64ToText(window.__versoDiskProductsB64);
 
   window.__storageAdapter = {
     name: "file",
@@ -91,6 +94,23 @@
         else if (window.console && console.error) console.error("[store-native] " + msg);
       };
       try { br.postMessage({ op: "storePutLibrary", reqId: reqId, text: json }); }
+      catch (e) { delete pending[reqId]; return { ok: false, quota: false, error: e }; }
+      return { ok: true };
+    },
+    // Product Rail #1: same read/write/confirm shape again, targeting products.json.
+    readProducts: function () { return productsCache; },
+    writeProducts: function (json) {
+      productsCache = json;
+      var br = bridge(); if (!br) return { ok: false, quota: false, error: new Error("no bridge") };
+      var reqId = "storeProd:" + (++seq);
+      pending[reqId] = function (res) {
+        if (res && res.ok) return;
+        var msg = "The Products store could not be saved to disk" + (res && res.error ? " (" + res.error + ")" : "") +
+          ". Your latest Product changes are NOT durably saved.";
+        if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure(msg);
+        else if (window.console && console.error) console.error("[store-native] " + msg);
+      };
+      try { br.postMessage({ op: "storePutProducts", reqId: reqId, text: json }); }
       catch (e) { delete pending[reqId]; return { ok: false, quota: false, error: e }; }
       return { ok: true };
     }
