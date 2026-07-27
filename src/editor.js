@@ -1191,6 +1191,52 @@
   // Product Rail ticket (bottom-rail nav, +New Product, Promote to Product, browser
   // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
   window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage };
+  // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
+  // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
+  // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
+  // (this modal always operates on `doc`, the one open course). Reuses the modalField +
+  // dsSelect pattern Find & Replace's variant picker already established, not a new
+  // control -- see modalField(box, "Apply to") at the Find & Replace call site.
+  var PRODUCT_STAGE_OPTS = [["eLearning", "elearning"], ["Presentations", "presentations"], ["Print docs", "printDocs"]];
+  function promoteToProductModal() {
+    if (!doc) return;
+    var NEW_KEY = "__new__";
+    var products = window.ProductsStore || {};
+    var productKeys = Object.keys(products);
+    var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
+    var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
+    var stage = (doc.meta && doc.meta.stage) || "elearning";
+    var newNameVal = "";
+    var shell = dsModalShell({
+      title: "Promote to Product",
+      subtitle: "Tags this course onto a Product + stage. Only adds meta — the course's content is never touched.",
+      primaryLabel: "Promote",
+      onPrimary: function () {
+        var pid = chosen;
+        if (chosen === NEW_KEY) {
+          var name = (newNameVal || "").trim();
+          if (!name) return;
+          pid = createProduct(name).id;
+        }
+        pushHistory();
+        tagDocProductStage(doc, pid, stage);
+        saveRegistry(registry);
+      }
+    });
+    var box = shell.body;
+    var pRow = modalField(box, "Product");
+    var pSel = dsSelect(pOpts, chosen, function (v) { chosen = v; newNameRow.style.display = (v === NEW_KEY) ? "" : "none"; });
+    pSel.classList.add("modal-field__control");
+    pRow.appendChild(pSel);
+    var newNameRow = h("div"); newNameRow.style.display = (chosen === NEW_KEY) ? "" : "none";
+    var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
+    nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
+    box.appendChild(newNameRow);
+    var sRow = modalField(box, "Stage");
+    var sSel = dsSelect(PRODUCT_STAGE_OPTS, stage, function (v) { stage = v; });
+    sSel.classList.add("modal-field__control");
+    sRow.appendChild(sSel);
+  }
   function isLibraryComponent(key) { return !!libComponents()[key]; }
 
   // ---- Product Rail: tag vocabulary + reserved owning-Product tag ---------------
@@ -1651,6 +1697,7 @@
     }
     action("Save as a copy", function () { if (activeDocId) duplicateCourse(activeDocId); });
     action("Open…", function () { pickCourseFile(function (imported) { importDocToRegistry(imported); }); });
+    action("Promote to Product…", function () { promoteToProductModal(); });
     menu.appendChild(h("div", "vsavemenu__sep"));
     menu.appendChild(h("div", "vsavemenu__head", "Where are my files"));
     menu.appendChild(h("div", "vsavemenu__path", storeLocationText()));
