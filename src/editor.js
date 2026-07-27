@@ -1168,10 +1168,41 @@
   // context), so the shipped SCORM is self-contained. Storage routes through
   // libraryAdapter() (#18) -- localStorage on the 'browser' backend, the per-user file
   // store on 'file' -- the same seam/flag the doc registry uses.
+  // Neutral demo master (ships with the tool, mirrors SAMPLE_DOC's role): a single
+  // reusable component carrying one named facet ("pro"), so the shipped demo course's
+  // Products & Variants chapter (model.js) has a real shared component to point its
+  // libraryInstance placements at on a fresh install. Only used to seed an EMPTY store —
+  // never overwrites real authored components.
+  function seedDemoLibrary(lib) {
+    lib.components["comp-demo-feature"] = {
+      name: "Feature Highlight",
+      productId: "prod-demo",
+      template: {
+        id: "lib-demo-root", type: "frame", padding: 24, radius: 12, border: true,
+        children: [
+          { id: "lib-demo-h", type: "subheading", text: "Standard" },
+          { id: "lib-demo-p", type: "paragraph", text: "The Standard tier covers the core feature set." }
+        ]
+      },
+      facets: {
+        pro: {
+          name: "Pro",
+          template: {
+            id: "lib-demo-root-pro", type: "frame", padding: 24, radius: 12, border: true,
+            children: [
+              { id: "lib-demo-h-pro", type: "subheading", text: "Pro" },
+              { id: "lib-demo-p-pro", type: "paragraph", text: "The Pro tier adds advanced options on top of the Standard feature set." }
+            ]
+          }
+        }
+      }
+    };
+  }
   function loadLibrary() {
     var lib = { components: {} };
     try { var raw = libraryAdapter().readLibrary(); if (raw) { var p = JSON.parse(raw); if (p && p.components) lib = p; } } catch (e) {}
     if (!lib.components) lib.components = {};
+    if (!Object.keys(lib.components).length) seedDemoLibrary(lib);
     return lib;
   }
   window.LibraryStore = loadLibrary();
@@ -1180,9 +1211,13 @@
 
   // Product Rail #1 — ProductsStore: { [productId]: {id, name, createdAt, groundTruthId} }.
   // Same load/save shape as the library above, through productsAdapter()'s adapter seam.
+  // A fresh (empty) store seeds the same neutral demo Product SAMPLE_DOC tags itself to
+  // (meta.productId), so "Products & Variants" (model.js) is a real Product Rail example
+  // out of the box — never overwrites a real, already-persisted store.
   function loadProducts() {
     var prods = {};
     try { var raw = productsAdapter().readProducts(); if (raw) { var p = JSON.parse(raw); if (p && typeof p === "object") prods = p; } } catch (e) {}
+    if (!Object.keys(prods).length) prods = { "prod-demo": { id: "prod-demo", name: "Sample Product Line", createdAt: 0 } };
     return prods;
   }
   window.ProductsStore = loadProducts();
@@ -15544,7 +15579,7 @@
       settings: { shuffleQuestions: false, shuffleOptions: false },
       questions: [
         { id: "q" + Date.now(), type: "multipleChoice", methodLabel: "Select the answer", prompt: "Type your question here?", options: [ { text: "Correct answer", correct: true }, { text: "Wrong answer", correct: false }, { text: "Another wrong answer", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> Explain why this is right.", feedbackIncorrect: "Give a hint and point to the material to review." },
-        { id: "q" + (Date.now() + 1), type: "fillBlank", methodLabel: "Complete the sentence", stemBefore: "RF jamming is regulated because", stemAfter: "", options: [ { text: "it is ineffective against drones", correct: false }, { text: "it can interfere with legitimate RF systems", correct: true }, { text: "it only works at short range", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> It disrupts whole frequency bands, not just the drone.", feedbackIncorrect: "Think about who else shares the frequency band." }
+        { id: "q" + (Date.now() + 1), type: "fillBlank", methodLabel: "Complete the sentence", stemBefore: "This step is important because", stemAfter: "", options: [ { text: "it has no real effect", correct: false }, { text: "it directly supports the topic being covered", correct: true }, { text: "it only matters in rare cases", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> Explain why this is right.", feedbackIncorrect: "Give a hint and point to the material to review." }
       ],
       done: { title: "Knowledge Check Complete", body: "All questions answered correctly. Continue to the next section.", retry: { on: false, label: "Try again" } }
     }; } },
