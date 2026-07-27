@@ -469,6 +469,24 @@
     b.addEventListener("click", function () { if (!props.disabled && typeof props.onClick === "function") props.onClick(); });
     return b;
   }
+  // Timeline -- a vertical node-based activity/history trail (dot + connecting line +
+  // content per entry), newest-first by convention (the caller orders entries). Promoted
+  // from Product Rail's per-topic import/edit history (design-system/components/structure/Timeline).
+  function Timeline(props) {
+    props = props || {};
+    var wrap = h("div", "vds-timeline");
+    (props.entries || []).forEach(function (entry) {
+      var node = h("div", "vds-timeline__node");
+      node.appendChild(h("div", "vds-timeline__dot"));
+      var content = h("div", "vds-timeline__content");
+      if (entry.date) content.appendChild(h("div", "vds-timeline__date", entry.date));
+      if (entry.label) content.appendChild(h("div", "vds-timeline__label", entry.label));
+      if (entry.detail) content.appendChild(h("div", "vds-timeline__detail", entry.detail));
+      node.appendChild(content);
+      wrap.appendChild(node);
+    });
+    return wrap;
+  }
 
   // ==========================================================================
   // OVERLAYS
@@ -546,7 +564,7 @@
     Select: Select, Checkbox: Checkbox, ColorField: ColorField,
     Panel: Panel, PanelSection: PanelSection, Breadcrumb: Breadcrumb,
     Tabs: Tabs, DocumentTab: DocumentTab,
-    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, ToggleChip: ToggleChip,
+    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, ToggleChip: ToggleChip, Timeline: Timeline,
     Modal: Modal, ContextMenu: ContextMenu, Tooltip: Tooltip,
     _pure: _pure
   };

@@ -10644,11 +10644,17 @@
   var __sourceActiveFacet = "technical";
   var __sourceSearchQuery = "";
   var __sourceActiveVariants = []; // reset whenever a different topic is selected
-  // Product Rail (md-topic-import bulk-delete): topic ids checked in the nav list, for
-  // "Select all" + "Delete selected" -- cleanup after a test import, without deleting one
-  // at a time. Cleared whenever the filtered set changes shape (search/product switch)
-  // so a stale selection can never silently apply to a different-looking list.
+  // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
+  // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
+  // unlocks them, mirroring the familiar Photos/Files/Gmail toggle rather than always
+  // showing a row of checkboxes nobody's using most of the time.
+  var __sourceSelectModeActive = false;
   var __sourceSelectedTopicIds = [];
+
+  function exitSelectMode() {
+    __sourceSelectModeActive = false;
+    __sourceSelectedTopicIds = [];
+  }
 
   function deleteSelectedTopics() {
     if (!__sourceSelectedTopicIds.length) return;
@@ -10661,7 +10667,7 @@
           delete comps[id];
           if (__sourceActiveTopicId === id) __sourceActiveTopicId = null;
         });
-        __sourceSelectedTopicIds = [];
+        exitSelectMode();
         saveLibrary();
         renderSourceTopicList();
         renderSourceArticle();
@@ -10686,19 +10692,31 @@
     }
 
     var bar = h("div", "source-stage__bulk-bar");
-    if (window.VersoUI && window.VersoUI.Checkbox) {
-      var allChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length === topics.length;
-      var someChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length < topics.length;
-      var selectAll = window.VersoUI.Checkbox({
-        checked: allChecked, mixed: someChecked,
-        onChange: function (next) { __sourceSelectedTopicIds = next ? topics.map(function (t) { return t.id; }) : []; renderSourceTopicList(); }
-      });
-      selectAll.title = "Select all";
-      bar.appendChild(selectAll);
-    }
-    bar.appendChild(h("span", "source-stage__bulk-count", __sourceSelectedTopicIds.length ? __sourceSelectedTopicIds.length + " selected" : "Select all"));
-    if (__sourceSelectedTopicIds.length && window.VersoUI && window.VersoUI.Button) {
-      bar.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics }));
+    if (!window.VersoUI || !window.VersoUI.Button) { /* no bar without the canonical Button */ }
+    else if (!__sourceSelectModeActive) {
+      bar.appendChild(window.VersoUI.Button({
+        variant: "secondary", icon: "check-square", label: "Select",
+        onClick: function () { __sourceSelectModeActive = true; renderSourceTopicList(); }
+      }));
+    } else {
+      if (window.VersoUI.Checkbox) {
+        var allChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length === topics.length;
+        var someChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length < topics.length;
+        var selectAll = window.VersoUI.Checkbox({
+          checked: allChecked, mixed: someChecked,
+          onChange: function (next) { __sourceSelectedTopicIds = next ? topics.map(function (t) { return t.id; }) : []; renderSourceTopicList(); }
+        });
+        selectAll.title = "Select all";
+        bar.appendChild(selectAll);
+      }
+      bar.appendChild(h("span", "source-stage__bulk-count", __sourceSelectedTopicIds.length ? __sourceSelectedTopicIds.length + " selected" : "Select all"));
+      if (__sourceSelectedTopicIds.length) {
+        bar.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics }));
+      }
+      bar.appendChild(window.VersoUI.Button({
+        variant: "ghost", label: "Done",
+        onClick: function () { exitSelectMode(); renderSourceTopicList(); }
+      }));
     }
     host.appendChild(bar);
 
@@ -10706,7 +10724,7 @@
       host.appendChild(h("div", "source-stage__group-label", g.label));
       g.topics.forEach(function (t) {
         var row = h("div", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""));
-        if (window.VersoUI && window.VersoUI.Checkbox) {
+        if (__sourceSelectModeActive && window.VersoUI && window.VersoUI.Checkbox) {
           var cb = window.VersoUI.Checkbox({
             checked: __sourceSelectedTopicIds.indexOf(t.id) !== -1,
             onChange: function (next) {
@@ -11016,11 +11034,38 @@
         sourceBody.appendChild(h("div", "insp-hint", line));
       });
     }
-    var historyBody = panelSection(host, "History");
-    var created = topic.createdAt ? new Date(topic.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
-    historyBody.appendChild(h("div", "insp-hint", "Created " + created));
-    var updatedLabel = topic.updatedAt ? formatRelativeTime(topic.updatedAt, Date.now()) : "—";
-    historyBody.appendChild(h("div", "insp-hint", "Updated " + updatedLabel + (topic.author ? " by " + topic.author : "")));
+    renderHistoryTimeline(host, topic);
+  }
+
+  // md-topic-import: a node-based vertical timeline tracing every change on this topic
+  // back to how it entered the platform -- newest first. Real entries come from
+  // topic.history (one per import: creation or a later reconcile pass); a hand-created
+  // "New topic" has none, so a single synthetic "Created" node stands in. If the topic
+  // was touched (edited, a flag resolved) more recently than its last import, a synthetic
+  // "Last edited" node leads -- the timeline reflects everything, not just imports.
+  function renderHistoryTimeline(host, topic) {
+    var body = panelSection(host, "History");
+    if (!window.VersoUI || !window.VersoUI.Timeline) return;
+    var rawEntries = (topic.history || []).slice().reverse();
+    if (!rawEntries.length) rawEntries = [{ type: "created", importedAt: topic.createdAt }];
+    var newestImportAt = (topic.history && topic.history.length) ? topic.history[topic.history.length - 1].importedAt : topic.createdAt;
+    if (topic.updatedAt && topic.updatedAt > (newestImportAt || 0)) {
+      rawEntries.unshift({ type: "edited", importedAt: topic.updatedAt });
+    }
+    var entries = rawEntries.map(function (entry) {
+      var label = entry.type === "edited" ? "Last edited" :
+        entry.type === "created" ? (entry.file ? ("Imported " + entry.file + [entry.version, entry.publishDate].filter(Boolean).map(function (x) { return " " + x; }).join("")) : "Created") :
+        "Re-imported " + entry.file + [entry.version, entry.publishDate].filter(Boolean).map(function (x) { return " " + x; }).join("");
+      var details = [entry.sectionsCreated && (entry.sectionsCreated + " new section(s)"),
+        entry.sectionsUpdated && (entry.sectionsUpdated + " updated from source"),
+        entry.sectionsFlagged && (entry.sectionsFlagged + " flagged for review")].filter(Boolean);
+      return {
+        date: entry.importedAt ? new Date(entry.importedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—",
+        label: label,
+        detail: details.length ? details.join(", ") : null
+      };
+    });
+    body.appendChild(window.VersoUI.Timeline({ entries: entries }));
   }
 
   // Matches the established search-field sibling (.vbrowser__search, also reused as
@@ -11078,10 +11123,12 @@
   // Minimal write path other tickets (source-topic-content-authoring) build their
   // authoring UI on top of -- same "ship the mechanism, UI follows" precedent as
   // createProduct(). Not wired to any Source-stage control in this ticket (view-only).
-  // extra (md-topic-import): optional { key, source, variantSources } -- key is the
-  // matching handle a later re-import uses to find this topic again; source/variantSources
-  // are plain display metadata (which manual file/version/publish date this came from).
-  // A blank "New topic" never sets any of these -- they're import-only.
+  // extra (md-topic-import): optional { key, source, variantSources, historyEntry } --
+  // key is the matching handle a later re-import uses to find this topic again;
+  // source/variantSources are plain display metadata (which manual file/version/publish
+  // date this came from); historyEntry seeds topic.history (the info panel's node
+  // timeline) with this creation event. A blank "New topic" never sets any of these --
+  // they're import-only.
   function createTopic(name, productId, sections, extra) {
     var comps = libComponents();
     var id = "topic-" + Math.random().toString(36).slice(2, 8);
@@ -11092,6 +11139,7 @@
     if (extra && extra.key != null) topic.key = extra.key;
     if (extra && extra.source) topic.source = extra.source;
     if (extra && extra.variantSources) topic.variantSources = extra.variantSources;
+    if (extra && extra.historyEntry) topic.history = [extra.historyEntry];
     window.LibraryStore.components[id] = topic;
     saveLibrary();
     return topic;
@@ -11161,28 +11209,41 @@
           sectionCount++;
           return sec;
         });
-        createTopic(t.name, productId, sections, { key: t.key, source: sourceStamp, variantSources: meta.variantMeta });
+        var historyEntry = sourceStamp ? { type: "created", file: sourceStamp.file, version: sourceStamp.version, publishDate: sourceStamp.publishDate, importedAt: sourceStamp.importedAt, sectionsCreated: sections.length } : undefined;
+        createTopic(t.name, productId, sections, { key: t.key, source: sourceStamp, variantSources: meta.variantMeta, historyEntry: historyEntry });
         topicCount++;
         return;
       }
+      var runCreated = 0, runUpdated = 0, runFlagged = 0;
       t.sections.forEach(function (s) {
         var existingSec = existingTopic.sections.filter(function (es) { return es.key === s.key; })[0];
         var decision = window.MarkdownImport.reconcileSection(existingSec ? { text: existingSec.facets.technical, lastImportedText: existingSec.lastImportedText } : null, s.text);
         var resolvedSec = applySectionReconcile(existingTopic, existingSec, s, decision);
-        if (decision.action === "create") sectionCount++;
-        else if (decision.action === "update" || decision.action === "track") updatedCount++;
-        else if (decision.action === "flag") flaggedCount++;
+        if (decision.action === "create") { sectionCount++; runCreated++; }
+        else if (decision.action === "update" || decision.action === "track") { updatedCount++; runUpdated++; }
+        else if (decision.action === "flag") { flaggedCount++; runFlagged++; }
         if (s.overrides) {
           Object.keys(s.overrides).forEach(function (v) {
             var vExisting = resolvedSec.overrides && resolvedSec.overrides[v];
             var vDecision = window.MarkdownImport.reconcileSection(vExisting ? { text: vExisting.facets.technical, lastImportedText: vExisting.lastImportedText } : null, s.overrides[v]);
             applyVariantReconcile(resolvedSec, v, s.overrides[v], vDecision);
-            if (vDecision.action === "flag") flaggedCount++;
+            if (vDecision.action === "flag") { flaggedCount++; runFlagged++; }
           });
         }
       });
-      existingTopic.updatedAt = Date.now();
-      if (sourceStamp) existingTopic.source = sourceStamp;
+      // Stamped with sourceStamp.importedAt, NOT a fresh Date.now() -- both must read as
+      // the SAME moment, or updatedAt (a few ms later in real time) would always look
+      // newer than the history entry it belongs to, wrongly triggering a phantom
+      // "Last edited" timeline node on every reconcile even when nothing was hand-edited.
+      existingTopic.updatedAt = sourceStamp ? sourceStamp.importedAt : Date.now();
+      if (sourceStamp) {
+        existingTopic.source = sourceStamp;
+        existingTopic.history = existingTopic.history || [];
+        existingTopic.history.push({
+          type: "reimport", file: sourceStamp.file, version: sourceStamp.version, publishDate: sourceStamp.publishDate,
+          importedAt: sourceStamp.importedAt, sectionsCreated: runCreated, sectionsUpdated: runUpdated, sectionsFlagged: runFlagged
+        });
+      }
       if (meta.variantMeta) existingTopic.variantSources = meta.variantMeta;
     });
     saveLibrary();

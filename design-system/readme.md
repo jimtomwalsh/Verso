@@ -15,7 +15,7 @@ This system encodes the editor's full set of controls, grouped by concern:
 **controls/** · `IconField` · `TextField` · `FieldRow` + `TwoUp` · `SegmentedControl` · `Switch` + `SwitchRow` · `Select` · `Checkbox` · `ColorField` · `ToggleChip`
 **panels/** · `Panel` · `PanelSection` · `Breadcrumb` · `LeftRail`
 **navigation/** · `Tabs` · `DocumentTab`
-**structure/** · `TreeItem` · `BlockPaletteItem` · `BlockTile` + `BlockGrid` · `Badge`
+**structure/** · `TreeItem` · `BlockPaletteItem` · `BlockTile` + `BlockGrid` · `Badge` · `Timeline`
 **overlays/** · `Modal` · `ContextMenu` · `Tooltip` · `CanvasOverlayBar`
 **browser/** · `CourseCard` · `CardGrid` + `BrowserEmptyState` · `ThumbnailFrame` · `SearchField` · `RecentsMenuRow`
 **board/** · `GraphBoard` · `ScreenNode` · `Edge` · `ConnectionPort`

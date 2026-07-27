@@ -8507,7 +8507,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
     /window\.__productRail\.importParsedTopics = importParsedTopics;/.test(e) && /window\.__productRail\.importMarkdownModal = importMarkdownModal;/.test(e));
   ok("importParsedTopics writes ONLY the technical facet from imported text", /facets: \{ technical: s\.text \}/.test(e));
   ok("a variant override becomes section.overrides[v].facets.technical, mirroring the shipped divergeSectionVariant shape", /sec\.overrides\[v\] = \{ facets: \{ technical: s\.overrides\[v\] \}, lastImportedText: s\.overrides\[v\] \};/.test(e));
-  ok("each NEW imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections, \{ key: t\.key, source: sourceStamp, variantSources: meta\.variantMeta \}\);/.test(e));
+  ok("each NEW imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections, \{ key: t\.key, source: sourceStamp, variantSources: meta\.variantMeta, historyEntry: historyEntry \}\);/.test(e));
 
   // Chrome-only invariant + no proprietary content ever hard-coded as a fixture.
   var renderJs2 = src("src/render.js");
@@ -8527,10 +8527,20 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("'Select all' uses the canonical Checkbox's own mixed/indeterminate state, not a hand-set DOM property", /var allChecked = __sourceSelectedTopicIds\.length > 0 && __sourceSelectedTopicIds\.length === topics\.length;/.test(e) &&
     /var someChecked = __sourceSelectedTopicIds\.length > 0 && __sourceSelectedTopicIds\.length < topics\.length;/.test(e) &&
     /window\.VersoUI\.Checkbox\(\{\s*checked: allChecked, mixed: someChecked,/.test(e));
-  ok("both checkboxes use the canonical VersoUI.Checkbox (mixed prop, multi-select use documented on the control itself), not a bare <input>", /window\.VersoUI && window\.VersoUI\.Checkbox\) \{[\s\S]{0,300}var selectAll = window\.VersoUI\.Checkbox\(\{/.test(e) &&
+  ok("both checkboxes use the canonical VersoUI.Checkbox (mixed prop, multi-select use documented on the control itself), not a bare <input>", /if \(window\.VersoUI\.Checkbox\) \{\s*var allChecked/.test(e) &&
     /var cb = window\.VersoUI\.Checkbox\(\{/.test(e));
   ok("a topic checkbox click never bubbles into the row's own open-topic handler", /cb\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); \}\);/.test(e));
-  ok("the delete/select bar only shows 'Delete selected' once something is actually checked (progressive disclosure)", /if \(__sourceSelectedTopicIds\.length && window\.VersoUI && window\.VersoUI\.Button\) \{/.test(e));
+  ok("the delete/select bar only shows 'Delete selected' once something is actually checked (progressive disclosure)", /if \(__sourceSelectedTopicIds\.length\) \{\s*bar\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics \}\)\);/.test(e));
+
+  // Select mode: OFF by default (a clean list, checkboxes never open unless asked for),
+  // toggled by a single "Select" button -- mirrors Photos/Files/Gmail's select-mode
+  // pattern rather than always showing a row of checkboxes.
+  ok("__sourceSelectModeActive starts false -- checkboxes are opt-in, not always-on", /var __sourceSelectModeActive = false;/.test(e));
+  ok("checkboxes (both 'Select all' and per-row) only render while select mode is active", /else if \(!__sourceSelectModeActive\) \{\s*bar\.appendChild\(window\.VersoUI\.Button\(\{\s*variant: "secondary", icon: "check-square", label: "Select",/.test(e) &&
+    /if \(__sourceSelectModeActive && window\.VersoUI && window\.VersoUI\.Checkbox\) \{/.test(e));
+  ok("a 'Done' button exits select mode and clears the selection (exitSelectMode), not just hides the bar", /function exitSelectMode\(\) \{\s*__sourceSelectModeActive = false;\s*__sourceSelectedTopicIds = \[\];\s*\}/.test(e) &&
+    /label: "Done",\s*onClick: function \(\) \{ exitSelectMode\(\); renderSourceTopicList\(\); \}/.test(e));
+  ok("deleting selected topics also exits select mode afterward (doesn't leave checkboxes open on an emptied selection)", /exitSelectMode\(\);\s*saveLibrary\(\);/.test(e));
   ok("deleteSelectedTopics confirms via the canonical danger confirmModal before doing anything irreversible", /function deleteSelectedTopics\(\) \{[\s\S]{0,400}confirmModal\("Delete " \+ n[\s\S]{0,600}\{ okLabel: "Delete", danger: true \}\);/.test(e));
   var dstStart = e.indexOf("function deleteSelectedTopics()");
   var dstBody = e.slice(dstStart, dstStart + 700);
@@ -8698,7 +8708,41 @@ section("Product Rail: Source stage info panel");
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
   ok("clicking a Linked-in row opens that document AND switches to Edit (where the block actually lives)", /openCourseFromBrowser\(u\.docCode\); setStage\("edit"\); \}\);/.test(e));
-  ok("History reuses the same relative-time formatter recents already uses (formatRelativeTime), not a second implementation", /formatRelativeTime\(topic\.updatedAt, Date\.now\(\)\)/.test(e));
+  // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
+  // not a flat Created/Updated pair -- traces every import (and any edit since) back to
+  // how the topic entered the platform, newest first.
+  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic\) \{\s*var body = panelSection\(host, "History"\);/.test(e));
+  // Timeline promoted to a real DSLMS component (design-system/components/structure/
+  // Timeline) rather than left as ad-hoc dot/line DOM in editor.js -- /verso-frontend
+  // ruled this converge-now given it's built entirely from already-anchored tokens
+  // reused inside the canonical panelSection(), same trajectory ToggleChip/Badge took.
+  var uk = src("src/ui-kit.js");
+  ok("VersoUI.Timeline exists and is exported", /function Timeline\(props\) \{/.test(uk) && /Timeline: Timeline,/.test(uk));
+  ok("Timeline renders a dot + optional date/label/detail per entry, canonical vds- classes", /h\("div", "vds-timeline"\)/.test(uk) && /h\("div", "vds-timeline__node"\)/.test(uk) &&
+    /h\("div", "vds-timeline__dot"\)/.test(uk) && /if \(entry\.date\) content\.appendChild\(h\("div", "vds-timeline__date", entry\.date\)\);/.test(uk));
+  var dsTimelineDts = src("design-system/components/structure/Timeline.d.ts");
+  ok("Timeline's DSLMS contract (.d.ts) exists with the entries prop", /interface TimelineProps/.test(dsTimelineDts) && /entries: TimelineEntry\[\];/.test(dsTimelineDts));
+  ok("readme.md's canonical control list includes Timeline under structure/", /\*\*structure\/\*\* · `TreeItem` · `BlockPaletteItem` · `BlockTile` \+ `BlockGrid` · `Badge` · `Timeline`/.test(src("design-system/readme.md")));
+  ok("editor.css styles the canonical .vds-timeline* classes, not the old source-stage__timeline ad-hoc names", /\.vds-timeline \{/.test(src("editor.css")) && src("editor.css").indexOf(".source-stage__timeline") === -1);
+  ok("real topic.history entries render newest-first (reversed)", /var rawEntries = \(topic\.history \|\| \[\]\)\.slice\(\)\.reverse\(\);/.test(e));
+  ok("a hand-created topic with no import history still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rawEntries\.length\) rawEntries = \[\{ type: "created", importedAt: topic\.createdAt \}\];/.test(e));
+  ok("activity since the last import (an edit, a resolved flag) leads with a synthetic 'Last edited' node", /if \(topic\.updatedAt && topic\.updatedAt > \(newestImportAt \|\| 0\)\) \{\s*rawEntries\.unshift\(\{ type: "edited", importedAt: topic\.updatedAt \}\);/.test(e));
+  ok("timeline entries render through the canonical VersoUI.Timeline, not hand-built dot/line DOM", /body\.appendChild\(window\.VersoUI\.Timeline\(\{ entries: entries \}\)\);/.test(e));
+
+  // Data side: each import call (first-time create AND every later reconcile) appends
+  // one history entry, never overwrites the log -- the whole point is a full trace.
+  ok("a brand-new topic's first history entry is stamped at creation via createTopic's extra.historyEntry", /if \(extra && extra\.historyEntry\) topic\.history = \[extra\.historyEntry\];/.test(e));
+  ok("a reconciled (already-existing) topic APPENDS to its history, never replaces it", /existingTopic\.history = existingTopic\.history \|\| \[\];\s*existingTopic\.history\.push\(\{/.test(e));
+  // REGRESSION (caught by browser-verify): updatedAt must be stamped with the SAME
+  // sourceStamp.importedAt as the history entry it belongs to, never a separate
+  // Date.now() -- a fresh call would read a few ms later than the entry's own
+  // timestamp, making renderHistoryTimeline's "is there activity since the last
+  // import" check wrongly true on EVERY reconcile and show a phantom "Last edited"
+  // node even when nothing was hand-edited.
+  ok("reconcile's updatedAt reuses sourceStamp.importedAt, not a fresh Date.now() (avoids a phantom 'Last edited' node)", /existingTopic\.updatedAt = sourceStamp \? sourceStamp\.importedAt : Date\.now\(\);/.test(e));
+  ok("each reconcile's history entry counts THIS run's created/updated/flagged sections, separate from the whole-import summary totals", /var runCreated = 0, runUpdated = 0, runFlagged = 0;/.test(e) &&
+    /sectionsCreated: runCreated, sectionsUpdated: runUpdated, sectionsFlagged: runFlagged/.test(e));
+  ok("a variant-override flag also counts toward the topic's OWN run tally, not just the global summary", /if \(vDecision\.action === "flag"\) \{ flaggedCount\+\+; runFlagged\+\+; \}/.test(e));
 
   // createTopic now stamps updatedAt alongside createdAt (both start equal -- "just
   // created" IS "just updated" until a future editing ticket bumps it independently).

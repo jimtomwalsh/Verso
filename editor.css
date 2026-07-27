@@ -583,6 +583,19 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   background: var(--surface-raised, #262626); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 4px);
   padding: 8px 10px; margin: 4px 0 12px; max-height: 200px; overflow-y: auto;
 }
+/* Timeline (DS canonical, design-system/components/structure/Timeline) -- a node-based
+   vertical activity trail: dot + connecting line, content to the right. Promoted from
+   Product Rail's per-topic import/edit history (info panel "History" section). */
+.vds-timeline { position: relative; padding-left: 2px; }
+.vds-timeline__node { position: relative; padding-left: 16px; padding-bottom: 14px; }
+.vds-timeline__node:last-child { padding-bottom: 0; }
+.vds-timeline__node:not(:last-child)::before {
+  content: ""; position: absolute; left: 3px; top: 12px; bottom: -2px; width: 1px; background: var(--border-subtle);
+}
+.vds-timeline__dot { position: absolute; left: 0; top: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #0d99ff); }
+.vds-timeline__date { font-size: var(--text-2xs, 9px); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
+.vds-timeline__label { font-size: var(--text-sm, 12px); color: var(--text-primary); margin-top: 1px; }
+.vds-timeline__detail { font-size: var(--text-xs, 11px); color: var(--text-tertiary); margin-top: 1px; }
 .source-stage__diverge-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .source-stage__diverge-btn {
   height: 22px; padding: 0 8px; border: 1px dashed var(--border-input); border-radius: var(--radius-sm, 4px);

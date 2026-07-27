@@ -608,9 +608,15 @@ the file and in what you've since written in the wiki, nothing is overwritten �
 updated" flag appears next to its heading. Click it to compare your text against the file's, then
 choose **Use updated text** or **Keep mine**.
 
-**Cleaning up.** Check the box beside one or more topics in the list (or "Select all") and click
-**Delete selected** to remove them — useful after a test import. This deletes whole topics
-(including all their sections); it can't be undone.
+**Cleaning up.** Click **Select** above the topic list to reveal a checkbox on each topic; check
+one or more (or use "Select all"), then **Delete selected** to remove them — useful after a test
+import. This deletes whole topics (including all their sections) and can't be undone. Click
+**Done** to leave selection mode.
+
+**A topic's history.** The info panel's History section shows every import and re-import that
+touched a topic as a timeline, newest first — file, version, publish date, and what changed each
+time (new sections, sections updated from source, sections flagged for review). A topic you wrote
+by hand shows a single "Created" entry.
 
 ---
 
