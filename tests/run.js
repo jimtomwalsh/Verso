@@ -8622,9 +8622,9 @@ section("Product Rail: Source topic content authoring");
   var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
-    "\nreturn { addSection: addSection, removeSection: removeSection, moveSection: moveSection," +
-    " divergeSectionVariant: divergeSectionVariant, wrapSelectionWithMarker: wrapSelectionWithMarker," +
-    " toggleBulletLines: toggleBulletLines };")();
+    "\nreturn { addSection: addSection, removeSection: removeSection," +
+    " structMoveSection: structMoveSection, divergeSectionVariant: divergeSectionVariant," +
+    " wrapSelectionWithMarker: wrapSelectionWithMarker, toggleBulletLines: toggleBulletLines };")();
 
   // Section CRUD -- plain array ops, callers own the updatedAt stamp + save.
   var topic = { sections: [{ id: "s1", heading: "One" }, { id: "s2", heading: "Two" }] };
@@ -8633,13 +8633,17 @@ section("Product Rail: Source topic content authoring");
   ok("a freshly added section has a technical facet ready to type into", added.facets && added.facets.technical === "");
   g.removeSection(topic, 0);
   ok("removeSection removes exactly the section at that index", topic.sections.length === 2 && topic.sections[0].id === "s2");
+  // structMoveSection: the drag-handle reorder, keyed on section id (not index) since
+  // that's what a real drag/drop event hands back.
   var topic2 = { sections: [{ id: "a" }, { id: "b" }, { id: "c" }] };
-  g.moveSection(topic2, 1, -1);
-  ok("moveSection(-1) swaps with the previous section", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
-  g.moveSection(topic2, 0, -1);
-  ok("moveSection at the top is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
-  g.moveSection(topic2, 2, 1);
-  ok("moveSection at the bottom is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
+  g.structMoveSection(topic2, "c", "a", false);
+  ok("structMoveSection drops BEFORE the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "c,a,b");
+  g.structMoveSection(topic2, "c", "b", true);
+  ok("structMoveSection drops AFTER the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
+  g.structMoveSection(topic2, "a", "a", true);
+  ok("structMoveSection self-drop is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
+  g.structMoveSection(topic2, "missing", "a", true);
+  ok("structMoveSection with an unknown drag id is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
 
   // divergeSectionVariant: copies Flagship's CURRENT facets in, once -- never resets an
   // existing override back to Flagship on a second call.
@@ -8675,7 +8679,12 @@ section("Product Rail: Source topic content authoring");
   // execCommand bar, since MarkdownLite.render() already treats storage as a plain string).
   ok("topic title is a real input, not read-only text", /source-stage__title-input/.test(e));
   ok("section heading is a real input, not read-only text", /source-stage__heading-input/.test(e));
-  ok("each section has move-up/move-down/delete actions", /iconBtn\("arrow-up", "Move up"\)/.test(e) && /iconBtn\("arrow-down", "Move down"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
+  // source-stage-section-disclosure: up/down arrow buttons replaced by a single drag
+  // handle (drag IS the reorder affordance); actions are hover/focus-disclosed via CSS,
+  // not permanently visible.
+  ok("each section has a drag handle and a delete action", /iconBtn\("grip", "Drag to reorder"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
+  ok("section actions are hover/focus-disclosed, not permanently visible", /\.source-stage__section-actions\s*\{[^}]*opacity:\s*0/.test(src("editor.css")) || /\.source-stage__section:hover \.source-stage__section-actions/.test(src("editor.css")));
+  ok("the drag handle is draggable and wires dragstart/drop for reorder", /gripBtn\.setAttribute\("draggable", "true"\)/.test(e) && /structMoveSection\(topic, dragId, sec\.id, after\)/.test(e));
   ok("deleting a section confirms first (destructive action)", /confirmModal\("Delete section"/.test(e));
   ok("an 'Add section' affordance exists at the end of the article", /source-stage__add-section/.test(e) && /\+ Add section/.test(e));
 

@@ -491,7 +491,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    the longest label ("Digestible") never truncates via .prop-toggle's ellipsis. */
 .source-stage__article-head .prop-toggle-row { min-width: 300px; }
 .source-stage__title { font-size: var(--text-lg, 18px); font-weight: 600; color: var(--text-primary); margin: 0; }
-.source-stage__section { max-width: 640px; margin-bottom: 24px; }
+.source-stage__section { max-width: 640px; margin-bottom: 24px; position: relative; }
 .source-stage__heading { font-size: var(--text-md, 14px); font-weight: 600; color: var(--text-primary); margin: 0 0 6px; }
 .source-stage__body { font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary); }
 .source-stage__body p { margin: 0 0 10px; }
@@ -565,7 +565,13 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .source-stage__heading-input:hover, .source-stage__heading-input:focus { background: var(--surface-hover); border-radius: var(--radius-sm, 4px); }
 .source-stage__heading-input::placeholder { color: var(--text-tertiary); font-weight: 500; }
-.source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; }
+/* source-stage-section-disclosure: hidden until the section is hovered/focused, so the
+   article reads as content first, not a permanent wall of controls (a drag handle +
+   delete, replacing the old always-visible up/down/delete trio). */
+.source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; opacity: 0; transition: opacity 0.1s ease; }
+.source-stage__section:hover .source-stage__section-actions,
+.source-stage__section:focus-within .source-stage__section-actions { opacity: 1; }
+.source-stage__section [draggable="true"] { cursor: grab; }
 .source-stage__body-input {
   display: block; width: 100%; resize: vertical;
   border: 1px solid transparent; background: transparent; outline: none;
