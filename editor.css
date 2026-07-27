@@ -483,10 +483,6 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   height: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer;
 }
-/* md-topic-import: "Select all" + "Delete selected" -- only the count/button shows once
-   something's actually checked (progressive disclosure, not a permanent toolbar row). */
-.source-stage__bulk-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
-.source-stage__bulk-count { font-size: var(--text-xs, 11px); color: var(--text-tertiary); flex: 1 1 auto; }
 .source-stage__empty { padding: 16px 10px; color: var(--text-tertiary); font-size: var(--text-sm, 12px); }
 .source-stage__article { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 28px 36px; background: var(--surface-canvas); }
 .source-stage__article-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -514,10 +510,16 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-stage__body .md-lite-table td { border: 1px solid var(--border-subtle); padding: 4px 8px; text-align: left; vertical-align: top; }
 .source-stage__body .md-lite-table th { background: var(--surface-raised, #262626); font-weight: 600; color: var(--text-primary); }
 
-/* product-rail-md-topic-import: "+ New Topic" / "Import from Markdown…", the console-
-   free way to get content into a topic. Sits between the search field and the list. */
-.source-stage__nav-actions { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; flex: 0 0 auto; }
-.source-stage__nav-actions .vds-btn { width: 100%; justify-content: flex-start; }
+/* /verso-frontend audit 2026-07-27: four rounds of additions (New topic, Import,
+   Select-mode bar, Needs-review chip) each passed review in isolation while this whole
+   region became an uncontrolled vertical stack of full-width labeled buttons with no
+   hierarchy. Converged to ONE icon-only toolbar row (IconButton, tooltip via its own
+   `label`) that swaps contents by mode instead of appending a new row per feature --
+   see renderSourceToolbar. Sits between the search field and the list. */
+.source-stage__nav-actions { padding: 0 6px 6px; flex: 0 0 auto; }
+.source-stage__toolbar { display: flex; align-items: center; gap: 2px; }
+.source-stage__toolbar-badge-wrap { position: relative; display: inline-flex; }
+.source-stage__toolbar-badge { position: absolute; top: -3px; right: -3px; pointer-events: none; }
 
 /* source-stage-variant-columns: Flagship (always-on, non-interactive) + one
    VersoUI.ToggleChip per variant declared for the topic's Product. */
@@ -579,10 +581,17 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-stage__source-flag { cursor: pointer; flex: 0 0 auto; }
 .source-stage__source-flag:hover { opacity: 0.8; }
 .source-stage__diff-block {
-  white-space: pre-wrap; font-size: var(--text-sm, 13px); line-height: 1.5; color: var(--text-secondary);
+  font-family: var(--font-mono, "JetBrains Mono", monospace); font-size: var(--text-sm, 13px); line-height: 1.5;
   background: var(--surface-raised, #262626); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 4px);
-  padding: 8px 10px; margin: 4px 0 12px; max-height: 200px; overflow-y: auto;
+  padding: 8px 10px; margin: 4px 0 12px; max-height: 260px; overflow-y: auto;
 }
+/* product-rail-review-diff: a real line-level diff (LineDiff) -- unchanged/removed/added
+   lines, each on their own row. Reuses the same red/green tint tokens Badge's
+   danger/success tones already use, so a real diff view needs no new colour vocabulary. */
+.source-stage__diff-line { white-space: pre-wrap; padding: 0 4px; }
+.source-stage__diff-line--same { color: var(--text-secondary); }
+.source-stage__diff-line--removed { background: var(--red-tint, rgba(242,72,34,0.16)); color: var(--danger, #f24822); }
+.source-stage__diff-line--added { background: var(--green-tint, rgba(20,174,92,0.16)); color: var(--success, #14ae5c); }
 /* Timeline (DS canonical, design-system/components/structure/Timeline) -- a node-based
    vertical activity trail: dot + connecting line, content to the right. Promoted from
    Product Rail's per-topic import/edit history (info panel "History" section). */

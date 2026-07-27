@@ -10510,6 +10510,15 @@
       .filter(function (t) { return !activeProduct || t.productId === activeProduct; })
       .filter(function (t) { return topicMatchesQuery(t, query); });
   }
+  // md-topic-import: true when ANY section (Flagship or a variant override) on this
+  // topic has a pending re-import conflict flag -- drives the "Needs review" filter chip
+  // so a flagged section is discoverable without opening every topic to find it.
+  function topicNeedsReview(topic) {
+    return (topic.sections || []).some(function (s) {
+      if (s.sourceUpdate) return true;
+      return Object.keys(s.overrides || {}).some(function (v) { return s.overrides[v] && s.overrides[v].sourceUpdate; });
+    });
+  }
   // Groups topics by owning Product (label from ProductsStore; "" bucket -> "Unassigned",
   // sorted last), each group's topics sorted by name.
   function groupTopicsByProduct(topics, products) {
@@ -10650,6 +10659,10 @@
   // showing a row of checkboxes nobody's using most of the time.
   var __sourceSelectModeActive = false;
   var __sourceSelectedTopicIds = [];
+  // md-topic-import: "Needs review" is a toggle, not a permanent tab -- it only ever
+  // shows (and only ever applies) when the current Product+search scope actually has
+  // 1+ flagged topics; auto-clears itself once nothing is left to review.
+  var __sourceReviewFilterActive = false;
 
   function exitSelectMode() {
     __sourceSelectModeActive = false;
@@ -10674,51 +10687,138 @@
       }, { okLabel: "Delete", danger: true });
   }
 
-  function renderSourceTopicList() {
+  // md-topic-import: bulk "Move to Product…" -- reassigns the selected topics'
+  // productId, content untouched. Reuses the exact Product-picker pattern
+  // promoteToProductModal already established (modalField + dsSelect + "+ Create a new
+  // Product…"), not a new control.
+  function moveSelectedTopicsModal() {
+    if (!__sourceSelectedTopicIds.length) return;
+    var n = __sourceSelectedTopicIds.length;
+    var NEW_KEY = "__new__";
+    var products = window.ProductsStore || {};
+    var productKeys = Object.keys(products);
+    var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
+    var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
+    var newNameVal = "";
+    var shell = dsModalShell({
+      title: "Move " + n + " topic" + (n === 1 ? "" : "s"),
+      subtitle: "Reassigns the selected topic(s) to a different Product. Content is never touched.",
+      primaryLabel: "Move",
+      onPrimary: function () {
+        var pid = chosen;
+        if (chosen === NEW_KEY) {
+          var name = (newNameVal || "").trim();
+          if (!name) return;
+          pid = createProduct(name).id;
+        }
+        var comps = libComponents();
+        __sourceSelectedTopicIds.forEach(function (id) {
+          var t = comps[id];
+          if (t) { t.productId = pid; t.updatedAt = Date.now(); }
+        });
+        saveLibrary();
+        shell.modal.close();
+        exitSelectMode();
+        renderSourceTopicList();
+        renderSourceArticle();
+      }
+    });
+    var box = shell.body;
+    var pRow = modalField(box, "Product");
+    var pSel = dsSelect(pOpts, chosen, function (v) { chosen = v; newNameRow.style.display = (v === NEW_KEY) ? "" : "none"; });
+    pSel.classList.add("modal-field__control");
+    pRow.appendChild(pSel);
+    var newNameRow = h("div"); newNameRow.style.display = (chosen === NEW_KEY) ? "" : "none";
+    var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
+    nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
+    box.appendChild(newNameRow);
+  }
+
+  // A small canonical Badge overlaid on an IconButton's corner -- the notification-bell-
+  // with-unread-count pattern -- so a count survives an icon-only treatment without
+  // reintroducing a text sentence. Returns the plain icon button unwrapped when there's
+  // nothing to show a count for.
+  function iconButtonWithBadge(btn, count) {
+    if (!count || !window.VersoUI || !window.VersoUI.Badge) return btn;
+    var wrap = h("div", "source-stage__toolbar-badge-wrap");
+    wrap.appendChild(btn);
+    var badge = window.VersoUI.Badge({ children: String(count), tone: "warning", size: "sm" });
+    badge.classList.add("source-stage__toolbar-badge");
+    wrap.appendChild(badge);
+    return wrap;
+  }
+
+  // One toolbar row, one place, always -- not a stack of full-width labeled buttons that
+  // grows with every ticket (/verso-frontend audit, 2026-07-27: four rounds of additions
+  // each passed review in isolation while the rail became an uncontrolled vertical stack
+  // with no hierarchy). Icon-only (IconButton, tooltip via its own `label` prop), a
+  // SINGLE row that swaps its contents by mode rather than appending a new row per
+  // feature: New topic / Import / Select / Needs-review (badge count) when idle;
+  // Select-all / Move / Delete / Done while select mode is active. A checkbox is
+  // already glyph-sized, so it needs no icon-button treatment of its own.
+  function renderSourceToolbar(topics, reviewCount) {
     if (typeof document === "undefined") return;
-    var host = document.getElementById("source-topic-list"); if (!host) return;
+    var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
     host.innerHTML = "";
-    var topics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
-    // A selected id that's fallen out of the current filtered view (search/product
-    // changed) can no longer be acted on from here -- drop it rather than let "Delete
-    // selected" silently reach past what's actually visible.
-    var visibleIds = {};
-    topics.forEach(function (t) { visibleIds[t.id] = true; });
-    __sourceSelectedTopicIds = __sourceSelectedTopicIds.filter(function (id) { return visibleIds[id]; });
+    if (!window.VersoUI || !window.VersoUI.IconButton) return;
+    var U = window.VersoUI;
+    var row = h("div", "source-stage__toolbar");
 
-    if (!topics.length) {
-      host.appendChild(h("div", "source-stage__empty", "No topics yet."));
-      return;
-    }
-
-    var bar = h("div", "source-stage__bulk-bar");
-    if (!window.VersoUI || !window.VersoUI.Button) { /* no bar without the canonical Button */ }
-    else if (!__sourceSelectModeActive) {
-      bar.appendChild(window.VersoUI.Button({
-        variant: "secondary", icon: "check-square", label: "Select",
+    if (!__sourceSelectModeActive) {
+      row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
+      row.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
+      row.appendChild(U.IconButton({
+        icon: "check-square", label: "Select",
         onClick: function () { __sourceSelectModeActive = true; renderSourceTopicList(); }
       }));
+      if (reviewCount) {
+        var reviewBtn = U.IconButton({
+          icon: "flag", label: "Needs review (" + reviewCount + ")", active: __sourceReviewFilterActive,
+          onClick: function () { __sourceReviewFilterActive = !__sourceReviewFilterActive; renderSourceTopicList(); }
+        });
+        row.appendChild(iconButtonWithBadge(reviewBtn, reviewCount));
+      }
     } else {
-      if (window.VersoUI.Checkbox) {
+      if (U.Checkbox) {
         var allChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length === topics.length;
         var someChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length < topics.length;
-        var selectAll = window.VersoUI.Checkbox({
+        var selectAll = U.Checkbox({
           checked: allChecked, mixed: someChecked,
           onChange: function (next) { __sourceSelectedTopicIds = next ? topics.map(function (t) { return t.id; }) : []; renderSourceTopicList(); }
         });
         selectAll.title = "Select all";
-        bar.appendChild(selectAll);
+        row.appendChild(selectAll);
       }
-      bar.appendChild(h("span", "source-stage__bulk-count", __sourceSelectedTopicIds.length ? __sourceSelectedTopicIds.length + " selected" : "Select all"));
       if (__sourceSelectedTopicIds.length) {
-        bar.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics }));
+        row.appendChild(U.IconButton({ icon: "folder-input", label: "Move to Product… (" + __sourceSelectedTopicIds.length + ")", onClick: moveSelectedTopicsModal }));
+        row.appendChild(U.IconButton({ icon: "trash-2", label: "Delete selected (" + __sourceSelectedTopicIds.length + ")", danger: true, onClick: deleteSelectedTopics }));
       }
-      bar.appendChild(window.VersoUI.Button({
-        variant: "ghost", label: "Done",
-        onClick: function () { exitSelectMode(); renderSourceTopicList(); }
-      }));
+      row.appendChild(U.IconButton({ icon: "x", label: "Done", onClick: function () { exitSelectMode(); renderSourceTopicList(); } }));
     }
-    host.appendChild(bar);
+    host.appendChild(row);
+  }
+
+  function renderSourceTopicList() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-topic-list"); if (!host) return;
+    host.innerHTML = "";
+    var scopedTopics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
+    var reviewCount = scopedTopics.filter(topicNeedsReview).length;
+    if (!reviewCount) __sourceReviewFilterActive = false; // nothing left to review -> never leave a stale filter engaged
+    var topics = __sourceReviewFilterActive ? scopedTopics.filter(topicNeedsReview) : scopedTopics;
+    // A selected id that's fallen out of the current filtered view (search/product/
+    // review-filter changed) can no longer be acted on from here -- drop it rather than
+    // let "Delete selected"/"Move" silently reach past what's actually visible.
+    var visibleIds = {};
+    topics.forEach(function (t) { visibleIds[t.id] = true; });
+    __sourceSelectedTopicIds = __sourceSelectedTopicIds.filter(function (id) { return visibleIds[id]; });
+
+    renderSourceToolbar(topics, reviewCount);
+
+    if (!topics.length) {
+      host.appendChild(h("div", "source-stage__empty", __sourceReviewFilterActive ? "Nothing needs review." : "No topics yet."));
+      return;
+    }
 
     groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
       host.appendChild(h("div", "source-stage__group-label", g.label));
@@ -10823,10 +10923,17 @@
         renderSourceArticle();
       }
     });
-    modalSection(shell.body, "Your current text");
-    shell.body.appendChild(h("div", "source-stage__diff-block", sec.facets.technical || "(empty)"));
-    modalSection(shell.body, "Updated source text");
-    shell.body.appendChild(h("div", "source-stage__diff-block", sec.sourceUpdate.text || "(empty)"));
+    // product-rail-review-diff: a real line-level diff (LineDiff, classic LCS) instead of
+    // two flat side-by-side blocks -- removed lines (your text) and added lines (the
+    // source's) are visually distinguished so the actual change is legible at a glance.
+    modalSection(shell.body, "What changed");
+    var diffBlock = h("div", "source-stage__diff-block");
+    var ops = window.LineDiff ? window.LineDiff.diff(sec.facets.technical || "", sec.sourceUpdate.text || "") : [];
+    ops.forEach(function (op) {
+      var prefix = op.type === "removed" ? "− " : op.type === "added" ? "+ " : "  ";
+      diffBlock.appendChild(h("div", "source-stage__diff-line source-stage__diff-line--" + op.type, prefix + op.text));
+    });
+    shell.body.appendChild(diffBlock);
   }
 
   function renderSourceArticle() {
@@ -11086,18 +11193,6 @@
     host.appendChild(search);
   }
 
-  // Product Rail (md-topic-import): the two ways to get a topic into the wiki now that
-  // console fixtures are no longer the only path -- a blank topic, or a whole Markdown
-  // manual parsed into topics/sections. Mounted once, like the search field above.
-  function mountSourceStageActions() {
-    if (typeof document === "undefined") return;
-    var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
-    if (!window.VersoUI || !window.VersoUI.Button) return;
-    host.innerHTML = "";
-    host.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "plus", label: "New topic", onClick: newTopicModal }));
-    host.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
-  }
-
   function newTopicModal() {
     var productId = getActiveProduct();
     if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
@@ -11110,12 +11205,12 @@
     });
   }
 
-  // Called each time Source becomes the active stage (setStage("source")) -- mounts
-  // the search field + actions once, then re-renders the topic list + article from
-  // current state.
+  // Called each time Source becomes the active stage (setStage("source")) -- mounts the
+  // search field once, then re-renders the toolbar + topic list + article from current
+  // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
+  // inside renderSourceTopicList, not mounted separately).
   function renderSourceStage() {
     mountSourceStageSearch();
-    mountSourceStageActions();
     renderSourceTopicList();
     renderSourceArticle();
   }
@@ -11284,6 +11379,44 @@
     });
   }
 
+  // product-rail-rename-tolerant-match: re-import matches by filename (see
+  // importParsedTopics), so renaming the source file on disk would otherwise silently
+  // start an unrelated second lineage of topics. Before treating an unrecognised
+  // filename as brand new, check whether it substantially overlaps with topics already
+  // bound to some OTHER file for this Product (MarkdownImport.detectRenamedSource);
+  // if so, ask before doing anything -- never auto-applies a guess. Flagship file only
+  // (the primary import's own filename); scoped this way so variant-file rename
+  // tolerance can follow later without complicating this pass. onDone(meta) always
+  // fires eventually, whichever choice is made (or if there was nothing to ask about).
+  function checkRenamedSource(productId, meta, parsedTopics, onDone) {
+    if (!meta || !meta.file) { onDone(meta); return; }
+    var allForProduct = Object.keys(libComponents()).map(function (k) { return libComponents()[k]; }).filter(function (t) {
+      return t.kind === "topic" && t.productId === productId && t.source && t.source.file;
+    });
+    var alreadyBound = allForProduct.some(function (t) { return t.source.file === meta.file; });
+    if (alreadyBound || !allForProduct.length) { onDone(meta); return; }
+    var filesToKeys = {};
+    allForProduct.forEach(function (t) { (filesToKeys[t.source.file] = filesToKeys[t.source.file] || []).push(t.key); });
+    var candidate = window.MarkdownImport.detectRenamedSource(filesToKeys, parsedTopics.map(function (t) { return t.key; }));
+    if (!candidate) { onDone(meta); return; }
+    var shell = dsModalShell({
+      title: "Same manual, new filename?",
+      subtitle: '"' + meta.file + '" substantially matches topics already imported from "' + candidate.file + '" (' +
+        candidate.matched + " of " + candidate.total + " topics). Treat it as an update to that source, or keep them separate?",
+      primaryLabel: "Yes, same manual",
+      extras: window.VersoUI ? [window.VersoUI.Button({
+        variant: "secondary", label: "No, keep separate",
+        onClick: function () { shell.modal.close(); onDone(meta); }
+      })] : [],
+      onPrimary: function () {
+        allForProduct.forEach(function (t) { if (t.source.file === candidate.file) t.source.file = meta.file; });
+        saveLibrary();
+        shell.modal.close();
+        onDone(meta);
+      }
+    });
+  }
+
   // Shared tail end of an import, whether it came from the one-click no-variant path or
   // the multi-file modal: merge any variant parses in, write/reconcile real topics,
   // re-render, and report a short summary through the canonical confirmModal (never a raw
@@ -11334,7 +11467,12 @@
       inp.addEventListener("change", function () {
         var f = inp.files && inp.files[0]; if (!f) return;
         promptImportProvenance([{ key: "flagship", label: "Manual", file: f.name }], function (metaList) {
-          readFileAsText(f).then(function (text) { finishMarkdownImport(window.MarkdownImport.parse(text), [], productId, metaList[0]); });
+          readFileAsText(f).then(function (text) {
+            var baseParse = window.MarkdownImport.parse(text);
+            checkRenamedSource(productId, metaList[0], baseParse.topics, function (meta) {
+              finishMarkdownImport(baseParse, [], productId, meta);
+            });
+          });
         });
       });
       inp.click();
@@ -11390,7 +11528,9 @@
         Promise.all(files.map(readFileAsText)).then(function (texts) {
           var baseParse = window.MarkdownImport.parse(texts[0]);
           var variantParses = variantNames.map(function (v, i) { return { name: v, parse: window.MarkdownImport.parse(texts[i + 1]), meta: metaList[i + 1] }; });
-          finishMarkdownImport(baseParse, variantParses, productId, metaList[0]);
+          checkRenamedSource(productId, metaList[0], baseParse.topics, function (meta) {
+            finishMarkdownImport(baseParse, variantParses, productId, meta);
+          });
         });
       });
     }
