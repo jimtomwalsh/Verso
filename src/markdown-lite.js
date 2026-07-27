@@ -152,11 +152,98 @@
     return html.join("");
   }
 
+  // serialize(rootNode): the reverse of render() -- a real DOM element (the Source-stage
+  // contentEditable an author just typed into) in, a markdown-lite string out, so edit
+  // mode never stores raw HTML, only the same plain-string dialect render() consumes.
+  // Walks children TOLERANTLY: a browser's execCommand output doesn't have to match
+  // render()'s own tag choices exactly, so <div> is treated the same as <p> for block
+  // boundaries and <b> the same as <strong> for bold. Formatting markdown-lite has no
+  // syntax for (italic, underline, links, spans, ...) is dropped to its plain text --
+  // the dialect is deliberately minimal (bold/code/lists/tables/br only), matching the
+  // same graceful-degradation spirit render() already documents for unmatched markers.
+  function serializeInlineNode(node) {
+    if (node.nodeType === 3) return node.nodeValue; // Text
+    if (node.nodeType !== 1) return "";
+    var tag = node.tagName;
+    if (tag === "BR") return "<br>";
+    if (tag === "STRONG" || tag === "B") return "**" + serializeInline(node) + "**";
+    if (tag === "CODE") return "`" + serializeInline(node) + "`";
+    return serializeInline(node); // unsupported inline formatting -- keep just the text
+  }
+  function serializeInline(parent) {
+    var out = "";
+    Array.prototype.forEach.call(parent.childNodes || [], function (child) { out += serializeInlineNode(child); });
+    return out;
+  }
+  function serializeListItems(listEl) {
+    var items = [];
+    Array.prototype.forEach.call(listEl.children || [], function (li) {
+      if (li.tagName === "LI") items.push(serializeInline(li).trim());
+    });
+    return items;
+  }
+  function serializeTable(tableEl) {
+    var rows = [];
+    Array.prototype.forEach.call(tableEl.querySelectorAll("tr"), function (tr) {
+      var cells = [];
+      Array.prototype.forEach.call(tr.children, function (cell) { cells.push(serializeInline(cell).trim()); });
+      rows.push(cells);
+    });
+    if (!rows.length) return "";
+    var header = "| " + rows[0].join(" | ") + " |";
+    var sep = "|" + rows[0].map(function () { return "---"; }).join("|") + "|";
+    var body = rows.slice(1).map(function (r) { return "| " + r.join(" | ") + " |"; });
+    return [header, sep].concat(body).join("\n");
+  }
+  function serialize(rootNode) {
+    if (!rootNode) return "";
+    var blocks = [];
+    var run = null; // accumulates stray top-level text/inline nodes into one paragraph
+    function flushRun() {
+      if (run == null) return;
+      var t = run.trim();
+      if (t) blocks.push(t);
+      run = null;
+    }
+    Array.prototype.forEach.call(rootNode.childNodes, function (child) {
+      if (child.nodeType === 3) { run = (run || "") + child.nodeValue; return; }
+      if (child.nodeType !== 1) return;
+      var tag = child.tagName;
+      if (tag === "UL" || tag === "OL") {
+        flushRun();
+        var items = serializeListItems(child);
+        if (!items.length) return;
+        if (tag === "OL") {
+          var start = parseInt(child.getAttribute("start") || "1", 10) || 1;
+          blocks.push(items.map(function (it, i) { return (start + i) + ". " + it; }).join("\n"));
+        } else {
+          blocks.push(items.map(function (it) { return "- " + it; }).join("\n"));
+        }
+        return;
+      }
+      if (tag === "TABLE") {
+        flushRun();
+        var t = serializeTable(child);
+        if (t) blocks.push(t);
+        return;
+      }
+      if (tag === "P" || tag === "DIV") {
+        flushRun();
+        var text = serializeInline(child).trim();
+        if (text) blocks.push(text);
+        return;
+      }
+      run = (run || "") + serializeInlineNode(child); // stray top-level inline element
+    });
+    flushRun();
+    return blocks.join("\n\n");
+  }
+
   var _pure = {
     escapeHtml: escapeHtml, renderInline: renderInline, render: render,
     isTableRow: isTableRow, isTableSeparatorRow: isTableSeparatorRow, splitTableRow: splitTableRow
   };
-  var MarkdownLite = { render: render, _pure: _pure };
+  var MarkdownLite = { render: render, serialize: serialize, _pure: _pure };
 
   if (typeof window !== "undefined") window.MarkdownLite = MarkdownLite;
   if (typeof module !== "undefined" && module.exports) module.exports = MarkdownLite;

@@ -556,8 +556,6 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   font-size: var(--text-lg, 18px); font-weight: 600; color: var(--text-primary); padding: 2px 0;
 }
 .source-stage__title-input:hover, .source-stage__title-input:focus { background: var(--surface-hover); border-radius: var(--radius-sm, 4px); }
-.source-stage__edit-toolbar { margin-bottom: 14px; }
-.source-stage__edit-toolbar .prop-toggle-row { width: fit-content; }
 .source-stage__heading-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .source-stage__heading-input {
   flex: 1 1 auto; border: none; background: transparent; outline: none;
@@ -566,14 +564,22 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-stage__heading-input:hover, .source-stage__heading-input:focus { background: var(--surface-hover); border-radius: var(--radius-sm, 4px); }
 .source-stage__heading-input::placeholder { color: var(--text-tertiary); font-weight: 500; }
 .source-stage__section-actions { display: flex; gap: 2px; flex: 0 0 auto; }
-.source-stage__body-input {
-  display: block; width: 100%; resize: vertical;
-  border: 1px solid transparent; background: transparent; outline: none;
-  font: inherit; font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary);
+/* source-stage-wysiwyg-editing: the toolbar is now CONTEXTUAL, rendered only next to
+   the one cell being edited (never a permanent fixture pinned to the article head
+   regardless of what's active) -- a small gap above the contentEditable it belongs to. */
+.source-stage__edit-toolbar { display: flex; align-items: center; gap: 2px; margin: 0 0 6px; }
+/* A never-clipping contentEditable: no fixed rows/height (it grows with content
+   naturally, unlike the old textarea's rows-at-open-time sizing), and the section
+   widens past its usual reading-width cap while a cell inside it is being edited (see
+   .source-stage__section--editing) so the full block stays visible while typing. */
+.source-stage__body--editing {
+  display: block; min-height: 1.6em;
+  border: 1px solid var(--border-focus, var(--accent)); background: var(--surface-input);
   padding: 4px 6px; margin: -4px -6px; border-radius: var(--radius-sm, 4px);
+  cursor: text;
 }
-.source-stage__body-input:hover { border-color: var(--border-subtle); }
-.source-stage__body-input:focus { border-color: var(--border-focus, var(--accent)); background: var(--surface-input); }
+.source-stage__body--editing:focus { outline: none; }
+.source-stage__section--editing { max-width: none; }
 /* md-topic-import re-import safety: a section that changed both here and in a
    re-imported source since the last import -- never auto-overwritten, flagged instead
    (see MarkdownImport.reconcileSection). The canonical Badge (tone="warning") supplies

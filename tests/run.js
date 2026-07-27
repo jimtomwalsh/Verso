@@ -6064,7 +6064,11 @@ section("richer bullet lists");
   // genuine top-level list block (gated separately, in the shared bar, on obj.type).
   ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
   ok("List toggle visibility is gated on obj.type in TEXT_CONTENT_TYPES, not rootIsList directly", /isListToggleable: function \(\) \{ return field === "text" && !!obj && !!obj\.type && !!TEXT_CONTENT_TYPES\[obj\.type\]; \}/.test(e));
-  ok("no execCommand/queryCommandState List path remains (block-type conversion replaced it)", !/insertUnorderedList/.test(e) && !/insertOrderedList/.test(e));
+  // The canvas's own removed switchRow pair (line above) stays the precise regression
+  // guard for THIS bar. source-stage-wysiwyg-editing later gave Source stage's own,
+  // separate topic-body toolbar a legitimate execCommand("insertUnorderedList") --
+  // free-flowing wiki prose has no block-type system to convert, unlike a canvas text
+  // block, so inline execCommand is the correct fit there, not a regression of this one.
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
@@ -8623,8 +8627,7 @@ section("Product Rail: Source topic content authoring");
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { addSection: addSection, removeSection: removeSection, moveSection: moveSection," +
-    " divergeSectionVariant: divergeSectionVariant, wrapSelectionWithMarker: wrapSelectionWithMarker," +
-    " toggleBulletLines: toggleBulletLines };")();
+    " divergeSectionVariant: divergeSectionVariant };")();
 
   // Section CRUD -- plain array ops, callers own the updatedAt stamp + save.
   var topic = { sections: [{ id: "s1", heading: "One" }, { id: "s2", heading: "Two" }] };
@@ -8652,57 +8655,45 @@ section("Product Rail: Source topic content authoring");
   ok("diverging an ALREADY-diverged variant is a no-op (never clobbers an existing edit)", sec.overrides.coastal.facets.technical === "author's coastal edit");
   ok("divergeSectionVariant is a deep copy, not a shared reference", sec.overrides.coastal.facets !== sec.facets);
 
-  // wrapSelectionWithMarker: bold/inline-code toggle, both directions.
-  var r1 = g.wrapSelectionWithMarker("hello world", 6, 11, "**");
-  ok("wraps a selection in the marker", r1.text === "hello **world**" && r1.start === 8 && r1.end === 13);
-  var r2 = g.wrapSelectionWithMarker("hello **world**", 8, 13, "**");
-  ok("wrapping an ALREADY-wrapped-in-exactly-that-marker selection unwraps it (true toggle)", r2.text === "hello world" && r2.start === 6 && r2.end === 11);
-  var r3 = g.wrapSelectionWithMarker("hello ", 6, 6, "`");
-  ok("a collapsed (empty) selection inserts an empty marker pair with the cursor between them", r3.text === "hello ``" && r3.start === 7 && r3.end === 7);
-
-  // toggleBulletLines: per-line toggle over whatever lines the selection spans.
-  var b1 = g.toggleBulletLines("one\ntwo\nthree", 0, 13);
-  ok("bullets every non-empty line the selection spans", b1.text === "- one\n- two\n- three");
-  var b2 = g.toggleBulletLines("- one\n- two\n- three", 0, 20);
-  ok("toggling an ALREADY-fully-bulleted block strips every bullet (true toggle)", b2.text === "one\ntwo\nthree");
-  var b3 = g.toggleBulletLines("one\n- two", 0, 9);
-  ok("a MIXED block (only some lines bulleted) bullets the rest rather than stripping", b3.text === "- one\n- two");
-  var b4 = g.toggleBulletLines("just one line", 4, 4);
-  ok("a collapsed selection still resolves to the line it sits on", b4.text === "- just one line");
-
-  // index.html / wiring: the article is directly editable (wiki-not-document framing --
-  // /verso-frontend design consult: a plain textarea + local toolbar, not the rich-text
-  // execCommand bar, since MarkdownLite.render() already treats storage as a plain string).
+  // index.html / wiring: the article is directly editable (wiki-not-document framing).
   ok("topic title is a real input, not read-only text", /source-stage__title-input/.test(e));
   ok("section heading is a real input, not read-only text", /source-stage__heading-input/.test(e));
   ok("each section has move-up/move-down/delete actions", /iconBtn\("arrow-up", "Move up"\)/.test(e) && /iconBtn\("arrow-down", "Move down"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
   ok("deleting a section confirms first (destructive action)", /confirmModal\("Delete section"/.test(e));
   ok("an 'Add section' affordance exists at the end of the article", /source-stage__add-section/.test(e) && /\+ Add section/.test(e));
 
-  // Click-to-edit: a body reads as normal MarkdownLite output until clicked, THEN swaps
-  // to a raw textarea -- browsing a topic never shows raw ** markers, only the one cell
-  // actively being edited. This is the fix for an initial always-raw-textarea approach
-  // that would have regressed the read experience source-stage-nav-article already shipped.
-  ok("a body cell starts as rendered MarkdownLite output, not a textarea, until clicked", /bodyEl\.addEventListener\("click", function \(\) \{ __sourceEditingCell = \{ sectionId: sec\.id, variant: c\.variant \}; renderSourceArticle\(\); \}\);/.test(e));
-  ok("blurring the textarea commits the edit AND swaps back to rendered view", /ta\.addEventListener\("blur", function \(\) \{[\s\S]{0,200}__sourceEditingCell = null;\s*\n\s*renderSourceArticle\(\);/.test(e));
+  // source-stage-wysiwyg-editing: click-to-edit swaps a rendered body for a real
+  // contentEditable seeded with the SAME rendered HTML, not a raw markdown-lite
+  // textarea -- browsing OR editing a topic never shows raw ** markers.
+  ok("a body cell starts as rendered MarkdownLite output until clicked", /bodyEl\.addEventListener\("click", function \(\) \{ __sourceEditingCell = \{ sectionId: sec\.id, variant: c\.variant \}; renderSourceArticle\(\); \}\);/.test(e));
+  ok("the editing surface is a real contentEditable, not a textarea", /editEl\.contentEditable = "true";/.test(e) && e.indexOf('h("textarea", "source-stage__body-input")') === -1);
+  ok("the contentEditable is seeded with rendered HTML, so entering edit mode never flashes raw markdown", /editEl\.innerHTML = window\.MarkdownLite \? window\.MarkdownLite\.render\(c\.text\) : "";/.test(e));
+  ok("blurring the contentEditable commits via commitEditableCell AND swaps back to rendered view", /editEl\.addEventListener\("blur", function \(\) \{\s*\n\s*commitEditableCell\(topic, sec, c\.variant, editEl\);\s*\n\s*__sourceEditingCell = null;\s*\n\s*renderSourceArticle\(\);/.test(e));
   ok("editing state resets when switching topics (no stray in-progress edit carried over)", /__sourceEditingCell = null; \/\/ don't carry an in-progress edit across topics/.test(e));
+  ok("the section widens while a cell within it is being edited, so the full block stays visible", /secEl\.classList\.add\("source-stage__section--editing"\);/.test(e));
 
-  // Shared format toolbar: mousedown+preventDefault (mirrors the copy editor's own
-  // formatting bar -- clicking a toolbar button must never steal the textarea's
-  // selection), and it targets whichever field last received focus.
-  ok("format toolbar buttons preventDefault on mousedown to preserve the textarea's selection (same trick the copy-editor bar uses)", /btn\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\); \/\/ keep the textarea's selection/.test(e));
-  ok("toolbar acts on __sourceActiveEditField (the last-focused field), mirroring the copy editor's _activeCopyRow pattern", /var f = __sourceActiveEditField; if \(!f\) return;/.test(e));
-  // Regression guard: wrapSelectionWithMarker's marker is its 4th param, not 1st --
-  // an earlier build used .bind(null, "**") here, which silently binds "**" to the
-  // FIRST param (text) instead, corrupting every call via type coercion (caught only
-  // by browser-verify, not by any source-string check, since the wiring still LOOKED
-  // plausible). Guard against that exact regression: the call site must pass the
-  // marker as its own explicit 4th argument, not via .bind().
-  ok("no .bind() shortcut on wrapSelectionWithMarker (parameter-order footgun -- marker is arg 4, not arg 1)", e.indexOf("wrapSelectionWithMarker.bind(") === -1);
-  ok("the toolbar wraps the marker in its own closure, calling wrapSelectionWithMarker with marker as the explicit 4th argument", /function wrapWith\(marker\) \{ return function \(text, start, end\) \{ return wrapSelectionWithMarker\(text, start, end, marker\); \}; \}/.test(e));
-  // /verso-frontend Tier 2 fix: code/bullet toolbar buttons must match the existing
-  // B/I/U bar's OWN list-toggle convention (a real Icon(), prop-toggle--icon) rather
-  // than a text glyph -- "B" correctly stays plain text (matches that bar's B/I/U).
+  // commitEditableCell: serializes via MarkdownLite.serialize, and guards a purely
+  // cosmetic open/close (nothing typed) from ever rewriting the stored string -- a
+  // naive round-trip could otherwise look like a change (render() itself is lossy in
+  // one direction, e.g. collapsing un-blank-line-separated newlines to spaces), which
+  // would falsely trip the re-import reconcile system's (#87) lastImportedText compare.
+  ok("commitEditableCell serializes the live contentEditable via MarkdownLite.serialize", /var newText = window\.MarkdownLite\.serialize\(editEl\);/.test(e));
+  ok("commitEditableCell compares against a re-serialize of the OLD text's own rendered form before writing (no-op guard)", /probe\.innerHTML = window\.MarkdownLite\.render\(oldText\);[\s\S]{0,80}var normalizedOld = window\.MarkdownLite\.serialize\(probe\);[\s\S]{0,120}if \(newText !== normalizedOld\)/.test(e));
+
+  // Contextual per-cell toolbar (source-stage-wysiwyg-editing): built fresh per editing
+  // cell via the SAME io.getNode()/io.onChange() adapter shape the canvas inspector's
+  // buildFormatToggleBar uses, rendered only next to the ONE cell being edited -- never
+  // a permanent fixture pinned to the top of the article regardless of what's active.
+  ok("no permanent top-of-article toolbar remains (it's per-editing-cell now)", e.indexOf('host.appendChild(toolbar);') === -1);
+  ok("the toolbar is built fresh per editing cell via buildSourceEditToolbar, closing over that cell's own element", /var toolbar = buildSourceEditToolbar\(\{ getNode: function \(\) \{ return editEl; \}, onChange: function \(\) \{\} \}\);/.test(e));
+  ok("Bold uses execCommand, not string-splicing", /execAndCommit\("bold"\)/.test(e) && /document\.execCommand\(cmd, false, arg \|\| null\);/.test(e));
+  ok("Bullet list uses execCommand('insertUnorderedList'), a real list toggle on the live selection", /execAndCommit\("insertUnorderedList"\)/.test(e));
+  ok("Inline code surrounds the live selection in a real <code> element (no native execCommand for it) and no-ops on a collapsed selection", /function wrapInlineCode\(\) \{[\s\S]{0,300}if \(range\.collapsed\) return;/.test(e));
+  ok("format toolbar buttons preventDefault on mousedown to preserve the field's selection (same trick the copy-editor bar uses)", /btn\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\); \/\/ keep the field's selection/.test(e));
+  // /verso-frontend Tier 2 (prior session): code/bullet toolbar buttons must match the
+  // existing B/I/U bar's OWN list-toggle convention (a real Icon(), prop-toggle--icon)
+  // rather than a text glyph -- "B" correctly stays plain text (matches that bar's B/I/U).
+  // Still true after the execCommand rewire -- same button shell, new wiring underneath.
   ok("inline-code toolbar button uses the real code-xml icon, not a '<>' text glyph", /icon: "code-xml", title: "Inline code"/.test(e));
   ok("bullet toolbar button uses the real list icon (matches the existing B/I/U bar's own list-toggle), not a '•' text glyph", /icon: "list", title: "Bullet list"/.test(e));
   ok("icon toolbar buttons get the prop-toggle--icon class, same as the existing list-toggle button", /h\("button", "prop-toggle" \+ \(t\.icon \? " prop-toggle--icon" : ""\)\)/.test(e));
@@ -8716,9 +8707,9 @@ section("Product Rail: Source topic content authoring");
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
-  ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1 && renderJs.indexOf("__sourceActiveEditField") === -1);
+  ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1);
   var courseCss2 = src("src/course.css");
-  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body-input") === -1 && courseCss2.indexOf("source-stage__diverge") === -1);
+  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body--editing") === -1 && courseCss2.indexOf("source-stage__diverge") === -1);
 })();
 
 // ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
@@ -8797,6 +8788,13 @@ section("markdown-lite content render");
   var M;
   try { M = require(path.join(ROOT, "src/markdown-lite.js")); } catch (e) { ok("require src/markdown-lite.js", false); return; }
   ok("require src/markdown-lite.js", !!M && !!M._pure && typeof M.render === "function");
+  // serialize(node) is the reverse of render() (DOM-in, markdown-lite string-out) for
+  // the Source-stage contentEditable editing surface (source-stage-wysiwyg-editing).
+  // It needs a real DOM (document.createElement etc.), which this Node test harness
+  // doesn't have (no jsdom -- the app is dependency-free) -- so beyond confirming it's
+  // exported, its actual round-trip fidelity is verified via real browser-verify, not
+  // a pure-logic fixture here.
+  ok("MarkdownLite.serialize is exported", typeof M.serialize === "function");
   if (!M || !M._pure) return;
   var P = M._pure;
 
