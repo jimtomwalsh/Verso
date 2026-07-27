@@ -2899,7 +2899,7 @@
         '<svg class="course-header__logo" viewBox="0 0 24 24" aria-hidden="true">' +
         '<path d="M12 2l8 3v6c0 5-3.4 8.6-8 11-4.6-2.4-8-6-8-11V5z" fill="none" stroke="currentColor" stroke-width="1.7"/>' +
         '<path d="M8.5 12l2.3 2.3L15.5 9.5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>' +
-        '<span class="course-header__word"><b>DRONE</b>SHIELD</span>';
+        '<span class="course-header__word">VERSO</span>';
     }
     root.appendChild(brand);
     var crumb = el("div", "course-header__crumb");
