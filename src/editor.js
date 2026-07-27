@@ -10922,10 +10922,36 @@
     host.appendChild(search);
   }
 
+  // Product Rail (md-topic-import): the two ways to get a topic into the wiki now that
+  // console fixtures are no longer the only path -- a blank topic, or a whole Markdown
+  // manual parsed into topics/sections. Mounted once, like the search field above.
+  function mountSourceStageActions() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
+    if (!window.VersoUI || !window.VersoUI.Button) return;
+    host.innerHTML = "";
+    host.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "plus", label: "New topic", onClick: newTopicModal }));
+    host.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
+  }
+
+  function newTopicModal() {
+    var productId = getActiveProduct();
+    if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
+    promptModal("New Topic", "Name", "", function (name) {
+      if (!(name || "").trim()) return;
+      var topic = createTopic(name, productId, []); // LibraryStore write, not doc -- no pushHistory
+      __sourceActiveTopicId = topic.id;
+      renderSourceTopicList();
+      renderSourceArticle();
+    });
+  }
+
   // Called each time Source becomes the active stage (setStage("source")) -- mounts
-  // the search field once, then re-renders the topic list + article from current state.
+  // the search field + actions once, then re-renders the topic list + article from
+  // current state.
   function renderSourceStage() {
     mountSourceStageSearch();
+    mountSourceStageActions();
     renderSourceTopicList();
     renderSourceArticle();
   }
@@ -10946,6 +10972,131 @@
   }
   window.__productRail.createTopic = createTopic;
   window.__productRail.renderSourceStage = renderSourceStage; // headless/browser-verify hook
+
+  // Product Rail (md-topic-import): turns a MarkdownImport parse's topics (already
+  // variant-merged, if any) into real LibraryStore topic components via createTopic.
+  // Pure conversion of shape -- {key,name,sections:[{key,heading,text,overrides}]} ->
+  // the real {id,heading,facets,overrides} section shape addSection() uses.
+  function importParsedTopics(parsedTopics, productId) {
+    var topicCount = 0, sectionCount = 0;
+    parsedTopics.forEach(function (t) {
+      var sections = t.sections.map(function (s) {
+        var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), heading: s.heading, facets: { technical: s.text } };
+        if (s.overrides) {
+          sec.overrides = {};
+          Object.keys(s.overrides).forEach(function (v) { sec.overrides[v] = { facets: { technical: s.overrides[v] } }; });
+        }
+        sectionCount++;
+        return sec;
+      });
+      createTopic(t.name, productId, sections);
+      topicCount++;
+    });
+    return { topicCount: topicCount, sectionCount: sectionCount };
+  }
+  window.__productRail.importParsedTopics = importParsedTopics; // headless/browser-verify hook
+
+  function readFileAsText(file) {
+    return new Promise(function (resolve) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result == null ? "" : r.result)); };
+      r.onerror = function () { resolve(""); };
+      r.readAsText(file);
+    });
+  }
+
+  // Shared tail end of an import, whether it came from the one-click no-variant path or
+  // the multi-file modal: merge any variant parses in, write real topics, re-render, and
+  // report a short summary through the canonical confirmModal (never a raw window.alert
+  // for anything beyond a single-sentence hard failure -- /verso-frontend Tier 2 review).
+  function finishMarkdownImport(baseParse, variantParses, productId) {
+    var warnings = baseParse.warnings.slice();
+    (variantParses || []).forEach(function (vp) {
+      warnings = warnings.concat(vp.parse.warnings.map(function (w) { return "[" + vp.name + "] " + w; }));
+      warnings = warnings.concat(window.MarkdownImport.mergeVariant(baseParse.topics, vp.parse, vp.name));
+    });
+    var result = importParsedTopics(baseParse.topics, productId);
+    renderSourceTopicList();
+    var summary = "Imported " + result.topicCount + " topic(s), " + result.sectionCount + " section(s).";
+    if (warnings.length) summary += " " + warnings.length + " item(s) may need review (an unmatched heading, or a variant-only section) -- check the imported topics.";
+    confirmModal("Import from Markdown", summary, function () {});
+  }
+
+  // "Import from Markdown…": one primary (Flagship) .md, plus one optional .md per the
+  // active Product's already-declared variants (no free-form variant-name entry -- the
+  // variant list is fixed by ProductsStore[id].variants, same source buildVariantPillsRow
+  // reads). A Product with NO declared variants only ever needs one file, so it matches
+  // the established one-click precedent exactly (glossary's importCsv, editor.js -- click
+  // the button, the native file picker opens immediately, no intermediate modal at all).
+  // The modal only exists for the multi-file case a single click structurally can't do:
+  // mapping several files to several variant names at once.
+  function importMarkdownModal() {
+    if (!window.MarkdownImport) { window.alert("Markdown import isn't available (markdown-import.js failed to load)."); return; }
+    var productId = getActiveProduct();
+    if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
+    var declaredVariants = declaredVariantsForProduct(window.ProductsStore || {}, productId);
+
+    if (!declaredVariants.length) {
+      var inp = h("input"); inp.type = "file"; inp.accept = ".md,.markdown,.txt";
+      inp.addEventListener("change", function () {
+        var f = inp.files && inp.files[0]; if (!f) return;
+        readFileAsText(f).then(function (text) { finishMarkdownImport(window.MarkdownImport.parse(text), [], productId); });
+      });
+      inp.click();
+      return;
+    }
+
+    var primaryFile = null;
+    var variantFiles = {};
+    var shell = dsModalShell({
+      title: "Import from Markdown",
+      subtitle: "Creates topics from a Markdown manual's headings (numbered headings like \"5.3\" split into topic/section by their number; plain headings use #/##). Only the Technical facet is written -- Digestible/Dot-point stay yours to author.",
+      primaryLabel: "Import",
+      onPrimary: function () {
+        if (!primaryFile) { window.alert("Choose the manual file first."); return; }
+        runImport();
+      }
+    });
+    var box = shell.body;
+
+    var pRow = modalField(box, "Manual (Flagship)");
+    var pWrap = h("div", "modal-field__control modal-field__file");
+    var pInput = h("input"); pInput.type = "file"; pInput.accept = ".md,.markdown,.txt";
+    var pLabel = h("span", "modal-field__hint", "No file chosen");
+    pInput.addEventListener("change", function () {
+      primaryFile = (pInput.files && pInput.files[0]) || null;
+      pLabel.textContent = primaryFile ? primaryFile.name : "No file chosen";
+    });
+    pWrap.appendChild(pInput);
+    pWrap.appendChild(pLabel);
+    pRow.appendChild(pWrap);
+
+    declaredVariants.forEach(function (v) {
+      var vRow = modalField(box, v + " (optional)");
+      var vWrap = h("div", "modal-field__control modal-field__file");
+      var vInput = h("input"); vInput.type = "file"; vInput.accept = ".md,.markdown,.txt";
+      var vLabel = h("span", "modal-field__hint", "No file chosen");
+      vInput.addEventListener("change", function () {
+        variantFiles[v] = (vInput.files && vInput.files[0]) || null;
+        vLabel.textContent = variantFiles[v] ? variantFiles[v].name : "No file chosen";
+      });
+      vWrap.appendChild(vInput);
+      vWrap.appendChild(vLabel);
+      vRow.appendChild(vWrap);
+    });
+
+    function runImport() {
+      var variantNames = Object.keys(variantFiles).filter(function (v) { return variantFiles[v]; });
+      var files = [primaryFile].concat(variantNames.map(function (v) { return variantFiles[v]; }));
+      Promise.all(files.map(readFileAsText)).then(function (texts) {
+        var baseParse = window.MarkdownImport.parse(texts[0]);
+        var variantParses = variantNames.map(function (v, i) { return { name: v, parse: window.MarkdownImport.parse(texts[i + 1]) }; });
+        shell.modal.close();
+        finishMarkdownImport(baseParse, variantParses, productId);
+      });
+    }
+  }
+  window.__productRail.importMarkdownModal = importMarkdownModal; // headless/browser-verify hook
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {

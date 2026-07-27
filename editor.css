@@ -494,6 +494,19 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   background: var(--surface-raised, #262626); border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm, 3px); padding: 1px 5px;
 }
+/* product-rail-md-topic-import: markdown-lite's new table render branch (GFM-style
+   pipe tables, imported manuals are full of them). Plain bordered grid, no theming
+   beyond the shared panel tokens -- matches the DS's "no bespoke chrome" bar for a
+   content-typography element, not a control. */
+.source-stage__body .md-lite-table { width: 100%; border-collapse: collapse; margin: 0 0 10px; font-size: var(--text-sm, 13px); }
+.source-stage__body .md-lite-table th,
+.source-stage__body .md-lite-table td { border: 1px solid var(--border-subtle); padding: 4px 8px; text-align: left; vertical-align: top; }
+.source-stage__body .md-lite-table th { background: var(--surface-raised, #262626); font-weight: 600; color: var(--text-primary); }
+
+/* product-rail-md-topic-import: "+ New Topic" / "Import from Markdown…", the console-
+   free way to get content into a topic. Sits between the search field and the list. */
+.source-stage__nav-actions { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; flex: 0 0 auto; }
+.source-stage__nav-actions .vds-btn { width: 100%; justify-content: flex-start; }
 
 /* source-stage-variant-columns: Flagship (always-on, non-interactive) + one
    VersoUI.ToggleChip per variant declared for the topic's Product. */
@@ -2186,6 +2199,11 @@ details[open] .disc__caret {
   flex: 0 0 auto;
   width: 220px;
 }
+/* product-rail-md-topic-import: one file-picker + chosen-filename hint, stacked as a
+   single modal-field control cell (a bare <input type=file>, same precedent as
+   importLibraryJson's file input -- no DS file-field component exists yet). */
+.modal-field__file { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 220px; }
+.modal-field__hint { font-size: 11px; color: var(--text-tertiary); }
 .modal-field__control.is-toggle {
   width: 96px;
 }
