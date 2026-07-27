@@ -10605,8 +10605,8 @@
     var host = document.getElementById("source-stage-info"); if (!host) return;
     host.innerHTML = "";
     if (!topic) return;
-    var linkedBody = panelSection(host, "Linked in");
     var used = libraryWhereUsedDetail(topic.id, getRegistry());
+    var linkedBody = panelSection(host, "Linked in (" + used.length + ")");
     if (!used.length) {
       linkedBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
     } else {

@@ -8408,7 +8408,7 @@ section("Product Rail: Source stage info panel");
   // renderSourceInfoPanel: reuses the canonical panelSection() helper (not a one-off
   // block) for both "Linked in" and "History" -- the same section chrome every other
   // side panel in the app uses.
-  ok("Linked in section uses the canonical panelSection() helper", /panelSection\(host, "Linked in"\)/.test(e));
+  ok("Linked in section uses the canonical panelSection() helper, titled with the count per the AC (\"Linked in (N)\")", /panelSection\(host, "Linked in \(" \+ used\.length \+ "\)"\)/.test(e));
   ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History"\)/.test(e));
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
