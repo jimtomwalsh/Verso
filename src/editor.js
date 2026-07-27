@@ -194,6 +194,21 @@
   };
   function libraryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserLibraryAdapter); }
 
+  // ---- Products storage adapter (Product Rail #1) — same seam/flag as the registry and
+  // library above. ProductsStore holds Product containers ({id,name,createdAt,groundTruthId})
+  // keyed by productId; a document only joins a Product when explicitly tagged via
+  // doc.meta.productId/stage (see docMatchesProductStage, @pure-recents fence) — untagged
+  // documents never touch this store and read/save through the registry exactly as today.
+  /* @products-adapter-start */
+  var PRODUCTS_STORAGE_KEY = "authoring.products";
+  var browserProductsAdapter = {
+    name: "browser",
+    readProducts: function () { return localStorage.getItem(PRODUCTS_STORAGE_KEY); },
+    writeProducts: function (json) { return writeStore(localStorage, PRODUCTS_STORAGE_KEY, json); }
+  };
+  /* @products-adapter-end */
+  function productsAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserProductsAdapter); }
+
   // ---- StorageBackend (platform-pivot 01/31 — EXPAND) -----------------------
   // The single, highest seam the whole platform pivot introduces. It unifies the
   // three storage choke points — the registry writer (saveRegistry), the low-level
@@ -342,6 +357,26 @@
     if (mos < 12) return mos + (mos === 1 ? " month ago" : " months ago");
     var yrs = Math.floor(days / 365);
     return yrs + (yrs === 1 ? " year ago" : " years ago");
+  }
+  // Product Rail #1: doc.meta.productId/stage are optional tagging fields (next to
+  // code/title/updatedAt) — an untagged doc has neither and behaves exactly as today.
+  // A falsy filter value means "no constraint on that dimension" (matches everything,
+  // tagged or not); a truthy one requires an exact match, so an untagged doc never
+  // matches a specific Product/Stage filter.
+  function docMatchesProductStage(d, productId, stage) {
+    var meta = (d && d.meta) || {};
+    if (productId && meta.productId !== productId) return false;
+    if (stage && meta.stage !== stage) return false;
+    return true;
+  }
+  // Tags (or clears, when passed a falsy value) a document's Product/Stage. Writes
+  // ONLY doc.meta — never touches pages/blocks, so promotion is lossless by construction.
+  function tagDocProductStage(d, productId, stage) {
+    if (!d) return d;
+    if (!d.meta) d.meta = {};
+    if (productId) d.meta.productId = productId; else delete d.meta.productId;
+    if (stage) d.meta.stage = stage; else delete d.meta.stage;
+    return d;
   }
   /* @pure-recents-end */
 
@@ -1142,7 +1177,131 @@
   window.LibraryStore = loadLibrary();
   function saveLibrary() { try { libraryAdapter().writeLibrary(JSON.stringify(window.LibraryStore)); } catch (e) {} }
   function libComponents() { return (window.LibraryStore && window.LibraryStore.components) || {}; }
+
+  // Product Rail #1 — ProductsStore: { [productId]: {id, name, createdAt, groundTruthId} }.
+  // Same load/save shape as the library above, through productsAdapter()'s adapter seam.
+  function loadProducts() {
+    var prods = {};
+    try { var raw = productsAdapter().readProducts(); if (raw) { var p = JSON.parse(raw); if (p && typeof p === "object") prods = p; } } catch (e) {}
+    return prods;
+  }
+  window.ProductsStore = loadProducts();
+  function saveProducts() { try { productsAdapter().writeProducts(JSON.stringify(window.ProductsStore)); } catch (e) {} }
+  // Creates a Product container and persists it; the sole write path other Product Rail
+  // tickets (new-product-flow, promote-to-product) build their UI on top of.
+  function createProduct(name) {
+    var id = "prod-" + Math.random().toString(36).slice(2, 8);
+    while (window.ProductsStore[id]) id = "prod-" + Math.random().toString(36).slice(2, 8);
+    var prod = { id: id, name: (String(name || "").trim() || "Untitled product"), createdAt: Date.now() };
+    window.ProductsStore[id] = prod;
+    saveProducts();
+    return prod;
+  }
+  // Foundational tagging-layer API (Product Rail #1) — the surface every downstream
+  // Product Rail ticket (bottom-rail nav, +New Product, Promote to Product, browser
+  // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
+  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage };
+  // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
+  // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
+  // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
+  // (this modal always operates on `doc`, the one open course). Reuses the modalField +
+  // dsSelect pattern Find & Replace's variant picker already established, not a new
+  // control -- see modalField(box, "Apply to") at the Find & Replace call site.
+  var PRODUCT_STAGE_OPTS = [["eLearning", "elearning"], ["Presentations", "presentations"], ["Print docs", "printDocs"]];
+  function promoteToProductModal() {
+    if (!doc) return;
+    var NEW_KEY = "__new__";
+    var products = window.ProductsStore || {};
+    var productKeys = Object.keys(products);
+    var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
+    var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
+    var stage = (doc.meta && doc.meta.stage) || "elearning";
+    var newNameVal = "";
+    var shell = dsModalShell({
+      title: "Promote to Product",
+      subtitle: "Tags this course onto a Product + stage. Only adds meta — the course's content is never touched.",
+      primaryLabel: "Promote",
+      onPrimary: function () {
+        var pid = chosen;
+        if (chosen === NEW_KEY) {
+          var name = (newNameVal || "").trim();
+          if (!name) return;
+          pid = createProduct(name).id;
+        }
+        pushHistory();
+        tagDocProductStage(doc, pid, stage);
+        saveRegistry(registry);
+      }
+    });
+    var box = shell.body;
+    var pRow = modalField(box, "Product");
+    var pSel = dsSelect(pOpts, chosen, function (v) { chosen = v; newNameRow.style.display = (v === NEW_KEY) ? "" : "none"; });
+    pSel.classList.add("modal-field__control");
+    pRow.appendChild(pSel);
+    var newNameRow = h("div"); newNameRow.style.display = (chosen === NEW_KEY) ? "" : "none";
+    var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
+    nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
+    box.appendChild(newNameRow);
+    var sRow = modalField(box, "Stage");
+    var sSel = dsSelect(PRODUCT_STAGE_OPTS, stage, function (v) { stage = v; });
+    sSel.classList.add("modal-field__control");
+    sRow.appendChild(sSel);
+  }
   function isLibraryComponent(key) { return !!libComponents()[key]; }
+
+  // ---- Product Rail: tag vocabulary + reserved owning-Product tag ---------------
+  // A master's tags: [{value, reserved}]. At most one entry is reserved:true -- the
+  // "owning Product" tag, stamped ONCE at promotion time from the active doc's Product
+  // context (birthplace, not ownership -- a master promoted from an untagged doc simply
+  // gets no reserved tag, nothing to attribute). Every other entry is a freeform
+  // technology tag, global across Products (never scoped per Product). Pure; callers own
+  // persistence (saveLibrary()) after mutating the master object passed in.
+  /* @tag-vocab-start */
+  function ownerProductTagValue(productId) { return productId ? ("product:" + productId) : null; }
+  function stampOwnerProductTag(master, productId) {
+    if (!master) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (!productId) return master; // no Product context at promotion time -- nothing to attribute
+    if (master.tags.some(function (t) { return t && t.reserved; })) return master; // stamped once, never re-stamped
+    master.tags.push({ value: ownerProductTagValue(productId), reserved: true });
+    return master;
+  }
+  function addTechnologyTag(master, value) {
+    if (!master) return master;
+    var v = String(value || "").trim(); if (!v) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (master.tags.some(function (t) { return t && t.value === v; })) return master; // no dupes
+    master.tags.push({ value: v, reserved: false });
+    return master;
+  }
+  // Ordinary tag-editing can never remove the reserved tag -- matches on a non-reserved value only.
+  function removeMasterTag(master, value) {
+    if (!master || !Array.isArray(master.tags)) return master;
+    master.tags = master.tags.filter(function (t) { return !(t && t.value === value && !t.reserved); });
+    return master;
+  }
+  // Autocomplete-first matching against the global technology-tag vocabulary. "propose
+  // new" is the caller's fallback when exact is false -- never the default typing path.
+  function matchTagVocabulary(vocab, query) {
+    var q = String(query || "").trim().toLowerCase();
+    if (!q) return { matches: [], exact: false };
+    var matches = (vocab || []).filter(function (t) { return t && t.toLowerCase().indexOf(q) !== -1; });
+    var exact = (vocab || []).some(function (t) { return t && t.toLowerCase() === q; });
+    return { matches: matches, exact: exact };
+  }
+  /* @tag-vocab-end */
+  // The global technology-tag vocabulary: every non-reserved tag value already used by
+  // any master in the shared library (not scoped per Product, per the ticket's spec).
+  function collectTagVocabulary() {
+    var seen = {}, out = [];
+    var comps = libComponents();
+    Object.keys(comps).forEach(function (k) {
+      ((comps[k] && comps[k].tags) || []).forEach(function (t) {
+        if (t && !t.reserved && t.value && !seen[t.value]) { seen[t.value] = true; out.push(t.value); }
+      });
+    });
+    return out;
+  }
   // doc override -> shared library -> built-in. Shared by the editor + render.
   function resolveComponentDef(key) {
     return (doc.components && doc.components[key]) || libComponents()[key] || (window.COMPONENTS || {})[key];
@@ -1548,6 +1707,7 @@
     }
     action("Save as a copy", function () { if (activeDocId) duplicateCourse(activeDocId); });
     action("Open…", function () { pickCourseFile(function (imported) { importDocToRegistry(imported); }); });
+    action("Promote to Product…", function () { promoteToProductModal(); });
     menu.appendChild(h("div", "vsavemenu__sep"));
     menu.appendChild(h("div", "vsavemenu__head", "Where are my files"));
     menu.appendChild(h("div", "vsavemenu__path", storeLocationText()));
@@ -2771,6 +2931,65 @@
     if (window.ResizeObserver) {
       var ro = new ResizeObserver(function () { positionHandles(); });
       ro.observe(columnsNode);
+    }
+  }
+
+  // Pure swap of two adjacent columns' block arrays (+ colWidths, if custom and still
+  // matching the column count). i/i+1 must both be valid indices; the caller (the click
+  // handler below) guarantees that by construction (one button per adjacent pair).
+  /* @swap-columns-start */
+  function swapColumns(block, i) {
+    if (!block || !Array.isArray(block.columns)) return block;
+    var a = block.columns[i], b = block.columns[i + 1];
+    block.columns[i] = b; block.columns[i + 1] = a;
+    if (Array.isArray(block.colWidths) && block.colWidths.length === block.columns.length) {
+      var wa = block.colWidths[i], wb = block.colWidths[i + 1];
+      block.colWidths[i] = wb; block.colWidths[i + 1] = wa;
+    }
+    return block;
+  }
+  /* @swap-columns-end */
+  // Per-gap column-SWAP glyph (editor chrome only — never rendered/exported). A small
+  // hover-revealed icon button in each inter-column gap, mirroring attachColumnResizers'
+  // wiring exactly, that exchanges the two adjacent columns via swapColumns and
+  // re-renders. Unlike a resize (a live drag on flex ratios), a swap is a genuine
+  // structural change — content actually moves — so it goes through the normal
+  // pushHistory + reapplyStructural + reselectBlockNode path, not a live DOM mirror.
+  function attachColumnSwaps(columnsNode, block) {
+    var cols = Array.prototype.slice.call(columnsNode.children).filter(function (c) {
+      return c.classList && c.classList.contains("layout-column");
+    });
+    if (cols.length < 2) return; // nothing to swap between
+    var gap = block.gap == null ? 24 : block.gap;
+    var btns = [];
+
+    function positionSwaps() {
+      btns.forEach(function (btn, i) {
+        var left = cols[i].offsetLeft + cols[i].offsetWidth + gap / 2;
+        btn.style.left = left + "px";
+        btn.style.top = (columnsNode.offsetHeight / 2) + "px";
+      });
+    }
+
+    cols.slice(0, -1).forEach(function (_, i) {
+      var btn = iconBtn("arrow-left-right", "Swap these two columns");
+      btn.classList.add("col-swap-btn");
+      btn.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); });
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        pushHistory();
+        swapColumns(block, i);
+        reapplyStructural(findPageOfBlock(block));
+        reselectBlockNode(block, "block");
+      });
+      btns.push(btn);
+      columnsNode.appendChild(btn);
+    });
+
+    positionSwaps();
+    if (window.ResizeObserver) {
+      var ro2 = new ResizeObserver(function () { positionSwaps(); });
+      ro2.observe(columnsNode);
     }
   }
 
@@ -4918,6 +5137,47 @@
     });
   }
   window.__clearBlockContent = clearBlockContent; // #174 test hook (pure subtree clear)
+  // #170/#33: text<->list BLOCK-TYPE conversion (not an inline execCommand list -- a
+  // whole-block type swap between the dedicated "list" type and any other text-content
+  // type). Only block-level tags are treated as item breaks, so inline formatting
+  // (b/i/u/span/a) survives untouched inside each <li>.
+  /* @list-convert-start */
+  function htmlToListItems(html) {
+    var s = String(html == null ? "" : html);
+    s = s.replace(/<\/(p|div)>/gi, "\n").replace(/<(p|div)[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "\n");
+    var lines = s.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
+    if (!lines.length) return "<li></li>";
+    return lines.map(function (l) { return "<li>" + l + "</li>"; }).join("");
+  }
+  // Inverse: join <li> items back into one flowing field, each item's inline HTML kept
+  // intact, multiple items separated by <br> so nothing is silently dropped.
+  function listItemsToHtml(liHtml) {
+    var s = String(liHtml == null ? "" : liHtml);
+    var items = [], re = /<li[^>]*>([\s\S]*?)<\/li>/gi, m;
+    while ((m = re.exec(s))) items.push(m[1].trim());
+    if (!items.length) return s; // not actually <li>-shaped -- return untouched (defensive)
+    return items.join("<br>");
+  }
+  // Converts a text-content block to/from the dedicated "list" type IN PLACE. Remembers
+  // the PRIOR type on the block (__priorTextType) so a round-trip restores it (default
+  // "paragraph" if that memory is somehow absent) -- heading<->list<->heading is lossless
+  // on TYPE; content is lossless on inline formatting (see htmlToListItems above).
+  function convertTextListBlockType(block) {
+    if (!block) return block;
+    if (block.type === "list") {
+      var restore = block.__priorTextType || "paragraph";
+      block.text = listItemsToHtml(block.text);
+      block.type = restore;
+      delete block.__priorTextType;
+    } else {
+      block.__priorTextType = block.type;
+      block.text = htmlToListItems(block.text);
+      block.type = "list";
+    }
+    return block;
+  }
+  /* @list-convert-end */
+  window.__convertTextListBlockType = convertTextListBlockType; // test hook
   // Action wrapper: confirm (destructive), push history, clear one or more blocks, remount.
   function clearBlockContentAction(blocks) {
     var list = Array.isArray(blocks) ? blocks.filter(Boolean) : [blocks].filter(Boolean);
@@ -7465,6 +7725,29 @@
     }
     } finally { inspector = _hins; }
     });
+
+    // Advanced: bulk source-video purge (tour builder only). Harvested screens are
+    // author-time scratch (never exported) but the recordings themselves can be heavy —
+    // this is the all-at-once pressure valve alongside the per-source Remove on each card.
+    if (Array.isArray(block.sources) && block.sources.length) {
+      sectionGroup("Advanced", "Source videos", function (_asb) {
+        var _ains = inspector; inspector = _asb;
+        try {
+          var n = block.sources.length;
+          inspector.appendChild(h("div", "insp-hint", n + " source video" + (n === 1 ? "" : "s") + " on the board. Author-time scratch — never exported."));
+          var purge = h("button", "prop-btn prop-btn--danger", "Purge all sources");
+          purge.addEventListener("click", function () {
+            confirmModal("Purge all sources", "Remove all " + block.sources.length + " source video" + (block.sources.length === 1 ? "" : "s") + "? Screens you've already harvested from them are kept.", function () {
+              pushHistory();
+              delete block.sources;
+              scheduleSave(); renderTourNodes(); renderTourInspector();
+              try { sweepAllAssets(); } catch (_) {} // free the purged blobs now (unreferenced)
+            }, { okLabel: "Purge all", danger: true });
+          });
+          inspector.appendChild(purge);
+        } finally { inspector = _ains; }
+      });
+    }
 
     endSections(inspector);
     // reveal the active hotspot on the canvas for in-place editing (after layout)
@@ -10041,7 +10324,7 @@
   function mountTopBar() {
     if (typeof document === "undefined") return;
     var Ic = window.Icon; if (!Ic) return;
-    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide]");
+    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
     Array.prototype.forEach.call(hosts, function (el) {
       var name = el.getAttribute("data-lucide");
       if (!name) return;
@@ -10059,13 +10342,55 @@
     }
   }
 
-  // #89 left rail. The Document tab shows the Structure + Blocks
-  // panes; the pinned bottom glyphs are global actions.
-  var __leftView = "document";
-  function setLeftPanelView(view) {
+  // Product Rail (2026-07-27 DaVinci pivot): left rail is three fixed, ungated,
+  // free-form segments -- Source, Edit, Publish -- replacing the old single
+  // Document tab. Edit shows exactly today's document-editing workspace
+  // (Structure/Blocks/Components + canvas + inspector), byte-for-byte unchanged.
+  // Source/Publish are placeholder regions until Epics 2/3/6 build their real
+  // content -- this ticket only owns the segment switch + the shared product
+  // context, not what renders inside each stage.
+  /* @stage-rail-start */
+  var STAGE_IDS = ["source", "edit", "publish"];
+  function isValidStage(s) { return STAGE_IDS.indexOf(s) !== -1; }
+  // Edit renders through the workspace's ORIGINAL grid (no extra class) so today's
+  // editing experience never changes; Source/Publish get a modifier class that hides
+  // the edit-only grid items and reveals their own placeholder (same "hide the grid
+  // items, span the leftover column" approach as .workspace.is-panels-hidden).
+  function stageWorkspaceClass(stage) {
+    if (stage === "source") return "workspace--stage-source";
+    if (stage === "publish") return "workspace--stage-publish";
+    return null;
+  }
+  // ProductsStore ({id: {id,name,...}}) -> dropdown options, "All products" first.
+  function productSelectOptions(store) {
+    var opts = [{ value: "", label: "All products" }];
+    Object.keys(store || {}).sort(function (a, b) {
+      return ((store[a] && store[a].name) || "").localeCompare((store[b] && store[b].name) || "");
+    }).forEach(function (id) {
+      opts.push({ value: id, label: (store[id] && store[id].name) || id });
+    });
+    return opts;
+  }
+  /* @stage-rail-end */
+
+  var __activeStage = "edit";
+  function setStage(stage) {
+    if (!isValidStage(stage)) return;
+    __activeStage = stage;
+    if (typeof document === "undefined") return;
     ["lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
-    var dt = document.getElementById("rail-tab-document"); if (dt) dt.classList.toggle("is-active", true);
-    __leftView = view;
+    var ws = document.getElementById("workspace");
+    if (ws) {
+      ws.classList.remove("workspace--stage-source", "workspace--stage-publish");
+      var cls = stageWorkspaceClass(stage);
+      if (cls) ws.classList.add(cls);
+    }
+    var srcEl = document.getElementById("stage-source"); if (srcEl) srcEl.hidden = stage !== "source";
+    var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
+    STAGE_IDS.forEach(function (s) {
+      var btn = document.getElementById("rail-tab-" + s);
+      if (btn) btn.classList.toggle("is-active", s === stage);
+    });
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
@@ -10075,10 +10400,31 @@
     var tabs = rail.querySelectorAll(".rail-tab");
     Array.prototype.forEach.call(tabs, function (t) {
       if (t.__navWired) return; t.__navWired = true;
-      t.addEventListener("click", function () { setLeftPanelView(t.getAttribute("data-rail-tab")); });
+      t.addEventListener("click", function () { setStage(t.getAttribute("data-rail-tab")); });
     });
+    setStage(__activeStage);
   }
-  window.__leftRail = { mount: mountLeftRail, setView: setLeftPanelView }; // boot + settings
+  window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; } }; // boot + settings
+
+  // Persistent top-bar product context (Product Rail): "" = All products. In-memory
+  // only for now -- every stage reads it through window.__productRail.getActiveProduct().
+  var __activeProduct = "";
+  function setActiveProduct(id) { __activeProduct = id || ""; }
+  function getActiveProduct() { return __activeProduct; }
+  function mountProductPicker() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("product-picker-host"); if (!host) return;
+    host.innerHTML = "";
+    var U = window.VersoUI; if (!U || !U.Select) return;
+    host.appendChild(U.Select({
+      options: productSelectOptions(window.ProductsStore),
+      value: __activeProduct,
+      onChange: function (v) { setActiveProduct(v); }
+    }));
+  }
+  window.__productRail.getActiveProduct = getActiveProduct;
+  window.__productRail.setActiveProduct = setActiveProduct;
+  window.__productRail.mountProductPicker = mountProductPicker; // boot hook
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {
@@ -10224,6 +10570,11 @@
           // remintIds); they become the master's permanent cross-course identity.
           var promoted = clone(doc.components[selectedKey]);
           stampMasterVersion(promoted, Date.now()); // Product Rail: bump on this content edit
+          // Product Rail: stamp the reserved owning-Product tag from THIS course's Product
+          // context, if it has one -- birthplace, not ownership; an untagged course simply
+          // promotes with no reserved tag (nothing to attribute). Stamped once, here, at
+          // the moment of promotion -- never re-stamped on a later overwrite.
+          stampOwnerProductTag(promoted, doc.meta && doc.meta.productId);
           window.LibraryStore.components[selectedKey] = promoted;
           delete doc.components[selectedKey]; // single-source: this course now references the library copy
           saveLibrary(); saveRegistry(registry); mount(); renderInspector();
@@ -11731,6 +12082,118 @@
   }
   window.__buildFontPicker = buildFontPicker; // headless test hook
 
+  // #170/#158: ONE canonical, config-driven formatting toggle-bar builder, shared by the
+  // block inspector's field editor AND the Course Copy Editor -- replacing their two
+  // bespoke prop-toggle-row "biu" rows. Behaviour is unchanged (inline execCommand for
+  // B/I/U/Link, active state via queryCommandState/an anchor check); only the surfaces
+  // now share one implementation. `io` decouples the bar from which surface it's in:
+  //   io.getNode() -> the current contentEditable element to focus/act on (or null/undefined
+  //                   when nothing is active -- the bar simply no-ops on click)
+  //   io.onChange() -> called after a toggle mutates content; the caller owns persistence
+  //                    (inspector: obj[field] = sanitizeFieldHtml(...) + renderModelView();
+  //                    copy editor: commitCopyRow(...))
+  // Config-driven so a future kind (e.g. the List ticket's block-level toggle) is a new
+  // branch here, not a new bar -- today "inline-exec" (B/I/U), "link", and "list-block"
+  // (#170/#33: a whole block-TYPE conversion, not an inline execCommand list) exist.
+  var FORMAT_TOGGLES = [
+    { kind: "inline-exec", label: "B", cmd: "bold", title: "Bold (selected text)" },
+    { kind: "inline-exec", label: "I", cmd: "italic", title: "Italic (selected text)" },
+    { kind: "inline-exec", label: "U", cmd: "underline", title: "Underline (selected text)" },
+    { kind: "link" },
+    { kind: "list-block" }
+  ];
+  function formatCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
+  function formatSelectionAnchor() {
+    var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
+    var c = sel.getRangeAt(0).commonAncestorContainer;
+    c = c.nodeType === 1 ? c : c.parentNode;
+    return (c && c.closest) ? c.closest("a[href]") : null;
+  }
+  function buildFormatToggleBar(io) {
+    var bar = h("div", "prop-toggle-row");
+    var execBtns = [];
+    var listBtn = null;
+    FORMAT_TOGGLES.forEach(function (t) {
+      if (t.kind === "inline-exec") {
+        var b = h("button", "prop-toggle" + (formatCmdOn(t.cmd) ? " is-on" : ""), t.label);
+        if (t.title) b.title = t.title;
+        b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's text selection
+        b.addEventListener("click", function () {
+          var node = io.getNode(); if (!node) return;
+          node.focus();
+          document.execCommand(t.cmd, false, null);
+          io.onChange();
+          b.classList.toggle("is-on", formatCmdOn(t.cmd));
+        });
+        bar.appendChild(b);
+        execBtns.push({ el: b, cmd: t.cmd });
+      } else if (t.kind === "link") {
+        // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
+        // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
+        // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
+        var linkB = h("button", "prop-toggle" + (formatSelectionAnchor() ? " is-on" : ""), "Link");
+        linkB.title = "Link the selected text to an external URL (opens in a new tab)";
+        linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        linkB.addEventListener("click", function () {
+          var node = io.getNode(); if (!node) return;
+          var a = formatSelectionAnchor(), sel = window.getSelection();
+          if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
+          // Save the text selection — the modal steals focus, so restore the Range before execCommand.
+          var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
+          promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
+            var n2 = io.getNode(); if (!n2) return;
+            n2.focus();
+            if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
+            url = (url || "").trim();
+            if (!url) { document.execCommand("unlink", false, null); }
+            else {
+              document.execCommand("createLink", false, url);
+              Array.prototype.forEach.call(n2.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
+            }
+            io.onChange();
+          });
+        });
+        bar.appendChild(linkB);
+        var unlinkB = iconBtn("unlink", "Remove the link");
+        unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        unlinkB.addEventListener("click", function () { var n3 = io.getNode(); if (!n3) return; n3.focus(); document.execCommand("unlink", false, null); io.onChange(); });
+        bar.appendChild(unlinkB);
+      } else if (t.kind === "list-block") {
+        // #170/#33: converts the WHOLE block to/from the dedicated "list" type (on-state
+        // reads block.type, not queryCommandState). Not every surface/field supports this
+        // (e.g. a quiz sub-field can't become a top-level list block), so the button is
+        // hidden -- not just disabled -- when io.isListToggleable() says no. A persisting
+        // bar (copy editor) re-derives visibility on every bar.refresh(), since which row
+        // is focused changes without the bar itself being rebuilt.
+        if (!io.isListToggleable || !io.isListBlock || !io.toggleListBlock) return;
+        var listB = h("button", "prop-toggle prop-toggle--icon");
+        listB.type = "button";
+        listB.title = "List — converts this block to/from a bulleted list";
+        listB.innerHTML = Icon("list");
+        listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        listB.addEventListener("click", function () { io.toggleListBlock(); });
+        bar.appendChild(listB);
+        listBtn = listB;
+      }
+    });
+    // Resync every inline-exec button's active state against the CURRENT selection, plus
+    // the list-block toggle's visibility/state -- callers that persist across re-focus
+    // (the copy editor's format bar, built once) use this instead of rebuilding; a surface
+    // that rebuilds the bar every render still gets a correct initial state (called below).
+    bar.refresh = function () {
+      var active = !!io.getNode();
+      execBtns.forEach(function (o) { o.el.classList.toggle("is-on", active && formatCmdOn(o.cmd)); });
+      if (listBtn) {
+        var canList = !!(io.isListToggleable && io.isListToggleable());
+        listBtn.hidden = !canList;
+        if (canList) listBtn.classList.toggle("is-on", !!(io.isListBlock && io.isListBlock()));
+      }
+    };
+    bar.refresh();
+    return bar;
+  }
+  window.__buildFormatToggleBar = buildFormatToggleBar; // headless test hook
+
   // Panel System v2 (James 2026-07-08): the generalised custom listbox. Same shape as
   // buildFontPicker (a button + popup, exposes `.value` get/set, fires 'change' on pick)
   // but each option can carry a live PREVIEW instead of a bare word — a CSS style applied
@@ -12698,89 +13161,36 @@
       }
     });
 
-    // Row 4: Inline style (B / I / U)
+    // Row 4: Inline style (B / I / U / Link / List) — #170/#158/#33: the shared canonical
+    // toggle-bar builder, also used by the Course Copy Editor (buildCopyFormatBar). List is
+    // now a whole block-TYPE conversion (block.type <-> "list"), not an inline execCommand
+    // list -- on-state reads the model, and clicking converts the block in place via
+    // convertTextListBlockType, remembering the prior type for a lossless round-trip. Only
+    // genuine top-level text-content blocks (obj.type in TEXT_CONTENT_TYPES) can convert --
+    // a quiz sub-field (obj has no .type) never shows the List toggle.
     inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Style"));
-    var biu = h("div", "prop-toggle-row");
-    function cmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-    [["B", "bold"], ["I", "italic"], ["U", "underline"]].forEach(function (o) {
-      // J: reflect the current selection's formatting (active state).
-      var b = h("button", "prop-toggle" + (cmdOn(o[1]) ? " is-on" : ""), o[0]);
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      b.addEventListener("click", function () { document.execCommand(o[1], false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); b.classList.toggle("is-on", cmdOn(o[1])); });
-      biu.appendChild(b);
-    });
-    // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
-    // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
-    // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
-    function selectionAnchor() {
-      var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
-      var c = sel.getRangeAt(0).commonAncestorContainer;
-      c = c.nodeType === 1 ? c : c.parentNode;
-      return (c && c.closest) ? c.closest("a[href]") : null;
-    }
-    var linkB = h("button", "prop-toggle" + (selectionAnchor() ? " is-on" : ""), "Link");
-    linkB.title = "Link the selected text to an external URL (opens in a new tab)";
-    linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    linkB.addEventListener("click", function () {
-      var a = selectionAnchor(), sel = window.getSelection();
-      if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
-      // Save the text selection — the modal steals focus, so restore the Range before execCommand.
-      var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
-      promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
-        node.focus();
-        if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
-        url = (url || "").trim();
-        if (!url) { document.execCommand("unlink", false, null); }
-        else {
-          document.execCommand("createLink", false, url);
-          Array.prototype.forEach.call(node.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
-        }
-        obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView();
-      });
-    });
-    biu.appendChild(linkB);
-    var unlinkB = iconBtn("unlink", "Remove the link");
-    unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    unlinkB.addEventListener("click", function () { document.execCommand("unlink", false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); });
-    biu.appendChild(unlinkB);
-    // List — #9: folded INTO this inline-format toggle bar (was a separate switchEl below).
-    // As a prop-toggle it shares B/I/U's mousedown-preventDefault, so the field keeps its
-    // text selection and execCommand acts on the right range. The old switch had no such
-    // guard: clicking it blurred the field first -> collapsed caret -> the toggle "did
-    // nothing". A field whose editable ROOT is a list (#31: the quiz summary <ul>, the list
-    // block) is inherently a list, so it shows NO toggle here — its marker settings live in
-    // the List section below.
     var rootIsList = node.tagName === "UL" || node.tagName === "OL";
-    function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
-    if (!rootIsList) {
-      var listB = h("button", "prop-toggle prop-toggle--icon" + (listOn() ? " is-on" : ""));
-      listB.type = "button";
-      listB.title = "List";
-      listB.innerHTML = Icon("list");
-      listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      listB.addEventListener("click", function () {
-        node.focus();
-        if (listOn()) {
-          if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null);
-          if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null);
-        } else {
-          document.execCommand("insertUnorderedList", false, null);
-        }
-        writeModel(node, node.innerHTML);
-        renderModelView();
-        renderInspector(); // reveals / hides the List marker section below
-      });
-      biu.appendChild(listB);
-    }
+    var biu = buildFormatToggleBar({
+      getNode: function () { return node; },
+      onChange: function () { obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); },
+      isListToggleable: function () { return field === "text" && !!obj && !!obj.type && !!TEXT_CONTENT_TYPES[obj.type]; },
+      isListBlock: function () { return !!obj && obj.type === "list"; },
+      toggleListBlock: function () {
+        pushHistory();
+        convertTextListBlockType(obj);
+        reapplyStructural(findPageOfBlock(obj));
+        reselectBlockNode(obj, "field"); // re-renders the inspector fresh (new type + marker section)
+      }
+    });
     inspector.appendChild(biu);
 
-    // List marker settings — the on/off toggle now lives in the inline-format bar above (#9).
-    // This section is purely the marker styling, shown only when the field IS a list: an
-    // inline list toggled on, OR a root-<ul>/<ol> field (#31: the quiz Chapter-summary <ul>,
-    // the list block). One <ul> renders disc / numbered / lettered alike (list-style-type is
-    // tag-agnostic), so the marker (incl. Numbered / Lettered / Roman) lives entirely in the
-    // Bullet-style dropdown; marker size stays a numeric iconField (exception).
-    if (rootIsList || listOn()) {
+    // List marker settings — the on/off toggle now lives in the inline-format bar above.
+    // Purely the marker styling, shown only when the field IS a list block (#31: the quiz
+    // Chapter-summary <ul> is its own root-<ul> field; the list block itself is rootIsList).
+    // One <ul> renders disc / numbered / lettered alike (list-style-type is tag-agnostic),
+    // so the marker (incl. Numbered / Lettered / Roman) lives entirely in the Bullet-style
+    // dropdown; marker size stays a numeric iconField (exception).
+    if (rootIsList) {
       inspector.appendChild(sub("List"));
       var MARKERS = [["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
       var MARK_GLYPH = { disc: "•", circle: "◦", square: "▪", dash: "–", arrow: "→", check: "✓", decimal: "1.", "lower-alpha": "a.", "lower-roman": "i.", custom: (obj.listMarkerChar || "✱") };
@@ -13325,7 +13735,7 @@
 
       // A columns row gets page-level top/bottom edge bands (AA) but no box/drag
       // handle of its own; a group is an invisible container with neither.
-      if (block.type === "columns") { attachColumnsEdgeBands(node, block, pi); attachColumnResizers(node, block); attachEmptyColumnDrops(node, block); return; }
+      if (block.type === "columns") { attachColumnsEdgeBands(node, block, pi); attachColumnResizers(node, block); attachColumnSwaps(node, block); attachEmptyColumnDrops(node, block); return; }
       if (block.type === "group") return; // no box of its own
 
       // Hotspot popover-card content is a FULL editing container (parity with
@@ -17814,14 +18224,8 @@
   // is the missing control the reporter needed: re-apply/repair the flagship's inline
   // weight boundary (e.g. lighter 'Rf') on shortened variant text. Built from canonical
   // prop-toggle buttons + the shared dsSelect weight picker (no bespoke controls).
-  var _copyFmtBtns = [];
-  function copyCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-  function refreshCopyFormatState() {
-    for (var i = 0; i < _copyFmtBtns.length; i++) {
-      var b = _copyFmtBtns[i];
-      b.el.classList.toggle("is-on", !!_activeCopyRow && copyCmdOn(b.cmd));
-    }
-  }
+  var _copyFormatBar = null; // the shared toggle-bar instance (has .refresh()) once built
+  function refreshCopyFormatState() { if (_copyFormatBar) _copyFormatBar.refresh(); }
   // Apply an inline font-weight span to the active row's selection (or the whole row when
   // nothing is selected) — mirrors the field inspector's applyWeightToSelection: raw
   // font-weight span => literal HTML that survives sanitizeFieldHtml and round-trips
@@ -17846,22 +18250,28 @@
     var host = document.getElementById("copyedit-tools");
     if (!host || !host.parentNode) return null;
     bar = h("div", "copyedit__format"); bar.id = "copyedit-format";
-    _copyFmtBtns = [];
-    var biu = h("div", "prop-toggle-row");
-    [["B", "bold"], ["I", "italic"], ["U", "underline"]].forEach(function (o) {
-      var b = h("button", "prop-toggle", o[0]);
-      b.title = o[1].charAt(0).toUpperCase() + o[1].slice(1) + " (selected text)";
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the row's selection
-      b.addEventListener("click", function () {
+    // #170/#158/#33: the shared canonical toggle-bar builder (B/I/U/Link/List) -- the same
+    // one the field inspector's Style row uses. The copy editor gains Link as a side effect
+    // of sharing one implementation (it had none before); same execCommand/createLink
+    // mechanic. List converts the FOCUSED row's underlying block type in place -- only
+    // shown when that row is a genuine top-level text-content block (t.host.type in
+    // TEXT_CONTENT_TYPES), never a quiz sub-field row (t.host has no .type). This bar is
+    // built ONCE and persists across every row focus, so visibility/state re-derive on
+    // every bar.refresh() (via refreshCopyFormatState, already wired to focus/keyup/mouseup).
+    var biu = buildFormatToggleBar({
+      getNode: function () { return _activeCopyRow && _activeCopyRow.tx; },
+      onChange: function () { if (!_activeCopyRow) return; commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant); },
+      isListToggleable: function () { return !!(_activeCopyRow && _activeCopyRow.t.key === "text" && _activeCopyRow.t.host && _activeCopyRow.t.host.type && TEXT_CONTENT_TYPES[_activeCopyRow.t.host.type]); },
+      isListBlock: function () { return !!(_activeCopyRow && _activeCopyRow.t.host.type === "list"); },
+      toggleListBlock: function () {
         if (!_activeCopyRow) return;
-        _activeCopyRow.tx.focus();
-        document.execCommand(o[1], false, null); // fires input -> commitCopyRow writes through
-        commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant);
-        b.classList.toggle("is-on", copyCmdOn(o[1]));
-      });
-      _copyFmtBtns.push({ el: b, cmd: o[1] });
-      biu.appendChild(b);
+        pushHistory();
+        convertTextListBlockType(_activeCopyRow.t.host);
+        copyEditDirty = true; scheduleSave();
+        renderCopyEditorDoc(); renderCopyEditorTools(); // rows rebuild -- the converted row now reflects the new content/type
+      }
     });
+    _copyFormatBar = biu;
     bar.appendChild(biu);
     // Inline weight — capture the row's live range on mousedown (opening the select steals
     // focus + collapses the selection, same trick the field inspector's Weight uses).
@@ -19607,6 +20017,7 @@
   wireCopyEditor(); // #116: full-screen copy-editor view (rail glyph opens, Close/Esc returns)
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
+  mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
   mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
   refreshCourseWeight(); // §308: initial course-weight readout
