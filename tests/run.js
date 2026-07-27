@@ -8348,7 +8348,12 @@ section("Product Rail: Source stage nav + article");
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { isValidFacet: isValidFacet, topicMatchesQuery: topicMatchesQuery, filterTopics: filterTopics," +
-    " groupTopicsByProduct: groupTopicsByProduct, resolveSectionFacetText: resolveSectionFacetText };")();
+    " groupTopicsByProduct: groupTopicsByProduct, canonicalizeTopicOrder: canonicalizeTopicOrder," +
+    " resolveSectionFacetText: resolveSectionFacetText };")();
+  // structMoveTopic itself isn't extracted here (unlike structMoveSection) -- it reads/
+  // writes the real libComponents()/saveLibrary() globals to look up drag/ref topics by id
+  // across the whole library, so it's exercised via the browser-verify pass instead, the
+  // same tier createTopic and its siblings already use.
 
   ok("isValidFacet accepts technical/digestible/dotpoint", g.isValidFacet("technical") && g.isValidFacet("digestible") && g.isValidFacet("dotpoint"));
   ok("isValidFacet rejects anything else", g.isValidFacet("flagship") === false && g.isValidFacet() === false);
@@ -8375,7 +8380,34 @@ section("Product Rail: Source stage nav + article");
   var groups = g.groupTopicsByProduct(g.filterTopics(comps, "", ""), products);
   ok("groupTopicsByProduct: one group per productId + an Unassigned bucket", groups.length === 3);
   ok("groupTopicsByProduct: groups sorted by product name, Unassigned last", groups[0].label === "Alpha" && groups[1].label === "Beta" && groups[2].label === "Unassigned");
-  ok("groupTopicsByProduct: topics within a group sorted by name", groups[0].topics[0].name === "Battery life" && groups[0].topics[1].name === "Radar overview");
+  // source-stage-topic-reorder: within a group, topics sort by their canonical drag `order`
+  // (author-chosen), not by name -- callers canonicalize order first (see below).
+  var orderedComps = {
+    o1: { id: "o1", kind: "topic", name: "Radar overview", productId: "prod-a", order: 1 },
+    o2: { id: "o2", kind: "topic", name: "Battery life", productId: "prod-a", order: 0 }
+  };
+  var orderedGroups = g.groupTopicsByProduct(g.filterTopics(orderedComps, "", ""), products);
+  ok("groupTopicsByProduct: topics within a group sorted by order, not name", orderedGroups[0].topics[0].name === "Battery life" && orderedGroups[0].topics[1].name === "Radar overview");
+
+  // canonicalizeTopicOrder: assigns a stable, dense order per Product group -- a topic
+  // with no order yet sorts to the end of ITS group, alphabetically among its equally-
+  // unordered siblings, so a freshly created/imported topic appends rather than jumping
+  // into an author's chosen order. Order is scoped per-group (cross-group position is
+  // meaningless), and restamped to a dense 0..n-1 range after sorting.
+  var unordered = [
+    { id: "u1", name: "Zebra", productId: "prod-a" },
+    { id: "u2", name: "Alpha topic", productId: "prod-a" },
+    { id: "u3", name: "Only one", productId: "prod-b" }
+  ];
+  g.canonicalizeTopicOrder(unordered);
+  ok("canonicalizeTopicOrder: no-order topics fall back to alpha order within their group", unordered[0].order === 1 && unordered[1].order === 0);
+  ok("canonicalizeTopicOrder: a lone topic in its own group still gets order 0", unordered[2].order === 0);
+  var mixed = [
+    { id: "m1", name: "Has an order", productId: "prod-a", order: 5 },
+    { id: "m2", name: "No order yet", productId: "prod-a" }
+  ];
+  g.canonicalizeTopicOrder(mixed);
+  ok("canonicalizeTopicOrder: an explicit order always sorts before a topic with none", mixed[0].order === 0 && mixed[1].order === 1);
 
   var sec = { heading: "H", facets: { technical: "tech text", dotpoint: "dot text" } };
   ok("resolveSectionFacetText: returns the requested facet when present", g.resolveSectionFacetText(sec, "dotpoint") === "dot text");
@@ -8626,8 +8658,8 @@ section("Product Rail: Source topic content authoring");
   var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
-    "\nreturn { addSection: addSection, removeSection: removeSection, moveSection: moveSection," +
-    " divergeSectionVariant: divergeSectionVariant };")();
+    "\nreturn { addSection: addSection, removeSection: removeSection," +
+    " structMoveSection: structMoveSection, divergeSectionVariant: divergeSectionVariant };")();
 
   // Section CRUD -- plain array ops, callers own the updatedAt stamp + save.
   var topic = { sections: [{ id: "s1", heading: "One" }, { id: "s2", heading: "Two" }] };
@@ -8636,13 +8668,17 @@ section("Product Rail: Source topic content authoring");
   ok("a freshly added section has a technical facet ready to type into", added.facets && added.facets.technical === "");
   g.removeSection(topic, 0);
   ok("removeSection removes exactly the section at that index", topic.sections.length === 2 && topic.sections[0].id === "s2");
+  // structMoveSection: the drag-handle reorder, keyed on section id (not index) since
+  // that's what a real drag/drop event hands back.
   var topic2 = { sections: [{ id: "a" }, { id: "b" }, { id: "c" }] };
-  g.moveSection(topic2, 1, -1);
-  ok("moveSection(-1) swaps with the previous section", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
-  g.moveSection(topic2, 0, -1);
-  ok("moveSection at the top is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
-  g.moveSection(topic2, 2, 1);
-  ok("moveSection at the bottom is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "b,a,c");
+  g.structMoveSection(topic2, "c", "a", false);
+  ok("structMoveSection drops BEFORE the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "c,a,b");
+  g.structMoveSection(topic2, "c", "b", true);
+  ok("structMoveSection drops AFTER the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
+  g.structMoveSection(topic2, "a", "a", true);
+  ok("structMoveSection self-drop is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
+  g.structMoveSection(topic2, "missing", "a", true);
+  ok("structMoveSection with an unknown drag id is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
 
   // divergeSectionVariant: copies Flagship's CURRENT facets in, once -- never resets an
   // existing override back to Flagship on a second call.
@@ -8658,7 +8694,12 @@ section("Product Rail: Source topic content authoring");
   // index.html / wiring: the article is directly editable (wiki-not-document framing).
   ok("topic title is a real input, not read-only text", /source-stage__title-input/.test(e));
   ok("section heading is a real input, not read-only text", /source-stage__heading-input/.test(e));
-  ok("each section has move-up/move-down/delete actions", /iconBtn\("arrow-up", "Move up"\)/.test(e) && /iconBtn\("arrow-down", "Move down"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
+  // source-stage-section-disclosure: up/down arrow buttons replaced by a single drag
+  // handle (drag IS the reorder affordance); actions are hover/focus-disclosed via CSS,
+  // not permanently visible.
+  ok("each section has a drag handle and a delete action", /iconBtn\("grip", "Drag to reorder"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
+  ok("section actions are hover/focus-disclosed, not permanently visible", /\.source-stage__section-actions\s*\{[^}]*opacity:\s*0/.test(src("editor.css")) || /\.source-stage__section:hover \.source-stage__section-actions/.test(src("editor.css")));
+  ok("the drag handle is draggable and wires dragstart/drop for reorder", /gripBtn\.setAttribute\("draggable", "true"\)/.test(e) && /structMoveSection\(topic, dragId, sec\.id, after\)/.test(e));
   ok("deleting a section confirms first (destructive action)", /confirmModal\("Delete section"/.test(e));
   ok("an 'Add section' affordance exists at the end of the article", /source-stage__add-section/.test(e) && /\+ Add section/.test(e));
 

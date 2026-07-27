@@ -619,10 +619,17 @@ match ones already imported from a different filename for this Product, you're a
 the same manual (updates the existing topics under the new filename) or a genuinely separate one
 (imports as new topics instead) — nothing is guessed silently.
 
+**Reordering topics.** Drag a topic in the left list to put it wherever you want — order is
+remembered per Product and stays put across sessions. (Not available while Select mode is on.)
+
 **Cleaning up.** Click **Select** above the topic list to reveal a checkbox on each topic; check
 one or more (or use "Select all"), then **Delete selected** to remove them — useful after a test
 import — or **Move to Product…** to reassign them elsewhere (content untouched). Click **Done** to
 leave selection mode.
+
+**Reordering and removing sections.** Hover a section to reveal its controls: drag the grip handle
+to reorder it within the topic, or click the trash icon to delete it (you'll be asked to confirm).
+Controls stay out of the way until you're actually looking at that section.
 
 **A topic's history.** The info panel's History section shows every import and re-import that
 touched a topic as a timeline, newest first — file, version, publish date, and what changed each

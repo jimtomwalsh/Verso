@@ -10520,7 +10520,11 @@
     });
   }
   // Groups topics by owning Product (label from ProductsStore; "" bucket -> "Unassigned",
-  // sorted last), each group's topics sorted by name.
+  // sorted last), each group's topics sorted by their canonical drag order (author-chosen,
+  // via the topic-row drag handle -- see canonicalizeTopicOrder/structMoveTopic). Callers
+  // must canonicalize order on the topic's FULL per-product population before calling this
+  // (see renderSourceTopicList) so order stays stable independent of any transient
+  // search/review filter narrowing what's actually passed in here.
   function groupTopicsByProduct(topics, products) {
     var groups = {};
     (topics || []).forEach(function (t) {
@@ -10536,9 +10540,56 @@
       return {
         productId: pid,
         label: pid ? ((products[pid] && products[pid].name) || pid) : "Unassigned",
-        topics: groups[pid].slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); })
+        topics: groups[pid].slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); })
       };
     });
+  }
+  // Assigns a stable, dense integer `order` to every topic within its own Product group
+  // (order is meaningful only WITHIN a group -- cross-group position doesn't exist). A
+  // topic with no order yet (never dragged) sorts to the end of its group, alphabetically
+  // among its equally-unordered siblings, so a freshly created/imported topic appends
+  // rather than jumping into the middle of an author's chosen order. Same canonicalize-
+  // then-restamp idiom `doc.chapters` already uses (editor.js ~1044-1045).
+  function canonicalizeTopicOrder(topics) {
+    var byProduct = {};
+    (topics || []).forEach(function (t) {
+      var pid = t.productId || "";
+      (byProduct[pid] = byProduct[pid] || []).push(t);
+    });
+    Object.keys(byProduct).forEach(function (pid) {
+      var group = byProduct[pid].slice().sort(function (a, b) {
+        var ao = a.order, bo = b.order;
+        if (ao == null && bo == null) return (a.name || "").localeCompare(b.name || "");
+        if (ao == null) return 1;
+        if (bo == null) return -1;
+        return ao - bo;
+      });
+      group.forEach(function (t, i) { t.order = i; });
+    });
+  }
+  // Drag-and-drop reorder for the topic-nav rail's drag handle -- move dragId to just
+  // before/after refId, WITHIN the same Product group only (dropping across groups is a
+  // no-op; reassigning Product stays "Promote to Product…"/"Move to Product…"'s job, not
+  // this drag). Same splice-out/find-ref/splice-in shape as structMoveSection/
+  // structMoveChapter.
+  function structMoveTopic(dragId, refId, after) {
+    var comps = libComponents();
+    var drag = comps[dragId], ref = comps[refId];
+    if (!drag || !ref || drag.kind !== "topic" || ref.kind !== "topic" || dragId === refId) return;
+    var pid = drag.productId || "";
+    if (pid !== (ref.productId || "")) return;
+    var group = Object.keys(comps).map(function (k) { return comps[k]; })
+      .filter(function (t) { return t && t.kind === "topic" && (t.productId || "") === pid; });
+    canonicalizeTopicOrder(group);
+    var sorted = group.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    var di = sorted.findIndex(function (t) { return t.id === dragId; });
+    if (di < 0) return;
+    var item = sorted.splice(di, 1)[0];
+    var ri = sorted.findIndex(function (t) { return t.id === refId; });
+    var at = ri < 0 ? sorted.length : (after ? ri + 1 : ri);
+    sorted.splice(at, 0, item);
+    sorted.forEach(function (t, i) { t.order = i; });
+    saveLibrary();
   }
   // A section's text for the requested facet, falling back to "technical" then to
   // whichever facet IS present -- a section never renders blank just because the
@@ -10593,13 +10644,19 @@
     if (!topic || !topic.sections) return;
     topic.sections.splice(index, 1);
   }
-  // dir: -1 (up) or 1 (down). No-ops silently at either end -- the caller doesn't need
-  // to compute bounds itself.
-  function moveSection(topic, index, dir) {
-    if (!topic || !topic.sections) return;
-    var arr = topic.sections, j = index + dir;
-    if (index < 0 || index >= arr.length || j < 0 || j >= arr.length) return;
-    var tmp = arr[index]; arr[index] = arr[j]; arr[j] = tmp;
+  // Drag-and-drop reorder (the section grip handle) -- move dragId to just before/after
+  // refId within the same topic.sections array. Same shape as the outliner's
+  // structMoveChapter (editor.js ~16341): splice out, find the reference's new index,
+  // splice back in before/after it. Self-drop is a no-op.
+  function structMoveSection(topic, dragId, refId, after) {
+    if (!topic || !topic.sections || dragId === refId) return;
+    var arr = topic.sections;
+    var di = arr.findIndex(function (s) { return s.id === dragId; });
+    if (di < 0) return;
+    var drag = arr.splice(di, 1)[0];
+    var ri = arr.findIndex(function (s) { return s.id === refId; });
+    var at = ri < 0 ? arr.length : (after ? ri + 1 : ri);
+    arr.splice(at, 0, drag);
   }
   // Diverge-for-<variant>: copies Flagship's CURRENT facets into an independently-
   // editable override, once -- mirrors the shipped "own image vs inherits flagship"
@@ -10627,6 +10684,9 @@
   // shows (and only ever applies) when the current Product+search scope actually has
   // 1+ flagged topics; auto-clears itself once nothing is left to review.
   var __sourceReviewFilterActive = false;
+  // Drag state for the topic-nav rail's row drag (source-stage-topic-reorder) -- same
+  // shape as the outliner's treeDrag/the section grip's __sourceSectionDrag.
+  var __sourceTopicDrag = null; // { id } | null
 
   function exitSelectMode() {
     __sourceSelectModeActive = false;
@@ -10766,6 +10826,10 @@
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-topic-list"); if (!host) return;
     host.innerHTML = "";
+    // Canonicalize drag order across the FULL topic population (every Product, no search/
+    // review filter applied) so a topic's order stays stable regardless of what the current
+    // view happens to be scoped to -- see canonicalizeTopicOrder.
+    canonicalizeTopicOrder(filterTopics(libComponents(), null, ""));
     var scopedTopics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
     var reviewCount = scopedTopics.filter(topicNeedsReview).length;
     if (!reviewCount) __sourceReviewFilterActive = false; // nothing left to review -> never leave a stale filter engaged
@@ -10813,6 +10877,36 @@
           renderSourceArticle();
         });
         row.appendChild(label);
+        // Drag-to-reorder (source-stage-topic-reorder): the whole row drags, same shape as
+        // the outliner's page/chapter rows (they have no inline-editable content either, so
+        // unlike the section grip handle, no separate handle is needed here). Disabled while
+        // select mode is active -- bulk-select and reorder are different modes, not mixed.
+        if (!__sourceSelectModeActive) {
+          row.setAttribute("draggable", "true");
+          row.addEventListener("dragstart", function (e) {
+            __sourceTopicDrag = { id: t.id };
+            try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
+            e.stopPropagation();
+          });
+          row.addEventListener("dragend", function () { __sourceTopicDrag = null; clearTreeMarks(); });
+          row.addEventListener("dragover", function (e) {
+            if (!__sourceTopicDrag || __sourceTopicDrag.id === t.id) return;
+            e.preventDefault(); e.stopPropagation();
+            var r = row.getBoundingClientRect();
+            row.__after = (e.clientY - r.top) > r.height / 2;
+            clearTreeMarks();
+            row.classList.add(row.__after ? "tree-drop-after" : "tree-drop-before");
+          });
+          row.addEventListener("dragleave", function () { row.classList.remove("tree-drop-before", "tree-drop-after"); });
+          row.addEventListener("drop", function (e) {
+            if (!__sourceTopicDrag) return;
+            e.preventDefault(); e.stopPropagation();
+            var dragId = __sourceTopicDrag.id, after = row.__after;
+            __sourceTopicDrag = null; clearTreeMarks();
+            structMoveTopic(dragId, t.id, after);
+            renderSourceTopicList();
+          });
+        }
         host.appendChild(row);
       });
     });
@@ -10854,6 +10948,12 @@
   }
   function stampTopicUpdated(topic) { topic.updatedAt = Date.now(); saveLibrary(); }
 
+  // Drag state for the section grip handle (source-stage-section-disclosure) -- only the
+  // handle itself is draggable=true (the section box holds an editable heading input and
+  // body text, so making the whole box draggable would fight text selection); the
+  // surrounding .source-stage__section box is the drop target. Same shape as the
+  // outliner's `treeDrag` (editor.js ~16310), reusing its drop-marker classes.
+  var __sourceSectionDrag = null; // { id } | null
   // Which single (section, variant) body cell is currently in edit mode -- click a
   // rendered body to swap it for a real contentEditable surface (seeded with the SAME
   // MarkdownLite.render() HTML the view shows, so entering edit mode never flashes raw
@@ -11029,18 +11129,44 @@
         flagPill.addEventListener("click", function () { openSourceUpdateModal(topic, sec); });
         headingRow.appendChild(flagPill);
       }
+      // Hover/focus-disclosed (source-stage-section-disclosure): hidden until you're
+      // actually looking at this section, so the article reads as content first, not a
+      // wall of controls. A drag handle replaces the old up/down button pair (drag IS the
+      // reorder affordance); delete stays behind its existing confirm, just no longer
+      // permanently on display.
       var actions = h("div", "source-stage__section-actions");
-      var upBtn = iconBtn("arrow-up", "Move up"); upBtn.disabled = secIdx === 0;
-      upBtn.addEventListener("click", function () { moveSection(topic, secIdx, -1); stampTopicUpdated(topic); renderSourceArticle(); });
-      var downBtn = iconBtn("arrow-down", "Move down"); downBtn.disabled = secIdx === (topic.sections.length - 1);
-      downBtn.addEventListener("click", function () { moveSection(topic, secIdx, 1); stampTopicUpdated(topic); renderSourceArticle(); });
+      var gripBtn = iconBtn("grip", "Drag to reorder");
+      gripBtn.setAttribute("draggable", "true");
+      gripBtn.addEventListener("dragstart", function (e) {
+        __sourceSectionDrag = { id: sec.id };
+        try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
+        e.stopPropagation();
+      });
+      gripBtn.addEventListener("dragend", function () { __sourceSectionDrag = null; clearTreeMarks(); });
+      secEl.addEventListener("dragover", function (e) {
+        if (!__sourceSectionDrag || __sourceSectionDrag.id === sec.id) return;
+        e.preventDefault(); e.stopPropagation();
+        var r = secEl.getBoundingClientRect();
+        secEl.__after = (e.clientY - r.top) > r.height / 2;
+        clearTreeMarks();
+        secEl.classList.add(secEl.__after ? "tree-drop-after" : "tree-drop-before");
+      });
+      secEl.addEventListener("dragleave", function () { secEl.classList.remove("tree-drop-before", "tree-drop-after"); });
+      secEl.addEventListener("drop", function (e) {
+        if (!__sourceSectionDrag) return;
+        e.preventDefault(); e.stopPropagation();
+        var dragId = __sourceSectionDrag.id, after = secEl.__after;
+        __sourceSectionDrag = null; clearTreeMarks();
+        structMoveSection(topic, dragId, sec.id, after);
+        stampTopicUpdated(topic); renderSourceArticle();
+      });
       var delBtn = iconBtn("trash-2", "Delete this section", true);
       delBtn.addEventListener("click", function () {
         confirmModal("Delete section", (sec.heading || "This section") + " will be removed from the topic.", function () {
           removeSection(topic, secIdx); stampTopicUpdated(topic); renderSourceArticle();
         });
       });
-      actions.appendChild(upBtn); actions.appendChild(downBtn); actions.appendChild(delBtn);
+      actions.appendChild(gripBtn); actions.appendChild(delBtn);
       headingRow.appendChild(actions);
       secEl.appendChild(headingRow);
 
