@@ -132,7 +132,33 @@
     return { action: existing.text === existing.lastImportedText ? "update" : "flag" };
   }
 
-  var MarkdownImport = { parse: parse, mergeVariant: mergeVariant, reconcileSection: reconcileSection, _pure: { headingInfo: headingInfo } };
+  // product-rail-rename-tolerant-match: re-import matches by filename, so renaming the
+  // source file on disk would otherwise silently start a whole separate, unrelated
+  // lineage of topics instead of reconciling into the existing ones. Before treating an
+  // unrecognised filename as brand new, check whether its topics substantially overlap
+  // with topics ALREADY bound to some other file for this Product -- if most of the
+  // fresh topic keys already exist under one other file, that's very likely the same
+  // manual under a new name. Never auto-applies -- the caller always confirms with the
+  // author before re-stamping anything (a false positive here would misfile real content).
+  // existingFilesToKeys: { file: [topicKey, ...] }, one entry per file currently bound to
+  // this Product. freshKeys: topic keys from the file just chosen for import.
+  function detectRenamedSource(existingFilesToKeys, freshKeys) {
+    if (!freshKeys || !freshKeys.length) return null;
+    var best = null;
+    Object.keys(existingFilesToKeys || {}).forEach(function (file) {
+      var keys = existingFilesToKeys[file] || [];
+      var matched = freshKeys.filter(function (k) { return keys.indexOf(k) !== -1; }).length;
+      if (!matched) return;
+      var ratio = matched / freshKeys.length;
+      if (ratio >= 0.5 && (!best || matched > best.matched)) best = { file: file, matched: matched, total: freshKeys.length };
+    });
+    return best;
+  }
+
+  var MarkdownImport = {
+    parse: parse, mergeVariant: mergeVariant, reconcileSection: reconcileSection, detectRenamedSource: detectRenamedSource,
+    _pure: { headingInfo: headingInfo }
+  };
 
   if (typeof window !== "undefined") window.MarkdownImport = MarkdownImport;
   if (typeof module !== "undefined" && module.exports) module.exports = MarkdownImport;

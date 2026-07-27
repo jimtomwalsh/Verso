@@ -605,13 +605,20 @@ the same Product, and it updates the existing topics instead of duplicating them
 text changed only in the file is updated automatically; a section you haven't touched since the
 last import is left alone if the file didn't change it either. If a section changed **both** in
 the file and in what you've since written in the wiki, nothing is overwritten — a small "Source
-updated" flag appears next to its heading. Click it to compare your text against the file's, then
-choose **Use updated text** or **Keep mine**.
+updated" flag appears next to its heading. Click it to see exactly what changed (added lines in
+green, removed in red), then choose **Use updated text** or **Keep mine**. Whenever a Product has
+1+ topics with a pending flag, a **Needs review** chip appears above the topic list — click it to
+filter down to just those topics.
+
+If you rename the manual file and import it under its new name, and its topics substantially
+match ones already imported from a different filename for this Product, you're asked whether it's
+the same manual (updates the existing topics under the new filename) or a genuinely separate one
+(imports as new topics instead) — nothing is guessed silently.
 
 **Cleaning up.** Click **Select** above the topic list to reveal a checkbox on each topic; check
 one or more (or use "Select all"), then **Delete selected** to remove them — useful after a test
-import. This deletes whole topics (including all their sections) and can't be undone. Click
-**Done** to leave selection mode.
+import — or **Move to Product…** to reassign them elsewhere (content untouched). Click **Done** to
+leave selection mode.
 
 **A topic's history.** The info panel's History section shows every import and re-import that
 touched a topic as a timeline, newest first — file, version, publish date, and what changed each

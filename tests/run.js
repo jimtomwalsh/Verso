@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/markdown-import.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -8491,7 +8491,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // file, so it matches the established one-click precedent exactly (glossary's importCsv
   // -- click, native picker opens immediately, no intermediate modal). The modal only
   // exists for the multi-file case a single click structurally can't do.
-  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{ finishMarkdownImport\(window\.MarkdownImport\.parse\(text\), \[\], productId, metaList\[0\]\); \}\);\s*\}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(e));
+  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);\s*checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{\s*finishMarkdownImport\(baseParse, \[\], productId, meta\);\s*\}\);\s*\}\);\s*\}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(e));
   var dsModalShellIdxInImport = e.indexOf("var shell = dsModalShell({", e.indexOf("function importMarkdownModal()"));
   ok("the multi-file modal path is reached only AFTER the no-variant early return", dsModalShellIdxInImport > e.indexOf('inp.click();\n      return;'));
 
@@ -8530,7 +8530,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("both checkboxes use the canonical VersoUI.Checkbox (mixed prop, multi-select use documented on the control itself), not a bare <input>", /if \(window\.VersoUI\.Checkbox\) \{\s*var allChecked/.test(e) &&
     /var cb = window\.VersoUI\.Checkbox\(\{/.test(e));
   ok("a topic checkbox click never bubbles into the row's own open-topic handler", /cb\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); \}\);/.test(e));
-  ok("the delete/select bar only shows 'Delete selected' once something is actually checked (progressive disclosure)", /if \(__sourceSelectedTopicIds\.length\) \{\s*bar\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics \}\)\);/.test(e));
+  ok("the delete/select bar only shows 'Delete selected' (and 'Move to Product…') once something is actually checked (progressive disclosure)", /if \(__sourceSelectedTopicIds\.length\) \{\s*bar\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "folder-input", label: "Move to Product…", onClick: moveSelectedTopicsModal \}\)\);\s*bar\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics \}\)\);/.test(e));
 
   // Select mode: OFF by default (a clean list, checkboxes never open unless asked for),
   // toggled by a single "Select" button -- mirrors Photos/Files/Gmail's select-mode
@@ -8545,6 +8545,30 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   var dstStart = e.indexOf("function deleteSelectedTopics()");
   var dstBody = e.slice(dstStart, dstStart + 700);
   ok("deleting a topic clears __sourceActiveTopicId if it was one of the deleted (never leaves the article pointed at a deleted topic)", /if \(__sourceActiveTopicId === id\) __sourceActiveTopicId = null;/.test(dstBody));
+
+  // "Needs review" filter: only surfaces when there's something to review, never a
+  // permanent tab; a section (Flagship OR any variant override) with a pending
+  // sourceUpdate flag counts.
+  ok("topicNeedsReview checks both the Flagship flag and every variant override's own flag", /function topicNeedsReview\(topic\) \{\s*return \(topic\.sections \|\| \[\]\)\.some\(function \(s\) \{\s*if \(s\.sourceUpdate\) return true;\s*return Object\.keys\(s\.overrides \|\| \{\}\)\.some\(function \(v\) \{ return s\.overrides\[v\] && s\.overrides\[v\]\.sourceUpdate; \}\);/.test(e));
+  ok("a stale review filter auto-clears once nothing is left to review (never leaves an author stuck on an empty filtered view)", /if \(!reviewCount\) __sourceReviewFilterActive = false;/.test(e));
+  ok("the review chip uses the canonical ToggleChip and only renders when reviewCount > 0", /if \(reviewCount && window\.VersoUI && window\.VersoUI\.ToggleChip\) \{/.test(e) &&
+    /label: "Needs review \(" \+ reviewCount \+ "\)", active: __sourceReviewFilterActive,/.test(e));
+  ok("an empty review-filtered list gets its own named empty state, distinct from 'no topics at all'", /__sourceReviewFilterActive \? "Nothing needs review\." : "No topics yet\."/.test(e));
+
+  // Bulk "Move to Product…": reuses promoteToProductModal's exact Product-picker pattern
+  // (modalField + dsSelect + "+ Create a new Product…"), not a new control.
+  ok("moveSelectedTopicsModal reuses the modalField + dsSelect Product-picker pattern, same as promoteToProductModal", /function moveSelectedTopicsModal\(\) \{[\s\S]{0,1400}var pRow = modalField\(box, "Product"\);\s*var pSel = dsSelect\(pOpts, chosen, function \(v\)/.test(e));
+  ok("'+ Create a new Product…' in the move modal calls the real createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{\s*var name = \(newNameVal \|\| ""\)\.trim\(\);\s*if \(!name\) return;\s*pid = createProduct\(name\)\.id;\s*\}\s*var comps = libComponents\(\);\s*__sourceSelectedTopicIds\.forEach\(function \(id\) \{\s*var t = comps\[id\];\s*if \(t\) \{ t\.productId = pid;/.test(e));
+  ok("moving topics exits select mode afterward too, same as delete", /saveLibrary\(\);\s*shell\.modal\.close\(\);\s*exitSelectMode\(\);\s*renderSourceTopicList\(\);\s*renderSourceArticle\(\);\s*\}\s*\}\);\s*var box = shell\.body;\s*var pRow = modalField/.test(e));
+
+  // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
+  // confirms with the author first, and covers both "no ambiguity" fast-paths.
+  ok("an already-bound filename (or a Product with no prior imports at all) skips the check entirely -- no ambiguity to ask about", /function checkRenamedSource\(productId, meta, parsedTopics, onDone\) \{[\s\S]{0,600}if \(alreadyBound \|\| !allForProduct\.length\) \{ onDone\(meta\); return; \}/.test(e));
+  ok("no rename candidate found -> proceeds silently as a genuinely new source", /var candidate = window\.MarkdownImport\.detectRenamedSource\(filesToKeys, parsedTopics\.map\(function \(t\) \{ return t\.key; \}\)\);\s*if \(!candidate\) \{ onDone\(meta\); return; \}/.test(e));
+  ok("a real candidate always asks first (dsModalShell, explicit Yes/No choice), never silently re-stamps", /title: "Same manual, new filename\?",[\s\S]{0,300}primaryLabel: "Yes, same manual",[\s\S]{0,200}label: "No, keep separate",/.test(e));
+  ok("accepting the rename re-stamps EVERY topic under the old filename (not just the matched ones) to the new name, then proceeds", /allForProduct\.forEach\(function \(t\) \{ if \(t\.source\.file === candidate\.file\) t\.source\.file = meta\.file; \}\);\s*saveLibrary\(\);\s*shell\.modal\.close\(\);\s*onDone\(meta\);/.test(e));
+  ok("declining keeps the two sources separate -- onDone still fires so the import completes as a genuinely new lineage", /onClick: function \(\) \{ shell\.modal\.close\(\); onDone\(meta\); \}/.test(e));
+  ok("both import paths run the rename check BEFORE finishMarkdownImport, never bypass it", (e.match(/checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{/g) || []).length === 2);
 
   // Re-import reconcile: createTopic carries optional key/source/variantSources so a
   // LATER import of the same (Product, file) can find and update instead of duplicating.
@@ -8561,7 +8585,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   // regardless of the one-click or multi-file path (neither a native picker nor the
   // file-input modal has anywhere to type free text).
   ok("promptImportProvenance is a lightweight modal (dsModalShell + modalText rows), not a bespoke dialog", /function promptImportProvenance\(fileEntries, onDone\) \{[\s\S]{0,300}dsModalShell\(\{/.test(e));
-  ok("the one-click (no-variant) path collects provenance for its single file before parsing/writing anything", /promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{ finishMarkdownImport\(window\.MarkdownImport\.parse\(text\), \[\], productId, metaList\[0\]\); \}\);/.test(e));
+  ok("the one-click (no-variant) path collects provenance for its single file before parsing/writing anything", /promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);/.test(e));
   ok("the multi-file modal path collects provenance for EVERY file (Flagship + each variant), not just the primary", /var entries = \[\{ key: "flagship", label: "Manual \(Flagship\)", file: primaryFile\.name \}\]\s*\.concat\(variantNames\.map\(function \(v\) \{ return \{ key: v, label: v, file: variantFiles\[v\]\.name \}; \}\)\);/.test(e));
 
   // Conflict-flag UI: a visible, clickable marker on a flagged section, never silent.
@@ -8569,6 +8593,10 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("Badge's canonical tone set was extended with 'warning' (design-system/components/structure/Badge), not hacked via an inline style override", /tone === "danger" \|\| tone === "warning" \|\| tone === "component"/.test(src("src/ui-kit.js")) &&
     /\.vds-badge--warning \{ background: var\(--warning, #e0a83e\); color: #1a1a1a; \}/.test(src("editor.css")));
   ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(e));
+  // product-rail-review-diff: a real line-level diff (LineDiff), not two flat side-by-side blocks.
+  ok("the review compares via the real LineDiff.diff, not a flat two-block dump", /var ops = window\.LineDiff \? window\.LineDiff\.diff\(sec\.facets\.technical \|\| "", sec\.sourceUpdate\.text \|\| ""\) : \[\];/.test(e));
+  ok("each diff op renders on its own line with a type-specific class (removed/added/same), + and − prefixes", /var prefix = op\.type === "removed" \? "− " : op\.type === "added" \? "\+ " : "  ";/.test(e) &&
+    /h\("div", "source-stage__diff-line source-stage__diff-line--" \+ op\.type, prefix \+ op\.text\)/.test(e));
   ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(e));
 
   // Provenance display: the info panel's new "Source" section, absent for a hand-created topic.
@@ -8906,6 +8934,46 @@ section("markdown manual import (parse + variant merge)");
   ok("both source AND local text changed since last import -> flag, never auto-overwrite", MI.reconcileSection({ text: "author's edit", lastImportedText: "old" }, "new-from-source").action === "flag");
   ok("pre-tracking section (no lastImportedText) whose text already matches the fresh import -> starts tracking silently", MI.reconcileSection({ text: "same", lastImportedText: null }, "same").action === "track");
   ok("pre-tracking section (no lastImportedText) whose text differs -> flag, never silently adopt tracking over unknown hand-authored content", MI.reconcileSection({ text: "hand-authored", lastImportedText: undefined }, "fresh-from-source").action === "flag");
+
+  // detectRenamedSource: rename-tolerant matching (product-rail-rename-tolerant-match) --
+  // never auto-applies, just proposes a candidate for the caller to confirm.
+  ok("no existing files at all -> no candidate", MI.detectRenamedSource({}, ["1", "1.1"]) === null);
+  ok("no fresh keys -> no candidate (nothing to compare)", MI.detectRenamedSource({ "old.md": ["1"] }, []) === null);
+  ok("substantial overlap (>=50%) with one other file -> that file is the candidate, with matched/total counts", (function () {
+    var r = MI.detectRenamedSource({ "old.md": ["1", "1.1", "1.2"] }, ["1", "1.1", "1.2", "1.3"]);
+    return r && r.file === "old.md" && r.matched === 3 && r.total === 4;
+  })());
+  ok("below the 50% threshold -> no candidate (avoids a false-positive rename guess on thin overlap)", MI.detectRenamedSource({ "old.md": ["1"] }, ["1", "2", "3", "4"]) === null);
+  ok("exactly at the 50% threshold counts as a match", (function () {
+    var r = MI.detectRenamedSource({ "old.md": ["1", "2"] }, ["1", "2", "3", "4"]);
+    return r && r.file === "old.md";
+  })());
+  ok("multiple candidate files -> picks the one with the MOST matches, not just the first crossing the threshold", (function () {
+    var r = MI.detectRenamedSource({ "a.md": ["1", "2"], "b.md": ["1", "2", "3"] }, ["1", "2", "3"]);
+    return r && r.file === "b.md" && r.matched === 3;
+  })());
+})();
+
+// ---- product-rail-review-diff: dependency-free line-level diff for the "Source updated" review ----
+section("line diff (LineDiff)");
+(function () {
+  var LD;
+  try { LD = require(path.join(ROOT, "src/line-diff.js")); } catch (e) { ok("require src/line-diff.js", false); return; }
+  ok("require src/line-diff.js", !!LD && typeof LD.diff === "function");
+  if (!LD) return;
+
+  ok("identical text -> every line 'same'", JSON.stringify(LD.diff("a\nb", "a\nb")) === JSON.stringify([{ type: "same", text: "a" }, { type: "same", text: "b" }]));
+  ok("a changed middle line -> surrounding lines stay 'same', only the changed one diffs", JSON.stringify(LD.diff("a\nb\nc", "a\nX\nc")) ===
+    JSON.stringify([{ type: "same", text: "a" }, { type: "removed", text: "b" }, { type: "added", text: "X" }, { type: "same", text: "c" }]));
+  ok("a pure addition -> only 'added' ops, nothing marked removed", JSON.stringify(LD.diff("a", "a\nb")) === JSON.stringify([{ type: "same", text: "a" }, { type: "added", text: "b" }]));
+  ok("a pure removal -> only 'removed' ops, nothing marked added", JSON.stringify(LD.diff("a\nb", "a")) === JSON.stringify([{ type: "same", text: "a" }, { type: "removed", text: "b" }]));
+  ok("completely different text -> old fully removed, new fully added (no false 'same' matches)", JSON.stringify(LD.diff("x\ny", "p\nq")) ===
+    JSON.stringify([{ type: "removed", text: "x" }, { type: "removed", text: "y" }, { type: "added", text: "p" }, { type: "added", text: "q" }]));
+  ok("both empty -> one 'same' blank-line op, never throws (\"\".split(\"\\n\") is one empty-string element, not zero)", JSON.stringify(LD.diff("", "")) === JSON.stringify([{ type: "same", text: "" }]));
+  ok("null-safe on both sides (coerced to \"\", same as the empty-string case)", JSON.stringify(LD.diff(null, undefined)) === JSON.stringify([{ type: "same", text: "" }]));
+
+  var idxLD = src("index.html");
+  ok("index.html loads line-diff.js", idxLD.indexOf("src/line-diff.js") !== -1);
 })();
 
 // resolveVariant must recurse into NESTED containers (columns / frame-group children /
