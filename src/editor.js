@@ -10391,6 +10391,7 @@
       var btn = document.getElementById("rail-tab-" + s);
       if (btn) btn.classList.toggle("is-active", s === stage);
     });
+    if (stage === "source") renderSourceStage();
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
@@ -10419,12 +10420,167 @@
     host.appendChild(U.Select({
       options: productSelectOptions(window.ProductsStore),
       value: __activeProduct,
-      onChange: function (v) { setActiveProduct(v); }
+      onChange: function (v) { setActiveProduct(v); renderSourceTopicList(); }
     }));
   }
   window.__productRail.getActiveProduct = getActiveProduct;
   window.__productRail.setActiveProduct = setActiveProduct;
   window.__productRail.mountProductPicker = mountProductPicker; // boot hook
+
+  // Product Rail (source-stage-nav-article): Source stage left-nav + flowing article.
+  // A "topic" is a LibraryStore master with kind:"topic" -- per #68's own note, Ground
+  // Truth topics slot into the existing master shape rather than a second store. No
+  // variant-column support yet (Flagship/base facet only); that's the next ticket.
+  /* @source-stage-start */
+  var DETAIL_FACETS = ["technical", "digestible", "dotpoint"];
+  function isValidFacet(f) { return DETAIL_FACETS.indexOf(f) !== -1; }
+  function topicMatchesQuery(topic, query) {
+    if (!query) return true;
+    var name = (topic && topic.name) || "";
+    return name.toLowerCase().indexOf(String(query).toLowerCase()) !== -1;
+  }
+  // Every kind:"topic" master, narrowed to the active product context ("" = All
+  // products -> every topic) and a search query. Untagged (productId-less) topics
+  // only ever show under "All products", matching an untagged doc's existing
+  // behaviour elsewhere in Product Rail (never silently attributed to a filter).
+  function filterTopics(comps, activeProduct, query) {
+    return Object.keys(comps || {}).map(function (k) { return comps[k]; })
+      .filter(function (t) { return t && t.kind === "topic"; })
+      .filter(function (t) { return !activeProduct || t.productId === activeProduct; })
+      .filter(function (t) { return topicMatchesQuery(t, query); });
+  }
+  // Groups topics by owning Product (label from ProductsStore; "" bucket -> "Unassigned",
+  // sorted last), each group's topics sorted by name.
+  function groupTopicsByProduct(topics, products) {
+    var groups = {};
+    (topics || []).forEach(function (t) {
+      var pid = t.productId || "";
+      if (!groups[pid]) groups[pid] = [];
+      groups[pid].push(t);
+    });
+    return Object.keys(groups).sort(function (a, b) {
+      var an = a ? ((products[a] && products[a].name) || a) : "￿";
+      var bn = b ? ((products[b] && products[b].name) || b) : "￿";
+      return an.localeCompare(bn);
+    }).map(function (pid) {
+      return {
+        productId: pid,
+        label: pid ? ((products[pid] && products[pid].name) || pid) : "Unassigned",
+        topics: groups[pid].slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); })
+      };
+    });
+  }
+  // A section's text for the requested facet, falling back to "technical" then to
+  // whichever facet IS present -- a section never renders blank just because the
+  // page-level control is set to a facet this section hasn't been written for yet.
+  function resolveSectionFacetText(section, facet) {
+    var facets = (section && section.facets) || {};
+    if (facets[facet] != null) return facets[facet];
+    if (facets.technical != null) return facets.technical;
+    var firstKey = Object.keys(facets)[0];
+    return firstKey ? facets[firstKey] : "";
+  }
+  /* @source-stage-end */
+
+  var __sourceActiveTopicId = null;
+  var __sourceActiveFacet = "technical";
+  var __sourceSearchQuery = "";
+
+  function renderSourceTopicList() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-topic-list"); if (!host) return;
+    host.innerHTML = "";
+    var topics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
+    if (!topics.length) {
+      host.appendChild(h("div", "source-stage__empty", "No topics yet."));
+      return;
+    }
+    groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
+      host.appendChild(h("div", "source-stage__group-label", g.label));
+      g.topics.forEach(function (t) {
+        var row = h("button", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""), t.name || "Untitled topic");
+        row.type = "button";
+        row.addEventListener("click", function () {
+          __sourceActiveTopicId = t.id;
+          renderSourceTopicList();
+          renderSourceArticle();
+        });
+        host.appendChild(row);
+      });
+    });
+  }
+
+  function renderSourceArticle() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    host.innerHTML = "";
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (!topic || topic.kind !== "topic") {
+      host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
+      return;
+    }
+    var headEl = h("div", "source-stage__article-head");
+    headEl.appendChild(h("h2", "source-stage__title", topic.name || "Untitled topic"));
+    var U = window.VersoUI;
+    if (U && U.SegmentedControl) {
+      headEl.appendChild(U.SegmentedControl({
+        options: [{ value: "technical", label: "Technical" }, { value: "digestible", label: "Digestible" }, { value: "dotpoint", label: "Dot-point" }],
+        value: __sourceActiveFacet,
+        onChange: function (v) { if (!isValidFacet(v)) return; __sourceActiveFacet = v; renderSourceArticle(); }
+      }));
+    }
+    host.appendChild(headEl);
+    (topic.sections || []).forEach(function (sec) {
+      var secEl = h("div", "source-stage__section");
+      secEl.appendChild(h("h3", "source-stage__heading", sec.heading || ""));
+      var bodyEl = h("div", "source-stage__body");
+      bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(resolveSectionFacetText(sec, __sourceActiveFacet)) : "";
+      secEl.appendChild(bodyEl);
+      host.appendChild(secEl);
+    });
+  }
+
+  // Matches the established search-field sibling (.vbrowser__search, also reused as
+  // .docs-search) rather than the generic TextField control -- VersoUI has no
+  // SearchField factory yet (DSLMS documents one in components/browser/SearchField.d.ts
+  // but ui-kit.js never built it), so this converges to the real existing pattern
+  // instead of introducing a third near-duplicate search input.
+  function mountSourceStageSearch() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-search"); if (!host) return;
+    host.innerHTML = "";
+    var search = h("label", "vbrowser__search source-stage__search-field");
+    search.innerHTML = window.Icon ? window.Icon("search") : "";
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "search topics";
+    input.value = __sourceSearchQuery;
+    input.addEventListener("input", function () { __sourceSearchQuery = input.value; renderSourceTopicList(); });
+    search.appendChild(input);
+    host.appendChild(search);
+  }
+
+  // Called each time Source becomes the active stage (setStage("source")) -- mounts
+  // the search field once, then re-renders the topic list + article from current state.
+  function renderSourceStage() {
+    mountSourceStageSearch();
+    renderSourceTopicList();
+    renderSourceArticle();
+  }
+
+  // Minimal write path other tickets (source-topic-content-authoring) build their
+  // authoring UI on top of -- same "ship the mechanism, UI follows" precedent as
+  // createProduct(). Not wired to any Source-stage control in this ticket (view-only).
+  function createTopic(name, productId, sections) {
+    var comps = libComponents();
+    var id = "topic-" + Math.random().toString(36).slice(2, 8);
+    while (comps[id]) id = "topic-" + Math.random().toString(36).slice(2, 8);
+    var topic = { id: id, kind: "topic", name: (String(name || "").trim() || "Untitled topic"),
+      productId: productId || undefined, sections: sections || [], createdAt: Date.now() };
+    window.LibraryStore.components[id] = topic;
+    saveLibrary();
+    return topic;
+  }
+  window.__productRail.createTopic = createTopic;
+  window.__productRail.renderSourceStage = renderSourceStage; // headless/browser-verify hook
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {

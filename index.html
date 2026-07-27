@@ -83,13 +83,18 @@
       </div>
     </nav>
 
-    <!-- Product Rail Source stage: placeholder only -- Epic 2 (source-stage-nav-article)
-         owns the real left-nav + flowing markdown-lite article. This ticket only owns
-         the segment switch that reveals/hides it. -->
-    <div class="stage-placeholder" id="stage-source" hidden>
-      <span data-lucide="layers"></span>
-      <span class="stage-placeholder__title">Source</span>
-      <span class="stage-placeholder__desc">You'll browse and write topic content here — this stage isn't built yet.</span>
+    <!-- Product Rail Source stage (source-stage-nav-article): left nav (search + topic
+         list grouped by Product) + a flowing markdown-lite article for the selected
+         topic, with a page-level Technical/Digestible/Dot-point facet switch. No
+         variant-column support yet (Flagship/base facet only) -- that's the next
+         ticket. Populated by renderSourceStage() in the editor script; search + facet
+         controls mounted as VersoUI canonical controls. -->
+    <div class="source-stage" id="stage-source" hidden>
+      <nav class="source-stage__nav" aria-label="Source topics">
+        <div class="source-stage__search" id="source-stage-search"></div>
+        <div class="source-stage__topics" id="source-topic-list"></div>
+      </nav>
+      <div class="source-stage__article" id="source-stage-article"></div>
     </div>
 
     <!-- Product Rail Publish stage: placeholder only -- Epic 6 (publish-stage-pick-configure-queue)

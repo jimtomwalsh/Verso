@@ -441,11 +441,59 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   color: var(--text-secondary);
   text-align: center;
 }
-.workspace--stage-source #stage-source,
 .workspace--stage-publish #stage-publish { display: flex; }
 .stage-placeholder svg { width: 32px; height: 32px; color: var(--icon-idle); }
 .stage-placeholder__title { font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); }
 .stage-placeholder__desc { font-size: var(--text-sm, 11px); max-width: 320px; }
+
+/* Source stage (source-stage-nav-article): left nav (search + topic list, grouped by
+   Product) + a flowing article for the selected topic. Same grid-column/hide mechanism
+   as .stage-placeholder above, but a row layout (nav + article) instead of a single
+   centered block, since this is real content, not a "coming soon" stand-in. */
+.source-stage { display: none; grid-column: 2 / -1; min-height: 0; }
+.workspace--stage-source #stage-source.source-stage { display: flex; }
+.source-stage__nav {
+  width: var(--left-w, 240px); flex: 0 0 auto;
+  background: var(--surface-panel);
+  border-right: 1px solid var(--border-strong);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.source-stage__search { padding: 10px 10px 6px; flex: 0 0 auto; }
+/* .vbrowser__search is a fixed 260px in its own toolbar home; fill the nav instead. */
+.source-stage__search .vbrowser__search { width: 100%; }
+.source-stage__topics { flex: 1 1 auto; overflow-y: auto; padding: 0 4px 10px; }
+/* Matches the Structure outliner's chapter-grouping tier (.tree-chapter__name) --
+   same uppercase-eyebrow token treatment, not hand-set numbers. */
+.source-stage__group-label {
+  padding: 10px 8px 4px; font: var(--type-section); text-transform: uppercase;
+  letter-spacing: var(--tracking-caps); color: var(--text-primary);
+}
+/* Matches the outliner's child-row tier (.tree-block) -- same type token + radius. */
+.source-stage__topic-row {
+  display: block; width: 100%; text-align: left;
+  height: 26px; padding: 0 8px; border: none; background: transparent; border-radius: var(--radius-xs);
+  color: var(--text-secondary); font: var(--type-label); cursor: pointer;
+}
+.source-stage__topic-row:hover { background: var(--surface-hover); color: var(--text-primary); }
+.source-stage__topic-row.is-active { background: var(--accent-quiet); color: var(--accent); }
+.source-stage__empty { padding: 16px 10px; color: var(--text-tertiary); font-size: var(--text-sm, 12px); }
+.source-stage__article { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 28px 36px; background: var(--surface-canvas); }
+.source-stage__article-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+/* The page-level Technical/Digestible/Dot-point control has room to breathe here
+   (unlike a narrow inspector panel, its usual home) -- give it enough width that
+   the longest label ("Digestible") never truncates via .prop-toggle's ellipsis. */
+.source-stage__article-head .prop-toggle-row { min-width: 300px; }
+.source-stage__title { font-size: var(--text-lg, 18px); font-weight: 600; color: var(--text-primary); margin: 0; }
+.source-stage__section { max-width: 640px; margin-bottom: 24px; }
+.source-stage__heading { font-size: var(--text-md, 14px); font-weight: 600; color: var(--text-primary); margin: 0 0 6px; }
+.source-stage__body { font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary); }
+.source-stage__body p { margin: 0 0 10px; }
+.source-stage__body ul { margin: 0 0 10px; padding-left: 20px; }
+.source-stage__body .md-lite-code {
+  font-family: var(--font-mono, "JetBrains Mono", monospace); font-size: 0.9em;
+  background: var(--surface-raised, #262626); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 3px); padding: 1px 5px;
+}
 
 /* Product Rail top-bar dropdown (next to the brand) -- a plain VersoUI.Select host. */
 .product-picker { align-self: center; width: 140px; margin: 0 6px 0 2px; }
