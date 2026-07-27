@@ -10593,13 +10593,19 @@
     if (!topic || !topic.sections) return;
     topic.sections.splice(index, 1);
   }
-  // dir: -1 (up) or 1 (down). No-ops silently at either end -- the caller doesn't need
-  // to compute bounds itself.
-  function moveSection(topic, index, dir) {
-    if (!topic || !topic.sections) return;
-    var arr = topic.sections, j = index + dir;
-    if (index < 0 || index >= arr.length || j < 0 || j >= arr.length) return;
-    var tmp = arr[index]; arr[index] = arr[j]; arr[j] = tmp;
+  // Drag-and-drop reorder (the section grip handle) -- move dragId to just before/after
+  // refId within the same topic.sections array. Same shape as the outliner's
+  // structMoveChapter (editor.js ~16341): splice out, find the reference's new index,
+  // splice back in before/after it. Self-drop is a no-op.
+  function structMoveSection(topic, dragId, refId, after) {
+    if (!topic || !topic.sections || dragId === refId) return;
+    var arr = topic.sections;
+    var di = arr.findIndex(function (s) { return s.id === dragId; });
+    if (di < 0) return;
+    var drag = arr.splice(di, 1)[0];
+    var ri = arr.findIndex(function (s) { return s.id === refId; });
+    var at = ri < 0 ? arr.length : (after ? ri + 1 : ri);
+    arr.splice(at, 0, drag);
   }
   // Diverge-for-<variant>: copies Flagship's CURRENT facets into an independently-
   // editable override, once -- mirrors the shipped "own image vs inherits flagship"
@@ -10895,6 +10901,12 @@
   // this, and the shared format toolbar's buttons (mousedown+preventDefault, so
   // clicking them never steals the field's selection) act on whichever one is live.
   var __sourceActiveEditField = null; // { textarea, sec, variant } | null
+  // Drag state for the section grip handle (source-stage-section-disclosure) -- only the
+  // handle itself is draggable=true (the section box holds an editable heading input and
+  // body text, so making the whole box draggable would fight text selection); the
+  // surrounding .source-stage__section box is the drop target. Same shape as the
+  // outliner's `treeDrag` (editor.js ~16310), reusing its drop-marker classes.
+  var __sourceSectionDrag = null; // { id } | null
   // Which single (section, variant) body cell is currently in edit mode -- click a
   // rendered body to swap it for a raw textarea; blur commits + swaps back. Everything
   // else keeps reading as normal MarkdownLite output, so browsing a topic never shows
@@ -11020,18 +11032,44 @@
         flagPill.addEventListener("click", function () { openSourceUpdateModal(topic, sec); });
         headingRow.appendChild(flagPill);
       }
+      // Hover/focus-disclosed (source-stage-section-disclosure): hidden until you're
+      // actually looking at this section, so the article reads as content first, not a
+      // wall of controls. A drag handle replaces the old up/down button pair (drag IS the
+      // reorder affordance); delete stays behind its existing confirm, just no longer
+      // permanently on display.
       var actions = h("div", "source-stage__section-actions");
-      var upBtn = iconBtn("arrow-up", "Move up"); upBtn.disabled = secIdx === 0;
-      upBtn.addEventListener("click", function () { moveSection(topic, secIdx, -1); stampTopicUpdated(topic); renderSourceArticle(); });
-      var downBtn = iconBtn("arrow-down", "Move down"); downBtn.disabled = secIdx === (topic.sections.length - 1);
-      downBtn.addEventListener("click", function () { moveSection(topic, secIdx, 1); stampTopicUpdated(topic); renderSourceArticle(); });
+      var gripBtn = iconBtn("grip", "Drag to reorder");
+      gripBtn.setAttribute("draggable", "true");
+      gripBtn.addEventListener("dragstart", function (e) {
+        __sourceSectionDrag = { id: sec.id };
+        try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
+        e.stopPropagation();
+      });
+      gripBtn.addEventListener("dragend", function () { __sourceSectionDrag = null; clearTreeMarks(); });
+      secEl.addEventListener("dragover", function (e) {
+        if (!__sourceSectionDrag || __sourceSectionDrag.id === sec.id) return;
+        e.preventDefault(); e.stopPropagation();
+        var r = secEl.getBoundingClientRect();
+        secEl.__after = (e.clientY - r.top) > r.height / 2;
+        clearTreeMarks();
+        secEl.classList.add(secEl.__after ? "tree-drop-after" : "tree-drop-before");
+      });
+      secEl.addEventListener("dragleave", function () { secEl.classList.remove("tree-drop-before", "tree-drop-after"); });
+      secEl.addEventListener("drop", function (e) {
+        if (!__sourceSectionDrag) return;
+        e.preventDefault(); e.stopPropagation();
+        var dragId = __sourceSectionDrag.id, after = secEl.__after;
+        __sourceSectionDrag = null; clearTreeMarks();
+        structMoveSection(topic, dragId, sec.id, after);
+        stampTopicUpdated(topic); renderSourceArticle();
+      });
       var delBtn = iconBtn("trash-2", "Delete this section", true);
       delBtn.addEventListener("click", function () {
         confirmModal("Delete section", (sec.heading || "This section") + " will be removed from the topic.", function () {
           removeSection(topic, secIdx); stampTopicUpdated(topic); renderSourceArticle();
         });
       });
-      actions.appendChild(upBtn); actions.appendChild(downBtn); actions.appendChild(delBtn);
+      actions.appendChild(gripBtn); actions.appendChild(delBtn);
       headingRow.appendChild(actions);
       secEl.appendChild(headingRow);
 

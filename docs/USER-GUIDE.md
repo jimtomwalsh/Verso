@@ -620,6 +620,10 @@ one or more (or use "Select all"), then **Delete selected** to remove them — u
 import — or **Move to Product…** to reassign them elsewhere (content untouched). Click **Done** to
 leave selection mode.
 
+**Reordering and removing sections.** Hover a section to reveal its controls: drag the grip handle
+to reorder it within the topic, or click the trash icon to delete it (you'll be asked to confirm).
+Controls stay out of the way until you're actually looking at that section.
+
 **A topic's history.** The info panel's History section shows every import and re-import that
 touched a topic as a timeline, newest first — file, version, publish date, and what changed each
 time (new sections, sections updated from source, sections flagged for review). A topic you wrote
