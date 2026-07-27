@@ -1264,7 +1264,7 @@
     var newNameVal = "";
     var shell = dsModalShell({
       title: "Promote to Product",
-      subtitle: "Tags this course onto a Product + stage. Only adds meta — the course's content is never touched.",
+      subtitle: "Tags this course onto a Product + format. Only adds meta — the course's content is never touched.",
       primaryLabel: "Promote",
       onPrimary: function () {
         var pid = chosen;
@@ -1287,7 +1287,7 @@
     var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
     nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
     box.appendChild(newNameRow);
-    var sRow = modalField(box, "Stage");
+    var sRow = modalField(box, "Format");
     var sSel = dsSelect(PRODUCT_STAGE_OPTS, stage, function (v) { stage = v; });
     sSel.classList.add("modal-field__control");
     sRow.appendChild(sSel);

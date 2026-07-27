@@ -93,6 +93,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // (library.json), injected + refreshed in lockstep with the registry so the web
         // layer's synchronous LibraryStore boot read works under the 'file' backend too.
         config.userContentController.addUserScript(libraryInjectionScript())
+        // Same treatment again for ProductsStore (Product Rail #1): a third on-disk file
+        // (products.json), injected + refreshed in lockstep so the web layer's synchronous
+        // ProductsStore boot read works under the 'file' backend too.
+        config.userContentController.addUserScript(productsInjectionScript())
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -499,6 +503,7 @@ extension AppDelegate: WKScriptMessageHandler {
         ucc.removeAllUserScripts()
         ucc.addUserScript(registryInjectionScript())
         ucc.addUserScript(libraryInjectionScript())
+        ucc.addUserScript(productsInjectionScript())
     }
     // #18: same pattern as registryInjectionScript, for the shared component library
     // (store/library.json). Kept as a SEPARATE file from the registry -- courses and
@@ -508,6 +513,15 @@ extension AppDelegate: WKScriptMessageHandler {
         let libText = (try? String(contentsOf: storeDir().appendingPathComponent("library.json"), encoding: .utf8)) ?? ""
         let libB64 = Data(libText.utf8).base64EncodedString()
         return WKUserScript(source: "window.__versoDiskLibraryB64 = \"\(libB64)\";",
+                            injectionTime: .atDocumentStart, forMainFrameOnly: true)
+    }
+    // Product Rail #1: same pattern again, for ProductsStore (store/products.json). A
+    // separate file from both the registry and the library -- Products are neither a
+    // course nor shared library content.
+    func productsInjectionScript() -> WKUserScript {
+        let prodText = (try? String(contentsOf: storeDir().appendingPathComponent("products.json"), encoding: .utf8)) ?? ""
+        let prodB64 = Data(prodText.utf8).base64EncodedString()
+        return WKUserScript(source: "window.__versoDiskProductsB64 = \"\(prodB64)\";",
                             injectionTime: .atDocumentStart, forMainFrameOnly: true)
     }
 
@@ -589,6 +603,18 @@ extension AppDelegate: WKScriptMessageHandler {
             let url = storeDir().appendingPathComponent("library.json")
             if let text = try? String(contentsOf: url, encoding: .utf8) { reply(["ok": true, "text": text]) }
             else { reply(["ok": true, "text": NSNull()]) } // absent = no shared components yet, not an error
+        } else if op == "storePutProducts" {
+            // Product Rail #1: durable, atomic write of ProductsStore to disk, alongside
+            // (but separate from) the registry and library. Same lockstep-injection-refresh
+            // rationale as storePutRegistry/storePutLibrary above.
+            guard let text = body["text"] as? String else { reply(["ok": false, "error": "bad args"]); return }
+            let url = storeDir().appendingPathComponent("products.json")
+            do {
+                try Data(text.utf8).write(to: url, options: .atomic)
+                DispatchQueue.main.async { self.refreshRegistryInjection() }
+                reply(["ok": true, "path": url.path])
+            }
+            catch { reply(["ok": false, "error": error.localizedDescription]) }
         } else if op == "storePutBackupB64" {
             // #69 backup gate: write one binary artifact (base64) under store/<path>, atomic,
             // creating intermediate dirs (e.g. backups/pre-cutover-<ts>/<code>.verso).
