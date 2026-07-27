@@ -8307,6 +8307,75 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("course.css carries no stage-placeholder/product-picker chrome classes", courseCss.indexOf("stage-placeholder") === -1 && courseCss.indexOf("product-picker") === -1);
 })();
 
+// ---- product-rail-source-stage-nav-article: Source stage left-nav + flowing article ----
+section("Product Rail: Source stage nav + article");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
+  if (!m) { ok("locate @source-stage fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { isValidFacet: isValidFacet, topicMatchesQuery: topicMatchesQuery, filterTopics: filterTopics," +
+    " groupTopicsByProduct: groupTopicsByProduct, resolveSectionFacetText: resolveSectionFacetText };")();
+
+  ok("isValidFacet accepts technical/digestible/dotpoint", g.isValidFacet("technical") && g.isValidFacet("digestible") && g.isValidFacet("dotpoint"));
+  ok("isValidFacet rejects anything else", g.isValidFacet("flagship") === false && g.isValidFacet() === false);
+
+  ok("topicMatchesQuery: empty query matches all", g.topicMatchesQuery({ name: "Radar basics" }, "") === true && g.topicMatchesQuery({ name: "x" }, null) === true);
+  ok("topicMatchesQuery: case-insensitive substring", g.topicMatchesQuery({ name: "Radar basics" }, "BASICS") === true);
+  ok("topicMatchesQuery: non-match -> false", g.topicMatchesQuery({ name: "Radar basics" }, "acoustic") === false);
+
+  var comps = {
+    t1: { id: "t1", kind: "topic", name: "Radar overview", productId: "prod-a" },
+    t2: { id: "t2", kind: "topic", name: "Battery life", productId: "prod-a" },
+    t3: { id: "t3", kind: "topic", name: "Other product topic", productId: "prod-b" },
+    t4: { id: "t4", kind: "topic", name: "Unassigned topic" },
+    blk: { id: "blk", kind: "composed", name: "Not a topic" }
+  };
+  ok("filterTopics: only kind:topic masters, 'All products' (falsy) -> every topic incl. unassigned", g.filterTopics(comps, "", "").length === 4);
+  ok("filterTopics: excludes non-topic masters", g.filterTopics(comps, "", "").every(function (t) { return t.kind === "topic"; }));
+  ok("filterTopics: narrows to the active product", g.filterTopics(comps, "prod-a", "").length === 2 && g.filterTopics(comps, "prod-b", "").length === 1);
+  ok("filterTopics: a product filter excludes unassigned topics", g.filterTopics(comps, "prod-a", "").some(function (t) { return t.id === "t4"; }) === false);
+  ok("filterTopics: search narrows further within the product filter", g.filterTopics(comps, "prod-a", "battery").length === 1);
+  ok("filterTopics: handles an empty/missing library", g.filterTopics({}, "", "").length === 0 && g.filterTopics(undefined, "", "").length === 0);
+
+  var products = { "prod-a": { id: "prod-a", name: "Alpha" }, "prod-b": { id: "prod-b", name: "Beta" } };
+  var groups = g.groupTopicsByProduct(g.filterTopics(comps, "", ""), products);
+  ok("groupTopicsByProduct: one group per productId + an Unassigned bucket", groups.length === 3);
+  ok("groupTopicsByProduct: groups sorted by product name, Unassigned last", groups[0].label === "Alpha" && groups[1].label === "Beta" && groups[2].label === "Unassigned");
+  ok("groupTopicsByProduct: topics within a group sorted by name", groups[0].topics[0].name === "Battery life" && groups[0].topics[1].name === "Radar overview");
+
+  var sec = { heading: "H", facets: { technical: "tech text", dotpoint: "dot text" } };
+  ok("resolveSectionFacetText: returns the requested facet when present", g.resolveSectionFacetText(sec, "dotpoint") === "dot text");
+  ok("resolveSectionFacetText: falls back to technical when the requested facet is missing", g.resolveSectionFacetText(sec, "digestible") === "tech text");
+  var secNoTech = { heading: "H", facets: { dotpoint: "only this" } };
+  ok("resolveSectionFacetText: falls back to whichever facet IS present when technical is also missing", g.resolveSectionFacetText(secNoTech, "digestible") === "only this");
+  ok("resolveSectionFacetText: a section with no facets at all -> empty string, never throws", g.resolveSectionFacetText({ heading: "H" }, "technical") === "");
+  ok("resolveSectionFacetText: null-safe", g.resolveSectionFacetText(null, "technical") === "");
+
+  // index.html wiring: the real left-nav + article shell (not the old centered
+  // placeholder), plus the mount points renderSourceStage()/mountSourceStageSearch()
+  // target.
+  var idx = src("index.html");
+  ok("stage-source is the real source-stage shell, not the .stage-placeholder centered stand-in", /class="source-stage" id="stage-source"/.test(idx));
+  ok("source-stage nav + search + topic-list + article mount points present", /id="source-stage-search"/.test(idx) && /id="source-topic-list"/.test(idx) && /id="source-stage-article"/.test(idx));
+  ok("stage-publish keeps the placeholder shell (its own ticket, untouched)", /class="stage-placeholder" id="stage-publish"/.test(idx));
+
+  // Wiring: setStage("source") triggers a render; the topic list re-renders on both
+  // search input and the shared product-context change (Epic 1's dropdown).
+  ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
+  ok("mountProductPicker()'s onChange also re-renders the Source topic list (shared product context)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceTopicList\(\); \}/.test(e));
+  ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{ __sourceSearchQuery = input\.value; renderSourceTopicList\(\); \}\);/.test(e));
+  ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
+  ok("the facet SegmentedControl re-renders the article, gated through isValidFacet", /onChange: function \(v\) \{ if \(!isValidFacet\(v\)\) return; __sourceActiveFacet = v; renderSourceArticle\(\); \}/.test(e));
+  ok("each section's body is rendered through the shared MarkdownLite primitive, not re-parsed", /window\.MarkdownLite \? window\.MarkdownLite\.render\(resolveSectionFacetText\(sec, __sourceActiveFacet\)\)/.test(e));
+
+  // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
+  var renderJs = src("src/render.js");
+  ok("render() never reads Source-stage state", renderJs.indexOf("__sourceActiveTopicId") === -1 && renderJs.indexOf("renderSourceStage") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no source-stage chrome classes", courseCss.indexOf("source-stage") === -1);
+})();
+
 // ---- product-rail-markdown-lite-content-render: shared topic-copy render primitive ----
 // DOM-free (string in, HTML string out), so require it directly like ui-kit's _pure.
 section("markdown-lite content render");
