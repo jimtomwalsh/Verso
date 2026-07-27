@@ -5640,9 +5640,15 @@ section("card-reveal flip / off modes");
   // Face DESCENDANTS are culled explicitly: a child that layer-promotes (own stacking
   // context, e.g. the authored front's blocks) escapes the parent face's backface cull.
   ok("flip face descendants carry their own backface cull", /data-reveal-style="flip"\] \.card-reveal__cover \*,\s*\.card-reveal\[data-reveal-style="flip"\] \.card-reveal__content \* \{\s*backface-visibility: hidden/.test(css));
-  // .card-reveal__front must NOT create a stacking context (position/z-index) — that is
-  // the layer-promotion that painted the front mirrored over the back.
-  ok("front face declares no position/z-index", (function () { var m = css.match(/\.card-reveal__front \{([\s\S]*?)\}/); return !!m && m[1].indexOf("z-index") === -1 && m[1].indexOf("position") === -1; })());
+  // REGRESSION (James 2026-07-27, GH #82): being an unpositioned flow child of the
+  // z-indexed .card-reveal__cover left the front face UNCLICKABLE in real Chrome — every
+  // point inside it hit-tested back to the cover, so double-click-to-edit never reached
+  // the authored block (the back face has no such wrapper, so it never showed the bug).
+  // .card-reveal__front now stacks explicitly (position+z-index) to fix hit-testing;
+  // the belt-and-braces descendant cull below already covers it, so backface culling on
+  // flip is unaffected (stress-tested with a will-change/filter/transform descendant —
+  // no bleed-through onto the back face).
+  ok("front face stacks explicitly to stay hit-testable", (function () { var m = css.match(/\.card-reveal__front \{([\s\S]*?)\}/); return !!m && /z-index:\s*1\b/.test(m[1]) && /position:\s*relative\b/.test(m[1]); })());
   ok("flip faces hide their backface; content pre-rotated", /data-reveal-style="flip"\][\s\S]*?backface-visibility: hidden/.test(css) && /data-reveal-style="flip"\] \.card-reveal__content \{ transform: rotateY\(180deg\)/.test(css));
   ok("flip animation honours prefers-reduced-motion", /@media \(prefers-reduced-motion: reduce\) \{\s*\.card-reveal\[data-reveal-style="flip"\] \.card-reveal__card \{ transition: none; \}/.test(css));
   // runtime: flip cards flip on full-card click (guarded against interactive children)

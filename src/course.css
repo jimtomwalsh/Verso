@@ -891,12 +891,19 @@
 /* Side 1 (item.front): authored blocks on the flip FRONT face. Fills the cover and
    mirrors the back face's content layout/typography so both sides read as one card.
    Only ever rendered in flip mode, so reveal/off styling is untouched.
-   NO position/z-index here: a stacking context inside the backface-hidden cover gets
-   composited separately (Chrome/WebKit) and ESCAPES the backface cull — the front
-   content then paints mirrored over the back face when the card flips. */
+   position+z-index (Chrome/WebKit bug fix, 2026-07-27): being an unpositioned flow
+   child of the z-indexed `.card-reveal__cover` left `.card-reveal__front` (and its
+   authored content) UNCLICKABLE — every point inside it hit-tested back to the cover
+   itself, so double-click-to-edit on the front never reached the real block (the BACK
+   face has no such wrapper — its children sit directly in `.card-reveal__content` — so
+   it never showed the bug). Stacking it explicitly fixes hit-testing; the existing
+   belt-and-braces cull below (`.card-reveal__cover *`) already covers this element and
+   its descendants, so backface culling on flip is unaffected (stress-tested with a
+   will-change/filter/transform descendant — no bleed-through onto the back face). */
 .card-reveal__front {
   width: 100%; height: 100%; box-sizing: border-box;
   display: flex; flex-direction: column; padding: 26px; text-align: left;
+  position: relative; z-index: 1;
 }
 /* Belt-and-braces for the same compositing quirk: authored face content is arbitrary
    blocks (images, frames, editor-decorated nodes), any of which may layer-promote and
