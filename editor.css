@@ -483,13 +483,6 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   height: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer;
 }
-/* md-topic-import: "Select all" + "Delete selected" -- only the count/button shows once
-   something's actually checked (progressive disclosure, not a permanent toolbar row). */
-.source-stage__bulk-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
-/* md-topic-import: "Needs review" -- only appears when 1+ topics in the current scope
-   actually have a pending re-import conflict; toggles a filter, doesn't navigate. */
-.source-stage__review-row { padding: 4px 8px 0; }
-.source-stage__bulk-count { font-size: var(--text-xs, 11px); color: var(--text-tertiary); flex: 1 1 auto; }
 .source-stage__empty { padding: 16px 10px; color: var(--text-tertiary); font-size: var(--text-sm, 12px); }
 .source-stage__article { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 28px 36px; background: var(--surface-canvas); }
 .source-stage__article-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -517,10 +510,16 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-stage__body .md-lite-table td { border: 1px solid var(--border-subtle); padding: 4px 8px; text-align: left; vertical-align: top; }
 .source-stage__body .md-lite-table th { background: var(--surface-raised, #262626); font-weight: 600; color: var(--text-primary); }
 
-/* product-rail-md-topic-import: "+ New Topic" / "Import from Markdown…", the console-
-   free way to get content into a topic. Sits between the search field and the list. */
-.source-stage__nav-actions { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 10px; flex: 0 0 auto; }
-.source-stage__nav-actions .vds-btn { width: 100%; justify-content: flex-start; }
+/* /verso-frontend audit 2026-07-27: four rounds of additions (New topic, Import,
+   Select-mode bar, Needs-review chip) each passed review in isolation while this whole
+   region became an uncontrolled vertical stack of full-width labeled buttons with no
+   hierarchy. Converged to ONE icon-only toolbar row (IconButton, tooltip via its own
+   `label`) that swaps contents by mode instead of appending a new row per feature --
+   see renderSourceToolbar. Sits between the search field and the list. */
+.source-stage__nav-actions { padding: 0 6px 6px; flex: 0 0 auto; }
+.source-stage__toolbar { display: flex; align-items: center; gap: 2px; }
+.source-stage__toolbar-badge-wrap { position: relative; display: inline-flex; }
+.source-stage__toolbar-badge { position: absolute; top: -3px; right: -3px; pointer-events: none; }
 
 /* source-stage-variant-columns: Flagship (always-on, non-interactive) + one
    VersoUI.ToggleChip per variant declared for the topic's Product. */

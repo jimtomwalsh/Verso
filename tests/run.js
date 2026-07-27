@@ -8467,9 +8467,12 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // Mount point + wiring: rendered once per renderSourceStage(), alongside the search field.
   var idx = src("index.html");
   ok("index.html has the nav-actions mount point between search and the topic list", /id="source-stage-search"[\s\S]{0,80}id="source-stage-nav-actions"[\s\S]{0,80}id="source-topic-list"/.test(idx));
-  ok("renderSourceStage() mounts the actions row alongside the search field", /function renderSourceStage\(\) \{\s*mountSourceStageSearch\(\);\s*mountSourceStageActions\(\);/.test(e));
-  ok("actions row uses the canonical VersoUI.Button (secondary + icon), not bespoke buttons", /host\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
-    /host\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
+  // /verso-frontend audit 2026-07-27: consolidated into ONE state-reactive toolbar row
+  // (renderSourceToolbar, icon-only IconButton), built inside renderSourceTopicList
+  // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{\s*mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(e));
+  ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
+    /row\.appendChild\(U\.IconButton\(\{ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
   ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
 
   // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
@@ -8526,20 +8529,21 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("__sourceSelectedTopicIds drops any id that's fallen outside the current filtered view", /__sourceSelectedTopicIds = __sourceSelectedTopicIds\.filter\(function \(id\) \{ return visibleIds\[id\]; \}\);/.test(e));
   ok("'Select all' uses the canonical Checkbox's own mixed/indeterminate state, not a hand-set DOM property", /var allChecked = __sourceSelectedTopicIds\.length > 0 && __sourceSelectedTopicIds\.length === topics\.length;/.test(e) &&
     /var someChecked = __sourceSelectedTopicIds\.length > 0 && __sourceSelectedTopicIds\.length < topics\.length;/.test(e) &&
-    /window\.VersoUI\.Checkbox\(\{\s*checked: allChecked, mixed: someChecked,/.test(e));
-  ok("both checkboxes use the canonical VersoUI.Checkbox (mixed prop, multi-select use documented on the control itself), not a bare <input>", /if \(window\.VersoUI\.Checkbox\) \{\s*var allChecked/.test(e) &&
-    /var cb = window\.VersoUI\.Checkbox\(\{/.test(e));
+    /U\.Checkbox\(\{\s*checked: allChecked, mixed: someChecked,/.test(e));
+  ok("the per-row checkbox uses the canonical VersoUI.Checkbox (mixed prop, multi-select use documented on the control itself), not a bare <input>", /var cb = window\.VersoUI\.Checkbox\(\{/.test(e));
   ok("a topic checkbox click never bubbles into the row's own open-topic handler", /cb\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); \}\);/.test(e));
-  ok("the delete/select bar only shows 'Delete selected' (and 'Move to Product…') once something is actually checked (progressive disclosure)", /if \(__sourceSelectedTopicIds\.length\) \{\s*bar\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "folder-input", label: "Move to Product…", onClick: moveSelectedTopicsModal \}\)\);\s*bar\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics \}\)\);/.test(e));
+  ok("Move/Delete icon buttons only render once something is actually checked (progressive disclosure)", /if \(__sourceSelectedTopicIds\.length\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "folder-input", label: "Move to Product… \(" \+ __sourceSelectedTopicIds\.length \+ "\)", onClick: moveSelectedTopicsModal \}\)\);\s*row\.appendChild\(U\.IconButton\(\{ icon: "trash-2", label: "Delete selected \(" \+ __sourceSelectedTopicIds\.length \+ "\)", danger: true, onClick: deleteSelectedTopics \}\)\);/.test(e));
 
   // Select mode: OFF by default (a clean list, checkboxes never open unless asked for),
-  // toggled by a single "Select" button -- mirrors Photos/Files/Gmail's select-mode
-  // pattern rather than always showing a row of checkboxes.
+  // toggled by a single icon-only "Select" button -- mirrors Photos/Files/Gmail's
+  // select-mode pattern rather than always showing a row of checkboxes.
   ok("__sourceSelectModeActive starts false -- checkboxes are opt-in, not always-on", /var __sourceSelectModeActive = false;/.test(e));
-  ok("checkboxes (both 'Select all' and per-row) only render while select mode is active", /else if \(!__sourceSelectModeActive\) \{\s*bar\.appendChild\(window\.VersoUI\.Button\(\{\s*variant: "secondary", icon: "check-square", label: "Select",/.test(e) &&
-    /if \(__sourceSelectModeActive && window\.VersoUI && window\.VersoUI\.Checkbox\) \{/.test(e));
-  ok("a 'Done' button exits select mode and clears the selection (exitSelectMode), not just hides the bar", /function exitSelectMode\(\) \{\s*__sourceSelectModeActive = false;\s*__sourceSelectedTopicIds = \[\];\s*\}/.test(e) &&
-    /label: "Done",\s*onClick: function \(\) \{ exitSelectMode\(\); renderSourceTopicList\(\); \}/.test(e));
+  ok("the toolbar is ONE row that swaps contents by mode, not a stack that grows per feature (/verso-frontend audit)", /function renderSourceToolbar\(topics, reviewCount\) \{/.test(e) &&
+    /if \(!__sourceSelectModeActive\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
+    /\} else \{\s*if \(U\.Checkbox\) \{/.test(e));
+  ok("checkboxes (both 'Select all' and per-row) only render while select mode is active", /if \(__sourceSelectModeActive && window\.VersoUI && window\.VersoUI\.Checkbox\) \{/.test(e));
+  ok("a 'Done' icon button exits select mode and clears the selection (exitSelectMode), not just hides the bar", /function exitSelectMode\(\) \{\s*__sourceSelectModeActive = false;\s*__sourceSelectedTopicIds = \[\];\s*\}/.test(e) &&
+    /icon: "x", label: "Done", onClick: function \(\) \{ exitSelectMode\(\); renderSourceTopicList\(\); \}/.test(e));
   ok("deleting selected topics also exits select mode afterward (doesn't leave checkboxes open on an emptied selection)", /exitSelectMode\(\);\s*saveLibrary\(\);/.test(e));
   ok("deleteSelectedTopics confirms via the canonical danger confirmModal before doing anything irreversible", /function deleteSelectedTopics\(\) \{[\s\S]{0,400}confirmModal\("Delete " \+ n[\s\S]{0,600}\{ okLabel: "Delete", danger: true \}\);/.test(e));
   var dstStart = e.indexOf("function deleteSelectedTopics()");
@@ -8548,11 +8552,14 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
 
   // "Needs review" filter: only surfaces when there's something to review, never a
   // permanent tab; a section (Flagship OR any variant override) with a pending
-  // sourceUpdate flag counts.
+  // sourceUpdate flag counts. Icon-only IconButton + a Badge count overlay (the
+  // notification-bell-with-unread-count pattern), not a labeled ToggleChip row of its own.
   ok("topicNeedsReview checks both the Flagship flag and every variant override's own flag", /function topicNeedsReview\(topic\) \{\s*return \(topic\.sections \|\| \[\]\)\.some\(function \(s\) \{\s*if \(s\.sourceUpdate\) return true;\s*return Object\.keys\(s\.overrides \|\| \{\}\)\.some\(function \(v\) \{ return s\.overrides\[v\] && s\.overrides\[v\]\.sourceUpdate; \}\);/.test(e));
   ok("a stale review filter auto-clears once nothing is left to review (never leaves an author stuck on an empty filtered view)", /if \(!reviewCount\) __sourceReviewFilterActive = false;/.test(e));
-  ok("the review chip uses the canonical ToggleChip and only renders when reviewCount > 0", /if \(reviewCount && window\.VersoUI && window\.VersoUI\.ToggleChip\) \{/.test(e) &&
-    /label: "Needs review \(" \+ reviewCount \+ "\)", active: __sourceReviewFilterActive,/.test(e));
+  ok("the review icon button only renders when reviewCount > 0, and shows the count via the canonical Badge overlay, not text", /if \(reviewCount\) \{\s*var reviewBtn = U\.IconButton\(\{\s*icon: "flag", label: "Needs review \(" \+ reviewCount \+ "\)", active: __sourceReviewFilterActive,/.test(e) &&
+    /row\.appendChild\(iconButtonWithBadge\(reviewBtn, reviewCount\)\);/.test(e));
+  ok("iconButtonWithBadge composes the canonical IconButton + Badge (tone=warning), not a bespoke count element", /function iconButtonWithBadge\(btn, count\) \{\s*if \(!count \|\| !window\.VersoUI \|\| !window\.VersoUI\.Badge\) return btn;/.test(e) &&
+    /window\.VersoUI\.Badge\(\{ children: String\(count\), tone: "warning", size: "sm" \}\);/.test(e));
   ok("an empty review-filtered list gets its own named empty state, distinct from 'no topics at all'", /__sourceReviewFilterActive \? "Nothing needs review\." : "No topics yet\."/.test(e));
 
   // Bulk "Move to Product…": reuses promoteToProductModal's exact Product-picker pattern

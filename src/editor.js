@@ -10734,6 +10734,70 @@
     box.appendChild(newNameRow);
   }
 
+  // A small canonical Badge overlaid on an IconButton's corner -- the notification-bell-
+  // with-unread-count pattern -- so a count survives an icon-only treatment without
+  // reintroducing a text sentence. Returns the plain icon button unwrapped when there's
+  // nothing to show a count for.
+  function iconButtonWithBadge(btn, count) {
+    if (!count || !window.VersoUI || !window.VersoUI.Badge) return btn;
+    var wrap = h("div", "source-stage__toolbar-badge-wrap");
+    wrap.appendChild(btn);
+    var badge = window.VersoUI.Badge({ children: String(count), tone: "warning", size: "sm" });
+    badge.classList.add("source-stage__toolbar-badge");
+    wrap.appendChild(badge);
+    return wrap;
+  }
+
+  // One toolbar row, one place, always -- not a stack of full-width labeled buttons that
+  // grows with every ticket (/verso-frontend audit, 2026-07-27: four rounds of additions
+  // each passed review in isolation while the rail became an uncontrolled vertical stack
+  // with no hierarchy). Icon-only (IconButton, tooltip via its own `label` prop), a
+  // SINGLE row that swaps its contents by mode rather than appending a new row per
+  // feature: New topic / Import / Select / Needs-review (badge count) when idle;
+  // Select-all / Move / Delete / Done while select mode is active. A checkbox is
+  // already glyph-sized, so it needs no icon-button treatment of its own.
+  function renderSourceToolbar(topics, reviewCount) {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
+    host.innerHTML = "";
+    if (!window.VersoUI || !window.VersoUI.IconButton) return;
+    var U = window.VersoUI;
+    var row = h("div", "source-stage__toolbar");
+
+    if (!__sourceSelectModeActive) {
+      row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
+      row.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
+      row.appendChild(U.IconButton({
+        icon: "check-square", label: "Select",
+        onClick: function () { __sourceSelectModeActive = true; renderSourceTopicList(); }
+      }));
+      if (reviewCount) {
+        var reviewBtn = U.IconButton({
+          icon: "flag", label: "Needs review (" + reviewCount + ")", active: __sourceReviewFilterActive,
+          onClick: function () { __sourceReviewFilterActive = !__sourceReviewFilterActive; renderSourceTopicList(); }
+        });
+        row.appendChild(iconButtonWithBadge(reviewBtn, reviewCount));
+      }
+    } else {
+      if (U.Checkbox) {
+        var allChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length === topics.length;
+        var someChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length < topics.length;
+        var selectAll = U.Checkbox({
+          checked: allChecked, mixed: someChecked,
+          onChange: function (next) { __sourceSelectedTopicIds = next ? topics.map(function (t) { return t.id; }) : []; renderSourceTopicList(); }
+        });
+        selectAll.title = "Select all";
+        row.appendChild(selectAll);
+      }
+      if (__sourceSelectedTopicIds.length) {
+        row.appendChild(U.IconButton({ icon: "folder-input", label: "Move to Product… (" + __sourceSelectedTopicIds.length + ")", onClick: moveSelectedTopicsModal }));
+        row.appendChild(U.IconButton({ icon: "trash-2", label: "Delete selected (" + __sourceSelectedTopicIds.length + ")", danger: true, onClick: deleteSelectedTopics }));
+      }
+      row.appendChild(U.IconButton({ icon: "x", label: "Done", onClick: function () { exitSelectMode(); renderSourceTopicList(); } }));
+    }
+    host.appendChild(row);
+  }
+
   function renderSourceTopicList() {
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-topic-list"); if (!host) return;
@@ -10749,49 +10813,12 @@
     topics.forEach(function (t) { visibleIds[t.id] = true; });
     __sourceSelectedTopicIds = __sourceSelectedTopicIds.filter(function (id) { return visibleIds[id]; });
 
-    if (reviewCount && window.VersoUI && window.VersoUI.ToggleChip) {
-      var reviewRow = h("div", "source-stage__review-row");
-      reviewRow.appendChild(window.VersoUI.ToggleChip({
-        label: "Needs review (" + reviewCount + ")", active: __sourceReviewFilterActive,
-        onClick: function () { __sourceReviewFilterActive = !__sourceReviewFilterActive; renderSourceTopicList(); }
-      }));
-      host.appendChild(reviewRow);
-    }
+    renderSourceToolbar(topics, reviewCount);
 
     if (!topics.length) {
       host.appendChild(h("div", "source-stage__empty", __sourceReviewFilterActive ? "Nothing needs review." : "No topics yet."));
       return;
     }
-
-    var bar = h("div", "source-stage__bulk-bar");
-    if (!window.VersoUI || !window.VersoUI.Button) { /* no bar without the canonical Button */ }
-    else if (!__sourceSelectModeActive) {
-      bar.appendChild(window.VersoUI.Button({
-        variant: "secondary", icon: "check-square", label: "Select",
-        onClick: function () { __sourceSelectModeActive = true; renderSourceTopicList(); }
-      }));
-    } else {
-      if (window.VersoUI.Checkbox) {
-        var allChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length === topics.length;
-        var someChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length < topics.length;
-        var selectAll = window.VersoUI.Checkbox({
-          checked: allChecked, mixed: someChecked,
-          onChange: function (next) { __sourceSelectedTopicIds = next ? topics.map(function (t) { return t.id; }) : []; renderSourceTopicList(); }
-        });
-        selectAll.title = "Select all";
-        bar.appendChild(selectAll);
-      }
-      bar.appendChild(h("span", "source-stage__bulk-count", __sourceSelectedTopicIds.length ? __sourceSelectedTopicIds.length + " selected" : "Select all"));
-      if (__sourceSelectedTopicIds.length) {
-        bar.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "folder-input", label: "Move to Product…", onClick: moveSelectedTopicsModal }));
-        bar.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics }));
-      }
-      bar.appendChild(window.VersoUI.Button({
-        variant: "ghost", label: "Done",
-        onClick: function () { exitSelectMode(); renderSourceTopicList(); }
-      }));
-    }
-    host.appendChild(bar);
 
     groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
       host.appendChild(h("div", "source-stage__group-label", g.label));
@@ -11166,18 +11193,6 @@
     host.appendChild(search);
   }
 
-  // Product Rail (md-topic-import): the two ways to get a topic into the wiki now that
-  // console fixtures are no longer the only path -- a blank topic, or a whole Markdown
-  // manual parsed into topics/sections. Mounted once, like the search field above.
-  function mountSourceStageActions() {
-    if (typeof document === "undefined") return;
-    var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
-    if (!window.VersoUI || !window.VersoUI.Button) return;
-    host.innerHTML = "";
-    host.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "plus", label: "New topic", onClick: newTopicModal }));
-    host.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
-  }
-
   function newTopicModal() {
     var productId = getActiveProduct();
     if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
@@ -11190,12 +11205,12 @@
     });
   }
 
-  // Called each time Source becomes the active stage (setStage("source")) -- mounts
-  // the search field + actions once, then re-renders the topic list + article from
-  // current state.
+  // Called each time Source becomes the active stage (setStage("source")) -- mounts the
+  // search field once, then re-renders the toolbar + topic list + article from current
+  // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
+  // inside renderSourceTopicList, not mounted separately).
   function renderSourceStage() {
     mountSourceStageSearch();
-    mountSourceStageActions();
     renderSourceTopicList();
     renderSourceArticle();
   }

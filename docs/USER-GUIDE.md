@@ -581,7 +581,7 @@ docs), and promote. This only tags the course — its content is never touched. 
 dropdown then lets you switch between every course, and the Source wiki, for that Product.
 
 **Populating the Source wiki.** Switch to the **Source** rail tab, pick a Product from the top bar,
-then use one of the two buttons above the topic list:
+then use the icon toolbar above the topic list (hover any icon for its name):
 
 - **New topic** — creates a blank topic you write directly, the same click-to-edit way as a
   course's text blocks: click a heading or body to edit it, click away to save.
