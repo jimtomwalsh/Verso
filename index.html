@@ -223,6 +223,8 @@
   <script src="src/icons.js"></script>
   <!-- DS canonical control set (issue #10) — chrome only; must precede editor.js so switchEl can drop in onto VersoUI.Switch -->
   <script src="src/ui-kit.js"></script>
+  <!-- Product Rail: markdown-lite content render primitive (bold/inline-code/bullets). DOM-free, no editor coupling -- load order is not load-bearing, kept near ui-kit.js since both are shared chrome render helpers. -->
+  <script src="src/markdown-lite.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->

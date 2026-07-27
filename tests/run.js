@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -7998,6 +7998,40 @@ section("ui-kit #10 DS control set");
   // index.html loads the library before editor.js (so switchEl can find it).
   var idx = src("index.html");
   ok("index.html loads ui-kit.js before editor.js", idx.indexOf("src/ui-kit.js") !== -1 && idx.indexOf("src/ui-kit.js") < idx.indexOf("src/editor.js"));
+})();
+
+// ---- product-rail-markdown-lite-content-render: shared topic-copy render primitive ----
+// DOM-free (string in, HTML string out), so require it directly like ui-kit's _pure.
+section("markdown-lite content render");
+(function () {
+  var M;
+  try { M = require(path.join(ROOT, "src/markdown-lite.js")); } catch (e) { ok("require src/markdown-lite.js", false); return; }
+  ok("require src/markdown-lite.js", !!M && !!M._pure && typeof M.render === "function");
+  if (!M || !M._pure) return;
+  var P = M._pure;
+
+  ok("plain text with no markers", M.render("just plain text") === "<p>just plain text</p>");
+  ok("bold", M.render("this is **bold** text") === "<p>this is <strong>bold</strong> text</p>");
+  ok("inline code", M.render("run `verso build` now") === '<p>run <code class="md-lite-code">verso build</code> now</p>');
+  ok("bullets", M.render("- one\n- two\n- three") === "<ul><li>one</li><li>two</li><li>three</li></ul>");
+  ok("mixed: paragraph then bullets", M.render("Intro **text**.\n\n- `a`\n- b") ===
+    '<p>Intro <strong>text</strong>.</p><ul><li><code class="md-lite-code">a</code></li><li>b</li></ul>');
+  ok("multi-line paragraph collapses newlines to spaces", M.render("line one\nline two") === "<p>line one line two</p>");
+  ok("empty input -> empty string", M.render("") === "" && M.render(null) === "" && M.render(undefined) === "");
+
+  // Malformed/unmatched markers degrade to literal text, never throw or break markup.
+  ok("unclosed bold stays literal", M.render("an **unclosed bold") === "<p>an **unclosed bold</p>");
+  ok("unclosed inline code stays literal", M.render("an `unclosed code") === "<p>an `unclosed code</p>");
+  ok("stray single asterisks stay literal", M.render("2 * 3 * 4") === "<p>2 * 3 * 4</p>");
+
+  // HTML in stored text is escaped, never injected as markup (XSS/authoring-safety).
+  ok("HTML in input is escaped", M.render("<script>alert(1)</" + "script>") === "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
+  ok("escapeHtml is the seam used before marker parsing", P.escapeHtml("<b>&") === "&lt;b&gt;&amp;");
+
+  // One shared render path: index.html loads it, and it's declared DOM-free/chrome-agnostic
+  // (no hard-coded coupling to editor.js or render.js — callers wire it in per surface).
+  var idx = src("index.html");
+  ok("index.html loads markdown-lite.js", idx.indexOf("src/markdown-lite.js") !== -1);
 })();
 
 // resolveVariant must recurse into NESTED containers (columns / frame-group children /
