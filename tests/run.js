@@ -4667,8 +4667,9 @@ section("#24 where-used + impact preview + push-update");
   var wuStart = etxt.indexOf("/* @where-used-start */");
   var wuEnd = etxt.indexOf("/* @where-used-end */");
   var pureBody = etxt.slice(wbStart, wbEnd) + etxt.slice(wuStart, wuEnd);
-  var mod = new Function(pureBody + "\nreturn { libraryWhereUsed: libraryWhereUsed };")();
+  var mod = new Function(pureBody + "\nreturn { libraryWhereUsed: libraryWhereUsed, libraryWhereUsedDetail: libraryWhereUsedDetail };")();
   ok("libraryWhereUsed extracted", typeof mod.libraryWhereUsed === "function");
+  ok("libraryWhereUsedDetail extracted", typeof mod.libraryWhereUsedDetail === "function");
 
   function mkCourse(refs) {
     return { pages: [{ blocks: refs.map(function (ref) { return { type: "libraryInstance", ref: ref }; }) }] };
@@ -4686,6 +4687,20 @@ section("#24 where-used + impact preview + push-update");
   // nested placement (inside a frame's children) must still be found -- walkBlocks descends.
   var nested = { "C-4": { pages: [{ blocks: [{ type: "frame", children: [{ type: "libraryInstance", ref: "comp-c" }] }] }] } };
   ok("finds a nested libraryInstance (inside a frame's children)", mod.libraryWhereUsed("comp-c", nested).instances === 1);
+
+  // Product Rail (source-stage-info-panel): libraryWhereUsedDetail is the per-usage
+  // sibling -- one entry per referencing block, carrying the document title + block
+  // id (so a caller can label AND jump to each usage), not just aggregate counts.
+  var registryTitled = {
+    "C-1": { meta: { title: "Course One" }, pages: [{ blocks: [{ type: "libraryInstance", ref: "topic-x", id: "b_1" }] }] },
+    "C-2": { meta: { title: "Course Two" }, pages: [{ blocks: [{ type: "libraryInstance", ref: "topic-x", id: "b_2" }, { type: "libraryInstance", ref: "topic-x", id: "b_3" }] }] },
+    "C-3": { pages: [{ blocks: [] }] } // no reference at all
+  };
+  var detail = mod.libraryWhereUsedDetail("topic-x", registryTitled);
+  ok("libraryWhereUsedDetail returns one entry per referencing block (3 total)", detail.length === 3);
+  ok("each entry carries docCode + docTitle + blockId", detail[0].docCode === "C-1" && detail[0].docTitle === "Course One" && detail[0].blockId === "b_1");
+  ok("a doc with no meta.title falls back to its code", mod.libraryWhereUsedDetail("comp-nowhere", { "C-9": { meta: {}, pages: [{ blocks: [{ type: "libraryInstance", ref: "comp-nowhere", id: "b_9" }] }] } })[0].docTitle === "C-9");
+  ok("a ref used nowhere -> empty list, never throws", mod.libraryWhereUsedDetail("nothing-here", registryTitled).length === 0);
 
   // 2. WIRING: the Component Library panel shows the where-used count per master.
   var lStart = etxt.indexOf("function buildLibraryBody(c)");
@@ -8536,6 +8551,41 @@ section("Product Rail: Source topic content authoring");
   ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1 && renderJs.indexOf("__sourceActiveEditField") === -1);
   var courseCss2 = src("src/course.css");
   ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body-input") === -1 && courseCss2.indexOf("source-stage__diverge") === -1);
+})();
+
+// ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
+section("Product Rail: Source stage info panel");
+(function () {
+  var e = src("src/editor.js");
+
+  // index.html: a real right pane, not a placeholder, mounted alongside the nav/article.
+  var idx = src("index.html");
+  ok("source-stage__info mount point present", /id="source-stage-info"/.test(idx));
+
+  // Wiring: renderSourceArticle() drives the info panel from the SAME topic-selection
+  // state as the article -- one source of truth, no separate re-fetch/resync path.
+  ok("no topic selected -> info panel explicitly cleared (not left stale from the last topic)", /renderSourceInfoPanel\(null\);\s*\n\s*return;/.test(e));
+  ok("a selected topic drives the info panel from the SAME render pass as the article", /renderSourceInfoPanel\(topic\);\s*\n\s*\}\s*\n\s*\n\s*\/\/ Product Rail \(source-stage-info-panel\)/.test(e));
+
+  // renderSourceInfoPanel: reuses the canonical panelSection() helper (not a one-off
+  // block) for both "Linked in" and "History" -- the same section chrome every other
+  // side panel in the app uses.
+  ok("Linked in section uses the canonical panelSection() helper, titled with the count per the AC (\"Linked in (N)\")", /panelSection\(host, "Linked in \(" \+ used\.length \+ "\)"\)/.test(e));
+  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History"\)/.test(e));
+  ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
+  ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
+  ok("clicking a Linked-in row opens that document AND switches to Edit (where the block actually lives)", /openCourseFromBrowser\(u\.docCode\); setStage\("edit"\); \}\);/.test(e));
+  ok("History reuses the same relative-time formatter recents already uses (formatRelativeTime), not a second implementation", /formatRelativeTime\(topic\.updatedAt, Date\.now\(\)\)/.test(e));
+
+  // createTopic now stamps updatedAt alongside createdAt (both start equal -- "just
+  // created" IS "just updated" until a future editing ticket bumps it independently).
+  ok("createTopic stamps updatedAt alongside createdAt", /createdAt: now, updatedAt: now \};/.test(e));
+
+  // Chrome-only invariant.
+  var renderJs = src("src/render.js");
+  ok("render() never reads the info-panel state", renderJs.indexOf("renderSourceInfoPanel") === -1 && renderJs.indexOf("libraryWhereUsedDetail") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no info-panel chrome classes", courseCss.indexOf("source-stage__info") === -1 && courseCss.indexOf("source-stage__linked-row") === -1);
 })();
 
 // ---- product-rail-markdown-lite-content-render: shared topic-copy render primitive ----

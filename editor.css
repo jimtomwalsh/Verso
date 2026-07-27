@@ -560,6 +560,23 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .source-stage__add-section:hover { border-color: var(--accent); color: var(--accent); }
 
+/* source-stage-info-panel: right pane, same width as the Edit stage's own right
+   panel (--right-w) for visual consistency. Uses the canonical .panel-section /
+   .panel-section__title classes (panelSection()) -- the same section chrome as
+   every other side panel in the app, not a one-off. */
+.source-stage__info {
+  width: var(--right-w, 248px); flex: 0 0 auto;
+  background: var(--surface-panel);
+  border-left: 1px solid var(--border-strong);
+  overflow-y: auto;
+}
+.source-stage__linked-row {
+  display: block; width: 100%; text-align: left;
+  padding: 6px 0; border: none; background: transparent;
+  color: var(--accent); font-size: var(--text-sm, 12px); cursor: pointer;
+}
+.source-stage__linked-row:hover { text-decoration: underline; }
+
 /* Product Rail top-bar dropdown (next to the brand) -- a plain VersoUI.Select host. */
 .product-picker { align-self: center; width: 140px; margin: 0 6px 0 2px; }
 .product-picker .vds-select { width: 100%; }
