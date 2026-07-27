@@ -10520,7 +10520,11 @@
     });
   }
   // Groups topics by owning Product (label from ProductsStore; "" bucket -> "Unassigned",
-  // sorted last), each group's topics sorted by name.
+  // sorted last), each group's topics sorted by their canonical drag order (author-chosen,
+  // via the topic-row drag handle -- see canonicalizeTopicOrder/structMoveTopic). Callers
+  // must canonicalize order on the topic's FULL per-product population before calling this
+  // (see renderSourceTopicList) so order stays stable independent of any transient
+  // search/review filter narrowing what's actually passed in here.
   function groupTopicsByProduct(topics, products) {
     var groups = {};
     (topics || []).forEach(function (t) {
@@ -10536,9 +10540,56 @@
       return {
         productId: pid,
         label: pid ? ((products[pid] && products[pid].name) || pid) : "Unassigned",
-        topics: groups[pid].slice().sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); })
+        topics: groups[pid].slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); })
       };
     });
+  }
+  // Assigns a stable, dense integer `order` to every topic within its own Product group
+  // (order is meaningful only WITHIN a group -- cross-group position doesn't exist). A
+  // topic with no order yet (never dragged) sorts to the end of its group, alphabetically
+  // among its equally-unordered siblings, so a freshly created/imported topic appends
+  // rather than jumping into the middle of an author's chosen order. Same canonicalize-
+  // then-restamp idiom `doc.chapters` already uses (editor.js ~1044-1045).
+  function canonicalizeTopicOrder(topics) {
+    var byProduct = {};
+    (topics || []).forEach(function (t) {
+      var pid = t.productId || "";
+      (byProduct[pid] = byProduct[pid] || []).push(t);
+    });
+    Object.keys(byProduct).forEach(function (pid) {
+      var group = byProduct[pid].slice().sort(function (a, b) {
+        var ao = a.order, bo = b.order;
+        if (ao == null && bo == null) return (a.name || "").localeCompare(b.name || "");
+        if (ao == null) return 1;
+        if (bo == null) return -1;
+        return ao - bo;
+      });
+      group.forEach(function (t, i) { t.order = i; });
+    });
+  }
+  // Drag-and-drop reorder for the topic-nav rail's drag handle -- move dragId to just
+  // before/after refId, WITHIN the same Product group only (dropping across groups is a
+  // no-op; reassigning Product stays "Promote to Product…"/"Move to Product…"'s job, not
+  // this drag). Same splice-out/find-ref/splice-in shape as structMoveSection/
+  // structMoveChapter.
+  function structMoveTopic(dragId, refId, after) {
+    var comps = libComponents();
+    var drag = comps[dragId], ref = comps[refId];
+    if (!drag || !ref || drag.kind !== "topic" || ref.kind !== "topic" || dragId === refId) return;
+    var pid = drag.productId || "";
+    if (pid !== (ref.productId || "")) return;
+    var group = Object.keys(comps).map(function (k) { return comps[k]; })
+      .filter(function (t) { return t && t.kind === "topic" && (t.productId || "") === pid; });
+    canonicalizeTopicOrder(group);
+    var sorted = group.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    var di = sorted.findIndex(function (t) { return t.id === dragId; });
+    if (di < 0) return;
+    var item = sorted.splice(di, 1)[0];
+    var ri = sorted.findIndex(function (t) { return t.id === refId; });
+    var at = ri < 0 ? sorted.length : (after ? ri + 1 : ri);
+    sorted.splice(at, 0, item);
+    sorted.forEach(function (t, i) { t.order = i; });
+    saveLibrary();
   }
   // A section's text for the requested facet, falling back to "technical" then to
   // whichever facet IS present -- a section never renders blank just because the
@@ -10669,6 +10720,9 @@
   // shows (and only ever applies) when the current Product+search scope actually has
   // 1+ flagged topics; auto-clears itself once nothing is left to review.
   var __sourceReviewFilterActive = false;
+  // Drag state for the topic-nav rail's row drag (source-stage-topic-reorder) -- same
+  // shape as the outliner's treeDrag/the section grip's __sourceSectionDrag.
+  var __sourceTopicDrag = null; // { id } | null
 
   function exitSelectMode() {
     __sourceSelectModeActive = false;
@@ -10808,6 +10862,10 @@
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-topic-list"); if (!host) return;
     host.innerHTML = "";
+    // Canonicalize drag order across the FULL topic population (every Product, no search/
+    // review filter applied) so a topic's order stays stable regardless of what the current
+    // view happens to be scoped to -- see canonicalizeTopicOrder.
+    canonicalizeTopicOrder(filterTopics(libComponents(), null, ""));
     var scopedTopics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
     var reviewCount = scopedTopics.filter(topicNeedsReview).length;
     if (!reviewCount) __sourceReviewFilterActive = false; // nothing left to review -> never leave a stale filter engaged
@@ -10855,6 +10913,36 @@
           renderSourceArticle();
         });
         row.appendChild(label);
+        // Drag-to-reorder (source-stage-topic-reorder): the whole row drags, same shape as
+        // the outliner's page/chapter rows (they have no inline-editable content either, so
+        // unlike the section grip handle, no separate handle is needed here). Disabled while
+        // select mode is active -- bulk-select and reorder are different modes, not mixed.
+        if (!__sourceSelectModeActive) {
+          row.setAttribute("draggable", "true");
+          row.addEventListener("dragstart", function (e) {
+            __sourceTopicDrag = { id: t.id };
+            try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
+            e.stopPropagation();
+          });
+          row.addEventListener("dragend", function () { __sourceTopicDrag = null; clearTreeMarks(); });
+          row.addEventListener("dragover", function (e) {
+            if (!__sourceTopicDrag || __sourceTopicDrag.id === t.id) return;
+            e.preventDefault(); e.stopPropagation();
+            var r = row.getBoundingClientRect();
+            row.__after = (e.clientY - r.top) > r.height / 2;
+            clearTreeMarks();
+            row.classList.add(row.__after ? "tree-drop-after" : "tree-drop-before");
+          });
+          row.addEventListener("dragleave", function () { row.classList.remove("tree-drop-before", "tree-drop-after"); });
+          row.addEventListener("drop", function (e) {
+            if (!__sourceTopicDrag) return;
+            e.preventDefault(); e.stopPropagation();
+            var dragId = __sourceTopicDrag.id, after = row.__after;
+            __sourceTopicDrag = null; clearTreeMarks();
+            structMoveTopic(dragId, t.id, after);
+            renderSourceTopicList();
+          });
+        }
         host.appendChild(row);
       });
     });

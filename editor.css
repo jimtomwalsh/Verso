@@ -472,11 +472,12 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    now a container (checkbox + label button) rather than one bare button -- md-topic-import
    bulk-delete needs a click target for selection that's independent of "open this topic". */
 .source-stage__topic-row {
-  display: flex; align-items: center; gap: 6px; width: 100%;
+  display: flex; align-items: center; gap: 6px; width: 100%; position: relative;
   height: 26px; padding: 0 8px 0 4px; border-radius: var(--radius-xs);
   color: var(--text-secondary); font: var(--type-label);
 }
 .source-stage__topic-row:hover { background: var(--surface-hover); color: var(--text-primary); }
+.source-stage__topic-row[draggable="true"] { cursor: grab; }
 .source-stage__topic-row.is-active { background: var(--accent-quiet); color: var(--accent); }
 .source-stage__topic-checkbox { flex: 0 0 auto; }
 .source-stage__topic-label {
