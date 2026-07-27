@@ -21,9 +21,12 @@
   var HEADING_RE = /^(#{1,6})\s+(.*?)\s*$/;
   var NUMBERED_RE = /^(\d+(?:\.\d+)*)\.?\s+(.*)$/; // "5.3 Title" or "5.3. Title"
 
+  // The number is the reliable signal for DEPTH (see file header), but showing it in the
+  // wiki duplicates what the nav list's own structure/order already conveys -- so the
+  // number is kept ONLY as the matching key, never as part of the displayed title.
   function headingInfo(hashes, rawTitle) {
     var m = NUMBERED_RE.exec(rawTitle);
-    if (m) return { key: m[1], depth: m[1].split(".").length, title: rawTitle };
+    if (m) return { key: m[1], depth: m[1].split(".").length, title: m[2].trim() || rawTitle.trim() };
     return { key: rawTitle.trim().toLowerCase(), depth: hashes.length, title: rawTitle };
   }
 
@@ -109,7 +112,27 @@
     return warnings;
   }
 
-  var MarkdownImport = { parse: parse, mergeVariant: mergeVariant, _pure: { headingInfo: headingInfo } };
+  // Re-importing an updated file must never silently clobber a hand-edit, nor silently
+  // keep re-flagging a source change nobody actually made. Tracks each section's
+  // lastImportedText (what THIS text looked like the last time an import touched it) so a
+  // re-import can tell three cases apart:
+  //   - only the SOURCE changed since then (freshText !== lastImportedText, current text
+  //     === lastImportedText) -> safe to auto-apply, nothing of the author's to lose.
+  //   - only the AUTHOR changed it (freshText === lastImportedText) -> no-op, nothing new
+  //     upstream to apply.
+  //   - BOTH changed -> conflict. Never overwrite; the caller flags it for review instead.
+  // existing: null (no section with this key exists yet) or { text, lastImportedText }
+  // (lastImportedText may itself be null/undefined -- a section that pre-dates import
+  // tracking, e.g. hand-authored -- treated the same conservative way as a real conflict
+  // unless its text already happens to match, in which case tracking just starts silently).
+  function reconcileSection(existing, freshText) {
+    if (!existing) return { action: "create" };
+    if (existing.lastImportedText == null) return { action: existing.text === freshText ? "track" : "flag" };
+    if (freshText === existing.lastImportedText) return { action: "noop" };
+    return { action: existing.text === existing.lastImportedText ? "update" : "flag" };
+  }
+
+  var MarkdownImport = { parse: parse, mergeVariant: mergeVariant, reconcileSection: reconcileSection, _pure: { headingInfo: headingInfo } };
 
   if (typeof window !== "undefined") window.MarkdownImport = MarkdownImport;
   if (typeof module !== "undefined" && module.exports) module.exports = MarkdownImport;

@@ -8491,14 +8491,14 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // file, so it matches the established one-click precedent exactly (glossary's importCsv
   // -- click, native picker opens immediately, no intermediate modal). The modal only
   // exists for the multi-file case a single click structurally can't do.
-  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*readFileAsText\(f\)\.then\(function \(text\) \{ finishMarkdownImport\(window\.MarkdownImport\.parse\(text\), \[\], productId\); \}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(e));
+  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{ finishMarkdownImport\(window\.MarkdownImport\.parse\(text\), \[\], productId, metaList\[0\]\); \}\);\s*\}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(e));
   var dsModalShellIdxInImport = e.indexOf("var shell = dsModalShell({", e.indexOf("function importMarkdownModal()"));
   ok("the multi-file modal path is reached only AFTER the no-variant early return", dsModalShellIdxInImport > e.indexOf('inp.click();\n      return;'));
 
   // /verso-frontend Tier 2 fix: the result summary goes through the canonical
   // confirmModal, never a raw window.alert (Tier 1 checklist item 1 explicitly bans
   // raw alert/confirm for anything beyond a single-sentence hard failure).
-  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId\) \{[\s\S]{0,900}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(e));
+  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId, meta\) \{[\s\S]{0,1500}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(e));
   ok("finishMarkdownImport is the single tail shared by both the one-click and modal import paths", (e.match(/finishMarkdownImport\(/g) || []).length === 3); // definition + the 2 call sites
 
   // importParsedTopics: pure shape conversion (parse-result section -> real
@@ -8506,13 +8506,68 @@ section("Product Rail: New Topic / Import from Markdown UI");
   ok("__productRail exposes importParsedTopics / importMarkdownModal (headless/browser-verify hooks)",
     /window\.__productRail\.importParsedTopics = importParsedTopics;/.test(e) && /window\.__productRail\.importMarkdownModal = importMarkdownModal;/.test(e));
   ok("importParsedTopics writes ONLY the technical facet from imported text", /facets: \{ technical: s\.text \}/.test(e));
-  ok("a variant override becomes section.overrides[v].facets.technical, mirroring the shipped divergeSectionVariant shape", /sec\.overrides\[v\] = \{ facets: \{ technical: s\.overrides\[v\] \} \};/.test(e));
-  ok("each imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections\);/.test(e));
+  ok("a variant override becomes section.overrides[v].facets.technical, mirroring the shipped divergeSectionVariant shape", /sec\.overrides\[v\] = \{ facets: \{ technical: s\.overrides\[v\] \}, lastImportedText: s\.overrides\[v\] \};/.test(e));
+  ok("each NEW imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections, \{ key: t\.key, source: sourceStamp, variantSources: meta\.variantMeta \}\);/.test(e));
 
   // Chrome-only invariant + no proprietary content ever hard-coded as a fixture.
   var renderJs2 = src("src/render.js");
   ok("render() never reads the New Topic / Import UI's state", renderJs2.indexOf("importMarkdownModal") === -1 && renderJs2.indexOf("mountSourceStageActions") === -1);
   ok("no product/course names hard-coded into the importer or its tests (public-repo hygiene)", !/RfLink|RfPatrol|DroneSentry|DroneShield/i.test(e));
+})();
+
+// ---- product-rail-md-topic-import follow-ups: bulk-select+delete, re-import reconcile,
+// conflict flag, provenance display ----
+section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
+(function () {
+  var e = src("src/editor.js");
+
+  // Bulk-select + delete: cleanup after a botched test import, at the TOPIC level (a
+  // whole import run's worth of content), not individual sections within one topic.
+  ok("__sourceSelectedTopicIds drops any id that's fallen outside the current filtered view", /__sourceSelectedTopicIds = __sourceSelectedTopicIds\.filter\(function \(id\) \{ return visibleIds\[id\]; \}\);/.test(e));
+  ok("'Select all' uses the canonical Checkbox's own mixed/indeterminate state, not a hand-set DOM property", /var allChecked = __sourceSelectedTopicIds\.length > 0 && __sourceSelectedTopicIds\.length === topics\.length;/.test(e) &&
+    /var someChecked = __sourceSelectedTopicIds\.length > 0 && __sourceSelectedTopicIds\.length < topics\.length;/.test(e) &&
+    /window\.VersoUI\.Checkbox\(\{\s*checked: allChecked, mixed: someChecked,/.test(e));
+  ok("both checkboxes use the canonical VersoUI.Checkbox (mixed prop, multi-select use documented on the control itself), not a bare <input>", /window\.VersoUI && window\.VersoUI\.Checkbox\) \{[\s\S]{0,300}var selectAll = window\.VersoUI\.Checkbox\(\{/.test(e) &&
+    /var cb = window\.VersoUI\.Checkbox\(\{/.test(e));
+  ok("a topic checkbox click never bubbles into the row's own open-topic handler", /cb\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); \}\);/.test(e));
+  ok("the delete/select bar only shows 'Delete selected' once something is actually checked (progressive disclosure)", /if \(__sourceSelectedTopicIds\.length && window\.VersoUI && window\.VersoUI\.Button\) \{/.test(e));
+  ok("deleteSelectedTopics confirms via the canonical danger confirmModal before doing anything irreversible", /function deleteSelectedTopics\(\) \{[\s\S]{0,400}confirmModal\("Delete " \+ n[\s\S]{0,600}\{ okLabel: "Delete", danger: true \}\);/.test(e));
+  var dstStart = e.indexOf("function deleteSelectedTopics()");
+  var dstBody = e.slice(dstStart, dstStart + 700);
+  ok("deleting a topic clears __sourceActiveTopicId if it was one of the deleted (never leaves the article pointed at a deleted topic)", /if \(__sourceActiveTopicId === id\) __sourceActiveTopicId = null;/.test(dstBody));
+
+  // Re-import reconcile: createTopic carries optional key/source/variantSources so a
+  // LATER import of the same (Product, file) can find and update instead of duplicating.
+  ok("createTopic accepts optional key/source/variantSources, a blank New Topic passes none of them", /function createTopic\(name, productId, sections, extra\) \{/.test(e) &&
+    /if \(extra && extra\.key != null\) topic\.key = extra\.key;/.test(e) && /if \(extra && extra\.source\) topic\.source = extra\.source;/.test(e));
+  ok("existing topics are matched for reconcile ONLY within the same Product + source file (never cross-Product, never a differently-named file)", /return t\.kind === "topic" && t\.productId === productId && t\.source && t\.source\.file === meta\.file;/.test(e));
+  ok("a fresh topic with no existing (Product,file,key) match still creates normally (first import, or a genuinely new topic in an updated manual)", /var existingTopic = existingForSource\.filter\(function \(et\) \{ return et\.key === t\.key; \}\)\[0\];\s*if \(!existingTopic\) \{/.test(e));
+  ok("applySectionReconcile: a 'create' verdict appends a brand-new section with lastImportedText already stamped", /function applySectionReconcile\(topic, existingSec, freshSection, decision\) \{\s*if \(decision\.action === "create"\) \{\s*var sec = \{ id: "sec-" \+ Math\.random\(\)\.toString\(36\)\.slice\(2, 8\), key: freshSection\.key, heading: freshSection\.heading, facets: \{ technical: freshSection\.text \}, lastImportedText: freshSection\.text \};/.test(e));
+  ok("applySectionReconcile: 'update'/'track' adopt the fresh text and clear any stale flag; 'flag' leaves the author's text untouched", /if \(decision\.action === "update" \|\| decision\.action === "track"\) \{\s*existingSec\.facets\.technical = freshSection\.text;\s*existingSec\.lastImportedText = freshSection\.text;\s*delete existingSec\.sourceUpdate;\s*\} else if \(decision\.action === "flag"\) \{\s*existingSec\.sourceUpdate = \{ text: freshSection\.text \};/.test(e));
+  ok("variant overrides go through the SAME reconcile safety as the Flagship text, not a raw overwrite", /function applyVariantReconcile\(sec, variant, freshText, decision\) \{/.test(e) && /sec\.overrides\[variant\]\.sourceUpdate = \{ text: freshText \};/.test(e));
+  ok("importParsedTopics reports created/updated/flagged counts separately, not one lumped total", /return \{ topicCount: topicCount, sectionCount: sectionCount, updatedCount: updatedCount, flaggedCount: flaggedCount \};/.test(e));
+
+  // Provenance capture: version + publish date are optional, asked once per file
+  // regardless of the one-click or multi-file path (neither a native picker nor the
+  // file-input modal has anywhere to type free text).
+  ok("promptImportProvenance is a lightweight modal (dsModalShell + modalText rows), not a bespoke dialog", /function promptImportProvenance\(fileEntries, onDone\) \{[\s\S]{0,300}dsModalShell\(\{/.test(e));
+  ok("the one-click (no-variant) path collects provenance for its single file before parsing/writing anything", /promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{ finishMarkdownImport\(window\.MarkdownImport\.parse\(text\), \[\], productId, metaList\[0\]\); \}\);/.test(e));
+  ok("the multi-file modal path collects provenance for EVERY file (Flagship + each variant), not just the primary", /var entries = \[\{ key: "flagship", label: "Manual \(Flagship\)", file: primaryFile\.name \}\]\s*\.concat\(variantNames\.map\(function \(v\) \{ return \{ key: v, label: v, file: variantFiles\[v\]\.name \}; \}\)\);/.test(e));
+
+  // Conflict-flag UI: a visible, clickable marker on a flagged section, never silent.
+  ok("a flagged section shows a clickable 'Source updated' pill, built from the canonical Badge (tone=warning), not a bespoke button", /if \(sec\.sourceUpdate && window\.VersoUI && window\.VersoUI\.Badge\) \{\s*var flagPill = window\.VersoUI\.Badge\(\{ children: "Source updated", tone: "warning" \}\);/.test(e));
+  ok("Badge's canonical tone set was extended with 'warning' (design-system/components/structure/Badge), not hacked via an inline style override", /tone === "danger" \|\| tone === "warning" \|\| tone === "component"/.test(src("src/ui-kit.js")) &&
+    /\.vds-badge--warning \{ background: var\(--warning, #e0a83e\); color: #1a1a1a; \}/.test(src("editor.css")));
+  ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(e));
+  ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(e));
+
+  // Provenance display: the info panel's new "Source" section, absent for a hand-created topic.
+  ok("the info panel's Source section only renders when the topic actually has one (a blank 'New topic' never does)", /if \(topic\.source\) \{\s*var sourceBody = panelSection\(host, "Source"\);/.test(e));
+  ok("Source section shows the file, then version/publish-date only if at least one was supplied", /var meta = \[topic\.source\.version, topic\.source\.publishDate\]\.filter\(Boolean\)\.join\(" · "\);/.test(e));
+
+  // Chrome-only invariant.
+  var renderJs3 = src("src/render.js");
+  ok("render() never reads bulk-select/reconcile/provenance state", renderJs3.indexOf("__sourceSelectedTopicIds") === -1 && renderJs3.indexOf("reconcileSection") === -1 && renderJs3.indexOf("sourceUpdate") === -1);
 })();
 
 // ---- product-rail-source-topic-content-authoring: section CRUD + markdown-lite toolbar ----
@@ -8741,7 +8796,12 @@ section("markdown manual import (parse + variant merge)");
     var r = MI.parse(md);
     return r.topics.length === 1 && r.topics[0].key === "5" &&
       r.topics[0].sections.length === 3 &&
-      r.topics[0].sections[2].key === "5.3" && r.topics[0].sections[2].heading === "5.3 Three" && r.topics[0].sections[2].text === "C.";
+      r.topics[0].sections[2].key === "5.3" && r.topics[0].sections[2].heading === "Three" && r.topics[0].sections[2].text === "C.";
+  })());
+
+  ok("the displayed name/heading never carries the numeric prefix (avoids duplicating the nav list's own structure)", (function () {
+    var r = MI.parse("# 5 Operation\n\n## 5.3 Detection Overview\n\nBody.");
+    return r.topics[0].name === "Operation" && r.topics[0].sections[0].heading === "Detection Overview";
   })());
 
   ok("non-numeric headings fall back to literal heading level", (function () {
@@ -8754,7 +8814,7 @@ section("markdown manual import (parse + variant merge)");
     var r = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nSetup body.\n\n### 1.1.1 Sub-step\n\nSub body.");
     var sec = r.topics[0].sections[0];
     return r.topics[0].sections.length === 1 && sec.text.indexOf("Setup body.") !== -1 &&
-      sec.text.indexOf("**1.1.1 Sub-step**") !== -1 && sec.text.indexOf("Sub body.") !== -1;
+      sec.text.indexOf("**Sub-step**") !== -1 && sec.text.indexOf("Sub body.") !== -1;
   })());
 
   ok("a topic with no ## underneath it gets a warning, not a silent empty topic", (function () {
@@ -8787,11 +8847,21 @@ section("markdown manual import (parse + variant merge)");
     var warnings = MI.mergeVariant(base, variant, "coastal");
     var extraTopic = base.filter(function (t) { return t.key === "2"; })[0];
     return base.length === 2 && !!extraTopic && extraTopic.sections[0].overrides.coastal === "Variant-only text." &&
-      warnings.some(function (w) { return /Topic "2 Variant-only chapter" only exists in the "coastal" file/.test(w); });
+      warnings.some(function (w) { return /Topic "Variant-only chapter" only exists in the "coastal" file/.test(w); });
   })());
 
   var idxMI = src("index.html");
   ok("index.html loads markdown-import.js", idxMI.indexOf("src/markdown-import.js") !== -1);
+
+  // reconcileSection: the re-import safety decision -- never silently overwrite a section
+  // that changed on BOTH sides since the last import, always safe to auto-apply when only
+  // the source changed, always a no-op when only the author changed it.
+  ok("no existing section at all -> create", MI.reconcileSection(null, "fresh").action === "create");
+  ok("source unchanged since last import -> noop, regardless of local edits", MI.reconcileSection({ text: "author's own text", lastImportedText: "old" }, "old").action === "noop");
+  ok("only the source changed (local text still matches what was last imported) -> safe auto-update", MI.reconcileSection({ text: "old", lastImportedText: "old" }, "new-from-source").action === "update");
+  ok("both source AND local text changed since last import -> flag, never auto-overwrite", MI.reconcileSection({ text: "author's edit", lastImportedText: "old" }, "new-from-source").action === "flag");
+  ok("pre-tracking section (no lastImportedText) whose text already matches the fresh import -> starts tracking silently", MI.reconcileSection({ text: "same", lastImportedText: null }, "same").action === "track");
+  ok("pre-tracking section (no lastImportedText) whose text differs -> flag, never silently adopt tracking over unknown hand-authored content", MI.reconcileSection({ text: "hand-authored", lastImportedText: undefined }, "fresh-from-source").action === "flag");
 })();
 
 // resolveVariant must recurse into NESTED containers (columns / frame-group children /

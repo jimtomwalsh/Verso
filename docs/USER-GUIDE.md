@@ -587,7 +587,9 @@ then use one of the two buttons above the topic list:
   course's text blocks: click a heading or body to edit it, click away to save.
 - **Import from Markdown…** — creates topics straight from a Markdown file (e.g. a manual you've
   converted to `.md`). Numbered headings (`# 1`, `## 1.1`, `### 1.1.1`) split into topics and
-  sections by their number; a `# 1` becomes a topic, its `## 1.1` headings become that topic's
+  sections by their number — the number itself decides the split even if the file's own `#`/`##`
+  levels are inconsistent (common in converted manuals); the number is never shown in the wiki
+  itself, only used to organise it. A `1` becomes a topic, its `1.1` headings become that topic's
   sections, and anything numbered deeper folds into the section text as a bold line. Bold, inline
   code, bullet lists, and Markdown tables in the file all carry over. If the Product has no
   declared variants, this opens your file picker directly; if it does, a small dialog lets you
@@ -595,7 +597,20 @@ then use one of the two buttons above the topic list:
   the same "Diverge for `<variant>`" mechanism described in §10) — a section that only exists in a
   variant's file is added with blank Flagship text so nothing is lost. Only import produces the
   wiki's "Technical" version of each section; the "Digestible" and "Dot-point" versions (switchable
-  above the article) are yours to write afterward.
+  above the article) are yours to write afterward. You can optionally note each file's version and
+  publish date when asked — shown later in the topic's info panel under "Source".
+
+**Re-importing an updated manual.** Run "Import from Markdown…" again with the same filename for
+the same Product, and it updates the existing topics instead of duplicating them: a section whose
+text changed only in the file is updated automatically; a section you haven't touched since the
+last import is left alone if the file didn't change it either. If a section changed **both** in
+the file and in what you've since written in the wiki, nothing is overwritten — a small "Source
+updated" flag appears next to its heading. Click it to compare your text against the file's, then
+choose **Use updated text** or **Keep mine**.
+
+**Cleaning up.** Check the box beside one or more topics in the list (or "Select all") and click
+**Delete selected** to remove them — useful after a test import. This deletes whole topics
+(including all their sections); it can't be undone.
 
 ---
 

@@ -10644,22 +10644,85 @@
   var __sourceActiveFacet = "technical";
   var __sourceSearchQuery = "";
   var __sourceActiveVariants = []; // reset whenever a different topic is selected
+  // Product Rail (md-topic-import bulk-delete): topic ids checked in the nav list, for
+  // "Select all" + "Delete selected" -- cleanup after a test import, without deleting one
+  // at a time. Cleared whenever the filtered set changes shape (search/product switch)
+  // so a stale selection can never silently apply to a different-looking list.
+  var __sourceSelectedTopicIds = [];
+
+  function deleteSelectedTopics() {
+    if (!__sourceSelectedTopicIds.length) return;
+    var comps = libComponents();
+    var n = __sourceSelectedTopicIds.length;
+    confirmModal("Delete " + n + " topic" + (n === 1 ? "" : "s"),
+      "Permanently delete " + n + " topic" + (n === 1 ? "" : "s") + " and all its sections? This can't be undone.",
+      function () {
+        __sourceSelectedTopicIds.forEach(function (id) {
+          delete comps[id];
+          if (__sourceActiveTopicId === id) __sourceActiveTopicId = null;
+        });
+        __sourceSelectedTopicIds = [];
+        saveLibrary();
+        renderSourceTopicList();
+        renderSourceArticle();
+      }, { okLabel: "Delete", danger: true });
+  }
 
   function renderSourceTopicList() {
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-topic-list"); if (!host) return;
     host.innerHTML = "";
     var topics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
+    // A selected id that's fallen out of the current filtered view (search/product
+    // changed) can no longer be acted on from here -- drop it rather than let "Delete
+    // selected" silently reach past what's actually visible.
+    var visibleIds = {};
+    topics.forEach(function (t) { visibleIds[t.id] = true; });
+    __sourceSelectedTopicIds = __sourceSelectedTopicIds.filter(function (id) { return visibleIds[id]; });
+
     if (!topics.length) {
       host.appendChild(h("div", "source-stage__empty", "No topics yet."));
       return;
     }
+
+    var bar = h("div", "source-stage__bulk-bar");
+    if (window.VersoUI && window.VersoUI.Checkbox) {
+      var allChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length === topics.length;
+      var someChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length < topics.length;
+      var selectAll = window.VersoUI.Checkbox({
+        checked: allChecked, mixed: someChecked,
+        onChange: function (next) { __sourceSelectedTopicIds = next ? topics.map(function (t) { return t.id; }) : []; renderSourceTopicList(); }
+      });
+      selectAll.title = "Select all";
+      bar.appendChild(selectAll);
+    }
+    bar.appendChild(h("span", "source-stage__bulk-count", __sourceSelectedTopicIds.length ? __sourceSelectedTopicIds.length + " selected" : "Select all"));
+    if (__sourceSelectedTopicIds.length && window.VersoUI && window.VersoUI.Button) {
+      bar.appendChild(window.VersoUI.Button({ variant: "secondary", icon: "trash-2", label: "Delete selected", danger: true, onClick: deleteSelectedTopics }));
+    }
+    host.appendChild(bar);
+
     groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
       host.appendChild(h("div", "source-stage__group-label", g.label));
       g.topics.forEach(function (t) {
-        var row = h("button", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""), t.name || "Untitled topic");
-        row.type = "button";
-        row.addEventListener("click", function () {
+        var row = h("div", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""));
+        if (window.VersoUI && window.VersoUI.Checkbox) {
+          var cb = window.VersoUI.Checkbox({
+            checked: __sourceSelectedTopicIds.indexOf(t.id) !== -1,
+            onChange: function (next) {
+              var idx = __sourceSelectedTopicIds.indexOf(t.id);
+              if (next && idx === -1) __sourceSelectedTopicIds.push(t.id);
+              else if (!next && idx !== -1) __sourceSelectedTopicIds.splice(idx, 1);
+              renderSourceTopicList();
+            }
+          });
+          cb.classList.add("source-stage__topic-checkbox");
+          cb.addEventListener("click", function (e) { e.stopPropagation(); });
+          row.appendChild(cb);
+        }
+        var label = h("button", "source-stage__topic-label", t.name || "Untitled topic");
+        label.type = "button";
+        label.addEventListener("click", function () {
           if (t.id === __sourceActiveTopicId) return;
           __sourceActiveTopicId = t.id;
           __sourceActiveVariants = []; // a different topic may have a different variant set
@@ -10667,6 +10730,7 @@
           renderSourceTopicList();
           renderSourceArticle();
         });
+        row.appendChild(label);
         host.appendChild(row);
       });
     });
@@ -10718,6 +10782,34 @@
   // else keeps reading as normal MarkdownLite output, so browsing a topic never shows
   // raw ** markers -- only the one cell an author is actively typing into.
   var __sourceEditingCell = null; // { sectionId, variant } | null
+
+  // md-topic-import: lets the author compare their current (Flagship) text against a
+  // re-imported source's version once reconcileSection has flagged a real conflict, and
+  // pick a side -- "Use updated text" applies the source's version (and clears the flag);
+  // "Keep mine" dismisses the flag without changing anything; Cancel leaves it pending.
+  function openSourceUpdateModal(topic, sec) {
+    var shell = dsModalShell({
+      title: "Source updated",
+      subtitle: (sec.heading || "This section") + " changed both here and in the re-imported source since the last import.",
+      primaryLabel: "Use updated text",
+      extras: window.VersoUI ? [window.VersoUI.Button({
+        variant: "secondary", label: "Keep mine",
+        onClick: function () { delete sec.sourceUpdate; stampTopicUpdated(topic); shell.modal.close(); renderSourceArticle(); }
+      })] : [],
+      onPrimary: function () {
+        sec.facets.technical = sec.sourceUpdate.text;
+        sec.lastImportedText = sec.sourceUpdate.text;
+        delete sec.sourceUpdate;
+        stampTopicUpdated(topic);
+        shell.modal.close();
+        renderSourceArticle();
+      }
+    });
+    modalSection(shell.body, "Your current text");
+    shell.body.appendChild(h("div", "source-stage__diff-block", sec.facets.technical || "(empty)"));
+    modalSection(shell.body, "Updated source text");
+    shell.body.appendChild(h("div", "source-stage__diff-block", sec.sourceUpdate.text || "(empty)"));
+  }
 
   function renderSourceArticle() {
     if (typeof document === "undefined") return;
@@ -10791,6 +10883,18 @@
       headingInput.type = "text"; headingInput.value = sec.heading || ""; headingInput.placeholder = "Section heading";
       headingInput.addEventListener("change", function () { sec.heading = headingInput.value; stampTopicUpdated(topic); });
       headingRow.appendChild(headingInput);
+      // md-topic-import re-import safety: this section changed BOTH here and in a
+      // re-imported source since the last import -- never silently overwritten (see
+      // MarkdownImport.reconcileSection), just flagged for a manual look. The canonical
+      // Badge (small status pill, design-system/components/structure/Badge) made
+      // clickable -- it takes no onClick itself, but returns a plain DOM node.
+      if (sec.sourceUpdate && window.VersoUI && window.VersoUI.Badge) {
+        var flagPill = window.VersoUI.Badge({ children: "Source updated", tone: "warning" });
+        flagPill.classList.add("source-stage__source-flag");
+        flagPill.title = "This section changed in the source since you last edited it here. Click to review.";
+        flagPill.addEventListener("click", function () { openSourceUpdateModal(topic, sec); });
+        headingRow.appendChild(flagPill);
+      }
       var actions = h("div", "source-stage__section-actions");
       var upBtn = iconBtn("arrow-up", "Move up"); upBtn.disabled = secIdx === 0;
       upBtn.addEventListener("click", function () { moveSection(topic, secIdx, -1); stampTopicUpdated(topic); renderSourceArticle(); });
@@ -10897,6 +11001,21 @@
         linkedBody.appendChild(row);
       });
     }
+    // md-topic-import provenance: which manual file (+ author-supplied version/publish
+    // date, both optional) this topic's Flagship content came from, plus one line per
+    // variant with its OWN source file if that variant was ever imported separately.
+    // Absent entirely for a hand-created ("New topic") topic -- there's nothing to show.
+    if (topic.source) {
+      var sourceBody = panelSection(host, "Source");
+      sourceBody.appendChild(h("div", "insp-hint", topic.source.file || "Unknown file"));
+      var meta = [topic.source.version, topic.source.publishDate].filter(Boolean).join(" · ");
+      if (meta) sourceBody.appendChild(h("div", "insp-hint", meta));
+      (Object.keys(topic.variantSources || {})).forEach(function (v) {
+        var vs = topic.variantSources[v];
+        var line = v + ": " + (vs.file || "Unknown file") + ([vs.version, vs.publishDate].filter(Boolean).length ? " (" + [vs.version, vs.publishDate].filter(Boolean).join(" · ") + ")" : "");
+        sourceBody.appendChild(h("div", "insp-hint", line));
+      });
+    }
     var historyBody = panelSection(host, "History");
     var created = topic.createdAt ? new Date(topic.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
     historyBody.appendChild(h("div", "insp-hint", "Created " + created));
@@ -10959,13 +11078,20 @@
   // Minimal write path other tickets (source-topic-content-authoring) build their
   // authoring UI on top of -- same "ship the mechanism, UI follows" precedent as
   // createProduct(). Not wired to any Source-stage control in this ticket (view-only).
-  function createTopic(name, productId, sections) {
+  // extra (md-topic-import): optional { key, source, variantSources } -- key is the
+  // matching handle a later re-import uses to find this topic again; source/variantSources
+  // are plain display metadata (which manual file/version/publish date this came from).
+  // A blank "New topic" never sets any of these -- they're import-only.
+  function createTopic(name, productId, sections, extra) {
     var comps = libComponents();
     var id = "topic-" + Math.random().toString(36).slice(2, 8);
     while (comps[id]) id = "topic-" + Math.random().toString(36).slice(2, 8);
     var now = Date.now();
     var topic = { id: id, kind: "topic", name: (String(name || "").trim() || "Untitled topic"),
       productId: productId || undefined, sections: sections || [], createdAt: now, updatedAt: now };
+    if (extra && extra.key != null) topic.key = extra.key;
+    if (extra && extra.source) topic.source = extra.source;
+    if (extra && extra.variantSources) topic.variantSources = extra.variantSources;
     window.LibraryStore.components[id] = topic;
     saveLibrary();
     return topic;
@@ -10973,26 +11099,94 @@
   window.__productRail.createTopic = createTopic;
   window.__productRail.renderSourceStage = renderSourceStage; // headless/browser-verify hook
 
+  // Applies one MarkdownImport.reconcileSection() verdict to a REAL section (or creates
+  // it, when none existed yet) -- "update"/"track" adopt the fresh text and clear any
+  // stale flag; "flag" leaves the author's text untouched and parks the source's version
+  // in section.sourceUpdate for review; "noop" touches nothing. Always returns the
+  // resolved section object (new or existing) so a caller can chain into its overrides.
+  function applySectionReconcile(topic, existingSec, freshSection, decision) {
+    if (decision.action === "create") {
+      var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), key: freshSection.key, heading: freshSection.heading, facets: { technical: freshSection.text }, lastImportedText: freshSection.text };
+      topic.sections.push(sec);
+      return sec;
+    }
+    if (decision.action === "update" || decision.action === "track") {
+      existingSec.facets.technical = freshSection.text;
+      existingSec.lastImportedText = freshSection.text;
+      delete existingSec.sourceUpdate;
+    } else if (decision.action === "flag") {
+      existingSec.sourceUpdate = { text: freshSection.text };
+    }
+    return existingSec; // noop/update/track/flag all keep the same object
+  }
+  // Same verdict, applied to one variant's override text instead of the section's own
+  // Flagship facets -- same three-way safety (only ever auto-applies when nothing of the
+  // author's is at risk of being lost).
+  function applyVariantReconcile(sec, variant, freshText, decision) {
+    if (decision.action === "create" || decision.action === "update" || decision.action === "track") {
+      sec.overrides = sec.overrides || {};
+      sec.overrides[variant] = { facets: { technical: freshText }, lastImportedText: freshText };
+    } else if (decision.action === "flag") {
+      sec.overrides = sec.overrides || {};
+      sec.overrides[variant] = sec.overrides[variant] || { facets: {} };
+      sec.overrides[variant].sourceUpdate = { text: freshText };
+    }
+  }
   // Product Rail (md-topic-import): turns a MarkdownImport parse's topics (already
-  // variant-merged, if any) into real LibraryStore topic components via createTopic.
-  // Pure conversion of shape -- {key,name,sections:[{key,heading,text,overrides}]} ->
-  // the real {id,heading,facets,overrides} section shape addSection() uses.
-  function importParsedTopics(parsedTopics, productId) {
-    var topicCount = 0, sectionCount = 0;
+  // variant-merged, if any) into real LibraryStore topic components. First import of a
+  // given (Product, source file) creates fresh topics via createTopic, stamped with the
+  // key/source a later re-import matches on. A re-import of the SAME (Product, file)
+  // reconciles instead of duplicating: matches existing topics/sections by key, and lets
+  // MarkdownImport.reconcileSection decide create/update/flag/noop per section (and per
+  // variant override) so nothing hand-authored is ever silently overwritten.
+  // meta (optional): { file, version, publishDate, variantMeta: {variantName: {...}} }.
+  function importParsedTopics(parsedTopics, productId, meta) {
+    meta = meta || {};
+    var topicCount = 0, sectionCount = 0, updatedCount = 0, flaggedCount = 0;
+    var comps = libComponents();
+    var existingForSource = meta.file ? Object.keys(comps).map(function (k) { return comps[k]; }).filter(function (t) {
+      return t.kind === "topic" && t.productId === productId && t.source && t.source.file === meta.file;
+    }) : [];
+    var sourceStamp = meta.file ? { file: meta.file, version: meta.version, publishDate: meta.publishDate, importedAt: Date.now() } : undefined;
+
     parsedTopics.forEach(function (t) {
-      var sections = t.sections.map(function (s) {
-        var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), heading: s.heading, facets: { technical: s.text } };
+      var existingTopic = existingForSource.filter(function (et) { return et.key === t.key; })[0];
+      if (!existingTopic) {
+        var sections = t.sections.map(function (s) {
+          var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), key: s.key, heading: s.heading, facets: { technical: s.text }, lastImportedText: s.text };
+          if (s.overrides) {
+            sec.overrides = {};
+            Object.keys(s.overrides).forEach(function (v) { sec.overrides[v] = { facets: { technical: s.overrides[v] }, lastImportedText: s.overrides[v] }; });
+          }
+          sectionCount++;
+          return sec;
+        });
+        createTopic(t.name, productId, sections, { key: t.key, source: sourceStamp, variantSources: meta.variantMeta });
+        topicCount++;
+        return;
+      }
+      t.sections.forEach(function (s) {
+        var existingSec = existingTopic.sections.filter(function (es) { return es.key === s.key; })[0];
+        var decision = window.MarkdownImport.reconcileSection(existingSec ? { text: existingSec.facets.technical, lastImportedText: existingSec.lastImportedText } : null, s.text);
+        var resolvedSec = applySectionReconcile(existingTopic, existingSec, s, decision);
+        if (decision.action === "create") sectionCount++;
+        else if (decision.action === "update" || decision.action === "track") updatedCount++;
+        else if (decision.action === "flag") flaggedCount++;
         if (s.overrides) {
-          sec.overrides = {};
-          Object.keys(s.overrides).forEach(function (v) { sec.overrides[v] = { facets: { technical: s.overrides[v] } }; });
+          Object.keys(s.overrides).forEach(function (v) {
+            var vExisting = resolvedSec.overrides && resolvedSec.overrides[v];
+            var vDecision = window.MarkdownImport.reconcileSection(vExisting ? { text: vExisting.facets.technical, lastImportedText: vExisting.lastImportedText } : null, s.overrides[v]);
+            applyVariantReconcile(resolvedSec, v, s.overrides[v], vDecision);
+            if (vDecision.action === "flag") flaggedCount++;
+          });
         }
-        sectionCount++;
-        return sec;
       });
-      createTopic(t.name, productId, sections);
-      topicCount++;
+      existingTopic.updatedAt = Date.now();
+      if (sourceStamp) existingTopic.source = sourceStamp;
+      if (meta.variantMeta) existingTopic.variantSources = meta.variantMeta;
     });
-    return { topicCount: topicCount, sectionCount: sectionCount };
+    saveLibrary();
+    return { topicCount: topicCount, sectionCount: sectionCount, updatedCount: updatedCount, flaggedCount: flaggedCount };
   }
   window.__productRail.importParsedTopics = importParsedTopics; // headless/browser-verify hook
 
@@ -11005,20 +11199,56 @@
     });
   }
 
+  // A lightweight version + publish-date prompt per file about to be imported -- optional,
+  // but it's what a later re-import shows in the info panel ("what changed and when").
+  // One small step regardless of path: neither a native file picker nor the file-input
+  // modal has anywhere to type free text, so this always runs right after file(s) are
+  // chosen and right before anything is actually parsed/written.
+  function promptImportProvenance(fileEntries, onDone) {
+    var values = fileEntries.map(function () { return { version: "", publishDate: "" }; });
+    var shell = dsModalShell({
+      title: "Manual details",
+      subtitle: "Optional — lets a later re-import of the same file show what changed and when.",
+      primaryLabel: "Import",
+      onPrimary: function () {
+        shell.modal.close();
+        onDone(fileEntries.map(function (f, i) { return { key: f.key, file: f.file, version: values[i].version, publishDate: values[i].publishDate }; }));
+      }
+    });
+    fileEntries.forEach(function (f, i) {
+      var vIn = modalText(shell.body, f.label + " version", "", "e.g. v1.4");
+      vIn.addEventListener("input", function () { values[i].version = vIn.value; });
+      var dIn = modalText(shell.body, f.label + " published", "", "e.g. 2026-06-24");
+      dIn.addEventListener("input", function () { values[i].publishDate = dIn.value; });
+    });
+  }
+
   // Shared tail end of an import, whether it came from the one-click no-variant path or
-  // the multi-file modal: merge any variant parses in, write real topics, re-render, and
-  // report a short summary through the canonical confirmModal (never a raw window.alert
-  // for anything beyond a single-sentence hard failure -- /verso-frontend Tier 2 review).
-  function finishMarkdownImport(baseParse, variantParses, productId) {
+  // the multi-file modal: merge any variant parses in, write/reconcile real topics,
+  // re-render, and report a short summary through the canonical confirmModal (never a raw
+  // window.alert for anything beyond a single-sentence hard failure -- /verso-frontend
+  // Tier 2 review).
+  function finishMarkdownImport(baseParse, variantParses, productId, meta) {
     var warnings = baseParse.warnings.slice();
+    var variantMeta = {};
     (variantParses || []).forEach(function (vp) {
       warnings = warnings.concat(vp.parse.warnings.map(function (w) { return "[" + vp.name + "] " + w; }));
       warnings = warnings.concat(window.MarkdownImport.mergeVariant(baseParse.topics, vp.parse, vp.name));
+      if (vp.meta) variantMeta[vp.name] = vp.meta;
     });
-    var result = importParsedTopics(baseParse.topics, productId);
+    var result = importParsedTopics(baseParse.topics, productId, {
+      file: meta && meta.file, version: meta && meta.version, publishDate: meta && meta.publishDate,
+      variantMeta: Object.keys(variantMeta).length ? variantMeta : undefined
+    });
     renderSourceTopicList();
-    var summary = "Imported " + result.topicCount + " topic(s), " + result.sectionCount + " section(s).";
-    if (warnings.length) summary += " " + warnings.length + " item(s) may need review (an unmatched heading, or a variant-only section) -- check the imported topics.";
+    renderSourceArticle();
+    var parts = [];
+    if (result.topicCount) parts.push(result.topicCount + " new topic(s)");
+    if (result.sectionCount) parts.push(result.sectionCount + " new section(s)");
+    if (result.updatedCount) parts.push(result.updatedCount + " section(s) updated from source");
+    if (result.flaggedCount) parts.push(result.flaggedCount + " section(s) flagged for review (changed both here and in the source since the last import)");
+    var summary = parts.length ? parts.join(", ") + "." : "Nothing changed since the last import.";
+    if (warnings.length) summary += " " + warnings.length + " other item(s) may need review.";
     confirmModal("Import from Markdown", summary, function () {});
   }
 
@@ -11029,7 +11259,9 @@
   // the established one-click precedent exactly (glossary's importCsv, editor.js -- click
   // the button, the native file picker opens immediately, no intermediate modal at all).
   // The modal only exists for the multi-file case a single click structurally can't do:
-  // mapping several files to several variant names at once.
+  // mapping several files to several variant names at once. Re-running this against the
+  // SAME filename for a Product that already has topics from it reconciles instead of
+  // duplicating -- see importParsedTopics.
   function importMarkdownModal() {
     if (!window.MarkdownImport) { window.alert("Markdown import isn't available (markdown-import.js failed to load)."); return; }
     var productId = getActiveProduct();
@@ -11040,7 +11272,9 @@
       var inp = h("input"); inp.type = "file"; inp.accept = ".md,.markdown,.txt";
       inp.addEventListener("change", function () {
         var f = inp.files && inp.files[0]; if (!f) return;
-        readFileAsText(f).then(function (text) { finishMarkdownImport(window.MarkdownImport.parse(text), [], productId); });
+        promptImportProvenance([{ key: "flagship", label: "Manual", file: f.name }], function (metaList) {
+          readFileAsText(f).then(function (text) { finishMarkdownImport(window.MarkdownImport.parse(text), [], productId, metaList[0]); });
+        });
       });
       inp.click();
       return;
@@ -11088,11 +11322,15 @@
     function runImport() {
       var variantNames = Object.keys(variantFiles).filter(function (v) { return variantFiles[v]; });
       var files = [primaryFile].concat(variantNames.map(function (v) { return variantFiles[v]; }));
-      Promise.all(files.map(readFileAsText)).then(function (texts) {
-        var baseParse = window.MarkdownImport.parse(texts[0]);
-        var variantParses = variantNames.map(function (v, i) { return { name: v, parse: window.MarkdownImport.parse(texts[i + 1]) }; });
-        shell.modal.close();
-        finishMarkdownImport(baseParse, variantParses, productId);
+      shell.modal.close();
+      var entries = [{ key: "flagship", label: "Manual (Flagship)", file: primaryFile.name }]
+        .concat(variantNames.map(function (v) { return { key: v, label: v, file: variantFiles[v].name }; }));
+      promptImportProvenance(entries, function (metaList) {
+        Promise.all(files.map(readFileAsText)).then(function (texts) {
+          var baseParse = window.MarkdownImport.parse(texts[0]);
+          var variantParses = variantNames.map(function (v, i) { return { name: v, parse: window.MarkdownImport.parse(texts[i + 1]), meta: metaList[i + 1] }; });
+          finishMarkdownImport(baseParse, variantParses, productId, metaList[0]);
+        });
       });
     }
   }

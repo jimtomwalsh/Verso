@@ -84,7 +84,7 @@
       return "vds-iconbtn vds-iconbtn--" + s + (active ? " is-active" : "") + (danger ? " is-danger" : "");
     },
     badgeClass: function (tone, size) {
-      var t = (tone === "accent" || tone === "success" || tone === "danger" || tone === "component") ? tone : "neutral";
+      var t = (tone === "accent" || tone === "success" || tone === "danger" || tone === "warning" || tone === "component") ? tone : "neutral";
       var s = size === "sm" ? "sm" : "md";
       return "vds-badge vds-badge--" + t + " vds-badge--" + s;
     },

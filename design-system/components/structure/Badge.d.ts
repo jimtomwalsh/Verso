@@ -2,8 +2,8 @@ import React from "react";
 
 export interface BadgeProps {
   children: React.ReactNode;
-  /** neutral (default) · accent · success · danger · component. */
-  tone?: "neutral" | "accent" | "success" | "danger" | "component";
+  /** neutral (default) · accent · success · danger · warning · component. */
+  tone?: "neutral" | "accent" | "success" | "danger" | "warning" | "component";
   size?: "sm" | "md";
   style?: React.CSSProperties;
 }
