@@ -569,5 +569,35 @@ restores it.
 
 ---
 
+## 18. Product Rail: Source stage (early)
+
+Product Rail groups your courses under **Products** (e.g. a hardware line), with a left rail
+switching between **Source** (reference wiki), **Edit** (the course canvas you already know), and
+**Publish**. This section covers Source — an early feature, still growing.
+
+**Attaching a course to a Product.** Open a course, then **Save/Recents → Promote to Product…**.
+Pick an existing Product or create a new one, choose a Format (eLearning, Presentations, or Print
+docs), and promote. This only tags the course — its content is never touched. The top-bar Product
+dropdown then lets you switch between every course, and the Source wiki, for that Product.
+
+**Populating the Source wiki.** Switch to the **Source** rail tab, pick a Product from the top bar,
+then use one of the two buttons above the topic list:
+
+- **New topic** — creates a blank topic you write directly, the same click-to-edit way as a
+  course's text blocks: click a heading or body to edit it, click away to save.
+- **Import from Markdown…** — creates topics straight from a Markdown file (e.g. a manual you've
+  converted to `.md`). Numbered headings (`# 1`, `## 1.1`, `### 1.1.1`) split into topics and
+  sections by their number; a `# 1` becomes a topic, its `## 1.1` headings become that topic's
+  sections, and anything numbered deeper folds into the section text as a bold line. Bold, inline
+  code, bullet lists, and Markdown tables in the file all carry over. If the Product has no
+  declared variants, this opens your file picker directly; if it does, a small dialog lets you
+  add one optional file per variant, whose matching sections become that variant's own text (via
+  the same "Diverge for `<variant>`" mechanism described in §10) — a section that only exists in a
+  variant's file is added with blank Flagship text so nothing is lost. Only import produces the
+  wiki's "Technical" version of each section; the "Digestible" and "Dot-point" versions (switchable
+  above the article) are yours to write afterward.
+
+---
+
 *This guide reflects the app as built. When a screen doesn't match, the app — and the
 `SCHEMA-TEMPLATE-GUIDE.md` and `SPEC-*.md` docs in this folder — are the source of truth.*

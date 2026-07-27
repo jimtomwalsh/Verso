@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/markdown-import.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -8458,6 +8458,63 @@ section("Product Rail: Source stage variant columns");
   ok("course.css carries no variant-column/toggle-chip chrome classes", courseCss.indexOf("vds-chip") === -1 && courseCss.indexOf("source-stage__col") === -1);
 })();
 
+// ---- product-rail-md-topic-import: "New Topic" / "Import from Markdown…" UI, the
+// console-free path this whole ticket exists for ----
+section("Product Rail: New Topic / Import from Markdown UI");
+(function () {
+  var e = src("src/editor.js");
+
+  // Mount point + wiring: rendered once per renderSourceStage(), alongside the search field.
+  var idx = src("index.html");
+  ok("index.html has the nav-actions mount point between search and the topic list", /id="source-stage-search"[\s\S]{0,80}id="source-stage-nav-actions"[\s\S]{0,80}id="source-topic-list"/.test(idx));
+  ok("renderSourceStage() mounts the actions row alongside the search field", /function renderSourceStage\(\) \{\s*mountSourceStageSearch\(\);\s*mountSourceStageActions\(\);/.test(e));
+  ok("actions row uses the canonical VersoUI.Button (secondary + icon), not bespoke buttons", /host\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
+    /host\.appendChild\(window\.VersoUI\.Button\(\{ variant: "secondary", icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
+  ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
+
+  // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
+  // LibraryStore write, not a course edit).
+  ok("newTopicModal is blocked when no Product is active", /function newTopicModal\(\) \{\s*var productId = getActiveProduct\(\);\s*if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
+  ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(e));
+  var ntmStart = e.indexOf("function newTopicModal()");
+  var ntmBody = e.slice(ntmStart, ntmStart + 500);
+  ok("newTopicModal never calls pushHistory() (LibraryStore write, not a doc edit)", ntmBody.indexOf("pushHistory()") === -1);
+
+  // Import from Markdown: same active-Product gate, blocked without a chosen file, and
+  // the variant file list is the Product's OWN declared variants (no free-form entry).
+  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,200}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
+  ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(e));
+  ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(e));
+  ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(e));
+
+  // /verso-frontend Tier 2 fix: a Product with NO declared variants only ever needs ONE
+  // file, so it matches the established one-click precedent exactly (glossary's importCsv
+  // -- click, native picker opens immediately, no intermediate modal). The modal only
+  // exists for the multi-file case a single click structurally can't do.
+  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*readFileAsText\(f\)\.then\(function \(text\) \{ finishMarkdownImport\(window\.MarkdownImport\.parse\(text\), \[\], productId\); \}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(e));
+  var dsModalShellIdxInImport = e.indexOf("var shell = dsModalShell({", e.indexOf("function importMarkdownModal()"));
+  ok("the multi-file modal path is reached only AFTER the no-variant early return", dsModalShellIdxInImport > e.indexOf('inp.click();\n      return;'));
+
+  // /verso-frontend Tier 2 fix: the result summary goes through the canonical
+  // confirmModal, never a raw window.alert (Tier 1 checklist item 1 explicitly bans
+  // raw alert/confirm for anything beyond a single-sentence hard failure).
+  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId\) \{[\s\S]{0,900}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(e));
+  ok("finishMarkdownImport is the single tail shared by both the one-click and modal import paths", (e.match(/finishMarkdownImport\(/g) || []).length === 3); // definition + the 2 call sites
+
+  // importParsedTopics: pure shape conversion (parse-result section -> real
+  // {id,heading,facets,overrides} section), exposed for headless/browser-verify use.
+  ok("__productRail exposes importParsedTopics / importMarkdownModal (headless/browser-verify hooks)",
+    /window\.__productRail\.importParsedTopics = importParsedTopics;/.test(e) && /window\.__productRail\.importMarkdownModal = importMarkdownModal;/.test(e));
+  ok("importParsedTopics writes ONLY the technical facet from imported text", /facets: \{ technical: s\.text \}/.test(e));
+  ok("a variant override becomes section.overrides[v].facets.technical, mirroring the shipped divergeSectionVariant shape", /sec\.overrides\[v\] = \{ facets: \{ technical: s\.overrides\[v\] \} \};/.test(e));
+  ok("each imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections\);/.test(e));
+
+  // Chrome-only invariant + no proprietary content ever hard-coded as a fixture.
+  var renderJs2 = src("src/render.js");
+  ok("render() never reads the New Topic / Import UI's state", renderJs2.indexOf("importMarkdownModal") === -1 && renderJs2.indexOf("mountSourceStageActions") === -1);
+  ok("no product/course names hard-coded into the importer or its tests (public-repo hygiene)", !/RfLink|RfPatrol|DroneSentry|DroneShield/i.test(e));
+})();
+
 // ---- product-rail-source-topic-content-authoring: section CRUD + markdown-lite toolbar ----
 section("Product Rail: Source topic content authoring");
 (function () {
@@ -8627,10 +8684,114 @@ section("markdown-lite content render");
   ok("HTML in input is escaped", M.render("<script>alert(1)</" + "script>") === "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
   ok("escapeHtml is the seam used before marker parsing", P.escapeHtml("<b>&") === "&lt;b&gt;&amp;");
 
+  // A literal <br> (carried over from manual-to-markdown conversions, e.g. multi-line
+  // table cells) survives escaping as text and renders back as a real line break --
+  // ONLY that one fixed tag, so it can't reopen an HTML-injection path.
+  ok("literal <br> becomes a real line break", M.render("line one<br>line two") === "<p>line one<br>line two</p>");
+  ok("self-closing <br/> also works", M.render("a<br/>b") === "<p>a<br>b</p>");
+  ok("other tags stay fully escaped, not just <br>", M.render("<div>x</div>") === "<p>&lt;div&gt;x&lt;/div&gt;</p>");
+
+  // GFM-style pipe tables: header + "|---|---|" separator + data rows.
+  ok("simple table", M.render("| A | B |\n|---|---|\n| 1 | 2 |") ===
+    '<table class="md-lite-table"><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>');
+  ok("table cells render bold/code/br like any other inline text", M.render("| A | B |\n|---|---|\n| **x** | `y`<br>z |") ===
+    '<table class="md-lite-table"><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td><strong>x</strong></td><td><code class="md-lite-code">y</code><br>z</td></tr></tbody></table>');
+  ok("ragged rows (fewer cells) don't throw", M.render("| A | B | C |\n|---|---|---|\n| 1 | 2 |") ===
+    '<table class="md-lite-table"><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>');
+  ok("text before and after a table stay separate paragraphs", M.render("Intro.\n\n| A |\n|---|\n| 1 |\n\nOutro.") ===
+    '<p>Intro.</p><table class="md-lite-table"><thead><tr><th>A</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table><p>Outro.</p>');
+  ok("a lone pipe-row with no separator is NOT a table (stays a paragraph)", M.render("| not a table |") === "<p>| not a table |</p>");
+  ok("_pure table helpers exposed", typeof P.isTableRow === "function" && typeof P.isTableSeparatorRow === "function" && typeof P.splitTableRow === "function");
+  ok("isTableRow / isTableSeparatorRow / splitTableRow behave", P.isTableRow("| a | b |") === true && P.isTableRow("no pipes") === false &&
+    P.isTableSeparatorRow("|---|---|") === true && P.isTableSeparatorRow("| a | b |") === false &&
+    JSON.stringify(P.splitTableRow("| a | b |")) === JSON.stringify(["a", "b"]));
+
   // One shared render path: index.html loads it, and it's declared DOM-free/chrome-agnostic
   // (no hard-coded coupling to editor.js or render.js — callers wire it in per surface).
   var idx = src("index.html");
   ok("index.html loads markdown-lite.js", idx.indexOf("src/markdown-lite.js") !== -1);
+})();
+
+// ---- product-rail-md-topic-import: heading-depth-aware Markdown -> topics/sections ----
+section("markdown manual import (parse + variant merge)");
+(function () {
+  var MI;
+  try { MI = require(path.join(ROOT, "src/markdown-import.js")); } catch (e) { ok("require src/markdown-import.js", false); return; }
+  ok("require src/markdown-import.js", !!MI && typeof MI.parse === "function" && typeof MI.mergeVariant === "function");
+  if (!MI) return;
+
+  ok("empty input -> no topics, a warning", (function () {
+    var r = MI.parse("");
+    return r.topics.length === 0 && r.warnings.length === 1;
+  })());
+
+  ok("# = topic, ## = section, body attaches to the current section", (function () {
+    var r = MI.parse("# Intro\n\nTop text.\n\n## First\n\nFirst body.\n\n## Second\n\nSecond body.");
+    return r.topics.length === 1 && r.topics[0].name === "Intro" &&
+      r.topics[0].sections.length === 2 &&
+      r.topics[0].sections[0].heading === "First" && r.topics[0].sections[0].text === "First body." &&
+      r.topics[0].sections[1].heading === "Second" && r.topics[0].sections[1].text === "Second body." &&
+      r.warnings.length === 1; // "Top text." before the first ## is unattached -> flagged, not silently dropped
+  })());
+
+  ok("numeric prefix determines depth REGARDLESS of literal #/##/### count (the real-world anomaly)", (function () {
+    // "5.3" is deliberately marked as a single # here, like the real conversion that motivated
+    // this -- it must still land as a SECTION of topic "5", not a sibling topic.
+    var md = "# 5 Operation\n\n## 5.1 One\n\nA.\n\n## 5.2 Two\n\nB.\n\n# 5.3 Three\n\nC.";
+    var r = MI.parse(md);
+    return r.topics.length === 1 && r.topics[0].key === "5" &&
+      r.topics[0].sections.length === 3 &&
+      r.topics[0].sections[2].key === "5.3" && r.topics[0].sections[2].heading === "5.3 Three" && r.topics[0].sections[2].text === "C.";
+  })());
+
+  ok("non-numeric headings fall back to literal heading level", (function () {
+    var r = MI.parse("# RfLink Manual\n\n## Contact Information\n\nContact body.");
+    return r.topics.length === 1 && r.topics[0].name === "RfLink Manual" &&
+      r.topics[0].sections.length === 1 && r.topics[0].sections[0].heading === "Contact Information";
+  })());
+
+  ok("depth 3+ folds into the current section as a bold line, not its own section", (function () {
+    var r = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nSetup body.\n\n### 1.1.1 Sub-step\n\nSub body.");
+    var sec = r.topics[0].sections[0];
+    return r.topics[0].sections.length === 1 && sec.text.indexOf("Setup body.") !== -1 &&
+      sec.text.indexOf("**1.1.1 Sub-step**") !== -1 && sec.text.indexOf("Sub body.") !== -1;
+  })());
+
+  ok("a topic with no ## underneath it gets a warning, not a silent empty topic", (function () {
+    var r = MI.parse("# Just a title\n\nSome text with no section heading at all.");
+    return r.topics.length === 1 && r.topics[0].sections.length === 0 &&
+      r.warnings.some(function (w) { return /no sections/.test(w); });
+  })());
+
+  ok("mergeVariant writes matching sections as overrides, keyed the same way as parse()", (function () {
+    var base = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nFlagship setup text.").topics;
+    var variant = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nVariant setup text.");
+    var warnings = MI.mergeVariant(base, variant, "coastal");
+    return warnings.length === 0 && base[0].sections[0].overrides &&
+      base[0].sections[0].overrides.coastal === "Variant setup text." &&
+      base[0].sections[0].text === "Flagship setup text."; // Flagship text untouched
+  })());
+
+  ok("a section that exists ONLY in the variant file is added to the base topic with blank Flagship text", (function () {
+    var base = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nFlagship text.").topics;
+    var variant = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nV text.\n\n## 1.2 Extra\n\nOnly-in-variant text.");
+    var warnings = MI.mergeVariant(base, variant, "coastal");
+    var extra = base[0].sections.filter(function (s) { return s.key === "1.2"; })[0];
+    return !!extra && extra.text === "" && extra.overrides.coastal === "Only-in-variant text." &&
+      warnings.some(function (w) { return /only exists in the "coastal" file/.test(w); });
+  })());
+
+  ok("a topic that exists ONLY in the variant file is added with blank Flagship content", (function () {
+    var base = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nFlagship text.").topics;
+    var variant = MI.parse("# 2 Variant-only chapter\n\n## 2.1 Sub\n\nVariant-only text.");
+    var warnings = MI.mergeVariant(base, variant, "coastal");
+    var extraTopic = base.filter(function (t) { return t.key === "2"; })[0];
+    return base.length === 2 && !!extraTopic && extraTopic.sections[0].overrides.coastal === "Variant-only text." &&
+      warnings.some(function (w) { return /Topic "2 Variant-only chapter" only exists in the "coastal" file/.test(w); });
+  })());
+
+  var idxMI = src("index.html");
+  ok("index.html loads markdown-import.js", idxMI.indexOf("src/markdown-import.js") !== -1);
 })();
 
 // resolveVariant must recurse into NESTED containers (columns / frame-group children /
