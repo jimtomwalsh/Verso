@@ -712,6 +712,11 @@ In this mode:
   spans several paragraphs is fine: the toolbar still appears, so an alternate or a comment can cover
   a whole passage, not just a single paragraph. A multi-paragraph mark highlights across every
   paragraph it covers and rides your edits the same way — edit the middle of it and it stays put.
+- **Insert an image or a table.** Once unlocked, the bottom bar shows an **image** and a **table**
+  button. Each drops the new block **after the block you're in** (or at the end of the document if you
+  haven't clicked into one). An image opens your file picker and is stored in the document itself; a
+  table starts as a small 2×2 you can build out. Both are whole **objects** — click to select, and the
+  same alternate / comment actions apply. (The buttons are hidden while the source is locked.)
 - **Alternates: one base, many renditions.** The base prose is the single source of truth. When a
   particular course needs to say a span differently, add an **alternate** — the same meaning, no new
   information — and optionally tag it with what it's *appropriate for* (e.g. "quick-start" or

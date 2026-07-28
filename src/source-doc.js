@@ -156,6 +156,22 @@
     return (model.nodes || []).filter(function (n) { return n.type === "heading"; })
       .map(function (n) { return { key: n.key, level: n.level || 2, text: nodeText(n) }; });
   }
+  // Insert a node immediately AFTER the node keyed blockKey (or at the end when blockKey is null /
+  // not found -- the toolbar-insert decision: drop the new block after the selected one). The new
+  // node gets a fresh unique key; existing keys, marks (anchored by key) and variants ride along
+  // untouched. Pushes ONE undo. Returns the inserted node. Pure -> headlessly testable.
+  function insertNodeAfter(model, blockKey, node) {
+    if (!model) return null;
+    pushUndo(model);
+    var c = clone(node) || {};
+    if (NODE_TYPES.indexOf(c.type) === -1) c.type = "paragraph";
+    var k; do { k = nextId(model, "n"); } while (nodeByKey(model, k)); c.key = k;
+    model.nodes = model.nodes || [];
+    var at = model.nodes.length;
+    if (blockKey != null) { for (var i = 0; i < model.nodes.length; i++) { if (model.nodes[i].key === blockKey) { at = i + 1; break; } } }
+    model.nodes.splice(at, 0, c);
+    return c;
+  }
 
   // ---- marks ---------------------------------------------------------------
   // A text mark: {id,type,anchor:{nodeKey,start,len},variant,baseText,alt,comments,locations,stale,broken}.
@@ -1031,7 +1047,7 @@
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit,
@@ -1048,7 +1064,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,

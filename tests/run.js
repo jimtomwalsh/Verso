@@ -10979,6 +10979,45 @@ section("Source rewrite: export a topic to Markdown (product-rail-source-rw-mark
   ok("an empty document serialises to just a trailing newline", SD.toMarkdown(SD.create([])) === "\n");
 })();
 
+// ---- product-rail-source-rw-insert-image-table: toolbar insert of image/table nodes ----
+// Object-marks made image/table markable; this is the CREATE half. SourceDoc.insertNodeAfter drops a
+// new node after the selected block (handoff C2), fresh-keyed, existing marks/keys/variants untouched.
+// Toolbar wiring (file picker, re-render) is DOM (browser-verified); the placement core is pure.
+section("Source rewrite: insert image/table node after a block (product-rail-source-rw-insert-image-table)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var m = SD.create([
+    { type: "heading", level: 2, text: "A" },
+    { type: "paragraph", text: "first" },
+    { type: "paragraph", text: "second" }
+  ]);
+  var kFirst = m.nodes[1].key;
+  var img = SD.insertNodeAfter(m, kFirst, { type: "image", src: "data:image/png;base64,X", alt: "diagram" });
+  ok("insertNodeAfter places the node immediately after the target block", m.nodes[2] === SD.nodeByKey(m, img.key) && m.nodes[2].type === "image");
+  ok("the inserted node gets a fresh unique key", !!img.key && m.nodes.filter(function (n) { return n.key === img.key; }).length === 1);
+  ok("insert does not disturb the other nodes' keys/order", m.nodes[1].key === kFirst && SD.nodeText(m.nodes[3]) === "second");
+  ok("insertNodeAfter with a null/unknown key appends at the end", (function () {
+    var d = SD.create([{ type: "paragraph", text: "only" }]);
+    var t = SD.insertNodeAfter(d, null, { type: "table", rows: [["h"], [""]] });
+    return d.nodes[d.nodes.length - 1].key === t.key && t.type === "table";
+  })());
+  ok("an inserted image/table is a markable object node", SD.isMarkableObjectNode(SD.nodeByKey(m, img.key)) === true);
+  ok("a mark anchored before the insert still resolves (keys untouched)", (function () {
+    var d = SD.create([{ type: "paragraph", text: "keep this marked" }]);
+    var k = d.nodes[0].key;
+    var mk = SD.addMark(d, { type: "comment", anchor: { nodeKey: k, start: 0, len: 4 } });
+    SD.insertNodeAfter(d, k, { type: "image", src: "x", alt: "y" });
+    return SD.anchorText(d, SD.markById(d, mk.id).anchor) === "keep";
+  })());
+  ok("insertNodeAfter is undoable (pushes one undo)", (function () {
+    var d = SD.create([{ type: "paragraph", text: "p" }]);
+    SD.insertNodeAfter(d, d.nodes[0].key, { type: "table", rows: [[""]] });
+    var n = d.nodes.length; SD.undo(d);
+    return n === 2 && d.nodes.length === 1;
+  })());
+  ok("an unknown node type falls back to paragraph (never a stray type)", SD.insertNodeAfter(SD.create([]), null, { type: "wat", text: "z" }).type === "paragraph");
+})();
+
 // ---- Source rewrite (Epic 2b): mark painting engine loads (DOM-verified in browser) ----
 // source-marks.js is the DOM painting layer (CSS Custom Highlight over live Ranges). Its offset
 // walking + selection reading need a real DOM/TreeWalker, so its behaviour is proven by the

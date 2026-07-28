@@ -11863,6 +11863,60 @@
   }
 
   // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
+  // The block the next insert lands AFTER (spec 2b §6 / handoff C2: "after the currently selected
+  // block"): the object-selected node, else the block under the caret/selection, else the doc's last
+  // node. Insert targets a whole block, never the text caret.
+  function currentSourceBlockKey() {
+    if (__sourceObjectSelKey) return __sourceObjectSelKey;
+    var art = document.getElementById("source-stage-article");
+    var sel = window.getSelection && window.getSelection();
+    if (sel && sel.focusNode && art && art.contains(sel.focusNode)) {
+      var n = sel.focusNode.nodeType === 3 ? sel.focusNode.parentNode : sel.focusNode;
+      var el = n && n.closest ? n.closest("[data-node]") : null;
+      if (el) return el.getAttribute("data-node");
+    }
+    if (__sourceSelAnchor && __sourceSelAnchor.nodeKey) return __sourceSelAnchor.nodeKey;
+    var m = __sourceDocModel;
+    return (m && m.nodes && m.nodes.length) ? m.nodes[m.nodes.length - 1].key : null;
+  }
+  // Insert a node after the current block, persist, re-render the article, and select the new object
+  // so its alternate/comment actions are one click away. Shared by the image + table inserts.
+  function insertSourceNodeAfterCurrent(topic, node) {
+    var SD = window.SourceDoc, model = __sourceDocModel; if (!SD || !model) return;
+    var inserted = SD.insertNodeAfter(model, currentSourceBlockKey(), node);
+    persistSourceDocModel(topic, model);
+    renderSourceArticle(); // full clean rebuild (headEl + article + docbar + marks)
+    if (inserted && SD.isMarkableObjectNode && SD.isMarkableObjectNode(inserted)) selectSourceObject(topic, inserted.key);
+    return inserted;
+  }
+  // Toolbar image insert: pick a file, store it inline as a data-URI (the Source doc is never
+  // exported to SCORM, so the simple storage wins -- handoff C2), insert an image node after the
+  // current block. Alt defaults to the file name; caption/alt are editable later via the object.
+  function insertSourceImage(topic) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to insert an image."); return; }
+    var inp = h("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; inp.remove();
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var alt = String(f.name || "image").replace(/\.[^.]+$/, "");
+        insertSourceNodeAfterCurrent(topic, { type: "image", src: rd.result, alt: alt });
+        sourceToast("Image inserted.");
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  // Toolbar table insert: a 2x2 starter (header row + one body row) after the current block. Rich
+  // in-cell editing is the spec 2b §6 fast-follow; this is the create half -- the table renders and
+  // is markable/movable as an object immediately.
+  function insertSourceTable(topic) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to insert a table."); return; }
+    insertSourceNodeAfterCurrent(topic, { type: "table", rows: [["Column 1", "Column 2"], ["", ""]] });
+    sourceToast("Table inserted.");
+  }
   // Document-scope only; glyph-only IconButtons from the DS.
   function buildSourceDocBar(topic) {
     var U = window.VersoUI;
@@ -11876,7 +11930,17 @@
     // replaces the old all-marks-drawer toggle that stacked a second surface over the info aside.
     var panelBtn = U && U.IconButton ? U.IconButton({ icon: "columns-2", label: __sourceInfoOpen ? "Hide the details panel" : "Show the details panel", active: __sourceInfoOpen, onClick: function () { __sourceInfoOpen = !__sourceInfoOpen; applySourceInfoVisibility(); updateSourceDocBar(); } }) : h("button", null, "Panel");
     panelBtn.classList.add("source-docbar__btn");
-    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(panelBtn);
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn);
+    // Insert image / table -- base-content mutations, so shown ONLY when unlocked (the same rule as
+    // the selection bar's rich-text buttons). Each drops a new node after the current block.
+    if (__sourceUnlocked && U && U.IconButton) {
+      var imgBtn = U.IconButton({ icon: "image", label: "Insert an image after the current block", onClick: function () { insertSourceImage(topic); } });
+      imgBtn.classList.add("source-docbar__btn");
+      var tblBtn = U.IconButton({ icon: "table", label: "Insert a table after the current block", onClick: function () { insertSourceTable(topic); } });
+      tblBtn.classList.add("source-docbar__btn");
+      bar.appendChild(imgBtn); bar.appendChild(tblBtn);
+    }
+    bar.appendChild(marksBtn); bar.appendChild(panelBtn);
     bar.setAttribute("data-source-docbar", "1");
     return bar;
   }
