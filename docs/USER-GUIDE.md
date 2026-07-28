@@ -661,6 +661,17 @@ In this mode:
   rich-text buttons (bold, italic, bullets) only appear once you've unlocked, since they change the
   base prose. There is no "link" button here: linking a course to a piece of source happens in the
   Edit stage, not Source.
+- **Alternates: one base, many renditions.** The base prose is the single source of truth. When a
+  particular course needs to say a span differently, add an **alternate** — the same meaning, no new
+  information — and optionally tag it with what it's *appropriate for* (e.g. "quick-start" or
+  "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
+  an alternate opens a **panel pinned in the right margin** that tracks the span as you scroll,
+  showing the **base vs the alternate**, a status dot, and Edit / Delete.
+- **Staleness keeps alternates honest.** If you later change the base text, any alternate written
+  against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
+  History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
+  reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
+  Ctrl/Cmd+Z brings the text and the mark back.
 - **Marks ride your edits.** An alternate or comment is anchored to the exact span you selected;
   as you edit around it the anchor moves with the text, and if you delete the anchored text the
   mark is flagged as broken. **Ctrl/Cmd+Z** is a document-aware undo — it restores deleted text

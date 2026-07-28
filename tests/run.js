@@ -10923,7 +10923,7 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
   ok("NO create-link action on the Source selection bar (linking is Edit-stage)", !/seg\("link"/.test(e) && !/data-cmd="link"/.test(e));
   ok("a selection extending past a mark flips create -> the ⟳ update action", /__sourceUpdateTarget = window\.SourceDoc\.markExtendedBy\(__sourceDocModel, anchor\)/.test(e));
-  ok("annotation uses an inline composer, not a raw prompt()", /function openSourceComposer\(mode, onSave\)/.test(e) && !/window\.prompt\(cmd/.test(e));
+  ok("annotation uses an inline composer, not a raw prompt()", /function openSourceComposer\(mode, onSave, opts\)/.test(e) && !/window\.prompt\(cmd/.test(e));
 
   // index.html load order
   var idx = src("index.html");
@@ -10970,10 +10970,58 @@ section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
   var e = src("src/editor.js");
   ok("topicMatchesQuery uses SourceDoc fuzzy full-text (not a title substring)", /window\.SourceDoc\.fuzzyMatch\(window\.SourceDoc\.searchText\(topic\), query\)/.test(e));
   ok("the article mounts a TOC rail from heading nodes with scroll-spy", /function buildSourceToc\(model, host\)[\s\S]{0,400}window\.SourceDoc\.headings\(model\)/.test(e) && /function updateSourceScrollSpy\(\)/.test(e));
-  ok("scroll-spy is re-bound remove-then-add so it survives re-renders", /host\.removeEventListener\("scroll", updateSourceScrollSpy\);[\s\S]{0,80}host\.addEventListener\("scroll", updateSourceScrollSpy\)/.test(e));
+  ok("scroll-spy is re-bound remove-then-add so it survives re-renders", /host\.removeEventListener\("scroll", onSourceArticleScroll\);[\s\S]{0,120}host\.addEventListener\("scroll", onSourceArticleScroll\)/.test(e) && /function onSourceArticleScroll\(\)[\s\S]{0,60}updateSourceScrollSpy\(\)/.test(e));
   ok("the doc-bar carries an all-marks drawer toggle (layers glyph)", /icon: "layers", label: "All marks"/.test(e));
   ok("the drawer offers All / Alternates / Linked / Comments filters", /SOURCE_DRAWER_FILTERS = \[[\s\S]{0,220}"alternate"[\s\S]{0,120}"link"[\s\S]{0,120}"comment"/.test(e));
   ok("a doc-topic swap drops the drawer (it belongs to the continuous-document view)", /if \(!\(topic && topicHasDoc\(topic\)\)\) \{ __sourceDrawerOpen = false;/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): demand-driven alternates + staleness (alternates-staleness) ----
+// The fixed 3-facet toggle dies: a span carries 0..N tagged alternates, each flagging stale when
+// the base drifts. Staleness + resolution are PURE (proven here); the pinned contextual panel is
+// wired in editor.js (browser-verified) and asserted structurally.
+section("Source rewrite: demand-driven alternates + staleness (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "paragraph", text: "The unit arbitrates contention by headroom." }]);
+  var k = model.nodes[0].key, phrase = "arbitrates contention by headroom";
+  var anchor = { nodeKey: k, start: model.nodes[0].text.indexOf(phrase), len: phrase.length };
+  var alt = SD.addMark(model, { type: "alternate", anchor: anchor, alt: "decides who wins when there's a clash", tag: "plain-language" });
+
+  ok("an alternate carries a tag (what it is appropriate for)", alt.tag === "plain-language");
+  ok("a fresh alternate is in sync (green), not stale", alt.stale === false && SD.markStatus(alt).dot === "green");
+
+  ok("editing the base span flips the alternate to stale (yellow) -- nothing auto-rewrites", (function () {
+    SD.applyTextEdit(model, k, "The unit arbitrates contention purely by headroom.");
+    var m = SD.markById(model, alt.id);
+    return m.stale === true && SD.markStatus(m).dot === "yellow" && m.alt === "decides who wins when there's a clash";
+  })());
+  ok("going stale logs a discrete mark-stale History entry (provenance, spec 3.2)", (function () {
+    var ev = (model.history || []).filter(function (h) { return h.type === "mark-stale" && h.markId === alt.id; });
+    return ev.length === 1;
+  })());
+  ok("Mark reviewed (updateMark) re-syncs baseText and clears stale", (function () {
+    var m = SD.markById(model, alt.id);
+    SD.updateMark(model, m.id, m.anchor);
+    return SD.markById(model, alt.id).stale === false;
+  })());
+
+  // pure resolution
+  var m2 = SD.create([{ type: "paragraph", text: "Vent the manifold." }]);
+  var kk = m2.nodes[0].key, a2 = { nodeKey: kk, start: 0, len: 4 }; // "Vent"
+  var altA = SD.addMark(m2, { type: "alternate", anchor: a2, alt: "Release", tag: "quick-start" });
+  var altB = SD.addMark(m2, { type: "alternate", anchor: a2, alt: "Open", tag: "" });
+  ok("alternatesFor returns every alternate on exactly the span", SD.alternatesFor(m2, kk, 0, 4).length === 2);
+  ok("pickAlternate: an exact tag match wins", SD.pickAlternate([altA, altB], "quick-start") === altA);
+  ok("pickAlternate: no tag match falls back to the untagged catch-all", SD.pickAlternate([altA, altB], "nope") === altB);
+  ok("pickAlternate: empty list resolves to null (use the base)", SD.pickAlternate([], "quick-start") === null);
+
+  // editor.js wiring (browser-verified live; asserted structurally here)
+  var e = src("src/editor.js");
+  ok("selecting a span-with-alternate opens the pinned contextual panel", /syncSourceAltPanel\(topic, m && m\.type === "alternate" \? m\.id : null\)/.test(e) && /function renderSourceAltPanel\(topic\)/.test(e));
+  ok("the alt panel shows base vs alternate + a status dot", /source-altpanel__base"[\s\S]{0,80}anchorText\(model, m\.anchor\)/.test(e) && /source-drawer__dot source-drawer__dot--" \+ status\.dot/.test(e));
+  ok("a stale alternate offers a Mark reviewed re-sync (updateMark)", /"Mark reviewed"[\s\S]{0,220}SD\.updateMark\(model, m\.id, m\.anchor\)/.test(e));
+  ok("the alt composer captures an optional tag; the panel light-dismisses on Escape", /source-composer__tag/.test(e) && /function onSourceAltPanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceAltPanel/.test(e));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

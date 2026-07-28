@@ -10704,6 +10704,7 @@
   var __sourceMarksEngine = null;  // the SourceMarks painting engine bound to the mounted article
   var __sourceDrawerOpen = false;  // the on-demand all-marks drawer (toc-search-drawer)
   var __sourceDrawerFilter = "all"; // all | alternate | link | comment
+  var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
   // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
   // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
   // unlocks them, mirroring the familiar Photos/Files/Gmail toggle rather than always
@@ -11195,7 +11196,7 @@
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     // the all-marks drawer belongs to the continuous-document view only -- drop it when the
     // active topic isn't a doc topic (the doc path re-syncs it against the live model below).
-    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); }
+    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); closeSourceAltPanel(); }
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
       renderSourceInfoPanel(null);
@@ -11506,9 +11507,9 @@
     col.appendChild(art);
     layout.appendChild(col);
     host.appendChild(layout);
-    // scroll-spy: re-bound each render (host survives innerHTML clears), so remove-then-add.
-    host.removeEventListener("scroll", updateSourceScrollSpy);
-    host.addEventListener("scroll", updateSourceScrollSpy);
+    // scroll-spy + alt-panel tracking: re-bound each render (host survives innerHTML clears).
+    host.removeEventListener("scroll", onSourceArticleScroll);
+    host.addEventListener("scroll", onSourceArticleScroll);
     requestAnimationFrame(updateSourceScrollSpy);
 
     // per-block contentEditable when unlocked; the keydown guard (below) enforces the lock so
@@ -11525,6 +11526,8 @@
       SD.applyTextEdit(model, block.getAttribute("data-node"), block.textContent);
       persistSourceDocModel(topic, model);
       repaintSourceMarks();
+      // a base edit can flip an open alternate to stale -> re-render its panel (status + base line).
+      if (__sourceAltPanelMarkId) renderSourceAltPanel(topic);
     });
     // two-layer lock: typing into base prose while locked is refused with a reminder; Ctrl+Z is
     // our owned undo (native undo would not restore marks).
@@ -11548,12 +11551,16 @@
       var sel = window.getSelection(); if (!sel || !sel.focusNode) return;
       var m = __sourceMarksEngine.markAtPoint(sel.focusNode, sel.focusOffset);
       __sourceMarksEngine.setActive(m ? m.id : null); repaintSourceMarks();
+      // selecting a span-with-alternate opens the pinned contextual panel (spec 3.2); any other
+      // click closes it. Comment/link marks are handled by their own tickets.
+      syncSourceAltPanel(topic, m && m.type === "alternate" ? m.id : null);
     });
     document.addEventListener("selectionchange", onSourceSelectionChange);
 
     host.appendChild(buildSourceDocBar(topic));
     host.appendChild(buildSourceSelBar(topic));
     renderSourceDrawer(); // re-sync the all-marks drawer to the live model after a re-render
+    if (__sourceAltPanelMarkId) renderSourceAltPanel(topic); // re-pin the alt panel after a re-render
   }
 
   function applySourceLockState(art) {
@@ -11627,6 +11634,94 @@
     Array.prototype.forEach.call(toc.querySelectorAll(".source-doc__toc-item"), function (it) {
       it.classList.toggle("is-current", it.getAttribute("data-toc-key") === currentKey);
     });
+  }
+  function onSourceArticleScroll() {
+    updateSourceScrollSpy();
+    // the alt panel is absolutely positioned within the scrolling content, so it tracks its
+    // span for free on scroll -- no per-scroll reposition needed.
+  }
+
+  // The contextual alternate panel (spec 3.2, primary view): selecting a span-with-alternate
+  // opens a card pinned in the right gutter, tracking the span like a margin comment. Shows base
+  // vs alternate + status; stale alternates offer a "Mark reviewed" re-sync. Annotation-tier, so
+  // it works whether or not the base is unlocked.
+  function onSourceAltPanelKey(ev) { if (ev.key === "Escape") closeSourceAltPanel(); }
+  function closeSourceAltPanel() {
+    __sourceAltPanelMarkId = null;
+    var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceAltPanelKey);
+  }
+  function syncSourceAltPanel(topic, markId) {
+    if (!markId) { closeSourceAltPanel(); return; }
+    __sourceAltPanelMarkId = markId;
+    renderSourceAltPanel(topic);
+  }
+  function positionSourceAltPanel() {
+    var panel = document.querySelector("[data-source-altpanel]"); if (!panel || !__sourceMarksEngine) return;
+    var model = __sourceDocModel, SD = window.SourceDoc;
+    var m = model && SD.markById(model, __sourceAltPanelMarkId); if (!m) return;
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var rect = __sourceMarksEngine.rectFor(m); if (!rect) return;
+    panel.style.top = Math.max(8, rect.top - host.getBoundingClientRect().top + host.scrollTop) + "px";
+  }
+  function renderSourceAltPanel(topic) {
+    var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceAltPanelKey);
+    var model = __sourceDocModel, SD = window.SourceDoc;
+    if (!model || !__sourceAltPanelMarkId) return;
+    var m = SD.markById(model, __sourceAltPanelMarkId);
+    if (!m || m.type !== "alternate") { __sourceAltPanelMarkId = null; return; }
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var status = SD.markStatus(m);
+    var panel = h("aside", "source-altpanel"); panel.setAttribute("data-source-altpanel", "1");
+    panel.setAttribute("aria-label", "Alternate rendition");
+    var head = h("div", "source-altpanel__head");
+    var dot = h("span", "source-drawer__dot source-drawer__dot--" + status.dot); dot.title = status.label;
+    head.appendChild(dot);
+    head.appendChild(h("div", "source-altpanel__title", "Alternate"));
+    var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
+    close.innerHTML = window.Icon ? window.Icon("x") : "close";
+    close.addEventListener("click", function () { closeSourceAltPanel(); });
+    head.appendChild(close);
+    panel.appendChild(head);
+    // tag = the canonical DS Badge (tone accent -- its stated use is "variant tags"), not a one-off pill.
+    if (m.tag) {
+      var tagWrap = h("div", "source-altpanel__tag");
+      tagWrap.appendChild(window.VersoUI && window.VersoUI.Badge ? window.VersoUI.Badge({ tone: "accent", children: "For: " + m.tag }) : document.createTextNode("For: " + m.tag));
+      panel.appendChild(tagWrap);
+    }
+    var baseWrap = h("div", "source-altpanel__field");
+    baseWrap.appendChild(h("div", "source-altpanel__label", "Base"));
+    baseWrap.appendChild(h("div", "source-altpanel__base", SD.anchorText(model, m.anchor) || "(empty)"));
+    panel.appendChild(baseWrap);
+    var altWrap = h("div", "source-altpanel__field");
+    altWrap.appendChild(h("div", "source-altpanel__label", "Alternate"));
+    altWrap.appendChild(h("div", "source-altpanel__alt", m.alt || ""));
+    panel.appendChild(altWrap);
+    if (m.stale) panel.appendChild(h("div", "source-altpanel__stale", "Base changed since this alternate was written -- review it."));
+    var actions = h("div", "source-altpanel__actions");
+    if (m.stale) {
+      var reviewed = h("button", "source-altpanel__btn source-altpanel__btn--primary", "Mark reviewed"); reviewed.type = "button";
+      reviewed.title = "Re-sync: accept the current base as what this alternate was written against";
+      reviewed.addEventListener("click", function () { SD.updateMark(model, m.id, m.anchor); persistSourceDocModel(topic, model); repaintSourceMarks(); renderSourceAltPanel(topic); });
+      actions.appendChild(reviewed);
+    }
+    var edit = h("button", "source-altpanel__btn", "Edit"); edit.type = "button";
+    edit.addEventListener("click", function () {
+      openSourceComposer("alternate", function (val, tag) { m.alt = val; m.tag = tag || ""; persistSourceDocModel(topic, model); repaintSourceMarks(); renderSourceAltPanel(topic); }, { alt: m.alt, tag: m.tag });
+    });
+    actions.appendChild(edit);
+    var del = h("button", "source-altpanel__btn source-altpanel__btn--danger", "Delete"); del.type = "button";
+    del.addEventListener("click", function () {
+      var i = model.marks.indexOf(m); if (i >= 0) { SD.pushUndo(model); model.marks.splice(i, 1); }
+      persistSourceDocModel(topic, model); repaintSourceMarks(); closeSourceAltPanel();
+    });
+    actions.appendChild(del);
+    panel.appendChild(actions);
+    host.appendChild(panel);
+    positionSourceAltPanel();
+    document.removeEventListener("keydown", onSourceAltPanelKey);
+    document.addEventListener("keydown", onSourceAltPanelKey);
   }
 
   // The on-demand all-marks drawer (spec 2.3): the marks list is demoted from the primary
@@ -11770,10 +11865,15 @@
     if (cmd === "alternate" || cmd === "comment") {
       if (!__sourceSelAnchor) return;
       var anchor = __sourceSelAnchor;
-      openSourceComposer(cmd, function (val) {
-        if (cmd === "alternate") SD.addMark(__sourceDocModel, { type: "alternate", anchor: anchor, alt: val });
-        else SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor, comments: [{ who: "you", ts: "", text: val }] });
-        persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+      openSourceComposer(cmd, function (val, tag) {
+        if (cmd === "alternate") {
+          var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: anchor, alt: val, tag: tag || "" });
+          persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+          syncSourceAltPanel(topic, mk.id); // open the contextual panel on the new alternate
+        } else {
+          SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor, comments: [{ who: "you", ts: "", text: val }] });
+          persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+        }
         sourceToast(cmd === "alternate" ? "Alternate added." : "Comment added.");
       });
     }
@@ -11781,12 +11881,22 @@
   // A small inline composer positioned under the selection -- the DS idiom for capturing an
   // alternate rendition or a comment (no raw prompt(); the rich pinned panels are the
   // alternates-staleness + comments-adapter tickets). Annotation stays available even when locked.
-  function openSourceComposer(mode, onSave) {
+  function openSourceComposer(mode, onSave, opts) {
+    opts = opts || {};
     var existing = document.querySelector("[data-source-composer]"); if (existing) existing.remove();
     var wrap = h("div", "source-composer"); wrap.setAttribute("data-source-composer", "1");
     wrap.appendChild(h("div", "source-composer__lbl", mode === "alternate" ? "Alternate rendition" : "Comment"));
     var ta = h("textarea", "source-composer__text"); ta.placeholder = mode === "alternate" ? "Another way to say this..." : "Add a comment...";
+    if (opts.alt != null) ta.value = opts.alt;
     wrap.appendChild(ta);
+    // alternates carry an optional tag -- what this rendition is "appropriate for" (spec 3.2).
+    var tagIn = null;
+    if (mode === "alternate") {
+      tagIn = h("input", "source-composer__tag"); tagIn.type = "text";
+      tagIn.placeholder = "Appropriate for (optional) -- e.g. quick-start, plain-language";
+      if (opts.tag) tagIn.value = opts.tag;
+      wrap.appendChild(tagIn);
+    }
     var row = h("div", "source-composer__row");
     var cancel = h("button", "source-composer__btn", "Cancel"); cancel.type = "button";
     var save = h("button", "source-composer__btn source-composer__btn--primary", "Save"); save.type = "button";
@@ -11796,7 +11906,7 @@
     document.body.appendChild(wrap);
     function close() { if (wrap.parentNode) wrap.remove(); }
     cancel.addEventListener("click", close);
-    save.addEventListener("click", function () { var v = ta.value.trim(); close(); if (v) onSave(v); });
+    save.addEventListener("click", function () { var v = ta.value.trim(); var t = tagIn ? tagIn.value.trim() : undefined; close(); if (v) onSave(v, t); });
     ta.focus();
   }
   // a light transient reminder for the Source stage (the lock reminder + annotation confirms).
@@ -11814,7 +11924,10 @@
     setActiveTopic: function (id) { __sourceActiveTopicId = id; __sourceDocModel = null; __sourceDocModelTopicId = null; __sourceUnlocked = false; },
     setUnlocked: function (v) { __sourceUnlocked = !!v; applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); },
     isUnlocked: function () { return __sourceUnlocked; },
-    getModel: function () { return __sourceDocModel; }
+    getModel: function () { return __sourceDocModel; },
+    openAltPanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceAltPanel(t, id); },
+    altPanelMarkId: function () { return __sourceAltPanelMarkId; },
+    editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); }
   };
 
 
