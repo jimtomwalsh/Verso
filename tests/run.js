@@ -2213,6 +2213,23 @@ section("editor-rework tab scope");
   ok("null-safe on empty inputs", g.visibleTabIds(null, reg, "").length === 0 && g.visibleTabIds(open, null, "").length === 0);
 })();
 
+// ---- SPEC 7: canvas geometry helpers (pure) ----
+section("editor-rework canvas geometry");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-geo-canvas-start \*\/([\s\S]*?)\/\* @pure-geo-canvas-end \*\//);
+  if (!m) { ok("locate @pure-geo-canvas fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { worldGeoClass: worldGeoClass, frameContentOverflows: frameContentOverflows };")();
+  ok("reflow -> geo-reflow", g.worldGeoClass("reflow") === "geo-reflow");
+  ok("frame -> geo-frame", g.worldGeoClass("frame") === "geo-frame");
+  ok("paged -> geo-paged", g.worldGeoClass("paged") === "geo-paged");
+  ok("unknown geo falls back to geo-reflow", g.worldGeoClass("isometric") === "geo-reflow" && g.worldGeoClass(undefined) === "geo-reflow");
+  ok("content taller than the frame overflows", g.frameContentOverflows(900, 720) === true);
+  ok("content within the frame does not overflow", g.frameContentOverflows(700, 720) === false);
+  ok("a 2px slack avoids false positives at the boundary", g.frameContentOverflows(721, 720) === false && g.frameContentOverflows(723, 720) === true);
+  ok("a zero-height frame never reports overflow", g.frameContentOverflows(500, 0) === false);
+})();
+
 // ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
 section("product-rail ProductsStore");
 (function () {

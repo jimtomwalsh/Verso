@@ -17153,11 +17153,27 @@
 
   // shows the device viewport line so you can gauge how much content sits below
   // the fold. Real scrolling lives in demo mode, not the authoring canvas.
+  // SPEC 7 canvas geometry: a page renders through the SAME renderPage() in every geometry
+  // (pure-render invariant held); only the frame CONTAINER changes per doc.meta.geo. reflow
+  // = today's fluid vertical flow (no rule -> pixel-identical). frame = a fixed one-screen
+  // surface that clips + warns on overflow. paged = a page-height surface with page-break
+  // guides, so content flows across page sections. These two helpers are PURE (headless-
+  // tested); the geometry itself is CSS on `.world.geo-<geo> .frame`, driven off this class.
+  /* @pure-geo-canvas-start */
+  function worldGeoClass(geo) { return "geo-" + (geo === "frame" || geo === "paged" ? geo : "reflow"); }
+  function frameContentOverflows(scrollH, clientH) { return clientH > 0 && scrollH > clientH + 2; }
+  /* @pure-geo-canvas-end */
+  var _worldGeo = "reflow";
+
   function buildWorld() {
     world = h("div", "world");
     frameDescs = [];
     var deviceH = BREAKPOINTS[activeBp].h;
     var renderDoc = currentDoc(); // base doc, or the resolved doc when previewing a variant
+    // Geometry cell drives the frame container (reflow / frame / paged). Untagged/legacy docs
+    // resolve to reflow via the doc-type model -> today's canvas, unchanged.
+    _worldGeo = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(renderDoc).geo : "reflow";
+    world.classList.add(worldGeoClass(_worldGeo));
 
     // JJJJ: group pages into chapter COLUMNS; each page's column X is known now
     // (its row Y is set after measure in layoutColumns). page.id -> {col,row}.
@@ -17327,6 +17343,12 @@
     colY.forEach(function (y) { if (y != null && y - GAP_Y > maxH) maxH = y - GAP_Y; });
     worldH = maxH || FRAME_H;
     world.style.height = worldH + "px";
+    // SPEC 7: in fixed-frame geometry a page is clipped to one screen -- flag any frame whose
+    // content overflows so the canvas shows the amber warning (never silently spawns a slide).
+    // Measured here (post-attach) before culling, alongside the height reads above.
+    if (_worldGeo === "frame") frameDescs.forEach(function (f) {
+      if (f.frame) f.frame.classList.toggle("is-overflowing", frameContentOverflows(f.frame.scrollHeight, f.frame.clientHeight));
+    });
     // Perf (#150): now that the TRUE heights are measured + stacked, pin each frame's
     // contain-intrinsic-size to its measured height and enable content-visibility:auto,
     // so the browser SKIPS painting + laying-out pages scrolled out of the viewport. The
