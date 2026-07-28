@@ -8486,7 +8486,11 @@ section("Product Rail: Source stage variant columns");
   ok("switching topics resets the toggled-variant selection", /__sourceActiveVariants = \[\]; \/\/ a different topic may have a different variant set/.test(e));
   ok("a Product with no declared variants renders no pill row at all", /if \(!declared\.length\) return null;/.test(e));
   ok("setProductVariants writes onto the Product, never invents one", /function setProductVariants\(productId, variants\) \{\s*var p = productId && window\.ProductsStore\[productId\]; if \(!p\) return null;/.test(e));
-  ok("__productRail exposes setProductVariants (fixture/future-authoring write path)", /window\.__productRail = \{ createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants \};/.test(e));
+  ok("__productRail exposes setProductVariants (fixture/future-authoring write path)", /window\.__productRail = \{ createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants,/.test(e));
+  ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
+  ok("lifecycle: deleteProductSource removes the master + every topic tagged to the Product", /function deleteProductSource\(pid\)[\s\S]{0,400}c\.kind === "topic" && c\.productId === pid[\s\S]{0,200}delete comps\[product\.groundTruthId\]/.test(e));
+  ok("lifecycle: deleteProduct clears the source, unlinks its courses, and removes the entry", /function deleteProduct\(pid\)[\s\S]{0,200}deleteProductSource\(pid\);\s*unlinkAllCoursesFromProduct\(pid\);\s*delete window\.ProductsStore\[pid\]/.test(e));
+  ok("lifecycle: the save menu offers Remove from Product only for a linked course", /doc\.meta\.productId && window\.ProductsStore\[doc\.meta\.productId\][\s\S]{0,200}action\("Remove from Product"[\s\S]{0,300}unlinkDocFromProduct\(doc\)/.test(e));
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
