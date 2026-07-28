@@ -294,6 +294,82 @@
       };
     });
   }
+  // ---- variants: per-node divergence (spec 4) -------------------------------
+  // Variants are a TOP-LEVEL structural layer, orthogonal to marks. A node carries three
+  // divergence types against the base (Flagship): SHARED (no override -> every variant shows the
+  // base), DIVERGED WORDING (node.variants[v] = {text}), and PRESENCE/ABSENCE (node.variants[v] =
+  // {absent:true} removes it from v; node.baseAbsent = true means it's ADDED-ONLY -- not in
+  // Flagship, present only for the variants that override it). Persistence is automatic: nodes are
+  // deep-cloned in toJSON/fromJSON, so `variants` + `baseAbsent` ride along with no schema change.
+  var FLAGSHIP = "Flagship";
+  function isFlagship(variant) { return !variant || variant === FLAGSHIP; }
+  // Resolve a node for ONE variant column -> { present, text, diverged, source }. source is one of
+  // "flagship" | "override" | "inherited" | "absent". `diverged` = the wording differs from the
+  // Flagship base (a real split, not an add-only or an inherit).
+  function nodeForVariant(node, variant) {
+    if (!node) return { present: false, text: "", diverged: false, source: "absent" };
+    var base = nodeText(node);
+    var ov = node.variants && node.variants[variant];
+    if (isFlagship(variant)) {
+      if (node.baseAbsent) return { present: false, text: "", diverged: false, source: "absent" };
+      return { present: true, text: base, diverged: false, source: "flagship" };
+    }
+    if (ov) {
+      if (ov.absent) return { present: false, text: "", diverged: false, source: "absent" };
+      if (ov.text != null) return { present: true, text: ov.text, diverged: !node.baseAbsent && ov.text !== base, source: "override" };
+    }
+    if (node.baseAbsent) return { present: false, text: "", diverged: false, source: "absent" }; // added-only: only overriding variants show it
+    return { present: true, text: base, diverged: false, source: "inherited" };
+  }
+  // Group the shown variants into columns for rendering. mode "shared" when every shown variant
+  // resolves to the SAME present+text (single column); else "split" (one column per shown variant,
+  // each carrying its own present/text/source so the UI can draw diverged text or an absent state).
+  function variantView(node, shownVariants) {
+    var shown = (shownVariants && shownVariants.length) ? shownVariants.slice() : [FLAGSHIP];
+    var cols = shown.map(function (v) {
+      var r = nodeForVariant(node, v);
+      return { variant: v, present: r.present, text: r.text, diverged: r.diverged, source: r.source };
+    });
+    var first = cols[0];
+    var allSame = cols.every(function (c) { return c.present === first.present && c.text === first.text; });
+    if (allSame && first.present) return { mode: "shared", text: first.text, cols: cols };
+    return { mode: "split", cols: cols };
+  }
+  function ensureVariants(node) { if (!node.variants) node.variants = {}; return node.variants; }
+  // Diverge (or set) a variant's wording. Flagship writes the base text; a named variant writes an
+  // override. Pushes undo. This is divergence type 2 (diverged wording).
+  function setVariantText(model, nodeKey, variant, text) {
+    var node = nodeByKey(model, nodeKey); if (!node) return null;
+    pushUndo(model);
+    if (isFlagship(variant)) { setNodeText(node, text); node.baseAbsent = false; }
+    else ensureVariants(node)[variant] = { text: text };
+    return node;
+  }
+  // Remove the node from a variant (presence/absence, type 3). Flagship removal sets baseAbsent
+  // (the node becomes added-only for whichever variants still override it). Pushes undo.
+  function removeNodeFromVariant(model, nodeKey, variant) {
+    var node = nodeByKey(model, nodeKey); if (!node) return null;
+    pushUndo(model);
+    if (isFlagship(variant)) node.baseAbsent = true;
+    else ensureVariants(node)[variant] = { absent: true };
+    return node;
+  }
+  // Restore the node to a variant: clear its absent/override so it inherits the base again (or, for
+  // Flagship, re-present it). The inverse of removeNodeFromVariant / setVariantText. Pushes undo.
+  function restoreNodeToVariant(model, nodeKey, variant) {
+    var node = nodeByKey(model, nodeKey); if (!node) return null;
+    pushUndo(model);
+    if (isFlagship(variant)) node.baseAbsent = false;
+    else if (node.variants) delete node.variants[variant];
+    return node;
+  }
+  // Every variant key referenced anywhere in the doc (so the UI can offer columns even before the
+  // product's declared-variant list is wired). Sorted, unique, Flagship excluded (it's the base).
+  function variantsInDoc(model) {
+    var set = {};
+    (model.nodes || []).forEach(function (n) { if (n.variants) Object.keys(n.variants).forEach(function (v) { if (!isFlagship(v)) set[v] = true; }); });
+    return Object.keys(set).sort();
+  }
   // A short human label for an object node -- the "base" line an object mark's panel/drawer shows
   // in place of the span text a text mark would carry.
   function objectNodeLabel(node) {
@@ -538,7 +614,8 @@
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
-    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark
+    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
   };
 
   var SourceDoc = {
@@ -552,6 +629,7 @@
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
