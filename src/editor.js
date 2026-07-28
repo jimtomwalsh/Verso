@@ -11025,7 +11025,9 @@
       title: "Variants",
       subtitle: "The variants this Product's source can carry. Each is a column you can compare and a target you can import a variant manual into. Flagship is the base and is always present.",
       primaryLabel: "Done",
-      onPrimary: function () { shell.modal.close(); }
+      // Commit any name still typed in the add field before closing -- otherwise clicking Done
+      // after typing a name (without Enter / the + button) would silently discard it.
+      onPrimary: function () { if (addInput && addInput.value.trim()) doAdd(); shell.modal.close(); }
     });
     var box = shell.body;
     function current() { return declaredVariantsForProduct(window.ProductsStore || {}, pid); }
