@@ -649,6 +649,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   border-left: 1px solid var(--border-strong);
   overflow-y: auto;
 }
+/* Source IA reshape: the details panel is on-demand for a doc topic. Hiding it (the article is
+   flex:1) reclaims the width for the reading column + its right-margin contextual cards, so the
+   two right rails stop "doubling up". */
+.source-stage--info-hidden .source-stage__info { display: none; }
 .source-stage__linked-row {
   display: block; width: 100%; text-align: left;
   padding: 6px 0; border: none; background: transparent;
@@ -663,6 +667,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-doc__layout { display: flex; align-items: flex-start; gap: 24px; }
 .source-doc__col { position: relative; flex: 1 1 auto; max-width: 760px; margin: 0 auto; padding-bottom: 120px; }
 .source-doc__toc { position: sticky; top: 0; flex: 0 0 188px; align-self: flex-start; max-height: calc(100vh - 130px); overflow-y: auto; padding: 2px 0 20px; }
+.source-doc__toc-search { margin: 0 8px 12px; }
 .source-doc__toc-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 8px; padding-left: 12px; }
 .source-doc__toc-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-left: 2px solid transparent; padding: 4px 10px 4px 12px; font-size: 12px; line-height: 1.45; color: var(--text-secondary); cursor: pointer; border-radius: 0 5px 5px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .source-doc__toc-item:hover { background: var(--surface-panel); color: var(--text-primary, var(--text-secondary)); }

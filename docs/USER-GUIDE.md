@@ -706,7 +706,11 @@ In this mode:
   (linked / alternate / comment), so annotation never clutters plain reading.
 - **Jump around with the outline.** A **table of contents** down the left side lists the document's
   headings; click one to jump to it, and the heading you're currently reading stays highlighted as
-  you scroll. (The outline hides itself on a narrow window so the reading column keeps its width.)
+  you scroll. A **Find a heading** box above the outline filters it as you type, for long documents.
+  (The outline hides itself on a narrow window so the reading column keeps its width.)
+- **Topic details are on demand.** The right-hand panel (Linked in, History, Comments, source file)
+  stays hidden while you read, so the reading column and its margin cards get the full width. Click
+  **Topic details** in the bottom bar to slide it in when you want the overview, and again to hide it.
 - **Find a topic by anything in it.** The topic search at the top of the left nav now matches the
   full text of every topic — a heading or a phrase inside the document, not just the title.
 - **See every mark at once.** The **All marks** button in the bottom bar opens a drawer listing all

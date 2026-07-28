@@ -8796,7 +8796,9 @@ section("Product Rail: Source stage info panel");
   // Wiring: renderSourceArticle() drives the info panel from the SAME topic-selection
   // state as the article -- one source of truth, no separate re-fetch/resync path.
   ok("no topic selected -> info panel explicitly cleared (not left stale from the last topic)", /renderSourceInfoPanel\(null\);\s*\n\s*return;/.test(e));
-  ok("a selected topic drives the info panel from the SAME render pass as the article", /renderSourceInfoPanel\(topic\);\s*\n\s*\}\s*\n\s*\n\s*\/\/ Product Rail \(source-stage-info-panel\)/.test(e));
+  ok("a selected topic drives the info panel from the SAME render pass (via applySourceInfoVisibility)", /applySourceInfoVisibility\(\); \/\/ doc topic|applySourceInfoVisibility\(\); \/\/ details panel is on-demand/.test(e) && /applySourceInfoVisibility\(\); \/\/ legacy/.test(e));
+  ok("the details panel is on-demand for a doc topic: default hidden, doc-bar toggle, article widens", /function applySourceInfoVisibility\(\)[\s\S]{0,400}source-stage--info-hidden/.test(e) && /icon: "panel-right", label: "Topic details", active: __sourceInfoOpen/.test(e) && /\.source-stage--info-hidden \.source-stage__info \{ display: none; \}/.test(src("editor.css")));
+  ok("a 'find a heading' search sits above the in-doc TOC, scoped to this doc's headings", /placeholder = "Find a heading"/.test(e) && /window\.SourceDoc\.fuzzyMatch\(it\.textContent \|\| "", q\)/.test(e) && /source-doc__toc-search/.test(src("editor.css")));
 
   // renderSourceInfoPanel: reuses the canonical panelSection() helper (not a one-off
   // block) for both "Linked in" and "History" -- the same section chrome every other

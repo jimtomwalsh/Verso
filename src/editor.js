@@ -10707,6 +10707,8 @@
   var __sourceDrawerFilter = "all"; // all | alternate | link | comment
   var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
   var __sourceWhereUsedMarkId = null; // the link mark shown in the pinned where-used ("Linked in N") panel
+  var __sourceInfoOpen = false;    // the right "Topic details" panel -- default HIDDEN for a doc topic (the right margin belongs to the contextual cards); on-demand via the doc bar
+  var __sourceTocQuery = "";       // the "find a heading" filter above the in-doc TOC
   var __sourceOpenCommentMarkId = null; // the comment mark whose thread card is open, or null
   // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
   // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
@@ -11205,6 +11207,8 @@
     if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); closeSourceAltPanel(); closeSourceWherePanel(); closeSourceCommentThread(); }
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
+      var stg = document.getElementById("stage-source"); if (stg) stg.classList.remove("source-stage--info-hidden");
+      var inf = document.getElementById("source-stage-info"); if (inf) inf.hidden = false;
       renderSourceInfoPanel(null);
       return;
     }
@@ -11224,7 +11228,7 @@
     if (topicHasDoc(topic)) {
       host.appendChild(headEl);
       renderSourceNodeArticle(topic, host);
-      renderSourceInfoPanel(topic);
+      applySourceInfoVisibility(); // details panel is on-demand for a doc topic (default hidden)
       return;
     }
 
@@ -11406,7 +11410,7 @@
       host.appendChild(convertRow);
     }
 
-    renderSourceInfoPanel(topic);
+    applySourceInfoVisibility(); // legacy (section) topics always show the panel; clears any doc-hidden state
   }
 
   // Product Rail (source-stage-info-panel): "Linked in" (where-used, jumps to the
@@ -11455,10 +11459,27 @@
   // Structural History events (comment/alternate added, resolved, reopened) log to model.history,
   // but the info-panel History timeline must be RE-RENDERED to show them. Only the prose-commit
   // path did that, so structural events never surfaced until an unrelated re-render (bug #109).
-  // Call this after any structural event persists.
+  // Call this after any structural event persists. No-ops when the details panel is hidden (it
+  // re-renders fresh when re-opened, see applySourceInfoVisibility).
   function refreshSourceHistory(topic) {
     var t = topic || (__sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null);
-    if (t && typeof document !== "undefined" && document.getElementById("source-stage-info")) renderSourceInfoPanel(t);
+    if (t && __sourceInfoOpen && typeof document !== "undefined" && document.getElementById("source-stage-info")) renderSourceInfoPanel(t);
+  }
+  // Source IA reshape: the right "Topic details" panel is on-demand for a continuous-doc topic --
+  // its right margin belongs to the contextual cards (alt/comment/where-used), so a second
+  // persistent right rail was "doubling up" (James, pilot). Default hidden; a doc-bar toggle opens
+  // it. Legacy (section) topics keep it always visible. Hiding it widens the reading column (the
+  // article is flex:1, so `display:none` on the aside reclaims the space for free).
+  function applySourceInfoVisibility() {
+    if (typeof document === "undefined") return;
+    var stage = document.getElementById("stage-source");
+    var info = document.getElementById("source-stage-info");
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    var isDoc = topic && topicHasDoc(topic);
+    var hide = isDoc && !__sourceInfoOpen;
+    if (stage) stage.classList.toggle("source-stage--info-hidden", !!hide);
+    if (info) info.hidden = !!hide;
+    if (topic && !hide) renderSourceInfoPanel(topic); // render only when visible; fresh on open
   }
 
   // ==== Source rewrite (Epic 2b): continuous-document article + two-layer lock + toolbars ====
@@ -11684,10 +11705,14 @@
     marksBtn.classList.add("source-docbar__btn");
     var drawerBtn = U && U.IconButton ? U.IconButton({ icon: "layers", label: "All marks", active: __sourceDrawerOpen, onClick: function () { toggleSourceDrawer(); } }) : h("button", null, "Marks list");
     drawerBtn.classList.add("source-docbar__btn");
+    // On-demand "Topic details" panel (History / Linked-in / Comments / Source) -- default hidden so
+    // the right margin belongs to the contextual cards; this toggles it in (Source IA reshape).
+    var infoBtn = U && U.IconButton ? U.IconButton({ icon: "panel-right", label: "Topic details", active: __sourceInfoOpen, onClick: function () { __sourceInfoOpen = !__sourceInfoOpen; applySourceInfoVisibility(); updateSourceDocBar(); } }) : h("button", null, "Details");
+    infoBtn.classList.add("source-docbar__btn");
     var revertBtn = h("button", "source-docbar__revert", "Revert to sections");
     revertBtn.type = "button"; revertBtn.title = "Discard the continuous-document view and return to the section editor (section data is kept)";
     revertBtn.addEventListener("click", function () { revertTopicDoc(topic); });
-    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(drawerBtn); bar.appendChild(revertBtn);
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(drawerBtn); bar.appendChild(infoBtn); bar.appendChild(revertBtn);
     bar.setAttribute("data-source-docbar", "1");
     return bar;
   }
@@ -11705,7 +11730,16 @@
     var heads = window.SourceDoc.headings(model);
     if (!heads.length) return null;
     var nav = h("nav", "source-doc__toc"); nav.setAttribute("aria-label", "Document outline");
+    // "Find a heading" filter above the TOC (Source IA reshape). Reuses the canonical search-field
+    // (.vbrowser__search) scoped to THIS doc's headings via SourceDoc.fuzzyMatch -- distinct from the
+    // left topic search (which switches topics). Placeholder disambiguates the two.
+    var search = h("label", "vbrowser__search source-doc__toc-search");
+    search.innerHTML = window.Icon ? window.Icon("search") : "";
+    var sInput = h("input", "vbrowser__search-input"); sInput.type = "text"; sInput.placeholder = "Find a heading"; sInput.value = __sourceTocQuery;
+    search.appendChild(sInput);
+    nav.appendChild(search);
     nav.appendChild(h("div", "source-doc__toc-label", "On this page"));
+    var itemsWrap = h("div", "source-doc__toc-items");
     heads.forEach(function (hd) {
       var item = h("button", "source-doc__toc-item source-doc__toc-item--l" + (hd.level || 2), hd.text || "Untitled");
       item.type = "button"; item.setAttribute("data-toc-key", hd.key); item.title = hd.text || "";
@@ -11713,8 +11747,17 @@
         var target = host.querySelector('[data-node="' + hd.key + '"]');
         if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
       });
-      nav.appendChild(item);
+      itemsWrap.appendChild(item);
     });
+    nav.appendChild(itemsWrap);
+    function applyTocFilter() {
+      var q = (__sourceTocQuery || "").trim();
+      Array.prototype.forEach.call(itemsWrap.children, function (it) {
+        it.style.display = (!q || window.SourceDoc.fuzzyMatch(it.textContent || "", q)) ? "" : "none";
+      });
+    }
+    sInput.addEventListener("input", function () { __sourceTocQuery = sInput.value; applyTocFilter(); });
+    applyTocFilter();
     return nav;
   }
   // Highlights the TOC item whose heading is the last one scrolled above the top of the
@@ -12257,6 +12300,8 @@
     addLinkMark: function (anchor, locations) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "link", anchor: anchor, locations: locations || [] }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); return mk.id; },
     openWherePanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceWherePanel(t, id); },
     wherePanelMarkId: function () { return __sourceWhereUsedMarkId; },
+    setInfoOpen: function (v) { __sourceInfoOpen = !!v; applySourceInfoVisibility(); updateSourceDocBar(); },
+    infoOpen: function () { return __sourceInfoOpen; },
     editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); },
     addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); refreshSourceHistory(t); return cmark.id; },
     selectObject: function (nodeKey) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; selectSourceObject(t, nodeKey); },
