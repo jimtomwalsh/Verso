@@ -52,7 +52,9 @@ saved** status in the top bar confirms it.
 Interactive*) opens a small menu to change the document's matrix cell after creation. Toggling
 **Interactive / Static** applies at once; switching the **geometry** (Reflow / Fixed frame /
 Paged) warns first, because content reflows into the new geometry and may not survive 1:1 — you
-can switch back.
+can switch back. In a **Static** document the interactive block types (Quiz, Image hotspots,
+Web/HTML Embed, Accordion, Card Reveal, and the rest) are hidden from the Blocks library; any
+interactive blocks you already placed are kept, and turning interactivity back on restores them.
 
 > **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
 > before clearing browser data or switching machines (§15).
