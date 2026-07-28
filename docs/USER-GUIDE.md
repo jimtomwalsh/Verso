@@ -609,6 +609,8 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   differs **splits into side-by-side columns** — one per shown variant — while paragraphs they all
   share stay a single column; a paragraph a variant omits shows "Not in this variant". The column
   view is for comparison and is **read-only** — turn the variants off to edit again.
+- **The first import into a new Product** builds the continuous document straight away — you land in
+  the one-document view (chapters in the outline), not an intermediate per-topic list.
 
 The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
 authoring a chapter's text, importing, annotations, history and comments all work as described.

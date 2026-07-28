@@ -8541,7 +8541,8 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // /verso-frontend Tier 2 fix: the result summary goes through the canonical
   // confirmModal, never a raw window.alert (Tier 1 checklist item 1 explicitly bans
   // raw alert/confirm for anything beyond a single-sentence hard failure).
-  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId, meta\) \{[\s\S]{0,1500}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(e));
+  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId, meta\) \{[\s\S]{0,1800}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(e));
+  ok("a fresh-Product import lands in the unified stage (renderSourceStage) so topics->unified migration fires, not the retired topic view", /var result = importParsedTopics\(baseParse\.topics, productId,[\s\S]{0,900}renderSourceStage\(\);/.test(e));
   ok("finishMarkdownImport is the single tail shared by both the one-click and modal import paths", (e.match(/finishMarkdownImport\(/g) || []).length === 3); // definition + the 2 call sites
 
   // importParsedTopics: pure shape conversion (parse-result section -> real
