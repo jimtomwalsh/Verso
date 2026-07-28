@@ -1605,6 +1605,7 @@
     renderTabs();
     renderVariantSwitch(); // rebuild the top-bar variant pill for the NEW doc (else it shows the old doc's variants / goes blank)
     renderVersionSwitch(); // #206: same for the software-version switcher
+    syncCellChip(); // SPEC 7: reflect the new doc's matrix cell in the header chip
   }
 
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
@@ -10605,6 +10606,63 @@
     setStage(__activeStage);
   }
   window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; } }; // boot + settings
+
+  // SPEC 7 (cell switcher + tiered mutability): the editor-header chip shows the document's matrix
+  // cell (geometry . interactivity) and opens a menu to change it AFTER creation. Tiered: toggling
+  // interactivity is free + immediate; a geometry-mode change warns (content reflows, may not survive
+  // 1:1) then re-renders the canvas into the new geometry. Reads/writes doc.meta via the pure
+  // doc-type model; a geometry change is reflected by mount() rebuilding the geo-classed canvas.
+  var CELL_GEO_LABEL = { reflow: "Reflow", frame: "Fixed frame", paged: "Paged" };
+  function currentCell() {
+    return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc) : { geo: "reflow", interactive: true };
+  }
+  function applyCellChange(geo, interactive) {
+    if (!window.__docType || !window.__docType.tagDocCell) return;
+    window.__docType.tagDocCell(doc, geo, interactive);
+    saveRegistry(registry);
+    mount();            // rebuild the geo-classed canvas + palette (static fallback rides render)
+    syncCellChip();
+  }
+  function setCellInteractive(on) {
+    var c = currentCell();
+    if (c.interactive === on) return;
+    applyCellChange(c.geo, on); // immediate, no warning (free per tiered mutability)
+  }
+  function setCellGeo(geo) {
+    var c = currentCell();
+    if (c.geo === geo) return;
+    // Guarded: a geometry-mode switch reflows content and may not survive 1:1.
+    confirmModal("Change layout mode?",
+      "Switching to " + (CELL_GEO_LABEL[geo] || geo) + " reflows this document's content into the new geometry. It may not survive 1:1 -- you can switch back, but check the result.",
+      function () { applyCellChange(geo, c.interactive); },
+      { okLabel: "Change & reflow" });
+  }
+  function openCellMenu(anchor) {
+    var c = currentCell();
+    var items = [{ head: "Geometry" }];
+    ["reflow", "frame", "paged"].forEach(function (g) {
+      items.push({ label: CELL_GEO_LABEL[g], active: c.geo === g, onClick: function () { setCellGeo(g); } });
+    });
+    items.push({ sep: true });
+    items.push({ head: "Interactivity" });
+    items.push({ label: "Interactive", active: c.interactive === true, onClick: function () { setCellInteractive(true); } });
+    items.push({ label: "Static", active: c.interactive === false, onClick: function () { setCellInteractive(false); } });
+    var r = anchor.getBoundingClientRect();
+    showContextMenu(r.left, r.bottom + 6, items);
+  }
+  function syncCellChip() {
+    if (typeof document === "undefined") return;
+    var chip = document.getElementById("editor-cell-chip"); if (!chip) return;
+    var c = currentCell();
+    chip.textContent = (CELL_GEO_LABEL[c.geo] || c.geo) + " · " + (c.interactive ? "Interactive" : "Static");
+    chip.classList.toggle("is-static", !c.interactive);
+  }
+  function mountCellChip() {
+    if (typeof document === "undefined") return;
+    var chip = document.getElementById("editor-cell-chip"); if (!chip) return;
+    if (!chip.__wired) { chip.__wired = true; chip.addEventListener("click", function () { openCellMenu(chip); }); }
+    syncCellChip();
+  }
 
   // Persistent top-bar product context (Product Rail): "" = All products. In-memory
   // only for now -- every stage reads it through window.__productRail.getActiveProduct().
@@ -22882,6 +22940,7 @@
   applyUiTheme(uiThemeIsLight()); // #44: restore the saved editor-chrome light/dark theme
   wireCopyEditor(); // #116: full-screen copy-editor view (rail glyph opens, Close/Esc returns)
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
+  mountCellChip(); // SPEC 7: the matrix-cell chip (geometry . interactivity) in the editor header
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
   mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe

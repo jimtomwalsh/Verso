@@ -48,6 +48,12 @@ Verso is a plain web app — nothing to install.
 Your work **saves automatically to this browser** (IndexedDB) as you go; the **All changes
 saved** status in the top bar confirms it.
 
+**Change the document type later.** The **cell chip** in the editor header (e.g. *Reflow ·
+Interactive*) opens a small menu to change the document's matrix cell after creation. Toggling
+**Interactive / Static** applies at once; switching the **geometry** (Reflow / Fixed frame /
+Paged) warns first, because content reflows into the new geometry and may not survive 1:1 — you
+can switch back.
+
 > **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
 > before clearing browser data or switching machines (§15).
 

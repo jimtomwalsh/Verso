@@ -438,6 +438,16 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .editor-window__axes { display: flex; align-items: center; gap: 2px; }
 .editor-window__spacer { flex: 1 1 auto; }
+/* SPEC 7 matrix-cell chip: shows geometry . interactivity; opens the cell menu. */
+.editor-window__cell {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 10px; border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border-input, var(--border-strong)); background: var(--surface-input);
+  color: var(--text-primary); font: var(--type-label); cursor: pointer; white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+}
+.editor-window__cell:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+.editor-window__cell.is-static { color: var(--text-secondary); }
 
 .panel {
   position: relative;

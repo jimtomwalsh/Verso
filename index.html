@@ -80,6 +80,11 @@
         <div class="toolbar-tabs" id="toolbar-tabs"></div>
       </div>
       <div class="editor-window__toolrow">
+        <!-- SPEC 7: the matrix-cell chip (geometry . interactive). Click to change the cell after
+             creation -- tiered mutability: interactivity toggles immediately; a geometry change warns
+             (content reflows) then re-renders. Mounted by mountCellChip(). -->
+        <button class="editor-window__cell" id="editor-cell-chip" type="button" title="Document type — geometry and interactivity"></button>
+        <span class="toolbar__divider"></span>
         <!-- doc-scoping axes: variant (outer) then software-version (inner) mount here. -->
         <div class="editor-window__axes" id="editor-doc-axes"></div>
         <div class="editor-window__spacer"></div>
