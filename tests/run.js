@@ -2127,6 +2127,68 @@ section("#71 recents");
   ok("tagDocProductStage is null-safe", g.tagDocProductStage(null, "x", "y") === null);
 })();
 
+// ---- SPEC 7: matrix doc-type model (geo x interactive) -- pure, headless ----
+section("editor-rework matrix doc-type");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-doctype-start \*\/([\s\S]*?)\/\* @pure-doctype-end \*\//);
+  if (!m) { ok("locate @pure-doctype fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { docCell: docCell, tagDocCell: tagDocCell, presetToCell: presetToCell," +
+    " cellToPreset: cellToPreset, condToolsFor: condToolsFor, isValidGeo: isValidGeo," +
+    " DOCTYPE_PRESETS: DOCTYPE_PRESETS, DOCTYPE_GEOS: DOCTYPE_GEOS };")();
+
+  // NON-REGRESSION (the critical one): an untagged legacy doc resolves to the today
+  // default {reflow, interactive:true}, so no migration is needed and it opens unchanged.
+  var legacy = { meta: { title: "Legacy course", code: "LEGACY" } };
+  var lc = g.docCell(legacy);
+  ok("untagged doc defaults to {reflow, interactive:true}", lc.geo === "reflow" && lc.interactive === true);
+  ok("docCell on a doc with no meta is null-safe", g.docCell({}).geo === "reflow" && g.docCell(null).interactive === true);
+
+  // docCell resolution: valid geo passes through; an out-of-range geo falls back to
+  // reflow; interactive is STRICT -- only an explicit false is static.
+  ok("valid geo passes through", g.docCell({ meta: { geo: "paged" } }).geo === "paged");
+  ok("out-of-range geo -> reflow", g.docCell({ meta: { geo: "isometric" } }).geo === "reflow");
+  ok("explicit interactive:false is the only way to static", g.docCell({ meta: { interactive: false } }).interactive === false);
+  ok("absent interactive stays interactive (legacy)", g.docCell({ meta: { geo: "frame" } }).interactive === true);
+
+  // presetToCell: all five presets map to the right cell; unknown -> null.
+  ok("preset elearning -> reflow/interactive", (function () { var c = g.presetToCell("elearning"); return c.geo === "reflow" && c.interactive === true; })());
+  ok("preset deck -> frame/interactive", (function () { var c = g.presetToCell("deck"); return c.geo === "frame" && c.interactive === true; })());
+  ok("preset onepager -> paged/static", (function () { var c = g.presetToCell("onepager"); return c.geo === "paged" && c.interactive === false; })());
+  ok("preset quickstart -> paged/static", (function () { var c = g.presetToCell("quickstart"); return c.geo === "paged" && c.interactive === false; })());
+  ok("preset webdoc -> reflow/static", (function () { var c = g.presetToCell("webdoc"); return c.geo === "reflow" && c.interactive === false; })());
+  ok("unknown preset -> null", g.presetToCell("hologram") === null);
+  ok("all five presets are covered", g.DOCTYPE_PRESETS.length === 5 && g.DOCTYPE_PRESETS.every(function (p) { return g.isValidGeo(p.geo) && typeof p.interactive === "boolean"; }));
+
+  // cellToPreset: names a cell when a preset covers it; a recombination outside the five
+  // presets (e.g. frame + static) returns null -- the matrix allows more than the presets.
+  ok("cell {reflow,true} -> elearning", g.cellToPreset("reflow", true) === "elearning");
+  ok("cell {frame,false} is a recombination -> null", g.cellToPreset("frame", false) === null);
+
+  // condToolsFor: the geometry tool lists per the spec; unknown geo -> reflow set; the
+  // returned array is a copy (mutating it must not corrupt the shared table).
+  ok("paged tools", g.condToolsFor("paged").join("|") === "Margins|Running header / footer|Page breaks|Page numbers");
+  ok("frame tools", g.condToolsFor("frame").join("|") === "Frame size / aspect|Slide transitions|Animation");
+  ok("reflow tools", g.condToolsFor("reflow").join("|") === "Breakpoint preview");
+  ok("unknown geo -> reflow tools", g.condToolsFor("nope").join("|") === "Breakpoint preview");
+  (function () { var a = g.condToolsFor("paged"); a.push("HACK"); ok("condToolsFor returns a copy (no shared-table mutation)", g.condToolsFor("paged").length === 4); })();
+
+  // tagDocCell round-trip: writes onto meta ONLY (never touches content); a clear reverts
+  // to the default resolution; null-safe.
+  var d = { meta: { title: "T", code: "C" }, pages: [{ blocks: [{ type: "image", src: "data:x" }] }] };
+  g.tagDocCell(d, "paged", false);
+  ok("tagDocCell writes geo/interactive onto meta only", d.meta.geo === "paged" && d.meta.interactive === false && d.meta.title === "T");
+  ok("tagDocCell leaves content untouched", d.pages[0].blocks[0].src === "data:x");
+  ok("round-trips through docCell", g.docCell(d).geo === "paged" && g.docCell(d).interactive === false);
+  g.tagDocCell(d, "reflow", true);
+  ok("re-tagging updates the cell", d.meta.geo === "reflow" && d.meta.interactive === true);
+  g.tagDocCell(d, "bogus", "maybe");
+  ok("invalid geo clears geo; non-boolean interactive clears interactive", d.meta.geo === undefined && d.meta.interactive === undefined);
+  ok("a cleared doc resolves back to the default", g.docCell(d).geo === "reflow" && g.docCell(d).interactive === true);
+  ok("tagDocCell is null-safe", g.tagDocCell(null, "paged", true) === null);
+})();
+
 // ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
 section("product-rail ProductsStore");
 (function () {

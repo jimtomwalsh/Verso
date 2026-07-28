@@ -380,6 +380,79 @@
   }
   /* @pure-recents-end */
 
+  // SPEC 7 (Editor Window Rework): a document is a cell in a two-axis matrix, not a
+  // fixed profile. Layout geometry (doc.meta.geo) x interactivity (doc.meta.interactive)
+  // sit on the SAME meta object as productId/stage. These are PURE helpers (DOM-free) so
+  // tests/run.js exercises them headlessly; the UI tickets (creation flow, cell switcher,
+  // capability inspector, static fallback) all consume this one model. `stage` from
+  // SPEC 1 is subsumed -- geo is the authoritative geometry; the three former stages are
+  // now presets over {geo, interactive}. An untagged legacy doc resolves to
+  // {reflow, interactive:true} = today's behaviour, so NO migration is needed and every
+  // existing course opens byte-identical.
+  /* @pure-doctype-start */
+  var DOCTYPE_GEOS = ["reflow", "frame", "paged"];
+  // The five named starting cells. Authors can recombine (any geo x interactivity) after
+  // creation, so the preset list is a convenience for the create flow, not an enum lock.
+  var DOCTYPE_PRESETS = [
+    { key: "elearning",  name: "eLearning",         geo: "reflow", interactive: true  },
+    { key: "deck",       name: "Presentation",      geo: "frame",  interactive: true  },
+    { key: "onepager",   name: "1-pager",           geo: "paged",  interactive: false },
+    { key: "quickstart", name: "Quick-start guide", geo: "paged",  interactive: false },
+    { key: "webdoc",     name: "Responsive doc",    geo: "reflow", interactive: false }
+  ];
+  // Geometry-specific Document-context tools (right inspector, nothing selected).
+  var DOCTYPE_COND_TOOLS = {
+    paged:  ["Margins", "Running header / footer", "Page breaks", "Page numbers"],
+    frame:  ["Frame size / aspect", "Slide transitions", "Animation"],
+    reflow: ["Breakpoint preview"]
+  };
+  function isValidGeo(geo) { return DOCTYPE_GEOS.indexOf(geo) !== -1; }
+  // Resolve a doc's matrix cell. Untagged/legacy docs -> {reflow, interactive:true}. An
+  // out-of-range geo falls back to reflow; interactive is strict -- only an explicit
+  // `false` turns a doc static (so an absent/legacy value stays interactive).
+  function docCell(d) {
+    var meta = (d && d.meta) || {};
+    var geo = isValidGeo(meta.geo) ? meta.geo : "reflow";
+    var interactive = meta.interactive === false ? false : true;
+    return { geo: geo, interactive: interactive };
+  }
+  // Write a doc's cell onto doc.meta ONLY -- never touches pages/blocks, so a cell change
+  // is lossless by construction. A falsy/invalid geo clears geo back to the reflow
+  // default; a non-boolean interactive clears it back to the interactive default.
+  function tagDocCell(d, geo, interactive) {
+    if (!d) return d;
+    if (!d.meta) d.meta = {};
+    if (isValidGeo(geo)) d.meta.geo = geo; else delete d.meta.geo;
+    if (interactive === true || interactive === false) d.meta.interactive = interactive;
+    else delete d.meta.interactive;
+    return d;
+  }
+  // preset key -> {geo, interactive}. Unknown key -> null (caller falls back to default).
+  function presetToCell(presetKey) {
+    for (var i = 0; i < DOCTYPE_PRESETS.length; i++) {
+      if (DOCTYPE_PRESETS[i].key === presetKey) {
+        return { geo: DOCTYPE_PRESETS[i].geo, interactive: DOCTYPE_PRESETS[i].interactive };
+      }
+    }
+    return null;
+  }
+  // {geo, interactive} -> the preset key that names that cell, or null when the cell is a
+  // recombination no preset covers (the matrix allows cells outside the five presets).
+  function cellToPreset(geo, interactive) {
+    for (var i = 0; i < DOCTYPE_PRESETS.length; i++) {
+      if (DOCTYPE_PRESETS[i].geo === geo && DOCTYPE_PRESETS[i].interactive === interactive) {
+        return DOCTYPE_PRESETS[i].key;
+      }
+    }
+    return null;
+  }
+  // Geometry tool list for the Document-context inspector. Unknown geo -> the reflow set
+  // (matches the default geo).
+  function condToolsFor(geo) {
+    return (DOCTYPE_COND_TOOLS[geo] || DOCTYPE_COND_TOOLS.reflow).slice();
+  }
+  /* @pure-doctype-end */
+
   var saveStateEl = null;
   var saveFailed = false;
   var saveFailAlerted = false;   // one blocking alert per failure episode
@@ -1291,6 +1364,12 @@
   // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
   window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants,
     unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct };
+  // SPEC 7 matrix doc-type model -- the pure surface the Editor Window Rework tickets
+  // (creation flow, cell switcher, capability inspector, static fallback, file picker
+  // grouping) consume so the {geo, interactive} logic lives in exactly one place.
+  window.__docType = { docCell: docCell, tagDocCell: tagDocCell, presetToCell: presetToCell,
+    cellToPreset: cellToPreset, condToolsFor: condToolsFor, isValidGeo: isValidGeo,
+    PRESETS: DOCTYPE_PRESETS, GEOS: DOCTYPE_GEOS };
   // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
   // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
   // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
