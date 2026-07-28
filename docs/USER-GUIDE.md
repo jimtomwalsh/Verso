@@ -56,13 +56,18 @@ saved** status in the top bar confirms it.
 ## 3. The workspace
 
 Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (centre), and the
-**Inspector** (right), under a top toolbar.
+**Inspector** (right). A slim **global bar** runs across the very top, and the Edit stage has its
+own **editor header** beneath it.
 
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
-- **Toolbar (top).** Light/dark toggle, save status, **Undo/Redo**, **Fit all**, **Comment
-  mode**, **Demo**, and the **Import & Export** menu (CSV import, SCORM export, JSON backup).
-  Open courses appear as tabs on the left.
+- **Global bar (very top).** App-level only: the **Verso** mark, the **product picker** (sets the
+  active product across Source, Edit and Publish) and the **storage-health dot**.
+- **Editor header (Edit stage).** Everything about the document you're editing lives here. The
+  **file-picker** (▤, browse all courses) and the **open-course tabs** sit on the tab row; the
+  **variant/version** selectors, the **light/dark** toggle (it flips the *document*, not the app
+  chrome), the **▶ Demo** preview and **Send to publish** sit on the row below. It shows only in
+  the Edit stage.
 - **Left (three stacked, collapsible panes).** **Structure** — the outliner of chapters and
   pages as a tree. **Blocks** — the insert palette for built-in block types (Text, Media,
   Layout, Interactive…). **Components** — the browse/insert surface for reusable components:
@@ -366,7 +371,7 @@ one carousel.
 
 Select nothing, and the Inspector shows document-wide design controls.
 
-- **Light / dark.** The top-bar **☾** toggles the palette you preview. Learners get a toggle
+- **Light / dark.** The editor header's **☾** toggles the palette you preview. Learners get a toggle
   too; the palette crossfades between modes (tunable under **Motion**; respects reduce-motion).
 - **Theme.** Edit the colour tokens for each mode — background, ink, accent, success, and so on.
 - **Saved Text Styles.** Create named styles (font, size, weight, spacing, case, alignment,
@@ -426,7 +431,7 @@ A course can carry **product variants** (e.g. two hardware models) that share mo
 differ in specifics. You author one **flagship**; each variant is a thin layer of overrides on
 top, so unchanged copy stays shared and you maintain one source.
 
-- **Switch flagship or variant** from the top bar. **Flagship** is the editable master; picking
+- **Switch flagship or variant** from the editor header. **Flagship** is the editable master; picking
   a variant shows a read-only preview. Edit a variant's wording where variant edits are allowed,
   and the change lands only on that variant's override.
 - A block with no override for the current variant simply **inherits** the flagship copy.

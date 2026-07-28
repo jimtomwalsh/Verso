@@ -393,10 +393,51 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   display: grid;
   /* #89: leftmost fixed icon rail, then the (resizable) left panel, canvas, right panel. */
   grid-template-columns: var(--rail-w, 44px) var(--left-w, 240px) 1fr var(--right-w, 248px);
+  /* SPEC 7: row 1 = the Edit-stage editor-window header (auto height, collapses to 0 when
+     hidden); row 2 = the panels + canvas + inspector. The rail spans both rows. */
+  grid-template-rows: auto 1fr;
   min-height: 0;
   background: var(--surface-canvas);
   position: relative; /* #86: anchor for the floating canvas overlay bar */
 }
+/* SPEC 7 grid pinning: the rail spans full height; the editor header sits in row 1 over the
+   left panel + canvas + inspector; those three sit in row 2. Source/Publish stages span both
+   rows (the editor header is hidden for them). */
+.workspace > .left-rail { grid-column: 1; grid-row: 1 / -1; }
+.workspace > .editor-window { grid-column: 2 / -1; grid-row: 1; }
+.workspace > .panel--left { grid-column: 2; grid-row: 2; }
+.workspace > #canvas-viewport { grid-column: 3; grid-row: 2; }
+.workspace > .panel--right { grid-column: 4; grid-row: 2; }
+.workspace > .source-stage,
+.workspace > .stage-placeholder { grid-row: 1 / -1; }
+
+/* SPEC 7 editor-window header: the Edit stage's own two-row header (DSLMS editor mockup
+   design-system/ui_kits/editor/TopBar.jsx). Row 1 = file-picker + open-doc tabs; row 2 =
+   doc-scoping axes (variant/version) at the left, light/dark + Preview + Send-to-publish at
+   the right. Only rendered in Edit (setStage toggles [hidden]). */
+.editor-window {
+  display: flex; flex-direction: column;
+  background: var(--surface-app);
+  border-bottom: 1px solid var(--border-strong);
+  min-width: 0;
+}
+.editor-window[hidden] { display: none; }
+.editor-window__tabrow {
+  display: flex; align-items: flex-end;
+  height: var(--tabbar-height, 36px);
+  padding: 0 6px; gap: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+.editor-window__filepicker { flex: 0 0 auto; align-self: center; }
+.editor-window__tabrow .toolbar-tabs { flex: 1 1 auto; }
+.editor-window__toolrow {
+  display: flex; align-items: center;
+  height: 40px; padding: 0 8px; gap: 6px;
+  min-width: 0; overflow-x: auto; overflow-y: hidden;
+}
+.editor-window__axes { display: flex; align-items: center; gap: 2px; }
+.editor-window__spacer { flex: 1 1 auto; }
 
 .panel {
   position: relative;
@@ -418,10 +459,11 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .workspace.is-panels-hidden { grid-template-columns: 0 0 1fr 0; }
 .workspace.is-panels-hidden .panel { display: none; }
 .workspace.is-panels-hidden .left-rail { display: none; } /* #89: rail hides with the panels in zen/preview */
+.workspace.is-panels-hidden .editor-window { display: none; } /* SPEC 7: header hides with the panels too */
 /* `display:none` REMOVES the panels as grid items, so the lone remaining canvas
    auto-places into column 1 (the 0px track) -> it collapses to width:0 and the whole
-   window looks dark. Pin the canvas to span every track so it always fills the row. */
-.workspace.is-panels-hidden .canvas { grid-column: 1 / -1; }
+   window looks dark. Pin the canvas to span every track (and row 2) so it always fills. */
+.workspace.is-panels-hidden .canvas { grid-column: 1 / -1; grid-row: 2; }
 
 /* Product Rail (2026-07-27 DaVinci pivot): the rail's Source/Publish segments swap
    out the whole edit-only region (Structure/Blocks/Components + canvas + inspector)

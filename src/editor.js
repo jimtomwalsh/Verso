@@ -10517,7 +10517,7 @@
   function mountTopBar() {
     if (typeof document === "undefined") return;
     var Ic = window.Icon; if (!Ic) return;
-    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
+    var hosts = document.querySelectorAll(".toolbar [data-lucide], .editor-window [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
     Array.prototype.forEach.call(hosts, function (el) {
       var name = el.getAttribute("data-lucide");
       if (!name) return;
@@ -10582,6 +10582,8 @@
     }
     var srcEl = document.getElementById("stage-source"); if (srcEl) srcEl.hidden = stage !== "source";
     var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
+    // SPEC 7: the editor-window header (tabs + doc controls) belongs to Edit only.
+    var edHdr = document.getElementById("editor-window-header"); if (edHdr) edHdr.hidden = stage !== "edit";
     STAGE_IDS.forEach(function (s) {
       var btn = document.getElementById("rail-tab-" + s);
       if (btn) btn.classList.toggle("is-active", s === stage);
@@ -21350,6 +21352,18 @@
     demoBpBtns = Array.prototype.slice.call(document.querySelectorAll("#demo-bp .bp-btn"));
     demoBpBtns.forEach(function (b) { b.addEventListener("click", function () { demoBp = b.getAttribute("data-bp"); renderDemo(); }); });
     document.getElementById("demo-enter").addEventListener("click", enterDemo);
+    // SPEC 7: Send-to-publish is relocated into the editor header. Real behaviour (wire to
+    // addToQueue) lands in the send-to-publish-wire ticket; a stub confirmation for now.
+    var sendPub = document.getElementById("send-to-publish-btn");
+    if (sendPub && !sendPub.__wired) {
+      sendPub.__wired = true;
+      sendPub.addEventListener("click", function () {
+        var t = h("div", "collab-toast", "Send to publish — coming soon");
+        document.body.appendChild(t);
+        requestAnimationFrame(function () { t.classList.add("is-on"); });
+        setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2400);
+      });
+    }
     document.getElementById("demo-exit").addEventListener("click", exitDemo);
     document.getElementById("demo-prev").addEventListener("click", function () { stepDemo(-1); });
     document.getElementById("demo-next").addEventListener("click", function () { stepDemo(1); });
@@ -22496,8 +22510,14 @@
     var r = anchor.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 6, items);
   }
+  // SPEC 7: the variant (outer axis) + version (inner axis) glyphs live at the left of the
+  // editor-window toolbar row (#editor-doc-axes). Fall back to the global bar's right group
+  // if the editor header isn't present (defensive; the header is static in index.html).
+  function axisSwitchHost() {
+    return document.getElementById("editor-doc-axes") || document.querySelector(".toolbar__group--right");
+  }
   function renderVariantSwitch() {
-    var host = document.querySelector(".toolbar__group--right");
+    var host = axisSwitchHost();
     if (!host) return;
     if (!variantWrapEl) {
       variantWrapEl = h("button", "tool variant-glyph"); variantWrapEl.type = "button";
@@ -22643,7 +22663,7 @@
     showContextMenu(r.left, r.bottom + 6, items);
   }
   function renderVersionSwitch() {
-    var host = document.querySelector(".toolbar__group--right");
+    var host = axisSwitchHost();
     if (!host) return;
     if (!versionWrapEl) {
       versionWrapEl = h("button", "tool version-glyph"); versionWrapEl.type = "button";
