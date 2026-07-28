@@ -10705,6 +10705,7 @@
   var __sourceDrawerOpen = false;  // the on-demand all-marks drawer (toc-search-drawer)
   var __sourceDrawerFilter = "all"; // all | alternate | link | comment
   var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
+  var __sourceOpenCommentMarkId = null; // the comment mark whose thread card is open, or null
   // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
   // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
   // unlocks them, mirroring the familiar Photos/Files/Gmail toggle rather than always
@@ -11119,8 +11120,12 @@
   // popover__row/.comment-popover__del classes the canvas comment system already
   // defines in editor.css (plain flex rows, nothing canvas/position-specific), reused
   // verbatim rather than styled twice.
-  function buildSourceCommentItem(topic, c) {
+  // opts.onChange (optional): fired after any mutation (resolve/delete/reply) so a mark-anchored
+  // thread can log the event to History + refresh its pinned card, instead of the default section
+  // path's full renderSourceArticle. Defaults to renderSourceArticle when omitted (the #94 path).
+  function buildSourceCommentItem(topic, c, opts) {
     var UI = window.VersoUI;
+    var after = (opts && opts.onChange) || function () { stampTopicUpdated(topic); renderSourceArticle(); };
     var item = h("div", "source-stage__comment-item");
     var line = h("div", "comment-reply");
     var dot = h("span", "comment-row__dot"); dot.style.background = c.colour || "";
@@ -11132,7 +11137,7 @@
     if (UI && UI.Checkbox) {
       var doneCheck = UI.Checkbox({
         checked: !!c.done, label: "Resolved",
-        onChange: function (v) { c.done = v; stampTopicUpdated(topic); renderSourceArticle(); }
+        onChange: function (v) { c.done = v; after("resolve", c); }
       });
       row.appendChild(doneCheck);
     }
@@ -11140,8 +11145,7 @@
     del.addEventListener("click", function () {
       var i = (topic.comments || []).indexOf(c);
       if (i !== -1) topic.comments.splice(i, 1);
-      stampTopicUpdated(topic);
-      renderSourceArticle();
+      after("delete", c);
     });
     row.appendChild(del);
     item.appendChild(row);
@@ -11159,7 +11163,7 @@
         onClick: function () {
           var v = (replyField.input.value || "").trim(); if (!v) return;
           c.replies = c.replies || []; c.replies.push(makeReply(v));
-          stampTopicUpdated(topic); renderSourceArticle();
+          after("reply", c);
         }
       });
       item.appendChild(replyField); item.appendChild(replyBtn);
@@ -11196,7 +11200,7 @@
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     // the all-marks drawer belongs to the continuous-document view only -- drop it when the
     // active topic isn't a doc topic (the doc path re-syncs it against the live model below).
-    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); closeSourceAltPanel(); }
+    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); closeSourceAltPanel(); closeSourceCommentThread(); }
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
       renderSourceInfoPanel(null);
@@ -11561,6 +11565,8 @@
     host.appendChild(buildSourceSelBar(topic));
     renderSourceDrawer(); // re-sync the all-marks drawer to the live model after a re-render
     if (__sourceAltPanelMarkId) renderSourceAltPanel(topic); // re-pin the alt panel after a re-render
+    renderSourceCommentPins(topic); // re-pin the comment margin pins after a re-render
+    if (__sourceOpenCommentMarkId) renderSourceCommentThread(topic); // re-pin an open comment thread
   }
 
   function applySourceLockState(art) {
@@ -11585,7 +11591,7 @@
     var lockBtn = U && U.IconButton ? U.IconButton({ icon: __sourceUnlocked ? "lock-open" : "lock", label: __sourceUnlocked ? "Lock the source prose" : "Unlock to edit the source prose", active: __sourceUnlocked, onClick: function () { __sourceUnlocked = !__sourceUnlocked; applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); } }) : h("button", null, "Lock");
     lockBtn.classList.add("source-docbar__btn");
     var lockLbl = h("span", "source-docbar__lbl", __sourceUnlocked ? "Source editable" : "Source locked");
-    var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); updateSourceDocBar(); } }) : h("button", null, "Marks");
+    var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); if (!__sourceShowMarks) closeSourceCommentThread(); renderSourceCommentPins(topic); updateSourceDocBar(); } }) : h("button", null, "Marks");
     marksBtn.classList.add("source-docbar__btn");
     var drawerBtn = U && U.IconButton ? U.IconButton({ icon: "layers", label: "All marks", active: __sourceDrawerOpen, onClick: function () { toggleSourceDrawer(); } }) : h("button", null, "Marks list");
     drawerBtn.classList.add("source-docbar__btn");
@@ -11656,14 +11662,17 @@
     __sourceAltPanelMarkId = markId;
     renderSourceAltPanel(topic);
   }
-  function positionSourceAltPanel() {
-    var panel = document.querySelector("[data-source-altpanel]"); if (!panel || !__sourceMarksEngine) return;
+  // Pin a gutter card (alternate panel / comment thread) to a mark's span: absolute within the
+  // scrolling article, so it tracks the span on scroll for free. Shared by both margin surfaces.
+  function pinCardToSpan(el, markId) {
+    if (!el || !__sourceMarksEngine) return;
     var model = __sourceDocModel, SD = window.SourceDoc;
-    var m = model && SD.markById(model, __sourceAltPanelMarkId); if (!m) return;
+    var m = model && SD.markById(model, markId); if (!m) return;
     var host = document.getElementById("source-stage-article"); if (!host) return;
     var rect = __sourceMarksEngine.rectFor(m); if (!rect) return;
-    panel.style.top = Math.max(8, rect.top - host.getBoundingClientRect().top + host.scrollTop) + "px";
+    el.style.top = Math.max(8, rect.top - host.getBoundingClientRect().top + host.scrollTop) + "px";
   }
+  function positionSourceAltPanel() { pinCardToSpan(document.querySelector("[data-source-altpanel]"), __sourceAltPanelMarkId); }
   function renderSourceAltPanel(topic) {
     var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
     document.removeEventListener("keydown", onSourceAltPanelKey);
@@ -11722,6 +11731,111 @@
     positionSourceAltPanel();
     document.removeEventListener("keydown", onSourceAltPanelKey);
     document.addEventListener("keydown", onSourceAltPanelKey);
+  }
+
+  // Comments (spec 3.3): ONE engine shared with the canvas -- makeComment/makeReply, the same
+  // comment-reply/comment-row__dot thread UI (buildSourceCommentItem), the same users. The
+  // Source-specific adapter is the ANCHOR: a comment is anchored to a range mark ({markId}, where
+  // the canvas uses a pixel pin). Comments live on topic.comments (library content, not a course
+  // doc), keyed by the mark id. Presentation = canvas-style margin pins in the right gutter,
+  // pinned to their span + scrolling with it; clicking a pin opens the thread card in place.
+  function sourceCommentsForMark(topic, markId) {
+    return (topic.comments || []).filter(function (c) { return c.anchor && c.anchor.markId === markId; });
+  }
+  // Every comment MARK on the doc that still has a live thread, newest span first is not needed --
+  // draw order follows model.marks. A comment mark with no thread (all deleted) draws no pin.
+  function renderSourceCommentPins(topic) {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    Array.prototype.forEach.call(host.querySelectorAll(".source-commentpin"), function (n) { n.remove(); });
+    var model = __sourceDocModel; if (!model || !__sourceShowMarks) return;
+    (model.marks || []).forEach(function (m) {
+      if (m.type !== "comment") return;
+      var thread = sourceCommentsForMark(topic, m.id); if (!thread.length) return;
+      var open = thread.filter(function (c) { return !c.done; }).length;
+      var pin = h("button", "source-commentpin" + (open ? "" : " is-done") + (m.id === __sourceOpenCommentMarkId ? " is-open" : ""));
+      pin.type = "button"; pin.setAttribute("data-comment-mark", m.id);
+      pin.title = thread.length + " comment" + (thread.length === 1 ? "" : "s") + (open ? "" : " (resolved)");
+      pin.innerHTML = window.Icon ? window.Icon("message-square") : "";
+      var lead = thread[0];
+      if (lead && lead.colour) pin.style.setProperty("--pin-colour", lead.colour);
+      if (thread.length > 1) pin.appendChild(h("span", "source-commentpin__count", String(thread.length)));
+      pin.addEventListener("click", function () { toggleSourceCommentThread(topic, m.id); });
+      host.appendChild(pin);
+      pinCardToSpan(pin, m.id);
+    });
+  }
+  function onSourceCommentThreadKey(ev) { if (ev.key === "Escape") closeSourceCommentThread(); }
+  // Outside-click light-dismiss, matching the canvas comment popover ("first outside click closes
+  // the open note", editor.js ~19632). A click on a pin is left to the pin's own toggle.
+  function onSourceCommentThreadOutside(ev) {
+    var card = document.querySelector("[data-source-commentthread]"); if (!card) return;
+    if (card.contains(ev.target)) return;
+    if (ev.target.closest && ev.target.closest(".source-commentpin")) return;
+    closeSourceCommentThread();
+    var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    renderSourceCommentPins(t);
+  }
+  function closeSourceCommentThread() {
+    __sourceOpenCommentMarkId = null;
+    var ex = document.querySelector("[data-source-commentthread]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceCommentThreadKey);
+    document.removeEventListener("mousedown", onSourceCommentThreadOutside);
+  }
+  function toggleSourceCommentThread(topic, markId) {
+    if (__sourceOpenCommentMarkId === markId) { closeSourceCommentThread(); renderSourceCommentPins(topic); return; }
+    __sourceOpenCommentMarkId = markId;
+    renderSourceCommentThread(topic);
+    renderSourceCommentPins(topic); // repaint the is-open pin state
+  }
+  // The in-place thread card for one comment mark: the shared canvas thread items + reply, plus a
+  // fresh "Add a comment" field. Open/resolve activity is logged to History (spec 3.3).
+  function renderSourceCommentThread(topic) {
+    var ex = document.querySelector("[data-source-commentthread]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceCommentThreadKey);
+    document.removeEventListener("mousedown", onSourceCommentThreadOutside);
+    var model = __sourceDocModel, SD = window.SourceDoc, UI = window.VersoUI;
+    if (!model || !__sourceOpenCommentMarkId) return;
+    var m = SD.markById(model, __sourceOpenCommentMarkId);
+    if (!m || m.type !== "comment") { __sourceOpenCommentMarkId = null; return; }
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var card = h("aside", "source-commentthread comment-thread"); card.setAttribute("data-source-commentthread", "1");
+    card.setAttribute("aria-label", "Comment thread");
+    var head = h("div", "source-commentthread__head");
+    head.appendChild(h("div", "source-commentthread__title", "Comments"));
+    var close = h("button", "source-commentthread__close"); close.type = "button"; close.title = "Close";
+    close.innerHTML = window.Icon ? window.Icon("x") : "close";
+    close.addEventListener("click", function () { closeSourceCommentThread(); renderSourceCommentPins(topic); });
+    head.appendChild(close);
+    card.appendChild(head);
+    var mid = m.id;
+    function afterThreadChange(kind, c) {
+      if (kind === "resolve") SD.logHistory(model, { type: c && c.done ? "comment-resolved" : "comment-reopened", markId: mid, commentId: c && c.id });
+      persistSourceDocModel(topic, model); stampTopicUpdated(topic);
+      // if every thread comment was deleted, drop the now-empty comment mark + close.
+      if (!sourceCommentsForMark(topic, mid).length) {
+        var i = model.marks.indexOf(m); if (i >= 0) { SD.pushUndo(model); model.marks.splice(i, 1); }
+        persistSourceDocModel(topic, model); closeSourceCommentThread(); repaintSourceMarks(); renderSourceCommentPins(topic); return;
+      }
+      repaintSourceMarks(); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+    }
+    sourceCommentsForMark(topic, mid).forEach(function (c) { card.appendChild(buildSourceCommentItem(topic, c, { onChange: afterThreadChange })); });
+    if (UI && UI.TextField && UI.Button) {
+      var newField = UI.TextField({ multiline: true, rows: 2, value: "", placeholder: "Add a comment..." });
+      newField.classList.add("comment-popover__body");
+      var addBtn = UI.Button({ variant: "primary", label: "Comment", onClick: function () {
+        var v = (newField.input.value || "").trim(); if (!v) return;
+        topic.comments = topic.comments || [];
+        var cm = makeComment({ markId: mid }, v);
+        topic.comments.push(cm);
+        SD.logHistory(model, { type: "comment-added", markId: mid, commentId: cm.id });
+        stampTopicUpdated(topic); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+      } });
+      card.appendChild(newField); card.appendChild(addBtn);
+    }
+    host.appendChild(card);
+    pinCardToSpan(card, mid);
+    document.addEventListener("keydown", onSourceCommentThreadKey);
+    document.addEventListener("mousedown", onSourceCommentThreadOutside);
   }
 
   // The on-demand all-marks drawer (spec 2.3): the marks list is demoted from the primary
@@ -11871,8 +11985,16 @@
           persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
           syncSourceAltPanel(topic, mk.id); // open the contextual panel on the new alternate
         } else {
-          SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor, comments: [{ who: "you", ts: "", text: val }] });
-          persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+          // comment = a range mark (the anchor) + a shared-canvas comment thread on topic.comments,
+          // keyed by the mark id (spec 3.3). Reuses makeComment; open/add logs to History.
+          var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor });
+          topic.comments = topic.comments || [];
+          var cm = makeComment({ markId: cmark.id }, val);
+          topic.comments.push(cm);
+          SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id });
+          persistSourceDocModel(topic, __sourceDocModel); stampTopicUpdated(topic); repaintSourceMarks();
+          renderSourceCommentPins(topic);
+          toggleSourceCommentThread(topic, cmark.id);
         }
         sourceToast(cmd === "alternate" ? "Alternate added." : "Comment added.");
       });
@@ -11927,7 +12049,11 @@
     getModel: function () { return __sourceDocModel; },
     openAltPanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceAltPanel(t, id); },
     altPanelMarkId: function () { return __sourceAltPanelMarkId; },
-    editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); }
+    editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); },
+    addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); return cmark.id; },
+    openCommentThread: function (markId) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; toggleSourceCommentThread(t, markId); },
+    openCommentMarkId: function () { return __sourceOpenCommentMarkId; },
+    getComments: function () { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; return t && t.comments; }
   };
 
 

@@ -747,6 +747,23 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-composer__tag { width: 100%; margin-top: 6px; font-size: 12px; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; box-sizing: border-box; }
 @media (max-width: 1180px) { .source-altpanel { position: fixed; right: 16px; bottom: 84px; top: auto !important; } }
 
+/* Comment margin pins (comments-canvas-adapter): canvas-style pins in the right gutter, pinned to
+   their span (absolute within the scrolling article, tracking on scroll). */
+.source-commentpin { position: absolute; right: 8px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border-strong); border-radius: 8px 8px 8px 2px; background: var(--surface-panel, #fff); color: var(--pin-colour, var(--accent)); cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.12); z-index: 24; }
+.source-commentpin svg { width: 15px; height: 15px; }
+.source-commentpin:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+.source-commentpin.is-open { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-quiet, rgba(59,108,246,0.25)); }
+.source-commentpin.is-done { opacity: 0.55; }
+.source-commentpin__count { position: absolute; top: -6px; right: -6px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; font-size: 9px; line-height: 15px; text-align: center; color: #fff; background: var(--accent); border-radius: 999px; }
+/* In-place thread card, pinned beside the span (reuses .comment-thread from the canvas engine). */
+.source-commentthread { position: absolute; right: 42px; width: 258px; z-index: 26; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.14); padding: 12px 14px; max-height: 60vh; overflow-y: auto; }
+.source-commentthread__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.source-commentthread__title { font-weight: 650; font-size: 13px; }
+.source-commentthread__close { display: inline-flex; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 5px; }
+.source-commentthread__close svg { width: 15px; height: 15px; }
+.source-commentthread__close:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+@media (max-width: 1180px) { .source-commentthread { position: fixed; right: 16px; bottom: 84px; top: auto !important; } }
+
 /* Contextual selection bar, above the highlight (canvas idiom, glyph-only). */
 .source-selbar { position: absolute; z-index: 40; display: none; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }
 .source-selbar__btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; background: transparent; border: 0; color: #fff; border-radius: 6px; cursor: pointer; }
