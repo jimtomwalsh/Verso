@@ -481,9 +481,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   color: var(--text-secondary); font: var(--type-label);
 }
 .source-stage__topic-row:hover { background: var(--surface-hover); color: var(--text-primary); }
-.source-stage__topic-row[draggable="true"] { cursor: grab; }
 .source-stage__topic-row.is-active { background: var(--accent-quiet); color: var(--accent); }
-.source-stage__topic-checkbox { flex: 0 0 auto; }
 .source-stage__topic-label {
   flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   height: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer;
@@ -729,15 +727,9 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-docbar__revert { margin-left: 6px; font-size: 11px; color: var(--text-on-inverse, #cbd5e1); background: transparent; border: 1px solid rgba(255,255,255,0.22); border-radius: 7px; padding: 4px 8px; cursor: pointer; }
 .source-docbar__revert:hover { background: rgba(255,255,255,0.12); }
 
-/* On-demand all-marks drawer (toc-search-drawer): right-docked, filtered by mark type. */
-.source-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 300px; z-index: 45; display: flex; flex-direction: column; background: var(--surface-panel, #fff); border-left: 1px solid var(--border-strong); box-shadow: -8px 0 30px rgba(0,0,0,0.14); }
-.source-drawer__head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border-strong); }
-.source-drawer__title { font-weight: 650; font-size: 14px; }
-.source-drawer__close { display: inline-flex; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 6px; }
-.source-drawer__close svg { width: 16px; height: 16px; }
-.source-drawer__close:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
-.source-drawer__filters { padding: 10px 12px; border-bottom: 1px solid var(--border-strong); }
-.source-drawer__list { flex: 1 1 auto; overflow-y: auto; padding: 6px; }
+/* The mark-navigator rows (Source v2 consolidated-panel): they live inside the one right panel's
+   Marks section. The retired fixed overlay drawer's container styling was removed with it (cleanup);
+   only the row/dot/type/snip/empty styling below survives, reused by that section. */
 .source-drawer__empty { color: var(--text-tertiary, var(--text-secondary)); font-size: 12px; padding: 18px 12px; text-align: center; }
 .source-drawer__row { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
 .source-drawer__row:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
