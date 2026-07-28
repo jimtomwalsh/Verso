@@ -458,7 +458,7 @@
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
-    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping,
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure

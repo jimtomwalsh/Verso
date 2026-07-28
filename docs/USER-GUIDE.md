@@ -672,6 +672,12 @@ In this mode:
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
   reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
   Ctrl/Cmd+Z brings the text and the mark back.
+- **Comments live in the margin.** Selecting text and choosing **Comment** drops a **pin in the
+  right-hand gutter** next to that span; the pin tracks the span as you scroll. Click a pin to open
+  the thread in place — the same comment threads, replies, and Resolved control as the canvas
+  editor, so a comment behaves the same everywhere. Add more comments or replies, tick **Resolved**
+  when it's handled, and both events show up in History. Comments can be added while the source is
+  locked. Click away or press **Esc** to close a thread.
 - **Marks ride your edits.** An alternate or comment is anchored to the exact span you selected;
   as you edit around it the anchor moves with the text, and if you delete the anchored text the
   mark is flagged as broken. **Ctrl/Cmd+Z** is a document-aware undo — it restores deleted text

@@ -11024,6 +11024,25 @@ section("Source rewrite: demand-driven alternates + staleness (Epic 2b)");
   ok("the alt composer captures an optional tag; the panel light-dismisses on Escape", /source-composer__tag/.test(e) && /function onSourceAltPanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceAltPanel/.test(e));
 })();
 
+// ---- Source rewrite (Epic 2b): comments = shared canvas engine + range-mark adapter ----
+// One comment engine shared with the canvas (makeComment/makeReply, the comment-reply thread UI);
+// the Source adapter anchors a comment to a range mark ({markId}). Presentation = margin pins in
+// the gutter tracking the span. Wiring is browser-verified; here we assert the adapter + reuse.
+section("Source rewrite: comments = shared canvas engine + range-mark adapter (Epic 2b)");
+(function () {
+  var e = src("src/editor.js");
+  ok("a Source comment is a range mark PLUS a shared makeComment thread keyed by the mark id", /var cmark = SD\.addMark\(__sourceDocModel, \{ type: "comment", anchor: anchor \}\);[\s\S]{0,220}makeComment\(\{ markId: cmark\.id \}, val\)/.test(e));
+  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(e) && /c\.replies\.push\(makeReply\(v\)\)/.test(e));
+  ok("comment threads anchor by mark id (sectionId anchor dies with sections)", /function sourceCommentsForMark\(topic, markId\)[\s\S]{0,120}c\.anchor\.markId === markId/.test(e));
+  ok("margin pins render in the gutter for each comment mark, pinned to the span", /function renderSourceCommentPins\(topic\)/.test(e) && /if \(m\.type !== "comment"\) return;/.test(e) && /pinCardToSpan\(pin, m\.id\)/.test(e));
+  ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(e) && /toggleSourceCommentThread\(topic, m\.id\)/.test(e));
+  ok("add / resolve activity is logged to History (spec 3.3)", /type: "comment-added", markId: cmark\.id/.test(e) && /type: c && c\.done \? "comment-resolved" : "comment-reopened"/.test(e));
+  ok("the thread card + pins re-sync after a re-render (survive undo/edit)", /renderSourceCommentPins\(topic\); \/\/ re-pin the comment margin pins/.test(e) && /if \(__sourceOpenCommentMarkId\) renderSourceCommentThread\(topic\)/.test(e));
+  ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceCommentThread\(\);/.test(e));
+  ok("the comment thread light-dismisses on Escape + outside click (canvas popover parity)", /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(e) && /function onSourceCommentThreadOutside\(ev\)/.test(e) && /if \(card\.contains\(ev\.target\)\) return;/.test(e));
+  ok("comments stay addable while the base is locked (annotation ungated -- no unlock guard on the comment path)", !/cmd === "comment"[\s\S]{0,80}__sourceUnlocked/.test(e));
+})();
+
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
 // Keeps the public repo free of customer/proprietary content, the removed in-app
 // assistant/translation code, personal paths, secrets, external CDN loads, and
