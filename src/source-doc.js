@@ -266,6 +266,27 @@
         && m.anchor.start === start && m.anchor.len === len;
     });
   }
+  // ---- objects: image/table as first-class markable nodes (spec 6) ----------
+  // Which node types are annotatable AS A WHOLE OBJECT (a node-id mark, no text span). v1 = the
+  // nodes with no editable text region of their own -- an image or a table. Callouts/lists carry
+  // editable text, so text-span marks cover them; object selection would fight click-into-edit.
+  function isMarkableObjectNode(node) { return !!node && (node.type === "image" || node.type === "table"); }
+  // The object alternates on a node (the object twin of alternatesFor -- keyed by node id only).
+  function objectAlternatesFor(model, nodeKey) {
+    return (model.marks || []).filter(function (m) {
+      return m.type === "alternate" && isObjectMark(m) && m.anchor.nodeKey === nodeKey;
+    });
+  }
+  // A short human label for an object node -- the "base" line an object mark's panel/drawer shows
+  // in place of the span text a text mark would carry.
+  function objectNodeLabel(node) {
+    if (!node) return "Object";
+    if (node.type === "image") return node.caption ? ("Image — " + node.caption) : (node.alt ? ("Image — " + node.alt) : "Image");
+    if (node.type === "table") return "Table (" + ((node.rows && node.rows.length) || 0) + " rows)";
+    if (node.type === "callout") return node.tag ? ("Callout — " + node.tag) : "Callout";
+    if (node.type === "list") return "List (" + ((node.items && node.items.length) || 0) + " items)";
+    return node.type ? (node.type.charAt(0).toUpperCase() + node.type.slice(1)) : "Object";
+  }
   // Pure alternate resolution (spec 3.2): from a span's alternates, pick the one appropriate for
   // `tag` (an untagged alternate is the catch-all). Returns the alternate mark, or null meaning
   // "use the base". Deterministic: an exact tag match wins, else the first untagged alternate.
@@ -499,7 +520,8 @@
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
-    summarizeEdits: summarizeEdits, historyEntryView: historyEntryView
+    summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
+    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel
   };
 
   var SourceDoc = {
@@ -512,6 +534,7 @@
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
+    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure

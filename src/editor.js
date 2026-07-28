@@ -11497,6 +11497,9 @@
     else if (node.type === "image") { el = h("figure", "source-doc__figure"); var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt; el.appendChild(im); if (node.caption) el.appendChild(h("figcaption", null, node.caption)); }
     else { el = h("p", "source-doc__p"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
     el.setAttribute("data-node", node.key);
+    // image/table = a first-class markable OBJECT (a node-id mark, no text span). Tag it so a
+    // click selects the whole node and offers the same alternate/comment actions as a text span.
+    if (SD.isMarkableObjectNode && SD.isMarkableObjectNode(node)) { el.classList.add("source-doc__obj"); el.setAttribute("data-object", "1"); }
     return el;
   }
 
@@ -11554,6 +11557,11 @@
     // here we confirm the hit-test + active repaint work).
     art.addEventListener("click", function (e) {
       if (!__sourceShowMarks) return;
+      // an image/table is a whole-node OBJECT: a click on it selects the object (not a text span)
+      // and offers the same alternate/comment actions, anchored by node id (spec 6).
+      var objEl = e.target && e.target.closest ? e.target.closest('[data-object="1"]') : null;
+      if (objEl && art.contains(objEl)) { selectSourceObject(topic, objEl.getAttribute("data-node")); return; }
+      clearSourceObjectSel();
       var sel = window.getSelection(); if (!sel || !sel.focusNode) return;
       var m = __sourceMarksEngine.markAtPoint(sel.focusNode, sel.focusOffset);
       __sourceMarksEngine.setActive(m ? m.id : null); repaintSourceMarks();
@@ -11581,7 +11589,7 @@
   }
   function repaintSourceMarks() {
     if (!__sourceMarksEngine) return;
-    if (!__sourceShowMarks) { if (window.SourceMarks && window.SourceMarks._registry && window.SourceMarks._registry()) { var reg = window.SourceMarks._registry(); Object.keys(reg).forEach(function (k) { reg[k].clear(); }); } return; }
+    if (!__sourceShowMarks) { if (window.SourceMarks && window.SourceMarks._registry && window.SourceMarks._registry()) { var reg = window.SourceMarks._registry(); Object.keys(reg).forEach(function (k) { reg[k].clear(); }); } if (__sourceMarksEngine.clearObjectDecor) __sourceMarksEngine.clearObjectDecor(); return; }
     __sourceMarksEngine.paint();
   }
 
@@ -11754,7 +11762,9 @@
     }
     var baseWrap = h("div", "source-altpanel__field");
     baseWrap.appendChild(h("div", "source-altpanel__label", "Base"));
-    baseWrap.appendChild(h("div", "source-altpanel__base", SD.anchorText(model, m.anchor) || "(empty)"));
+    // an object mark has no span text -- show the node's label (e.g. "Image — <caption>") instead.
+    var baseLine = SD.isObjectMark(m) ? SD.objectNodeLabel(SD.nodeByKey(model, m.anchor.nodeKey)) : (SD.anchorText(model, m.anchor) || "(empty)");
+    baseWrap.appendChild(h("div", "source-altpanel__base", baseLine));
     panel.appendChild(baseWrap);
     var altWrap = h("div", "source-altpanel__field");
     altWrap.appendChild(h("div", "source-altpanel__label", "Alternate"));
@@ -11949,7 +11959,7 @@
         var dot = h("span", "source-drawer__dot source-drawer__dot--" + status.dot); dot.title = status.label;
         var body = h("div", "source-drawer__row-body");
         body.appendChild(h("div", "source-drawer__row-type " + meta.cls, meta.label));
-        var snip = SD.isObjectMark(m) ? ("[" + (m.anchor.nodeKey ? "object" : "mark") + "]") : (SD.anchorText(model, m.anchor) || "(empty)");
+        var snip = SD.isObjectMark(m) ? SD.objectNodeLabel(SD.nodeByKey(model, m.anchor.nodeKey)) : (SD.anchorText(model, m.anchor) || "(empty)");
         body.appendChild(h("div", "source-drawer__row-snip", snip));
         row.appendChild(dot); row.appendChild(body);
         row.addEventListener("click", function () {
@@ -11999,11 +12009,15 @@
     var bar = sourceSelBarEl(); if (!bar) return;
     bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
   }
-  var __sourceSelAnchor = null, __sourceUpdateTarget = null;
+  var __sourceSelAnchor = null, __sourceUpdateTarget = null, __sourceObjectSelKey = null;
   function onSourceSelectionChange() {
     var bar = sourceSelBarEl(); if (!bar || !__sourceMarksEngine) return;
     var anchor = __sourceMarksEngine.selectionAnchor();
-    if (!anchor) { bar.style.display = "none"; __sourceSelAnchor = null; return; }
+    if (!anchor) {
+      if (__sourceObjectSelKey) return; // an object selection owns the bar -- don't clear it
+      bar.style.display = "none"; __sourceSelAnchor = null; return;
+    }
+    if (__sourceObjectSelKey) clearSourceObjectSel(); // a real text selection supersedes the object
     __sourceSelAnchor = anchor;
     // ⟳ update if this selection extends past an existing mark; else offer create.
     __sourceUpdateTarget = window.SourceDoc.markExtendedBy(__sourceDocModel, anchor);
@@ -12016,6 +12030,48 @@
     bar.style.display = "flex";
     bar.style.left = (window.scrollX + r.left + r.width / 2) + "px";
     bar.style.top = (window.scrollY + r.top) + "px";
+  }
+  // ---- object selection (spec 6): an image/table is selected as a whole node ----------------
+  // Selecting an object shows the SAME selbar (alternate + comment only -- no text formatting, no
+  // ⟳ update) anchored over the node, with __sourceSelAnchor set to an object anchor { nodeKey }
+  // (no start/len). addMark then produces a node-id mark, stable by construction.
+  function clearSourceObjectSel() {
+    if (!__sourceObjectSelKey) return;
+    var el = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
+    if (el) el.classList.remove("is-object-selected");
+    __sourceObjectSelKey = null;
+  }
+  function selectSourceObject(topic, nodeKey) {
+    var SD = window.SourceDoc;
+    clearSourceObjectSel();
+    __sourceObjectSelKey = nodeKey;
+    var el = document.querySelector('[data-node="' + nodeKey + '"]');
+    if (el) el.classList.add("is-object-selected");
+    var s = window.getSelection(); if (s && s.removeAllRanges) s.removeAllRanges(); // the two selection models must not fight
+    __sourceSelAnchor = { nodeKey: nodeKey }; // object anchor -- no start/len
+    __sourceUpdateTarget = null;
+    // any existing object mark on this node becomes the active (tinted) one
+    var existing = objectMarksOnNode(nodeKey);
+    if (__sourceMarksEngine) { __sourceMarksEngine.setActive(existing.length ? existing[0].id : null); repaintSourceMarks(); }
+    // show the selbar over the object: annotation actions only, formatting/update hidden
+    var bar = sourceSelBarEl();
+    if (bar && el) {
+      bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = "none"; });
+      var upd = bar.querySelector('[data-cmd="update"]'); if (upd) upd.style.display = "none";
+      bar.querySelector('[data-cmd="alternate"]').style.display = "";
+      bar.querySelector('[data-cmd="comment"]').style.display = "";
+      var r = el.getBoundingClientRect();
+      bar.style.display = "flex";
+      bar.style.left = (window.scrollX + r.left + r.width / 2) + "px";
+      bar.style.top = (window.scrollY + r.top) + "px";
+    }
+    // if the object already carries an alternate, open its contextual panel
+    var alts = SD.objectAlternatesFor(__sourceDocModel, nodeKey);
+    syncSourceAltPanel(topic, alts.length ? alts[0].id : null);
+  }
+  function objectMarksOnNode(nodeKey) {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    return (model && model.marks || []).filter(function (m) { return SD.isObjectMark(m) && m.anchor.nodeKey === nodeKey; });
   }
   function onSourceSelbarAction(topic, cmd) {
     var SD = window.SourceDoc;
@@ -12032,6 +12088,9 @@
     if (cmd === "alternate" || cmd === "comment") {
       if (!__sourceSelAnchor) return;
       var anchor = __sourceSelAnchor;
+      // object anchors have no text selection to position under -- pin the composer to the node.
+      var objRect = null;
+      if (anchor.len == null) { var oe = document.querySelector('[data-node="' + anchor.nodeKey + '"]'); if (oe) objRect = oe.getBoundingClientRect(); }
       openSourceComposer(cmd, function (val, tag) {
         if (cmd === "alternate") {
           var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: anchor, alt: val, tag: tag || "" });
@@ -12051,7 +12110,7 @@
           toggleSourceCommentThread(topic, cmark.id);
         }
         sourceToast(cmd === "alternate" ? "Alternate added." : "Comment added.");
-      });
+      }, { rect: objRect });
     }
   }
   // A small inline composer positioned under the selection -- the DS idiom for capturing an
@@ -12078,6 +12137,7 @@
     var save = h("button", "source-composer__btn source-composer__btn--primary", "Save"); save.type = "button";
     row.appendChild(cancel); row.appendChild(save); wrap.appendChild(row);
     var sel = window.getSelection(); var r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+    if ((!r || !r.width) && opts.rect) r = opts.rect; // object selection has no text range -- use the node rect
     if (r) { wrap.style.left = (window.scrollX + r.left + r.width / 2) + "px"; wrap.style.top = (window.scrollY + r.bottom + 8) + "px"; }
     document.body.appendChild(wrap);
     function close() { if (wrap.parentNode) wrap.remove(); }
@@ -12105,6 +12165,10 @@
     altPanelMarkId: function () { return __sourceAltPanelMarkId; },
     editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); },
     addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); return cmark.id; },
+    selectObject: function (nodeKey) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; selectSourceObject(t, nodeKey); },
+    objectSelKey: function () { return __sourceObjectSelKey; },
+    objectMarksOnNode: function (nodeKey) { return objectMarksOnNode(nodeKey); },
+    addObjectAlternate: function (nodeKey, alt, tag) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: { nodeKey: nodeKey }, alt: alt, tag: tag || "" }); SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); return mk.id; },
     openCommentThread: function (markId) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; toggleSourceCommentThread(t, markId); },
     openCommentMarkId: function () { return __sourceOpenCommentMarkId; },
     getComments: function () { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; return t && t.comments; }

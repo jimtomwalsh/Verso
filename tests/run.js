@@ -11019,7 +11019,7 @@ section("Source rewrite: demand-driven alternates + staleness (Epic 2b)");
   // editor.js wiring (browser-verified live; asserted structurally here)
   var e = src("src/editor.js");
   ok("selecting a span-with-alternate opens the pinned contextual panel", /syncSourceAltPanel\(topic, m && m\.type === "alternate" \? m\.id : null\)/.test(e) && /function renderSourceAltPanel\(topic\)/.test(e));
-  ok("the alt panel shows base vs alternate + a status dot", /source-altpanel__base"[\s\S]{0,80}anchorText\(model, m\.anchor\)/.test(e) && /source-drawer__dot source-drawer__dot--" \+ status\.dot/.test(e));
+  ok("the alt panel shows base vs alternate + a status dot", /var baseLine = SD\.isObjectMark\(m\) \?[\s\S]{0,90}SD\.anchorText\(model, m\.anchor\) \|\| "\(empty\)"/.test(e) && /source-altpanel__base", baseLine/.test(e) && /source-drawer__dot source-drawer__dot--" \+ status\.dot/.test(e));
   ok("a stale alternate offers a Mark reviewed re-sync (updateMark)", /"Mark reviewed"[\s\S]{0,220}SD\.updateMark\(model, m\.id, m\.anchor\)/.test(e));
   ok("the alt composer captures an optional tag; the panel light-dismisses on Escape", /source-composer__tag/.test(e) && /function onSourceAltPanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceAltPanel/.test(e));
 })();
@@ -11091,6 +11091,63 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
   ok("the timeline MERGES import events (topic.history) with doc events (model.history)", /var imports = \(topic\.history \|\| \[\]\)\.map/.test(e) && /historyEntryView\(e\)/.test(e) && /var rows = imports\.concat\(docRows\)/.test(e));
   ok("the merged rows sort newest-first across both streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
   ok("the synthetic 'Last edited' node only fills in when there are no doc commits", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): object (image/table) marks -----------------
+// An image or table is a first-class markable OBJECT: its mark is a node-id reference (anchor
+// with no start/len), stable by construction -- nothing to survive when surrounding prose is
+// edited. The model half is pure (proven here); the selection + create UX is wired in editor.js.
+section("Source rewrite: object (image/table) marks (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([
+    { type: "paragraph", text: "Before the diagram." },
+    { type: "image", src: "d.png", caption: "The arbitration path" },
+    { type: "table", rows: [["A", "B"], ["1", "2"]] },
+    { type: "paragraph", text: "After the diagram." }
+  ]);
+  var imgKey = model.nodes[1].key, tblKey = model.nodes[2].key, p0 = model.nodes[0].key;
+
+  ok("isMarkableObjectNode: image + table are objects; a paragraph is not", SD.isMarkableObjectNode(model.nodes[1]) && SD.isMarkableObjectNode(model.nodes[2]) && !SD.isMarkableObjectNode(model.nodes[0]));
+
+  // create: an object mark anchors by node id only (no start/len -> isObjectMark true)
+  var alt = SD.addMark(model, { type: "alternate", anchor: { nodeKey: imgKey }, alt: "A simplified caption", tag: "plain-language" });
+  ok("an object alternate is a node-id mark (isObjectMark, no start/len)", SD.isObjectMark(alt) && alt.anchor.nodeKey === imgKey && alt.anchor.start == null);
+  ok("objectAlternatesFor finds the object's alternates by node id", SD.objectAlternatesFor(model, imgKey).length === 1 && SD.objectAlternatesFor(model, tblKey).length === 0);
+  ok("objectNodeLabel summarises the node for the panel base line", /^Image — The arbitration path/.test(SD.objectNodeLabel(model.nodes[1])) && /^Table \(2 rows\)/.test(SD.objectNodeLabel(model.nodes[2])));
+
+  // stable across surrounding edits: editing the paragraphs never shifts a node-id anchor
+  SD.applyTextEdit(model, p0, "Before the diagram, note this."); // grow the prose before it
+  SD.refreshMark(model, alt);
+  ok("the object mark is stable across surrounding prose edits (node id, nothing to shift)", alt.anchor.nodeKey === imgKey && alt.broken === false);
+
+  // resolve = the node's fate: deleting the node breaks the mark (refreshMark), otherwise in-sync
+  ok("an object mark stays in sync while its node exists", SD.markStatus(SD.markById(model, alt.id)).dot === "green");
+  var idx = model.nodes.map(function (n) { return n.key; }).indexOf(imgKey);
+  model.nodes.splice(idx, 1); // the object is deleted
+  SD.refreshMark(model, alt);
+  ok("deleting the object node breaks its mark (red)", alt.broken === true && SD.markStatus(alt).dot === "red");
+
+  // a comment on an object is the same node-id anchor
+  var cmark = SD.addMark(model, { type: "comment", anchor: { nodeKey: tblKey } });
+  ok("an object comment is also a node-id mark", SD.isObjectMark(cmark) && cmark.type === "comment" && cmark.anchor.nodeKey === tblKey);
+
+  // ---- marks engine: object marks tint their node element (no Range) ----
+  var sm = src("src/source-marks.js");
+  ok("paint() tints object-marked nodes via a class, not a Range highlight", /if \(sd\.isObjectMark\(m\)\) \{ decorateObject\(m\); return; \}/.test(sm) && /function decorateObject\(m\)/.test(sm));
+  ok("object decoration clears + re-applies each paint and on hide (clearObjectDecor exported)", /clearObjectDecor: clearObjectDecor/.test(sm) && /clearObjectDecor\(\);/.test(sm));
+  ok("rectFor already returns the node element rect for an object mark (panel/pin pinning)", /if \(sd\.isObjectMark\(m\)\) \{ var el = nodeEl\(m\.anchor\.nodeKey\); return el && el\.getBoundingClientRect\(\); \}/.test(sm));
+
+  // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
+  var e = src("src/editor.js");
+  ok("image/table nodes are tagged as objects (data-object) for whole-node selection", /if \(SD\.isMarkableObjectNode && SD\.isMarkableObjectNode\(node\)\) \{ el\.classList\.add\("source-doc__obj"\); el\.setAttribute\("data-object", "1"\); \}/.test(e));
+  ok("clicking an object selects the whole node (not a text span)", /var objEl = e\.target && e\.target\.closest \? e\.target\.closest\('\[data-object="1"\]'\) : null;/.test(e) && /selectSourceObject\(topic, objEl\.getAttribute\("data-node"\)\)/.test(e));
+  ok("an object selection sets an object anchor { nodeKey } (no start/len) + shows alternate/comment only", /__sourceSelAnchor = \{ nodeKey: nodeKey \}; \/\/ object anchor/.test(e) && /bar\.querySelectorAll\("\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
+  ok("a real text selection supersedes the object selection (the two models don't fight)", /if \(__sourceObjectSelKey\) clearSourceObjectSel\(\); \/\/ a real text selection supersedes the object/.test(e));
+  ok("selecting an object with an existing alternate opens its contextual panel", /var alts = SD\.objectAlternatesFor\(__sourceDocModel, nodeKey\);\s*syncSourceAltPanel\(topic, alts\.length \? alts\[0\]\.id : null\)/.test(e));
+  ok("the object composer pins to the node rect (no text range to sit under)", /if \(anchor\.len == null\) \{ var oe = document\.querySelector\('\[data-node="' \+ anchor\.nodeKey \+ '"\]'\); if \(oe\) objRect = oe\.getBoundingClientRect\(\); \}/.test(e) && /if \(\(!r \|\| !r\.width\) && opts\.rect\) r = opts\.rect;/.test(e));
+  ok("the alt panel shows the object's node label as its base line", /SD\.isObjectMark\(m\) \? SD\.objectNodeLabel\(SD\.nodeByKey\(model, m\.anchor\.nodeKey\)\)/.test(e));
+  ok("hidden marks also clear object decoration (the eye toggle hides all mark visuals)", /if \(__sourceMarksEngine\.clearObjectDecor\) __sourceMarksEngine\.clearObjectDecor\(\);/.test(e));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

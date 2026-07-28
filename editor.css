@@ -694,6 +694,16 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 ::highlight(sd-stale) { background-color: rgba(249, 115, 22, 0.18); }
 ::highlight(sd-broken) { background-color: rgba(239, 68, 68, 0.20); text-decoration: line-through; text-decoration-color: rgb(220, 38, 38); }
 
+/* Objects (image/table) as first-class markable nodes: hover invites the click; a ring shows the
+   current selection; a status tint mirrors the ::highlight() mark colours (no Range to highlight). */
+.source-doc__obj { cursor: pointer; border-radius: 8px; transition: box-shadow 120ms ease, background-color 120ms ease; }
+.source-doc__obj:hover { box-shadow: 0 0 0 2px var(--border-strong); }
+.source-doc__obj.is-object-selected { box-shadow: 0 0 0 2px var(--accent); }
+.source-doc__obj.sd-obj-marked { background-color: rgba(234, 179, 8, 0.12); box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.45); }
+.source-doc__obj.sd-obj-active { background-color: rgba(234, 179, 8, 0.22); box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7); }
+.source-doc__obj.sd-obj-stale { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.6); }
+.source-doc__obj.sd-obj-broken { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.7); }
+
 /* Document-level bar, docked bottom-centre (canvas idiom). */
 .source-docbar { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--surface-inverse, #111827); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.28); }
 .source-docbar__lbl { color: var(--text-on-inverse, #cbd5e1); font-size: 11px; padding: 0 6px 0 4px; }

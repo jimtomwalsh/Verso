@@ -125,8 +125,9 @@
       var reg = registry();
       if (!reg) return;
       HL_TYPES.forEach(function (k) { reg[k].clear(); });
+      clearObjectDecor();
       (model.marks || []).forEach(function (m) {
-        if (sd.isObjectMark(m)) return; // object marks decorate their node element, not a range
+        if (sd.isObjectMark(m)) { decorateObject(m); return; } // object marks tint their node element, not a range
         sd.refreshMark(model, m);
         var r = rangeFor(m.anchor);
         if (!r) { m.broken = true; return; }
@@ -135,6 +136,23 @@
         if (m.stale) { reg.stale.add(r); return; }
         reg[m.type === "link" ? "link" : m.type === "comment" ? "comment" : "alt"].add(r);
       });
+    }
+    // Object marks can't be Range-highlighted, so they tint the node element itself with a status
+    // class (the CSS mirrors the ::highlight tints). Cleared + re-applied each paint.
+    var OBJ_CLASSES = ["sd-obj-marked", "sd-obj-broken", "sd-obj-stale", "sd-obj-active"];
+    function clearObjectDecor() {
+      if (!root) return;
+      Array.prototype.forEach.call(root.querySelectorAll(".sd-obj-marked"), function (el) {
+        el.classList.remove.apply(el.classList, OBJ_CLASSES);
+      });
+    }
+    function decorateObject(m) {
+      sd.refreshMark(model, m);
+      var el = nodeEl(m.anchor.nodeKey); if (!el) return;
+      el.classList.add("sd-obj-marked");
+      if (m.broken) el.classList.add("sd-obj-broken");
+      else if (m.id === activeId) el.classList.add("sd-obj-active");
+      else if (m.stale) el.classList.add("sd-obj-stale");
     }
 
     // Hit-test: the mark whose painted span contains a DOM point (for click-to-activate).
@@ -161,6 +179,7 @@
       selectionAnchor: selectionAnchor,
       markAtPoint: markAtPoint,
       rectFor: rectFor,
+      clearObjectDecor: clearObjectDecor,
       offsetOf: offsetOf,
       blockOf: blockOf,
       hasHighlight: hasHighlight
