@@ -10107,6 +10107,18 @@ section("#170/#33 text<->list block-type conversion");
   ok("converting one block never touches an unrelated object", JSON.stringify(untouched) === before);
 })();
 
+// ---- SPEC 7: Build/Read view toggle in the editor header (wiring) ----
+section("editor-rework Build/Read toggle");
+(function () {
+  var e = src("src/editor.js");
+  ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(e));
+  ok("the toggle offers Build + Read segments", /options: \[\{ value: "build", label: "Build" \}, \{ value: "read", label: "Read" \}\]/.test(e));
+  ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(e));
+  ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(e) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(e));
+  ok("the toggle is mounted at boot", /mountViewToggle\(\); \/\/ SPEC 7/.test(e));
+  ok("the header carries the view-toggle host", /id="editor-view-toggle"/.test(src("index.html")));
+})();
+
 section("#175 copy-editor format toolbar");
 (function () {
   var e = src("src/editor.js");

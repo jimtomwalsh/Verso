@@ -80,6 +80,10 @@
         <div class="toolbar-tabs" id="toolbar-tabs"></div>
       </div>
       <div class="editor-window__toolrow">
+        <!-- SPEC 7 (decision 14): Build/Read view toggle. Build = the authoring canvas; Read = the
+             per-doc copy view (the copy editor), reachable in-flow instead of the old rail button.
+             A VersoUI.SegmentedControl mounts here. Preview stays its own glyph (right). -->
+        <div class="editor-window__view" id="editor-view-toggle"></div>
         <!-- doc-scoping axes: variant (outer) then software-version (inner) mount here. -->
         <div class="editor-window__axes" id="editor-doc-axes"></div>
         <div class="editor-window__spacer"></div>
