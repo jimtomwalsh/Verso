@@ -80,8 +80,10 @@ own **editor header** beneath it.
   active product across Source, Edit and Publish — and **scopes the open tabs** to that product;
   "All products" shows every open tab) and the **storage-health dot**.
 - **Editor header (Edit stage).** Everything about the document you're editing lives here. The
-  **file-picker** (▤, browse all courses) and the **open-course tabs** — each carrying a per-product
-  colour dot so a mixed set stays legible — sit on the tab row; the
+  **file-picker** (▤, browse all courses — a browser **grouped by document type**, colour-coded,
+  each card showing its product, interactive/static and whether it's open; it respects the product
+  scope and opens automatically when no course is open) and the **open-course tabs** — each carrying
+  a per-product colour dot so a mixed set stays legible — sit on the tab row; the
   **variant/version** selectors, the **light/dark** toggle (it flips the *document*, not the app
   chrome), the **▶ Demo** preview and **Send to publish** sit on the row below. It shows only in
   the Edit stage.

@@ -2127,6 +2127,30 @@ section("#71 recents");
   ok("tagDocProductStage is null-safe", g.tagDocProductStage(null, "x", "y") === null);
 })();
 
+// ---- SPEC 7: file picker — doc browser grouped by geo (pure) ----
+section("editor-rework file-picker grouping");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-browser-geo-start \*\/([\s\S]*?)\/\* @pure-browser-geo-end \*\//);
+  if (!m) { ok("locate @pure-browser-geo fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { groupDocIdsByGeo: groupDocIdsByGeo, BROWSER_GEO_ORDER: BROWSER_GEO_ORDER };")();
+  var reg = { a: { geo: "reflow" }, b: { geo: "paged" }, c: { geo: "reflow" }, d: { geo: "frame" }, e: { geo: "unknownGeo" } };
+  var geoOf = function (doc) { return doc.geo; };
+  var groups = g.groupDocIdsByGeo(["a", "b", "c", "d", "e"], reg, geoOf);
+  ok("groups appear in canonical geo order (reflow, frame, paged)", groups.map(function (x) { return x.geo; }).join(",") === "reflow,frame,paged");
+  ok("reflow group holds the reflow docs + unknown-geo fallback", groups[0].ids.sort().join(",") === "a,c,e");
+  ok("frame group holds the frame doc", groups[1].ids.join(",") === "d");
+  ok("paged group holds the paged doc", groups[2].ids.join(",") === "b");
+  ok("an empty geo produces no group", g.groupDocIdsByGeo(["b"], reg, geoOf).map(function (x) { return x.geo; }).join(",") === "paged");
+  ok("ids with no registry doc are dropped", g.groupDocIdsByGeo(["a", "ghost"], reg, geoOf)[0].ids.join(",") === "a");
+  ok("null-safe on empty input", g.groupDocIdsByGeo(null, reg, geoOf).length === 0);
+  // the browser is product-scoped + auto-opens on a zero-tab Edit landing
+  ok("the browser filters by the product scope (docMatchesProductStage)", /courseMatchesQuery\(registry\[id\], browserQuery\) && docMatchesProductStage\(registry\[id\], scope, null\)/.test(t));
+  ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(t));
+  ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(t) && /cell\.interactive \? "Interactive" : "Static"/.test(t));
+})();
+
+// ---- SPEC 7: product-filtered tab scope (pure predicate) ----
 // ---- SPEC 7: matrix doc-type model (geo x interactive) -- pure, headless ----
 section("editor-rework matrix doc-type");
 (function () {

@@ -3466,10 +3466,24 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .vbrowser__btn--primary:hover { background: var(--accent-hover); }
 .vbrowser__close { flex: none; }
 .vbrowser__grid {
-  flex: 1 1 auto; overflow-y: auto; align-content: start;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: var(--space-8); padding: var(--space-10);
+  flex: 1 1 auto; overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--space-6); padding: var(--space-10);
 }
+/* SPEC 7: doc-type group header + the card grid within each group. */
+.vbrowser__group { display: flex; align-items: center; gap: 8px; padding: 4px 2px 2px; }
+.vbrowser__group-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.vbrowser__group-title { font-size: 12px; font-weight: 600; color: var(--text-primary); letter-spacing: 0.02em; }
+.vbrowser__group-count { font-size: 11px; color: var(--text-tertiary); }
+.vbrowser__grid-inner {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-8); align-content: start;
+}
+.vbrowser-card__badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.vbrowser-card__badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 999px;
+  background: var(--surface-input); color: var(--text-secondary); border: 1px solid var(--border-subtle);
+}
+.vbrowser-card__badge--open { background: var(--accent-quiet); color: var(--accent); border-color: transparent; }
 .vbrowser-card {
   display: flex; flex-direction: column; cursor: pointer;
   border-radius: var(--radius-md); background: var(--surface-raised);

@@ -1701,6 +1701,15 @@
     meta.appendChild(h("span", "vbrowser-card__sep", "·"));
     meta.appendChild(h("span", "vbrowser-card__when", formatRelativeTime(d.meta && d.meta.updatedAt, Date.now())));
     main.appendChild(titleEl); main.appendChild(meta);
+    // SPEC 7: a badge row — Product (if tagged), interactive/static, and an open-state mark.
+    var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { interactive: true };
+    var pid = d.meta && d.meta.productId;
+    var pname = (pid && window.ProductsStore && window.ProductsStore[pid]) ? window.ProductsStore[pid].name : null;
+    var badges = h("div", "vbrowser-card__badges");
+    if (pname) badges.appendChild(h("span", "vbrowser-card__badge", pname));
+    badges.appendChild(h("span", "vbrowser-card__badge", cell.interactive ? "Interactive" : "Static"));
+    if (id === activeDocId || openDocIds.indexOf(id) !== -1) badges.appendChild(h("span", "vbrowser-card__badge vbrowser-card__badge--open", "Open"));
+    main.appendChild(badges);
     var menuBtn = iconBtn("more-horizontal", "Course actions"); menuBtn.classList.add("vbrowser-card__menu");
     menuBtn.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -1815,14 +1824,53 @@
     cards.forEach(function (c) { thumbObserver.observe(c); });
   }
 
+  // SPEC 7 file-picker: the doc browser groups documents BY DOC TYPE (geometry cell), each group
+  // colour-coded. Grouping is pure (takes a geoOf resolver) so tests/run.js exercises it headlessly.
+  var BROWSER_GEO = {
+    reflow: { label: "Reflow", colour: "#0d99ff" },
+    frame:  { label: "Fixed frame", colour: "#9747ff" },
+    paged:  { label: "Paged", colour: "#14ae5c" }
+  };
+  /* @pure-browser-geo-start */
+  var BROWSER_GEO_ORDER = ["reflow", "frame", "paged"];
+  function groupDocIdsByGeo(ids, reg, geoOf) {
+    var by = { reflow: [], frame: [], paged: [] };
+    (ids || []).forEach(function (id) {
+      var d = reg && reg[id]; if (!d) return;
+      var geo = geoOf ? geoOf(d) : "reflow";
+      if (!by[geo]) geo = "reflow"; // unknown geo groups under reflow
+      by[geo].push(id);
+    });
+    return BROWSER_GEO_ORDER.filter(function (g) { return by[g].length; })
+      .map(function (g) { return { geo: g, ids: by[g] }; });
+  }
+  /* @pure-browser-geo-end */
   function renderBrowserGrid() {
     if (!browserUI) return;
     var grid = browserUI.grid; grid.innerHTML = "";
-    var ids = Object.keys(registry).filter(function (id) { return courseMatchesQuery(registry[id], browserQuery); });
+    // Respect the global product scope (like the tabs) + the search query.
+    var scope = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var ids = Object.keys(registry).filter(function (id) {
+      return courseMatchesQuery(registry[id], browserQuery) && docMatchesProductStage(registry[id], scope, null);
+    });
     ids.sort(function (x, y) { return recentsCompare(registry[x], registry[y]); });
     if (!ids.length) { grid.appendChild(buildBrowserEmpty()); return; }
-    var cards = ids.map(function (id) { var c = buildBrowserCard(id, registry[id]); grid.appendChild(c); return c; });
-    observeThumbs(cards);
+    var groups = groupDocIdsByGeo(ids, registry, function (d) {
+      return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d).geo : "reflow";
+    });
+    var allCards = [];
+    groups.forEach(function (grp) {
+      var gm = BROWSER_GEO[grp.geo] || BROWSER_GEO.reflow;
+      var head = h("div", "vbrowser__group");
+      var dot = h("span", "vbrowser__group-dot"); dot.style.background = gm.colour; head.appendChild(dot);
+      head.appendChild(h("span", "vbrowser__group-title", gm.label));
+      head.appendChild(h("span", "vbrowser__group-count", String(grp.ids.length)));
+      grid.appendChild(head);
+      var inner = h("div", "vbrowser__grid-inner");
+      grp.ids.forEach(function (id) { var c = buildBrowserCard(id, registry[id]); inner.appendChild(c); allCards.push(c); });
+      grid.appendChild(inner);
+    });
+    observeThumbs(allCards);
   }
 
   function ensureBrowser() {
@@ -10678,6 +10726,8 @@
       if (btn) btn.classList.toggle("is-active", s === stage);
     });
     if (stage === "source") renderSourceStage();
+    // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
+    if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
