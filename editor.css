@@ -1248,6 +1248,30 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
      fold marker when a page is shorter than one screenful */
   overflow: hidden;
 }
+
+/* SPEC 7 canvas geometry (reflow / frame / paged): the block render() is identical in every
+   geometry -- only this frame CONTAINER changes, driven by the .geo-<geo> class on .world.
+   REFLOW is today's fluid vertical flow and gets NO rule here, so it stays pixel-identical. */
+/* Fixed-frame (deck): a page is one fixed screen; content beyond it is clipped (the base
+   .frame already has overflow:hidden) and flagged, never silently pushed onto a new slide. */
+.world.geo-frame .frame { height: var(--vp-h, 720px); }
+.world.geo-frame .frame.is-overflowing::after {
+  content: "\26A0  Overflows frame \2014 trim or resize";
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
+  padding: 4px 8px; font-size: 10px; font-weight: 600; text-align: center;
+  color: #1b1c1e; background: var(--warning, #f5a623);
+  pointer-events: none;
+}
+/* Paged (print): a page-height surface with a page-break guide every page-height, so content
+   visibly flows across page sections. The repeating guide needs no measurement -- its period
+   is the frame's own --vp-h. */
+.world.geo-paged .frame {
+  background-image: repeating-linear-gradient(to bottom,
+    transparent 0,
+    transparent calc(var(--vp-h, 720px) - 1px),
+    rgba(255, 255, 255, 0.16) calc(var(--vp-h, 720px) - 1px),
+    rgba(255, 255, 255, 0.16) var(--vp-h, 720px));
+}
 /* Perf (#150): pages scrolled out of the viewport skip paint + layout of their
    contents. contain-intrinsic-size (set inline per-frame from the measured height in
    layoutColumns) reserves the exact box, so stacking is unchanged; the frame's own bg

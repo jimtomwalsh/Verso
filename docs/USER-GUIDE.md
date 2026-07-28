@@ -70,7 +70,11 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   §9). Drag the thin divider between any two panes to resize them; click a pane's header to
   collapse it.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
-  pinch) to zoom. Every page is a live, editable render of what the learner will see.
+  pinch) to zoom. Every page is a live, editable render of what the learner will see. The board
+  follows the document's **geometry** (set by its preset, §2): **reflow** flows content down a
+  fluid page (eLearning / web); **fixed frame** shows each page as one fixed screen and clips
+  anything past it with an amber *overflows* warning (decks); **paged** shows page-break guide
+  lines, so content reads across pages (print / guides). The same blocks render in every geometry.
 - **Inspector (right).** Context-sensitive: with nothing selected it shows **document**
   settings; select a block and it shows that block's settings.
 
