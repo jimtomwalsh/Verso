@@ -18970,8 +18970,9 @@
     renderStructure();
     renderAssets(); // keep the Blocks palette current
     renderComponentsPalette(); // keep the Components pane current (My Components / Blocks / Pages)
+    if (typeof syncCellChip === "function") syncCellChip(); // SPEC 7: reflect the doc's cell in the header chip after any rebuild
     renderModelView();
-    
+
     restoreSelection();
     
     updateHistoryButtons();
