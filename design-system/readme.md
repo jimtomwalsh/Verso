@@ -111,6 +111,42 @@ How Verso writes UI copy:
 
 ---
 
+## Scope — Verso UI only
+
+This system governs the **Verso UI** (`editor.css`, the inspector/render code in
+`src/editor.js`, `src/export.js` UI, `index.html`) and nothing else. It NEVER governs the
+exported course output (`src/render.js`, `src/course.css`) — that is the learner-facing
+product, styled separately. `render(doc, theme)`, `src/course.css` tokens, and SCORM export
+bytes stay byte-identical regardless of the UI. DS Verso-UI tokens must never enter
+`src/course.css` nor be read by `render()`.
+
+Verso is vanilla JS (classic-script globals, opens from `file://`, no ES modules / bundler /
+npm). The DS ships some artifacts that violate that and are therefore **reference only —
+nothing in the app loads them**: the React `.jsx` sources, `_ds_bundle.js` /
+`window.VersoDesignSystem_*` (with `_ds_manifest.json`, `_adherence.oxlintrc.json`), and the
+DS's Lucide-via-CDN icons + Google-Fonts `@import` in `tokens/fonts.css`. What is **adopted**:
+the token CSS values, this visual spec, the component contracts (`.d.ts` / `.prompt.md`), the
+Lucide glyph set (inlined locally), and the fonts (vendored locally). Icons resolve through the
+single `Icon` accessor keyed by Lucide (kebab-case) names — never a stray inline `<svg>`.
+
+## Machine-gate enforcement
+
+This readme is the human rulebook; `tests/run.js` is its automated negative-space guard — it
+enforces that retired patterns stay gone, not that the rulebook is followed line by line.
+
+- **`panel-standards`** (`tests/run.js` section `"panel-standards"`) — canonical primitives
+  present; open-state persisted; no word-boolean `segmentedLive`.
+- **UI kit conformance gate (ticket 9 — HARD FAIL)** — three violation classes must be 0:
+  (1) no hand-appended block container chrome (all via `renderContainerChrome`),
+  (2) no inline one-off glyphs (all from the canonical glyph set),
+  (3) no labelled dimensional controls (`numRow` / `labeledRow` deleted).
+
+Build against the canonical helpers mapped above — the gate enforces they are used, not
+hand-rolled. A future DS drop is applied by replacing the vendored `design-system/` files in
+place; if a needed pattern is missing, add it here, not in a second rulebook.
+
+---
+
 ## Index / manifest
 
 **Root** — `styles.css` (the single entry point consumers link) · `readme.md` (this file).
