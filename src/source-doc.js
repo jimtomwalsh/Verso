@@ -619,6 +619,55 @@
     });
     return out;
   }
+  function isChapterNode(n) { return !!n && n.type === "heading" && (n.chapter === true || (n.level || 2) === 1); }
+  // The nested outline the unified TOC renders: chapters (level-1) each carrying their child
+  // headings (level 2/3), in document order. A heading before the first chapter (rare) nests at
+  // the top level with no children. Pure -> the TOC tree is testable without the DOM.
+  function outline(model) {
+    var out = [], cur = null;
+    (model && model.nodes || []).forEach(function (n) {
+      if (n.type !== "heading") return;
+      if (isChapterNode(n)) { cur = { key: n.key, text: nodeText(n), level: 1, children: [] }; out.push(cur); }
+      else { var item = { key: n.key, text: nodeText(n), level: n.level || 2 }; if (cur) cur.children.push(item); else out.push({ key: n.key, text: nodeText(n), level: n.level || 2, children: [] }); }
+    });
+    return out;
+  }
+  // The contiguous node span each chapter owns: its level-1 heading through the node just before
+  // the next chapter heading (or end of doc). Nodes before the first chapter heading (there
+  // shouldn't be any in a migrated doc) form a leading "" block that never moves.
+  function chapterBlocks(model) {
+    var ns = (model && model.nodes) || [], blocks = [], cur = null;
+    ns.forEach(function (n, i) {
+      if (isChapterNode(n)) { if (cur) blocks.push(cur); cur = { key: n.key, text: nodeText(n), start: i, end: i + 1 }; }
+      else if (cur) { cur.end = i + 1; }
+      else {
+        // leading nodes before the first chapter heading (rare) share one key:null block that stays put
+        if (!blocks.length) blocks.push({ key: null, text: "", start: 0, end: 1 }); else blocks[0].end = i + 1;
+      }
+    });
+    if (cur) blocks.push(cur);
+    return blocks;
+  }
+  // Move a whole chapter block (heading + its nodes) so it lands immediately before the chapter
+  // keyed refKey, or at the end when refKey is null. Pure array splice on model.nodes -- node
+  // keys, marks (anchored by key) and variants (on the node) all ride along untouched. Pushes
+  // undo. Returns true when the order actually changed.
+  function moveChapter(model, chapterKey, refKey) {
+    if (!model || chapterKey === refKey) return false;
+    var blocks = chapterBlocks(model);
+    var from = null, before = null;
+    blocks.forEach(function (b) { if (b.key === chapterKey) from = b; if (b.key === refKey) before = b; });
+    if (!from || (refKey != null && !before)) return false;
+    var moving = model.nodes.slice(from.start, from.end);
+    if (!moving.length) return false;
+    pushUndo(model);
+    var rest = model.nodes.slice(0, from.start).concat(model.nodes.slice(from.end));
+    // recompute the insert point in `rest` (indices shift once `moving` is pulled out)
+    var at = rest.length;
+    if (refKey != null) { for (var i = 0; i < rest.length; i++) { if (rest[i].key === refKey) { at = i; break; } } }
+    model.nodes = rest.slice(0, at).concat(moving, rest.slice(at));
+    return true;
+  }
 
   // ---- full-text search (toc-search-drawer) ---------------------------------
   // Every searchable word on a topic: its name + all node text (continuous doc) or,
@@ -654,7 +703,7 @@
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters,
+    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
@@ -670,7 +719,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters,
+    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,

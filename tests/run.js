@@ -8428,7 +8428,7 @@ section("Product Rail: Source stage nav + article");
   // Wiring: setStage("source") triggers a render; the topic list re-renders on both
   // search input and the shared product-context change (Epic 1's dropdown).
   ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
-  ok("mountProductPicker()'s onChange also re-renders the Source topic list (shared product context)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceTopicList\(\); \}/.test(e));
+  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); \}/.test(e));
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{ __sourceSearchQuery = input\.value; renderSourceTopicList\(\); \}\);/.test(e));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
   ok("the facet SegmentedControl re-renders the article, gated through isValidFacet", /onChange: function \(v\) \{ if \(!isValidFacet\(v\)\) return; __sourceActiveFacet = v; renderSourceArticle\(\); \}/.test(e));
@@ -8506,7 +8506,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // /verso-frontend audit 2026-07-27: consolidated into ONE state-reactive toolbar row
   // (renderSourceToolbar, icon-only IconButton), built inside renderSourceTopicList
   // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
-  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,400}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(e));
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,900}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(e));
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(e) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(e));
@@ -11363,6 +11363,53 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
     return SD.concatChapters([]).nodes.length === 0 && SD.concatChapters([{ name: "Solo" }]).nodes.length === 1;
   })());
 
+  // --- unified TOC outline + chapter reorder (unified-toc ticket, spec 2c section 2) ---
+  var doc = SD.concatChapters([
+    { name: "Alpha", model: SD.create([{ type: "heading", level: 2, text: "A-sec1" }, { type: "paragraph", text: "a body" }, { type: "heading", level: 3, text: "A-sub" }]) },
+    { name: "Beta", model: SD.create([{ type: "heading", level: 2, text: "B-sec1" }, { type: "paragraph", text: "b body" }]) },
+    { name: "Gamma", model: SD.create([{ type: "paragraph", text: "g body only" }]) }
+  ]);
+  ok("outline nests child headings (level 2/3) under their chapter (level 1)", (function () {
+    var o = SD.outline(doc);
+    return o.length === 3 && o[0].text === "Alpha" && o[0].level === 1
+      && o[0].children.length === 2 && o[0].children[0].text === "A-sec1" && o[0].children[1].level === 3
+      && o[1].children.length === 1 && o[2].children.length === 0;
+  })());
+  ok("chapterBlocks reports each chapter's contiguous node span", (function () {
+    var b = SD.chapterBlocks(doc);
+    return b.length === 3 && b[0].text === "Alpha" && b[0].end - b[0].start === 4 && b[2].text === "Gamma";
+  })());
+  ok("moveChapter reorders a whole chapter block before another chapter", (function () {
+    var d2 = SD.fromJSON(SD.toJSON(doc));
+    var gammaKey = SD.chapters(d2)[2].key, alphaKey = SD.chapters(d2)[0].key;
+    var moved = SD.moveChapter(d2, gammaKey, alphaKey); // Gamma -> before Alpha
+    var order = SD.chapters(d2).map(function (c) { return c.text; });
+    return moved === true && order.join(",") === "Gamma,Alpha,Beta";
+  })());
+  ok("moveChapter to null appends the chapter to the end", (function () {
+    var d3 = SD.fromJSON(SD.toJSON(doc));
+    var alphaKey = SD.chapters(d3)[0].key;
+    SD.moveChapter(d3, alphaKey, null); // Alpha -> end
+    return SD.chapters(d3).map(function (c) { return c.text; }).join(",") === "Beta,Gamma,Alpha";
+  })());
+  ok("moveChapter carries the chapter's nodes with it (Alpha keeps its 2 child headings)", (function () {
+    var d4 = SD.fromJSON(SD.toJSON(doc));
+    SD.moveChapter(d4, SD.chapters(d4)[0].key, null);
+    var o = SD.outline(d4);
+    return o[o.length - 1].text === "Alpha" && o[o.length - 1].children.length === 2;
+  })());
+  ok("moveChapter is a no-op (returns false) for an unknown or self target", (function () {
+    var d5 = SD.fromJSON(SD.toJSON(doc));
+    var a = SD.chapters(d5)[0].key;
+    return SD.moveChapter(d5, a, a) === false && SD.moveChapter(d5, "nope", null) === false;
+  })());
+  ok("moveChapter pushes undo (the reorder is reversible)", (function () {
+    var d6 = SD.fromJSON(SD.toJSON(doc));
+    SD.moveChapter(d6, SD.chapters(d6)[2].key, SD.chapters(d6)[0].key);
+    SD.undo(d6);
+    return SD.chapters(d6).map(function (c) { return c.text; }).join(",") === "Alpha,Beta,Gamma";
+  })());
+
   // editor wiring: the migration is guarded + reversible + stored as a reserved master.
   var e = src("src/editor.js");
   ok("the unified doc lives in a reserved 'source master' component keyed off product.groundTruthId", /function sourceMasterFor\(productId\)[\s\S]{0,200}p\.groundTruthId[\s\S]{0,120}m\.sourceMaster/.test(e));
@@ -11371,6 +11418,16 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("migration is REVERSIBLE: old topics are kept, only stamped archivedInto (never deleted)", /topics\.forEach\(function \(t\) \{ t\.archivedInto = master\.id; \}\);/.test(e) && /function revertProductUnifiedDoc/.test(e));
   ok("the reserved master + archived topics are hidden from the interim Source nav (no double-up)", /\.filter\(function \(t\) \{ return !t\.sourceMaster && !t\.archivedInto; \}\)/.test(e));
   ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(e) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(e));
+
+  // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
+  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(e));
+  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = sourceMasterFor\(activeSourceProductId\(\)\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(e));
+  ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(e) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(e));
+  ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(e));
+  ok("the one-doc toolbar keeps ONLY Markdown import (topic-management is gone)", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,220}icon: "upload", label: "Import from Markdown[\s\S]{0,140}return;/.test(e));
+  ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(e));
+  ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(e) && /it\.classList\.toggle\("is-selected", on\)/.test(e));
+  ok("the search field prompts 'find a heading' under one document", /unified \? "find a heading" : "search topics \+ text"/.test(e));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

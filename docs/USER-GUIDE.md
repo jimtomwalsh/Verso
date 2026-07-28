@@ -577,6 +577,22 @@ Product Rail groups your courses under **Products** (e.g. a hardware line), with
 switching between **Source** (reference wiki), **Edit** (the course canvas you already know), and
 **Publish**. This section covers Source — an early feature, still growing.
 
+**One document per Product (Source v2).** A Product's source is now **one continuous document**,
+not a list of separate topics. The first time you open the Source rail for a Product, the topics
+you imported are joined into a single document — each becomes a top-level **chapter**, its headings
+nested underneath. Nothing is thrown away; the original topics are kept, so this is reversible.
+
+- **The left rail is the document's table of contents.** Chapters sit at the top level with a twirl
+  to fold their headings in or out; click any entry to jump to it; the entry you're reading
+  highlights as you scroll. Drag a chapter to move that whole chapter (and everything under it)
+  within the document.
+- **Find a heading.** The search field above the outline filters it to matching headings as you type.
+- **The one action left in the rail is Import from Markdown** (below). Because there's one document,
+  the old per-topic tools — new topic, select, delete, move, reorder topics — are gone.
+
+The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
+authoring a chapter's text, importing, annotations, history and comments all work as described.
+
 **Attaching a course to a Product.** Open a course, then **Save/Recents → Promote to Product…**.
 Pick an existing Product or create a new one, choose a Format (eLearning, Presentations, or Print
 docs), and promote. This only tags the course — its content is never touched. The top-bar Product

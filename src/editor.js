@@ -10485,7 +10485,7 @@
     host.appendChild(U.Select({
       options: productSelectOptions(window.ProductsStore),
       value: __activeProduct,
-      onChange: function (v) { setActiveProduct(v); renderSourceTopicList(); }
+      onChange: function (v) { setActiveProduct(v); renderSourceStage(); } // re-resolve the Product's one document
     }));
   }
   window.__productRail.getActiveProduct = getActiveProduct;
@@ -10729,6 +10729,11 @@
   // Drag state for the topic-nav rail's row drag (source-stage-topic-reorder) -- same
   // shape as the outliner's treeDrag/the section grip's __sourceSectionDrag.
   var __sourceTopicDrag = null; // { id } | null
+  // Source v2 (unified-toc): the left rail is ONE document TOC of the active Product's unified
+  // doc (chapters + nested headings) instead of a per-topic list. Chapter twirl state (a key set
+  // to false is collapsed; default open) + the chapter drag-reorder state.
+  var __sourceOpenChapters = {}; // chapterKey -> false collapses it in the TOC (default open)
+  var __sourceChapterDrag = null; // { key } | null
 
   function exitSelectMode() {
     __sourceSelectModeActive = false;
@@ -10828,6 +10833,15 @@
     host.innerHTML = "";
     if (!window.VersoUI || !window.VersoUI.IconButton) return;
     var U = window.VersoUI;
+    // Source v2 (unified-toc): under one document there is no topic list to manage, so the only
+    // surviving left action is Markdown import (its additive-with-preview reshape is a later
+    // ticket). New-topic / select / delete / move / review-filter all go away with the list.
+    if (sourceMasterFor(activeSourceProductId())) {
+      var oneRow = h("div", "source-stage__toolbar");
+      oneRow.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
+      host.appendChild(oneRow);
+      return;
+    }
     var row = h("div", "source-stage__toolbar");
 
     if (!__sourceSelectModeActive) {
@@ -10864,8 +10878,120 @@
     host.appendChild(row);
   }
 
+  // ---- Source v2: the unified-document TOC (unified-toc, spec 2c section 2) ----
+  // The active Product's source is ONE document (the reserved master). The left rail shows its
+  // whole outline -- chapters (old topics, level-1) with their headings nested -- not a per-topic
+  // list. This resolves the Product to show and materialises the one-doc model on first entry.
+
+  // The Product whose source document the stage shows. Prefers the picker's active Product; if
+  // none is set, defaults to the first Product that has source content (a master or topics), so
+  // the stage always lands on a real document instead of an empty rail.
+  function activeSourceProductId() {
+    var pid = getActiveProduct();
+    if (pid && window.ProductsStore[pid]) return pid;
+    var keys = Object.keys(window.ProductsStore || {});
+    for (var i = 0; i < keys.length; i++) { if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) { setActiveProduct(keys[i]); return keys[i]; } }
+    return keys[0] || "";
+  }
+  // Resolve the active Product's unified-doc master, migrating on first entry when the Product
+  // still has loose topics (the one-doc model is the locked v2 design and the migration is
+  // reversible -- see migrateProductToUnifiedDoc). Returns the master topic, or null.
+  function ensureUnifiedDocForActiveProduct() {
+    var pid = activeSourceProductId(); if (!pid) return null;
+    var master = sourceMasterFor(pid);
+    if (!master && unifiableTopicsFor(pid).length) master = migrateProductToUnifiedDoc(pid);
+    return master;
+  }
+  // Scroll the reading column to a node (a chapter or heading key) -- the TOC's click-to-jump.
+  function scrollSourceToNode(key) {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var target = host.querySelector('[data-node="' + key + '"]');
+    if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+  // Chapter drag-reorder on a TOC chapter row: same drop-marker idiom as the topic-row drag it
+  // replaces (tree-drop-before/after + clearTreeMarks), but it moves a whole chapter block in the
+  // one document via SourceDoc.moveChapter.
+  function wireSourceChapterDrag(row, key) {
+    row.setAttribute("draggable", "true");
+    row.addEventListener("dragstart", function (e) { __sourceChapterDrag = { key: key }; try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {} e.stopPropagation(); });
+    row.addEventListener("dragend", function () { __sourceChapterDrag = null; clearTreeMarks(); });
+    row.addEventListener("dragover", function (e) {
+      if (!__sourceChapterDrag || __sourceChapterDrag.key === key) return;
+      e.preventDefault(); e.stopPropagation();
+      var r = row.getBoundingClientRect();
+      row.__after = (e.clientY - r.top) > r.height / 2;
+      clearTreeMarks();
+      row.classList.add(row.__after ? "tree-drop-after" : "tree-drop-before");
+    });
+    row.addEventListener("dragleave", function () { row.classList.remove("tree-drop-before", "tree-drop-after"); });
+    row.addEventListener("drop", function (e) {
+      if (!__sourceChapterDrag) return;
+      e.preventDefault(); e.stopPropagation();
+      var dragKey = __sourceChapterDrag.key, after = row.__after;
+      __sourceChapterDrag = null; clearTreeMarks();
+      applySourceChapterMove(dragKey, key, after);
+    });
+  }
+  function applySourceChapterMove(dragKey, refKey, after) {
+    var master = ensureUnifiedDocForActiveProduct(); if (!master) return;
+    var SD = window.SourceDoc, model = ensureSourceDocModel(master);
+    var chs = SD.chapters(model).map(function (c) { return c.key; });
+    var refIdx = chs.indexOf(refKey);
+    var target = after ? (chs[refIdx + 1] || null) : refKey; // drop-after == "before the next chapter"
+    if (SD.moveChapter(model, dragKey, target)) {
+      persistSourceDocModel(master, model);
+      renderSourceArticle();
+      renderSourceTopicList();
+    }
+  }
+  // Render the one-document TOC into the left rail: chapters as top-level TreeItem rows (twirl +
+  // heading-count badge), their headings nested one/two levels deep. Filter narrows by heading
+  // text (fuzzy). Every row is the canonical VersoUI.TreeItem (DSLMS structure/TreeItem).
+  function renderSourceUnifiedToc(master) {
+    if (typeof document === "undefined") return;
+    renderSourceToolbar(null, 0); // one-doc toolbar: import only
+    var host = document.getElementById("source-topic-list"); if (!host) return;
+    host.innerHTML = "";
+    var U = window.VersoUI, SD = window.SourceDoc;
+    if (!U || !U.TreeItem || !SD) return;
+    var model = ensureSourceDocModel(master);
+    var q = __sourceSearchQuery || "";
+    function hit(t) { return !q || SD.fuzzyMatch(t || "", q); }
+    var tree = SD.outline(model), rendered = 0;
+    tree.forEach(function (ch) {
+      var kids = (ch.children || []).filter(function (k) { return hit(ch.text) || hit(k.text); });
+      if (q && !hit(ch.text) && !kids.length) return; // chapter filtered out entirely
+      var open = q ? true : (__sourceOpenChapters[ch.key] !== false); // an active filter force-opens
+      var count = (ch.children || []).length;
+      var chapterRow = U.TreeItem({
+        label: ch.text || "Untitled chapter", depth: 0,
+        expandable: count > 0, expanded: open,
+        trailing: count ? U.Badge({ children: String(count), tone: "neutral", size: "sm" }) : null,
+        onToggle: function () { __sourceOpenChapters[ch.key] = !open; renderSourceTopicList(); },
+        onSelect: function () { scrollSourceToNode(ch.key); }
+      });
+      chapterRow.classList.add("source-toc__row", "source-toc__row--chapter");
+      chapterRow.setAttribute("data-toc-key", ch.key);
+      chapterRow.title = ch.text || "";
+      wireSourceChapterDrag(chapterRow, ch.key);
+      host.appendChild(chapterRow); rendered++;
+      if (open) kids.forEach(function (k) {
+        var kr = U.TreeItem({ label: k.text || "Untitled", depth: (k.level >= 3 ? 2 : 1), onSelect: function () { scrollSourceToNode(k.key); } });
+        kr.classList.add("source-toc__row");
+        kr.setAttribute("data-toc-key", k.key);
+        kr.title = k.text || "";
+        host.appendChild(kr); rendered++;
+      });
+    });
+    if (!rendered) host.appendChild(h("div", "source-stage__empty", q ? "No headings match." : "This document has no headings yet."));
+    updateSourceScrollSpy();
+  }
+
   function renderSourceTopicList() {
     if (typeof document === "undefined") return;
+    // Source v2: when the active Product has a unified document, the rail is its one TOC.
+    var master = sourceMasterFor(activeSourceProductId());
+    if (master) { renderSourceUnifiedToc(master); return; }
     var host = document.getElementById("source-topic-list"); if (!host) return;
     host.innerHTML = "";
     // Canonicalize drag order across the FULL topic population (every Product, no search/
@@ -11525,7 +11651,10 @@
     var SD = window.SourceDoc, SM = window.SourceMarks;
     var model = ensureSourceDocModel(topic);
     var layout = h("div", "source-doc__layout");
-    var toc = buildSourceToc(model, host);
+    // Source v2: the unified document's outline lives in the LEFT rail (renderSourceUnifiedToc),
+    // so the in-article sticky rail is dropped for a source master -- no double-TOC. A legacy
+    // section topic (fallback path) keeps its own in-article outline.
+    var toc = topic.sourceMaster ? null : buildSourceToc(model, host);
     if (toc) layout.appendChild(toc);
     var col = h("div", "source-doc__col");
     var art = h("article", "source-doc"); art.setAttribute("spellcheck", "false");
@@ -11730,13 +11859,21 @@
   // reading pane -- the section the author is currently reading.
   function updateSourceScrollSpy() {
     var host = document.getElementById("source-stage-article"); if (!host) return;
-    var toc = host.querySelector(".source-doc__toc"); if (!toc) return;
     var top = host.getBoundingClientRect().top + 12;
     var heads = Array.prototype.slice.call(host.querySelectorAll(".source-doc__h[data-node]"));
     var currentKey = heads.length ? heads[0].getAttribute("data-node") : null;
     heads.forEach(function (el) { if (el.getBoundingClientRect().top <= top) currentKey = el.getAttribute("data-node"); });
-    Array.prototype.forEach.call(toc.querySelectorAll(".source-doc__toc-item"), function (it) {
-      it.classList.toggle("is-current", it.getAttribute("data-toc-key") === currentKey);
+    // Highlight the current entry wherever the outline lives: the left-rail unified TOC
+    // (VersoUI.TreeItem rows, is-selected) and/or the legacy in-article rail (is-current).
+    var rows = [];
+    var rail = document.getElementById("source-topic-list");
+    if (rail) rows = rows.concat(Array.prototype.slice.call(rail.querySelectorAll(".source-toc__row[data-toc-key]")));
+    var toc = host.querySelector(".source-doc__toc");
+    if (toc) rows = rows.concat(Array.prototype.slice.call(toc.querySelectorAll(".source-doc__toc-item")));
+    rows.forEach(function (it) {
+      var on = it.getAttribute("data-toc-key") === currentKey;
+      it.classList.toggle("is-current", on);
+      it.classList.toggle("is-selected", on);
     });
   }
   function onSourceArticleScroll() {
@@ -12378,7 +12515,8 @@
     host.innerHTML = "";
     var search = h("label", "vbrowser__search source-stage__search-field");
     search.innerHTML = window.Icon ? window.Icon("search") : "";
-    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "search topics + text";
+    var unified = !!sourceMasterFor(activeSourceProductId());
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = unified ? "find a heading" : "search topics + text";
     input.value = __sourceSearchQuery;
     input.addEventListener("input", function () { __sourceSearchQuery = input.value; renderSourceTopicList(); });
     search.appendChild(input);
@@ -12403,8 +12541,15 @@
   // inside renderSourceTopicList, not mounted separately).
   var SOURCE_TOPIC_PERSIST_KEY = "verso.sourceTopic"; // the topic open on the Source stage, restored across a refresh
   function renderSourceStage() {
-    // restore the last-open topic on a fresh load (a refresh should return to the doc, not a blank stage)
-    if (!__sourceActiveTopicId) {
+    // Source v2: the active Product's source is ONE document. Resolve (and materialise on first
+    // entry) its unified master and open it, so the stage shows the document, not a topic list.
+    var master = ensureUnifiedDocForActiveProduct();
+    if (master) {
+      __sourceActiveTopicId = master.id;
+      __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind if the Product changed
+      try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, master.id); } catch (e) {}
+    } else if (!__sourceActiveTopicId) {
+      // no unified doc yet (no Product / no topics) -> restore the last-open topic on a fresh load
       try { var savedT = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY); if (savedT && libComponents()[savedT]) __sourceActiveTopicId = savedT; } catch (e) {}
     }
     mountSourceStageSearch();
@@ -12517,6 +12662,7 @@
     saveProducts();
     return true;
   }
+  window.__productRail.applySourceChapterMove = applySourceChapterMove; // browser-verify: chapter drag-reorder
   window.__productRail.sourceMasterFor = sourceMasterFor;
   window.__productRail.unifiableTopicsFor = unifiableTopicsFor;
   window.__productRail.buildUnifiedModelFor = buildUnifiedModelFor;

@@ -485,6 +485,17 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   height: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer;
 }
 .source-stage__empty { padding: 16px 10px; color: var(--text-tertiary); font-size: var(--text-sm, 12px); }
+
+/* Source v2 (unified-toc): the left rail is ONE document TOC built from canonical
+   VersoUI.TreeItem rows (.vds-tree-item). These add only the TOC-specific tier accents on top
+   of the DSLMS TreeItem base -- chapter rows read bolder, the scroll-spy current entry gets the
+   accent left-border used by the in-doc TOC it replaces. */
+.source-toc__row { cursor: pointer; }
+.source-toc__row--chapter .vds-tree-item__label,
+.source-toc__row--chapter.vds-tree-item .vds-tree-item__label { font-weight: 600; color: var(--text-primary); }
+.source-toc__row[draggable="true"] { cursor: grab; }
+.source-toc__row.is-current, .source-toc__row.is-selected { color: var(--accent); }
+.source-toc__row.is-current .vds-tree-item__label, .source-toc__row.is-selected .vds-tree-item__label { color: var(--accent); }
 .source-stage__article { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 28px 36px; background: var(--surface-canvas); }
 .source-stage__article-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 /* The page-level Technical/Digestible/Dot-point control has room to breathe here
