@@ -775,13 +775,17 @@ a refresh and a stage-switch.
 - **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
   **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
   that's already queued re-arms it rather than duplicating it.
+- **Presets.** Each queue row shows an **output preset** chip — click it to switch the row's preset,
+  save the current settings as a new named preset, or rename/delete one of your own. Three come built
+  in: **Master** (full quality), **Review copy** (adds the reviewer file, learner theme off), and
+  **Lightweight** (optimises media hard for a smaller package). Presets are shared across the app, and
+  each document remembers the preset it last used, so re-queuing it is one click.
 - **Publish.** One **Publish** button runs every pending row in turn: each is packaged as a SCORM
-  `.zip` and downloaded. Done rows stay in the queue, greyed, with their result — the queue isn't
-  cleared, so you can see what shipped. (This early version packages with the standard SCORM options;
-  named presets and a chosen save folder arrive in later updates.)
+  `.zip` (using that row's preset) and downloaded. Done rows stay in the queue, greyed, with their
+  result — the queue isn't cleared, so you can see what shipped.
 
-This is an early view — the per-document configuration, staleness dots, and folder output arrive in
-later updates.
+This is an early view — a chosen save folder, staleness dots, and a "Send to publish queue" button in
+the editor arrive in later updates.
 
 ---
 

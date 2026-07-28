@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -8483,10 +8483,58 @@ section("Product Rail: Publish queue store (T1)");
   var e = src("src/editor.js");
   ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(e));
   ok("the queue persists through the durable key/value writer", /writeStore\(localStorage, PUBLISH_QUEUE_KEY, JSON\.stringify\(PQ\.toJSON\(__publishQueue\)\)\)/.test(e));
-  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /SX\.buildPackage\(SX\.defaultOptions\(\)\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
+  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
   ok("index.html loads publish-queue.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/publish-queue.js") > -1 && idx.indexOf("src/publish-queue.js") < idx.indexOf("src/editor.js");
   })());
+})();
+
+// ---- product-rail-publish-queue-t2: app-level output presets ----
+// A preset is a named bundle of export-option overrides applied onto defaultOptions() at publish time.
+// 3 built-ins ship; authors save/rename/delete their own; a doc remembers its last-used preset. Pure
+// store + resolution here; the row dropdown / save-as modal are browser-verified.
+section("Product Rail: Publish presets (T2)");
+(function () {
+  var PP = require(path.join(ROOT, "src/publish-presets.js"));
+  var s = PP.create();
+  ok("three built-ins ship (Master / Review copy / Lightweight)", (function () {
+    var b = PP.builtins(); return b.length === 3 && b[0].id === "master" && b[1].id === "review" && b[2].id === "lightweight";
+  })());
+  ok("Master applies no overrides; Review copy sets reviewFile; Lightweight lowers maxImageDim", (function () {
+    return Object.keys(PP.optionsFor(s, "master")).length === 0
+      && PP.optionsFor(s, "review").reviewFile === true && PP.optionsFor(s, "review").learnerTheme === false
+      && PP.optionsFor(s, "lightweight").maxImageDim === 1200;
+  })());
+  ok("an unknown preset id resolves to Master (never strands a row)", PP.presetById(s, "nope").id === "master" && Object.keys(PP.optionsFor(s, "nope")).length === 0);
+  var custom = PP.saveCustom(s, "My tight build", { optimiseMedia: true, imageQuality: 0.6 });
+  ok("saveCustom adds an app-global custom preset with its overrides", (function () {
+    return custom.id.indexOf("preset-") === 0 && !custom.builtin && PP.optionsFor(s, custom.id).imageQuality === 0.6 && PP.allPresets(s).length === 4;
+  })());
+  ok("renameCustom renames a custom preset; a built-in can't be renamed", (function () {
+    PP.renameCustom(s, custom.id, "Tight"); PP.renameCustom(s, "master", "Nope");
+    return PP.presetName(s, custom.id) === "Tight" && PP.presetName(s, "master") === "Master";
+  })());
+  ok("a doc remembers its last-used preset; a re-visit recalls it", (function () {
+    PP.setLastForDoc(s, "COURSE-A", custom.id);
+    return PP.lastForDoc(s, "COURSE-A") === custom.id && PP.lastForDoc(s, "COURSE-UNSEEN") === "master";
+  })());
+  ok("deleting a custom preset falls its documents back to Master", (function () {
+    PP.deleteCustom(s, custom.id);
+    return PP.allPresets(s).length === 3 && PP.lastForDoc(s, "COURSE-A") === "master";
+  })());
+  ok("the preset store round-trips through toJSON/fromJSON (built-ins are never persisted as custom)", (function () {
+    var s2 = PP.create(); var c = PP.saveCustom(s2, "Keep", { reviewFile: true }); PP.setLastForDoc(s2, "D", c.id);
+    var back = PP.fromJSON(JSON.parse(JSON.stringify(PP.toJSON(s2))));
+    return back.custom.length === 1 && back.custom[0].name === "Keep" && PP.lastForDoc(back, "D") === c.id && PP.allPresets(back).length === 4;
+  })());
+  ok("fromJSON drops any built-in id smuggled into custom + tolerates a malformed blob", PP.fromJSON({ custom: [{ id: "master", name: "x" }, { id: "p9", name: "ok" }] }).custom.length === 1 && PP.fromJSON(null).custom.length === 0);
+
+  // Editor wiring (grep guards -- the dropdown + modal are browser-verified)
+  var e = src("src/editor.js");
+  ok("the run loop packages each row with its resolved preset options, not bare defaults", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e));
+  ok("publishOptionsForRow merges the preset overrides onto defaultOptions()", /Object\.assign\(base, PP\.optionsFor\(publishPresets\(\), row\.preset \|\| "master"\)\)/.test(e));
+  ok("adding a doc recalls its last-used preset (zero-config re-queue)", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e));
+  ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
 })();
 
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
