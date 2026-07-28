@@ -2213,6 +2213,21 @@ section("editor-rework tab scope");
   ok("null-safe on empty inputs", g.visibleTabIds(null, reg, "").length === 0 && g.visibleTabIds(open, null, "").length === 0);
 })();
 
+// ---- SPEC 7: cell switcher + tiered mutability (wiring) ----
+section("editor-rework cell switcher");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  ok("the editor header carries a matrix-cell chip", /id="editor-cell-chip"/.test(html));
+  ok("the chip shows geometry . interactivity", /chip\.textContent = \(CELL_GEO_LABEL\[c\.geo\] \|\| c\.geo\) \+ " · " \+ \(c\.interactive \? "Interactive" : "Static"\)/.test(e));
+  ok("interactivity toggles are IMMEDIATE (no warning)", /function setCellInteractive\(on\)[\s\S]{0,200}applyCellChange\(c\.geo, on\); \/\/ immediate, no warning/.test(e));
+  ok("a geometry-mode change is GUARDED by a reflow warning", /function setCellGeo\(geo\)[\s\S]{0,320}confirmModal\("Change layout mode\?"/.test(e));
+  ok("the geometry change re-renders the canvas via applyCellChange -> mount", /function applyCellChange\(geo, interactive\)[\s\S]{0,220}tagDocCell\(doc, geo, interactive\);[\s\S]{0,80}mount\(\);/.test(e));
+  ok("the change writes the cell through the pure doc-type model, then saves", /window\.__docType\.tagDocCell\(doc, geo, interactive\);\s*\n\s*saveRegistry\(registry\);/.test(e));
+  ok("the chip menu offers all three geometries + both interactivity states", /\["reflow", "frame", "paged"\]\.forEach[\s\S]{0,200}head: "Interactivity"[\s\S]{0,160}label: "Interactive"[\s\S]{0,120}label: "Static"/.test(e));
+  ok("the chip is mounted at boot + re-synced on doc switch", /mountCellChip\(\); \/\/ SPEC 7/.test(e) && /syncCellChip\(\); \/\/ SPEC 7: reflect the new doc/.test(e));
+})();
+
 // ---- SPEC 7: canvas geometry helpers (pure) ----
 section("editor-rework canvas geometry");
 (function () {
