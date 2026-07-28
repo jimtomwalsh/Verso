@@ -6795,6 +6795,15 @@
       ? "Live library instance, linked to “" + (def.name || block.ref) + "”. Edit the master in Settings → System → Component Library and every placement updates automatically."
       : "This instance's library master (“" + block.ref + "”) no longer exists. Detach to keep this placement as an editable copy, or remove it."));
 
+    // SPEC 7 two-way link: a block inserted from Source carries a sourceRef -- offer a jump back
+    // to its exact source topic (the reverse of the Source panel's where-used row).
+    if (block.sourceRef && block.sourceRef.topicId && window.VersoUI && window.VersoUI.Button) {
+      inspector.appendChild(window.VersoUI.Button({
+        variant: "secondary", icon: "link", label: "Open in Source",
+        onClick: function () { jumpToSourceTopic(block.sourceRef.topicId); }
+      }));
+    }
+
     // Product Rail: a facet switcher, shown only when the master carries named facets
     // (never for docTypeRenderings -- that's export-time-only, structurally never a
     // picker here). Switching only changes what THIS placement resolves to; it never
@@ -11705,8 +11714,9 @@
       used.forEach(function (u) {
         var row = h("button", "source-stage__linked-row", u.docTitle);
         row.type = "button";
-        row.title = "Open " + u.docTitle;
-        row.addEventListener("click", function () { openCourseFromBrowser(u.docCode); setStage("edit"); });
+        row.title = "Open " + u.docTitle + " and select the linked block";
+        // SPEC 7 two-way link: jump to the EXACT linked block, not just the document.
+        row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
         sourceBody.appendChild(row);
       });
     }
@@ -18722,9 +18732,48 @@
           setStage("source");
         });
         row.appendChild(label);
+        // SPEC 7: insert this source topic as a live-linked block on the current page.
+        var ins = h("button", "source-stage__insert"); ins.type = "button";
+        ins.innerHTML = window.Icon ? window.Icon("plus") : "+";
+        ins.title = "Insert as a linked block on the current page";
+        ins.setAttribute("aria-label", "Insert " + (t.name || "topic") + " as a linked block");
+        ins.addEventListener("click", function (e) { e.stopPropagation(); insertSourceLinkedBlock(t.id); });
+        row.appendChild(ins);
         host.appendChild(row);
       });
     });
+  }
+  // SPEC 7 source insert: a source topic becomes its own live-linked block. The instance keeps
+  // ref = the topic master id (so libraryWhereUsedDetail's "Linked in N" registers with no extra
+  // plumbing) AND a sourceRef back-reference so the block's link can jump back to its topic. The
+  // topic's prose renders through resolveFacetTemplate (facet pointer), the same live-link path
+  // any libraryInstance uses -- the cell only supplies constraints, never a second render path.
+  function insertSourceLinkedBlock(topicId) {
+    if (!topicId) return;
+    var block = { type: "libraryInstance", id: mintId(), ref: topicId, sourceRef: { topicId: topicId } };
+    // Point the placement at the topic's first facet so it resolves a template (a facet-only
+    // topic master has no def.template to fall back to); the inspector's facet switcher can change it.
+    var def = resolveComponentDef(topicId);
+    if (def && def.facets) { var fk = Object.keys(def.facets); if (fk.length) block.facet = fk[0]; }
+    insertBlock(block);
+  }
+  // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
+  function jumpToSourceTopic(topicId) {
+    if (!topicId) return;
+    __sourceActiveTopicId = topicId;
+    try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, topicId); } catch (e) {}
+    setStage("source");
+  }
+  // Two-way link, direction 1: open the doc, land in Edit, and select the exact linked block.
+  function jumpToLinkedBlock(docCode, blockId) {
+    openCourseFromBrowser(docCode);
+    setStage("edit");
+    var b = blockById(blockId);
+    if (b) {
+      var pi = findPageOfBlock(b);
+      if (pi != null && pi >= 0) { focusFrame(pi); setActivePage(pi); }
+      reselectBlockNode(b, "block");
+    }
   }
   function wireLeftSwitcher() {
     renderAssets();
