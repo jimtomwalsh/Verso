@@ -12117,9 +12117,19 @@
     altB.style.display = __sourceUpdateTarget ? "none" : ""; cmtB.style.display = __sourceUpdateTarget ? "none" : "";
     var sel = window.getSelection(); var r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
     if (!r || !r.width) { bar.style.display = "none"; return; }
+    positionSourceSelBar(bar, r);
+  }
+  // Pin the selection bar over a viewport rect. The bar is absolutely positioned inside
+  // #source-stage-article -- a scrollable container offset from the page by the left rail -- so it
+  // must use container-relative coords (same conversion as pinCardToSpan). Feeding it raw
+  // viewport/page x pushed it right by the rail's width. left = the selection's CENTRE x; the CSS
+  // transform: translate(-50%, -132%) then centres the bar over, and lifts it above, the selection.
+  function positionSourceSelBar(bar, r) {
+    var host = document.getElementById("source-stage-article"); if (!host || !bar || !r) return;
+    var hr = host.getBoundingClientRect();
     bar.style.display = "flex";
-    bar.style.left = (window.scrollX + r.left + r.width / 2) + "px";
-    bar.style.top = (window.scrollY + r.top) + "px";
+    bar.style.left = (r.left + r.width / 2 - hr.left + host.scrollLeft) + "px";
+    bar.style.top = (r.top - hr.top + host.scrollTop) + "px";
   }
   // ---- object selection (spec 6): an image/table is selected as a whole node ----------------
   // Selecting an object shows the SAME selbar (alternate + comment only -- no text formatting, no
@@ -12150,10 +12160,7 @@
       var upd = bar.querySelector('[data-cmd="update"]'); if (upd) upd.style.display = "none";
       bar.querySelector('[data-cmd="alternate"]').style.display = "";
       bar.querySelector('[data-cmd="comment"]').style.display = "";
-      var r = el.getBoundingClientRect();
-      bar.style.display = "flex";
-      bar.style.left = (window.scrollX + r.left + r.width / 2) + "px";
-      bar.style.top = (window.scrollY + r.top) + "px";
+      positionSourceSelBar(bar, el.getBoundingClientRect());
     }
     // if the object already carries an alternate or a link, open the matching contextual panel
     var alts = SD.objectAlternatesFor(__sourceDocModel, nodeKey);
