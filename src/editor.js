@@ -13673,6 +13673,28 @@
     // #162: the canvas backdrop is an Appearance sectionGroup (canonical taxonomy), so the
     // document panel reads with the same grammar as the block inspectors.
     beginSections();
+    // SPEC 7 capability inspector: with nothing selected the Document context leads with the
+    // document's matrix cell + the geometry-specific tools (condToolsFor). No top strip -- these
+    // live in the inspector like every other document control. Changing the cell (header chip)
+    // re-mounts, so this section updates live.
+    var _cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc) : { geo: "reflow", interactive: true };
+    sectionGroup("Layout", "Document type", function (secBody) {
+      var _i = inspector; inspector = secBody;
+      try {
+        inspector.appendChild(h("div", "insp-hint",
+          (CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " · " + (_cell.interactive ? "Interactive" : "Static") +
+          " — change it from the cell chip in the editor header."));
+        var tools = (window.__docType && window.__docType.condToolsFor) ? window.__docType.condToolsFor(_cell.geo) : [];
+        if (tools.length) {
+          inspector.appendChild(sub((CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " tools"));
+          tools.forEach(function (t) {
+            var row = h("div", "insp-row insp-doc-tool");
+            row.appendChild(h("span", "insp-row__label", t));
+            inspector.appendChild(row);
+          });
+        }
+      } finally { inspector = _i; }
+    });
     sectionGroup("Appearance", "Canvas", function (secBody) {
       var _i = inspector; inspector = secBody;
       try {

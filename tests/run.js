@@ -2251,6 +2251,17 @@ section("editor-rework cell switcher");
   ok("the chip is mounted at boot + re-synced on doc switch", /mountCellChip\(\); \/\/ SPEC 7/.test(e) && /syncCellChip\(\); \/\/ SPEC 7: reflect the new doc/.test(e));
 })();
 
+// ---- SPEC 7: capability inspector (Document context) ----
+section("editor-rework capability inspector");
+(function () {
+  var e = src("src/editor.js");
+  ok("the Document inspector leads with a Document type section", /renderDocumentInspector\(\)[\s\S]{0,700}sectionGroup\("Layout", "Document type"/.test(e));
+  ok("it reads the cell from the pure doc-type model", /window\.__docType\.docCell\(doc\)[\s\S]{0,500}CELL_GEO_LABEL\[_cell\.geo\]/.test(e));
+  ok("it renders the geometry-specific tools from condToolsFor", /window\.__docType\.condToolsFor\(_cell\.geo\)[\s\S]{0,220}tools\.forEach/.test(e));
+  ok("the cell summary points at the header chip (no top strip)", /change it from the cell chip in the editor header/.test(e));
+  ok("the Document type section comes before the Canvas/Appearance section", e.indexOf('sectionGroup("Layout", "Document type"') < e.indexOf('sectionGroup("Appearance", "Canvas"'));
+})();
+
 // ---- SPEC 7: canvas geometry helpers (pure) ----
 section("editor-rework canvas geometry");
 (function () {
@@ -3954,7 +3965,7 @@ section("#159/#163 frontend conformance gate");
     // (panel-ia §3: sub() is allowed as an in-section label, never as a section header) — that
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
-    sectionGroup: { base: 42, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section)" },
+    sectionGroup: { base: 43, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section)" },
     subHeader:    { base: 28, dir: "down", enforce: true,  ticket: "#163 (residual = legit in-section sub-labels)" },
     disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "#163 (ad-hoc collapsibles capped)" },
     rawDialog:    { base: 0,  dir: "down", enforce: true,  ticket: "#163 (#156 landed — no native dialogs)" },

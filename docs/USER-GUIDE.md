@@ -101,8 +101,11 @@ own **editor header** beneath it.
   fluid page (eLearning / web); **fixed frame** shows each page as one fixed screen and clips
   anything past it with an amber *overflows* warning (decks); **paged** shows page-break guide
   lines, so content reads across pages (print / guides). The same blocks render in every geometry.
-- **Inspector (right).** Context-sensitive: with nothing selected it shows **document**
-  settings; select a block and it shows that block's settings.
+- **Inspector (right).** Context-sensitive: with nothing selected it shows the **Document**
+  context — the document type (its geometry · interactivity) with that geometry's tools (paged →
+  margins / running header-footer / page breaks / page numbers; frame → frame size / transitions /
+  animation; reflow → breakpoint preview) — then the canvas backdrop. Select a block and it shows
+  that block's settings instead.
 
 ---
 
