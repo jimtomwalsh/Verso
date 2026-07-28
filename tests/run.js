@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -10726,6 +10726,124 @@ section("left-panel Components reorg");
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
+})();
+
+// ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
+// Foundation of the Source-stage rewrite (spec 2b). The whole rewrite rests on two
+// mechanisms the throwaway prototype proved only as an interaction: (a) marks anchored to
+// MODEL offsets that ride edits, and (b) an owned undo that restores a deleted span AND
+// re-anchors its mark (native contentEditable undo does NOT). source-doc.js is a pure,
+// DOM-free core, so we require it directly and exercise the mechanisms headlessly. This IS
+// the spike gate for the node-model-undo ticket.
+section("Source rewrite: node model + owned undo (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var P = SD._pure;
+
+  // --- text diff: single contiguous replaced region ---
+  ok("diffText: pure insertion inside", (function () { var d = P.diffText("abcdef", "abcXYZdef"); return d.start === 3 && d.removed === 0 && d.inserted === 3; })());
+  ok("diffText: pure deletion", (function () { var d = P.diffText("abcdef", "abf"); return d.start === 2 && d.removed === 3 && d.inserted === 0; })());
+  ok("diffText: replacement", (function () { var d = P.diffText("hello world", "hello there"); return d.removed > 0 && d.inserted > 0; })());
+  ok("diffText: identical -> no-op", (function () { var d = P.diffText("same", "same"); return d.removed === 0 && d.inserted === 0; })());
+
+  // --- boundary riding: type inside grows, type at edge holds (start-incl / end-excl) ---
+  ok("shiftAnchor: insertion strictly inside grows the span", (function () {
+    var e = P.diffText("the quick fox", "the quick brown fox"); // insert "brown " at 10
+    var a = P.shiftAnchor({ nodeKey: "n", start: 4, len: 5 }, e); // "quick"
+    return a.start === 4 && a.len === 5; // "quick" unchanged (edit after it)
+  })());
+  ok("shiftAnchor: insertion inside the span extends its length", (function () {
+    var e = P.diffText("quick", "quiiick"); // insert "ii" inside
+    var a = P.shiftAnchor({ nodeKey: "n", start: 0, len: 5 }, e);
+    return a.start === 0 && a.len === 7;
+  })());
+  ok("shiftAnchor: insertion exactly at the end boundary does NOT grow (end-exclusive)", (function () {
+    var e = P.diffText("quick", "quickly"); // append "ly" at 5 (== end of a [0,5) span)
+    var a = P.shiftAnchor({ nodeKey: "n", start: 0, len: 5 }, e);
+    return a.start === 0 && a.len === 5;
+  })());
+  ok("shiftAnchor: text before the span shifts start, keeps length", (function () {
+    var e = P.diffText("fox", "the fox"); // prepend "the " -> everything shifts +4
+    var a = P.shiftAnchor({ nodeKey: "n", start: 0, len: 3 }, e);
+    return a.start === 4 && a.len === 3;
+  })());
+  ok("shiftAnchor: deletion straddling the span clips it", (function () {
+    var e = P.diffText("abcdefgh", "afgh"); // delete "bcde" (4..? ) region [1,5)
+    var a = P.shiftAnchor({ nodeKey: "n", start: 2, len: 4 }, e); // "cdef" straddles the delete
+    return a.len < 4; // clipped
+  })());
+
+  // --- node model round-trip + stable heading keys ---
+  var model = SD.create([
+    { type: "heading", level: 2, text: "Overview" },
+    { type: "paragraph", text: "The unit regulates water across sixteen zones." },
+    { type: "list", ordered: false, items: ["Green nominal", "Amber degraded"] }
+  ]);
+  ok("create assigns a stable key to every node", model.nodes.every(function (n) { return !!n.key; }));
+  ok("heading nodes are queryable for the TOC with their keys", (function () {
+    var h = SD.headings(model); return h.length === 1 && h[0].text === "Overview" && !!h[0].key;
+  })());
+  ok("node model round-trips through toJSON/fromJSON (no undo state leaks)", (function () {
+    var j = SD.toJSON(model); var s = JSON.stringify(j);
+    var back = SD.fromJSON(JSON.parse(s));
+    return JSON.stringify(SD.toJSON(back)) === s && j.undo === undefined && j.redo === undefined;
+  })());
+  ok("nodeText: list joins items; paragraph is its text", (function () {
+    return P.nodeText(model.nodes[2]) === "Green nominal\nAmber degraded" && P.nodeText(model.nodes[1]).indexOf("regulates") > -1;
+  })());
+
+  // --- THE SPIKE: owned undo restores a deleted span AND re-anchors its mark ---
+  var m2 = SD.create([{ type: "paragraph", text: "The controller arbitrates contention by line-pressure headroom." }]);
+  var pKey = m2.nodes[0].key;
+  var idx = P.nodeText(m2.nodes[0]).indexOf("arbitrates contention by line-pressure headroom");
+  var mark = SD.addMark(m2, { type: "link", anchor: { nodeKey: pKey, start: idx, len: "arbitrates contention by line-pressure headroom".length }, locations: [{ doc: "Quick-Start", section: "Wiring", loc: "Step 4" }] });
+  ok("a link mark anchors to the exact model text", SD.anchorText(m2, mark.anchor) === "arbitrates contention by line-pressure headroom");
+  // destructive edit: delete the marked phrase entirely (simulating a contentEditable delete)
+  var before = P.nodeText(m2.nodes[0]);
+  var deleted = before.replace("arbitrates contention by line-pressure headroom", "does that");
+  SD.applyTextEdit(m2, pKey, deleted);
+  SD.refreshMark(m2, SD.markById(m2, mark.id));
+  ok("after deleting the anchored text the mark is flagged broken", SD.markById(m2, mark.id).broken === true);
+  // Ctrl+Z: owned undo restores the span AND re-anchors the mark (the native-undo failure)
+  SD.undo(m2);
+  var restored = SD.markById(m2, mark.id);
+  ok("undo restores the deleted phrase into the node text", P.nodeText(SD.nodeByKey(m2, pKey)).indexOf("arbitrates contention by line-pressure headroom") > -1);
+  ok("undo re-anchors the mark: it is no longer broken and points at its original text", (function () {
+    SD.refreshMark(m2, restored); return restored.broken === false && SD.anchorText(m2, restored.anchor) === "arbitrates contention by line-pressure headroom";
+  })());
+  ok("undo also preserves the mark's downstream payload (locations survive the round-trip)", restored.locations && restored.locations[0].doc === "Quick-Start");
+  ok("redo re-applies the destructive edit and re-breaks the mark", (function () {
+    SD.redo(m2); SD.refreshMark(m2, SD.markById(m2, mark.id)); return SD.markById(m2, mark.id).broken === true;
+  })());
+
+  // --- editing a span's own text keeps it anchored (rides the edit, stays in sync) ---
+  var m3 = SD.create([{ type: "paragraph", text: "Flush the manifold quarterly." }]);
+  var k3 = m3.nodes[0].key;
+  var mk3 = SD.addMark(m3, { type: "alternate", anchor: { nodeKey: k3, start: 0, len: 5 }, alt: "Rinse it out." }); // "Flush"
+  SD.applyTextEdit(m3, k3, "Now: Flush the manifold quarterly."); // prepend "Now: " (distinct first char -> clean before-edit)
+  ok("editing before an alternate span keeps the anchor over the same word", SD.anchorText(m3, SD.markById(m3, mk3.id).anchor) === "Flush");
+
+  // --- staleness: base edit inside an alternate's span flags it needs-review ---
+  var m4 = SD.create([{ type: "paragraph", text: "Hold the set-point within a two-percent tolerance band." }]);
+  var k4 = m4.nodes[0].key;
+  var phrase = "two-percent tolerance band";
+  var mk4 = SD.addMark(m4, { type: "alternate", anchor: { nodeKey: k4, start: P.nodeText(m4.nodes[0]).indexOf(phrase), len: phrase.length }, alt: "within 2%" });
+  ok("a fresh alternate is not stale", SD.markById(m4, mk4.id).stale === false);
+  SD.applyTextEdit(m4, k4, P.nodeText(m4.nodes[0]).replace("two-percent", "three-percent"));
+  SD.refreshMark(m4, SD.markById(m4, mk4.id));
+  ok("editing the base span after an alternate was written flags it stale (needs re-sync)", SD.markById(m4, mk4.id).stale === true);
+
+  // --- fromSections migration seam: section-object model -> node tree ---
+  var seeded = SD.fromSections({ sections: [
+    { id: "sec-a", heading: "Zone configuration", facets: { technical: "Each zone carries a schedule.\n\n- Green nominal\n- Amber degraded" } }
+  ] });
+  ok("fromSections builds a heading node with a section-derived stable key", (function () {
+    var h = SD.headings(seeded); return h.length === 1 && h[0].text === "Zone configuration" && seeded.nodes[0].key === "n-sec-a";
+  })());
+  ok("fromSections splits the base text into paragraph + list nodes", (function () {
+    var types = seeded.nodes.map(function (n) { return n.type; });
+    return types.indexOf("paragraph") > -1 && types.indexOf("list") > -1;
+  })());
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
