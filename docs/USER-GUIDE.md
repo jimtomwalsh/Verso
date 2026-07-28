@@ -590,8 +590,13 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   document — headings and body copy — as you type. It shows a match count ("3 / 12"); press Enter
   (or the up/down arrows next to the count) to jump between hits, each scrolled to and highlighted.
   The outline narrows to the sections that contain a match, so it doubles as a filter.
-- **The one action left in the rail is Import from Markdown** (below). Because there's one document,
-  the old per-topic tools — new topic, select, delete, move, reorder topics — are gone.
+- **The one action left in the rail is Import from Markdown.** Because there's one document, the old
+  per-topic tools — new topic, select, delete, move, reorder topics — are gone. Import is now
+  **additive**: pick a Markdown file (it can be a segment — just one chapter), and Verso shows a
+  **preview** first — which chapters it will **add** and which existing chapters it will **update**
+  (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
+  import**; an update keeps the parts you haven't changed (so any alternates or comments on them stay
+  put) and only adds or removes what actually differs. There's no silent whole-document overwrite.
 
 The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
 authoring a chapter's text, importing, annotations, history and comments all work as described.
