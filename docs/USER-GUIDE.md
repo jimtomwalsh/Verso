@@ -620,6 +620,13 @@ Pick an existing Product or create a new one, choose a Format (eLearning, Presen
 docs), and promote. This only tags the course — its content is never touched. The top-bar Product
 dropdown then lets you switch between every course, and the Source wiki, for that Product.
 
+**Unlinking and deleting.** To detach a course from its Product, open it and choose **Save/Recents →
+Remove from Product** (the course and its content stay; only the tag is removed). On the **Source**
+stage, the **Product actions** menu (the ⋯ button by the toolbar) lets you **Unlink all courses** from
+a Product, **Delete source document** (clears the whole continuous document but keeps the Product), or
+**Delete Product** (removes the Product entirely, including its source and the tag on any linked
+course). The deletes ask for confirmation and can't be undone.
+
 **Populating the Source wiki.** Switch to the **Source** rail tab, pick a Product from the top bar,
 then use the icon toolbar above the topic list (hover any icon for its name):
 

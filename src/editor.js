@@ -1242,10 +1242,55 @@
     saveProducts();
     return p;
   }
+  // Product/source lifecycle (test + real authoring cleanup): unlink a course, delete a Product's
+  // source document, or delete the Product outright. Destructive ops are confirm-gated at the UI.
+  // Unlink the OPEN (or given) course from its Product -- clears only doc.meta.productId/stage; the
+  // course + its content are untouched.
+  function unlinkDocFromProduct(d) {
+    d = d || doc; if (!d || !d.meta || !d.meta.productId) return false;
+    pushHistory();
+    delete d.meta.productId; delete d.meta.stage;
+    saveRegistry(registry);
+    return true;
+  }
+  // Clear the Product tag from EVERY course in the registry pointing at pid. Returns the count.
+  function unlinkAllCoursesFromProduct(pid) {
+    var n = 0;
+    Object.keys(registry).forEach(function (id) {
+      var d = registry[id];
+      if (d && d.meta && d.meta.productId === pid) { delete d.meta.productId; delete d.meta.stage; n++; }
+    });
+    if (n) saveRegistry(registry);
+    return n;
+  }
+  // Delete a Product's WHOLE source document: its reserved master + every topic tagged to it
+  // (archived or loose). Clears product.groundTruthId. The Product entry itself stays.
+  function deleteProductSource(pid) {
+    var product = window.ProductsStore[pid]; if (!product) return 0;
+    var comps = libComponents(), n = 0;
+    Object.keys(comps).forEach(function (k) {
+      var c = comps[k];
+      if (c && c.kind === "topic" && c.productId === pid) { delete comps[k]; n++; }
+    });
+    if (product.groundTruthId && comps[product.groundTruthId]) { delete comps[product.groundTruthId]; n++; }
+    delete product.groundTruthId;
+    saveLibrary(); saveProducts();
+    return n;
+  }
+  // Delete a Product outright: its source document + unlink all its linked courses + remove the entry.
+  function deleteProduct(pid) {
+    if (!window.ProductsStore[pid]) return false;
+    deleteProductSource(pid);
+    unlinkAllCoursesFromProduct(pid);
+    delete window.ProductsStore[pid];
+    saveProducts();
+    return true;
+  }
   // Foundational tagging-layer API (Product Rail #1) — the surface every downstream
   // Product Rail ticket (bottom-rail nav, +New Product, Promote to Product, browser
   // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
-  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants };
+  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants,
+    unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct };
   // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
   // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
   // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
@@ -1755,6 +1800,12 @@
     action("Save as a copy", function () { if (activeDocId) duplicateCourse(activeDocId); });
     action("Open…", function () { pickCourseFile(function (imported) { importDocToRegistry(imported); }); });
     action("Promote to Product…", function () { promoteToProductModal(); });
+    if (doc && doc.meta && doc.meta.productId && window.ProductsStore[doc.meta.productId]) {
+      action("Remove from Product", function () {
+        var pname = window.ProductsStore[doc.meta.productId].name || "this Product";
+        confirmModal("Remove from Product?", "Unlinks this course from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(doc); mountProductPicker(); }, { okLabel: "Remove", danger: true });
+      });
+    }
     menu.appendChild(h("div", "vsavemenu__sep"));
     menu.appendChild(h("div", "vsavemenu__head", "Where are my files"));
     menu.appendChild(h("div", "vsavemenu__path", storeLocationText()));
@@ -10726,7 +10777,43 @@
       row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
     }
     row.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
+    var lifePid = activeSourceProductId();
+    if (lifePid && window.ProductsStore[lifePid]) {
+      row.appendChild(U.IconButton({ icon: "more-horizontal", label: "Product actions", onClick: function (e) {
+        var t = (e && (e.currentTarget || e.target)) || null; var r = t && t.getBoundingClientRect ? t.getBoundingClientRect() : { left: 0, bottom: 0 };
+        openProductActionsMenu(lifePid, r.left, r.bottom + 4);
+      } }));
+    }
     host.appendChild(row);
+  }
+  // Product/source lifecycle menu (Source stage). Destructive items are confirm-gated; on delete we
+  // reset the active Product + re-render so the stage never points at a document that no longer exists.
+  function openProductActionsMenu(pid, x, y) {
+    var pname = (window.ProductsStore[pid] && window.ProductsStore[pid].name) || "Product";
+    var hasSource = !!sourceMasterFor(pid) || unifiableTopicsFor(pid).length > 0;
+    showContextMenu(x, y, [
+      { head: pname },
+      { label: "Unlink all courses", onClick: function () {
+        var n = unlinkAllCoursesFromProduct(pid); mountProductPicker();
+        window.alert(n ? ("Unlinked " + n + " course" + (n === 1 ? "" : "s") + " from “" + pname + "”.") : "No linked courses to unlink.");
+      } },
+      { label: "Delete source document", danger: true, onClick: function () {
+        if (!hasSource) { window.alert("This Product has no source document to delete."); return; }
+        confirmModal("Delete source document?", "Removes the entire continuous document for “" + pname + "” -- every chapter -- and cannot be undone. The Product itself stays.", function () { deleteProductSource(pid); afterProductLifecycleChange(); }, { okLabel: "Delete", danger: true });
+      } },
+      { sep: true },
+      { label: "Delete Product", danger: true, onClick: function () {
+        confirmModal("Delete Product?", "Deletes “" + pname + "” entirely -- its source document and its Product tag on any linked course. Cannot be undone.", function () { deleteProduct(pid); afterProductLifecycleChange(); }, { okLabel: "Delete", danger: true });
+      } }
+    ]);
+  }
+  // After a delete, drop any dangling active-Product/topic state and re-render the stage + picker.
+  function afterProductLifecycleChange() {
+    setActiveProduct("");
+    __sourceActiveTopicId = null; __sourceDocModel = null; __sourceDocModelTopicId = null;
+    __sourceActiveVariants = [];
+    mountProductPicker();
+    renderSourceStage();
   }
 
   // ---- Source v2: the unified-document TOC (unified-toc, spec 2c section 2) ----
