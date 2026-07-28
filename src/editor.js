@@ -12778,8 +12778,11 @@
       file: meta && meta.file, version: meta && meta.version, publishDate: meta && meta.publishDate,
       variantMeta: Object.keys(variantMeta).length ? variantMeta : undefined
     });
-    renderSourceTopicList();
-    renderSourceArticle();
+    // Source v2: the imported topics seed the ONE continuous document. Land in the unified stage so
+    // the topics->unified migration fires now (renderSourceStage -> ensureUnifiedDocForActiveProduct),
+    // rather than stranding the author in the retired topic/section view -- its second left panel +
+    // "Switch to continuous document" button -- until the next stage entry (pilot 2026-07-28).
+    renderSourceStage();
     var parts = [];
     if (result.topicCount) parts.push(result.topicCount + " new topic(s)");
     if (result.sectionCount) parts.push(result.sectionCount + " new section(s)");
