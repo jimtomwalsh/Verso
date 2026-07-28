@@ -277,6 +277,23 @@
       return m.type === "alternate" && isObjectMark(m) && m.anchor.nodeKey === nodeKey;
     });
   }
+  // Where-used (spec 3.1): the destinations a LINK mark points at, normalised into breadcrumb
+  // rows {doc, section, location, docCode, blockId}. Source only DISPLAYS these; the Edit stage is
+  // what populates mark.locations (a course pins to this span/alternate). Tolerant of missing
+  // fields so a partial location still renders a crumb. Returns [] for a non-link or unlinked mark.
+  function whereUsedForMark(mark) {
+    if (!mark || mark.type !== "link") return [];
+    return (mark.locations || []).map(function (loc) {
+      loc = loc || {};
+      return {
+        doc: loc.docTitle || loc.docCode || "Document",
+        section: loc.sectionTitle || loc.section || null,
+        location: loc.locationLabel || loc.location || null,
+        docCode: loc.docCode || null,
+        blockId: loc.blockId || null
+      };
+    });
+  }
   // A short human label for an object node -- the "base" line an object mark's panel/drawer shows
   // in place of the span text a text mark would carry.
   function objectNodeLabel(node) {
@@ -521,7 +538,7 @@
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
-    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel
+    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark
   };
 
   var SourceDoc = {
@@ -534,7 +551,7 @@
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
-    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel,
+    isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
