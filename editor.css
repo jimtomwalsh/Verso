@@ -746,6 +746,15 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-marks__list { padding: 4px 0 2px; }
 .source-drawer__row.is-active { background: var(--accent-quiet); }
 .source-info__subhead { margin: 10px 0 4px; font: var(--type-label); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-tertiary, var(--text-secondary)); }
+
+/* Source v2 (md-import-additive): the reconcile preview list in the import modal -- one row per
+   chapter op (add / update), each with a small type dot, shown BEFORE the import is applied. */
+.source-import__preview { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; margin-top: 4px; }
+.source-import__op { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text-primary); }
+.source-import__op-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; margin-top: 1px; background: var(--text-tertiary, var(--text-secondary)); }
+.source-import__op.is-add .source-import__op-dot { background: #22c55e; }
+.source-import__op.is-update .source-import__op-dot { background: #eab308; }
+.source-import__op-text { flex: 1 1 auto; }
 .source-drawer__dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; }
 .source-drawer__dot--green { background: #22c55e; }
 .source-drawer__dot--yellow { background: #eab308; }

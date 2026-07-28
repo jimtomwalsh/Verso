@@ -12975,8 +12975,78 @@
   // mapping several files to several variant names at once. Re-running this against the
   // SAME filename for a Product that already has topics from it reconciles instead of
   // duplicating -- see importParsedTopics.
+  // ---- Source v2: additive Markdown import into the ONE document (md-import-additive, spec 2c section 4) ----
+  // The one surviving left action under the unified-document model. A Markdown file becomes one or
+  // more CHAPTERS that either ADD (a new name) or UPDATE an existing chapter; the author previews
+  // exactly what will add / change / remove BEFORE it touches the document -- never a silent
+  // whole-document overwrite. The reconcile itself is the pure SourceDoc.importPlan/applyImportPlan.
+
+  // A parse's topics -> [{name, nodes}] chapters, reusing fromSections to turn each topic's
+  // sections into heading + body nodes (the incoming nodes are matched by TEXT in the reconcile,
+  // so their keys don't matter -- applyImportPlan mints fresh keys for whatever it inserts).
+  function incomingChaptersFromParse(parse) {
+    var SD = window.SourceDoc;
+    return (parse && parse.topics || []).map(function (t) {
+      var model = SD.fromSections({ sections: t.sections }, function (sec) { return sec.text || ""; });
+      return { name: t.name, nodes: model.nodes };
+    });
+  }
+  // A short human line describing one plan op, for the preview list.
+  function importOpLine(op) {
+    if (op.type === "add") return "Add chapter “" + op.name + "” (" + op.nodes.length + " block" + (op.nodes.length === 1 ? "" : "s") + ")";
+    var bits = [];
+    if (op.added) bits.push("+" + op.added);
+    if (op.removed) bits.push("−" + op.removed);
+    var change = bits.length ? bits.join(" ") + " block" + (op.added + op.removed === 1 ? "" : "s") : "no changes";
+    return "Update “" + op.name + "”: " + change + ", " + op.kept + " unchanged";
+  }
+  function importMarkdownAdditive() {
+    var master = ensureUnifiedDocForActiveProduct();
+    if (!master) { window.alert("Open a Product's source document first."); return; }
+    var SD = window.SourceDoc;
+    var inp = h("input"); inp.type = "file"; inp.accept = ".md,.markdown,.txt";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      readFileAsText(f).then(function (text) {
+        var parse = SD && window.MarkdownImport ? window.MarkdownImport.parse(text) : { topics: [] };
+        var incoming = incomingChaptersFromParse(parse);
+        if (!incoming.length) { window.alert("No headings found in that file -- nothing to import. (Chapters come from level-1 headings.)"); return; }
+        var model = ensureSourceDocModel(master);
+        var plan = SD.importPlan(model, incoming);
+        // Preview BEFORE anything changes -- add / change / remove, then confirm (spec 2c section 4).
+        var shell = dsModalShell({
+          title: "Import from Markdown",
+          subtitle: f.name + " — " + plan.summary.chaptersAdded + " chapter" + (plan.summary.chaptersAdded === 1 ? "" : "s") + " added, " + plan.summary.chaptersUpdated + " updated. Nothing changes until you apply.",
+          primaryLabel: "Apply import",
+          onPrimary: function () {
+            SD.applyImportPlan(model, plan);
+            persistSourceDocModel(master, model);
+            SD.logHistory(model, { type: "imported", file: f.name, chaptersAdded: plan.summary.chaptersAdded, chaptersUpdated: plan.summary.chaptersUpdated });
+            persistSourceDocModel(master, model);
+            shell.modal.close();
+            renderSourceArticle();
+            renderSourceTopicList();
+            refreshSourceHistory(master);
+          }
+        });
+        var list = h("div", "source-import__preview");
+        plan.ops.forEach(function (op) {
+          var row = h("div", "source-import__op" + (op.type === "add" ? " is-add" : " is-update"));
+          row.appendChild(h("span", "source-import__op-dot"));
+          row.appendChild(h("span", "source-import__op-text", importOpLine(op)));
+          list.appendChild(row);
+        });
+        shell.body.appendChild(list);
+      });
+    });
+    inp.click();
+  }
+
   function importMarkdownModal() {
     if (!window.MarkdownImport) { window.alert("Markdown import isn't available (markdown-import.js failed to load)."); return; }
+    // Source v2: a Product with a unified source document imports ADDITIVELY (add/update a chapter
+    // with a preview), not by spawning fresh topics.
+    if (sourceMasterFor(activeSourceProductId())) { importMarkdownAdditive(); return; }
     var productId = getActiveProduct();
     if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
     var declaredVariants = declaredVariantsForProduct(window.ProductsStore || {}, productId);
@@ -13055,6 +13125,17 @@
     }
   }
   window.__productRail.importMarkdownModal = importMarkdownModal; // headless/browser-verify hook
+  // Source v2 (md-import-additive) verify hook: run the additive pipeline from raw text (no file
+  // picker / modal) -- parse -> chapters -> reconcile plan; apply=true commits it. Returns the plan.
+  window.__productRail.importMarkdownText = function (text, apply) {
+    var master = ensureUnifiedDocForActiveProduct(); if (!master || !window.SourceDoc || !window.MarkdownImport) return null;
+    var SD = window.SourceDoc;
+    var incoming = incomingChaptersFromParse(window.MarkdownImport.parse(text));
+    var model = ensureSourceDocModel(master);
+    var plan = SD.importPlan(model, incoming);
+    if (apply) { SD.applyImportPlan(model, plan); persistSourceDocModel(master, model); renderSourceArticle(); renderSourceTopicList(); }
+    return { summary: plan.summary, ops: plan.ops.map(function (o) { return { type: o.type, name: o.name, added: o.added, removed: o.removed, kept: o.kept }; }) };
+  };
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {

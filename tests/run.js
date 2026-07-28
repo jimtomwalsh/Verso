@@ -8524,7 +8524,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
 
   // Import from Markdown: same active-Product gate, blocked without a chosen file, and
   // the variant file list is the Product's OWN declared variants (no free-form entry).
-  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,200}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
+  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,600}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
   ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(e));
   ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(e));
   ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(e));
@@ -11456,6 +11456,64 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
       && SD.headingKeyForNode(fdoc, flushPara) === fdoc.nodes[0].key;  // 'Manifold' chapter
   })());
 
+  // --- additive Markdown import + reconcile preview (md-import-additive, spec 2c section 4) ---
+  var base = SD.concatChapters([
+    { name: "Intro", model: SD.create([{ type: "paragraph", text: "Welcome." }]) },
+    { name: "Setup", model: SD.create([{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step two." }]) }
+  ]);
+  // a mark on Setup's first paragraph -- it must survive an update that keeps that node
+  var setupPara = base.nodes[3].key; // Intro-head, Intro-para, Setup-head, Setup-para1...
+  SD.addMark(base, { type: "comment", anchor: { nodeKey: setupPara, start: 0, len: 4 }, comments: [{ text: "note" }] });
+
+  ok("importPlan ADDs a chapter whose name isn't in the document", (function () {
+    var plan = SD.importPlan(base, [{ name: "Wiring", nodes: [{ type: "paragraph", text: "Connect." }] }]);
+    return plan.ops.length === 1 && plan.ops[0].type === "add" && plan.summary.chaptersAdded === 1 && plan.summary.nodesAdded === 1;
+  })());
+  ok("importPlan UPDATEs a chapter that already exists (matched by name), reporting add/remove/keep", (function () {
+    // Setup: keep "Step one.", drop "Step two.", add "Step three."
+    var plan = SD.importPlan(base, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step three." }] }]);
+    var op = plan.ops[0];
+    return op.type === "update" && op.kept === 1 && op.added === 1 && op.removed === 1 && plan.summary.chaptersUpdated === 1;
+  })());
+  ok("importPlan is a preview only -- it does NOT mutate the document", (function () {
+    var before = base.nodes.length;
+    SD.importPlan(base, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Changed." }] }]);
+    return base.nodes.length === before;
+  })());
+  ok("applyImportPlan appends an added chapter with fresh unique keys", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var plan = SD.importPlan(d, [{ name: "Wiring", nodes: [{ type: "paragraph", text: "Connect." }] }]);
+    SD.applyImportPlan(d, plan);
+    var chs = SD.chapters(d).map(function (c) { return c.text; });
+    var seen = {}, unique = d.nodes.every(function (n) { if (seen[n.key]) return false; seen[n.key] = 1; return true; });
+    return chs.join(",") === "Intro,Setup,Wiring" && unique;
+  })());
+  ok("applyImportPlan UPDATE keeps unchanged nodes' keys so their marks survive", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var keepKey = SD.chapterBlocks(d).filter(function (b) { return b.text === "Setup"; })[0];
+    var setupFirst = d.nodes[keepKey.start + 1].key; // "Step one." node
+    var plan = SD.importPlan(d, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step three." }] }]);
+    SD.applyImportPlan(d, plan);
+    // the kept node still exists under its original key, and its comment mark still anchors to it
+    var mark = d.marks[0];
+    return !!SD.nodeByKey(d, setupFirst) && mark.anchor.nodeKey === setupFirst && SD.anchorText(d, mark.anchor) === "Step";
+  })());
+  ok("applyImportPlan UPDATE drops removed nodes and inserts added ones in order", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var plan = SD.importPlan(d, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step three." }] }]);
+    SD.applyImportPlan(d, plan);
+    var blk = SD.chapterBlocks(d).filter(function (b) { return b.text === "Setup"; })[0];
+    var body = d.nodes.slice(blk.start + 1, blk.end).map(function (n) { return SD.nodeText(n); });
+    return body.join("|") === "Step one.|Step three.";
+  })());
+  ok("applyImportPlan pushes undo (the whole import is reversible)", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var before = d.nodes.length;
+    SD.applyImportPlan(d, SD.importPlan(d, [{ name: "Wiring", nodes: [{ type: "paragraph", text: "x" }] }]));
+    SD.undo(d);
+    return d.nodes.length === before;
+  })());
+
   // editor wiring: the migration is guarded + reversible + stored as a reserved master.
   var e = src("src/editor.js");
   ok("the unified doc lives in a reserved 'source master' component keyed off product.groundTruthId", /function sourceMasterFor\(productId\)[\s\S]{0,200}p\.groundTruthId[\s\S]{0,120}m\.sourceMaster/.test(e));
@@ -11464,6 +11522,12 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("migration is REVERSIBLE: old topics are kept, only stamped archivedInto (never deleted)", /topics\.forEach\(function \(t\) \{ t\.archivedInto = master\.id; \}\);/.test(e) && /function revertProductUnifiedDoc/.test(e));
   ok("the reserved master + archived topics are hidden from the interim Source nav (no double-up)", /\.filter\(function \(t\) \{ return !t\.sourceMaster && !t\.archivedInto; \}\)/.test(e));
   ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(e) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(e));
+
+  // md-import-additive wiring (spec 2c section 4)
+  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{ importMarkdownAdditive\(\); return; \}/.test(e));
+  ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
+  ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
+  ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));
 
   // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
   ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(e));

@@ -669,6 +669,76 @@
     return true;
   }
 
+  // ---- source v2: additive Markdown import with a reconcile preview (md-import-additive) -----
+  // Import is CHAPTER-scoped and non-destructive (spec 2c section 4): an incoming file becomes one
+  // or more chapters that either ADD (a name not already in the doc) or UPDATE an existing chapter.
+  // An update is a node-level reconcile -- unchanged nodes keep their key (so their marks + variants
+  // survive), changed/removed nodes drop, new nodes insert -- computed by an LCS over node text so
+  // the author can preview exactly what add/change/remove will happen BEFORE it is applied.
+  function normChapterName(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
+  // LCS reconcile of one chapter's body: returns the merged node sequence (old nodes reused where
+  // the text still matches, new nodes inserted where added) + the add/remove/keep counts.
+  function nodeReconcile(oldNodes, newNodes) {
+    var a = oldNodes || [], b = newNodes || [], m = a.length, n = b.length;
+    var dp = []; for (var x = 0; x <= m; x++) { dp.push(new Array(n + 1).fill(0)); }
+    for (var i = m - 1; i >= 0; i--) for (var j = n - 1; j >= 0; j--) {
+      dp[i][j] = (nodeText(a[i]) === nodeText(b[j])) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+    var p = 0, q = 0, result = [], added = 0, removed = 0, kept = 0;
+    while (p < m && q < n) {
+      if (nodeText(a[p]) === nodeText(b[q])) { result.push({ node: a[p], isNew: false }); kept++; p++; q++; }
+      else if (dp[p + 1][q] >= dp[p][q + 1]) { removed++; p++; }
+      else { result.push({ node: b[q], isNew: true }); added++; q++; }
+    }
+    while (q < n) { result.push({ node: b[q], isNew: true }); added++; q++; }
+    while (p < m) { removed++; p++; }
+    return { result: result, added: added, removed: removed, kept: kept };
+  }
+  // Build the preview PLAN for importing `incoming` chapters ([{name, nodes}]) into `model`. Each
+  // incoming chapter is matched to an existing chapter by name; a miss is an "add", a hit is an
+  // "update" carrying its node reconcile. Pure -- no mutation; the plan is what the preview shows.
+  function importPlan(model, incoming) {
+    var blocks = chapterBlocks(model), byName = {};
+    blocks.forEach(function (b) { if (b.key != null) byName[normChapterName(b.text)] = b; });
+    var ops = [], summary = { chaptersAdded: 0, chaptersUpdated: 0, nodesAdded: 0, nodesRemoved: 0, nodesKept: 0 };
+    (incoming || []).forEach(function (ch) {
+      var name = (ch && ch.name != null && String(ch.name).trim()) ? String(ch.name) : "Untitled";
+      var match = byName[normChapterName(name)];
+      if (!match) {
+        var nodes = (ch.nodes || []);
+        ops.push({ type: "add", name: name, nodes: nodes });
+        summary.chaptersAdded++; summary.nodesAdded += nodes.length;
+      } else {
+        var body = model.nodes.slice(match.start + 1, match.end); // chapter body, excluding its heading
+        var rec = nodeReconcile(body, ch.nodes || []);
+        ops.push({ type: "update", chapterKey: match.key, name: name, result: rec.result, added: rec.added, removed: rec.removed, kept: rec.kept });
+        summary.chaptersUpdated++; summary.nodesAdded += rec.added; summary.nodesRemoved += rec.removed; summary.nodesKept += rec.kept;
+      }
+    });
+    return { ops: ops, summary: summary };
+  }
+  // Apply a plan built by importPlan. Adds append a new chapter (fresh keys); updates rebuild the
+  // matched chapter's body in place, keeping the reused nodes' keys (marks + variants ride along)
+  // and minting fresh keys only for inserted nodes. Pushes ONE undo (the whole import is reversible).
+  function applyImportPlan(model, plan) {
+    if (!model || !plan) return model;
+    pushUndo(model);
+    function freshKey() { var k; do { k = nextId(model, "n"); } while (nodeByKey(model, k)); return k; }
+    (plan.ops || []).forEach(function (op) {
+      if (op.type === "add") {
+        model.nodes.push({ type: "heading", level: 1, chapter: true, text: op.name, key: freshKey() });
+        (op.nodes || []).forEach(function (n) { var c = clone(n); c.key = freshKey(); model.nodes.push(c); });
+      } else {
+        var blocks = chapterBlocks(model), blk = null;
+        blocks.forEach(function (b) { if (b.key === op.chapterKey) blk = b; });
+        if (!blk) return;
+        var newBody = (op.result || []).map(function (r) { if (r.isNew) { var c = clone(r.node); c.key = freshKey(); return c; } return r.node; });
+        model.nodes = model.nodes.slice(0, blk.start + 1).concat(newBody, model.nodes.slice(blk.end));
+      }
+    });
+    return model;
+  }
+
   // ---- full-text search (toc-search-drawer) ---------------------------------
   // Every searchable word on a topic: its name + all node text (continuous doc) or,
   // for a legacy section topic, each section heading + every facet string. The Source
@@ -732,7 +802,7 @@
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline,
+    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
@@ -748,7 +818,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline,
+    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,
