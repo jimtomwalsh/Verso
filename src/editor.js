@@ -10698,6 +10698,7 @@
   // regression. The live SourceDoc model is cached per topic so its owned undo stack survives
   // re-renders; edits persist back to topic.doc.
   var __sourceUnlocked = false;    // base prose editable? (annotation is always live)
+  var __sourceEditSession = null;  // buffered prose-edit deltas during an unlock->lock cycle (History commit collapse)
   var __sourceShowMarks = true;    // marks painted + status dots visible
   var __sourceDocModel = null;     // the live SourceDoc model for __sourceDocModelTopicId
   var __sourceDocModelTopicId = null;
@@ -11527,7 +11528,8 @@
     art.addEventListener("input", function (e) {
       var block = e.target && e.target.closest ? e.target.closest("[data-node]") : null;
       if (!block) return;
-      SD.applyTextEdit(model, block.getAttribute("data-node"), block.textContent);
+      var res = SD.applyTextEdit(model, block.getAttribute("data-node"), block.textContent);
+      recordSourceEdit(res && res.edit); // buffer for the unlock->lock History commit
       persistSourceDocModel(topic, model);
       repaintSourceMarks();
       // a base edit can flip an open alternate to stale -> re-render its panel (status + base line).
@@ -11583,12 +11585,63 @@
     __sourceMarksEngine.paint();
   }
 
+  // --- History commit collapse (spec 5) --------------------------------------
+  // Prose edits made during one unlock->lock cycle fold into a single "commit" History entry
+  // rather than one entry per keystroke (structural events -- breaks, stale, comments -- keep
+  // their own discrete entries; those are logged inside applyTextEdit / the mark actions).
+  // We buffer the per-edit deltas while unlocked; on lock we summarise + capture a why-note.
+  function beginSourceEditSession() { __sourceEditSession = { edits: [] }; }
+  function recordSourceEdit(edit) {
+    if (__sourceEditSession && edit && ((edit.inserted || 0) || (edit.removed || 0))) __sourceEditSession.edits.push(edit);
+  }
+  function flushSourceEditSession(topic, opts) {
+    opts = opts || {};
+    var s = __sourceEditSession; __sourceEditSession = null;
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    if (!s || !s.edits.length || !topic || !SD || !model) return;
+    var summary = SD.summarizeEdits(s.edits);
+    if (!summary.editCount) return;
+    function commit(note) {
+      SD.logHistory(model, { type: "commit", charsAdded: summary.charsAdded, charsRemoved: summary.charsRemoved, editCount: summary.editCount, note: (note || "").trim() || undefined });
+      persistSourceDocModel(topic, model);
+      renderSourceInfoPanel(topic); // refresh the History timeline in the info panel
+    }
+    if (opts.prompt === false) commit(""); else sourceCommitNoteModal(commit);
+  }
+  // The skippable why-note prompted at lock (spec 5). Reuses the DS modal shell (promptModal's
+  // family) -- Save records the note, Skip / Escape / scrim commits with no note. The commit
+  // always lands; the note is optional, never a gate.
+  function sourceCommitNoteModal(onCommit) {
+    if (!window.VersoUI || !window.VersoUI.Modal) { onCommit(""); return; }
+    var done = false;
+    var ta = h("textarea", "source-note__text"); ta.placeholder = "Why this change? (optional)"; ta.rows = 3;
+    var shell = dsModalShell({
+      title: "Save changes", subtitle: "Add an optional note about why you made this edit.",
+      primaryLabel: "Save note", cancelLabel: "Skip",
+      onPrimary: function () { if (done) return; done = true; var v = ta.value; shell.modal.close(); onCommit(v); },
+      onClose: function () { if (done) return; done = true; onCommit(""); }
+    });
+    shell.body.appendChild(ta);
+    ta.focus();
+  }
+  // Single entry point for flipping the source lock, so the toolbar button and the
+  // browser-verify hook share one begin/flush path. opts.prompt=false skips the why-note modal.
+  function setSourceUnlocked(v, opts) {
+    opts = opts || {};
+    var next = !!v;
+    if (next === __sourceUnlocked) { applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); return; }
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (next) beginSourceEditSession(); else flushSourceEditSession(topic, { prompt: opts.prompt });
+    __sourceUnlocked = next;
+    applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+  }
+
   // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
   // Document-scope only; glyph-only IconButtons from the DS.
   function buildSourceDocBar(topic) {
     var U = window.VersoUI;
     var bar = h("div", "source-docbar");
-    var lockBtn = U && U.IconButton ? U.IconButton({ icon: __sourceUnlocked ? "lock-open" : "lock", label: __sourceUnlocked ? "Lock the source prose" : "Unlock to edit the source prose", active: __sourceUnlocked, onClick: function () { __sourceUnlocked = !__sourceUnlocked; applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); } }) : h("button", null, "Lock");
+    var lockBtn = U && U.IconButton ? U.IconButton({ icon: __sourceUnlocked ? "lock-open" : "lock", label: __sourceUnlocked ? "Lock the source prose" : "Unlock to edit the source prose", active: __sourceUnlocked, onClick: function () { setSourceUnlocked(!__sourceUnlocked); } }) : h("button", null, "Lock");
     lockBtn.classList.add("source-docbar__btn");
     var lockLbl = h("span", "source-docbar__lbl", __sourceUnlocked ? "Source editable" : "Source locked");
     var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); if (!__sourceShowMarks) closeSourceCommentThread(); renderSourceCommentPins(topic); updateSourceDocBar(); } }) : h("button", null, "Marks");
@@ -11982,6 +12035,7 @@
       openSourceComposer(cmd, function (val, tag) {
         if (cmd === "alternate") {
           var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: anchor, alt: val, tag: tag || "" });
+          SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" });
           persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
           syncSourceAltPanel(topic, mk.id); // open the contextual panel on the new alternate
         } else {
@@ -12044,7 +12098,7 @@
     convertTopicToDoc: convertTopicToDoc,
     revertTopicDoc: revertTopicDoc,
     setActiveTopic: function (id) { __sourceActiveTopicId = id; __sourceDocModel = null; __sourceDocModelTopicId = null; __sourceUnlocked = false; },
-    setUnlocked: function (v) { __sourceUnlocked = !!v; applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); },
+    setUnlocked: function (v, opts) { setSourceUnlocked(v, opts || { prompt: false }); },
     isUnlocked: function () { return __sourceUnlocked; },
     getModel: function () { return __sourceDocModel; },
     openAltPanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceAltPanel(t, id); },
@@ -12090,32 +12144,57 @@
     group("Orphaned", orphaned);
   }
 
-  // md-topic-import: a node-based vertical timeline tracing every change on this topic
-  // back to how it entered the platform -- newest first. Real entries come from
-  // topic.history (one per import: creation or a later reconcile pass); a hand-created
-  // "New topic" has none, so a single synthetic "Created" node stands in. If the topic
-  // was touched (edited, a flag resolved) more recently than its last import, a synthetic
-  // "Last edited" node leads -- the timeline reflects everything, not just imports.
+  // md-topic-import + source-rw-history-timeline: a node-based vertical timeline tracing every
+  // change on this topic -- newest first. Two provenance streams are merged (spec 5, hybrid
+  // granularity):
+  //   * IMPORT events (topic.history) -- creation / re-import reconcile passes, timestamped.
+  //   * DOC events (the SourceDoc model.history) -- prose edits collapsed into "commit" entries
+  //     plus discrete structural events (alternate added, span broke/stale/restored, comment
+  //     opened/resolved). These carry an `at` stamp so both streams interleave by time.
+  // A hand-created "New topic" with neither stream shows a single synthetic "Created" node. The
+  // synthetic "Last edited" node only fills in for legacy topics that have no doc-commit history.
   function renderHistoryTimeline(host, topic) {
     var body = panelSection(host, "History");
     if (!window.VersoUI || !window.VersoUI.Timeline) return;
-    var rawEntries = (topic.history || []).slice().reverse();
-    if (!rawEntries.length) rawEntries = [{ type: "created", importedAt: topic.createdAt }];
-    var newestImportAt = (topic.history && topic.history.length) ? topic.history[topic.history.length - 1].importedAt : topic.createdAt;
-    if (topic.updatedAt && topic.updatedAt > (newestImportAt || 0)) {
-      rawEntries.unshift({ type: "edited", importedAt: topic.updatedAt });
-    }
-    var entries = rawEntries.map(function (entry) {
-      var label = entry.type === "edited" ? "Last edited" :
-        entry.type === "created" ? (entry.file ? ("Imported " + entry.file + [entry.version, entry.publishDate].filter(Boolean).map(function (x) { return " " + x; }).join("")) : "Created") :
+    var SD = window.SourceDoc;
+
+    // Import stream -> a common { ts, date, label, detail } row shape.
+    var imports = (topic.history || []).map(function (entry) {
+      var label = entry.type === "created" ? (entry.file ? ("Imported " + entry.file + [entry.version, entry.publishDate].filter(Boolean).map(function (x) { return " " + x; }).join("")) : "Created") :
         "Re-imported " + entry.file + [entry.version, entry.publishDate].filter(Boolean).map(function (x) { return " " + x; }).join("");
       var details = [entry.sectionsCreated && (entry.sectionsCreated + " new section(s)"),
         entry.sectionsUpdated && (entry.sectionsUpdated + " updated from source"),
         entry.sectionsFlagged && (entry.sectionsFlagged + " flagged for review")].filter(Boolean);
+      return { ts: entry.importedAt || 0, importedAt: entry.importedAt, label: label, detail: details.length ? details.join(", ") : null };
+    });
+
+    // Doc stream -> the same row shape via the pure SourceDoc.historyEntryView mapping. Prefer
+    // the live model when this is the active topic; else read the persisted doc.
+    var liveModel = (__sourceDocModel && __sourceDocModelTopicId === topic.id) ? __sourceDocModel : null;
+    var docHistory = liveModel ? (liveModel.history || []) : ((topic.doc && topic.doc.history) || []);
+    var hasCommit = false;
+    var docRows = (SD && SD.historyEntryView) ? docHistory.map(function (e) {
+      if (e.type === "commit") hasCommit = true;
+      var v = SD.historyEntryView(e);
+      return { ts: e.at || 0, importedAt: e.at, label: v.label, detail: v.detail };
+    }) : [];
+
+    var rows = imports.concat(docRows);
+    // Legacy fallback: no doc commits AND a plain edit is newer than the last import -> a single
+    // synthetic "Last edited" node (superseded by real commit entries once the doc is edited).
+    if (!hasCommit) {
+      var newestImportAt = (topic.history && topic.history.length) ? topic.history[topic.history.length - 1].importedAt : topic.createdAt;
+      if (topic.updatedAt && topic.updatedAt > (newestImportAt || 0)) rows.push({ ts: topic.updatedAt, importedAt: topic.updatedAt, label: "Last edited", detail: null });
+    }
+    if (!rows.length) rows = [{ ts: topic.createdAt || 0, importedAt: topic.createdAt, label: "Created", detail: null }];
+
+    // Newest first; stable order preserves each stream's own sequence when times tie.
+    rows.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    var entries = rows.map(function (r) {
       return {
-        date: entry.importedAt ? new Date(entry.importedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—",
-        label: label,
-        detail: details.length ? details.join(", ") : null
+        date: r.importedAt ? new Date(r.importedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—",
+        label: r.label,
+        detail: r.detail
       };
     });
     body.appendChild(window.VersoUI.Timeline({ entries: entries }));

@@ -199,6 +199,9 @@
     if (!m.broken && m.type === "alternate" && m.alt != null) m.stale = (cur !== m.baseText);
     m._brokeNow = m.broken && !wasBroken;
     m._staleNow = m.stale && !wasStale;
+    // a mark that was broken or stale and is now fully in sync again (the author edited the
+    // text back toward the base) -- the inverse provenance signal to _brokeNow / _staleNow.
+    m._restoredNow = (wasBroken || wasStale) && !m.broken && !m.stale;
     return m;
   }
 
@@ -233,6 +236,10 @@
       // An alternate going stale (its base drifted) is the sharpest provenance signal (spec 3.2);
       // it earns its own discrete History entry so "needs re-sync" is discoverable, not just a dot.
       else if (m._staleNow) { logHistory(model, { type: "mark-stale", markId: m.id, markType: m.type }); m._staleNow = false; }
+      // The recovery is provenance too -- editing the text back in sync clears the flag with a
+      // discrete "restored" entry, so the timeline shows the break AND the fix, not just the break.
+      else if (m._restoredNow) { logHistory(model, { type: "mark-restored", markId: m.id, markType: m.type }); }
+      m._restoredNow = false;
     });
     return { model: model, edit: edit };
   }
@@ -313,8 +320,52 @@
   }
   function logHistory(model, entry) {
     model.history = model.history || [];
+    // Stamp a wall-clock time so the timeline can interleave these events with the
+    // import events (which carry importedAt); insertion order still breaks ties.
+    if (entry && entry.at == null) entry.at = Date.now();
     model.history.unshift(entry);
     return entry;
+  }
+
+  // ---- history: pure collapse + view mapping (spec 5) -----------------------
+  // Collapse a stream of per-keystroke edit deltas (each { inserted, removed } from
+  // applyTextEdit's diff) into one commit summary. This is the hybrid-granularity core:
+  // ordinary prose edits fold into a single commit entry rather than one entry each.
+  function summarizeEdits(edits) {
+    var added = 0, removed = 0, count = 0;
+    (edits || []).forEach(function (e) {
+      if (!e) return;
+      var ins = e.inserted || 0, rem = e.removed || 0;
+      if (ins === 0 && rem === 0) return; // a no-op keystroke (arrow key etc.) doesn't count
+      added += ins; removed += rem; count++;
+    });
+    return { charsAdded: added, charsRemoved: removed, editCount: count };
+  }
+  // Map one history entry to its display view { kind, label, detail }. Pure so the timeline
+  // rendering is headlessly testable and the copy lives in one place. A commit collapses a
+  // prose session; every other type is a discrete structural event.
+  function historyEntryView(entry) {
+    entry = entry || {};
+    var typeLabel = { link: "Link", alternate: "Alternate", comment: "Comment" }[entry.markType] || "Mark";
+    switch (entry.type) {
+      case "commit": {
+        var bits = [];
+        if (entry.charsAdded) bits.push("+" + entry.charsAdded);
+        if (entry.charsRemoved) bits.push("−" + entry.charsRemoved); // U+2212 minus
+        var detail = bits.length ? bits.join(" / ") + " chars" : "no net change";
+        if (entry.note) detail += " — “" + entry.note + "”";
+        return { kind: "commit", label: "Edited source", detail: detail };
+      }
+      case "mark-broken": return { kind: "structural", label: typeLabel + " broke", detail: "the anchored text was deleted" };
+      case "mark-stale": return { kind: "structural", label: "Alternate went stale", detail: "the base changed since it was written" };
+      case "mark-restored": return { kind: "structural", label: typeLabel + " restored", detail: "back in sync with the base" };
+      case "mark-updated": return { kind: "structural", label: typeLabel + " updated", detail: "extended to include appended text" };
+      case "alternate-created": return { kind: "structural", label: "Alternate added", detail: entry.tag ? "for " + entry.tag : null };
+      case "comment-added": return { kind: "structural", label: "Comment opened", detail: null };
+      case "comment-resolved": return { kind: "structural", label: "Comment resolved", detail: null };
+      case "comment-reopened": return { kind: "structural", label: "Comment reopened", detail: null };
+      default: return { kind: "structural", label: entry.type || "Change", detail: null };
+    }
   }
 
   // ---- owned undo / redo ---------------------------------------------------
@@ -447,7 +498,8 @@
     blocksFromText: blocksFromText, fromSections: fromSections,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
-    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    summarizeEdits: summarizeEdits, historyEntryView: historyEntryView
   };
 
   var SourceDoc = {
@@ -459,6 +511,7 @@
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
