@@ -132,13 +132,15 @@
       <span class="stage-placeholder__desc">You'll pick, configure and queue documents here — this stage isn't built yet.</span>
     </div>
 
-    <!-- left: layers / pages / components -->
+    <!-- left: SPEC 7 (decision 11) — a single 3-way switcher: Structure . Blocks . Source
+         (Source gets equal billing now that source insertion is a primary use). Each .lpane
+         carries data-lsec; the switcher (mounted into #lpane-switch, wired in wireLeftSwitcher)
+         shows the panes for the active section and hides the rest, persisting the last-active.
+         Components folds INTO Blocks (James's call): the Blocks section shows the Insert palette
+         with the Reusable-components pane beneath it. -->
     <aside class="panel panel--left">
-      <!-- SS: Structure + Blocks + Components are STACKED (all visible), each
-           collapsible, with a draggable split between each adjacent pair
-           (wired in wireLeftPanes, generalized to N panes). -->
-      <div class="lpane lpane--structure" id="lpane-structure">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Structure</span></div>
+      <div class="lpane-switch" id="lpane-switch"></div>
+      <div class="lpane lpane--structure" id="lpane-structure" data-lsec="structure">
         <div class="lpane__body" id="tab-structure">
           <div class="panel-section">
             <div class="panel-section__title panel-section__title--sticky" style="display: flex; align-items: center; justify-content: space-between;">
@@ -153,9 +155,7 @@
           </div>
         </div>
       </div>
-      <div class="lpane-split" id="lpane-split-0"></div>
-      <div class="lpane lpane--blocks" id="lpane-blocks">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Blocks</span></div>
+      <div class="lpane lpane--blocks" id="lpane-blocks" data-lsec="blocks">
         <div class="lpane__body" id="tab-assets">
           <div class="panel-section">
             <div class="panel-section__title panel-section__title--row">
@@ -167,16 +167,18 @@
           </div>
         </div>
       </div>
-      <div class="lpane-split" id="lpane-split-1"></div>
-      <div class="lpane lpane--components" id="lpane-components">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Components</span></div>
+      <!-- Components folded into the Blocks section (data-lsec="blocks"): a sub-pane beneath the palette. -->
+      <div class="lpane lpane--components" id="lpane-components" data-lsec="blocks">
+        <div class="lpane__head lpane__head--sub"><span class="lpane__title">Reusable components</span></div>
         <div class="lpane__body" id="tab-components">
           <div class="panel-section">
-            <div class="panel-section__title">Reusable components</div>
             <div id="components-palette-list"></div>
             <div class="insp-hint">Click to insert. My Components are course-local copies; Blocks and Pages are live-linked to the shared library.</div>
           </div>
         </div>
+      </div>
+      <div class="lpane lpane--source" id="lpane-source" data-lsec="source" hidden>
+        <div class="lpane__body" id="tab-source"></div>
       </div>
       <div class="panel-resizer" id="resizer-left"></div>
     </aside>
