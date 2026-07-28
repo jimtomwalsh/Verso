@@ -10793,6 +10793,10 @@
     var hasSource = !!sourceMasterFor(pid) || unifiableTopicsFor(pid).length > 0;
     showContextMenu(x, y, [
       { head: pname },
+      { label: "Export to Markdown", onClick: function () {
+        if (!hasSource) { window.alert("This Product has no source document to export."); return; }
+        exportProductSourceMarkdown(pid);
+      } },
       { label: "Unlink all courses", onClick: function () {
         var n = unlinkAllCoursesFromProduct(pid); mountProductPicker();
         window.alert(n ? ("Unlinked " + n + " course" + (n === 1 ? "" : "s") + " from “" + pname + "”.") : "No linked courses to unlink.");
@@ -10806,6 +10810,30 @@
         confirmModal("Delete Product?", "Deletes “" + pname + "” entirely -- its source document and its Product tag on any linked course. Cannot be undone.", function () { deleteProduct(pid); afterProductLifecycleChange(); }, { okLabel: "Delete", danger: true });
       } }
     ]);
+  }
+  // Export a Product's continuous source document to a portable Markdown (.md) file (pilot ask:
+  // "this source page should be exportable to .md"). Prefers the persisted unified master doc (it
+  // carries the author's edits); falls back to a freshly-concatenated model for a not-yet-unified
+  // Product. Serialisation is the pure SourceDoc.toMarkdown; download reuses the Blob idiom.
+  function sourceModelForExport(pid) {
+    var SD = window.SourceDoc; if (!SD) return null;
+    var master = sourceMasterFor(pid);
+    if (master && master.doc && master.doc.nodes && master.doc.nodes.length) return SD.fromJSON(master.doc);
+    return buildUnifiedModelFor(pid);
+  }
+  function exportProductSourceMarkdown(pid) {
+    var SD = window.SourceDoc;
+    var model = sourceModelForExport(pid);
+    if (!SD || !model || !model.nodes || !model.nodes.length) { window.alert("This Product has no source document to export."); return; }
+    var pname = (window.ProductsStore[pid] && window.ProductsStore[pid].name) || "source";
+    var slug = String(pname).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "source";
+    var md = SD.toMarkdown(model);
+    var blob = new Blob([md], { type: "text/markdown" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = slug + "-source.md";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    if (typeof sourceToast === "function") sourceToast("Exported “" + pname + "” source to Markdown.");
   }
   // After a delete, drop any dangling active-Product/topic state and re-render the stage + picker.
   function afterProductLifecycleChange() {

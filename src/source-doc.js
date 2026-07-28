@@ -978,8 +978,57 @@
     return i === n.length;
   }
 
+  // ---- source v2: serialise the continuous document back out to Markdown (.md) ---------------
+  // The inverse of the import on-ramp (product-rail-source-rw-markdown-export). A node tree -> a
+  // portable Markdown string. Inline conventions (bold **x**, `inline code`) already live literally
+  // in node text, so they emit as-is; each block type maps to standard Markdown. Pure + DOM-free ->
+  // headlessly testable and reusable anywhere. Chapter headings (level 1) become `# `.
+  function mdCell(c) { return String(c == null ? "" : c).replace(/\|/g, "\\|"); }
+  function nodeToMarkdown(node) {
+    if (!node) return "";
+    switch (node.type) {
+      case "heading": {
+        var lvl = Math.max(1, Math.min(6, node.level || 2));
+        return new Array(lvl + 1).join("#") + " " + (node.text || "");
+      }
+      case "paragraph": return String(node.text == null ? "" : node.text);
+      case "callout": {
+        var t = String(node.text == null ? "" : node.text);
+        var lines = t.split("\n");
+        return lines.map(function (line, i) {
+          return "> " + (i === 0 && node.tag ? "**" + node.tag + "** " : "") + line;
+        }).join("\n");
+      }
+      case "list": {
+        var ordered = !!node.ordered;
+        return (node.items || []).map(function (it, i) { return (ordered ? (i + 1) + ". " : "- ") + it; }).join("\n");
+      }
+      case "table": {
+        var rows = node.rows || [];
+        if (!rows.length) return "";
+        var head = rows[0] || [], out = [];
+        out.push("| " + head.map(mdCell).join(" | ") + " |");
+        out.push("| " + head.map(function () { return "---"; }).join(" | ") + " |");
+        for (var i = 1; i < rows.length; i++) out.push("| " + (rows[i] || []).map(mdCell).join(" | ") + " |");
+        return out.join("\n");
+      }
+      case "image": {
+        var alt = node.alt || node.caption || "";
+        var md = "![" + alt + "](" + (node.src || "") + ")";
+        if (node.caption && node.caption !== alt) md += "\n\n*" + node.caption + "*";
+        return md;
+      }
+      default: return String(node.text == null ? "" : node.text);
+    }
+  }
+  function toMarkdown(model) {
+    var body = ((model && model.nodes) || []).map(nodeToMarkdown).join("\n\n");
+    return body.replace(/\n{3,}/g, "\n\n").replace(/^\n+|\n+$/g, "") + "\n";
+  }
+
   var _pure = {
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
+    nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
     create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
@@ -1012,6 +1061,7 @@
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
+    toMarkdown: toMarkdown,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
   };

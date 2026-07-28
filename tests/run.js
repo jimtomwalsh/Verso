@@ -10948,6 +10948,37 @@ section("Source rewrite: multi-block marks (one word to whole document, D1)");
   })());
 })();
 
+// ---- product-rail-source-rw-markdown-export: serialise the continuous doc back out to .md ----
+// The inverse of the import on-ramp: SourceDoc.toMarkdown(model) is a pure node-tree -> Markdown
+// string. Inline conventions (bold/`code`) already live in the node text, so they pass through;
+// each block type maps to standard Markdown. Download wiring is DOM (browser-verified separately).
+section("Source rewrite: export a topic to Markdown (product-rail-source-rw-markdown-export)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([
+    { type: "heading", level: 1, chapter: true, text: "Cooling system" },
+    { type: "paragraph", text: "The **pump** cycles coolant through the `manifold`." },
+    { type: "heading", level: 2, text: "Checks" },
+    { type: "list", ordered: false, items: ["Pressure nominal", "No leaks"] },
+    { type: "list", ordered: true, items: ["Open valve", "Prime pump"] },
+    { type: "table", rows: [["Zone", "State"], ["A", "Green"], ["B", "Amber"]] },
+    { type: "image", src: "diagram.png", alt: "Flow diagram", caption: "Coolant flow" },
+    { type: "callout", tag: "Warning", text: "Do not run dry." }
+  ]);
+  var md = SD.toMarkdown(model);
+  ok("chapter heading (level 1) serialises to a single #", /(^|\n)# Cooling system(\n|$)/.test(md));
+  ok("a level-2 heading serialises to ##", /\n## Checks\n/.test(md));
+  ok("paragraph inline bold/code pass through verbatim", md.indexOf("The **pump** cycles coolant through the `manifold`.") > -1);
+  ok("an unordered list serialises with - bullets", md.indexOf("- Pressure nominal\n- No leaks") > -1);
+  ok("an ordered list serialises with 1. 2. numbering", md.indexOf("1. Open valve\n2. Prime pump") > -1);
+  ok("a table serialises header + --- separator + rows (GFM)", md.indexOf("| Zone | State |\n| --- | --- |\n| A | Green |\n| B | Amber |") > -1);
+  ok("an image serialises to ![alt](src) with its caption", md.indexOf("![Flow diagram](diagram.png)") > -1 && md.indexOf("*Coolant flow*") > -1);
+  ok("a callout serialises to a > blockquote with a bold tag", md.indexOf("> **Warning** Do not run dry.") > -1);
+  ok("blocks are separated by a blank line and the file ends with one newline", /\n\n/.test(md) && /\n$/.test(md) && !/\n\n\n/.test(md));
+  ok("a table cell containing a pipe is escaped", SD.toMarkdown(SD.create([{ type: "table", rows: [["a|b", "c"]] }])).indexOf("a\\|b") > -1);
+  ok("an empty document serialises to just a trailing newline", SD.toMarkdown(SD.create([])) === "\n");
+})();
+
 // ---- Source rewrite (Epic 2b): mark painting engine loads (DOM-verified in browser) ----
 // source-marks.js is the DOM painting layer (CSS Custom Highlight over live Ranges). Its offset
 // walking + selection reading need a real DOM/TreeWalker, so its behaviour is proven by the

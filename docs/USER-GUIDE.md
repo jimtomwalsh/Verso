@@ -620,6 +620,12 @@ Pick an existing Product or create a new one, choose a Format (eLearning, Presen
 docs), and promote. This only tags the course — its content is never touched. The top-bar Product
 dropdown then lets you switch between every course, and the Source wiki, for that Product.
 
+**Exporting the source to Markdown.** On the **Source** stage, the **Product actions** menu (the ⋯
+button by the toolbar) has **Export to Markdown** — it downloads the Product's whole continuous
+document as a portable `.md` file (named after the Product). Headings, paragraphs, bold/`inline code`,
+bullet and numbered lists, tables, images, and callouts all come across, so it round-trips with the
+Markdown import. Nothing is changed in the app; it's a save-a-copy.
+
 **Unlinking and deleting.** To detach a course from its Product, open it and choose **Save/Recents →
 Remove from Product** (the course and its content stay; only the tag is removed). On the **Source**
 stage, the **Product actions** menu (the ⋯ button by the toolbar) lets you **Unlink all courses** from
