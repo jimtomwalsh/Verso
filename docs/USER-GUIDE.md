@@ -728,10 +728,13 @@ In this mode:
   you scroll. (The outline hides itself on a narrow window so the reading column keeps its width.)
 - **Find a topic by anything in it.** The topic search at the top of the left nav now matches the
   full text of every topic — a heading or a phrase inside the document, not just the title.
-- **See every mark at once.** The **All marks** button in the bottom bar opens a drawer listing all
-  the topic's marks with a status dot (green in sync / amber stale / red broken). Filter it to
-  **Alternates**, **Linked**, or **Comments** so the three kinds are never read mixed, and click any
-  row to jump straight to that mark. Press **Esc** or the button again to close it.
+- **One details panel on the right.** Everything about the document lives in a single right panel:
+  **Marks** (every alternate, link, and comment with a status dot — green in sync / amber stale /
+  red broken; filter to **Alternates**, **Linked**, or **Comments**, and click a row to jump to that
+  mark), **History** (the provenance timeline), **Source** (where the document came from, and where
+  it's used), and **Comments**. The bottom-bar panel button shows or hides it; selecting a mark opens
+  the panel to that mark. (This replaces the older split of a fixed info panel plus a separate
+  slide-over marks drawer.)
 
 This is an early view — the variant columns arrive in a later update; the section editor above
 remains the full-featured path.
