@@ -451,6 +451,19 @@
   function condToolsFor(geo) {
     return (DOCTYPE_COND_TOOLS[geo] || DOCTYPE_COND_TOOLS.reflow).slice();
   }
+  // SPEC 7 static fallback: block types that mount runtime.js for learner interactivity. In a
+  // STATIC cell (doc.meta.interactive === false) these are hidden from the Blocks library so a
+  // static document can't gain new interactive content. Existing ones are NEVER dropped -- they
+  // simply render their static output (the authoring canvas already renders without the learner
+  // runtime; the degrade is only visible in Demo/export, a follow-up), and toggling back to
+  // interactive restores them, so the toggle is lossless.
+  var INTERACTIVE_BLOCK_TYPES = {
+    quiz: 1, hotspot: 1, checkbox: 1, navButton: 1,
+    accordion: 1, cardReveal: 1, sequence: 1, cardDeck: 1, htmlEmbed: 1, webEmbed: 1
+  };
+  function isInteractiveBlockType(t) { return !!INTERACTIVE_BLOCK_TYPES[t]; }
+  // A palette item is offered when the cell is interactive, OR the item is not an interactive type.
+  function paletteAllowsType(type, interactive) { return interactive !== false || !isInteractiveBlockType(type); }
   /* @pure-doctype-end */
 
   var saveStateEl = null;
@@ -1369,6 +1382,7 @@
   // grouping) consume so the {geo, interactive} logic lives in exactly one place.
   window.__docType = { docCell: docCell, tagDocCell: tagDocCell, presetToCell: presetToCell,
     cellToPreset: cellToPreset, condToolsFor: condToolsFor, isValidGeo: isValidGeo,
+    isInteractiveBlockType: isInteractiveBlockType, paletteAllowsType: paletteAllowsType,
     PRESETS: DOCTYPE_PRESETS, GEOS: DOCTYPE_GEOS };
   // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
   // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
@@ -18609,8 +18623,15 @@
       if (view === "grid" && U && U.BlockGrid) return U.BlockGrid({ minColWidth: 84 });
       return h("div", "asset-group__list");
     }
+    // SPEC 7: in a static cell, hide interactive block types from the library (existing blocks
+    // are untouched -- this only gates what NEW content can be added).
+    var cellInteractive = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc).interactive : true;
     var order = [], byGroup = {};
     LIBRARY.forEach(function (item, idx) {
+      // A palette item's block type lives in item.make() (the item itself has no .type). Cache it
+      // on first read, then gate on the cell: a static cell hides interactive types.
+      if (item.__bt === undefined) item.__bt = item.type || (item.make ? (item.make() || {}).type : null);
+      if (!paletteAllowsType(item.__bt, cellInteractive)) return; // static cell: skip interactive types
       var g = item.group || "Blocks";
       if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
       byGroup[g].push({ item: item, idx: idx });

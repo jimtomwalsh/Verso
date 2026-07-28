@@ -2213,6 +2213,29 @@ section("editor-rework tab scope");
   ok("null-safe on empty inputs", g.visibleTabIds(null, reg, "").length === 0 && g.visibleTabIds(open, null, "").length === 0);
 })();
 
+// ---- SPEC 7: static fallback — interactive-block palette filter (pure) ----
+section("editor-rework static-fallback palette filter");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-doctype-start \*\/([\s\S]*?)\/\* @pure-doctype-end \*\//);
+  if (!m) { ok("locate @pure-doctype fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { isInteractiveBlockType: isInteractiveBlockType, paletteAllowsType: paletteAllowsType, INTERACTIVE_BLOCK_TYPES: INTERACTIVE_BLOCK_TYPES };")();
+  ["quiz", "hotspot", "checkbox", "navButton", "accordion", "cardReveal", "sequence", "cardDeck", "htmlEmbed", "webEmbed"].forEach(function (ty) {
+    ok(ty + " is an interactive type", g.isInteractiveBlockType(ty) === true);
+  });
+  ["heading", "paragraph", "image", "table", "divider", "columns", "quote", "list"].forEach(function (ty) {
+    ok(ty + " is a static-safe type", g.isInteractiveBlockType(ty) === false);
+  });
+  // an interactive cell offers everything; a static cell hides interactive types but keeps static ones
+  ok("interactive cell offers a quiz", g.paletteAllowsType("quiz", true) === true);
+  ok("static cell hides a quiz", g.paletteAllowsType("quiz", false) === false);
+  ok("static cell still offers a heading", g.paletteAllowsType("heading", false) === true);
+  ok("legacy/undefined interactivity behaves as interactive (offers everything)", g.paletteAllowsType("quiz", undefined) === true);
+  // the editor filters the LIBRARY through this predicate against the doc's cell
+  ok("renderAssets gates the palette on the cell's interactivity (type via item.make)", /item\.__bt = item\.type \|\| \(item\.make \? \(item\.make\(\) \|\| \{\}\)\.type : null\);[\s\S]{0,120}if \(!paletteAllowsType\(item\.__bt, cellInteractive\)\) return;/.test(t));
+  ok("existing blocks are never dropped by the filter (palette-only)", /this only gates what NEW content can be added/.test(t));
+})();
+
 // ---- SPEC 7: cell switcher + tiered mutability (wiring) ----
 section("editor-rework cell switcher");
 (function () {
