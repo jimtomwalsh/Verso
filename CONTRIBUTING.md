@@ -31,8 +31,8 @@ Content blocks are split across four files, each with one job:
 - `src/runtime.js` — learner-side behaviour in the exported course
 - `src/editor.js` — the inspector / authoring UI
 
-Build inspector controls from the canonical set (see `UX-STYLE-GUIDE.md` and the
-`design-system/`); if a pattern is missing, add it there first, then build to it.
+Build inspector controls from the canonical set (see `design-system/readme.md`); if a
+pattern is missing, add it there first, then build to it.
 
 ## Stack rules
 

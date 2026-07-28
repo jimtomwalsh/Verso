@@ -64,15 +64,10 @@ See [SECURITY.md](SECURITY.md) for the vulnerability-disclosure policy.
 
 ## The one invariant
 
-`render(doc, theme)` in `src/render.js` is a **pure function of the document**.
-
-- The editor **mounts** its output onto the canvas.
-- The SCORM export **serialises the same output**.
-
-So what you see in the editor is what ships. Nothing in `editor.js` / `editor.css`
-may leak into `render()`; new per-document state is data on the `doc`, and render
-reads per-pass hooks (e.g. `window.__navSections`, `__docStyles`, `__glossary`)
-rather than editor state. This is the rule everything else defers to.
+`render(doc, theme)` in `src/render.js` is a **pure function of the document** — the editor
+mounts its output onto the canvas, and the SCORM export serialises the *same* output. So what
+you see in the editor is what ships. The full render/export rules live in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Run
 
@@ -86,19 +81,13 @@ No install. No bundler. Classic `<script>` tags exposing globals.
 
 ## Test
 
-Headless regression suite — pure Node, no dependencies, run before every change:
-
 ```bash
-node tests/run.js      # syntax-checks src/* + exercises the pure cores → N/N
+node tests/run.js      # headless regression suite, pure Node → N/N
 ```
 
-It extracts the pure logic from the classic-script IIFEs and asserts against
-fixtures; a failure prints `FAIL [section] name` and the process exits non-zero
-(this is what CI gates on). Add a regression guard for any new pure logic.
-
-Wiring that unit tests can't see is checked with a Puppeteer harness that boots
-the app, runs an in-page probe, and inspects both the editor render **and** a real
-`SCORMExport.buildPackage(...)`.
+Run before every change; CI gates on it. Wiring that unit tests can't see is browser-verified
+against a real `SCORMExport.buildPackage(...)`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+full testing workflow and regression-guard rule.
 
 ## Authoring model
 
@@ -106,10 +95,9 @@ Build content once, reuse it across documents, and publish it in different forma
 
 - **Document** → chapters → pages → blocks. Blocks are the content units
   (headings, text, images, columns, cards, quizzes, hotspots, HTML/web embeds, …).
-- **Blocks follow a 4-file contract:** `src/render.js` (pure render) ·
-  `src/course.css` (tokens-only styling that ships in SCORM) · `src/runtime.js`
-  (learner-side behaviour in the exported course) · `src/editor.js` (the inspector
-  UI). New controls are built from the canonical set in `UX-STYLE-GUIDE.md`.
+- **Blocks follow a 4-file contract** (`render.js` · `course.css` · `runtime.js` ·
+  `editor.js`), with UI controls from `design-system/` — see
+  [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Theming** is CSS custom properties (`--color-*`), with a `data-mode` light/dark
   switch and author-editable tokens, saved text styles, and custom fonts.
 - **Export** produces a self-contained SCORM 1.2 zip; fonts and assets are inlined
@@ -133,30 +121,17 @@ src/
 tests/run.js        headless regression suite (no deps)
 viewer/             standalone review Viewer (publish → comment → merge back)
 desktop/            optional macOS app shell (WKWebView)
-design-system/      the Verso UI design system (tokens + components)
+design-system/      the Verso UI design system — rules, tokens, components, gate mapping
 server/             optional server-of-one backend (server mode, in development)
 docs/               user guide + architecture decision records (docs/adr/)
-UX-STYLE-GUIDE.md   canonical inspector controls + design rules
 ```
-
-## Stack rules
-
-- Vanilla JS, classic `<script>` globals — **no** ES modules, bundler, or
-  `npm install` in the **app**. Must open from `file://`.
-- `editor.css` = Verso UI only. `src/course.css` = tokens-only, ships in SCORM.
-- No emojis in code or files.
-- The optional `server/` backend (server mode, in development) is the one scoped
-  exception to "dependency-free": it uses only Node built-ins (`node:sqlite`,
-  `node:crypto`, `node:http`) plus a consciously accepted bundled Node runtime.
-  It never renders, and everything in it is dormant unless a deployment runs in
-  server mode — the standalone `file://` app is unaffected.
 
 ## Contributing
 
-1. Read `UX-STYLE-GUIDE.md` (how the UI is built) before adding inspector controls.
-2. Make render/CSS changes single-source so editor and export stay identical.
-3. `node tests/run.js` must be green, and any new pure logic gets a regression guard.
-4. Browser-verify wiring (editor render **and** the export package) before shipping.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build/test setup, the render/export invariant, the
+4-file block contract, stack rules, and the PR checklist. In short: `node tests/run.js` must be
+green, render/CSS changes stay single-source, and new pure logic gets a regression guard. UI
+controls come from the canonical set in [`design-system/readme.md`](design-system/readme.md).
 
 > **Course content is not part of this repository.** Real course data, built SCORM
 > packages, and course assets are gitignored and stay local — see `.gitignore`.
