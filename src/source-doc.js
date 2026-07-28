@@ -569,6 +569,57 @@
     return model;
   }
 
+  // ---- source v2: unify a Product's topic docs into ONE continuous document --
+  // Concatenate several chapter docs into ONE continuous model (spec 2c section 1). Each
+  // chapter contributes a level-1 heading node (its name, stamped chapter:true) followed by
+  // that chapter's nodes, deep-copied so the source docs are never mutated. A node key is
+  // preserved when it is still free and re-keyed only on collision (the cousin of the
+  // reconcile-rekey machinery); every reference that rides a key -- a text mark's
+  // anchor.nodeKey and a history entry's markId -- is rewritten through the same remap, so
+  // marks, per-node variants (which travel ON the node, deep-cloned) and provenance all
+  // survive the merge. Minted keys skip any key already present, so a preserved key can never
+  // be handed out again. Pure + DOM-free -> headlessly testable.
+  function concatChapters(chapters) {
+    var out = makeModel();
+    function freshNodeKey() { var k; do { k = nextId(out, "n"); } while (nodeByKey(out, k)); return k; }
+    function freshMarkId() { var k; do { k = nextId(out, "m"); } while (markById(out, k)); return k; }
+    (chapters || []).forEach(function (ch) {
+      var name = (ch && ch.name != null && String(ch.name).trim()) ? String(ch.name) : "Untitled";
+      out.nodes.push({ type: "heading", level: 1, text: name, key: freshNodeKey(), chapter: true });
+      var src = fromJSON(ch && ch.model ? toJSON(ch.model) : null); // independent deep copy, keys ensured
+      var nodeRemap = {}, markRemap = {};
+      (src.nodes || []).forEach(function (n) {
+        var oldKey = n.key;
+        var newKey = (oldKey && !nodeByKey(out, oldKey)) ? oldKey : freshNodeKey();
+        if (oldKey != null) nodeRemap[oldKey] = newKey;
+        n.key = newKey;
+        out.nodes.push(n);
+      });
+      (src.marks || []).forEach(function (m) {
+        var oldId = m.id;
+        var newId = (oldId && !markById(out, oldId)) ? oldId : freshMarkId();
+        if (oldId != null) markRemap[oldId] = newId;
+        m.id = newId;
+        if (m.anchor && m.anchor.nodeKey != null && nodeRemap.hasOwnProperty(m.anchor.nodeKey)) m.anchor.nodeKey = nodeRemap[m.anchor.nodeKey];
+        out.marks.push(m);
+      });
+      (src.history || []).forEach(function (h) {
+        if (h && h.markId != null && markRemap.hasOwnProperty(h.markId)) h.markId = markRemap[h.markId];
+        out.history.push(h);
+      });
+    });
+    return out;
+  }
+  // The chapter (level-1 / chapter:true) headings of a unified doc, in document order, each with
+  // the index of its heading node -> the outline the unified TOC and chapter-reorder build on.
+  function chapters(model) {
+    var out = [];
+    (model && model.nodes || []).forEach(function (n, i) {
+      if (n.type === "heading" && (n.chapter === true || (n.level || 2) === 1)) out.push({ key: n.key, text: nodeText(n), index: i });
+    });
+    return out;
+  }
+
   // ---- full-text search (toc-search-drawer) ---------------------------------
   // Every searchable word on a topic: its name + all node text (continuous doc) or,
   // for a legacy section topic, each section heading + every facet string. The Source
@@ -603,7 +654,7 @@
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings,
+    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
@@ -619,7 +670,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections,
+    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,
