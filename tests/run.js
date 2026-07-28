@@ -11293,6 +11293,86 @@ section("Source rewrite: variant per-node divergence, model layer (Epic 2b)");
   })());
 })();
 
+// Source v2 (spec 2c section 1): a Product's many topic docs become ONE continuous document.
+// concatChapters is the load-bearing pure core -- it must (a) emit a level-1 chapter heading
+// per topic, (b) survive the id-collision crux (each topic's model mints n-1/m-1... on its own
+// _seq counter, so keys collide across topics), and (c) carry marks + per-node variants +
+// provenance across the merge with every key-riding reference rewritten. This is the migration
+// gate: if these fail, marks/variants would silently break on migration.
+section("Source v2: concatChapters unify topics -> one document (spec 2c)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  // Two topics that INDEPENDENTLY mint colliding keys (both start n-1/m-1...).
+  var t1 = SD.create([
+    { type: "heading", level: 2, text: "Overview" },
+    { type: "paragraph", text: "The unit regulates water across sixteen zones." }
+  ]);
+  var t1k = t1.nodes[1].key;
+  var m1 = SD.addMark(t1, { type: "link", anchor: { nodeKey: t1k, start: 4, len: 4 }, locations: [{ doc: "Quick-Start" }] });
+
+  var t2 = SD.create([
+    { type: "heading", level: 2, text: "Wiring" },
+    { type: "paragraph", text: "Bleed the manifold before pulling the cap." }
+  ]);
+  var t2k = t2.nodes[1].key;
+  SD.setVariantText(t2, t2k, "Model-Y", "Bleed the manifold before pulling the cap.");
+  var m2 = SD.addMark(t2, { type: "comment", anchor: { nodeKey: t2k, start: 0, len: 5 }, comments: [{ text: "typo?" }] });
+
+  // sanity: the two topics really do collide on keys/ids before merge
+  ok("precondition: the two topic docs collide on node keys (the crux)", t1.nodes[0].key === t2.nodes[0].key);
+
+  var uni = SD.concatChapters([{ name: "Alpha", model: t1 }, { name: "Beta", model: t2 }]);
+
+  ok("concatChapters emits one level-1 chapter heading per topic, chapter:true stamped", (function () {
+    var chs = SD.chapters(uni);
+    return chs.length === 2 && chs[0].text === "Alpha" && chs[1].text === "Beta"
+      && uni.nodes[0].level === 1 && uni.nodes[0].chapter === true;
+  })());
+  ok("concatChapters keeps every original content node (2 chapter heads + 4 topic nodes = 6)", uni.nodes.length === 6);
+  ok("concatChapters gives every node a UNIQUE key (collision resolved)", (function () {
+    var seen = {}; return uni.nodes.every(function (n) { if (seen[n.key]) return false; seen[n.key] = 1; return true; });
+  })());
+  ok("concatChapters gives every mark a UNIQUE id", (function () {
+    var seen = {}; return (uni.marks || []).every(function (m) { if (seen[m.id]) return false; seen[m.id] = 1; return true; });
+  })());
+  ok("a text mark's anchor is rewritten to its node's (possibly re-keyed) key and still covers its text", (function () {
+    return (uni.marks || []).length === 2 && (uni.marks || []).every(function (m) {
+      return SD.nodeByKey(uni, m.anchor.nodeKey) && (m.type === "link" ? SD.anchorText(uni, m.anchor).length === 4 : true);
+    });
+  })());
+  ok("per-node variants ride the merge (Beta's Model-Y override survives)", (function () {
+    var beta = SD.nodeByKey(uni, SD.chapters(uni)[1].key); // chapter head; find its diverged para
+    // the diverged node is the one carrying a Model-Y override
+    var diverged = uni.nodes.filter(function (n) { return n.variants && n.variants["Model-Y"]; });
+    return diverged.length === 1 && /Bleed the manifold/.test(diverged[0].variants["Model-Y"].text) && !!beta;
+  })());
+  ok("the unified doc round-trips through toJSON/fromJSON (marks + variants persist)", (function () {
+    var back = SD.fromJSON(SD.toJSON(uni));
+    return JSON.stringify(SD.toJSON(back)) === JSON.stringify(SD.toJSON(uni)) && (back.marks || []).length === 2;
+  })());
+  ok("minted keys never collide with a preserved key (no post-hoc counter catch-up)", (function () {
+    // force a case where chapter-1 keeps keys the running counter would later reach
+    var a = SD.create([{ type: "paragraph", text: "one" }, { type: "paragraph", text: "two" }, { type: "paragraph", text: "three" }]);
+    var b = SD.create([{ type: "paragraph", text: "four" }, { type: "paragraph", text: "five" }]);
+    var u = SD.concatChapters([{ name: "A", model: a }, { name: "B", model: b }]);
+    var seen = {}; return u.nodes.every(function (n) { if (seen[n.key]) return false; seen[n.key] = 1; return true; });
+  })());
+  ok("concatChapters is non-destructive: source topic docs are untouched", t1.nodes.length === 2 && t1.nodes[1].key === t1k);
+  ok("an empty chapter list yields an empty document; a missing model yields just its heading", (function () {
+    return SD.concatChapters([]).nodes.length === 0 && SD.concatChapters([{ name: "Solo" }]).nodes.length === 1;
+  })());
+
+  // editor wiring: the migration is guarded + reversible + stored as a reserved master.
+  var e = src("src/editor.js");
+  ok("the unified doc lives in a reserved 'source master' component keyed off product.groundTruthId", /function sourceMasterFor\(productId\)[\s\S]{0,200}p\.groundTruthId[\s\S]{0,120}m\.sourceMaster/.test(e));
+  ok("migrateProductToUnifiedDoc is GUARDED (idempotent unless force) -> returns the existing master", /var existing = sourceMasterFor\(productId\);[\s\S]{0,80}if \(existing && !opts\.force\) return existing;/.test(e));
+  ok("migration concatenates the Product's topics via SourceDoc.concatChapters", /SD\.concatChapters\(chapters\)/.test(e));
+  ok("migration is REVERSIBLE: old topics are kept, only stamped archivedInto (never deleted)", /topics\.forEach\(function \(t\) \{ t\.archivedInto = master\.id; \}\);/.test(e) && /function revertProductUnifiedDoc/.test(e));
+  ok("the reserved master + archived topics are hidden from the interim Source nav (no double-up)", /\.filter\(function \(t\) \{ return !t\.sourceMaster && !t\.archivedInto; \}\)/.test(e));
+  ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(e) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(e));
+})();
+
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
 // Keeps the public repo free of customer/proprietary content, the removed in-app
 // assistant/translation code, personal paths, secrets, external CDN loads, and

@@ -10516,6 +10516,10 @@
   function filterTopics(comps, activeProduct, query) {
     return Object.keys(comps || {}).map(function (k) { return comps[k]; })
       .filter(function (t) { return t && t.kind === "topic"; })
+      // Source v2: the reserved unified-doc master is not a nav topic, and a topic already
+      // rolled into a master (archivedInto) is now a chapter -- both are hidden so a migrated
+      // Product's nav shows the one document, never the old per-topic list on top of it.
+      .filter(function (t) { return !t.sourceMaster && !t.archivedInto; })
       .filter(function (t) { return !activeProduct || t.productId === activeProduct; })
       .filter(function (t) { return topicMatchesQuery(t, query); });
   }
@@ -12434,6 +12438,90 @@
   }
   window.__productRail.createTopic = createTopic;
   window.__productRail.renderSourceStage = renderSourceStage; // headless/browser-verify hook
+
+  // ---- Source v2: unify a Product's topic docs into ONE continuous document (spec 2c section 1) ----
+  // A Product's source becomes ONE document. It is stored as a reserved "source master"
+  // component (kind:"topic", sourceMaster:true) pointed to by product.groundTruthId -- the
+  // already-reserved seam (:1212). This reuses the whole topic-keyed Source stage (doc
+  // round-trip, marks/variants, lock, every __sourceRw hook) with the least churn instead of a
+  // new product.sourceDoc content path the topic nav has no slot for. The migration is guarded
+  // (idempotent -- re-running returns the existing master) and REVERSIBLE: the old per-topic
+  // docs are KEPT, only stamped archivedInto:<masterId>, so a revert restores the pre-migration
+  // nav exactly (nothing is ever deleted). The heavy lifting -- concatenating N topic models
+  // into one, re-keying on collision, and riding every mark/variant/history reference across --
+  // is SourceDoc.concatChapters (a pure, headlessly-tested core).
+
+  // The reserved source-master component for a Product (via product.groundTruthId), or null.
+  function sourceMasterFor(productId) {
+    var p = productId && window.ProductsStore[productId];
+    if (!p || !p.groundTruthId) return null;
+    var m = libComponents()[p.groundTruthId];
+    return (m && m.sourceMaster) ? m : null;
+  }
+  // The topics that feed a Product's unified doc, in the author's canonical reading order.
+  // Excludes the reserved master itself and any topic already archived into one.
+  function unifiableTopicsFor(productId) {
+    var comps = libComponents();
+    var all = Object.keys(comps).map(function (k) { return comps[k]; })
+      .filter(function (t) { return t && t.kind === "topic" && !t.sourceMaster && !t.archivedInto && (t.productId || "") === (productId || ""); });
+    canonicalizeTopicOrder(all);
+    return all.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+  }
+  // Build the unified model from a Product's topics without persisting: each topic contributes
+  // its live doc model (a legacy section topic is converted on the fly), concatenated to chapters.
+  function buildUnifiedModelFor(productId) {
+    var SD = window.SourceDoc; if (!SD) return null;
+    var chapters = unifiableTopicsFor(productId).map(function (t) {
+      var model = topicHasDoc(t) ? SD.fromJSON(t.doc) : SD.fromSections(t, resolveTopicBaseText);
+      return { name: t.name, model: model };
+    });
+    return SD.concatChapters(chapters);
+  }
+  // Migrate a Product to one unified document. Guarded: returns the existing master untouched if
+  // one already exists (unless opts.force rebuilds it from the current topics). Concatenates the
+  // Product's topics into a reserved master, points product.groundTruthId at it, and stamps each
+  // source topic archivedInto:<masterId> (kept, not deleted). Reversible via revertProductUnifiedDoc.
+  function migrateProductToUnifiedDoc(productId, opts) {
+    opts = opts || {};
+    var SD = window.SourceDoc; if (!SD) return null;
+    var product = productId && window.ProductsStore[productId];
+    if (!product) return null;
+    var existing = sourceMasterFor(productId);
+    if (existing && !opts.force) return existing;
+    var topics = unifiableTopicsFor(productId);
+    var unified = buildUnifiedModelFor(productId);
+    var master = existing;
+    if (!master) {
+      master = createTopic(product.name || "Source", productId, []);
+      master.sourceMaster = true;
+    }
+    master.doc = SD.toJSON(unified);
+    master.updatedAt = Date.now();
+    product.groundTruthId = master.id;
+    topics.forEach(function (t) { t.archivedInto = master.id; });
+    saveLibrary();
+    saveProducts();
+    return master;
+  }
+  // Reverse the migration: drop the reserved master, clear product.groundTruthId, and un-archive
+  // the source topics -> the pre-migration Source nav is restored exactly (nothing was deleted).
+  function revertProductUnifiedDoc(productId) {
+    var product = productId && window.ProductsStore[productId];
+    if (!product) return false;
+    var masterId = product.groundTruthId;
+    var comps = libComponents();
+    Object.keys(comps).forEach(function (k) { if (comps[k] && comps[k].archivedInto === masterId) delete comps[k].archivedInto; });
+    if (masterId && comps[masterId] && comps[masterId].sourceMaster) delete comps[masterId];
+    delete product.groundTruthId;
+    saveLibrary();
+    saveProducts();
+    return true;
+  }
+  window.__productRail.sourceMasterFor = sourceMasterFor;
+  window.__productRail.unifiableTopicsFor = unifiableTopicsFor;
+  window.__productRail.buildUnifiedModelFor = buildUnifiedModelFor;
+  window.__productRail.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;
+  window.__productRail.revertProductUnifiedDoc = revertProductUnifiedDoc;
 
   // Applies one MarkdownImport.reconcileSection() verdict to a REAL section (or creates
   // it, when none existed yet) -- "update"/"track" adopt the fresh text and clear any
