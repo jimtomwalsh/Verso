@@ -756,6 +756,12 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-altpanel__btn--danger { color: #dc2626; }
 .source-composer__tag { width: 100%; margin-top: 6px; font-size: 12px; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; box-sizing: border-box; }
 @media (max-width: 1180px) { .source-altpanel { position: fixed; right: 16px; bottom: 84px; top: auto !important; } }
+/* Where-used ("Linked in N") panel: reuses the pinned-card chrome above + a blue link glyph; each
+   destination is a canonical VersoUI.Breadcrumb (insp-crumbs), so no bespoke crumb styling. */
+.source-wherepanel__glyph { display: inline-flex; color: var(--accent); }
+.source-wherepanel__glyph svg { width: 15px; height: 15px; }
+.source-wherepanel__dest { margin-bottom: 6px; }
+.source-wherepanel__dest .insp-crumbs { flex-wrap: wrap; }
 
 /* Comment margin pins (comments-canvas-adapter): canvas-style pins in the right gutter, pinned to
    their span (absolute within the scrolling article, tracking on scroll). */

@@ -679,6 +679,11 @@ In this mode:
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
   reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
   Ctrl/Cmd+Z brings the text and the mark back.
+- **See where a span is used.** When a course links to a piece of this source, selecting the linked
+  span (or image/table) opens a read-only **"Linked in N"** panel in the right margin, one row per
+  place it's used — a **Document › Section › Location** breadcrumb you can click to jump straight to
+  that course. Source is one-way: it *shows* where things are linked; the linking itself happens in
+  the Edit stage, not here. A span that isn't linked anywhere says so.
 - **Comments live in the margin.** Selecting text and choosing **Comment** drops a **pin in the
   right-hand gutter** next to that span; the pin tracks the span as you scroll. Click a pin to open
   the thread in place — the same comment threads, replies, and Resolved control as the canvas

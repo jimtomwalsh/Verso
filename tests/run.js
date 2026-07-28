@@ -11038,7 +11038,7 @@ section("Source rewrite: comments = shared canvas engine + range-mark adapter (E
   ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(e) && /toggleSourceCommentThread\(topic, m\.id\)/.test(e));
   ok("add / resolve activity is logged to History (spec 3.3)", /type: "comment-added", markId: cmark\.id/.test(e) && /type: c && c\.done \? "comment-resolved" : "comment-reopened"/.test(e));
   ok("the thread card + pins re-sync after a re-render (survive undo/edit)", /renderSourceCommentPins\(topic\); \/\/ re-pin the comment margin pins/.test(e) && /if \(__sourceOpenCommentMarkId\) renderSourceCommentThread\(topic\)/.test(e));
-  ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceCommentThread\(\);/.test(e));
+  ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceWherePanel\(\); closeSourceCommentThread\(\);/.test(e));
   ok("the comment thread light-dismisses on Escape + outside click (canvas popover parity)", /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(e) && /function onSourceCommentThreadOutside\(ev\)/.test(e) && /if \(card\.contains\(ev\.target\)\) return;/.test(e));
   ok("comments stay addable while the base is locked (annotation ungated -- no unlock guard on the comment path)", !/cmd === "comment"[\s\S]{0,80}__sourceUnlocked/.test(e));
 })();
@@ -11144,10 +11144,53 @@ section("Source rewrite: object (image/table) marks (Epic 2b)");
   ok("clicking an object selects the whole node (not a text span)", /var objEl = e\.target && e\.target\.closest \? e\.target\.closest\('\[data-object="1"\]'\) : null;/.test(e) && /selectSourceObject\(topic, objEl\.getAttribute\("data-node"\)\)/.test(e));
   ok("an object selection sets an object anchor { nodeKey } (no start/len) + shows alternate/comment only", /__sourceSelAnchor = \{ nodeKey: nodeKey \}; \/\/ object anchor/.test(e) && /bar\.querySelectorAll\("\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
   ok("a real text selection supersedes the object selection (the two models don't fight)", /if \(__sourceObjectSelKey\) clearSourceObjectSel\(\); \/\/ a real text selection supersedes the object/.test(e));
-  ok("selecting an object with an existing alternate opens its contextual panel", /var alts = SD\.objectAlternatesFor\(__sourceDocModel, nodeKey\);\s*syncSourceAltPanel\(topic, alts\.length \? alts\[0\]\.id : null\)/.test(e));
+  ok("selecting an object with an existing alternate opens its contextual panel", /var alts = SD\.objectAlternatesFor\(__sourceDocModel, nodeKey\);[\s\S]{0,120}syncSourceAltPanel\(topic, alts\.length \? alts\[0\]\.id : null\)/.test(e));
   ok("the object composer pins to the node rect (no text range to sit under)", /if \(anchor\.len == null\) \{ var oe = document\.querySelector\('\[data-node="' \+ anchor\.nodeKey \+ '"\]'\); if \(oe\) objRect = oe\.getBoundingClientRect\(\); \}/.test(e) && /if \(\(!r \|\| !r\.width\) && opts\.rect\) r = opts\.rect;/.test(e));
   ok("the alt panel shows the object's node label as its base line", /SD\.isObjectMark\(m\) \? SD\.objectNodeLabel\(SD\.nodeByKey\(model, m\.anchor\.nodeKey\)\)/.test(e));
   ok("hidden marks also clear object decoration (the eye toggle hides all mark visuals)", /if \(__sourceMarksEngine\.clearObjectDecor\) __sourceMarksEngine\.clearObjectDecor\(\);/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): where-used panel (read-only "Linked in N") -
+// Source is ONE-WAY: it DISPLAYS where a span is linked, never creates links (the creating side
+// is an Edit-stage ticket). Selecting a link mark opens a read-only card with a breadcrumb pill
+// per destination. The where-used list build is pure (0/1/N destinations); the panel is wired
+// in editor.js and browser-verified.
+section("Source rewrite: where-used panel (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
+  var k = model.nodes[0].key, a = { nodeKey: k, start: 0, len: 4 }; // "Vent"
+
+  // 0 destinations: a link mark with no locations -> empty list (the empty-state path)
+  var link0 = SD.addMark(model, { type: "link", anchor: a, locations: [] });
+  ok("whereUsedForMark on a link with no destinations is empty (empty-state)", SD.whereUsedForMark(link0).length === 0);
+  ok("whereUsedForMark on a non-link mark is empty (only links have where-used)", SD.whereUsedForMark(SD.addMark(model, { type: "alternate", anchor: a, alt: "x" })).length === 0);
+
+  // 1 destination: a full breadcrumb (Document > Section > Location)
+  var link1 = SD.addMark(model, { type: "link", anchor: a, locations: [{ docCode: "C1", docTitle: "Orchard-9 Course", sectionTitle: "Setup", locationLabel: "Page 2", blockId: "b_1" }] });
+  var w1 = SD.whereUsedForMark(link1);
+  ok("whereUsedForMark builds a Document > Section > Location breadcrumb", w1.length === 1 && w1[0].doc === "Orchard-9 Course" && w1[0].section === "Setup" && w1[0].location === "Page 2" && w1[0].docCode === "C1");
+
+  // N destinations + tolerance of missing fields (a partial location still renders a crumb)
+  var linkN = SD.addMark(model, { type: "link", anchor: a, locations: [
+    { docCode: "C1", docTitle: "Course One", sectionTitle: "Intro" },
+    { docCode: "C2" }, // only a code -> doc falls back to the code, no section/location
+    {} // wholly empty -> "Document", nulls
+  ] });
+  var wN = SD.whereUsedForMark(linkN);
+  ok("whereUsedForMark returns one row per destination (N)", wN.length === 3);
+  ok("a partial destination still resolves a doc label; missing fields are null", wN[1].doc === "C2" && wN[1].section === null && wN[2].doc === "Document");
+
+  // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
+  var e = src("src/editor.js");
+  ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(e) && /function renderSourceWherePanel\(topic\)/.test(e));
+  ok("the panel titles 'Linked in N' from the crumb count", /source-altpanel__title", "Linked in " \+ crumbs\.length/.test(e));
+  ok("each destination is a canonical VersoUI.Breadcrumb that navigates out to the course", /window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(e) && /openCourseFromBrowser\(c\.docCode\); setStage\("edit"\)/.test(e));
+  ok("a linked span with no destinations shows the empty state", /if \(!crumbs\.length\) \{[\s\S]{0,220}Not linked in any document yet\./.test(e));
+  ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(e) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(e));
+  ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(e) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(e));
+  ok("it is READ-ONLY: no addMark/link creation inside the where-used panel", !/function renderSourceWherePanel\(topic\)[\s\S]{0,1400}SD\.addMark/.test(e));
+  ok("a 'link' glyph exists in the icon set for the panel", /"link":/.test(src("src/icons.js")));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

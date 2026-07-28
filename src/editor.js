@@ -10706,6 +10706,7 @@
   var __sourceDrawerOpen = false;  // the on-demand all-marks drawer (toc-search-drawer)
   var __sourceDrawerFilter = "all"; // all | alternate | link | comment
   var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
+  var __sourceWhereUsedMarkId = null; // the link mark shown in the pinned where-used ("Linked in N") panel
   var __sourceOpenCommentMarkId = null; // the comment mark whose thread card is open, or null
   // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
   // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
@@ -11201,7 +11202,7 @@
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     // the all-marks drawer belongs to the continuous-document view only -- drop it when the
     // active topic isn't a doc topic (the doc path re-syncs it against the live model below).
-    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); closeSourceAltPanel(); closeSourceCommentThread(); }
+    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); closeSourceAltPanel(); closeSourceWherePanel(); closeSourceCommentThread(); }
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
       renderSourceInfoPanel(null);
@@ -11565,9 +11566,11 @@
       var sel = window.getSelection(); if (!sel || !sel.focusNode) return;
       var m = __sourceMarksEngine.markAtPoint(sel.focusNode, sel.focusOffset);
       __sourceMarksEngine.setActive(m ? m.id : null); repaintSourceMarks();
-      // selecting a span-with-alternate opens the pinned contextual panel (spec 3.2); any other
-      // click closes it. Comment/link marks are handled by their own tickets.
+      // selecting a span opens its contextual panel by mark type: an alternate -> the alt panel
+      // (spec 3.2); a link -> the read-only where-used panel (spec 3.1). One mark has one type, so
+      // at most one opens; the other is passed null and closes. Comments have their own thread.
       syncSourceAltPanel(topic, m && m.type === "alternate" ? m.id : null);
+      syncSourceWherePanel(topic, m && m.type === "link" ? m.id : null);
     });
     document.addEventListener("selectionchange", onSourceSelectionChange);
 
@@ -11575,6 +11578,7 @@
     host.appendChild(buildSourceSelBar(topic));
     renderSourceDrawer(); // re-sync the all-marks drawer to the live model after a re-render
     if (__sourceAltPanelMarkId) renderSourceAltPanel(topic); // re-pin the alt panel after a re-render
+    if (__sourceWhereUsedMarkId) renderSourceWherePanel(topic); // re-pin the where-used panel after a re-render
     renderSourceCommentPins(topic); // re-pin the comment margin pins after a re-render
     if (__sourceOpenCommentMarkId) renderSourceCommentThread(topic); // re-pin an open comment thread
   }
@@ -11734,6 +11738,63 @@
     el.style.top = Math.max(8, rect.top - host.getBoundingClientRect().top + host.scrollTop) + "px";
   }
   function positionSourceAltPanel() { pinCardToSpan(document.querySelector("[data-source-altpanel]"), __sourceAltPanelMarkId); }
+  // Where-used panel (spec 3.1): selecting a LINKED span opens a read-only card pinned in the
+  // right gutter -- "Linked in N" with a breadcrumb pill per destination (Document > Section >
+  // Location), clickable to navigate out to the course. Source only DISPLAYS links; creating them
+  // is an Edit-stage ticket. Reuses the alt panel's pinned-card chrome (.source-altpanel*) + the
+  // shared pinCardToSpan tracker; light-dismisses on Escape like its siblings.
+  function onSourceWherePanelKey(ev) { if (ev.key === "Escape") closeSourceWherePanel(); }
+  function closeSourceWherePanel() {
+    __sourceWhereUsedMarkId = null;
+    var ex = document.querySelector("[data-source-wherepanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceWherePanelKey);
+  }
+  function syncSourceWherePanel(topic, markId) {
+    if (!markId) { closeSourceWherePanel(); return; }
+    __sourceWhereUsedMarkId = markId;
+    renderSourceWherePanel(topic);
+  }
+  function positionSourceWherePanel() { pinCardToSpan(document.querySelector("[data-source-wherepanel]"), __sourceWhereUsedMarkId); }
+  function renderSourceWherePanel(topic) {
+    var ex = document.querySelector("[data-source-wherepanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceWherePanelKey);
+    var model = __sourceDocModel, SD = window.SourceDoc;
+    if (!model || !__sourceWhereUsedMarkId) return;
+    var m = SD.markById(model, __sourceWhereUsedMarkId);
+    if (!m || m.type !== "link") { __sourceWhereUsedMarkId = null; return; }
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var crumbs = SD.whereUsedForMark(m);
+    var panel = h("aside", "source-altpanel source-wherepanel"); panel.setAttribute("data-source-wherepanel", "1");
+    panel.setAttribute("aria-label", "Where this is linked");
+    var head = h("div", "source-altpanel__head");
+    var glyph = h("span", "source-wherepanel__glyph"); glyph.innerHTML = window.Icon ? window.Icon("link") : "";
+    head.appendChild(glyph);
+    head.appendChild(h("div", "source-altpanel__title", "Linked in " + crumbs.length));
+    var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
+    close.innerHTML = window.Icon ? window.Icon("x") : "close";
+    close.addEventListener("click", function () { closeSourceWherePanel(); });
+    head.appendChild(close);
+    panel.appendChild(head);
+    if (!crumbs.length) {
+      // a link mark with no destinations yet -- the empty state (spec: absent handling)
+      panel.appendChild(h("div", "source-altpanel__field insp-hint", "Not linked in any document yet."));
+    } else {
+      // one canonical VersoUI.Breadcrumb per destination (Document > Section > Location) -- the
+      // Document crumb carries the navigate-out onClick (its {label,onClick} contract); the trailing
+      // crumbs are read-only context, last auto-emphasised. Reuses the DS component, not a one-off.
+      crumbs.forEach(function (c) {
+        var dest = h("div", "source-wherepanel__dest");
+        var items = [c.docCode ? { label: c.doc, onClick: function () { openCourseFromBrowser(c.docCode); setStage("edit"); } } : c.doc];
+        if (c.section) items.push(c.section);
+        if (c.location) items.push(c.location);
+        dest.appendChild(window.VersoUI && window.VersoUI.Breadcrumb ? window.VersoUI.Breadcrumb({ items: items }) : document.createTextNode(items.map(function (x) { return x.label || x; }).join(" › ")));
+        panel.appendChild(dest);
+      });
+    }
+    host.appendChild(panel);
+    positionSourceWherePanel();
+    document.addEventListener("keydown", onSourceWherePanelKey);
+  }
   function renderSourceAltPanel(topic) {
     var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
     document.removeEventListener("keydown", onSourceAltPanelKey);
@@ -12065,9 +12126,11 @@
       bar.style.left = (window.scrollX + r.left + r.width / 2) + "px";
       bar.style.top = (window.scrollY + r.top) + "px";
     }
-    // if the object already carries an alternate, open its contextual panel
+    // if the object already carries an alternate or a link, open the matching contextual panel
     var alts = SD.objectAlternatesFor(__sourceDocModel, nodeKey);
+    var links = existing.filter(function (mk) { return mk.type === "link"; });
     syncSourceAltPanel(topic, alts.length ? alts[0].id : null);
+    syncSourceWherePanel(topic, links.length ? links[0].id : null);
   }
   function objectMarksOnNode(nodeKey) {
     var SD = window.SourceDoc, model = __sourceDocModel;
@@ -12163,6 +12226,9 @@
     getModel: function () { return __sourceDocModel; },
     openAltPanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceAltPanel(t, id); },
     altPanelMarkId: function () { return __sourceAltPanelMarkId; },
+    addLinkMark: function (anchor, locations) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "link", anchor: anchor, locations: locations || [] }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); return mk.id; },
+    openWherePanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceWherePanel(t, id); },
+    wherePanelMarkId: function () { return __sourceWhereUsedMarkId; },
     editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); },
     addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); return cmark.id; },
     selectObject: function (nodeKey) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; selectSourceObject(t, nodeKey); },
