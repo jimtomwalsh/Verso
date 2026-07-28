@@ -485,7 +485,7 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   height: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer;
 }
 .source-stage__empty { padding: 16px 10px; color: var(--text-tertiary); font-size: var(--text-sm, 12px); }
-.source-stage__article { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 28px 36px; background: var(--surface-canvas); }
+.source-stage__article { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 28px 36px; background: var(--surface-canvas); }
 .source-stage__article-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 /* The page-level Technical/Digestible/Dot-point control has room to breathe here
    (unlike a narrow inspector panel, its usual home) -- give it enough width that
@@ -723,6 +723,29 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-drawer__row-type.sd-mark-alt { color: #b45309; }
 .source-drawer__row-type.sd-mark-comment { color: #0d9488; }
 .source-drawer__row-snip { font-size: 12.5px; color: var(--text-secondary); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Contextual alternate panel (alternates-staleness): a margin card pinned in the right gutter,
+   tracking its span (absolutely positioned within the scrolling article, so scroll tracks free). */
+.source-altpanel { position: absolute; right: 20px; width: 244px; z-index: 25; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.12); padding: 12px 14px; }
+.source-altpanel__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.source-altpanel__title { flex: 1 1 auto; font-weight: 650; font-size: 13px; }
+.source-altpanel__head .source-drawer__dot { margin-top: 0; }
+.source-altpanel__close { display: inline-flex; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 5px; }
+.source-altpanel__close svg { width: 15px; height: 15px; }
+.source-altpanel__close:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+.source-altpanel__tag { margin-bottom: 8px; }
+.source-altpanel__field { margin-bottom: 8px; }
+.source-altpanel__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 3px; }
+.source-altpanel__base { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+.source-altpanel__alt { font-size: 13px; color: var(--text-primary, var(--text-secondary)); line-height: 1.5; }
+.source-altpanel__stale { font-size: 11.5px; color: #b45309; background: rgba(234,179,8,0.12); border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; line-height: 1.4; }
+.source-altpanel__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.source-altpanel__btn { font-size: 12px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-secondary); cursor: pointer; }
+.source-altpanel__btn:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+.source-altpanel__btn--primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.source-altpanel__btn--danger { color: #dc2626; }
+.source-composer__tag { width: 100%; margin-top: 6px; font-size: 12px; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; box-sizing: border-box; }
+@media (max-width: 1180px) { .source-altpanel { position: fixed; right: 16px; bottom: 84px; top: auto !important; } }
 
 /* Contextual selection bar, above the highlight (canvas idiom, glyph-only). */
 .source-selbar { position: absolute; z-index: 40; display: none; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }

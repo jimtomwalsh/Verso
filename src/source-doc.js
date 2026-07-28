@@ -167,6 +167,7 @@
       type: MARK_TYPES.indexOf(spec.type) === -1 ? "alternate" : spec.type,
       anchor: clone(spec.anchor) || { nodeKey: null, start: 0, len: 0 },
       variant: spec.variant || "",
+      tag: spec.tag != null ? spec.tag : "", // what an alternate is "appropriate for" (detail/doc-type/purpose)
       baseText: spec.baseText != null ? spec.baseText : anchorText(model, spec.anchor),
       alt: spec.alt != null ? spec.alt : null,
       comments: spec.comments ? clone(spec.comments) : [],
@@ -194,8 +195,10 @@
     var wasBroken = m.broken;
     m.broken = m.anchor.len <= 0 || cur.trim() === "";
     if (!m.broken && m.baseText && m.baseText.length > 40 && cur.length < m.baseText.length * 0.25) m.broken = true;
+    var wasStale = m.stale;
     if (!m.broken && m.type === "alternate" && m.alt != null) m.stale = (cur !== m.baseText);
     m._brokeNow = m.broken && !wasBroken;
+    m._staleNow = m.stale && !wasStale;
     return m;
   }
 
@@ -227,6 +230,9 @@
       // A span breaking is a structural provenance event (spec 3.2 / 5), so it earns a
       // discrete History entry even though the surrounding prose edit collapses to a commit.
       if (m._brokeNow) { logHistory(model, { type: "mark-broken", markId: m.id, markType: m.type }); m._brokeNow = false; }
+      // An alternate going stale (its base drifted) is the sharpest provenance signal (spec 3.2);
+      // it earns its own discrete History entry so "needs re-sync" is discoverable, not just a dot.
+      else if (m._staleNow) { logHistory(model, { type: "mark-stale", markId: m.id, markType: m.type }); m._staleNow = false; }
     });
     return { model: model, edit: edit };
   }
@@ -245,6 +251,25 @@
       alternate: { cls: "sd-mark-alt", label: "Alternate" },
       comment: { cls: "sd-mark-comment", label: "Comment" }
     }[m.type] || { cls: "sd-mark-alt", label: "Mark" };
+  }
+  // The alternate marks anchored on exactly a given span (spec 3.2: 0..N tagged alternates).
+  function alternatesFor(model, nodeKey, start, len) {
+    return (model.marks || []).filter(function (m) {
+      return m.type === "alternate" && !isObjectMark(m) && m.anchor.nodeKey === nodeKey
+        && m.anchor.start === start && m.anchor.len === len;
+    });
+  }
+  // Pure alternate resolution (spec 3.2): from a span's alternates, pick the one appropriate for
+  // `tag` (an untagged alternate is the catch-all). Returns the alternate mark, or null meaning
+  // "use the base". Deterministic: an exact tag match wins, else the first untagged alternate.
+  function pickAlternate(alternates, tag) {
+    if (!alternates || !alternates.length) return null;
+    var exact = null, untagged = null;
+    alternates.forEach(function (m) {
+      if (tag && m.tag && m.tag === tag && !exact) exact = m;
+      if (!m.tag && !untagged) untagged = m;
+    });
+    return exact || untagged || null;
   }
   // Update-with-appended-copy (the "⟳ update" affordance, spec 3.1): a selection that extends
   // PAST an existing mark's span captures the appended text into that mark, so the extension
@@ -421,6 +446,7 @@
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
     blocksFromText: blocksFromText, fromSections: fromSections,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
+    alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory
   };
 
@@ -431,6 +457,7 @@
     applyTextEdit: applyTextEdit,
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
+    alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping,
     searchText: searchText, fuzzyMatch: fuzzyMatch,
     toJSON: toJSON, fromJSON: fromJSON,
