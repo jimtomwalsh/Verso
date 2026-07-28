@@ -4515,7 +4515,7 @@ section("#20 library-instance mirror");
   // (prop-component--instance), and offers Detach as the only structural action in v1.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
   ok("renderLibraryInstanceBody found", lbStart !== -1);
-  var lbBody = etxt.slice(lbStart, lbStart + 4000);
+  var lbBody = etxt.slice(lbStart, lbStart + 5000);
   ok("reuses the canonical instance header (same class componentGrid cards use)", /"prop-component prop-component--instance"/.test(lbBody));
   ok("offers a Detach action, disabled when the master is missing", /detachB\.disabled = !def/.test(lbBody));
 
@@ -8788,7 +8788,7 @@ section("Product Rail: Source stage info panel");
   ok("each comment row reuses the canvas's own comment-row\/comment-row__dot\/comment-row__snip classes verbatim", /h\("div", "comment-row" \+ \(sourceCommentIsOrphaned\(c, topic\) \? " is-orphan" : ""\)\)/.test(e) && /h\("span", "comment-row__dot"\)/.test(e) && /h\("div", "comment-row__snip"/.test(e));
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
-  ok("clicking a Linked-in row opens that document AND switches to Edit (where the block actually lives)", /openCourseFromBrowser\(u\.docCode\); setStage\("edit"\); \}\);/.test(e));
+  ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(e) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(e));
   // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
   // not a flat Created/Updated pair -- traces every import (and any edit since) back to
   // how the topic entered the platform, newest first.
@@ -10690,6 +10690,22 @@ section("left-panel Components reorg");
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
+})();
+
+// ---- SPEC 7: source insert (linked block) + two-way jump ----
+section("editor-rework source insert + two-way jump");
+(function () {
+  var e = src("src/editor.js");
+  ok("a source row inserts a live-linked block (libraryInstance) with ref + back-reference",
+     /function insertSourceLinkedBlock\(topicId\)[\s\S]{0,320}var block = \{ type: "libraryInstance", id: mintId\(\), ref: topicId, sourceRef: \{ topicId: topicId \} \}/.test(e));
+  ok("the insert carries BOTH the master ref (for where-used) and the sourceRef backref (for the jump)",
+     /ref: topicId, sourceRef: \{ topicId: topicId \}/.test(e));
+  ok("the placement is pointed at the topic's first facet so it resolves a template",
+     /if \(def && def\.facets\) \{ var fk = Object\.keys\(def\.facets\); if \(fk\.length\) block\.facet = fk\[0\]; \}/.test(e));
+  ok("each source row exposes an insert affordance wired to the insert", /insertSourceLinkedBlock\(t\.id\)/.test(e));
+  ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
+  ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
+  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
 })();
 
 // ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----

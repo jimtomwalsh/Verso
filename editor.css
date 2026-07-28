@@ -486,6 +486,15 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   height: 100%; padding: 0; border: none; background: transparent; color: inherit; font: inherit; cursor: pointer;
 }
+/* SPEC 7: insert-as-linked-block affordance on a source row (reveals on hover, like a tab close). */
+.source-stage__insert {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border: none; background: transparent; color: var(--icon-idle);
+  border-radius: var(--radius-xs); cursor: pointer; opacity: 0; transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.source-stage__insert svg { width: 14px; height: 14px; }
+.source-stage__topic-row:hover .source-stage__insert { opacity: 1; }
+.source-stage__insert:hover { background: var(--surface-hover); color: var(--accent); }
 .source-stage__empty { padding: 16px 10px; color: var(--text-tertiary); font-size: var(--text-sm, 12px); }
 
 /* Source v2 (unified-toc): the left rail is ONE document TOC built from canonical
