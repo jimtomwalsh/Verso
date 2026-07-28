@@ -762,5 +762,28 @@ remains the full-featured path.
 
 ---
 
+## 19. Product Rail: Publish stage (early)
+
+The **Publish** rail tab is a **persistent publish queue** — like a render queue. You line up the
+documents you want to package, then run them all with one button; the queue is saved, so it survives
+a refresh and a stage-switch.
+
+- **Left — pick documents.** A list of your documents, scoped to the Product chosen in the top bar
+  (all documents when no Product is selected). Click **+** on a row to add it to the queue, or use
+  **Add current document** at the top to queue the document you have open. A solo export is just a
+  queue of one.
+- **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
+  **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
+  that's already queued re-arms it rather than duplicating it.
+- **Publish.** One **Publish** button runs every pending row in turn: each is packaged as a SCORM
+  `.zip` and downloaded. Done rows stay in the queue, greyed, with their result — the queue isn't
+  cleared, so you can see what shipped. (This early version packages with the standard SCORM options;
+  named presets and a chosen save folder arrive in later updates.)
+
+This is an early view — the per-document configuration, staleness dots, and folder output arrive in
+later updates.
+
+---
+
 *This guide reflects the app as built. When a screen doesn't match, the app — and the
 `SCHEMA-TEMPLATE-GUIDE.md` and `SPEC-*.md` docs in this folder — are the source of truth.*

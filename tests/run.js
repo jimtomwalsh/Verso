@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -8424,7 +8424,7 @@ section("Product Rail: Source stage nav + article");
   var idx = src("index.html");
   ok("stage-source is the real source-stage shell, not the .stage-placeholder centered stand-in", /class="source-stage" id="stage-source"/.test(idx));
   ok("source-stage nav + search + topic-list + article mount points present", /id="source-stage-search"/.test(idx) && /id="source-topic-list"/.test(idx) && /id="source-stage-article"/.test(idx));
-  ok("stage-publish keeps the placeholder shell (its own ticket, untouched)", /class="stage-placeholder" id="stage-publish"/.test(idx));
+  ok("stage-publish is the real 2-pane publish stage (pick + queue), not the placeholder", /class="publish-stage" id="stage-publish"/.test(idx) && /id="publish-pick"/.test(idx) && /id="publish-queue"/.test(idx));
 
   // Wiring: setStage("source") triggers a render; the topic list re-renders on both
   // search input and the shared product-context change (Epic 1's dropdown).
@@ -8440,6 +8440,53 @@ section("Product Rail: Source stage nav + article");
   ok("render() never reads Source-stage state", renderJs.indexOf("__sourceActiveTopicId") === -1 && renderJs.indexOf("renderSourceStage") === -1);
   var courseCss = src("src/course.css");
   ok("course.css carries no source-stage chrome classes", courseCss.indexOf("source-stage") === -1);
+})();
+
+// ---- product-rail-publish-queue-t1: persistent publish queue store + pane + run ----
+// The Publish stage is a persistent queue of per-document jobs (AE render-queue model). The STATE
+// is a pure store (add / remove / run / complete transitions); the pane UI + the buildPackage run
+// loop mount on top and are browser-verified. This section guards the pure store + the wiring.
+section("Product Rail: Publish queue store (T1)");
+(function () {
+  var PQ = require(path.join(ROOT, "src/publish-queue.js"));
+  var q = PQ.create();
+  ok("create() is an empty queue", q.rows.length === 0 && q._seq === 0);
+  var r1 = PQ.addDoc(q, "COURSE-A", { title: "Course A" });
+  ok("addDoc queues one row per document with a stable id + pending status", q.rows.length === 1 && r1.docId === "COURSE-A" && r1.status === "pending" && !!r1.id);
+  ok("addDoc defaults the title from meta and a preset id", r1.title === "Course A" && r1.preset === "master");
+  var r1b = PQ.addDoc(q, "COURSE-A", { title: "Course A (renamed)" });
+  ok("re-adding the same document RE-ARMS its row (no duplicate)", q.rows.length === 1 && r1b.id === r1.id && r1b.title === "Course A (renamed)");
+  var r2 = PQ.addDoc(q, "COURSE-B", { title: "Course B" });
+  ok("a second distinct document is a second row", q.rows.length === 2 && r2.id !== r1.id);
+  ok("pendingRows lists both while both are pending", PQ.pendingRows(q).length === 2 && PQ.hasPending(q) === true);
+  PQ.setStatus(q, r1.id, "running");
+  ok("setStatus running clears any prior result and drops it out of pending", PQ.rowById(q, r1.id).status === "running" && PQ.rowById(q, r1.id).result === null && PQ.pendingRows(q).length === 1);
+  PQ.setStatus(q, r1.id, "done", { to: "download", path: "COURSE-A_V001_SCORM.zip" });
+  ok("setStatus done records the result path and stays out of pending", PQ.rowById(q, r1.id).status === "done" && PQ.rowById(q, r1.id).result.path.indexOf("COURSE-A") === 0 && PQ.pendingRows(q).length === 1);
+  ok("an unknown status is ignored (never a stray state)", (function () { PQ.setStatus(q, r1.id, "wat"); return PQ.rowById(q, r1.id).status === "done"; })());
+  ok("re-adding a done document re-arms it to pending (re-publish)", (function () { PQ.addDoc(q, "COURSE-A", {}); return PQ.rowById(q, r1.id).status === "pending" && PQ.rowById(q, r1.id).result === null; })());
+  PQ.removeRow(q, r2.id);
+  ok("removeRow drops just that row", q.rows.length === 1 && PQ.rowByDoc(q, "COURSE-B") === null);
+  ok("the queue round-trips through toJSON/fromJSON", (function () {
+    var back = PQ.fromJSON(JSON.parse(JSON.stringify(PQ.toJSON(q))));
+    return back.rows.length === 1 && back.rows[0].docId === "COURSE-A" && back._seq === q._seq;
+  })());
+  ok("fromJSON reverts a mid-run 'running' row to pending (a reload can't leave it stuck)", (function () {
+    var mid = PQ.create(); var rr = PQ.addDoc(mid, "X", {}); PQ.setStatus(mid, rr.id, "running");
+    var back = PQ.fromJSON(JSON.parse(JSON.stringify(PQ.toJSON(mid))));
+    return back.rows[0].status === "pending";
+  })());
+  ok("fromJSON is tolerant of a malformed blob (starts empty, never throws)", PQ.fromJSON(null).rows.length === 0 && PQ.fromJSON({ rows: "nope" }).rows.length === 0);
+  ok("fromJSON drops rows with no docId", PQ.fromJSON({ rows: [{ title: "orphan" }, { docId: "Y" }] }).rows.length === 1);
+
+  // Editor wiring (grep guards -- the DOM behaviour is browser-verified)
+  var e = src("src/editor.js");
+  ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(e));
+  ok("the queue persists through the durable key/value writer", /writeStore\(localStorage, PUBLISH_QUEUE_KEY, JSON\.stringify\(PQ\.toJSON\(__publishQueue\)\)\)/.test(e));
+  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /SX\.buildPackage\(SX\.defaultOptions\(\)\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
+  ok("index.html loads publish-queue.js before editor.js", (function () {
+    var idx = src("index.html"); return idx.indexOf("src/publish-queue.js") > -1 && idx.indexOf("src/publish-queue.js") < idx.indexOf("src/editor.js");
+  })());
 })();
 
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----

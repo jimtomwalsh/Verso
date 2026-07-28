@@ -1222,6 +1222,152 @@
   }
   window.ProductsStore = loadProducts();
   function saveProducts() { try { productsAdapter().writeProducts(JSON.stringify(window.ProductsStore)); } catch (e) {} }
+
+  // ---- Publish queue (Product Rail Epic 6, T1) — the persistent Publish-stage queue -----------
+  // A single app-global queue (PublishQueue model, src/publish-queue.js), persisted through the
+  // durable key/value writer (writeStore) so it survives refresh + stage-switches. Lazily loaded
+  // on first use; every mutation calls savePublishQueue().
+  var PUBLISH_QUEUE_KEY = "authoring.publishQueue";
+  var __publishQueue = null;
+  function loadPublishQueue() {
+    var PQ = window.PublishQueue; if (!PQ) return null;
+    try { var raw = localStorage.getItem(PUBLISH_QUEUE_KEY); if (raw) return PQ.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return PQ.create();
+  }
+  function publishQueue() { if (!__publishQueue) __publishQueue = loadPublishQueue(); return __publishQueue; }
+  function savePublishQueue() {
+    var PQ = window.PublishQueue; if (!PQ || !__publishQueue) return;
+    try { writeStore(localStorage, PUBLISH_QUEUE_KEY, JSON.stringify(PQ.toJSON(__publishQueue))); } catch (e) {}
+  }
+  // The documents the picker offers: every registry doc, scoped to the active Product when one is
+  // set (untagged docs drop out of a Product-scoped view), sorted by title. docId = the registry key.
+  function publishPickDocs() {
+    var pid = getActiveProduct(), out = [];
+    Object.keys(registry).forEach(function (id) {
+      var d = registry[id]; if (!d) return;
+      if (pid && !docMatchesProductStage(d, pid, null)) return;
+      out.push({ id: id, title: (d.meta && d.meta.title) || id });
+    });
+    out.sort(function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; });
+    return out;
+  }
+  function mountPublishStage() {
+    if (typeof document === "undefined") return;
+    renderPublishPick();
+    renderPublishQueue();
+  }
+  // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
+  // shortcut to queue the currently-open document (the fast single-export path -- a queue-of-one).
+  function renderPublishPick() {
+    var host = document.getElementById("publish-pick"); if (!host) return;
+    var U = window.VersoUI;
+    host.innerHTML = "";
+    host.appendChild(h("div", "publish-pane__title", "Documents"));
+    if (registry[activeDocId]) {
+      var addCur = U ? U.Button({ variant: "secondary", full: true, icon: "plus", label: "Add current document", onClick: function () { addDocToPublishQueue(activeDocId); } }) : h("button", null, "Add current document");
+      addCur.classList.add("publish-pane__addcur");
+      host.appendChild(addCur);
+    }
+    var list = h("div", "publish-picklist");
+    var docs = publishPickDocs();
+    if (!docs.length) { list.appendChild(h("div", "publish-empty", "No documents" + (getActiveProduct() ? " in this Product" : "") + " yet.")); }
+    docs.forEach(function (d) {
+      var row = h("div", "publish-pickrow");
+      row.appendChild(h("span", "publish-pickrow__title", d.title));
+      var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
+      row.appendChild(add);
+      list.appendChild(row);
+    });
+    host.appendChild(list);
+  }
+  function addDocToPublishQueue(docId) {
+    var PQ = window.PublishQueue, d = registry[docId]; if (!PQ || !d) return;
+    PQ.addDoc(publishQueue(), docId, { title: (d.meta && d.meta.title) || docId });
+    savePublishQueue();
+    renderPublishQueue();
+  }
+  // Right pane: the persistent queue, one row per document (title + status + remove), and one
+  // Publish button that runs every pending row sequentially through buildPackage.
+  function renderPublishQueue() {
+    var host = document.getElementById("publish-queue"); if (!host) return;
+    var U = window.VersoUI, PQ = window.PublishQueue; if (!PQ) return;
+    var q = publishQueue();
+    host.innerHTML = "";
+    var head = h("div", "publish-pane__head");
+    head.appendChild(h("div", "publish-pane__title", "Publish queue"));
+    var pending = PQ.pendingRows(q).length;
+    var pubLabel = __publishRunning ? "Publishing…" : ("Publish" + (pending ? " (" + pending + ")" : ""));
+    var pub = U ? U.Button({ variant: "primary", icon: "upload", label: pubLabel, onClick: runPublishQueue }) : h("button", null, pubLabel);
+    if (!pending || __publishRunning) pub.setAttribute("disabled", "disabled");
+    head.appendChild(pub);
+    host.appendChild(head);
+    var rows = (q.rows || []);
+    if (!rows.length) { host.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); return; }
+    var list = h("div", "publish-queuelist");
+    rows.forEach(function (r) {
+      var row = h("div", "publish-queuerow is-" + r.status);
+      var main = h("div", "publish-queuerow__main");
+      main.appendChild(h("span", "publish-queuerow__title", r.title));
+      var status = h("span", "publish-queuerow__status", publishStatusLabel(r));
+      main.appendChild(status);
+      row.appendChild(main);
+      if (r.status !== "running") {
+        var rm = U ? U.IconButton({ icon: "x", label: "Remove from the queue", onClick: function () { PQ.removeRow(q, r.id); savePublishQueue(); renderPublishQueue(); } }) : h("button", null, "x");
+        row.appendChild(rm);
+      }
+      list.appendChild(row);
+    });
+    host.appendChild(list);
+  }
+  function publishStatusLabel(r) {
+    if (r.status === "running") return "Publishing…";
+    if (r.status === "done") return "Done" + (r.result && r.result.path ? " · " + r.result.path : "");
+    if (r.status === "error") return "Failed" + (r.result && r.result.path ? " · " + r.result.path : "");
+    return "Pending";
+  }
+  // Download a built package (T1 fallback; the File System Access folder-write is T3's save-path).
+  function downloadPublishPackage(pkg) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(pkg.blob); a.download = pkg.name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    return { to: "download", path: pkg.name };
+  }
+  var __publishRunning = false;
+  // Run every PENDING row sequentially: switch to that doc so buildPackage reads it, build a SCORM
+  // package with the default options, deliver (download), and record the result. The active doc is
+  // restored at the end. Done rows stay (greyed) with their result; the queue is not auto-emptied.
+  function runPublishQueue() {
+    var PQ = window.PublishQueue, SX = window.SCORMExport; if (!PQ || !SX) return;
+    if (location.protocol === "file:") { window.alert("Publish needs the http:// origin so it can bundle fonts, course.css and interactions.\n\nRun ./serve.command and open http://localhost:8123, then Publish again."); return; }
+    var q = publishQueue();
+    var pend = PQ.pendingRows(q);
+    if (!pend.length || __publishRunning) return;
+    __publishRunning = true;
+    var originalId = activeDocId, i = 0;
+    renderPublishQueue();
+    function finish() {
+      __publishRunning = false;
+      if (activeDocId !== originalId && registry[originalId]) switchDoc(originalId);
+      savePublishQueue(); renderPublishQueue();
+    }
+    function step() {
+      if (i >= pend.length) { finish(); return; }
+      var row = pend[i++];
+      if (!registry[row.docId]) { PQ.setStatus(q, row.id, "error", { to: "error", path: "document not found" }); savePublishQueue(); renderPublishQueue(); step(); return; }
+      PQ.setStatus(q, row.id, "running"); renderPublishQueue();
+      var run = function () {
+        Promise.resolve()
+          .then(function () { return SX.buildPackage(SX.defaultOptions()); })
+          .then(function (pkg) { return downloadPublishPackage(pkg); })
+          .then(function (res) { PQ.setStatus(q, row.id, "done", res); })
+          .catch(function (e) { PQ.setStatus(q, row.id, "error", { to: "error", path: String((e && e.message) || e) }); })
+          .then(function () { savePublishQueue(); renderPublishQueue(); step(); });
+      };
+      if (activeDocId !== row.docId) { switchDoc(row.docId); requestAnimationFrame(run); } else run();
+    }
+    step();
+  }
   // Creates a Product container and persists it; the sole write path other Product Rail
   // tickets (new-product-flow, promote-to-product) build their UI on top of.
   function createProduct(name) {
@@ -10508,6 +10654,7 @@
       if (btn) btn.classList.toggle("is-active", s === stage);
     });
     if (stage === "source") renderSourceStage();
+    if (stage === "publish") mountPublishStage();
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;

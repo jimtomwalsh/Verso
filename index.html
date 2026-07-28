@@ -104,12 +104,11 @@
       <aside class="source-stage__info" id="source-stage-info" aria-label="Topic info"></aside>
     </div>
 
-    <!-- Product Rail Publish stage: placeholder only -- Epic 6 (publish-stage-pick-configure-queue)
-         owns the real pick/configure/queue panes. -->
-    <div class="stage-placeholder" id="stage-publish" hidden>
-      <span data-lucide="upload"></span>
-      <span class="stage-placeholder__title">Publish</span>
-      <span class="stage-placeholder__desc">You'll pick, configure and queue documents here — this stage isn't built yet.</span>
+    <!-- Product Rail Publish stage (Epic 6, T1): left = product-scoped document picker, right = the
+         persistent publish queue + one Publish button. mountPublishStage (editor.js) fills both. -->
+    <div class="publish-stage" id="stage-publish" hidden>
+      <div class="publish-stage__pick" id="publish-pick" aria-label="Documents to publish"></div>
+      <div class="publish-stage__queue" id="publish-queue" aria-label="Publish queue"></div>
     </div>
 
     <!-- left: layers / pages / components -->
@@ -269,6 +268,7 @@
   <!-- Source rewrite (Epic 2b): continuous-document node model + owned undo (DOM-free), and the range-mark painting engine (CSS Custom Highlight over live Ranges). Must load before editor.js, which mounts them in the Source stage. -->
   <script src="src/source-doc.js"></script>
   <script src="src/source-marks.js"></script>
+  <script src="src/publish-queue.js"></script>
   <!-- Product Rail: Markdown-manual importer (heading-depth-aware topic/section + variant-override parsing). DOM-free, no editor coupling -- load order is not load-bearing. -->
   <script src="src/markdown-import.js"></script>
   <!-- Product Rail: dependency-free line-level diff (the "Source updated" reconcile-conflict review). DOM-free, no editor coupling -- load order is not load-bearing. -->
