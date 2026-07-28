@@ -667,6 +667,15 @@ In this mode:
   *and* reconnects its mark, which the browser's own undo cannot do.
 - **Show/hide marks** with the eye button in the bottom bar. Marked spans are tinted by type
   (linked / alternate / comment), so annotation never clutters plain reading.
+- **Jump around with the outline.** A **table of contents** down the left side lists the document's
+  headings; click one to jump to it, and the heading you're currently reading stays highlighted as
+  you scroll. (The outline hides itself on a narrow window so the reading column keeps its width.)
+- **Find a topic by anything in it.** The topic search at the top of the left nav now matches the
+  full text of every topic — a heading or a phrase inside the document, not just the title.
+- **See every mark at once.** The **All marks** button in the bottom bar opens a drawer listing all
+  the topic's marks with a status dot (green in sync / amber stale / red broken). Filter it to
+  **Alternates**, **Linked**, or **Comments** so the three kinds are never read mixed, and click any
+  row to jump straight to that mark. Press **Esc** or the button again to close it.
 
 This is an early view — pinned side-panels for alternates and comments, and the variant columns,
 arrive in later updates; for now marks are added and shown, and the section editor above remains
