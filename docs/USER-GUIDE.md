@@ -599,6 +599,16 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
   import**; an update keeps the parts you haven't changed (so any alternates or comments on them stay
   put) and only adds or removes what actually differs. There's no silent whole-document overwrite.
+- **Bringing in a variant's manual.** If your Product has variants declared, importing asks first
+  whether the file updates the **Flagship** (the base) or a **variant**. Choosing a variant runs a
+  **combine**: it reconciles that manual against the Flagship per paragraph and previews exactly what
+  will **diverge**, go **absent**, or be **added** for that variant before anything is written — the
+  Flagship base is never rewritten. (Choosing Flagship runs the normal additive import.)
+- **Comparing variants as columns.** Above the document, a chip row switches variants on. With none
+  on, the document reads and edits as normal (Flagship). Turn a variant on and every paragraph that
+  differs **splits into side-by-side columns** — one per shown variant — while paragraphs they all
+  share stay a single column; a paragraph a variant omits shows "Not in this variant". The column
+  view is for comparison and is **read-only** — turn the variants off to edit again.
 
 The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
 authoring a chapter's text, importing, annotations, history and comments all work as described.

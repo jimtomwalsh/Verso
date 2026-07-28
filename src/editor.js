@@ -11547,6 +11547,24 @@
     return el;
   }
 
+  // spec 2d: render one node as a variant comparison. A node all shown variants agree on renders as
+  // a single shared block (its normal element); a node that diverges splits into one column per shown
+  // variant, each drawing its own wording or an explicit "not in this variant" state. Read-oriented.
+  function renderSourceDocNodeColumns(node, shown) {
+    var SD = window.SourceDoc;
+    var view = SD.variantView(node, shown);
+    if (view.mode === "shared") { var el = renderSourceDocNode(node); el.classList.add("source-doc__shared"); return el; }
+    var row = h("div", "source-doc__vrow"); row.setAttribute("data-node", node.key);
+    view.cols.forEach(function (c) {
+      var cell = h("div", "source-doc__vcol" + (c.diverged ? " is-diverged" : "") + (!c.present ? " is-absent" : ""));
+      cell.appendChild(h("div", "source-doc__vcol-head", c.variant));
+      if (!c.present) cell.appendChild(h("div", "source-doc__vcol-absent", "Not in this variant"));
+      else { var body = h("div", "source-doc__vcol-body"); body.textContent = c.text; cell.appendChild(body); }
+      row.appendChild(cell);
+    });
+    return row;
+  }
+
   function renderSourceNodeArticle(topic, host) {
     var SD = window.SourceDoc, SM = window.SourceMarks;
     var model = ensureSourceDocModel(topic);
@@ -11557,8 +11575,20 @@
     var toc = topic.sourceMaster ? null : buildSourceToc(model, host);
     if (toc) layout.appendChild(toc);
     var col = h("div", "source-doc__col");
-    var art = h("article", "source-doc"); art.setAttribute("spellcheck", "false");
-    model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNode(n)); });
+    // spec 2d: on a variant-bearing Product, a chip row picks which variants are shown as columns.
+    // Flagship-only (no chips active) reads exactly as before; turning a variant on splits the
+    // diverged nodes into columns. The column view is a read-oriented comparison (no inline edit yet).
+    if (topic.sourceMaster) { var vpills = buildVariantPillsRow(topic); if (vpills) col.appendChild(vpills); }
+    var showCols = topic.sourceMaster && __sourceActiveVariants.length > 0;
+    // /verso-frontend fix: make the editable->read-only mode switch legible when comparing variants.
+    if (showCols) col.appendChild(h("div", "source-doc__cols-hint", "Comparing variants — read-only. Turn variants off to edit."));
+    var art = h("article", "source-doc" + (showCols ? " source-doc--cols" : "")); art.setAttribute("spellcheck", "false");
+    if (showCols) {
+      var shown = [SD.FLAGSHIP].concat(__sourceActiveVariants);
+      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNodeColumns(n, shown)); });
+    } else {
+      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNode(n)); });
+    }
     col.appendChild(art);
     layout.appendChild(col);
     host.appendChild(layout);
@@ -11566,6 +11596,10 @@
     host.removeEventListener("scroll", onSourceArticleScroll);
     host.addEventListener("scroll", onSourceArticleScroll);
     requestAnimationFrame(updateSourceScrollSpy);
+
+    // Column comparison is read-only: skip the marks engine + editing wiring (they operate on the
+    // Flagship base text, which the split columns don't project). Toggle every variant off to edit.
+    if (showCols) return;
 
     // per-block contentEditable when unlocked; the keydown guard (below) enforces the lock so
     // marks stay clickable + annotation stays live even when locked.
@@ -12867,11 +12901,96 @@
     inp.click();
   }
 
+  // spec 2d: choose what an imported .md updates on a variant-bearing Product -- the Flagship base
+  // (additive reconcile) or one variant (an overlay combine). Reuses the modalField + dsSelect
+  // pattern (same as Promote to Product / Find & Replace), not a bespoke control.
+  function importIntentModal(declared) {
+    var FLAG = "__flagship__";
+    var choice = FLAG;
+    var shell = dsModalShell({
+      title: "Import from Markdown",
+      subtitle: "Flagship is the base document. A variant overlays only where its manual differs -- the base is never rewritten.",
+      primaryLabel: "Choose file…",
+      onPrimary: function () {
+        shell.modal.close();
+        if (choice === FLAG) importMarkdownAdditive();
+        else importVariantCombine(choice);
+      }
+    });
+    var row = modalField(shell.body, "Import as");
+    var opts = [["Flagship (the base document)", FLAG]].concat(declared.map(function (v) { return [v, v]; }));
+    var sel = dsSelect(opts, choice, function (v) { choice = v; });
+    sel.classList.add("modal-field__control");
+    row.appendChild(sel);
+  }
+
+  function shorten(s, n) { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  // A short human line describing one variant-combine plan op, for the preview list.
+  function variantImportOpLine(op) {
+    if (op.type === "diverge") return "Diverge in “" + op.name + "”: “" + shorten(op.text, 60) + "”";
+    if (op.type === "absent") return "Not in this variant (“" + op.name + "”): “" + shorten(op.from, 60) + "”";
+    if (op.type === "add-node") return "Add (variant only, “" + op.name + "”): “" + shorten(op.text, 60) + "”";
+    if (op.type === "add-chapter") return "Add chapter “" + op.name + "” (variant only)";
+    return op.type;
+  }
+  // spec 2d: combine a variant's manual into the ONE document as an overlay. Reconciles the file
+  // against the Flagship base per node (SourceDoc.variantImportPlan) and previews exactly what will
+  // diverge / go absent / be added for this variant BEFORE anything is written; the base is untouched.
+  function importVariantCombine(variant) {
+    var master = ensureUnifiedDocForActiveProduct();
+    if (!master) { window.alert("Open a Product's source document first."); return; }
+    var SD = window.SourceDoc;
+    var inp = h("input"); inp.type = "file"; inp.accept = ".md,.markdown,.txt";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      readFileAsText(f).then(function (text) {
+        var incoming = incomingChaptersFromParse(window.MarkdownImport.parse(text));
+        if (!incoming.length) { window.alert("No headings found in that file -- nothing to combine. (Chapters come from level-1 headings.)"); return; }
+        var model = ensureSourceDocModel(master);
+        var plan = SD.variantImportPlan(model, variant, incoming);
+        var s = plan.summary;
+        var shell = dsModalShell({
+          title: "Combine variant: " + variant,
+          subtitle: f.name + " — " + s.diverged + " diverged, " + s.absent + " absent, " + s.added + " added for " + variant + ". The Flagship base is not changed.",
+          primaryLabel: "Apply combine",
+          onPrimary: function () {
+            SD.applyVariantImportPlan(model, plan);
+            persistSourceDocModel(master, model);
+            SD.logHistory(model, { type: "imported", file: f.name, variant: variant, diverged: s.diverged, absent: s.absent, added: s.added });
+            persistSourceDocModel(master, model);
+            shell.modal.close();
+            // show the variant's column so the author immediately sees the combine result
+            if (__sourceActiveVariants.indexOf(variant) === -1) __sourceActiveVariants.push(variant);
+            renderSourceArticle();
+            refreshSourceHistory(master);
+          }
+        });
+        var list = h("div", "source-import__preview");
+        if (!plan.ops.length) { list.appendChild(h("div", "source-drawer__empty", "This variant matches the Flagship exactly -- nothing to combine.")); }
+        plan.ops.forEach(function (op) {
+          var row = h("div", "source-import__op" + (op.type === "absent" ? " is-update" : (op.type === "diverge" ? " is-update" : " is-add")));
+          row.appendChild(h("span", "source-import__op-dot"));
+          row.appendChild(h("span", "source-import__op-text", variantImportOpLine(op)));
+          list.appendChild(row);
+        });
+        shell.body.appendChild(list);
+      });
+    });
+    inp.click();
+  }
+
   function importMarkdownModal() {
     if (!window.MarkdownImport) { window.alert("Markdown import isn't available (markdown-import.js failed to load)."); return; }
     // Source v2: a Product with a unified source document imports ADDITIVELY (add/update a chapter
     // with a preview), not by spawning fresh topics.
-    if (sourceMasterFor(activeSourceProductId())) { importMarkdownAdditive(); return; }
+    if (sourceMasterFor(activeSourceProductId())) {
+      // spec 2d: if the Product declares variants, ask what this file updates first -- Flagship
+      // (the base) or one variant (an overlay). This IS the guardrail: you can't reconcile a
+      // variant manual into the Flagship base by mistake, because you must choose up front.
+      var declaredNow = declaredVariantsForProduct(window.ProductsStore || {}, activeSourceProductId());
+      if (declaredNow.length) { importIntentModal(declaredNow); return; }
+      importMarkdownAdditive(); return;
+    }
     var productId = getActiveProduct();
     if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
     var declaredVariants = declaredVariantsForProduct(window.ProductsStore || {}, productId);
