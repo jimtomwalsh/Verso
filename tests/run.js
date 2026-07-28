@@ -8506,7 +8506,10 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // /verso-frontend audit 2026-07-27: consolidated into ONE state-reactive toolbar row
   // (renderSourceToolbar, icon-only IconButton), built inside renderSourceTopicList
   // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
-  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{\s*mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(e));
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,400}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(e));
+  // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
+  ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
+  ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(e) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(e));
   ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
     /row\.appendChild\(U\.IconButton\(\{ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
   ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
