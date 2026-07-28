@@ -10711,8 +10711,11 @@
   var __sourceDocModel = null;     // the live SourceDoc model for __sourceDocModelTopicId
   var __sourceDocModelTopicId = null;
   var __sourceMarksEngine = null;  // the SourceMarks painting engine bound to the mounted article
-  var __sourceDrawerOpen = false;  // the on-demand all-marks drawer (toc-search-drawer)
-  var __sourceDrawerFilter = "all"; // all | alternate | link | comment
+  // Source v2 (consolidated-panel): ONE right panel (#source-stage-info) holds Marks + History +
+  // Source + Comments; the on-demand overlay drawer is retired. One doc-bar control shows/hides it.
+  var __sourceInfoOpen = true;     // the one consolidated right panel is shown (default) or hidden
+  var __sourceMarksFilter = "all"; // the Marks-section filter: all | alternate | link | comment
+  var __sourceActiveMarkId = null; // the mark whose row is highlighted (selected in the panel/article)
   var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
   var __sourceWhereUsedMarkId = null; // the link mark shown in the pinned where-used ("Linked in N") panel
   var __sourceOpenCommentMarkId = null; // the comment mark whose thread card is open, or null
@@ -11399,7 +11402,7 @@
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     // the all-marks drawer belongs to the continuous-document view only -- drop it when the
     // active topic isn't a doc topic (the doc path re-syncs it against the live model below).
-    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); closeSourceAltPanel(); closeSourceWherePanel(); closeSourceCommentThread(); }
+    if (!(topic && topicHasDoc(topic))) { __sourceActiveMarkId = null; closeSourceAltPanel(); closeSourceWherePanel(); closeSourceCommentThread(); }
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
       renderSourceInfoPanel(null);
@@ -11613,30 +11616,24 @@
   // already uses). Reuses the canonical panelSection() helper, not a one-off block --
   // this is a plain info panel, not a block-inspector taxonomy section (sectionGroup's
   // TAXONOMY/reorder system is specific to that surface, not this one).
+  // The ONE consolidated right panel (Source v2, spec 2c section 3). It replaces the old pair --
+  // an always-on info aside PLUS an overlay all-marks drawer that stacked on top of it (the
+  // "double-up") -- with a single panel of canonical sections in navigator order: Marks (the mark
+  // navigator, folded in from the drawer) / History / Source (provenance + where-used) / Comments.
   function renderSourceInfoPanel(topic) {
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-info"); if (!host) return;
     host.innerHTML = "";
     if (!topic) return;
-    var used = libraryWhereUsedDetail(topic.id, getRegistry());
-    var linkedBody = panelSection(host, "Linked in (" + used.length + ")");
-    if (!used.length) {
-      linkedBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
-    } else {
-      used.forEach(function (u) {
-        var row = h("button", "source-stage__linked-row", u.docTitle);
-        row.type = "button";
-        row.title = "Open " + u.docTitle;
-        row.addEventListener("click", function () { openCourseFromBrowser(u.docCode); setStage("edit"); });
-        linkedBody.appendChild(row);
-      });
-    }
-    // md-topic-import provenance: which manual file (+ author-supplied version/publish
-    // date, both optional) this topic's Flagship content came from, plus one line per
-    // variant with its OWN source file if that variant was ever imported separately.
-    // Absent entirely for a hand-created ("New topic") topic -- there's nothing to show.
+    // Marks -- the navigator, first (only when the topic is a continuous document with a live model)
+    if (topicHasDoc(topic)) renderSourceMarksSection(host, ensureSourceDocModel(topic));
+    // History
+    renderHistoryTimeline(host, topic);
+    // Source -- provenance (which manual file/version/publish date this came from), then where the
+    // document is used downstream ("Linked in N"). Both are document-origin facts, so they share
+    // one section instead of the old separate top-of-panel "Linked in" block.
+    var sourceBody = panelSection(host, "Source", { collapsible: true });
     if (topic.source) {
-      var sourceBody = panelSection(host, "Source");
       sourceBody.appendChild(h("div", "insp-hint", topic.source.file || "Unknown file"));
       var meta = [topic.source.version, topic.source.publishDate].filter(Boolean).join(" · ");
       if (meta) sourceBody.appendChild(h("div", "insp-hint", meta));
@@ -11645,9 +11642,31 @@
         var line = v + ": " + (vs.file || "Unknown file") + ([vs.version, vs.publishDate].filter(Boolean).length ? " (" + [vs.version, vs.publishDate].filter(Boolean).join(" · ") + ")" : "");
         sourceBody.appendChild(h("div", "insp-hint", line));
       });
+    } else {
+      sourceBody.appendChild(h("div", "insp-hint", "Authored in Verso (no imported source)."));
     }
-    renderHistoryTimeline(host, topic);
+    var used = libraryWhereUsedDetail(topic.id, getRegistry());
+    sourceBody.appendChild(h("div", "source-info__subhead", "Linked in (" + used.length + ")"));
+    if (!used.length) {
+      sourceBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
+    } else {
+      used.forEach(function (u) {
+        var row = h("button", "source-stage__linked-row", u.docTitle);
+        row.type = "button";
+        row.title = "Open " + u.docTitle;
+        row.addEventListener("click", function () { openCourseFromBrowser(u.docCode); setStage("edit"); });
+        sourceBody.appendChild(row);
+      });
+    }
+    // Comments
     renderSourceCommentsPanel(host, topic);
+    applySourceInfoVisibility();
+  }
+  // Show or hide the one consolidated panel (its single doc-bar toggle). Hidden -> the reading
+  // column reclaims the width; shown (default) -> the panel docks at the right as before.
+  function applySourceInfoVisibility() {
+    var el = document.getElementById("source-stage-info"); if (!el) return;
+    el.style.display = __sourceInfoOpen ? "" : "none";
   }
   // Structural History events (comment/alternate added, resolved, reopened) log to model.history,
   // but the info-panel History timeline must be RE-RENDERED to show them. Only the prose-commit
@@ -11774,6 +11793,9 @@
       var sel = window.getSelection(); if (!sel || !sel.focusNode) return;
       var m = __sourceMarksEngine.markAtPoint(sel.focusNode, sel.focusOffset);
       __sourceMarksEngine.setActive(m ? m.id : null); repaintSourceMarks();
+      // keep the consolidated panel's Marks section in sync -- highlight the row for the clicked mark
+      __sourceActiveMarkId = m ? m.id : null;
+      if (__sourceInfoOpen && topicHasDoc(topic)) renderSourceInfoPanel(topic);
       // selecting a span opens its contextual panel by mark type: an alternate -> the alt panel
       // (spec 3.2); a link -> the read-only where-used panel (spec 3.1). One mark has one type, so
       // at most one opens; the other is passed null and closes. Comments have their own thread.
@@ -11786,7 +11808,7 @@
 
     host.appendChild(buildSourceDocBar(topic));
     host.appendChild(buildSourceSelBar(topic));
-    renderSourceDrawer(); // re-sync the all-marks drawer to the live model after a re-render
+    applySourceInfoVisibility(); // keep the one consolidated panel's shown/hidden state after a re-render
     if (__sourceAltPanelMarkId) renderSourceAltPanel(topic); // re-pin the alt panel after a re-render
     if (__sourceWhereUsedMarkId) renderSourceWherePanel(topic); // re-pin the where-used panel after a re-render
     renderSourceCommentPins(topic); // re-pin the comment margin pins after a re-render
@@ -11882,12 +11904,14 @@
     var lockLbl = h("span", "source-docbar__lbl", __sourceUnlocked ? "Source editable" : "Source locked");
     var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); if (!__sourceShowMarks) closeSourceCommentThread(); renderSourceCommentPins(topic); updateSourceDocBar(); } }) : h("button", null, "Marks");
     marksBtn.classList.add("source-docbar__btn");
-    var drawerBtn = U && U.IconButton ? U.IconButton({ icon: "layers", label: "All marks", active: __sourceDrawerOpen, onClick: function () { toggleSourceDrawer(); } }) : h("button", null, "Marks list");
-    drawerBtn.classList.add("source-docbar__btn");
+    // ONE control for the ONE consolidated right panel (Marks + History + Source + Comments) --
+    // replaces the old all-marks-drawer toggle that stacked a second surface over the info aside.
+    var panelBtn = U && U.IconButton ? U.IconButton({ icon: "columns-2", label: __sourceInfoOpen ? "Hide the details panel" : "Show the details panel", active: __sourceInfoOpen, onClick: function () { __sourceInfoOpen = !__sourceInfoOpen; applySourceInfoVisibility(); updateSourceDocBar(); } }) : h("button", null, "Panel");
+    panelBtn.classList.add("source-docbar__btn");
     var revertBtn = h("button", "source-docbar__revert", "Revert to sections");
     revertBtn.type = "button"; revertBtn.title = "Discard the continuous-document view and return to the section editor (section data is kept)";
     revertBtn.addEventListener("click", function () { revertTopicDoc(topic); });
-    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(drawerBtn); bar.appendChild(revertBtn);
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(panelBtn); bar.appendChild(revertBtn);
     bar.setAttribute("data-source-docbar", "1");
     return bar;
   }
@@ -12196,78 +12220,65 @@
     document.addEventListener("mousedown", onSourceCommentThreadOutside);
   }
 
-  // The on-demand all-marks drawer (spec 2.3): the marks list is demoted from the primary
-  // view to a dock-bar drawer, filtered All / Alternates / Linked / Comments so the three mark
-  // types are never read mixed. Clicking a row activates + scrolls to that mark in the article.
-  function toggleSourceDrawer() {
-    __sourceDrawerOpen = !__sourceDrawerOpen;
-    renderSourceDrawer();
-    updateSourceDocBar();
-  }
-  var SOURCE_DRAWER_FILTERS = [
+  // Source v2 (consolidated-panel): the all-marks list is no longer a separate overlay drawer --
+  // it is the FIRST section of the one consolidated right panel (see renderSourceMarksSection,
+  // built by renderSourceInfoPanel). The filter set is shared. Clicking a row activates + scrolls
+  // to that mark in the article, exactly as the drawer did.
+  var SOURCE_MARK_FILTERS = [
     { key: "all", label: "All" },
     { key: "alternate", label: "Alternates" },
     { key: "link", label: "Linked" },
     { key: "comment", label: "Comments" }
   ];
-  function onSourceDrawerKey(ev) {
-    if (ev.key === "Escape") { __sourceDrawerOpen = false; renderSourceDrawer(); updateSourceDocBar(); }
-  }
-  function renderSourceDrawer() {
-    var existing = document.querySelector("[data-source-drawer]"); if (existing) existing.remove();
-    document.removeEventListener("keydown", onSourceDrawerKey);
-    if (!__sourceDrawerOpen) return;
-    document.addEventListener("keydown", onSourceDrawerKey); // light-dismiss (Escape)
-    var model = __sourceDocModel; if (!model) return;
+  // Reveal a mark in the consolidated panel: open the panel if hidden, highlight its row, and
+  // scroll the article to it (the "selecting a mark opens the panel to that mark" behaviour).
+  function revealSourceMark(m) {
+    __sourceActiveMarkId = m.id;
+    if (__sourceMarksEngine) { __sourceMarksEngine.setActive(m.id); repaintSourceMarks(); }
+    if (!__sourceInfoOpen) { __sourceInfoOpen = true; applySourceInfoVisibility(); updateSourceDocBar(); }
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
-    var SD = window.SourceDoc;
-    var drawer = h("aside", "source-drawer"); drawer.setAttribute("data-source-drawer", "1");
-    drawer.setAttribute("aria-label", "All marks");
-    var head = h("div", "source-drawer__head");
-    head.appendChild(h("div", "source-drawer__title", "Marks"));
-    var close = h("button", "source-drawer__close"); close.type = "button"; close.title = "Close";
-    close.innerHTML = window.Icon ? window.Icon("x") : "close";
-    close.addEventListener("click", function () { toggleSourceDrawer(); });
-    head.appendChild(close);
-    drawer.appendChild(head);
-    // single-select filter -> the canonical SegmentedControl (DSLMS: pick-exactly-one is a
-    // segmented control, not bespoke chips; converges with the facet toggle in this stage).
-    var filters = h("div", "source-drawer__filters");
-    if (window.VersoUI && window.VersoUI.SegmentedControl) {
-      filters.appendChild(window.VersoUI.SegmentedControl({
+    if (topic) renderSourceInfoPanel(topic);
+    var host = document.getElementById("source-stage-article");
+    var target = host && host.querySelector('[data-node="' + m.anchor.nodeKey + '"]');
+    if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+    var info = document.getElementById("source-stage-info");
+    var rowEl = info && info.querySelector('.source-drawer__row[data-mark-id="' + m.id + '"]');
+    if (rowEl) rowEl.scrollIntoView({ block: "nearest" });
+  }
+  // The Marks section of the consolidated panel: the mark navigator (filter + rows), folded in
+  // from the retired drawer. Filtered All / Alternates / Linked / Comments so the three mark types
+  // are never read mixed; a row jumps to + highlights its mark.
+  function renderSourceMarksSection(host, model) {
+    var SD = window.SourceDoc, U = window.VersoUI;
+    var body = panelSection(host, "Marks", { collapsible: true, defaultOpen: true });
+    if (U && U.SegmentedControl) {
+      body.appendChild(U.SegmentedControl({
         size: "sm",
-        options: SOURCE_DRAWER_FILTERS.map(function (f) { return { value: f.key, label: f.label }; }),
-        value: __sourceDrawerFilter,
-        onChange: function (v) { __sourceDrawerFilter = v; renderSourceDrawer(); }
+        options: SOURCE_MARK_FILTERS.map(function (f) { return { value: f.key, label: f.label }; }),
+        value: __sourceMarksFilter,
+        onChange: function (v) { __sourceMarksFilter = v; var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; if (t) renderSourceInfoPanel(t); }
       }));
     }
-    drawer.appendChild(filters);
-    // rows
-    var listWrap = h("div", "source-drawer__list");
-    var marks = (model.marks || []).filter(function (m) { return __sourceDrawerFilter === "all" || m.type === __sourceDrawerFilter; });
+    var listWrap = h("div", "source-marks__list");
+    var marks = (model.marks || []).filter(function (m) { return __sourceMarksFilter === "all" || m.type === __sourceMarksFilter; });
     if (!marks.length) {
-      listWrap.appendChild(h("div", "source-drawer__empty", "No marks" + (__sourceDrawerFilter === "all" ? " yet." : " of this type.")));
+      listWrap.appendChild(h("div", "source-drawer__empty", "No marks" + (__sourceMarksFilter === "all" ? " yet." : " of this type.")));
     } else {
       marks.forEach(function (m) {
         var meta = SD.markMeta(m), status = SD.markStatus(m);
-        var row = h("button", "source-drawer__row"); row.type = "button";
+        var row = h("button", "source-drawer__row" + (m.id === __sourceActiveMarkId ? " is-active" : "")); row.type = "button";
+        row.setAttribute("data-mark-id", m.id);
         var dot = h("span", "source-drawer__dot source-drawer__dot--" + status.dot); dot.title = status.label;
-        var body = h("div", "source-drawer__row-body");
-        body.appendChild(h("div", "source-drawer__row-type " + meta.cls, meta.label));
+        var rbody = h("div", "source-drawer__row-body");
+        rbody.appendChild(h("div", "source-drawer__row-type " + meta.cls, meta.label));
         var snip = SD.isObjectMark(m) ? SD.objectNodeLabel(SD.nodeByKey(model, m.anchor.nodeKey)) : (SD.anchorText(model, m.anchor) || "(empty)");
-        body.appendChild(h("div", "source-drawer__row-snip", snip));
-        row.appendChild(dot); row.appendChild(body);
-        row.addEventListener("click", function () {
-          if (__sourceMarksEngine) { __sourceMarksEngine.setActive(m.id); repaintSourceMarks(); }
-          var host = document.getElementById("source-stage-article");
-          var target = host && host.querySelector('[data-node="' + m.anchor.nodeKey + '"]');
-          if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
-        });
+        rbody.appendChild(h("div", "source-drawer__row-snip", snip));
+        row.appendChild(dot); row.appendChild(rbody);
+        row.addEventListener("click", function () { revealSourceMark(m); });
         listWrap.appendChild(row);
       });
     }
-    drawer.appendChild(listWrap);
-    document.body.appendChild(drawer);
+    body.appendChild(listWrap);
   }
 
   // The contextual selection bar, above the highlight (canvas idiom): glyph rich-text
@@ -12473,7 +12484,13 @@
     addObjectAlternate: function (nodeKey, alt, tag) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: { nodeKey: nodeKey }, alt: alt, tag: tag || "" }); SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); refreshSourceHistory(t); return mk.id; },
     openCommentThread: function (markId) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; toggleSourceCommentThread(t, markId); },
     openCommentMarkId: function () { return __sourceOpenCommentMarkId; },
-    getComments: function () { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; return t && t.comments; }
+    getComments: function () { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; return t && t.comments; },
+    // consolidated-panel: the one right panel's visibility + Marks filter/active-row
+    setInfoOpen: function (v) { __sourceInfoOpen = !!v; applySourceInfoVisibility(); updateSourceDocBar(); },
+    infoOpen: function () { return __sourceInfoOpen; },
+    setMarksFilter: function (f) { __sourceMarksFilter = f; var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; if (t) renderSourceInfoPanel(t); },
+    revealMark: function (id) { var m = __sourceDocModel && window.SourceDoc.markById(__sourceDocModel, id); if (m) revealSourceMark(m); },
+    activeMarkId: function () { return __sourceActiveMarkId; }
   };
 
 

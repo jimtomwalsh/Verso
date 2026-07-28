@@ -8646,7 +8646,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(e));
 
   // Provenance display: the info panel's new "Source" section, absent for a hand-created topic.
-  ok("the info panel's Source section only renders when the topic actually has one (a blank 'New topic' never does)", /if \(topic\.source\) \{\s*var sourceBody = panelSection\(host, "Source"\);/.test(e));
+  ok("the info panel always has a Source section (imported provenance, or an 'authored in Verso' note)", /var sourceBody = panelSection\(host, "Source", \{ collapsible: true \}\);\s*\n\s*if \(topic\.source\) \{/.test(e) && /Authored in Verso \(no imported source\)\./.test(e));
   ok("Source section shows the file, then version/publish-date only if at least one was supplied", /var meta = \[topic\.source\.version, topic\.source\.publishDate\]\.filter\(Boolean\)\.join\(" · "\);/.test(e));
 
   // Chrome-only invariant.
@@ -8804,12 +8804,12 @@ section("Product Rail: Source stage info panel");
   // renderSourceInfoPanel: reuses the canonical panelSection() helper (not a one-off
   // block) for both "Linked in" and "History" -- the same section chrome every other
   // side panel in the app uses.
-  ok("Linked in section uses the canonical panelSection() helper, titled with the count per the AC (\"Linked in (N)\")", /panelSection\(host, "Linked in \(" \+ used\.length \+ "\)"\)/.test(e));
+  ok("'Linked in (N)' is a sub-head folded into the Source section (both are document-origin facts)", /source-info__subhead", "Linked in \(" \+ used\.length \+ "\)"/.test(e));
   ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History"\)/.test(e));
   // source-stage-comments: a topic-wide overview alongside the per-section thread
   // panels, mirroring renderCommentList's own Open/Resolved/Orphaned split.
   ok("Comments section uses the canonical panelSection() helper, titled with the count", /panelSection\(host, "Comments \(" \+ comments\.length \+ "\)"\)/.test(e));
-  ok("renderSourceInfoPanel calls renderSourceCommentsPanel after History, same render pass", /renderHistoryTimeline\(host, topic\);\s*\n\s*renderSourceCommentsPanel\(host, topic\);/.test(e));
+  ok("renderSourceInfoPanel renders Comments last (after the Source section), same render pass", /renderSourceCommentsPanel\(host, topic\);\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
   ok("empty comments renders a named empty state, not a blank section", /No comments yet\./.test(e));
   ok("comments split into Open\/Resolved\/Orphaned groups, reusing the same split shape as the canvas's renderCommentList", /group\("Open", open\);/.test(e) && /group\("Resolved", resolved\);/.test(e) && /group\("Orphaned", orphaned\);/.test(e));
   ok("orphan classification reuses sourceCommentIsOrphaned (a section deleted out from under its comment)", /if \(sourceCommentIsOrphaned\(c, topic\)\) orphaned\.push\(c\);/.test(e));
@@ -10963,20 +10963,38 @@ section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
   ok("fuzzyMatch: chars out of order do NOT match", SD.fuzzyMatch("abc", "cab") === false);
   ok("fuzzyMatch: is case-insensitive", SD.fuzzyMatch("Headroom", "HEAD") === true);
 
-  // drawer filtering: the type filter is a plain predicate over model.marks
+  // Marks-section filtering: the type filter is a plain predicate over model.marks
   function drawerFilter(marks, f) { return marks.filter(function (m) { return f === "all" || m.type === f; }); }
   var marks = [{ type: "link" }, { type: "alternate" }, { type: "comment" }, { type: "alternate" }];
-  ok("drawer filter 'all' returns every mark", drawerFilter(marks, "all").length === 4);
-  ok("drawer filter by type narrows to that mark type only", drawerFilter(marks, "alternate").length === 2 && drawerFilter(marks, "link").length === 1);
+  ok("marks filter 'all' returns every mark", drawerFilter(marks, "all").length === 4);
+  ok("marks filter by type narrows to that mark type only", drawerFilter(marks, "alternate").length === 2 && drawerFilter(marks, "link").length === 1);
 
   // editor.js wiring (browser-verified live; asserted structurally here)
   var e = src("src/editor.js");
   ok("topicMatchesQuery uses SourceDoc fuzzy full-text (not a title substring)", /window\.SourceDoc\.fuzzyMatch\(window\.SourceDoc\.searchText\(topic\), query\)/.test(e));
   ok("the article mounts a TOC rail from heading nodes with scroll-spy", /function buildSourceToc\(model, host\)[\s\S]{0,400}window\.SourceDoc\.headings\(model\)/.test(e) && /function updateSourceScrollSpy\(\)/.test(e));
   ok("scroll-spy is re-bound remove-then-add so it survives re-renders", /host\.removeEventListener\("scroll", onSourceArticleScroll\);[\s\S]{0,120}host\.addEventListener\("scroll", onSourceArticleScroll\)/.test(e) && /function onSourceArticleScroll\(\)[\s\S]{0,60}updateSourceScrollSpy\(\)/.test(e));
-  ok("the doc-bar carries an all-marks drawer toggle (layers glyph)", /icon: "layers", label: "All marks"/.test(e));
-  ok("the drawer offers All / Alternates / Linked / Comments filters", /SOURCE_DRAWER_FILTERS = \[[\s\S]{0,220}"alternate"[\s\S]{0,120}"link"[\s\S]{0,120}"comment"/.test(e));
-  ok("a doc-topic swap drops the drawer (it belongs to the continuous-document view)", /if \(!\(topic && topicHasDoc\(topic\)\)\) \{ __sourceDrawerOpen = false;/.test(e));
+  // Source v2 (consolidated-panel): the drawer is folded into the one right panel; the doc-bar
+  // toggle now shows/hides that panel, and the Marks filter lives in its Marks section.
+  ok("the doc-bar carries ONE consolidated-panel toggle (columns-2 glyph), not a second overlay", /icon: "columns-2", label: __sourceInfoOpen \? "Hide the details panel"/.test(e) && !/label: "All marks"/.test(e));
+  ok("the Marks section offers All / Alternates / Linked / Comments filters", /SOURCE_MARK_FILTERS = \[[\s\S]{0,220}"alternate"[\s\S]{0,120}"link"[\s\S]{0,120}"comment"/.test(e));
+  ok("a doc-topic swap clears the active mark (no orphan overlay left behind)", /if \(!\(topic && topicHasDoc\(topic\)\)\) \{ __sourceActiveMarkId = null;/.test(e));
+})();
+
+// Source v2 (spec 2c section 3): the two overlapping right surfaces (always-on info aside + an
+// overlay all-marks drawer that stacked over it -- the "double-up") become ONE consolidated panel:
+// Marks / History / Source / Comments, opened by ONE doc-bar control. The overlay drawer is gone.
+section("Source v2: one consolidated right panel (spec 2c section 3)");
+(function () {
+  var e = src("src/editor.js");
+  ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /if \(topicHasDoc\(topic\)\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(e));
+  ok("renderSourceMarksSection builds a canonical panelSection with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,120}panelSection\(host, "Marks"[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(e));
+  ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(e));
+  ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));
+  ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface", /function applySourceInfoVisibility\(\)[\s\S]{0,140}el\.style\.display = __sourceInfoOpen \? "" : "none";/.test(e));
+  ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,320}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(e));
+  ok("the active mark's row is highlighted (is-active) in the Marks list", /"source-drawer__row" \+ \(m\.id === __sourceActiveMarkId \? " is-active" : ""\)/.test(e));
+  ok("panel visibility + Marks controls are exposed on __sourceRw for verification", /setInfoOpen: function[\s\S]{0,400}infoOpen: function[\s\S]{0,400}revealMark: function/.test(e));
 })();
 
 // ---- Source rewrite (Epic 2b): demand-driven alternates + staleness (alternates-staleness) ----
