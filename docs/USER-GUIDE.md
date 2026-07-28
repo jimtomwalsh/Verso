@@ -668,6 +668,12 @@ In this mode:
   "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
   an alternate opens a **panel pinned in the right margin** that tracks the span as you scroll,
   showing the **base vs the alternate**, a status dot, and Edit / Delete.
+- **Images and tables are markable too.** An image or a table is a whole **object** — click it (a
+  ring shows it's selected) and the same **Add an alternate** / **Comment** actions appear, so you
+  can attach, say, a simplified caption to a diagram or a note to a table. An object's mark is tied
+  to the object itself, so it stays put no matter how you edit the prose around it; a marked object
+  carries the same status tint as a marked span, and its alternate/comment opens the same margin
+  panel (its "base" line names the object, e.g. "Image — <caption>").
 - **Staleness keeps alternates honest.** If you later change the base text, any alternate written
   against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
@@ -703,9 +709,8 @@ In this mode:
   **Alternates**, **Linked**, or **Comments** so the three kinds are never read mixed, and click any
   row to jump straight to that mark. Press **Esc** or the button again to close it.
 
-This is an early view — the variant columns and object marks (making an image or table a
-first-class annotatable unit) arrive in later updates; the section editor above remains the
-full-featured path.
+This is an early view — the variant columns arrive in a later update; the section editor above
+remains the full-featured path.
 
 ---
 
