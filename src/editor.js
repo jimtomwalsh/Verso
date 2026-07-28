@@ -10494,7 +10494,7 @@
     __activeStage = stage;
     try { localStorage.setItem(STAGE_PERSIST_KEY, stage); } catch (e) {}
     if (typeof document === "undefined") return;
-    ["lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
+    if (typeof applyLeftSection === "function") applyLeftSection(_activeLeftSection); // SPEC 7: re-apply the left switcher's active section (Edit shows the panel; the switcher owns pane visibility)
     var ws = document.getElementById("workspace");
     if (ws) {
       ws.classList.remove("workspace--stage-source", "workspace--stage-publish");
@@ -18500,85 +18500,69 @@
     focusFrame(currentPage);
     reselectBlockNode(block, "block"); // select the new block so repeated inserts stack after it
   }
-  // SS: the left panel stacks N panes (Structure, Blocks, Components — all visible),
-  // each collapsible, with a draggable split between every adjacent pair adjusting
-  // their combined height share. Generalized from a hard-coded two-pane model so a
-  // pane can be added/removed without touching the split math (#component-library
-  // reorg: added the third "Components" pane).
-  var LPANE_ORDER = [
-    { id: "lpane-structure", key: "structure", share: 6 },
-    { id: "lpane-blocks", key: "blocks", share: 4 },
-    { id: "lpane-components", key: "components", share: 3 }
-  ];
-  function wireLeftPanes() {
+  // SPEC 7 (decision 11): the left panel is a single 3-way switcher -- Structure . Blocks .
+  // Source -- with equal billing (Source insertion is a primary use now, not a bolt-on). Each
+  // .lpane carries data-lsec; the active section's pane(s) show and the rest drop out. Components
+  // folds INTO Blocks (James's call), so the Blocks section shows the Insert palette with the
+  // Reusable-components pane beneath it. The last-active section persists across reloads.
+  var LEFT_SECTIONS = ["structure", "blocks", "source"];
+  var LEFT_SECTION_KEY = "authoring.lpane.active";
+  var _activeLeftSection = "structure";
+  function applyLeftSection(sec) {
+    if (LEFT_SECTIONS.indexOf(sec) === -1) sec = "structure";
+    _activeLeftSection = sec;
+    try { localStorage.setItem(LEFT_SECTION_KEY, sec); } catch (e) {}
+    var panel = document.querySelector(".panel--left"); if (!panel) return;
+    Array.prototype.forEach.call(panel.querySelectorAll(".lpane[data-lsec]"), function (el) {
+      el.hidden = el.getAttribute("data-lsec") !== sec;
+    });
+    mountLeftSwitcher(); // re-render so the active segment reflects the state (also on programmatic switches)
+    if (sec === "source") renderLeftSourceNav();
+  }
+  function mountLeftSwitcher() {
+    var host = document.getElementById("lpane-switch"); if (!host) return;
+    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
+    host.innerHTML = "";
+    host.appendChild(U.SegmentedControl({
+      size: "sm",
+      options: [{ value: "structure", label: "Structure" }, { value: "blocks", label: "Blocks" }, { value: "source", label: "Source" }],
+      value: _activeLeftSection,
+      onChange: function (v) { applyLeftSection(v); }
+    }));
+  }
+  // The Edit left panel's Source section reuses the Source stage's topic list (same filterTopics /
+  // groupTopicsByProduct, product-scoped). A row opens that topic in the Source stage -- the quick
+  // jump from Edit into source. (Drag-to-canvas source insertion is source-insert-two-way-jump.)
+  function renderLeftSourceNav() {
+    var host = document.getElementById("tab-source"); if (!host) return;
+    host.innerHTML = "";
+    var topics = filterTopics(libComponents(), getActiveProduct(), "");
+    if (!topics.length) {
+      host.appendChild(h("div", "source-stage__empty", "No source document yet. Open the Source stage to import or add topics."));
+      return;
+    }
+    groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
+      host.appendChild(h("div", "source-stage__group-label", g.label));
+      g.topics.forEach(function (t) {
+        var row = h("div", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""));
+        var label = h("button", "source-stage__topic-label", t.name || "Untitled topic");
+        label.type = "button";
+        label.title = "Open in the Source stage";
+        label.addEventListener("click", function () {
+          __sourceActiveTopicId = t.id;
+          try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, t.id); } catch (e) {}
+          setStage("source");
+        });
+        row.appendChild(label);
+        host.appendChild(row);
+      });
+    });
+  }
+  function wireLeftSwitcher() {
     renderAssets();
     renderComponentsPalette();
-    var panel = document.querySelector(".panel--left");
-    var panes = LPANE_ORDER.map(function (o) {
-      return { el: document.getElementById(o.id), key: o.key, share: o.share };
-    }).filter(function (o) { return o.el; });
-    var splits = Array.prototype.slice.call(panel ? panel.querySelectorAll(".lpane-split") : []);
-    if (!panel || panes.length < 2) return;
-
-    function syncSplits() {
-      // a split between pane i and pane i+1 only matters (is shown) when BOTH are open
-      splits.forEach(function (split, i) {
-        var a = panes[i], b = panes[i + 1];
-        var bothOpen = a && b && !a.el.classList.contains("is-collapsed") && !b.el.classList.contains("is-collapsed");
-        split.style.display = bothOpen ? "" : "none";
-      });
-    }
-    // restore collapse state + wire collapse toggles
-    panes.forEach(function (o) {
-      var key = "authoring.lpane." + o.key;
-      var v = null; try { v = localStorage.getItem(key); } catch (e) {}
-      if (v === "1") o.el.classList.add("is-collapsed");
-      var head = o.el.querySelector(".lpane__head");
-      if (head) head.addEventListener("click", function (e) {
-        if (e.target.closest(".outliner-add-btn")) return; // let the + button through
-        o.el.classList.toggle("is-collapsed");
-        try { localStorage.setItem(key, o.el.classList.contains("is-collapsed") ? "1" : "0"); } catch (_) {}
-        syncSplits();
-      });
-    });
-    syncSplits();
-
-    // each adjacent pair's split ratio is stored independently, so dragging one
-    // split only redistributes the two panes touching it, leaving the rest alone.
-    function applyShares() { panes.forEach(function (o) { o.el.style.flexGrow = String(o.share); }); }
-    splits.forEach(function (split, i) {
-      var a = panes[i], b = panes[i + 1];
-      if (!a || !b) return;
-      var combined = a.share + b.share;
-      var r = a.share / combined;
-      var storeKey = "authoring.lpane.split." + i;
-      try {
-        var s = localStorage.getItem(storeKey);
-        if (!s && i === 0) s = localStorage.getItem("authoring.lpane.split"); // pre-reorg key
-        if (s) r = Math.min(0.85, Math.max(0.15, parseFloat(s)));
-      } catch (e) {}
-      a.share = combined * r; b.share = combined * (1 - r);
-    });
-    applyShares();
-
-    splits.forEach(function (split, i) {
-      var a = panes[i], b = panes[i + 1];
-      if (!a || !b) return;
-      var combined = a.share + b.share;
-      split.addEventListener("mousedown", function (e) {
-        e.preventDefault(); split.classList.add("is-dragging");
-        function move(ev) {
-          var aRect = a.el.getBoundingClientRect(), bRect = b.el.getBoundingClientRect();
-          var top = aRect.top, span = (bRect.bottom - top) || 1;
-          var ratio = Math.min(0.85, Math.max(0.15, (ev.clientY - top) / span));
-          a.share = combined * ratio; b.share = combined * (1 - ratio);
-          applyShares();
-          try { localStorage.setItem("authoring.lpane.split." + i, String(ratio)); } catch (_) {}
-        }
-        function up() { split.classList.remove("is-dragging"); document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); }
-        document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
-      });
-    });
+    try { var saved = localStorage.getItem(LEFT_SECTION_KEY); if (LEFT_SECTIONS.indexOf(saved) !== -1) _activeLeftSection = saved; } catch (e) {}
+    applyLeftSection(_activeLeftSection);
   }
 
   // ---- mount / re-mount (preserves view) -----------------------------------
@@ -22766,7 +22750,7 @@
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
   mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
   refreshCourseWeight(); // §308: initial course-weight readout
-  wireLeftPanes();
+  wireLeftSwitcher();
   wireRightTabs();
   // HH: restore the right-panel Design/Interact mode before the boot mount so the
   // canvas + panel render in the saved mode (setInteractMode persists it on change).

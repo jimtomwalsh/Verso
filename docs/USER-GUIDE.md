@@ -20,7 +20,7 @@ Build and export your first course in a few minutes.
 1. **Open Verso.** Launch the desktop app, or open `index.html` in a browser (serve the folder
    over `http://` so export and fonts work — see §2).
 2. **Add a page.** In the **Structure** panel on the left, click **+** to add a page.
-3. **Add a block.** Open the **Blocks** palette (below Structure) and click **Heading**, then
+3. **Add a block.** Switch the left panel to **Blocks** and click **Heading**, then
    **Paragraph**. Click the text on the canvas and type.
 4. **Preview it.** Click **▶ Demo** (or press ⌘P) to see the page exactly as a learner will.
    Press **Esc** to return.
@@ -63,12 +63,12 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
 - **Toolbar (top).** Light/dark toggle, save status, **Undo/Redo**, **Fit all**, **Comment
   mode**, **Demo**, and the **Import & Export** menu (CSV import, SCORM export, JSON backup).
   Open courses appear as tabs on the left.
-- **Left (three stacked, collapsible panes).** **Structure** — the outliner of chapters and
-  pages as a tree. **Blocks** — the insert palette for built-in block types (Text, Media,
-  Layout, Interactive…). **Components** — the browse/insert surface for reusable components:
-  **My Components** (course-local), **Blocks** and **Pages** (the shared cross-course library,
-  §9). Drag the thin divider between any two panes to resize them; click a pane's header to
-  collapse it.
+- **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
+  panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
+  palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
+  components** beneath it: **My Components** (course-local), **Blocks** and **Pages** (the shared
+  cross-course library, §9). **Source** — the source-topic list for the active product; click a
+  topic to open it in the Source stage. The panel remembers which section you last used.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
   pinch) to zoom. Every page is a live, editable render of what the learner will see.
 - **Inspector (right).** Context-sensitive: with nothing selected it shows **document**
@@ -118,9 +118,9 @@ the full catalogue.
 
 ![Click a page in the outliner; the highlight marks the page you're editing.](docs/assets/annotated-navigate.webp "The highlight marks the active page."){poster=docs/assets/annotated-navigate-still.webp}
 
-**Insert a block.** Open the **Blocks** palette and click or drag a block onto a page — or into
-a container (**Card**, **Columns**, **Card Reveal**). For a reusable component you've already
-saved (§9), use the **Components** pane instead.
+**Insert a block.** Switch the left panel to **Blocks** and click or drag a block onto a page — or
+into a container (**Card**, **Columns**, **Card Reveal**). For a reusable component you've already
+saved (§9), use the **Reusable components** beneath the palette in the same Blocks section.
 
 **Select and drill in.** One click selects the outermost container under the cursor; each
 further click drills one level in (container → block → text). **Double-click** jumps straight

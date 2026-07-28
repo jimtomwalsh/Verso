@@ -10658,23 +10658,12 @@ section("left-panel Components reorg");
   ok("renderComponentsList() removed from editor.js", e.indexOf("renderComponentsList") === -1);
   ok("componentsList DOM var removed", e.indexOf('getElementById("components-list")') === -1);
 
-  // new twirl markup: a third .lpane peer to Structure/Blocks, with two split handles
-  ok("index.html has the new Components .lpane peer to Structure/Blocks",
-     /lpane lpane--components" id="lpane-components"/.test(html) && /lpane__title">Components</.test(html));
-  ok("two lpane-split handles bracket the three panes", /id="lpane-split-0"/.test(html) && /id="lpane-split-1"/.test(html));
-  ok("Components twirl hosts the new insert list", /id="components-palette-list"/.test(html));
-
-  // wireLeftPanes() generalized to N panes (not hard-coded to exactly two)
-  var wlpStart = e.indexOf("var LPANE_ORDER = [");
-  ok("wireLeftPanes has an LPANE_ORDER config (structure/blocks/components)", wlpStart > -1);
-  var wlpBody = e.slice(wlpStart, e.indexOf("function wireLeftPanes(") + 2600);
-  ok("LPANE_ORDER lists all three panes", /"lpane-structure"/.test(wlpBody) && /"lpane-blocks"/.test(wlpBody) && /"lpane-components"/.test(wlpBody));
-  ok("split visibility is computed per adjacent pair, not a single bothOpen bool", /function syncSplits\(\)/.test(wlpBody) && /splits\.forEach\(function \(split, i\)/.test(wlpBody));
-  ok("a split's drag only redistributes its OWN two adjacent panes (independent ratios)", /var storeKey = "authoring\.lpane\.split\." \+ i/.test(wlpBody));
-  ok("wireLeftPanes bails out gracefully with fewer than 2 panes present", /panes\.length < 2/.test(wlpBody));
-
-  // setLeftPanelView must know about the new pane + both split ids, or it stays hidden
-  ok("setLeftPanelView un-hides the new pane + both splits", /"lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"/.test(e));
+  // SPEC 7: Components folds INTO the Blocks section of the 3-way switcher (data-lsec="blocks"),
+  // as a sub-pane beneath the Insert palette (its own insert list host kept).
+  ok("Components .lpane is tagged into the Blocks section", /lpane lpane--components" id="lpane-components" data-lsec="blocks"/.test(html));
+  ok("Components pane reads as a sub-section (Reusable components)", /lpane__head--sub"><span class="lpane__title">Reusable components</.test(html));
+  ok("Components sub-pane hosts the insert list", /id="components-palette-list"/.test(html));
+  ok("the old draggable split handles are gone", html.indexOf('id="lpane-split-0"') === -1 && html.indexOf('id="lpane-split-1"') === -1);
 
   // renderComponentsPalette(): three groups, in the documented order
   var rcpStart = e.indexOf("function renderComponentsPalette()");
@@ -10692,7 +10681,7 @@ section("left-panel Components reorg");
 
   // mount() keeps the new pane in sync on every render, same as the Blocks palette
   ok("mount() re-renders the Components pane alongside the Blocks palette", /renderAssets\(\); \/\/ keep the Blocks palette current[\s\S]{0,20}renderComponentsPalette\(\);/.test(e));
-  ok("wireLeftPanes() renders both panels on boot", /renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
+  ok("wireLeftSwitcher() renders both panels on boot", /function wireLeftSwitcher\(\)[\s\S]{0,120}renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
 
   // context-menu additions (Tier 1 per the /verso-frontend ruling): single-block
   // "Save as component…" (canvas + outliner) and page "Save page to library…"
@@ -10701,6 +10690,22 @@ section("left-panel Components reorg");
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
+})();
+
+// ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
+section("editor-rework left-panel 3-way switcher");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  ok("the panel has a switcher host + a Source pane", /id="lpane-switch"/.test(html) && /lpane lpane--source" id="lpane-source" data-lsec="source"/.test(html));
+  ok("every content pane is tagged with a section (data-lsec)", /id="lpane-structure" data-lsec="structure"/.test(html) && /id="lpane-blocks" data-lsec="blocks"/.test(html) && /id="lpane-source" data-lsec="source"/.test(html));
+  ok("the switcher offers Structure / Blocks / Source", /options: \[\{ value: "structure", label: "Structure" \}, \{ value: "blocks", label: "Blocks" \}, \{ value: "source", label: "Source" \}\]/.test(e));
+  ok("applyLeftSection shows only the active section's panes", /el\.hidden = el\.getAttribute\("data-lsec"\) !== sec;/.test(e));
+  ok("the active section persists across reloads", /LEFT_SECTION_KEY = "authoring\.lpane\.active"/.test(e) && /localStorage\.getItem\(LEFT_SECTION_KEY\)/.test(e));
+  ok("switching to Source renders the reused topic nav", /if \(sec === "source"\) renderLeftSourceNav\(\);/.test(e));
+  ok("the Source nav reuses filterTopics + groupTopicsByProduct (not a bespoke list)", /function renderLeftSourceNav\(\)[\s\S]{0,400}filterTopics\(libComponents\(\), getActiveProduct\(\)[\s\S]{0,300}groupTopicsByProduct\(/.test(e));
+  ok("a Source row jumps into the Source stage on that topic", /__sourceActiveTopicId = t\.id;[\s\S]{0,160}setStage\("source"\);/.test(e));
+  ok("setStage re-applies the switcher's active section in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(e) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
 })();
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
