@@ -8830,9 +8830,9 @@ section("Product Rail: Source stage info panel");
   ok("Timeline's DSLMS contract (.d.ts) exists with the entries prop", /interface TimelineProps/.test(dsTimelineDts) && /entries: TimelineEntry\[\];/.test(dsTimelineDts));
   ok("readme.md's canonical control list includes Timeline under structure/", /\*\*structure\/\*\* · `TreeItem` · `BlockPaletteItem` · `BlockTile` \+ `BlockGrid` · `Badge` · `Timeline`/.test(src("design-system/readme.md")));
   ok("editor.css styles the canonical .vds-timeline* classes, not the old source-stage__timeline ad-hoc names", /\.vds-timeline \{/.test(src("editor.css")) && src("editor.css").indexOf(".source-stage__timeline") === -1);
-  ok("real topic.history entries render newest-first (reversed)", /var rawEntries = \(topic\.history \|\| \[\]\)\.slice\(\)\.reverse\(\);/.test(e));
-  ok("a hand-created topic with no import history still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rawEntries\.length\) rawEntries = \[\{ type: "created", importedAt: topic\.createdAt \}\];/.test(e));
-  ok("activity since the last import (an edit, a resolved flag) leads with a synthetic 'Last edited' node", /if \(topic\.updatedAt && topic\.updatedAt > \(newestImportAt \|\| 0\)\) \{\s*rawEntries\.unshift\(\{ type: "edited", importedAt: topic\.updatedAt \}\);/.test(e));
+  ok("timeline rows sort newest-first across both provenance streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
+  ok("a hand-created topic with neither stream still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rows\.length\) rows = \[\{ ts: topic\.createdAt \|\| 0, importedAt: topic\.createdAt, label: "Created", detail: null \}\];/.test(e));
+  ok("a legacy edit newer than the last import leads with a synthetic 'Last edited' node (only when there are no doc commits)", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
   ok("timeline entries render through the canonical VersoUI.Timeline, not hand-built dot/line DOM", /body\.appendChild\(window\.VersoUI\.Timeline\(\{ entries: entries \}\)\);/.test(e));
 
   // Data side: each import call (first-time create AND every later reconcile) appends
@@ -11041,6 +11041,56 @@ section("Source rewrite: comments = shared canvas engine + range-mark adapter (E
   ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceCommentThread\(\);/.test(e));
   ok("the comment thread light-dismisses on Escape + outside click (canvas popover parity)", /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(e) && /function onSourceCommentThreadOutside\(ev\)/.test(e) && /if \(card\.contains\(ev\.target\)\) return;/.test(e));
   ok("comments stay addable while the base is locked (annotation ungated -- no unlock guard on the comment path)", !/cmd === "comment"[\s\S]{0,80}__sourceUnlocked/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): History timeline (hybrid granularity) ------
+// Prose edits collapse into ONE commit entry (summarizeEdits over the per-keystroke diff
+// stream); structural events (alternate added, span broke/stale/restored, comment opened/
+// resolved) each get a discrete entry. The pure cores are proven here; the merged rendering
+// (topic.history import events + model.history doc events) is wired in editor.js.
+section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  // --- pure collapse: a keystroke stream folds into a single commit summary ---
+  var stream = [{ inserted: 3, removed: 0 }, { inserted: 0, removed: 0 }, { inserted: 1, removed: 2 }, { inserted: 5, removed: 0 }];
+  var sum = SD.summarizeEdits(stream);
+  ok("summarizeEdits totals inserted/removed across the stream", sum.charsAdded === 9 && sum.charsRemoved === 2);
+  ok("summarizeEdits ignores no-op keystrokes (arrow keys etc.)", sum.editCount === 3);
+  ok("summarizeEdits on an empty stream is zero (no commit worth logging)", (function () { var s = SD.summarizeEdits([]); return s.editCount === 0 && s.charsAdded === 0; })());
+
+  // --- pure view mapping: each event type renders a label (+ optional detail) ---
+  var commitView = SD.historyEntryView({ type: "commit", charsAdded: 12, charsRemoved: 3, editCount: 4, note: "clarity" });
+  ok("historyEntryView: a commit collapses to one 'Edited source' entry with a char summary", commitView.kind === "commit" && commitView.label === "Edited source" && /\+12/.test(commitView.detail) && /3 chars/.test(commitView.detail));
+  ok("historyEntryView: a commit carries its optional why-note in the detail", /clarity/.test(commitView.detail));
+  ok("historyEntryView: a note-less commit still summarises without a dangling quote", (function () { var v = SD.historyEntryView({ type: "commit", charsAdded: 5, charsRemoved: 0, editCount: 1 }); return v.detail.indexOf("“") === -1; })());
+  ok("historyEntryView: structural events map to discrete labels", SD.historyEntryView({ type: "mark-broken", markType: "link" }).label === "Link broke" && SD.historyEntryView({ type: "mark-stale", markType: "alternate" }).label === "Alternate went stale" && SD.historyEntryView({ type: "alternate-created" }).label === "Alternate added" && SD.historyEntryView({ type: "comment-resolved" }).label === "Comment resolved");
+
+  // --- logHistory stamps a time so both provenance streams interleave ---
+  var m = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
+  SD.logHistory(m, { type: "commit", charsAdded: 4, charsRemoved: 0, editCount: 1 });
+  ok("logHistory stamps `at` so doc events sort against timestamped import events", typeof m.history[0].at === "number");
+
+  // --- restore is provenance too: break the span, then edit it back in sync ---
+  var mm = SD.create([{ type: "paragraph", text: "The unit arbitrates contention by headroom." }]);
+  var k = mm.nodes[0].key, phrase = "arbitrates contention by headroom";
+  var a = { nodeKey: k, start: mm.nodes[0].text.indexOf(phrase), len: phrase.length };
+  SD.addMark(mm, { type: "alternate", anchor: a, alt: "decides ties", tag: "" });
+  SD.applyTextEdit(mm, k, "The unit weighs contention by headroom."); // drift -> stale
+  ok("editing the base drifts the alternate stale (a discrete entry)", mm.history.some(function (h) { return h.type === "mark-stale"; }));
+  SD.applyTextEdit(mm, k, "The unit arbitrates contention by headroom."); // back to base -> restored
+  ok("editing the text back in sync logs a discrete mark-restored entry", mm.history.some(function (h) { return h.type === "mark-restored"; }));
+
+  // --- editor.js wiring (browser-verified live; asserted structurally here) ---
+  var e = src("src/editor.js");
+  ok("prose edits buffer per unlock->lock cycle (recordSourceEdit on the input path)", /recordSourceEdit\(res && res\.edit\)/.test(e) && /function beginSourceEditSession\(\) \{ __sourceEditSession = \{ edits: \[\] \}; \}/.test(e));
+  ok("locking flushes the buffer into ONE commit entry via summarizeEdits", /function flushSourceEditSession\(topic, opts\)[\s\S]{0,400}SD\.summarizeEdits\(s\.edits\)/.test(e) && /type: "commit", charsAdded:/.test(e));
+  ok("the commit why-note is optional + skippable (Skip / Escape still commits)", /function sourceCommitNoteModal\(onCommit\)[\s\S]{0,700}onClose: function \(\) \{ if \(done\) return; done = true; onCommit\(""\); \}/.test(e));
+  ok("the lock toggle routes through one begin/flush entry point (setSourceUnlocked)", /function setSourceUnlocked\(v, opts\)/.test(e) && /onClick: function \(\) \{ setSourceUnlocked\(!__sourceUnlocked\); \}/.test(e));
+  ok("creating an alternate logs a discrete alternate-created entry", /type: "alternate-created", markId: mk\.id/.test(e));
+  ok("the timeline MERGES import events (topic.history) with doc events (model.history)", /var imports = \(topic\.history \|\| \[\]\)\.map/.test(e) && /historyEntryView\(e\)/.test(e) && /var rows = imports\.concat\(docRows\)/.test(e));
+  ok("the merged rows sort newest-first across both streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
+  ok("the synthetic 'Last edited' node only fills in when there are no doc commits", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

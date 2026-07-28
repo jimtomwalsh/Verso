@@ -636,7 +636,8 @@ Controls stay out of the way until you're actually looking at that section.
 **A topic's history.** The info panel's History section shows every import and re-import that
 touched a topic as a timeline, newest first — file, version, publish date, and what changed each
 time (new sections, sections updated from source, sections flagged for review). A topic you wrote
-by hand shows a single "Created" entry.
+by hand shows a single "Created" entry. In continuous-document mode (below) the same timeline also
+records your edits and annotations (see "History records what changed and why").
 
 **Comments.** The same comment/discussion feature as the canvas editor, for this wiki. Click the
 comment icon next to any section to open its thread — write a note, reply, mark it Resolved, or
@@ -682,6 +683,14 @@ In this mode:
   as you edit around it the anchor moves with the text, and if you delete the anchored text the
   mark is flagged as broken. **Ctrl/Cmd+Z** is a document-aware undo — it restores deleted text
   *and* reconnects its mark, which the browser's own undo cannot do.
+- **History records what changed and why.** The info panel's **History** timeline now shows your
+  editing, not just imports. A run of prose edits between unlocking and locking collapses into one
+  **"Edited source"** entry (with a `+added / −removed` character summary), so the log reads as
+  meaningful changes rather than keystroke noise. When you **lock**, a small dialog offers an
+  optional note — *why* you made the change — which you can type or **Skip**. Structural events
+  each get their own entry: an alternate added, a mark going stale, broken, or restored, a comment
+  opened or resolved. Import events (from the section view) and these doc events share one timeline,
+  newest first.
 - **Show/hide marks** with the eye button in the bottom bar. Marked spans are tinted by type
   (linked / alternate / comment), so annotation never clutters plain reading.
 - **Jump around with the outline.** A **table of contents** down the left side lists the document's
@@ -694,9 +703,9 @@ In this mode:
   **Alternates**, **Linked**, or **Comments** so the three kinds are never read mixed, and click any
   row to jump straight to that mark. Press **Esc** or the button again to close it.
 
-This is an early view — pinned side-panels for alternates and comments, and the variant columns,
-arrive in later updates; for now marks are added and shown, and the section editor above remains
-the full-featured path.
+This is an early view — the variant columns and object marks (making an image or table a
+first-class annotatable unit) arrive in later updates; the section editor above remains the
+full-featured path.
 
 ---
 
