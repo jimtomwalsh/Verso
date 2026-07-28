@@ -10734,6 +10734,11 @@
   // to false is collapsed; default open) + the chapter drag-reorder state.
   var __sourceOpenChapters = {}; // chapterKey -> false collapses it in the TOC (default open)
   var __sourceChapterDrag = null; // { key } | null
+  // Source v2 (find-word-cycling): the TOC search finds down to the word/line level. The live
+  // ordered hits + the cursor into them drive the "N matches" count, next/prev cycling, and the
+  // TOC filter (a heading is kept when it owns a hit). Recomputed by renderSourceUnifiedToc.
+  var __sourceFindMatches = []; // [{nodeKey,start,len,index}] in document order for the current query
+  var __sourceFindIndex = 0;    // which hit is currently scrolled-to + highlighted
 
   function exitSelectMode() {
     __sourceSelectModeActive = false;
@@ -10908,6 +10913,53 @@
     var target = host.querySelector('[data-node="' + key + '"]');
     if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
   }
+
+  // ---- find-to-word + match cycling (find-word-cycling, spec 2c section 2) ----
+  // The TOC search finds every occurrence of the query across the whole document (not just
+  // headings). The hits drive a "N matches" count + next/prev cycling that scrolls to and paints
+  // each one, and the same hits filter the TOC (a heading stays when it owns a hit). The paint
+  // reuses the mounted marks engine's rangeFor (model offset -> live DOM Range) into a dedicated
+  // CSS Custom Highlight so it never collides with the alternate/link/comment sets.
+  function clearSourceFindHighlight() {
+    if (typeof CSS !== "undefined" && CSS.highlights) { var hl = CSS.highlights.get("sd-find"); if (hl) hl.clear(); }
+  }
+  function paintSourceFindHit(hit) {
+    if (!hit || typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") return;
+    var hl = CSS.highlights.get("sd-find"); if (!hl) { hl = new Highlight(); CSS.highlights.set("sd-find", hl); }
+    hl.clear();
+    var eng = __sourceMarksEngine; if (!eng || !eng.rangeFor) return;
+    var r = eng.rangeFor({ nodeKey: hit.nodeKey, start: hit.start, len: hit.len });
+    if (r) hl.add(r);
+  }
+  function scrollToSourceFindHit(hit) {
+    var host = document.getElementById("source-stage-article"); if (!host || !hit) return;
+    var el = host.querySelector('[data-node="' + hit.nodeKey + '"]');
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+    // paint after layout settles so rangeFor reads final text nodes
+    requestAnimationFrame(function () { paintSourceFindHit(hit); });
+  }
+  // Step the find cursor by dir (+1 next / -1 prev), wrapping, then scroll+paint + refresh the nav.
+  function cycleSourceFind(dir) {
+    if (!__sourceFindMatches.length) return;
+    __sourceFindIndex = (__sourceFindIndex + dir + __sourceFindMatches.length) % __sourceFindMatches.length;
+    scrollToSourceFindHit(__sourceFindMatches[__sourceFindIndex]);
+    renderSourceFindNav();
+  }
+  // The contextual match navigator ("3 / 12" + prev/next), shown only while a query has hits.
+  function renderSourceFindNav() {
+    var nav = document.getElementById("source-find-nav"); if (!nav) return;
+    nav.innerHTML = "";
+    var q = __sourceSearchQuery || "", U = window.VersoUI;
+    if (!q) { nav.style.display = "none"; return; }
+    nav.style.display = "";
+    var n = __sourceFindMatches.length;
+    var count = h("span", "source-find-nav__count", n ? (__sourceFindIndex + 1) + " / " + n : "No matches");
+    nav.appendChild(count);
+    if (n && U && U.IconButton) {
+      nav.appendChild(U.IconButton({ icon: "chevron-up", label: "Previous match", onClick: function () { cycleSourceFind(-1); } }));
+      nav.appendChild(U.IconButton({ icon: "chevron-down", label: "Next match", onClick: function () { cycleSourceFind(1); } }));
+    }
+  }
   // Chapter drag-reorder on a TOC chapter row: same drop-marker idiom as the topic-row drag it
   // replaces (tree-drop-before/after + clearTreeMarks), but it moves a whole chapter block in the
   // one document via SourceDoc.moveChapter.
@@ -10945,8 +10997,10 @@
     }
   }
   // Render the one-document TOC into the left rail: chapters as top-level TreeItem rows (twirl +
-  // heading-count badge), their headings nested one/two levels deep. Filter narrows by heading
-  // text (fuzzy). Every row is the canonical VersoUI.TreeItem (DSLMS structure/TreeItem).
+  // heading-count badge), their headings nested one/two levels deep. The search finds every hit
+  // across the whole document (find-word-cycling); the TOC narrows to headings that OWN a hit --
+  // one mechanism drives the count, the highlight, and this filter. Rows are canonical
+  // VersoUI.TreeItem (DSLMS structure/TreeItem).
   function renderSourceUnifiedToc(master) {
     if (typeof document === "undefined") return;
     renderSourceToolbar(null, 0); // one-doc toolbar: import only
@@ -10956,11 +11010,18 @@
     if (!U || !U.TreeItem || !SD) return;
     var model = ensureSourceDocModel(master);
     var q = __sourceSearchQuery || "";
-    function hit(t) { return !q || SD.fuzzyMatch(t || "", q); }
+    // Recompute the live hits (the count/cycle source of truth) and the set of headings that own
+    // one: headingKeyForNode of a heading-text hit is that heading itself, so this covers both
+    // heading matches and body matches uniformly.
+    __sourceFindMatches = q ? SD.findMatches(model, q) : [];
+    if (__sourceFindIndex >= __sourceFindMatches.length) __sourceFindIndex = 0;
+    var kept = null;
+    if (q) { kept = {}; __sourceFindMatches.forEach(function (m) { var hk = SD.headingKeyForNode(model, m.nodeKey); if (hk) kept[hk] = 1; }); }
+    function keep(key) { return !q || (kept && kept[key]); }
     var tree = SD.outline(model), rendered = 0;
     tree.forEach(function (ch) {
-      var kids = (ch.children || []).filter(function (k) { return hit(ch.text) || hit(k.text); });
-      if (q && !hit(ch.text) && !kids.length) return; // chapter filtered out entirely
+      var kids = (ch.children || []).filter(function (k) { return keep(k.key); });
+      if (q && !keep(ch.key) && !kids.length) return; // chapter has no hit anywhere -> filtered out
       var open = q ? true : (__sourceOpenChapters[ch.key] !== false); // an active filter force-opens
       var count = (ch.children || []).length;
       var chapterRow = U.TreeItem({
@@ -10983,7 +11044,8 @@
         host.appendChild(kr); rendered++;
       });
     });
-    if (!rendered) host.appendChild(h("div", "source-stage__empty", q ? "No headings match." : "This document has no headings yet."));
+    if (!rendered) host.appendChild(h("div", "source-stage__empty", q ? "No matches." : "This document has no headings yet."));
+    renderSourceFindNav();
     updateSourceScrollSpy();
   }
 
@@ -12516,11 +12578,24 @@
     var search = h("label", "vbrowser__search source-stage__search-field");
     search.innerHTML = window.Icon ? window.Icon("search") : "";
     var unified = !!sourceMasterFor(activeSourceProductId());
-    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = unified ? "find a heading" : "search topics + text";
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = unified ? "find in document" : "search topics + text";
     input.value = __sourceSearchQuery;
-    input.addEventListener("input", function () { __sourceSearchQuery = input.value; renderSourceTopicList(); });
+    input.addEventListener("input", function () {
+      __sourceSearchQuery = input.value;
+      renderSourceTopicList(); // recomputes __sourceFindMatches + the TOC + the match nav
+      if (unified) {
+        __sourceFindIndex = 0;
+        if (__sourceFindMatches.length) scrollToSourceFindHit(__sourceFindMatches[0]); else clearSourceFindHighlight();
+      }
+    });
+    // Enter cycles to the next match, Shift+Enter to the previous (find-word-cycling).
+    if (unified) input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); cycleSourceFind(e.shiftKey ? -1 : 1); } });
     search.appendChild(input);
     host.appendChild(search);
+    // The contextual match navigator ("3 / 12" + prev/next) lives just under the field; it is
+    // populated by renderSourceFindNav (looked up by id) and stays put across cycling so the field
+    // keeps focus.
+    if (unified) { var findNav = h("div", "source-find-nav"); findNav.id = "source-find-nav"; host.appendChild(findNav); }
   }
 
   function newTopicModal() {

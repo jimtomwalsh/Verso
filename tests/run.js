@@ -8429,7 +8429,7 @@ section("Product Rail: Source stage nav + article");
   // search input and the shared product-context change (Epic 1's dropdown).
   ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
   ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); \}/.test(e));
-  ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{ __sourceSearchQuery = input\.value; renderSourceTopicList\(\); \}\);/.test(e));
+  ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(e));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
   ok("the facet SegmentedControl re-renders the article, gated through isValidFacet", /onChange: function \(v\) \{ if \(!isValidFacet\(v\)\) return; __sourceActiveFacet = v; renderSourceArticle\(\); \}/.test(e));
   ok("every column's body (single or multi) is rendered through the shared MarkdownLite primitive, not re-parsed", /window\.MarkdownLite \? window\.MarkdownLite\.render\(c\.text\)/.test(e));
@@ -11410,6 +11410,34 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
     return SD.chapters(d6).map(function (c) { return c.text; }).join(",") === "Alpha,Beta,Gamma";
   })());
 
+  // --- find-to-word + match cycling (find-word-cycling ticket, spec 2c section 2) ---
+  var fdoc = SD.create([
+    { type: "heading", level: 1, text: "Manifold", chapter: true },
+    { type: "paragraph", text: "Flush the manifold. Flush it twice." },
+    { type: "heading", level: 2, text: "Bleeding" },
+    { type: "paragraph", text: "Bleed the line, then flush again." }
+  ]);
+  ok("findMatches returns every case-insensitive occurrence across the whole document, in order", (function () {
+    var ms = SD.findMatches(fdoc, "flush");
+    return ms.length === 3 && ms[0].nodeKey === fdoc.nodes[1].key && ms[0].len === 5
+      && ms[2].nodeKey === fdoc.nodes[3].key && ms[1].index === 1;
+  })());
+  ok("findMatches counts repeated hits within one node (two 'Flush' in the first paragraph)", (function () {
+    return SD.findMatches(fdoc, "flush").filter(function (m) { return m.nodeKey === fdoc.nodes[1].key; }).length === 2;
+  })());
+  ok("findMatches on an empty needle is no matches; a miss is zero", (function () {
+    return SD.findMatches(fdoc, "").length === 0 && SD.findMatches(fdoc, "zzz").length === 0;
+  })());
+  ok("each hit is a highlightable span -- its slice equals the needle (case-folded)", (function () {
+    var ms = SD.findMatches(fdoc, "manifold");
+    return ms.length === 2 && SD.nodeText(SD.nodeByKey(fdoc, ms[0].nodeKey)).substr(ms[0].start, ms[0].len).toLowerCase() === "manifold";
+  })());
+  ok("headingKeyForNode reports the section a hit sits under (body hit -> its preceding heading)", (function () {
+    var bleedPara = fdoc.nodes[3].key, flushPara = fdoc.nodes[1].key;
+    return SD.headingKeyForNode(fdoc, bleedPara) === fdoc.nodes[2].key // 'Bleeding'
+      && SD.headingKeyForNode(fdoc, flushPara) === fdoc.nodes[0].key;  // 'Manifold' chapter
+  })());
+
   // editor wiring: the migration is guarded + reversible + stored as a reserved master.
   var e = src("src/editor.js");
   ok("the unified doc lives in a reserved 'source master' component keyed off product.groundTruthId", /function sourceMasterFor\(productId\)[\s\S]{0,200}p\.groundTruthId[\s\S]{0,120}m\.sourceMaster/.test(e));
@@ -11427,7 +11455,14 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("the one-doc toolbar keeps ONLY Markdown import (topic-management is gone)", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,220}icon: "upload", label: "Import from Markdown[\s\S]{0,140}return;/.test(e));
   ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(e));
   ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(e) && /it\.classList\.toggle\("is-selected", on\)/.test(e));
-  ok("the search field prompts 'find a heading' under one document", /unified \? "find a heading" : "search topics \+ text"/.test(e));
+  ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(e));
+
+  // find-word-cycling wiring (spec 2c section 2)
+  ok("the TOC recomputes live find hits + filters headings that own a hit (one mechanism)", /__sourceFindMatches = q \? SD\.findMatches\(model, q\) : \[\];[\s\S]{0,220}var hk = SD\.headingKeyForNode\(model, m\.nodeKey\); if \(hk\) kept\[hk\] = 1;/.test(e));
+  ok("a find hit is painted into a dedicated sd-find CSS Custom Highlight via the marks engine's rangeFor", /CSS\.highlights\.get\("sd-find"\)[\s\S]{0,200}eng\.rangeFor\(\{ nodeKey: hit\.nodeKey, start: hit\.start, len: hit\.len \}\)/.test(e));
+  ok("cycling steps the cursor with wrap, scrolls to + paints the hit, refreshes the nav", /function cycleSourceFind\(dir\)[\s\S]{0,220}__sourceFindIndex \+ dir \+ __sourceFindMatches\.length\) % __sourceFindMatches\.length;[\s\S]{0,80}scrollToSourceFindHit/.test(e));
+  ok("the match navigator shows N/total + prev/next only while a query is active", /function renderSourceFindNav\(\)[\s\S]{0,180}if \(!q\) \{ nav\.style\.display = "none"; return; \}[\s\S]{0,400}"Previous match"[\s\S]{0,160}"Next match"/.test(e));
+  ok("Enter cycles next, Shift\\+Enter previous, in the find field", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleSourceFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

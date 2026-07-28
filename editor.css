@@ -461,6 +461,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-stage__search { padding: 10px 10px 6px; flex: 0 0 auto; }
 /* .vbrowser__search is a fixed 260px in its own toolbar home; fill the nav instead. */
 .source-stage__search .vbrowser__search { width: 100%; }
+/* Source v2 (find-word-cycling): the match navigator under the search field -- "3 / 12" + prev/
+   next, only while a query is active. */
+.source-find-nav { display: flex; align-items: center; gap: 2px; padding: 4px 2px 0; }
+.source-find-nav__count { flex: 1 1 auto; font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
 .source-stage__topics { flex: 1 1 auto; overflow-y: auto; padding: 0 4px 10px; }
 /* Matches the Structure outliner's chapter-grouping tier (.tree-chapter__name) --
    same uppercase-eyebrow token treatment, not hand-set numbers. */
@@ -704,6 +708,9 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 ::highlight(sd-active) { background-color: rgba(234, 179, 8, 0.34); }
 ::highlight(sd-stale) { background-color: rgba(249, 115, 22, 0.18); }
 ::highlight(sd-broken) { background-color: rgba(239, 68, 68, 0.20); text-decoration: line-through; text-decoration-color: rgb(220, 38, 38); }
+/* Source v2 (find-word-cycling): the current find hit -- a distinct, strong tint so the cycled-to
+   match reads apart from the alternate/link/comment mark sets. */
+::highlight(sd-find) { background-color: rgba(250, 204, 21, 0.45); color: inherit; }
 
 /* Objects (image/table) as first-class markable nodes: hover invites the click; a ring shows the
    current selection; a status tint mirrors the ::highlight() mark colours (no Range to highlight). */
