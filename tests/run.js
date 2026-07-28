@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -10844,6 +10844,56 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
     var types = seeded.nodes.map(function (n) { return n.type; });
     return types.indexOf("paragraph") > -1 && types.indexOf("list") > -1;
   })());
+
+  // --- range-mark engine: status, ⟳ update-with-appended-copy, relationships, history ---
+  var mm = SD.create([{ type: "paragraph", text: "Flush the manifold quarterly and log the service." }]);
+  var mk = mm.nodes[0].key;
+  var ph = "Flush the manifold quarterly";
+  var link = SD.addMark(mm, { type: "link", anchor: { nodeKey: mk, start: 0, len: ph.length }, locations: [{ doc: "QS", section: "Care", loc: "Step 1" }] });
+  var alt = SD.addMark(mm, { type: "alternate", anchor: { nodeKey: mk, start: mm.nodes[0].text.indexOf("log the service"), len: "log the service".length }, alt: "record it" });
+
+  ok("markStatus: a fresh mark is green/in-sync", SD.markStatus(link).dot === "green");
+  ok("markMeta: each type carries a distinct visual class + label", (function () {
+    return SD._pure.markMeta({ type: "link" }).cls === "sd-mark-link" && SD._pure.markMeta({ type: "comment" }).cls === "sd-mark-comment" && SD._pure.markMeta({ type: "alternate" }).cls === "sd-mark-alt";
+  })());
+  ok("markExtendedBy: a selection that fully contains + extends a mark is offered ⟳ update", (function () {
+    var ext = SD.markExtendedBy(mm, { nodeKey: mk, start: 0, len: ph.length + 6 }); // extends past the link
+    return ext && ext.id === link.id;
+  })());
+  ok("markExtendedBy: a selection equal to (not longer than) the mark is NOT an update target", SD.markExtendedBy(mm, { nodeKey: mk, start: 0, len: ph.length }) === null);
+  ok("⟳ updateMark captures the appended text into the existing mark + resets its baseText", (function () {
+    SD.updateMark(mm, link.id, { nodeKey: mk, start: 0, len: ph.length + 5 }); // + " and"
+    var m = SD.markById(mm, link.id);
+    return m.anchor.len === ph.length + 5 && m.baseText === SD.anchorText(mm, m.anchor) && m.locations[0].doc === "QS";
+  })());
+  ok("marksOverlapping: hit-tests marks covering a point/range in a node", (function () {
+    var hits = SD.marksOverlapping(mm, mk, 2, 0); // inside "Flush..."
+    return hits.length === 1 && hits[0].id === link.id;
+  })());
+  ok("broken detection logs a discrete History event on the edit that breaks a mark", (function () {
+    var m5 = SD.create([{ type: "paragraph", text: "The unit arbitrates contention by headroom." }]);
+    var kk = m5.nodes[0].key, pph = "arbitrates contention by headroom";
+    var lk = SD.addMark(m5, { type: "link", anchor: { nodeKey: kk, start: m5.nodes[0].text.indexOf(pph), len: pph.length } });
+    SD.applyTextEdit(m5, kk, "The unit .");  // delete the whole anchored phrase -> mark breaks
+    var brokeEvents = (m5.history || []).filter(function (h) { return h.type === "mark-broken" && h.markId === lk.id; });
+    return brokeEvents.length === 1;
+  })());
+})();
+
+// ---- Source rewrite (Epic 2b): mark painting engine loads (DOM-verified in browser) ----
+// source-marks.js is the DOM painting layer (CSS Custom Highlight over live Ranges). Its offset
+// walking + selection reading need a real DOM/TreeWalker, so its behaviour is proven by the
+// Puppeteer harness (prototypes/source-doc-spike-harness.html and the marks harness), not here;
+// this section only asserts the module loads clean and exposes its contract.
+section("Source rewrite: mark painting engine contract (Epic 2b)");
+(function () {
+  var SM = require(path.join(ROOT, "src/source-marks.js"));
+  ok("SourceMarks exposes create() + hasHighlight()", typeof SM.create === "function" && typeof SM.hasHighlight === "function");
+  ok("hasHighlight() is false headlessly (no CSS.highlights in node) -> paint is a safe no-op", SM.hasHighlight() === false);
+  var eng = SM.create({ root: null, model: { marks: [] } });
+  ok("an engine instance exposes the paint/selection/hit-test contract", typeof eng.paint === "function" && typeof eng.selectionAnchor === "function" && typeof eng.markAtPoint === "function");
+  var threw = false; try { eng.paint(); } catch (e) { threw = true; }
+  ok("paint() is a no-op (does not throw) when the Highlight API is unavailable", threw === false);
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
