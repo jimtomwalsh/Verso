@@ -227,6 +227,30 @@
     });
     return row;
   }
+  // ChoiceCards — a single-select grid of labelled cards (title + optional description),
+  // for picking one of several presets/modes where a SegmentedControl is too dense (5+
+  // options, each wanting a description). SPEC 7 uses it for the create-flow preset grid;
+  // reusable by the cell switcher and doc-type picker. props: { options:[{value,title,desc}],
+  // value, onChange, columns }. Self-updates its is-on state on click.
+  function ChoiceCards(props) {
+    props = props || {};
+    var grid = h("div", "vds-choicecards");
+    if (props.columns) grid.style.gridTemplateColumns = "repeat(" + props.columns + ", 1fr)";
+    var cards = [];
+    (props.options || []).forEach(function (o) {
+      var card = h("button", "vds-choicecard" + (o.value === props.value ? " is-on" : ""));
+      card.type = "button"; card.setAttribute("data-value", o.value);
+      card.appendChild(h("span", "vds-choicecard__title", o.title == null ? String(o.value) : String(o.title)));
+      if (o.desc != null) card.appendChild(h("span", "vds-choicecard__desc", String(o.desc)));
+      card.addEventListener("click", function () {
+        cards.forEach(function (c) { c.classList.remove("is-on"); });
+        card.classList.add("is-on");
+        if (typeof props.onChange === "function") props.onChange(o.value);
+      });
+      cards.push(card); grid.appendChild(card);
+    });
+    return grid;
+  }
   // Switch — EXACT drop-in for editor.js `switchEl` (same uiswitch DOM). Self-
   // updates its is-on/aria state; callers that re-render simply discard it.
   function Switch(props) {
@@ -560,7 +584,7 @@
     Icon: Icon,
     Button: Button, IconButton: IconButton,
     IconField: IconField, TextField: TextField, FieldRow: FieldRow, TwoUp: TwoUp,
-    SegmentedControl: SegmentedControl, Switch: Switch, SwitchRow: SwitchRow,
+    SegmentedControl: SegmentedControl, ChoiceCards: ChoiceCards, Switch: Switch, SwitchRow: SwitchRow,
     Select: Select, Checkbox: Checkbox, ColorField: ColorField,
     Panel: Panel, PanelSection: PanelSection, Breadcrumb: Breadcrumb,
     Tabs: Tabs, DocumentTab: DocumentTab,

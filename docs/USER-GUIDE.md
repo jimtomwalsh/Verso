@@ -48,6 +48,13 @@ Verso is a plain web app — nothing to install.
 Your work **saves automatically to this browser** (IndexedDB) as you go; the **All changes
 saved** status in the top bar confirms it.
 
+**Create a document.** The **＋** beside the tabs opens **New document**: pick a **Product**
+(defaults to the one you're scoped to), a **preset** — the starting matrix cell (eLearning,
+Presentation, 1-pager, Quick-start guide, Responsive doc), each shown as *geometry · interactive
+or static* — then a **title** and **code**. The document is born in that Product and that cell;
+you can change the cell later. The same dialog also opens a saved course, imports a document, or
+loads a sample.
+
 > **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
 > before clearing browser data or switching machines (§15).
 
