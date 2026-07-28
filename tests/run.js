@@ -8525,7 +8525,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
 
   // Import from Markdown: same active-Product gate, blocked without a chosen file, and
   // the variant file list is the Product's OWN declared variants (no free-form entry).
-  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,600}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
+  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,900}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
   ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(e));
   ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(e));
   ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(e));
@@ -11284,6 +11284,102 @@ section("Source rewrite: variant per-node divergence, model layer (Epic 2b)");
   })());
 })();
 
+// Source v2 (spec 2d): cross-variant manual combine/import. variantImportPlan reconciles a
+// variant's manual against the Flagship base per node (SHARED / DIVERGED / ABSENT / ADDED-ONLY),
+// and applyVariantImportPlan writes ONLY per-variant overrides -- the base + other variants are
+// never touched. Pure cores, headlessly testable like importPlan.
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function baseDoc() {
+    return SD.create([
+      { type: "heading", level: 1, chapter: true, text: "Intro" },
+      { type: "paragraph", text: "Shared opening line." },
+      { type: "paragraph", text: "Flagship wording here." },
+      { type: "paragraph", text: "Only the flagship has this." }
+    ]);
+  }
+  function chap(name, texts) { return [{ name: name, nodes: texts.map(function (t) { return { type: "paragraph", text: t }; }) }]; }
+
+  // DIVERGE + ABSENT: variant reworded line 2 and dropped line 3
+  ok("variantImportPlan: a reworded line diverges, a dropped line goes absent, a match is shared", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    var s = plan.summary;
+    return s.shared === 1 && s.diverged === 1 && s.absent === 1 && s.added === 0;
+  })());
+  ok("applyVariantImportPlan writes ONLY Model-Y overrides; the Flagship base is untouched", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    SD.applyVariantImportPlan(m, plan);
+    var body = m.nodes.slice(1); // after the chapter heading
+    var l1 = SD.nodeForVariant(body[0], "Model-Y"); // shared
+    var l2f = SD.nodeForVariant(body[1], SD.FLAGSHIP), l2y = SD.nodeForVariant(body[1], "Model-Y"); // diverged
+    var l3y = SD.nodeForVariant(body[2], "Model-Y"); // absent
+    return l1.source === "inherited" && l1.present &&
+      /Flagship wording here\./.test(l2f.text) && l2y.diverged && /Variant wording here\./.test(l2y.text) &&
+      l3y.present === false && l3y.source === "absent";
+  })());
+
+  // ADDED-ONLY node: variant manual has an extra paragraph after a shared one
+  ok("variantImportPlan: a variant-only paragraph is added-only (base-absent, present for the variant)", (function () {
+    var m = SD.create([{ type: "heading", level: 1, chapter: true, text: "Ops" }, { type: "paragraph", text: "Common step." }]);
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Ops", ["Common step.", "Extra Model-Y step."]));
+    SD.applyVariantImportPlan(m, plan);
+    var added = m.nodes[m.nodes.length - 1];
+    return plan.summary.added === 1 && added.baseAbsent === true &&
+      SD.nodeForVariant(added, SD.FLAGSHIP).present === false &&
+      SD.nodeForVariant(added, "Model-Y").present === true && /Extra Model-Y step\./.test(SD.nodeForVariant(added, "Model-Y").text);
+  })());
+
+  // ADDED-ONLY chapter: a chapter only the variant's manual has
+  ok("variantImportPlan: an unmatched chapter becomes an added-only chapter (heading + nodes, base-absent)", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Variant-only chapter", ["A line only Model-Y has."]));
+    SD.applyVariantImportPlan(m, plan);
+    var head = m.nodes[m.nodes.length - 2];
+    return plan.summary.chaptersAdded === 1 && head.type === "heading" && head.chapter === true && head.baseAbsent === true &&
+      SD.nodeForVariant(head, SD.FLAGSHIP).present === false && SD.nodeForVariant(head, "Model-Y").present === true;
+  })());
+
+  // Identical manual -> all shared, zero ops
+  ok("variantImportPlan: an identical manual produces no overrides (all shared)", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Flagship wording here.", "Only the flagship has this."]));
+    return plan.ops.length === 0 && plan.summary.shared === 3;
+  })());
+
+  // Key preservation: the base node carrying the divergence keeps its key (marks ride along)
+  ok("applyVariantImportPlan preserves base node keys (marks + other variants ride along)", (function () {
+    var m = baseDoc();
+    var keyBefore = m.nodes[2].key;
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    SD.applyVariantImportPlan(m, plan);
+    return m.nodes[2].key === keyBefore;
+  })());
+
+  // One undo reverses the whole combine
+  ok("applyVariantImportPlan pushes ONE undo -- the whole combine reverses", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    SD.applyVariantImportPlan(m, plan);
+    SD.undo(m);
+    var body = m.nodes.slice(1);
+    return !(body[1].variants && body[1].variants["Model-Y"]) && !(body[2].variants && body[2].variants["Model-Y"]);
+  })());
+
+  // Re-import an updated manual updates the same override in place (no duplicate node)
+  ok("re-importing an updated variant manual updates the override in place, no duplicate", (function () {
+    var m = baseDoc();
+    SD.applyVariantImportPlan(m, SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "First variant text."])));
+    var lenAfterFirst = m.nodes.length;
+    SD.applyVariantImportPlan(m, SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Second variant text."])));
+    return m.nodes.length === lenAfterFirst && /Second variant text\./.test(SD.nodeForVariant(m.nodes[2], "Model-Y").text);
+  })());
+
+  // Flagship is not a variant target -- use importPlan for the base
+  ok("variantImportPlan returns null for Flagship (the base uses importPlan)", SD.variantImportPlan(baseDoc(), SD.FLAGSHIP, chap("Intro", ["x"])) === null);
+})();
+
 // Source v2 (spec 2c section 1): a Product's many topic docs become ONE continuous document.
 // concatChapters is the load-bearing pure core -- it must (a) emit a level-1 chapter heading
 // per topic, (b) survive the id-collision crux (each topic's model mints n-1/m-1... on its own
@@ -11497,7 +11593,10 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(e) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(e));
 
   // md-import-additive wiring (spec 2c section 4)
-  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{ importMarkdownAdditive\(\); return; \}/.test(e));
+  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(e));
+  ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(e));
+  ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(e));
+  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(n, shown\)/.test(e));
   ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
   ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
   ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));

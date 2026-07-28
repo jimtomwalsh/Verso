@@ -739,6 +739,97 @@
     return model;
   }
 
+  // ---- source v2: cross-variant manual combine/import (variant-combine-import, spec 2d) ------
+  // A variant's manual is imported into the SAME document as an OVERLAY on the Flagship base -- the
+  // base is never rewritten (that is what the flagship importPlan does). Within a name-matched
+  // chapter, align the incoming variant nodes to the Flagship body: an LCS by text gives the SHARED
+  // anchors (variant inherits the base), and the runs between anchors pair positionally -- each
+  // paired (base, incoming) is a DIVERGED wording, a leftover base node is ABSENT in the variant,
+  // and a leftover incoming node is ADDED-ONLY. A whole chapter only the variant has is an
+  // added-only chapter. Pure + DOM-free -> headlessly testable like importPlan.
+  function variantAlign(baseNodes, incoming) {
+    var a = baseNodes || [], b = incoming || [], m = a.length, n = b.length;
+    var dp = []; for (var x = 0; x <= m; x++) { dp.push(new Array(n + 1).fill(0)); }
+    for (var i = m - 1; i >= 0; i--) for (var j = n - 1; j >= 0; j--) {
+      dp[i][j] = (nodeText(a[i]) === nodeText(b[j])) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+    var p = 0, q = 0, pairs = [], absent = [], added = [], runBase = [], runIn = [];
+    function flushRun() {
+      var k = Math.min(runBase.length, runIn.length), t;
+      for (t = 0; t < k; t++) pairs.push({ base: runBase[t], incoming: runIn[t], kind: "diverged" });
+      for (t = k; t < runBase.length; t++) absent.push(runBase[t]);
+      for (t = k; t < runIn.length; t++) added.push(runIn[t]);
+      runBase = []; runIn = [];
+    }
+    while (p < m && q < n) {
+      if (nodeText(a[p]) === nodeText(b[q])) { flushRun(); pairs.push({ base: a[p], incoming: b[q], kind: "shared" }); p++; q++; }
+      else if (dp[p + 1][q] >= dp[p][q + 1]) { runBase.push(a[p]); p++; }
+      else { runIn.push(b[q]); q++; }
+    }
+    while (p < m) { runBase.push(a[p]); p++; }
+    while (q < n) { runIn.push(b[q]); q++; }
+    flushRun();
+    return { pairs: pairs, absent: absent, added: added };
+  }
+  // Build the preview PLAN for combining `incoming` chapters into `model` AS a named `variant`. The
+  // Flagship base is read-only here; the plan is a set of per-node overrides. Non-destructive: a
+  // SHARED match emits no op (the variant just inherits) -- import only ever ADDS divergence, so it
+  // never silently un-diverges a hand edit. Pure -- no mutation. Returns null for Flagship (use
+  // importPlan for the base).
+  function variantImportPlan(model, variant, incoming) {
+    if (isFlagship(variant)) return null;
+    var blocks = chapterBlocks(model), byName = {};
+    blocks.forEach(function (b) { if (b.key != null) byName[normChapterName(b.text)] = b; });
+    var ops = [], summary = { variant: variant, chaptersMatched: 0, chaptersAdded: 0, shared: 0, diverged: 0, absent: 0, added: 0 };
+    (incoming || []).forEach(function (ch) {
+      var name = (ch && ch.name != null && String(ch.name).trim()) ? String(ch.name) : "Untitled";
+      var match = byName[normChapterName(name)];
+      if (!match) {
+        ops.push({ type: "add-chapter", name: name, nodes: (ch.nodes || []) });
+        summary.chaptersAdded++; summary.added += (ch.nodes || []).length;
+        return;
+      }
+      summary.chaptersMatched++;
+      var body = model.nodes.slice(match.start + 1, match.end);
+      var al = variantAlign(body, ch.nodes || []);
+      al.pairs.forEach(function (pr) {
+        if (pr.kind === "shared") { summary.shared++; return; }
+        ops.push({ type: "diverge", nodeKey: pr.base.key, name: name, text: nodeText(pr.incoming), from: nodeText(pr.base) });
+        summary.diverged++;
+      });
+      al.absent.forEach(function (bn) { ops.push({ type: "absent", nodeKey: bn.key, name: name, from: nodeText(bn) }); summary.absent++; });
+      al.added.forEach(function (inn) { ops.push({ type: "add-node", chapterKey: match.key, name: name, node: inn, text: nodeText(inn) }); summary.added++; });
+    });
+    return { variant: variant, ops: ops, summary: summary };
+  }
+  // Apply a variant plan: write per-node overrides for plan.variant only. The Flagship base text and
+  // every other variant are untouched. Added nodes/chapters are base-absent (present only for this
+  // variant). Pushes ONE undo -- the whole combine is reversible.
+  function applyVariantImportPlan(model, plan) {
+    if (!model || !plan || !plan.variant) return model;
+    var variant = plan.variant;
+    pushUndo(model);
+    function freshKey() { var k; do { k = nextId(model, "n"); } while (nodeByKey(model, k)); return k; }
+    function ov(node) { if (!node.variants) node.variants = {}; return node.variants; }
+    (plan.ops || []).forEach(function (op) {
+      if (op.type === "diverge") { var n = nodeByKey(model, op.nodeKey); if (n) ov(n)[variant] = { text: op.text }; }
+      else if (op.type === "absent") { var n2 = nodeByKey(model, op.nodeKey); if (n2) ov(n2)[variant] = { absent: true }; }
+      else if (op.type === "add-node") {
+        var blocks = chapterBlocks(model), blk = null;
+        blocks.forEach(function (b) { if (b.key === op.chapterKey) blk = b; });
+        if (!blk) return;
+        var c = clone(op.node); c.key = freshKey(); c.baseAbsent = true; c.variants = {}; c.variants[variant] = { text: nodeText(op.node) };
+        model.nodes = model.nodes.slice(0, blk.end).concat([c], model.nodes.slice(blk.end));
+      } else if (op.type === "add-chapter") {
+        var head = { type: "heading", level: 1, chapter: true, text: op.name, key: freshKey(), baseAbsent: true, variants: {} };
+        head.variants[variant] = { text: op.name };
+        model.nodes.push(head);
+        (op.nodes || []).forEach(function (nd) { var cc = clone(nd); cc.key = freshKey(); cc.baseAbsent = true; cc.variants = {}; cc.variants[variant] = { text: nodeText(nd) }; model.nodes.push(cc); });
+      }
+    });
+    return model;
+  }
+
   // ---- full-text search (toc-search-drawer) ---------------------------------
   // Every searchable word on a topic: its name + all node text (continuous doc) or,
   // for a legacy section topic, each section heading + every facet string. The Source
@@ -802,7 +893,7 @@
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
@@ -818,7 +909,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,

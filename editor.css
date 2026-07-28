@@ -697,6 +697,17 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__h:first-child { margin-top: 0; }
 .source-doc__p { margin: 0.7em 0; }
+/* spec 2d: variant comparison columns. A diverged node splits into side-by-side columns inside the
+   reading column (never a new panel); shared nodes stay full-width. */
+.source-doc__vrow { display: flex; gap: var(--space-4); margin: 0.7em 0; align-items: stretch; }
+.source-doc__vcol { flex: 1 1 0; min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px); padding: var(--space-3) var(--space-4); background: var(--surface-panel); }
+.source-doc__vcol.is-diverged { border-color: var(--accent); }
+.source-doc__vcol.is-absent { opacity: 0.6; }
+.source-doc__vcol-head { font: var(--type-label); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-tertiary, var(--text-secondary)); margin-bottom: var(--space-2); }
+.source-doc__vcol.is-diverged .source-doc__vcol-head { color: var(--accent); }
+.source-doc__vcol-body { color: var(--text-primary); }
+.source-doc__vcol-absent { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+.source-doc__cols-hint { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); margin: 0 0 var(--space-4); }
 .source-doc__list { margin: 0.6em 0; padding-left: 22px; }
 .source-doc__list li { margin: 0.25em 0; }
 .source-doc__callout { border-left: 3px solid var(--accent); background: var(--surface-panel); padding: 12px 16px; border-radius: 4px; margin: 1.1em 0; }
