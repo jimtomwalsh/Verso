@@ -10435,9 +10435,11 @@
   /* @stage-rail-end */
 
   var __activeStage = "edit";
+  var STAGE_PERSIST_KEY = "verso.activeStage"; // persist the active stage so a refresh returns here, not Edit
   function setStage(stage) {
     if (!isValidStage(stage)) return;
     __activeStage = stage;
+    try { localStorage.setItem(STAGE_PERSIST_KEY, stage); } catch (e) {}
     if (typeof document === "undefined") return;
     ["lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
     var ws = document.getElementById("workspace");
@@ -10464,6 +10466,8 @@
       if (t.__navWired) return; t.__navWired = true;
       t.addEventListener("click", function () { setStage(t.getAttribute("data-rail-tab")); });
     });
+    // restore the stage the author left on (a refresh should not snap back to Edit)
+    try { var saved = localStorage.getItem(STAGE_PERSIST_KEY); if (isValidStage(saved)) __activeStage = saved; } catch (e) {}
     setStage(__activeStage);
   }
   window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; } }; // boot + settings
@@ -10905,6 +10909,7 @@
         label.addEventListener("click", function () {
           if (t.id === __sourceActiveTopicId) return;
           __sourceActiveTopicId = t.id;
+          try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, t.id); } catch (e) {} // return to this topic after a refresh
           __sourceActiveVariants = []; // a different topic may have a different variant set
           __sourceEditingCell = null; // don't carry an in-progress edit across topics
           __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind the doc model to the new topic
@@ -12392,7 +12397,12 @@
   // search field once, then re-renders the toolbar + topic list + article from current
   // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
   // inside renderSourceTopicList, not mounted separately).
+  var SOURCE_TOPIC_PERSIST_KEY = "verso.sourceTopic"; // the topic open on the Source stage, restored across a refresh
   function renderSourceStage() {
+    // restore the last-open topic on a fresh load (a refresh should return to the doc, not a blank stage)
+    if (!__sourceActiveTopicId) {
+      try { var savedT = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY); if (savedT && libComponents()[savedT]) __sourceActiveTopicId = savedT; } catch (e) {}
+    }
     mountSourceStageSearch();
     renderSourceTopicList();
     renderSourceArticle();
