@@ -10523,21 +10523,10 @@
       .filter(function (t) { return !activeProduct || t.productId === activeProduct; })
       .filter(function (t) { return topicMatchesQuery(t, query); });
   }
-  // md-topic-import: true when ANY section (Flagship or a variant override) on this
-  // topic has a pending re-import conflict flag -- drives the "Needs review" filter chip
-  // so a flagged section is discoverable without opening every topic to find it.
-  function topicNeedsReview(topic) {
-    return (topic.sections || []).some(function (s) {
-      if (s.sourceUpdate) return true;
-      return Object.keys(s.overrides || {}).some(function (v) { return s.overrides[v] && s.overrides[v].sourceUpdate; });
-    });
-  }
   // Groups topics by owning Product (label from ProductsStore; "" bucket -> "Unassigned",
-  // sorted last), each group's topics sorted by their canonical drag order (author-chosen,
-  // via the topic-row drag handle -- see canonicalizeTopicOrder/structMoveTopic). Callers
-  // must canonicalize order on the topic's FULL per-product population before calling this
-  // (see renderSourceTopicList) so order stays stable independent of any transient
-  // search/review filter narrowing what's actually passed in here.
+  // sorted last), each group's topics sorted by their canonical order (see canonicalizeTopicOrder).
+  // Only reached in the empty-Product onboarding fallback now that the unified TOC replaced the
+  // per-topic navigator; kept (with filterTopics/topicMatchesQuery) as a small pure helper.
   function groupTopicsByProduct(topics, products) {
     var groups = {};
     (topics || []).forEach(function (t) {
@@ -10579,30 +10568,6 @@
       });
       group.forEach(function (t, i) { t.order = i; });
     });
-  }
-  // Drag-and-drop reorder for the topic-nav rail's drag handle -- move dragId to just
-  // before/after refId, WITHIN the same Product group only (dropping across groups is a
-  // no-op; reassigning Product stays "Promote to Product…"/"Move to Product…"'s job, not
-  // this drag). Same splice-out/find-ref/splice-in shape as structMoveSection/
-  // structMoveChapter.
-  function structMoveTopic(dragId, refId, after) {
-    var comps = libComponents();
-    var drag = comps[dragId], ref = comps[refId];
-    if (!drag || !ref || drag.kind !== "topic" || ref.kind !== "topic" || dragId === refId) return;
-    var pid = drag.productId || "";
-    if (pid !== (ref.productId || "")) return;
-    var group = Object.keys(comps).map(function (k) { return comps[k]; })
-      .filter(function (t) { return t && t.kind === "topic" && (t.productId || "") === pid; });
-    canonicalizeTopicOrder(group);
-    var sorted = group.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
-    var di = sorted.findIndex(function (t) { return t.id === dragId; });
-    if (di < 0) return;
-    var item = sorted.splice(di, 1)[0];
-    var ri = sorted.findIndex(function (t) { return t.id === refId; });
-    var at = ri < 0 ? sorted.length : (after ? ri + 1 : ri);
-    sorted.splice(at, 0, item);
-    sorted.forEach(function (t, i) { t.order = i; });
-    saveLibrary();
   }
   // A section's text for the requested facet, falling back to "technical" then to
   // whichever facet IS present -- a section never renders blank just because the
@@ -10719,19 +10684,6 @@
   var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
   var __sourceWhereUsedMarkId = null; // the link mark shown in the pinned where-used ("Linked in N") panel
   var __sourceOpenCommentMarkId = null; // the comment mark whose thread card is open, or null
-  // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
-  // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
-  // unlocks them, mirroring the familiar Photos/Files/Gmail toggle rather than always
-  // showing a row of checkboxes nobody's using most of the time.
-  var __sourceSelectModeActive = false;
-  var __sourceSelectedTopicIds = [];
-  // md-topic-import: "Needs review" is a toggle, not a permanent tab -- it only ever
-  // shows (and only ever applies) when the current Product+search scope actually has
-  // 1+ flagged topics; auto-clears itself once nothing is left to review.
-  var __sourceReviewFilterActive = false;
-  // Drag state for the topic-nav rail's row drag (source-stage-topic-reorder) -- same
-  // shape as the outliner's treeDrag/the section grip's __sourceSectionDrag.
-  var __sourceTopicDrag = null; // { id } | null
   // Source v2 (unified-toc): the left rail is ONE document TOC of the active Product's unified
   // doc (chapters + nested headings) instead of a per-topic list. Chapter twirl state (a key set
   // to false is collapsed; default open) + the chapter drag-reorder state.
@@ -10742,76 +10694,6 @@
   // TOC filter (a heading is kept when it owns a hit). Recomputed by renderSourceUnifiedToc.
   var __sourceFindMatches = []; // [{nodeKey,start,len,index}] in document order for the current query
   var __sourceFindIndex = 0;    // which hit is currently scrolled-to + highlighted
-
-  function exitSelectMode() {
-    __sourceSelectModeActive = false;
-    __sourceSelectedTopicIds = [];
-  }
-
-  function deleteSelectedTopics() {
-    if (!__sourceSelectedTopicIds.length) return;
-    var comps = libComponents();
-    var n = __sourceSelectedTopicIds.length;
-    confirmModal("Delete " + n + " topic" + (n === 1 ? "" : "s"),
-      "Permanently delete " + n + " topic" + (n === 1 ? "" : "s") + " and all its sections? This can't be undone.",
-      function () {
-        __sourceSelectedTopicIds.forEach(function (id) {
-          delete comps[id];
-          if (__sourceActiveTopicId === id) __sourceActiveTopicId = null;
-        });
-        exitSelectMode();
-        saveLibrary();
-        renderSourceTopicList();
-        renderSourceArticle();
-      }, { okLabel: "Delete", danger: true });
-  }
-
-  // md-topic-import: bulk "Move to Product…" -- reassigns the selected topics'
-  // productId, content untouched. Reuses the exact Product-picker pattern
-  // promoteToProductModal already established (modalField + dsSelect + "+ Create a new
-  // Product…"), not a new control.
-  function moveSelectedTopicsModal() {
-    if (!__sourceSelectedTopicIds.length) return;
-    var n = __sourceSelectedTopicIds.length;
-    var NEW_KEY = "__new__";
-    var products = window.ProductsStore || {};
-    var productKeys = Object.keys(products);
-    var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
-    var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
-    var newNameVal = "";
-    var shell = dsModalShell({
-      title: "Move " + n + " topic" + (n === 1 ? "" : "s"),
-      subtitle: "Reassigns the selected topic(s) to a different Product. Content is never touched.",
-      primaryLabel: "Move",
-      onPrimary: function () {
-        var pid = chosen;
-        if (chosen === NEW_KEY) {
-          var name = (newNameVal || "").trim();
-          if (!name) return;
-          pid = createProduct(name).id;
-        }
-        var comps = libComponents();
-        __sourceSelectedTopicIds.forEach(function (id) {
-          var t = comps[id];
-          if (t) { t.productId = pid; t.updatedAt = Date.now(); }
-        });
-        saveLibrary();
-        shell.modal.close();
-        exitSelectMode();
-        renderSourceTopicList();
-        renderSourceArticle();
-      }
-    });
-    var box = shell.body;
-    var pRow = modalField(box, "Product");
-    var pSel = dsSelect(pOpts, chosen, function (v) { chosen = v; newNameRow.style.display = (v === NEW_KEY) ? "" : "none"; });
-    pSel.classList.add("modal-field__control");
-    pRow.appendChild(pSel);
-    var newNameRow = h("div"); newNameRow.style.display = (chosen === NEW_KEY) ? "" : "none";
-    var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
-    nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
-    box.appendChild(newNameRow);
-  }
 
   // A small canonical Badge overlaid on an IconButton's corner -- the notification-bell-
   // with-unread-count pattern -- so a count survives an icon-only treatment without
@@ -10827,62 +10709,21 @@
     return wrap;
   }
 
-  // One toolbar row, one place, always -- not a stack of full-width labeled buttons that
-  // grows with every ticket (/verso-frontend audit, 2026-07-27: four rounds of additions
-  // each passed review in isolation while the rail became an uncontrolled vertical stack
-  // with no hierarchy). Icon-only (IconButton, tooltip via its own `label` prop), a
-  // SINGLE row that swaps its contents by mode rather than appending a new row per
-  // feature: New topic / Import / Select / Needs-review (badge count) when idle;
-  // Select-all / Move / Delete / Done while select mode is active. A checkbox is
-  // already glyph-sized, so it needs no icon-button treatment of its own.
-  function renderSourceToolbar(topics, reviewCount) {
+  // The left-rail action row. Under the unified-document model (Source v2) there is no per-topic
+  // list to manage, so the topic-management actions -- select / delete / move / reorder / needs-
+  // review -- are gone (cleanup, spec 2c section 7.6). What remains: Markdown import always, plus
+  // "New topic" only in the empty-Product onboarding path (no document yet).
+  function renderSourceToolbar() {
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
     host.innerHTML = "";
     if (!window.VersoUI || !window.VersoUI.IconButton) return;
     var U = window.VersoUI;
-    // Source v2 (unified-toc): under one document there is no topic list to manage, so the only
-    // surviving left action is Markdown import (its additive-with-preview reshape is a later
-    // ticket). New-topic / select / delete / move / review-filter all go away with the list.
-    if (sourceMasterFor(activeSourceProductId())) {
-      var oneRow = h("div", "source-stage__toolbar");
-      oneRow.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
-      host.appendChild(oneRow);
-      return;
-    }
     var row = h("div", "source-stage__toolbar");
-
-    if (!__sourceSelectModeActive) {
+    if (!sourceMasterFor(activeSourceProductId())) {
       row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
-      row.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
-      row.appendChild(U.IconButton({
-        icon: "check-square", label: "Select",
-        onClick: function () { __sourceSelectModeActive = true; renderSourceTopicList(); }
-      }));
-      if (reviewCount) {
-        var reviewBtn = U.IconButton({
-          icon: "flag", label: "Needs review (" + reviewCount + ")", active: __sourceReviewFilterActive,
-          onClick: function () { __sourceReviewFilterActive = !__sourceReviewFilterActive; renderSourceTopicList(); }
-        });
-        row.appendChild(iconButtonWithBadge(reviewBtn, reviewCount));
-      }
-    } else {
-      if (U.Checkbox) {
-        var allChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length === topics.length;
-        var someChecked = __sourceSelectedTopicIds.length > 0 && __sourceSelectedTopicIds.length < topics.length;
-        var selectAll = U.Checkbox({
-          checked: allChecked, mixed: someChecked,
-          onChange: function (next) { __sourceSelectedTopicIds = next ? topics.map(function (t) { return t.id; }) : []; renderSourceTopicList(); }
-        });
-        selectAll.title = "Select all";
-        row.appendChild(selectAll);
-      }
-      if (__sourceSelectedTopicIds.length) {
-        row.appendChild(U.IconButton({ icon: "folder-input", label: "Move to Product… (" + __sourceSelectedTopicIds.length + ")", onClick: moveSelectedTopicsModal }));
-        row.appendChild(U.IconButton({ icon: "trash-2", label: "Delete selected (" + __sourceSelectedTopicIds.length + ")", danger: true, onClick: deleteSelectedTopics }));
-      }
-      row.appendChild(U.IconButton({ icon: "x", label: "Done", onClick: function () { exitSelectMode(); renderSourceTopicList(); } }));
     }
+    row.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
     host.appendChild(row);
   }
 
@@ -11057,48 +10898,21 @@
     // Source v2: when the active Product has a unified document, the rail is its one TOC.
     var master = sourceMasterFor(activeSourceProductId());
     if (master) { renderSourceUnifiedToc(master); return; }
+    // No unified document for this Product yet (an empty Product) -> the onboarding toolbar
+    // (import / new topic) + a plain, click-to-open list of any still-loose topics. The old
+    // select / reorder / bulk-move / needs-review machinery is gone with the topic model (cleanup).
+    renderSourceToolbar();
     var host = document.getElementById("source-topic-list"); if (!host) return;
     host.innerHTML = "";
-    // Canonicalize drag order across the FULL topic population (every Product, no search/
-    // review filter applied) so a topic's order stays stable regardless of what the current
-    // view happens to be scoped to -- see canonicalizeTopicOrder.
-    canonicalizeTopicOrder(filterTopics(libComponents(), null, ""));
-    var scopedTopics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
-    var reviewCount = scopedTopics.filter(topicNeedsReview).length;
-    if (!reviewCount) __sourceReviewFilterActive = false; // nothing left to review -> never leave a stale filter engaged
-    var topics = __sourceReviewFilterActive ? scopedTopics.filter(topicNeedsReview) : scopedTopics;
-    // A selected id that's fallen out of the current filtered view (search/product/
-    // review-filter changed) can no longer be acted on from here -- drop it rather than
-    // let "Delete selected"/"Move" silently reach past what's actually visible.
-    var visibleIds = {};
-    topics.forEach(function (t) { visibleIds[t.id] = true; });
-    __sourceSelectedTopicIds = __sourceSelectedTopicIds.filter(function (id) { return visibleIds[id]; });
-
-    renderSourceToolbar(topics, reviewCount);
-
+    var topics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
     if (!topics.length) {
-      host.appendChild(h("div", "source-stage__empty", __sourceReviewFilterActive ? "Nothing needs review." : "No topics yet."));
+      host.appendChild(h("div", "source-stage__empty", "No source document yet — import a Markdown file or add a topic to begin."));
       return;
     }
-
     groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
       host.appendChild(h("div", "source-stage__group-label", g.label));
       g.topics.forEach(function (t) {
         var row = h("div", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""));
-        if (__sourceSelectModeActive && window.VersoUI && window.VersoUI.Checkbox) {
-          var cb = window.VersoUI.Checkbox({
-            checked: __sourceSelectedTopicIds.indexOf(t.id) !== -1,
-            onChange: function (next) {
-              var idx = __sourceSelectedTopicIds.indexOf(t.id);
-              if (next && idx === -1) __sourceSelectedTopicIds.push(t.id);
-              else if (!next && idx !== -1) __sourceSelectedTopicIds.splice(idx, 1);
-              renderSourceTopicList();
-            }
-          });
-          cb.classList.add("source-stage__topic-checkbox");
-          cb.addEventListener("click", function (e) { e.stopPropagation(); });
-          row.appendChild(cb);
-        }
         var label = h("button", "source-stage__topic-label", t.name || "Untitled topic");
         label.type = "button";
         label.addEventListener("click", function () {
@@ -11113,36 +10927,6 @@
           renderSourceArticle();
         });
         row.appendChild(label);
-        // Drag-to-reorder (source-stage-topic-reorder): the whole row drags, same shape as
-        // the outliner's page/chapter rows (they have no inline-editable content either, so
-        // unlike the section grip handle, no separate handle is needed here). Disabled while
-        // select mode is active -- bulk-select and reorder are different modes, not mixed.
-        if (!__sourceSelectModeActive) {
-          row.setAttribute("draggable", "true");
-          row.addEventListener("dragstart", function (e) {
-            __sourceTopicDrag = { id: t.id };
-            try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
-            e.stopPropagation();
-          });
-          row.addEventListener("dragend", function () { __sourceTopicDrag = null; clearTreeMarks(); });
-          row.addEventListener("dragover", function (e) {
-            if (!__sourceTopicDrag || __sourceTopicDrag.id === t.id) return;
-            e.preventDefault(); e.stopPropagation();
-            var r = row.getBoundingClientRect();
-            row.__after = (e.clientY - r.top) > r.height / 2;
-            clearTreeMarks();
-            row.classList.add(row.__after ? "tree-drop-after" : "tree-drop-before");
-          });
-          row.addEventListener("dragleave", function () { row.classList.remove("tree-drop-before", "tree-drop-after"); });
-          row.addEventListener("drop", function (e) {
-            if (!__sourceTopicDrag) return;
-            e.preventDefault(); e.stopPropagation();
-            var dragId = __sourceTopicDrag.id, after = row.__after;
-            __sourceTopicDrag = null; clearTreeMarks();
-            structMoveTopic(dragId, t.id, after);
-            renderSourceTopicList();
-          });
-        }
         host.appendChild(row);
       });
     });
