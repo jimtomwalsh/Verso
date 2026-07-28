@@ -589,7 +589,8 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
 - **Find in the document.** The search field above the outline finds your text anywhere in the
   document — headings and body copy — as you type. It shows a match count ("3 / 12"); press Enter
   (or the up/down arrows next to the count) to jump between hits, each scrolled to and highlighted.
-  The outline narrows to the sections that contain a match, so it doubles as a filter.
+  The outline narrows to the sections that contain a match, so it doubles as a filter, and it
+  scrolls to and highlights the entry that owns the hit you're on so you never lose your place.
 - **The one action left in the rail is Import from Markdown.** Because there's one document, the old
   per-topic tools — new topic, select, delete, move, reorder topics — are gone. Import is now
   **additive**: pick a Markdown file (it can be a segment — just one chapter), and Verso shows a
@@ -668,8 +669,7 @@ Comments section lists every comment on the topic (Open / Resolved), including a
 **Continuous-document mode (beta).** A newer way to author a topic: instead of separate sections
 with Technical/Digestible/Dot-point versions, the whole topic reads and edits as **one continuous
 document** — like the manual it came from. Open a topic and click **Switch to continuous document
-(beta)** at the bottom of the article; your existing section text is carried over (nothing is lost,
-and **Revert to sections** in the bottom bar brings the old view back at any time).
+(beta)** at the bottom of the article; your existing section text is carried over (nothing is lost).
 
 In this mode:
 

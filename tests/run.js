@@ -2406,10 +2406,11 @@ section("#69 migration cutover");
   ok("no bulk/batch variant exists anywhere (only ever operates on the single `doc`)", (ed.match(/promoteToProductModal\(/g) || []).length === 2); // definition + the one call site above
   var ptmStart = ed.indexOf("function promoteToProductModal()");
   ok("promoteToProductModal found", ptmStart !== -1);
-  var ptmBody = ed.slice(ptmStart, ptmStart + 1700);
+  var ptmBody = ed.slice(ptmStart, ptmStart + 1900);
   ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
   ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Format"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
   ok("writes ONLY doc.meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(doc, pid, stage\);\s*\n\s*saveRegistry\(registry\);/.test(ptmBody));
+  ok("A1: onPrimary dismisses the modal (shell.modal.close) + refreshes the product context (mountProductPicker)", /saveRegistry\(registry\);\s*\n\s*shell\.modal\.close\(\);\s*\n\s*mountProductPicker\(\);/.test(ptmBody));
   ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
   ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(ed));
@@ -10959,7 +10960,7 @@ section("Source v2: one consolidated right panel (spec 2c section 3)");
 (function () {
   var e = src("src/editor.js");
   ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /if \(topicHasDoc\(topic\)\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(e));
-  ok("renderSourceMarksSection builds a canonical panelSection with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,120}panelSection\(host, "Marks"[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(e));
+  ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(e));
   ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(e));
   ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));
   ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface", /function applySourceInfoVisibility\(\)[\s\S]{0,140}el\.style\.display = __sourceInfoOpen \? "" : "none";/.test(e));

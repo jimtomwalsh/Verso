@@ -1276,6 +1276,8 @@
         pushHistory();
         tagDocProductStage(doc, pid, stage);
         saveRegistry(registry);
+        shell.modal.close();
+        mountProductPicker(); // refresh the top-bar product context so the new/changed Product shows
       }
     });
     var box = shell.body;
@@ -10779,8 +10781,23 @@
     var host = document.getElementById("source-stage-article"); if (!host || !hit) return;
     var el = host.querySelector('[data-node="' + hit.nodeKey + '"]');
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+    syncSourceTocToNode(hit.nodeKey);
     // paint after layout settles so rangeFor reads final text nodes
     requestAnimationFrame(function () { paintSourceFindHit(hit); });
+  }
+  // Scroll the left TOC to (and mark current) the entry owning a given doc node -- used when a
+  // find-jump moves the cursor without a document scroll (the scroll-spy only fires on scroll).
+  function syncSourceTocToNode(nodeKey) {
+    var rail = document.getElementById("source-topic-list"); if (!rail) return;
+    var SD = window.SourceDoc; if (!SD || !SD.headingKeyForNode || !__sourceDocModel) return;
+    var key = SD.headingKeyForNode(__sourceDocModel, nodeKey); if (!key) return;
+    var rows = Array.prototype.slice.call(rail.querySelectorAll(".source-toc__row[data-toc-key]"));
+    rows.forEach(function (it) {
+      var on = it.getAttribute("data-toc-key") === key;
+      it.classList.toggle("is-current", on);
+      it.classList.toggle("is-selected", on);
+      if (on) it.scrollIntoView({ block: "nearest" });
+    });
   }
   // Step the find cursor by dir (+1 next / -1 prev), wrapping, then scroll+paint + refresh the nav.
   function cycleSourceFind(dir) {
@@ -11692,10 +11709,7 @@
     // replaces the old all-marks-drawer toggle that stacked a second surface over the info aside.
     var panelBtn = U && U.IconButton ? U.IconButton({ icon: "columns-2", label: __sourceInfoOpen ? "Hide the details panel" : "Show the details panel", active: __sourceInfoOpen, onClick: function () { __sourceInfoOpen = !__sourceInfoOpen; applySourceInfoVisibility(); updateSourceDocBar(); } }) : h("button", null, "Panel");
     panelBtn.classList.add("source-docbar__btn");
-    var revertBtn = h("button", "source-docbar__revert", "Revert to sections");
-    revertBtn.type = "button"; revertBtn.title = "Discard the continuous-document view and return to the section editor (section data is kept)";
-    revertBtn.addEventListener("click", function () { revertTopicDoc(topic); });
-    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(panelBtn); bar.appendChild(revertBtn);
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(panelBtn);
     bar.setAttribute("data-source-docbar", "1");
     return bar;
   }
@@ -12034,7 +12048,9 @@
   // are never read mixed; a row jumps to + highlights its mark.
   function renderSourceMarksSection(host, model) {
     var SD = window.SourceDoc, U = window.VersoUI;
-    var body = panelSection(host, "Marks", { collapsible: true, defaultOpen: true });
+    // Marks is the primary section of the consolidated panel -- render it title-less, straight
+    // into the panel host (no "Marks" header), above the History/Source/Comments sections.
+    var body = h("div", "source-marks__primary"); host.appendChild(body);
     if (U && U.SegmentedControl) {
       body.appendChild(U.SegmentedControl({
         size: "sm",
