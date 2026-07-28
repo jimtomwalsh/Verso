@@ -702,6 +702,10 @@ In this mode:
   rich-text buttons (bold, italic, bullets) only appear once you've unlocked, since they change the
   base prose. There is no "link" button here: linking a course to a piece of source happens in the
   Edit stage, not Source.
+- **Select as little or as much as you like — one word to the whole document.** A selection that
+  spans several paragraphs is fine: the toolbar still appears, so an alternate or a comment can cover
+  a whole passage, not just a single paragraph. A multi-paragraph mark highlights across every
+  paragraph it covers and rides your edits the same way — edit the middle of it and it stays put.
 - **Alternates: one base, many renditions.** The base prose is the single source of truth. When a
   particular course needs to say a span differently, add an **alternate** — the same meaning, no new
   information — and optionally tag it with what it's *appropriate for* (e.g. "quick-start" or

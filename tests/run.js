@@ -10855,6 +10855,99 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   })());
 })();
 
+// ---- product-rail-source-rw-multi-block-marks: a mark spans one word to the whole document (D1) ----
+// SourceMarks.selectionAnchor() returned null for a selection spanning >1 block, so comment / link /
+// alternate never offered on a cross-paragraph selection. The model now lets a mark carry an
+// endAnchor: it covers its FIRST node start..end, its LAST node 0..endOffset, and every node between
+// whole (derived from document order). Only the two endpoints ride edits; interiors are always fully
+// covered. Painting (a single Range across blocks) is DOM-verified in the browser; this proves the
+// pure model -- span decomposition, edit-shift, broken/stale -- headlessly.
+section("Source rewrite: multi-block marks (one word to whole document, D1)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var P = SD._pure;
+  function doc() {
+    return SD.create([
+      { type: "paragraph", text: "The quick brown fox" }, // 0: len 19
+      { type: "paragraph", text: "jumps over" },           // 1: len 10 (interior, whole)
+      { type: "paragraph", text: "the lazy dog" }           // 2: len 12
+    ]);
+  }
+  var m = doc();
+  var k0 = m.nodes[0].key, k1 = m.nodes[1].key, k2 = m.nodes[2].key;
+  // select from "quick..." (offset 4 of node 0) through "the lazy" (offset 8 of node 2)
+  var mk = SD.addMark(m, { type: "comment", anchor: { nodeKey: k0, start: 4, len: 15 }, endAnchor: { nodeKey: k2, start: 0, len: 8 } });
+
+  ok("addMark stores an endAnchor -> the mark is multi-block", SD.isMultiBlock(mk) === true);
+  ok("a same-node mark is NOT multi-block (no regression)", SD.isMultiBlock(SD.addMark(doc(), { type: "comment", anchor: { nodeKey: k0, start: 0, len: 3 } })) === false);
+  ok("markSpans decomposes: first node start..end, interior whole, last node 0..endOffset", (function () {
+    var sp = SD.markSpans(m, mk);
+    return sp.length === 3
+      && sp[0].nodeKey === k0 && sp[0].start === 4 && sp[0].len === 15 // "quick brown fox"
+      && sp[1].nodeKey === k1 && sp[1].start === 0 && sp[1].len === 10 && sp[1].whole === true
+      && sp[2].nodeKey === k2 && sp[2].start === 0 && sp[2].len === 8; // "the lazy"
+  })());
+  ok("markText joins every covered slice (the base a stale-check compares against)", SD.markText(m, mk) === "quick brown fox\njumps over\nthe lazy");
+  ok("baseText is the combined covered text at creation", mk.baseText === "quick brown fox\njumps over\nthe lazy");
+  ok("all three mark types accept a multi-block selection", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var link = SD.addMark(d, { type: "link", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 3 } });
+    var alt = SD.addMark(d, { type: "alternate", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 3 }, alt: "x" });
+    return SD.isMultiBlock(link) && SD.isMultiBlock(alt);
+  })());
+
+  // hit-testing: a click in the first, an interior, OR the last covered node finds the mark
+  ok("marksOverlapping finds a multi-block mark from its first node", SD.marksOverlapping(m, k0, 6, 0).some(function (x) { return x.id === mk.id; }));
+  ok("marksOverlapping finds it from an interior (whole-covered) node", SD.marksOverlapping(m, k1, 3, 0).some(function (x) { return x.id === mk.id; }));
+  ok("marksOverlapping finds it from its last node", SD.marksOverlapping(m, k2, 2, 0).some(function (x) { return x.id === mk.id; }));
+  ok("marksOverlapping does NOT match the uncovered tail of the last node", SD.marksOverlapping(m, k2, 10, 0).some(function (x) { return x.id === mk.id; }) === false);
+
+  // survives a base edit on every covered node
+  ok("editing an INTERIOR node keeps the mark covering it and does not break it", (function () {
+    var d = doc(), a = d.nodes[0].key, mid = d.nodes[1].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 4, len: 15 }, endAnchor: { nodeKey: c, start: 0, len: 8 } });
+    SD.applyTextEdit(d, mid, "jumps right over"); // grow the interior paragraph
+    var mm2 = SD.markById(d, x.id);
+    var sp = SD.markSpans(d, mm2);
+    return mm2.broken === false && sp[1].nodeKey === mid && sp[1].len === "jumps right over".length; // interior re-covered whole
+  })());
+  ok("editing the FIRST node shifts the start endpoint, mark stays intact", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 4, len: 15 }, endAnchor: { nodeKey: c, start: 0, len: 8 } });
+    SD.applyTextEdit(d, a, "AB The quick brown fox"); // prepend "AB " -> start rides right
+    var mm2 = SD.markById(d, x.id), sp = SD.markSpans(d, mm2);
+    return mm2.broken === false && sp[0].start === 7 && SD.nodeText(SD.nodeByKey(d, a)).substr(sp[0].start, sp[0].len) === "quick brown fox";
+  })());
+  ok("editing the LAST node shifts the end endpoint (left gravity holds the boundary)", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 4, len: 15 }, endAnchor: { nodeKey: c, start: 0, len: 8 } });
+    SD.applyTextEdit(d, c, "XY the lazy dog"); // prepend to the last node -> end offset rides right
+    var mm2 = SD.markById(d, x.id), sp = SD.markSpans(d, mm2);
+    return mm2.broken === false && SD.nodeText(SD.nodeByKey(d, c)).substr(0, sp[2].len) === "XY the lazy";
+  })());
+  ok("a multi-block alternate goes stale when a covered node's text changes", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "alternate", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 12 }, alt: "short" });
+    if (SD.markById(d, x.id).stale !== false) return false; // fresh multi-block alternate is in sync
+    SD.applyTextEdit(d, d.nodes[1].key, "leaps over"); // change the interior -> combined text drifts
+    SD.refreshMark(d, SD.markById(d, x.id));
+    return SD.markById(d, x.id).stale === true;
+  })());
+  ok("deleting a multi-block mark's endpoint node breaks it", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 12 } });
+    d.nodes.splice(2, 1); // remove the last covered node (structural)
+    SD.refreshMark(d, SD.markById(d, x.id));
+    return SD.markById(d, x.id).broken === true;
+  })());
+  ok("markExtendedBy ignores a multi-block selection (⟳ update is single-block only)", SD.markExtendedBy(m, { nodeKey: k0, start: 4, len: 15, endAnchor: { nodeKey: k2, start: 0, len: 8 } }) === null);
+  ok("endAnchor round-trips through toJSON/fromJSON", (function () {
+    var back = SD.fromJSON(JSON.parse(JSON.stringify(SD.toJSON(m))));
+    var bm = SD.markById(back, mk.id);
+    return SD.isMultiBlock(bm) && bm.endAnchor.nodeKey === k2 && bm.endAnchor.len === 8;
+  })());
+})();
+
 // ---- Source rewrite (Epic 2b): mark painting engine loads (DOM-verified in browser) ----
 // source-marks.js is the DOM painting layer (CSS Custom Highlight over live Ranges). Its offset
 // walking + selection reading need a real DOM/TreeWalker, so its behaviour is proven by the
