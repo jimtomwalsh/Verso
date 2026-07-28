@@ -10891,6 +10891,11 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(e));
   ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
   ok("NO create-link action on the Source selection bar (linking is Edit-stage)", !/seg\("link"/.test(e) && !/data-cmd="link"/.test(e));
+  // the selection bar is centred over the selection: positioned in #source-stage-article-relative
+  // coords (subtract the container's viewport left + add its scroll), NOT raw page x -- else the
+  // left rail's width pushed it off to the right. Both selection paths route through the helper.
+  ok("the selection bar centres over the selection via container-relative coords, not page x", /function positionSourceSelBar\(bar, r\)[\s\S]{0,200}r\.left \+ r\.width \/ 2 - hr\.left \+ host\.scrollLeft/.test(e) && !/bar\.style\.left = \(window\.scrollX \+ r\.left \+ r\.width/.test(e));
+  ok("both the text-selection and object-selection paths use positionSourceSelBar", (e.match(/positionSourceSelBar\(bar,/g) || []).length >= 2);
   ok("a selection extending past a mark flips create -> the ⟳ update action", /__sourceUpdateTarget = window\.SourceDoc\.markExtendedBy\(__sourceDocModel, anchor\)/.test(e));
   ok("annotation uses an inline composer, not a raw prompt()", /function openSourceComposer\(mode, onSave, opts\)/.test(e) && !/window\.prompt\(cmd/.test(e));
 
