@@ -11193,6 +11193,91 @@ section("Source rewrite: where-used panel (Epic 2b)");
   ok("a 'link' glyph exists in the icon set for the panel", /"link":/.test(src("src/icons.js")));
 })();
 
+// ---- Source rewrite (Epic 2b): variant per-node divergence (MODEL layer) --
+// Variants are a top-level structural layer orthogonal to marks (spec 4). A node diverges against
+// the Flagship base in three ways: SHARED (inherit), DIVERGED WORDING (an override), and
+// PRESENCE/ABSENCE (removed from a variant, or added-only). This is the PURE model layer only --
+// the conditional-column UI is a follow-on ticket (gated on the Source IA reshape). Persistence is
+// automatic (deep clone), so no schema change; the round-trip is asserted here.
+section("Source rewrite: variant per-node divergence, model layer (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
+  var k = model.nodes[0].key;
+
+  // SHARED: no override -> every variant inherits the Flagship base
+  ok("nodeForVariant: a shared node inherits the base for every variant", (function () {
+    var f = SD.nodeForVariant(model.nodes[0], SD.FLAGSHIP), y = SD.nodeForVariant(model.nodes[0], "Model-Y");
+    return f.present && f.source === "flagship" && y.present && y.source === "inherited" && y.text === f.text;
+  })());
+  ok("variantView: all shown variants identical -> a single shared column", (function () {
+    var v = SD.variantView(model.nodes[0], [SD.FLAGSHIP, "Model-Y", "Model-Z"]);
+    return v.mode === "shared" && /Vent the manifold/.test(v.text);
+  })());
+
+  // DIVERGED WORDING: an override splits the columns
+  SD.setVariantText(model, k, "Model-Y", "Bleed the manifold before pulling the cap.");
+  ok("setVariantText diverges one variant's wording (override), Flagship untouched", (function () {
+    var y = SD.nodeForVariant(model.nodes[0], "Model-Y"), f = SD.nodeForVariant(model.nodes[0], SD.FLAGSHIP);
+    return y.source === "override" && y.diverged === true && /Bleed the manifold/.test(y.text) && /Vent the manifold/.test(f.text);
+  })());
+  ok("variantView: a diverged node splits into per-variant columns", (function () {
+    var v = SD.variantView(model.nodes[0], [SD.FLAGSHIP, "Model-Y", "Model-Z"]);
+    return v.mode === "split" && v.cols.length === 3 && v.cols[1].variant === "Model-Y" && v.cols[1].diverged && v.cols[2].source === "inherited";
+  })());
+
+  // PRESENCE/ABSENCE: remove from a variant, then restore
+  SD.removeNodeFromVariant(model, k, "Model-Z");
+  ok("removeNodeFromVariant marks the node absent for that variant (present/absence)", (function () {
+    var z = SD.nodeForVariant(model.nodes[0], "Model-Z");
+    return z.present === false && z.source === "absent";
+  })());
+  ok("variantView carries the absent state as a column (for the 'not in Model-Z' UI)", (function () {
+    var v = SD.variantView(model.nodes[0], [SD.FLAGSHIP, "Model-Z"]);
+    return v.mode === "split" && v.cols[1].present === false;
+  })());
+  SD.restoreNodeToVariant(model, k, "Model-Z");
+  ok("restoreNodeToVariant clears the override/absent -> inherits the base again", SD.nodeForVariant(model.nodes[0], "Model-Z").source === "inherited" && SD.nodeForVariant(model.nodes[0], "Model-Z").present === true);
+
+  // ADDED-ONLY: a node not in Flagship, present only for a variant (baseAbsent)
+  var m2 = SD.create([{ type: "paragraph", text: "Base line." }]);
+  var k2 = m2.nodes[0].key;
+  SD.setVariantText(m2, k2, "Model-Z", "Only Model-Z says this.");
+  SD.removeNodeFromVariant(m2, k2, SD.FLAGSHIP); // now baseAbsent -> added-only for Model-Z
+  ok("an added-only node is absent from Flagship but present for its variant", (function () {
+    var f = SD.nodeForVariant(m2.nodes[0], SD.FLAGSHIP), z = SD.nodeForVariant(m2.nodes[0], "Model-Z"), y = SD.nodeForVariant(m2.nodes[0], "Model-Y");
+    return f.present === false && z.present === true && /Only Model-Z/.test(z.text) && y.present === false; // a non-overriding variant is also absent
+  })());
+
+  ok("variantsInDoc lists the referenced variant keys, Flagship excluded", (function () {
+    var vs = SD.variantsInDoc(model);
+    return vs.indexOf("Model-Y") !== -1 && vs.indexOf(SD.FLAGSHIP) === -1;
+  })());
+
+  // undo covers a variant mutation (owned undo, same as text edits)
+  ok("a variant mutation is undoable (pushUndo)", (function () {
+    var m3 = SD.create([{ type: "paragraph", text: "X." }]);
+    var kk = m3.nodes[0].key;
+    SD.setVariantText(m3, kk, "Model-Y", "Y override");
+    SD.undo(m3);
+    return !(m3.nodes[0].variants && m3.nodes[0].variants["Model-Y"]);
+  })());
+
+  // persistence: variants + baseAbsent survive the toJSON/fromJSON round-trip (deep clone, no schema change)
+  ok("variants + baseAbsent round-trip through toJSON/fromJSON", (function () {
+    var re = SD.fromJSON(SD.toJSON(m2));
+    var n = re.nodes[0];
+    return n.baseAbsent === true && n.variants && n.variants["Model-Z"] && /Only Model-Z/.test(n.variants["Model-Z"].text);
+  })());
+
+  // Flagship base + Flagship removed
+  ok("removing the node from Flagship sets baseAbsent (added-only pivot)", (function () {
+    var m4 = SD.create([{ type: "paragraph", text: "Z." }]);
+    SD.removeNodeFromVariant(m4, m4.nodes[0].key, SD.FLAGSHIP);
+    return m4.nodes[0].baseAbsent === true && SD.nodeForVariant(m4.nodes[0], SD.FLAGSHIP).present === false;
+  })());
+})();
+
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
 // Keeps the public repo free of customer/proprietary content, the removed in-app
 // assistant/translation code, personal paths, secrets, external CDN loads, and
