@@ -687,6 +687,35 @@
     }
     return parts.join(" ");
   }
+  // ---- source v2: find-to-word + match cycling (find-word-cycling, spec 2c section 2) --------
+  // Every occurrence of `needle` across the whole document's text, in document order, as a
+  // highlightable span {nodeKey,start,len,index}. Case-insensitive substring (contains) match --
+  // concrete positions the editor can scroll to + paint, unlike a scattered fuzzy subsequence.
+  // The match COUNT ("5 matches") is out.length; cycling is an index into out. Pure + DOM-free.
+  function findMatches(model, needle) {
+    var q = String(needle == null ? "" : needle).toLowerCase();
+    var out = [];
+    if (!q) return out;
+    (model && model.nodes || []).forEach(function (n) {
+      var hay = nodeText(n).toLowerCase(), from = 0, i;
+      while ((i = hay.indexOf(q, from)) !== -1) {
+        out.push({ nodeKey: n.key, start: i, len: q.length, index: out.length });
+        from = i + (q.length || 1);
+      }
+    });
+    return out;
+  }
+  // The nearest heading at or before a node (the "section" a match sits under), so the TOC filter
+  // can keep the heading row that owns a body hit -- "narrow the outline to entries under matching
+  // text" (spec 2c section 2). Returns the heading node's key, or null if the hit precedes any heading.
+  function headingKeyForNode(model, nodeKey) {
+    var ns = (model && model.nodes) || [], cur = null;
+    for (var i = 0; i < ns.length; i++) {
+      if (ns[i].type === "heading") cur = ns[i].key;
+      if (ns[i].key === nodeKey) return cur;
+    }
+    return null;
+  }
   // Fuzzy subsequence match: every char of `needle` appears in `hay` in order (case-
   // insensitive). An empty needle matches everything; this is the standard "fuzzy" feel
   // (typing "flsh" finds "flush") while still matching plain substrings.
@@ -701,7 +730,7 @@
 
   var _pure = {
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
-    searchText: searchText, fuzzyMatch: fuzzyMatch,
+    searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
     create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
@@ -730,7 +759,7 @@
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
-    searchText: searchText, fuzzyMatch: fuzzyMatch,
+    searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
   };

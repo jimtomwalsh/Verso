@@ -586,7 +586,10 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   to fold their headings in or out; click any entry to jump to it; the entry you're reading
   highlights as you scroll. Drag a chapter to move that whole chapter (and everything under it)
   within the document.
-- **Find a heading.** The search field above the outline filters it to matching headings as you type.
+- **Find in the document.** The search field above the outline finds your text anywhere in the
+  document — headings and body copy — as you type. It shows a match count ("3 / 12"); press Enter
+  (or the up/down arrows next to the count) to jump between hits, each scrolled to and highlighted.
+  The outline narrows to the sections that contain a match, so it doubles as a filter.
 - **The one action left in the rail is Import from Markdown** (below). Because there's one document,
   the old per-topic tools — new topic, select, delete, move, reorder topics — are gone.
 
