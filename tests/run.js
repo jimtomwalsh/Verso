@@ -11091,6 +11091,18 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
   ok("the timeline MERGES import events (topic.history) with doc events (model.history)", /var imports = \(topic\.history \|\| \[\]\)\.map/.test(e) && /historyEntryView\(e\)/.test(e) && /var rows = imports\.concat\(docRows\)/.test(e));
   ok("the merged rows sort newest-first across both streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
   ok("the synthetic 'Last edited' node only fills in when there are no doc commits", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
+
+  // Regression #108: a LOCKED block is contentEditable=false, so a click can't focus it and a real
+  // keystroke never reaches the article keydown guard -> no lock reminder showed. A document-level
+  // guard catches the attempt (locked doc mounted + a printable key + not in a real field).
+  ok("#108: a document-level guard shows the lock reminder when typing into locked prose", /function onSourceLockedTypeGuard\(e\)[\s\S]{0,500}The source is locked/.test(e) && /document\.addEventListener\("keydown", onSourceLockedTypeGuard\)/.test(e));
+  ok("#108: the guard ignores real fields + shortcuts, only printable keys count", /if \(!e\.key \|\| e\.key\.length !== 1\) return;/.test(e) && /t\.isContentEditable \|\| \/\^\(INPUT\|TEXTAREA\|SELECT\)\$\/\.test/.test(e));
+  // Regression #109: structural History events (comment/alternate add + resolve/reopen) must
+  // re-render the info-panel timeline; only the commit path did before, so they never surfaced.
+  ok("#109: refreshSourceHistory re-renders the info-panel History for the active topic", /function refreshSourceHistory\(topic\)[\s\S]{0,320}renderSourceInfoPanel\(t\)/.test(e));
+  ok("#109: creating an alternate refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new alternate/.test(e));
+  ok("#109: adding a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new comment in the History timeline/.test(e));
+  ok("#109: resolving/reopening a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface comment resolve\/reopen/.test(e));
 })();
 
 // ---- Source rewrite (Epic 2b): object (image/table) marks -----------------

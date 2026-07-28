@@ -11452,6 +11452,14 @@
     renderHistoryTimeline(host, topic);
     renderSourceCommentsPanel(host, topic);
   }
+  // Structural History events (comment/alternate added, resolved, reopened) log to model.history,
+  // but the info-panel History timeline must be RE-RENDERED to show them. Only the prose-commit
+  // path did that, so structural events never surfaced until an unrelated re-render (bug #109).
+  // Call this after any structural event persists.
+  function refreshSourceHistory(topic) {
+    var t = topic || (__sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null);
+    if (t && typeof document !== "undefined" && document.getElementById("source-stage-info")) renderSourceInfoPanel(t);
+  }
 
   // ==== Source rewrite (Epic 2b): continuous-document article + two-layer lock + toolbars ====
   // The node-model article. Coexists with the legacy section article (above): a topic renders
@@ -11573,6 +11581,8 @@
       syncSourceWherePanel(topic, m && m.type === "link" ? m.id : null);
     });
     document.addEventListener("selectionchange", onSourceSelectionChange);
+    document.removeEventListener("keydown", onSourceLockedTypeGuard);
+    document.addEventListener("keydown", onSourceLockedTypeGuard); // #108: reminder when typing into locked prose
 
     host.appendChild(buildSourceDocBar(topic));
     host.appendChild(buildSourceSelBar(topic));
@@ -11590,6 +11600,20 @@
       el.contentEditable = __sourceUnlocked ? "true" : "false";
     });
     art.classList.toggle("source-doc--unlocked", __sourceUnlocked);
+  }
+  // When LOCKED the blocks are contentEditable=false, so a real click can't place a caret in them
+  // and a keystroke lands on <body>, never reaching the article's keydown guard -- so no "source
+  // is locked" reminder ever showed (bug #108). A document-level guard catches the attempt: if the
+  // locked source doc is mounted and the user presses a character key while NOT in a real field,
+  // show the reminder. Registered once; cheap (returns early in every non-typing case).
+  function onSourceLockedTypeGuard(e) {
+    if (__sourceUnlocked) return;
+    if (!document.querySelector("#source-stage-article .source-doc")) return; // no locked doc mounted
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // a shortcut, not typing
+    if (!e.key || e.key.length !== 1) return; // only printable keys count as "trying to type"
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ""))) return; // a real field (title, search)
+    sourceToast("The source is locked -- unlock in the toolbar to edit the base text.");
   }
   function repaintSourceMarks() {
     if (!__sourceMarksEngine) return;
@@ -11941,6 +11965,7 @@
         persistSourceDocModel(topic, model); closeSourceCommentThread(); repaintSourceMarks(); renderSourceCommentPins(topic); return;
       }
       repaintSourceMarks(); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+      refreshSourceHistory(topic); // surface comment resolve/reopen in the History timeline (#109)
     }
     sourceCommentsForMark(topic, mid).forEach(function (c) { card.appendChild(buildSourceCommentItem(topic, c, { onChange: afterThreadChange })); });
     if (UI && UI.TextField && UI.Button) {
@@ -11953,6 +11978,7 @@
         topic.comments.push(cm);
         SD.logHistory(model, { type: "comment-added", markId: mid, commentId: cm.id });
         stampTopicUpdated(topic); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+        refreshSourceHistory(topic); // surface the new comment in the History timeline (#109)
       } });
       card.appendChild(newField); card.appendChild(addBtn);
     }
@@ -12160,6 +12186,7 @@
           SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" });
           persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
           syncSourceAltPanel(topic, mk.id); // open the contextual panel on the new alternate
+          refreshSourceHistory(topic); // surface the new alternate in the History timeline (#109)
         } else {
           // comment = a range mark (the anchor) + a shared-canvas comment thread on topic.comments,
           // keyed by the mark id (spec 3.3). Reuses makeComment; open/add logs to History.
@@ -12170,6 +12197,7 @@
           SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id });
           persistSourceDocModel(topic, __sourceDocModel); stampTopicUpdated(topic); repaintSourceMarks();
           renderSourceCommentPins(topic);
+          refreshSourceHistory(topic); // surface the new comment in the History timeline (#109)
           toggleSourceCommentThread(topic, cmark.id);
         }
         sourceToast(cmd === "alternate" ? "Alternate added." : "Comment added.");
@@ -12230,11 +12258,11 @@
     openWherePanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceWherePanel(t, id); },
     wherePanelMarkId: function () { return __sourceWhereUsedMarkId; },
     editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); },
-    addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); return cmark.id; },
+    addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); refreshSourceHistory(t); return cmark.id; },
     selectObject: function (nodeKey) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; selectSourceObject(t, nodeKey); },
     objectSelKey: function () { return __sourceObjectSelKey; },
     objectMarksOnNode: function (nodeKey) { return objectMarksOnNode(nodeKey); },
-    addObjectAlternate: function (nodeKey, alt, tag) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: { nodeKey: nodeKey }, alt: alt, tag: tag || "" }); SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); return mk.id; },
+    addObjectAlternate: function (nodeKey, alt, tag) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: { nodeKey: nodeKey }, alt: alt, tag: tag || "" }); SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); refreshSourceHistory(t); return mk.id; },
     openCommentThread: function (markId) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; toggleSourceCommentThread(t, markId); },
     openCommentMarkId: function () { return __sourceOpenCommentMarkId; },
     getComments: function () { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; return t && t.comments; }
