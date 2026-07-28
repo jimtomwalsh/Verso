@@ -370,6 +370,21 @@
     (model.nodes || []).forEach(function (n) { if (n.variants) Object.keys(n.variants).forEach(function (v) { if (!isFlagship(v)) set[v] = true; }); });
     return Object.keys(set).sort();
   }
+  // Rename a declared variant everywhere it overrides a node (node.variants[old] -> [new]), so a
+  // Product-level rename carries its per-node divergences with it. No-op for Flagship or a same
+  // name. Pushes ONE undo. Pure -> testable headlessly. (Removing a variant needs no model change:
+  // an undeclared variant's overrides simply stop showing, and re-declaring the name restores them.)
+  function renameVariant(model, oldName, newName) {
+    if (!model || isFlagship(oldName) || isFlagship(newName) || oldName === newName || !newName) return model;
+    pushUndo(model);
+    (model.nodes || []).forEach(function (n) {
+      if (n.variants && Object.prototype.hasOwnProperty.call(n.variants, oldName)) {
+        n.variants[newName] = n.variants[oldName];
+        delete n.variants[oldName];
+      }
+    });
+    return model;
+  }
   // A short human label for an object node -- the "base" line an object mark's panel/drawer shows
   // in place of the span text a text mark would carry.
   function objectNodeLabel(node) {
@@ -905,7 +920,7 @@
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
-    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc, renameVariant: renameVariant
   };
 
   var SourceDoc = {
@@ -919,7 +934,7 @@
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
-    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc, renameVariant: renameVariant,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure

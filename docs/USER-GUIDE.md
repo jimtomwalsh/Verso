@@ -599,6 +599,12 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
   import**; an update keeps the parts you haven't changed (so any alternates or comments on them stay
   put) and only adds or removes what actually differs. There's no silent whole-document overwrite.
+- **Declaring a Product's variants.** Above the document, **Manage variants** opens a small editor to
+  add, rename, or remove the variants this Product's source carries (Flagship is always the base). It's
+  shown even when a Product has none yet, so you can declare the first one. Renaming a variant carries
+  its divergences with it; removing one just hides its column (re-add the name to bring it back). If you
+  attach a course that already has variants (Save/Recents → Promote to Product), those variant names are
+  copied onto the Product automatically.
 - **Bringing in a variant's manual.** If your Product has variants declared, importing asks first
   whether the file updates the **Flagship** (the base) or a **variant**. Choosing a variant runs a
   **combine**: it reconciles that manual against the Flagship per paragraph and previews exactly what

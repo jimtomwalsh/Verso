@@ -2406,10 +2406,11 @@ section("#69 migration cutover");
   ok("no bulk/batch variant exists anywhere (only ever operates on the single `doc`)", (ed.match(/promoteToProductModal\(/g) || []).length === 2); // definition + the one call site above
   var ptmStart = ed.indexOf("function promoteToProductModal()");
   ok("promoteToProductModal found", ptmStart !== -1);
-  var ptmBody = ed.slice(ptmStart, ptmStart + 1900);
+  var ptmBody = ed.slice(ptmStart, ptmStart + 2900);
   ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
   ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Format"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
-  ok("writes ONLY doc.meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(doc, pid, stage\);\s*\n\s*saveRegistry\(registry\);/.test(ptmBody));
+  ok("writes ONLY doc.meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(doc, pid, stage\);[\s\S]{0,800}saveRegistry\(registry\);/.test(ptmBody));
+  ok("spec 2d bridge: Promote carries the course's doc.variants onto the Product (union) so its variant workflow is reachable", /doc\.variants && doc\.variants\.length[\s\S]{0,400}setProductVariants\(pid, merged\)/.test(ptmBody));
   ok("A1: onPrimary dismisses the modal (shell.modal.close) + refreshes the product context (mountProductPicker)", /saveRegistry\(registry\);\s*\n\s*shell\.modal\.close\(\);\s*\n\s*mountProductPicker\(\);/.test(ptmBody));
   ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
@@ -11263,6 +11264,13 @@ section("Source rewrite: variant per-node divergence, model layer (Epic 2b)");
     var vs = SD.variantsInDoc(model);
     return vs.indexOf("Model-Y") !== -1 && vs.indexOf(SD.FLAGSHIP) === -1;
   })());
+  ok("renameVariant carries a variant's per-node overrides to the new name (Product-level rename)", (function () {
+    var mr = SD.create([{ type: "paragraph", text: "Base." }]);
+    SD.setVariantText(mr, mr.nodes[0].key, "Model-Y", "Y wording");
+    SD.renameVariant(mr, "Model-Y", "Model-Y2");
+    var v = mr.nodes[0].variants;
+    return v && !v["Model-Y"] && v["Model-Y2"] && v["Model-Y2"].text === "Y wording";
+  })());
 
   // undo covers a variant mutation (owned undo, same as text edits)
   ok("a variant mutation is undoable (pushUndo)", (function () {
@@ -11601,6 +11609,8 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(e));
   ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(e));
   ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(n, shown\)/.test(e));
+  ok("spec 2d: the variant bar always offers Manage variants (declare the first variant on a Product with none)", /function buildSourceVariantBar\(topic\)[\s\S]{0,400}label: "Manage variants", onClick: function \(\) \{ openVariantEditor\(topic\)/.test(e));
+  ok("spec 2d: the variant editor declares via setProductVariants; a rename migrates overrides via SourceDoc.renameVariant", (function () { var m = e.slice(e.indexOf("function openVariantEditor(topic)"), e.indexOf("function openVariantEditor(topic)") + 1900); return /setProductVariants\(pid, list\)/.test(m) && /SD\.renameVariant\(model, v, nn\)/.test(m); })());
   ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
   ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
   ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));
