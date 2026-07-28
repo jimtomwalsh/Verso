@@ -6847,7 +6847,13 @@ section("project auto-backup");
   ok("folder reconnects on boot + doc switch", /window\.addEventListener\("load", function \(\) \{ initReviewAutoIngest\(\); connectBackupFolder\(\)/.test(e) && /connectBackupFolder\(\); \/\/ re-point auto-backup/.test(e));
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(e) && /saveBackupHandle\(activeDocId, h\)/.test(e));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(e) && /Backup OFF — this course is NOT being saved/.test(e) && /No backup folder — this course is NOT being saved anywhere/.test(e) && /\? "Reconnect folder" : "Choose folder"/.test(e));
-  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(doc && doc\.backupRequired\)\)/.test(e));
+  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(doc && doc\.backupRequired\)\)/.test(e));
+  // SPEC 7 create flow: the new-doc dialog resolves the chosen preset to a matrix cell and
+  // stamps the new doc with its Product + {geo, interactive}; createBlankDoc applies both.
+  ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(e));
+  ok("create flow passes productId + geo + interactive into createBlankDoc", /createBlankDoc\(title, code, \{ productId: newDocProduct, geo: cell\.geo, interactive: cell\.interactive \}\)/.test(e));
+  ok("createBlankDoc stamps the Product + cell onto the new doc", /if \(opts\.productId\) tagDocProductStage\(newDoc, opts\.productId, null\)/.test(e) && /if \(opts\.geo\) tagDocCell\(newDoc, opts\.geo, opts\.interactive\)/.test(e));
+  ok("create flow offers a ChoiceCards preset grid from the doc-type model", /window\.VersoUI\.ChoiceCards\(\{[\s\S]{0,200}DT\.PRESETS\.map/.test(e));
   ok("Backup section registered at the top of Project settings", /\{ key: "backup", title: "Backup", build: buildBackupBody \}/.test(e));
   ok("schema CSV has a pure text builder for reuse", /window\.__schemaCsv = schemaCsvText/.test(src("src/schema.js")));
   ok("backup-off banner styled (loud, [hidden]-toggled)", /#backup-off-banner\s*\{[\s\S]{0,320}position: fixed/.test(src("editor.css")) && /#backup-off-banner\[hidden\] \{ display: none; \}/.test(src("editor.css")));

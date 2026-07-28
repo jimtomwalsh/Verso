@@ -9,8 +9,7 @@
  * selection/active accent.
  */
 
-/* ============================================================
-   DESIGN SYSTEM TOKENS — source of truth (issue #7, parent #22)
+/* =====================================================   DESIGN SYSTEM TOKENS — source of truth (issue #7, parent #22)
    The vendored DS token CSS (design-system/tokens/*.css) is the
    canonical token set for the editor chrome and is imported here
    verbatim. CSS @import resolves from file://; the editor chrome is
@@ -1889,8 +1888,7 @@ details[open] .disc__caret {
 .demo__device::-webkit-scrollbar { width: 8px; }
 .demo__device::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 6px; }
 
-/* ==================== copy editor (#116 — fullscreen alternate copy-editing view) ====================
-   Same enter/exit shell pattern as .demo: a fixed inset:0 overlay above the layout canvas.
+/* ==================== copy editor (#116 — fullscreen alternate copy-editing view) =============   Same enter/exit shell pattern as .demo: a fixed inset:0 overlay above the layout canvas.
    Dark chrome bar (parity with .demo__bar) over a light document stage — the copy renders as a
    Word-doc-style page in slices 2-4. Verso UI only; never ships in the SCORM export. */
 .copyedit {
@@ -3174,8 +3172,7 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .frame .hotspot-stage__empty { min-height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
 
-/* ==========================================================================
-   Verso Design System canonical control set (issue #10, SPEC-chrome-redesign).
+/* ===================================================================   Verso Design System canonical control set (issue #10, SPEC-chrome-redesign).
    CHROME ONLY — never enters src/course.css / render() / the SCORM export.
    Token-driven (DS tokens referenced directly). Consumed by window.
    VersoUI (src/ui-kit.js); the surface re-skins that adopt these land in #11+.
@@ -3278,6 +3275,18 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .vds-doctab { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 12px; border-radius: var(--radius-sm, 2px) var(--radius-sm, 2px) 0 0; color: var(--text-secondary); font-size: var(--text-sm, 11px); cursor: pointer; }
 .vds-doctab.is-active { background: var(--surface-canvas); color: var(--text-primary); }
 .vds-doctab__dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; } /* SPEC 7: per-Product colour dot */
+/* SPEC 7 ChoiceCards: a single-select grid of preset/mode cards (create flow, cell switcher). */
+.vds-choicecards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.vds-choicecard {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+  padding: 11px 12px; border: 1px solid var(--border-input, var(--border-strong));
+  background: var(--surface-input); border-radius: var(--radius-md, 8px);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.vds-choicecard:hover { border-color: var(--border-strong); }
+.vds-choicecard.is-on { border-color: var(--accent); background: var(--accent-quiet); }
+.vds-choicecard__title { font-size: var(--text-md, 13px); font-weight: 500; color: var(--text-primary); }
+.vds-choicecard__desc { font-size: var(--text-sm, 11px); color: var(--text-tertiary); }
 .vds-doctab__label { background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; }
 .vds-doctab__close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; background: transparent; color: var(--icon-idle, #999); cursor: pointer; border-radius: var(--radius-xs, 2px); opacity: 0; }
 .vds-doctab__close svg { width: 12px; height: 12px; }
@@ -3356,8 +3365,7 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 /* --- Icon wrapper ------------------------------------------------------- */
 .vds-icon { display: inline-flex; align-items: center; }
 
-/* ============================================================
-   #73 Home / file browser ("local-first, no cloud")
+/* =====================================================   #73 Home / file browser ("local-first, no cloud")
    A full-screen overlay OVER the editor. Chrome only — never ships.
    Built to the DS browser/ patterns (CourseCard/CardGrid/ThumbnailFrame/
    SearchField); tokens come from the vendored design-system/tokens/*.css

@@ -1990,7 +1990,11 @@
   }
   function clearHeaderFooterDefault() { try { localStorage.removeItem(HF_DEFAULT_KEY); } catch (e) {} }
 
-  function createBlankDoc(title, code) {
+  // SPEC 7: `opts` (optional) = { productId, geo, interactive } from the product-first create
+  // flow. When present, the new doc is stamped with its Product (doc.meta.productId) and its
+  // matrix cell (doc.meta.geo/interactive) at birth. Omitted -> an untagged doc = today's
+  // {reflow, interactive} default, so the old callers are unchanged.
+  function createBlankDoc(title, code, opts) {
     if (registry[code]) {
       alert("A course with code '" + code + "' already exists.");
       return;
@@ -2013,6 +2017,9 @@
         }
       ]
     };
+    opts = opts || {};
+    if (opts.productId) tagDocProductStage(newDoc, opts.productId, null);
+    if (opts.geo) tagDocCell(newDoc, opts.geo, opts.interactive); // preset {geo, interactive}
     registry[code] = newDoc;
     saveRegistry(registry);
     openDocIds.push(code);
@@ -2107,6 +2114,12 @@
     // dialog routes through the DS modal shell (VersoUI.Modal) — issue #19. modal
     // + box are assigned from the shell below.
     var modal, box, titleIn, codeIn;
+    // SPEC 7 product-first creation: the new doc is born in a Product (defaults to the current
+    // picker scope) and a matrix-cell preset (defaults to eLearning). Resolved to
+    // {geo, interactive} via the doc-type model at create time.
+    var DT = window.__docType;
+    var newDocProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var newDocPreset = "elearning";
     var btnImport = window.VersoUI.Button({ variant: "secondary", label: "Import…", onClick: function () {
       pickCourseFile(function (imported) { importDocToRegistry(imported); modal.remove(); });
     } });
@@ -2129,7 +2142,8 @@
         var title = titleIn.value.trim();
         var code = codeIn.value.trim();
         if (!title || !code) { alert("Title and Code are required."); return; }
-        createBlankDoc(title, code);
+        var cell = (DT && DT.presetToCell(newDocPreset)) || { geo: "reflow", interactive: true };
+        createBlankDoc(title, code, { productId: newDocProduct, geo: cell.geo, interactive: cell.interactive });
         modal.remove();
         // Slice 2: MANDATORY backup-folder setup — prompt the picker immediately (still
         // within this click gesture, required for the native/FSA folder pickers). If the
@@ -2177,6 +2191,23 @@
     }
 
     modalSection(box, "New course");
+    // Product (defaults to the current scope) -> preset (matrix cell) -> name, per SPEC 7.
+    var prodRow = modalField(box, "Product");
+    prodRow.appendChild(window.VersoUI.Select({
+      options: productSelectOptions(window.ProductsStore),
+      value: newDocProduct,
+      onChange: function (v) { newDocProduct = v || ""; }
+    }));
+    if (DT && window.VersoUI.ChoiceCards) {
+      modalField(box, "Start from a preset");
+      box.appendChild(window.VersoUI.ChoiceCards({
+        options: DT.PRESETS.map(function (p) {
+          return { value: p.key, title: p.name, desc: (p.geo.charAt(0).toUpperCase() + p.geo.slice(1)) + " · " + (p.interactive ? "interactive" : "static") };
+        }),
+        value: newDocPreset,
+        onChange: function (v) { newDocPreset = v; }
+      }));
+    }
     titleIn = modalText(box, "Course title", "", "e.g. My New Course");
     codeIn = modalText(box, "Course code", "", "e.g. DRO-NEW-101");
   }
