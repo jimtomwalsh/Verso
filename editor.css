@@ -808,14 +808,15 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-wherepanel__dest { margin-bottom: 6px; }
 .source-wherepanel__dest .insp-crumbs { flex-wrap: wrap; }
 
-/* Comment margin pins (comments-canvas-adapter): canvas-style pins in the right gutter, pinned to
-   their span (absolute within the scrolling article, tracking on scroll). */
-.source-commentpin { position: absolute; right: 8px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border-strong); border-radius: 8px 8px 8px 2px; background: var(--surface-panel, #fff); color: var(--pin-colour, var(--accent)); cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.12); z-index: 24; }
-.source-commentpin svg { width: 15px; height: 15px; }
-.source-commentpin:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
-.source-commentpin.is-open { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-quiet, rgba(59,108,246,0.25)); }
-.source-commentpin.is-done { opacity: 0.55; }
-.source-commentpin__count { position: absolute; top: -6px; right: -6px; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; font-size: 9px; line-height: 15px; text-align: center; color: #fff; background: var(--accent); border-radius: 999px; }
+/* Comment margin pins (comments-canvas-adapter): a subtle blue glyph converged to the canvas comment
+   idiom -- smaller, no bounding box, anchored just right of the text margin (pilot feedback 2026-07-28).
+   Pinned to its span (absolute within the scrolling article, tracking on scroll; left set in JS). */
+.source-commentpin { position: absolute; right: 8px; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 50%; background: none; color: var(--pin-colour, var(--accent)); cursor: pointer; box-shadow: none; z-index: 24; }
+.source-commentpin svg { width: 16px; height: 16px; }
+.source-commentpin:hover { background: var(--accent-quiet, rgba(59,108,246,0.14)); }
+.source-commentpin.is-open { background: var(--accent-quiet, rgba(59,108,246,0.2)); color: var(--accent); }
+.source-commentpin.is-done { opacity: 0.5; }
+.source-commentpin__count { position: absolute; top: -5px; right: -5px; min-width: 13px; height: 13px; padding: 0 3px; box-sizing: border-box; font-size: 8px; line-height: 13px; text-align: center; color: #fff; background: var(--accent); border-radius: 999px; }
 /* In-place thread card, pinned beside the span (reuses .comment-thread from the canvas engine). */
 .source-commentthread { position: absolute; right: 42px; width: 258px; z-index: 26; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.14); padding: 12px 14px; max-height: 60vh; overflow-y: auto; }
 .source-commentthread__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }

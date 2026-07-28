@@ -12170,8 +12170,20 @@
       if (thread.length > 1) pin.appendChild(h("span", "source-commentpin__count", String(thread.length)));
       pin.addEventListener("click", function () { toggleSourceCommentThread(topic, m.id); });
       host.appendChild(pin);
-      pinCardToSpan(pin, m.id);
+      pinCardToSpan(pin, m.id); // sets top (tracks the span vertically)
+      anchorPinToTextMargin(pin, host); // sets left just right of the reading column (pilot feedback)
     });
+  }
+  // Anchor a comment pin just to the RIGHT of the text margin (the reading column's right edge),
+  // not out in the far gutter -- pilot feedback 2026-07-28. Clamped so it never leaves the host.
+  function anchorPinToTextMargin(pin, host) {
+    var col = host.querySelector(".source-doc__col") || host.querySelector(".source-doc");
+    if (!col) return;
+    var cr = col.getBoundingClientRect(), hr = host.getBoundingClientRect();
+    var left = cr.right - hr.left + host.scrollLeft + 6;
+    left = Math.min(left, host.clientWidth - 26); // keep it on-screen on a narrow viewport
+    pin.style.left = Math.max(8, left) + "px";
+    pin.style.right = "auto";
   }
   function onSourceCommentThreadKey(ev) { if (ev.key === "Escape") closeSourceCommentThread(); }
   // Outside-click light-dismiss, matching the canvas comment popover ("first outside click closes

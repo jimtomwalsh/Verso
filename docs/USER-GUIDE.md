@@ -739,8 +739,9 @@ In this mode:
   place it's used — a **Document › Section › Location** breadcrumb you can click to jump straight to
   that course. Source is one-way: it *shows* where things are linked; the linking itself happens in
   the Edit stage, not here. A span that isn't linked anywhere says so.
-- **Comments live in the margin.** Selecting text and choosing **Comment** drops a **pin in the
-  right-hand gutter** next to that span; the pin tracks the span as you scroll. Click a pin to open
+- **Comments live in the margin.** Selecting text and choosing **Comment** drops a small **blue
+  comment glyph just to the right of the text** next to that span; the pin tracks the span as you
+  scroll. It matches the canvas comment glyph — subtle, no box. Click a pin to open
   the thread in place — the same comment threads, replies, and Resolved control as the canvas
   editor, so a comment behaves the same everywhere. Add more comments or replies, tick **Resolved**
   when it's handled, and both events show up in History. Comments can be added while the source is
