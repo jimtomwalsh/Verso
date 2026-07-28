@@ -10687,6 +10687,16 @@
   var __sourceActiveFacet = "technical";
   var __sourceSearchQuery = "";
   var __sourceActiveVariants = []; // reset whenever a different topic is selected
+  // Source rewrite (Epic 2b, lock-toolbars): a topic renders the new continuous-document article
+  // (node model + range marks + two-layer lock + canvas-idiom toolbars) once it carries a `doc`
+  // (SourceDoc JSON). Legacy section topics render the shipped article unchanged -- additive, no
+  // regression. The live SourceDoc model is cached per topic so its owned undo stack survives
+  // re-renders; edits persist back to topic.doc.
+  var __sourceUnlocked = false;    // base prose editable? (annotation is always live)
+  var __sourceShowMarks = true;    // marks painted + status dots visible
+  var __sourceDocModel = null;     // the live SourceDoc model for __sourceDocModelTopicId
+  var __sourceDocModelTopicId = null;
+  var __sourceMarksEngine = null;  // the SourceMarks painting engine bound to the mounted article
   // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
   // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
   // unlocks them, mirroring the familiar Photos/Files/Gmail toggle rather than always
@@ -10886,6 +10896,8 @@
           __sourceActiveTopicId = t.id;
           __sourceActiveVariants = []; // a different topic may have a different variant set
           __sourceEditingCell = null; // don't carry an in-progress edit across topics
+          __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind the doc model to the new topic
+          __sourceUnlocked = false; // every topic opens locked (base prose protected by default)
           renderSourceTopicList();
           renderSourceArticle();
         });
@@ -11189,6 +11201,16 @@
       renderSourceTopicList(); // the left-nav row label must stay in sync
     });
     headEl.appendChild(titleInput);
+
+    // Source rewrite: a topic that has been converted to the continuous-document model renders
+    // the new node-model article (lock + toolbars + marks) instead of the section+facet article.
+    if (topicHasDoc(topic)) {
+      host.appendChild(headEl);
+      renderSourceNodeArticle(topic, host);
+      renderSourceInfoPanel(topic);
+      return;
+    }
+
     var U = window.VersoUI;
     if (U && U.SegmentedControl) {
       headEl.appendChild(U.SegmentedControl({
@@ -11355,6 +11377,18 @@
     });
     host.appendChild(addBtn);
 
+    // Source rewrite on-ramp (Epic 2b): opt a topic into the continuous-document model. Additive
+    // and reversible -- the section data is kept, so a revert restores the section article.
+    if (window.SourceDoc) {
+      var convertRow = h("div", "source-stage__convert-row");
+      var convertBtn = h("button", "source-stage__convert-btn", "Switch to continuous document (beta)");
+      convertBtn.type = "button";
+      convertBtn.title = "Re-author this topic as one continuous rich-text document with range marks (the new Source model)";
+      convertBtn.addEventListener("click", function () { convertTopicToDoc(topic); });
+      convertRow.appendChild(convertBtn);
+      host.appendChild(convertRow);
+    }
+
     renderSourceInfoPanel(topic);
   }
 
@@ -11401,6 +11435,260 @@
     renderHistoryTimeline(host, topic);
     renderSourceCommentsPanel(host, topic);
   }
+
+  // ==== Source rewrite (Epic 2b): continuous-document article + two-layer lock + toolbars ====
+  // The node-model article. Coexists with the legacy section article (above): a topic renders
+  // this once it carries a `doc`. render()/mount() stay pure -- topic.doc is data on the topic,
+  // the live model is cached, and edits round-trip through applyTextEdit -> topic.doc.
+  function topicHasDoc(topic) { return !!(topic && topic.doc && topic.doc.nodes && topic.doc.nodes.length); }
+  function resolveTopicBaseText(sec) { return resolveSectionFacetText(sec, "technical"); }
+  function convertTopicToDoc(topic) {
+    if (!window.SourceDoc) return;
+    var model = window.SourceDoc.fromSections(topic, resolveTopicBaseText);
+    topic.doc = window.SourceDoc.toJSON(model);
+    __sourceDocModel = null; __sourceDocModelTopicId = null; // force a fresh model bind
+    stampTopicUpdated(topic);
+    renderSourceArticle();
+  }
+  function revertTopicDoc(topic) {
+    if (topic) { delete topic.doc; stampTopicUpdated(topic); }
+    __sourceDocModel = null; __sourceDocModelTopicId = null;
+    renderSourceArticle();
+  }
+  // The live model for a topic, cached so its owned undo stack persists across the article's
+  // frequent full re-renders. Rebuilt from topic.doc whenever the active topic changes.
+  function ensureSourceDocModel(topic) {
+    if (__sourceDocModel && __sourceDocModelTopicId === topic.id) return __sourceDocModel;
+    __sourceDocModel = window.SourceDoc.fromJSON(topic.doc);
+    __sourceDocModelTopicId = topic.id;
+    return __sourceDocModel;
+  }
+  function persistSourceDocModel(topic, model) {
+    topic.doc = window.SourceDoc.toJSON(model);
+    stampTopicUpdated(topic);
+  }
+
+  // Project one node to its DOM block, keyed by node.key. Text blocks (heading/paragraph/callout)
+  // are contentEditable so the base prose can be edited when unlocked; structural blocks (list/
+  // table/image) render for reading in v1 (cell/list editing is fast-follow, spec 6) but still
+  // carry marks. Marks paint over whatever text these blocks contain via the engine.
+  function renderSourceDocNode(node) {
+    var SD = window.SourceDoc, el;
+    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
+    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); cb.textContent = SD.nodeText(node); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
+    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
+    else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row) { var tr = h("tr"); (row || []).forEach(function (c) { tr.appendChild(h("td", null, c)); }); el.appendChild(tr); }); }
+    else if (node.type === "image") { el = h("figure", "source-doc__figure"); var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt; el.appendChild(im); if (node.caption) el.appendChild(h("figcaption", null, node.caption)); }
+    else { el = h("p", "source-doc__p"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
+    el.setAttribute("data-node", node.key);
+    return el;
+  }
+
+  function renderSourceNodeArticle(topic, host) {
+    var SD = window.SourceDoc, SM = window.SourceMarks;
+    var model = ensureSourceDocModel(topic);
+    var col = h("div", "source-doc__col");
+    var art = h("article", "source-doc"); art.setAttribute("spellcheck", "false");
+    model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNode(n)); });
+    col.appendChild(art);
+    host.appendChild(col);
+
+    // per-block contentEditable when unlocked; the keydown guard (below) enforces the lock so
+    // marks stay clickable + annotation stays live even when locked.
+    applySourceLockState(art);
+
+    __sourceMarksEngine = SM.create({ root: art, model: model });
+    repaintSourceMarks();
+
+    // base edits: read the edited block's text back into the model, shift marks, persist.
+    art.addEventListener("input", function (e) {
+      var block = e.target && e.target.closest ? e.target.closest("[data-node]") : null;
+      if (!block) return;
+      SD.applyTextEdit(model, block.getAttribute("data-node"), block.textContent);
+      persistSourceDocModel(topic, model);
+      repaintSourceMarks();
+    });
+    // two-layer lock: typing into base prose while locked is refused with a reminder; Ctrl+Z is
+    // our owned undo (native undo would not restore marks).
+    art.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) SD.redo(model); else SD.undo(model);
+        persistSourceDocModel(topic, model);
+        renderSourceArticle();
+        return;
+      }
+      if (!__sourceUnlocked && (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete" || e.key === "Enter")) {
+        e.preventDefault();
+        sourceToast("The source is locked -- unlock in the toolbar to edit the base text.");
+      }
+    });
+    // clicking a painted mark activates it (contextual view is the alternates/comments tickets;
+    // here we confirm the hit-test + active repaint work).
+    art.addEventListener("click", function (e) {
+      if (!__sourceShowMarks) return;
+      var sel = window.getSelection(); if (!sel || !sel.focusNode) return;
+      var m = __sourceMarksEngine.markAtPoint(sel.focusNode, sel.focusOffset);
+      __sourceMarksEngine.setActive(m ? m.id : null); repaintSourceMarks();
+    });
+    document.addEventListener("selectionchange", onSourceSelectionChange);
+
+    host.appendChild(buildSourceDocBar(topic));
+    host.appendChild(buildSourceSelBar(topic));
+  }
+
+  function applySourceLockState(art) {
+    art = art || document.querySelector("#source-stage-article .source-doc");
+    if (!art) return;
+    Array.prototype.forEach.call(art.querySelectorAll('[data-editable], [data-node-body]'), function (el) {
+      el.contentEditable = __sourceUnlocked ? "true" : "false";
+    });
+    art.classList.toggle("source-doc--unlocked", __sourceUnlocked);
+  }
+  function repaintSourceMarks() {
+    if (!__sourceMarksEngine) return;
+    if (!__sourceShowMarks) { if (window.SourceMarks && window.SourceMarks._registry && window.SourceMarks._registry()) { var reg = window.SourceMarks._registry(); Object.keys(reg).forEach(function (k) { reg[k].clear(); }); } return; }
+    __sourceMarksEngine.paint();
+  }
+
+  // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
+  // Document-scope only; glyph-only IconButtons from the DS.
+  function buildSourceDocBar(topic) {
+    var U = window.VersoUI;
+    var bar = h("div", "source-docbar");
+    var lockBtn = U && U.IconButton ? U.IconButton({ icon: __sourceUnlocked ? "lock-open" : "lock", label: __sourceUnlocked ? "Lock the source prose" : "Unlock to edit the source prose", active: __sourceUnlocked, onClick: function () { __sourceUnlocked = !__sourceUnlocked; applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); } }) : h("button", null, "Lock");
+    lockBtn.classList.add("source-docbar__btn");
+    var lockLbl = h("span", "source-docbar__lbl", __sourceUnlocked ? "Source editable" : "Source locked");
+    var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); updateSourceDocBar(); } }) : h("button", null, "Marks");
+    marksBtn.classList.add("source-docbar__btn");
+    var revertBtn = h("button", "source-docbar__revert", "Revert to sections");
+    revertBtn.type = "button"; revertBtn.title = "Discard the continuous-document view and return to the section editor (section data is kept)";
+    revertBtn.addEventListener("click", function () { revertTopicDoc(topic); });
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(revertBtn);
+    bar.setAttribute("data-source-docbar", "1");
+    return bar;
+  }
+  function updateSourceDocBar() {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var old = host.querySelector("[data-source-docbar]"); if (!old) return;
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    var fresh = buildSourceDocBar(topic); old.parentNode.replaceChild(fresh, old);
+  }
+
+  // The contextual selection bar, above the highlight (canvas idiom): glyph rich-text
+  // (bold/italic/dot-points -- ONLY when unlocked) plus the annotation actions alternate +
+  // comment (always, since annotation is ungated). NO create-link here -- linking is Edit-stage.
+  // A selection that extends past an existing mark flips the create button to a ⟳ update.
+  function buildSourceSelBar(topic) {
+    var bar = h("div", "source-selbar"); bar.setAttribute("data-source-selbar", "1"); bar.style.display = "none";
+    // glyph-only, from the shared Lucide icon set (Icon()), matching the canvas toolbar idiom --
+    // never text letters or emoji.
+    function seg(cmd, icon, title, cls) {
+      var b = h("button", "source-selbar__btn" + (cls ? " " + cls : "")); b.type = "button"; b.title = title;
+      b.innerHTML = window.Icon ? window.Icon(icon) : "";
+      b.setAttribute("data-cmd", cmd);
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      return b;
+    }
+    bar.appendChild(seg("bold", "bold", "Bold", "source-selbar__rt"));
+    bar.appendChild(seg("italic", "italic", "Italic", "source-selbar__rt"));
+    bar.appendChild(seg("list", "list", "Dot points", "source-selbar__rt"));
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
+    bar.appendChild(seg("alternate", "square-pen", "Add an alternate rendition"));
+    bar.appendChild(seg("comment", "message-square", "Comment"));
+    bar.appendChild(seg("update", "refresh-cw", "Update the mark to include the appended text", "source-selbar__update"));
+    bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
+    bar.querySelector('[data-cmd="update"]').style.display = "none";
+    bar.querySelectorAll("[data-cmd]").forEach(function (b) {
+      b.addEventListener("click", function () { onSourceSelbarAction(topic, b.getAttribute("data-cmd")); });
+    });
+    return bar;
+  }
+  function sourceSelBarEl() { return document.querySelector("[data-source-selbar]"); }
+  function refreshSourceSelBar() {
+    var bar = sourceSelBarEl(); if (!bar) return;
+    bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
+  }
+  var __sourceSelAnchor = null, __sourceUpdateTarget = null;
+  function onSourceSelectionChange() {
+    var bar = sourceSelBarEl(); if (!bar || !__sourceMarksEngine) return;
+    var anchor = __sourceMarksEngine.selectionAnchor();
+    if (!anchor) { bar.style.display = "none"; __sourceSelAnchor = null; return; }
+    __sourceSelAnchor = anchor;
+    // ⟳ update if this selection extends past an existing mark; else offer create.
+    __sourceUpdateTarget = window.SourceDoc.markExtendedBy(__sourceDocModel, anchor);
+    var upd = bar.querySelector('[data-cmd="update"]');
+    var altB = bar.querySelector('[data-cmd="alternate"]'), cmtB = bar.querySelector('[data-cmd="comment"]');
+    upd.style.display = __sourceUpdateTarget ? "" : "none";
+    altB.style.display = __sourceUpdateTarget ? "none" : ""; cmtB.style.display = __sourceUpdateTarget ? "none" : "";
+    var sel = window.getSelection(); var r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+    if (!r || !r.width) { bar.style.display = "none"; return; }
+    bar.style.display = "flex";
+    bar.style.left = (window.scrollX + r.left + r.width / 2) + "px";
+    bar.style.top = (window.scrollY + r.top) + "px";
+  }
+  function onSourceSelbarAction(topic, cmd) {
+    var SD = window.SourceDoc;
+    if (cmd === "bold" || cmd === "italic" || cmd === "list") {
+      if (!__sourceUnlocked) return;
+      if (cmd === "list") document.execCommand("insertUnorderedList"); else document.execCommand(cmd);
+      return;
+    }
+    if (cmd === "update" && __sourceUpdateTarget && __sourceSelAnchor) {
+      SD.updateMark(__sourceDocModel, __sourceUpdateTarget.id, __sourceSelAnchor);
+      persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+      sourceToast("Updated the mark to include the appended text."); return;
+    }
+    if (cmd === "alternate" || cmd === "comment") {
+      if (!__sourceSelAnchor) return;
+      var anchor = __sourceSelAnchor;
+      openSourceComposer(cmd, function (val) {
+        if (cmd === "alternate") SD.addMark(__sourceDocModel, { type: "alternate", anchor: anchor, alt: val });
+        else SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor, comments: [{ who: "you", ts: "", text: val }] });
+        persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+        sourceToast(cmd === "alternate" ? "Alternate added." : "Comment added.");
+      });
+    }
+  }
+  // A small inline composer positioned under the selection -- the DS idiom for capturing an
+  // alternate rendition or a comment (no raw prompt(); the rich pinned panels are the
+  // alternates-staleness + comments-adapter tickets). Annotation stays available even when locked.
+  function openSourceComposer(mode, onSave) {
+    var existing = document.querySelector("[data-source-composer]"); if (existing) existing.remove();
+    var wrap = h("div", "source-composer"); wrap.setAttribute("data-source-composer", "1");
+    wrap.appendChild(h("div", "source-composer__lbl", mode === "alternate" ? "Alternate rendition" : "Comment"));
+    var ta = h("textarea", "source-composer__text"); ta.placeholder = mode === "alternate" ? "Another way to say this..." : "Add a comment...";
+    wrap.appendChild(ta);
+    var row = h("div", "source-composer__row");
+    var cancel = h("button", "source-composer__btn", "Cancel"); cancel.type = "button";
+    var save = h("button", "source-composer__btn source-composer__btn--primary", "Save"); save.type = "button";
+    row.appendChild(cancel); row.appendChild(save); wrap.appendChild(row);
+    var sel = window.getSelection(); var r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+    if (r) { wrap.style.left = (window.scrollX + r.left + r.width / 2) + "px"; wrap.style.top = (window.scrollY + r.bottom + 8) + "px"; }
+    document.body.appendChild(wrap);
+    function close() { if (wrap.parentNode) wrap.remove(); }
+    cancel.addEventListener("click", close);
+    save.addEventListener("click", function () { var v = ta.value.trim(); close(); if (v) onSave(v); });
+    ta.focus();
+  }
+  // a light transient reminder for the Source stage (the lock reminder + annotation confirms).
+  function sourceToast(msg) {
+    var t = h("div", "source-toast", msg); document.body.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add("is-on"); });
+    setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2600);
+  }
+  // browser-verify hook (mirrors window.__productRail's own test hooks): lets the Puppeteer
+  // harness open a topic, convert it to the continuous-document model, and drive the lock.
+  window.__sourceRw = {
+    topicHasDoc: topicHasDoc,
+    convertTopicToDoc: convertTopicToDoc,
+    revertTopicDoc: revertTopicDoc,
+    setActiveTopic: function (id) { __sourceActiveTopicId = id; __sourceDocModel = null; __sourceDocModelTopicId = null; __sourceUnlocked = false; },
+    setUnlocked: function (v) { __sourceUnlocked = !!v; applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); },
+    isUnlocked: function () { return __sourceUnlocked; },
+    getModel: function () { return __sourceDocModel; }
+  };
+
 
   // source-stage-comments: a topic-wide overview alongside the per-section thread
   // panels -- Open/Resolved/Orphaned, mirroring renderCommentList's own split

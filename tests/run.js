@@ -10896,6 +10896,43 @@ section("Source rewrite: mark painting engine contract (Epic 2b)");
   ok("paint() is a no-op (does not throw) when the Highlight API is unavailable", threw === false);
 })();
 
+// ---- Source rewrite (Epic 2b): two-layer lock + canvas-idiom toolbars (lock-toolbars) ----
+// The node-model article mounts additively: a topic renders the continuous-document view once it
+// carries a `doc`; legacy section topics are untouched (no regression -- the shipped Source tests
+// above still pass). These assertions guard the wiring that the browser-verify exercises live.
+section("Source rewrite: lock-toolbars wiring (Epic 2b)");
+(function () {
+  var e = src("src/editor.js");
+  ok("renderSourceArticle routes a doc-topic to the node-model article (additive gate)", /if \(topicHasDoc\(topic\)\) \{[\s\S]{0,120}renderSourceNodeArticle\(topic, host\);/.test(e));
+  ok("topicHasDoc gates on the presence of a node tree", /function topicHasDoc\(topic\) \{ return !!\(topic && topic\.doc && topic\.doc\.nodes/.test(e));
+  ok("convertTopicToDoc builds topic.doc from the shipped sections via SourceDoc.fromSections", /window\.SourceDoc\.fromSections\(topic, resolveTopicBaseText\)/.test(e) && /topic\.doc = window\.SourceDoc\.toJSON\(model\)/.test(e));
+  ok("the live model is cached per topic so its owned undo stack survives re-renders", /function ensureSourceDocModel\(topic\)[\s\S]{0,200}__sourceDocModelTopicId === topic\.id/.test(e));
+  ok("switching topics rebinds the doc model and re-locks (base protected by default)", /__sourceDocModel = null; __sourceDocModelTopicId = null;[\s\S]{0,80}__sourceUnlocked = false;/.test(e));
+
+  // two-layer lock
+  ok("locked base prose refuses edits with an unlock reminder (annotation stays live)", /if \(!__sourceUnlocked && \(e\.key\.length === 1 \|\| e\.key === "Backspace"[\s\S]{0,160}sourceToast\("The source is locked/.test(e));
+  ok("Ctrl\\+Z is the OWNED undo (native undo would not restore marks); Shift redo", /if \(e\.shiftKey\) SD\.redo\(model\); else SD\.undo\(model\);/.test(e));
+  ok("the lock toggles per-block contentEditable, not the whole article", /function applySourceLockState[\s\S]{0,360}el\.contentEditable = __sourceUnlocked \? "true" : "false";/.test(e));
+
+  // doc-level bar (bottom-centre): lock + marks only
+  ok("doc-bar has a lock toggle (glyph swaps lock/lock-open) via the DS IconButton", /icon: __sourceUnlocked \? "lock-open" : "lock"/.test(e));
+  ok("doc-bar has a marks show/hide toggle (eye/eye-off)", /icon: __sourceShowMarks \? "eye" : "eye-off"/.test(e));
+
+  // contextual selection bar: rich-text unlocked-only; alternate + comment always; NO create-link
+  ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(e));
+  ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
+  ok("NO create-link action on the Source selection bar (linking is Edit-stage)", !/seg\("link"/.test(e) && !/data-cmd="link"/.test(e));
+  ok("a selection extending past a mark flips create -> the ⟳ update action", /__sourceUpdateTarget = window\.SourceDoc\.markExtendedBy\(__sourceDocModel, anchor\)/.test(e));
+  ok("annotation uses an inline composer, not a raw prompt()", /function openSourceComposer\(mode, onSave\)/.test(e) && !/window\.prompt\(cmd/.test(e));
+
+  // index.html load order
+  var idx = src("index.html");
+  ok("index.html loads source-doc.js + source-marks.js before editor.js", (function () {
+    var a = idx.indexOf("src/source-doc.js"), b = idx.indexOf("src/source-marks.js"), c = idx.indexOf("src/editor.js");
+    return a > -1 && b > -1 && a < c && b < c;
+  })());
+})();
+
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
 // Keeps the public repo free of customer/proprietary content, the removed in-app
 // assistant/translation code, personal paths, secrets, external CDN loads, and
