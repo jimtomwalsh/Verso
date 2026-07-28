@@ -599,6 +599,8 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
   import**; an update keeps the parts you haven't changed (so any alternates or comments on them stay
   put) and only adds or removes what actually differs. There's no silent whole-document overwrite.
+- **The first import into a new Product** builds the continuous document straight away — you land in
+  the one-document view (chapters in the outline), not an intermediate per-topic list.
 
 The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
 authoring a chapter's text, importing, annotations, history and comments all work as described.
