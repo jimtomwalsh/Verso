@@ -2127,6 +2127,182 @@ section("#71 recents");
   ok("tagDocProductStage is null-safe", g.tagDocProductStage(null, "x", "y") === null);
 })();
 
+// ---- SPEC 7: file picker — doc browser grouped by geo (pure) ----
+section("editor-rework file-picker grouping");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-browser-geo-start \*\/([\s\S]*?)\/\* @pure-browser-geo-end \*\//);
+  if (!m) { ok("locate @pure-browser-geo fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { groupDocIdsByGeo: groupDocIdsByGeo, BROWSER_GEO_ORDER: BROWSER_GEO_ORDER };")();
+  var reg = { a: { geo: "reflow" }, b: { geo: "paged" }, c: { geo: "reflow" }, d: { geo: "frame" }, e: { geo: "unknownGeo" } };
+  var geoOf = function (doc) { return doc.geo; };
+  var groups = g.groupDocIdsByGeo(["a", "b", "c", "d", "e"], reg, geoOf);
+  ok("groups appear in canonical geo order (reflow, frame, paged)", groups.map(function (x) { return x.geo; }).join(",") === "reflow,frame,paged");
+  ok("reflow group holds the reflow docs + unknown-geo fallback", groups[0].ids.sort().join(",") === "a,c,e");
+  ok("frame group holds the frame doc", groups[1].ids.join(",") === "d");
+  ok("paged group holds the paged doc", groups[2].ids.join(",") === "b");
+  ok("an empty geo produces no group", g.groupDocIdsByGeo(["b"], reg, geoOf).map(function (x) { return x.geo; }).join(",") === "paged");
+  ok("ids with no registry doc are dropped", g.groupDocIdsByGeo(["a", "ghost"], reg, geoOf)[0].ids.join(",") === "a");
+  ok("null-safe on empty input", g.groupDocIdsByGeo(null, reg, geoOf).length === 0);
+  // the browser is product-scoped + auto-opens on a zero-tab Edit landing
+  ok("the browser filters by the product scope (docMatchesProductStage)", /courseMatchesQuery\(registry\[id\], browserQuery\) && docMatchesProductStage\(registry\[id\], scope, null\)/.test(t));
+  ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(t));
+  ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(t) && /cell\.interactive \? "Interactive" : "Static"/.test(t));
+})();
+
+// ---- SPEC 7: product-filtered tab scope (pure predicate) ----
+// ---- SPEC 7: matrix doc-type model (geo x interactive) -- pure, headless ----
+section("editor-rework matrix doc-type");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-doctype-start \*\/([\s\S]*?)\/\* @pure-doctype-end \*\//);
+  if (!m) { ok("locate @pure-doctype fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { docCell: docCell, tagDocCell: tagDocCell, presetToCell: presetToCell," +
+    " cellToPreset: cellToPreset, condToolsFor: condToolsFor, isValidGeo: isValidGeo," +
+    " DOCTYPE_PRESETS: DOCTYPE_PRESETS, DOCTYPE_GEOS: DOCTYPE_GEOS };")();
+
+  // NON-REGRESSION (the critical one): an untagged legacy doc resolves to the today
+  // default {reflow, interactive:true}, so no migration is needed and it opens unchanged.
+  var legacy = { meta: { title: "Legacy course", code: "LEGACY" } };
+  var lc = g.docCell(legacy);
+  ok("untagged doc defaults to {reflow, interactive:true}", lc.geo === "reflow" && lc.interactive === true);
+  ok("docCell on a doc with no meta is null-safe", g.docCell({}).geo === "reflow" && g.docCell(null).interactive === true);
+
+  // docCell resolution: valid geo passes through; an out-of-range geo falls back to
+  // reflow; interactive is STRICT -- only an explicit false is static.
+  ok("valid geo passes through", g.docCell({ meta: { geo: "paged" } }).geo === "paged");
+  ok("out-of-range geo -> reflow", g.docCell({ meta: { geo: "isometric" } }).geo === "reflow");
+  ok("explicit interactive:false is the only way to static", g.docCell({ meta: { interactive: false } }).interactive === false);
+  ok("absent interactive stays interactive (legacy)", g.docCell({ meta: { geo: "frame" } }).interactive === true);
+
+  // presetToCell: all five presets map to the right cell; unknown -> null.
+  ok("preset elearning -> reflow/interactive", (function () { var c = g.presetToCell("elearning"); return c.geo === "reflow" && c.interactive === true; })());
+  ok("preset deck -> frame/interactive", (function () { var c = g.presetToCell("deck"); return c.geo === "frame" && c.interactive === true; })());
+  ok("preset onepager -> paged/static", (function () { var c = g.presetToCell("onepager"); return c.geo === "paged" && c.interactive === false; })());
+  ok("preset quickstart -> paged/static", (function () { var c = g.presetToCell("quickstart"); return c.geo === "paged" && c.interactive === false; })());
+  ok("preset webdoc -> reflow/static", (function () { var c = g.presetToCell("webdoc"); return c.geo === "reflow" && c.interactive === false; })());
+  ok("unknown preset -> null", g.presetToCell("hologram") === null);
+  ok("all five presets are covered", g.DOCTYPE_PRESETS.length === 5 && g.DOCTYPE_PRESETS.every(function (p) { return g.isValidGeo(p.geo) && typeof p.interactive === "boolean"; }));
+
+  // cellToPreset: names a cell when a preset covers it; a recombination outside the five
+  // presets (e.g. frame + static) returns null -- the matrix allows more than the presets.
+  ok("cell {reflow,true} -> elearning", g.cellToPreset("reflow", true) === "elearning");
+  ok("cell {frame,false} is a recombination -> null", g.cellToPreset("frame", false) === null);
+
+  // condToolsFor: the geometry tool lists per the spec; unknown geo -> reflow set; the
+  // returned array is a copy (mutating it must not corrupt the shared table).
+  ok("paged tools", g.condToolsFor("paged").join("|") === "Margins|Running header / footer|Page breaks|Page numbers");
+  ok("frame tools", g.condToolsFor("frame").join("|") === "Frame size / aspect|Slide transitions|Animation");
+  ok("reflow tools", g.condToolsFor("reflow").join("|") === "Breakpoint preview");
+  ok("unknown geo -> reflow tools", g.condToolsFor("nope").join("|") === "Breakpoint preview");
+  (function () { var a = g.condToolsFor("paged"); a.push("HACK"); ok("condToolsFor returns a copy (no shared-table mutation)", g.condToolsFor("paged").length === 4); })();
+
+  // tagDocCell round-trip: writes onto meta ONLY (never touches content); a clear reverts
+  // to the default resolution; null-safe.
+  var d = { meta: { title: "T", code: "C" }, pages: [{ blocks: [{ type: "image", src: "data:x" }] }] };
+  g.tagDocCell(d, "paged", false);
+  ok("tagDocCell writes geo/interactive onto meta only", d.meta.geo === "paged" && d.meta.interactive === false && d.meta.title === "T");
+  ok("tagDocCell leaves content untouched", d.pages[0].blocks[0].src === "data:x");
+  ok("round-trips through docCell", g.docCell(d).geo === "paged" && g.docCell(d).interactive === false);
+  g.tagDocCell(d, "reflow", true);
+  ok("re-tagging updates the cell", d.meta.geo === "reflow" && d.meta.interactive === true);
+  g.tagDocCell(d, "bogus", "maybe");
+  ok("invalid geo clears geo; non-boolean interactive clears interactive", d.meta.geo === undefined && d.meta.interactive === undefined);
+  ok("a cleared doc resolves back to the default", g.docCell(d).geo === "reflow" && g.docCell(d).interactive === true);
+  ok("tagDocCell is null-safe", g.tagDocCell(null, "paged", true) === null);
+})();
+
+// ---- SPEC 7: product-filtered tab scope (pure predicate) ----
+section("editor-rework tab scope");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-tabscope-start \*\/([\s\S]*?)\/\* @pure-tabscope-end \*\//);
+  if (!m) { ok("locate @pure-tabscope fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { visibleTabIds: visibleTabIds };")();
+  var reg = {
+    a: { meta: { title: "A", productId: "prod-a" } },
+    b: { meta: { title: "B", productId: "prod-b" } },
+    a2: { meta: { title: "A2", productId: "prod-a" } },
+    leg: { meta: { title: "Legacy" } } // untagged
+  };
+  var open = ["a", "b", "a2", "leg"];
+  ok("All products ('') shows every open tab", g.visibleTabIds(open, reg, "").join(",") === "a,b,a2,leg");
+  ok("All products (null) shows every open tab", g.visibleTabIds(open, reg, null).join(",") === "a,b,a2,leg");
+  ok("prod-a scope shows only prod-a tabs", g.visibleTabIds(open, reg, "prod-a").join(",") === "a,a2");
+  ok("prod-b scope shows only prod-b tabs", g.visibleTabIds(open, reg, "prod-b").join(",") === "b");
+  ok("an untagged doc never shows under a specific product", g.visibleTabIds(open, reg, "prod-a").indexOf("leg") === -1);
+  ok("a scope with no open tabs -> empty", g.visibleTabIds(open, reg, "prod-c").length === 0);
+  ok("ids with no registry entry are dropped", g.visibleTabIds(["a", "ghost"], reg, "").join(",") === "a");
+  ok("null-safe on empty inputs", g.visibleTabIds(null, reg, "").length === 0 && g.visibleTabIds(open, null, "").length === 0);
+})();
+
+// ---- SPEC 7: static fallback — interactive-block palette filter (pure) ----
+section("editor-rework static-fallback palette filter");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-doctype-start \*\/([\s\S]*?)\/\* @pure-doctype-end \*\//);
+  if (!m) { ok("locate @pure-doctype fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { isInteractiveBlockType: isInteractiveBlockType, paletteAllowsType: paletteAllowsType, INTERACTIVE_BLOCK_TYPES: INTERACTIVE_BLOCK_TYPES };")();
+  ["quiz", "hotspot", "checkbox", "navButton", "accordion", "cardReveal", "sequence", "cardDeck", "htmlEmbed", "webEmbed"].forEach(function (ty) {
+    ok(ty + " is an interactive type", g.isInteractiveBlockType(ty) === true);
+  });
+  ["heading", "paragraph", "image", "table", "divider", "columns", "quote", "list"].forEach(function (ty) {
+    ok(ty + " is a static-safe type", g.isInteractiveBlockType(ty) === false);
+  });
+  // an interactive cell offers everything; a static cell hides interactive types but keeps static ones
+  ok("interactive cell offers a quiz", g.paletteAllowsType("quiz", true) === true);
+  ok("static cell hides a quiz", g.paletteAllowsType("quiz", false) === false);
+  ok("static cell still offers a heading", g.paletteAllowsType("heading", false) === true);
+  ok("legacy/undefined interactivity behaves as interactive (offers everything)", g.paletteAllowsType("quiz", undefined) === true);
+  // the editor filters the LIBRARY through this predicate against the doc's cell
+  ok("renderAssets gates the palette on the cell's interactivity (type via item.make)", /item\.__bt = item\.type \|\| \(item\.make \? \(item\.make\(\) \|\| \{\}\)\.type : null\);[\s\S]{0,120}if \(!paletteAllowsType\(item\.__bt, cellInteractive\)\) return;/.test(t));
+  ok("existing blocks are never dropped by the filter (palette-only)", /this only gates what NEW content can be added/.test(t));
+})();
+
+// ---- SPEC 7: cell switcher + tiered mutability (wiring) ----
+section("editor-rework cell switcher");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  ok("the editor header carries a matrix-cell chip", /id="editor-cell-chip"/.test(html));
+  ok("the chip shows geometry . interactivity", /chip\.textContent = \(CELL_GEO_LABEL\[c\.geo\] \|\| c\.geo\) \+ " · " \+ \(c\.interactive \? "Interactive" : "Static"\)/.test(e));
+  ok("interactivity toggles are IMMEDIATE (no warning)", /function setCellInteractive\(on\)[\s\S]{0,200}applyCellChange\(c\.geo, on\); \/\/ immediate, no warning/.test(e));
+  ok("a geometry-mode change is GUARDED by a reflow warning", /function setCellGeo\(geo\)[\s\S]{0,320}confirmModal\("Change layout mode\?"/.test(e));
+  ok("the geometry change re-renders the canvas via applyCellChange -> mount", /function applyCellChange\(geo, interactive\)[\s\S]{0,220}tagDocCell\(doc, geo, interactive\);[\s\S]{0,80}mount\(\);/.test(e));
+  ok("the change writes the cell through the pure doc-type model, then saves", /window\.__docType\.tagDocCell\(doc, geo, interactive\);\s*\n\s*saveRegistry\(registry\);/.test(e));
+  ok("the chip menu offers all three geometries + both interactivity states", /\["reflow", "frame", "paged"\]\.forEach[\s\S]{0,200}head: "Interactivity"[\s\S]{0,160}label: "Interactive"[\s\S]{0,120}label: "Static"/.test(e));
+  ok("the chip is mounted at boot + re-synced on doc switch", /mountCellChip\(\); \/\/ SPEC 7/.test(e) && /syncCellChip\(\); \/\/ SPEC 7: reflect the new doc/.test(e));
+})();
+
+// ---- SPEC 7: capability inspector (Document context) ----
+section("editor-rework capability inspector");
+(function () {
+  var e = src("src/editor.js");
+  ok("the Document inspector leads with a Document type section", /renderDocumentInspector\(\)[\s\S]{0,700}sectionGroup\("Layout", "Document type"/.test(e));
+  ok("it reads the cell from the pure doc-type model", /window\.__docType\.docCell\(doc\)[\s\S]{0,500}CELL_GEO_LABEL\[_cell\.geo\]/.test(e));
+  ok("it renders the geometry-specific tools from condToolsFor", /window\.__docType\.condToolsFor\(_cell\.geo\)[\s\S]{0,220}tools\.forEach/.test(e));
+  ok("the cell summary points at the header chip (no top strip)", /change it from the cell chip in the editor header/.test(e));
+  ok("the Document type section comes before the Canvas/Appearance section", e.indexOf('sectionGroup("Layout", "Document type"') < e.indexOf('sectionGroup("Appearance", "Canvas"'));
+})();
+
+// ---- SPEC 7: canvas geometry helpers (pure) ----
+section("editor-rework canvas geometry");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-geo-canvas-start \*\/([\s\S]*?)\/\* @pure-geo-canvas-end \*\//);
+  if (!m) { ok("locate @pure-geo-canvas fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { worldGeoClass: worldGeoClass, frameContentOverflows: frameContentOverflows };")();
+  ok("reflow -> geo-reflow", g.worldGeoClass("reflow") === "geo-reflow");
+  ok("frame -> geo-frame", g.worldGeoClass("frame") === "geo-frame");
+  ok("paged -> geo-paged", g.worldGeoClass("paged") === "geo-paged");
+  ok("unknown geo falls back to geo-reflow", g.worldGeoClass("isometric") === "geo-reflow" && g.worldGeoClass(undefined) === "geo-reflow");
+  ok("content taller than the frame overflows", g.frameContentOverflows(900, 720) === true);
+  ok("content within the frame does not overflow", g.frameContentOverflows(700, 720) === false);
+  ok("a 2px slack avoids false positives at the boundary", g.frameContentOverflows(721, 720) === false && g.frameContentOverflows(723, 720) === true);
+  ok("a zero-height frame never reports overflow", g.frameContentOverflows(500, 0) === false);
+})();
+
 // ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
 section("product-rail ProductsStore");
 (function () {
@@ -3813,7 +3989,7 @@ section("#159/#163 frontend conformance gate");
     // (panel-ia §3: sub() is allowed as an in-section label, never as a section header) — that
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
-    sectionGroup: { base: 42, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section)" },
+    sectionGroup: { base: 43, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section)" },
     subHeader:    { base: 28, dir: "down", enforce: true,  ticket: "#163 (residual = legit in-section sub-labels)" },
     disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "#163 (ad-hoc collapsibles capped)" },
     rawDialog:    { base: 0,  dir: "down", enforce: true,  ticket: "#163 (#156 landed — no native dialogs)" },
@@ -4515,7 +4691,7 @@ section("#20 library-instance mirror");
   // (prop-component--instance), and offers Detach as the only structural action in v1.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
   ok("renderLibraryInstanceBody found", lbStart !== -1);
-  var lbBody = etxt.slice(lbStart, lbStart + 4000);
+  var lbBody = etxt.slice(lbStart, lbStart + 5000);
   ok("reuses the canonical instance header (same class componentGrid cards use)", /"prop-component prop-component--instance"/.test(lbBody));
   ok("offers a Detach action, disabled when the master is missing", /detachB\.disabled = !def/.test(lbBody));
 
@@ -6761,7 +6937,13 @@ section("project auto-backup");
   ok("folder reconnects on boot + doc switch", /window\.addEventListener\("load", function \(\) \{ initReviewAutoIngest\(\); connectBackupFolder\(\)/.test(e) && /connectBackupFolder\(\); \/\/ re-point auto-backup/.test(e));
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(e) && /saveBackupHandle\(activeDocId, h\)/.test(e));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(e) && /Backup OFF — this course is NOT being saved/.test(e) && /No backup folder — this course is NOT being saved anywhere/.test(e) && /\? "Reconnect folder" : "Choose folder"/.test(e));
-  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(doc && doc\.backupRequired\)\)/.test(e));
+  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(doc && doc\.backupRequired\)\)/.test(e));
+  // SPEC 7 create flow: the new-doc dialog resolves the chosen preset to a matrix cell and
+  // stamps the new doc with its Product + {geo, interactive}; createBlankDoc applies both.
+  ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(e));
+  ok("create flow passes productId + geo + interactive into createBlankDoc", /createBlankDoc\(title, code, \{ productId: newDocProduct, geo: cell\.geo, interactive: cell\.interactive \}\)/.test(e));
+  ok("createBlankDoc stamps the Product + cell onto the new doc", /if \(opts\.productId\) tagDocProductStage\(newDoc, opts\.productId, null\)/.test(e) && /if \(opts\.geo\) tagDocCell\(newDoc, opts\.geo, opts\.interactive\)/.test(e));
+  ok("create flow offers a ChoiceCards preset grid from the doc-type model", /window\.VersoUI\.ChoiceCards\(\{[\s\S]{0,200}DT\.PRESETS\.map/.test(e));
   ok("Backup section registered at the top of Project settings", /\{ key: "backup", title: "Backup", build: buildBackupBody \}/.test(e));
   ok("schema CSV has a pure text builder for reuse", /window\.__schemaCsv = schemaCsvText/.test(src("src/schema.js")));
   ok("backup-off banner styled (loud, [hidden]-toggled)", /#backup-off-banner\s*\{[\s\S]{0,320}position: fixed/.test(src("editor.css")) && /#backup-off-banner\[hidden\] \{ display: none; \}/.test(src("editor.css")));
@@ -8429,7 +8611,7 @@ section("Product Rail: Source stage nav + article");
   // Wiring: setStage("source") triggers a render; the topic list re-renders on both
   // search input and the shared product-context change (Epic 1's dropdown).
   ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
-  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); \}/.test(e));
+  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(e));
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(e));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
   ok("the facet SegmentedControl re-renders the article, gated through isValidFacet", /onChange: function \(v\) \{ if \(!isValidFacet\(v\)\) return; __sourceActiveFacet = v; renderSourceArticle\(\); \}/.test(e));
@@ -8788,7 +8970,7 @@ section("Product Rail: Source stage info panel");
   ok("each comment row reuses the canvas's own comment-row\/comment-row__dot\/comment-row__snip classes verbatim", /h\("div", "comment-row" \+ \(sourceCommentIsOrphaned\(c, topic\) \? " is-orphan" : ""\)\)/.test(e) && /h\("span", "comment-row__dot"\)/.test(e) && /h\("div", "comment-row__snip"/.test(e));
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
-  ok("clicking a Linked-in row opens that document AND switches to Edit (where the block actually lives)", /openCourseFromBrowser\(u\.docCode\); setStage\("edit"\); \}\);/.test(e));
+  ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(e) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(e));
   // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
   // not a flat Created/Updated pair -- traces every import (and any edit since) back to
   // how the topic entered the platform, newest first.
@@ -9998,6 +10180,18 @@ section("#170/#33 text<->list block-type conversion");
   ok("converting one block never touches an unrelated object", JSON.stringify(untouched) === before);
 })();
 
+// ---- SPEC 7: Build/Read view toggle in the editor header (wiring) ----
+section("editor-rework Build/Read toggle");
+(function () {
+  var e = src("src/editor.js");
+  ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(e));
+  ok("the toggle offers Build + Read segments", /options: \[\{ value: "build", label: "Build" \}, \{ value: "read", label: "Read" \}\]/.test(e));
+  ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(e));
+  ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(e) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(e));
+  ok("the toggle is mounted at boot", /mountViewToggle\(\); \/\/ SPEC 7/.test(e));
+  ok("the header carries the view-toggle host", /id="editor-view-toggle"/.test(src("index.html")));
+})();
+
 section("#175 copy-editor format toolbar");
 (function () {
   var e = src("src/editor.js");
@@ -10658,23 +10852,12 @@ section("left-panel Components reorg");
   ok("renderComponentsList() removed from editor.js", e.indexOf("renderComponentsList") === -1);
   ok("componentsList DOM var removed", e.indexOf('getElementById("components-list")') === -1);
 
-  // new twirl markup: a third .lpane peer to Structure/Blocks, with two split handles
-  ok("index.html has the new Components .lpane peer to Structure/Blocks",
-     /lpane lpane--components" id="lpane-components"/.test(html) && /lpane__title">Components</.test(html));
-  ok("two lpane-split handles bracket the three panes", /id="lpane-split-0"/.test(html) && /id="lpane-split-1"/.test(html));
-  ok("Components twirl hosts the new insert list", /id="components-palette-list"/.test(html));
-
-  // wireLeftPanes() generalized to N panes (not hard-coded to exactly two)
-  var wlpStart = e.indexOf("var LPANE_ORDER = [");
-  ok("wireLeftPanes has an LPANE_ORDER config (structure/blocks/components)", wlpStart > -1);
-  var wlpBody = e.slice(wlpStart, e.indexOf("function wireLeftPanes(") + 2600);
-  ok("LPANE_ORDER lists all three panes", /"lpane-structure"/.test(wlpBody) && /"lpane-blocks"/.test(wlpBody) && /"lpane-components"/.test(wlpBody));
-  ok("split visibility is computed per adjacent pair, not a single bothOpen bool", /function syncSplits\(\)/.test(wlpBody) && /splits\.forEach\(function \(split, i\)/.test(wlpBody));
-  ok("a split's drag only redistributes its OWN two adjacent panes (independent ratios)", /var storeKey = "authoring\.lpane\.split\." \+ i/.test(wlpBody));
-  ok("wireLeftPanes bails out gracefully with fewer than 2 panes present", /panes\.length < 2/.test(wlpBody));
-
-  // setLeftPanelView must know about the new pane + both split ids, or it stays hidden
-  ok("setLeftPanelView un-hides the new pane + both splits", /"lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"/.test(e));
+  // SPEC 7: Components folds INTO the Blocks section of the 3-way switcher (data-lsec="blocks"),
+  // as a sub-pane beneath the Insert palette (its own insert list host kept).
+  ok("Components .lpane is tagged into the Blocks section", /lpane lpane--components" id="lpane-components" data-lsec="blocks"/.test(html));
+  ok("Components pane reads as a sub-section (Reusable components)", /lpane__head--sub"><span class="lpane__title">Reusable components</.test(html));
+  ok("Components sub-pane hosts the insert list", /id="components-palette-list"/.test(html));
+  ok("the old draggable split handles are gone", html.indexOf('id="lpane-split-0"') === -1 && html.indexOf('id="lpane-split-1"') === -1);
 
   // renderComponentsPalette(): three groups, in the documented order
   var rcpStart = e.indexOf("function renderComponentsPalette()");
@@ -10692,7 +10875,7 @@ section("left-panel Components reorg");
 
   // mount() keeps the new pane in sync on every render, same as the Blocks palette
   ok("mount() re-renders the Components pane alongside the Blocks palette", /renderAssets\(\); \/\/ keep the Blocks palette current[\s\S]{0,20}renderComponentsPalette\(\);/.test(e));
-  ok("wireLeftPanes() renders both panels on boot", /renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
+  ok("wireLeftSwitcher() renders both panels on boot", /function wireLeftSwitcher\(\)[\s\S]{0,120}renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
 
   // context-menu additions (Tier 1 per the /verso-frontend ruling): single-block
   // "Save as component…" (canvas + outliner) and page "Save page to library…"
@@ -10701,6 +10884,38 @@ section("left-panel Components reorg");
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
+})();
+
+// ---- SPEC 7: source insert (linked block) + two-way jump ----
+section("editor-rework source insert + two-way jump");
+(function () {
+  var e = src("src/editor.js");
+  ok("a source row inserts a live-linked block (libraryInstance) with ref + back-reference",
+     /function insertSourceLinkedBlock\(topicId\)[\s\S]{0,320}var block = \{ type: "libraryInstance", id: mintId\(\), ref: topicId, sourceRef: \{ topicId: topicId \} \}/.test(e));
+  ok("the insert carries BOTH the master ref (for where-used) and the sourceRef backref (for the jump)",
+     /ref: topicId, sourceRef: \{ topicId: topicId \}/.test(e));
+  ok("the placement is pointed at the topic's first facet so it resolves a template",
+     /if \(def && def\.facets\) \{ var fk = Object\.keys\(def\.facets\); if \(fk\.length\) block\.facet = fk\[0\]; \}/.test(e));
+  ok("each source row exposes an insert affordance wired to the insert", /insertSourceLinkedBlock\(t\.id\)/.test(e));
+  ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
+  ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
+  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
+})();
+
+// ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
+section("editor-rework left-panel 3-way switcher");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  ok("the panel has a switcher host + a Source pane", /id="lpane-switch"/.test(html) && /lpane lpane--source" id="lpane-source" data-lsec="source"/.test(html));
+  ok("every content pane is tagged with a section (data-lsec)", /id="lpane-structure" data-lsec="structure"/.test(html) && /id="lpane-blocks" data-lsec="blocks"/.test(html) && /id="lpane-source" data-lsec="source"/.test(html));
+  ok("the switcher offers Structure / Blocks / Source", /options: \[\{ value: "structure", label: "Structure" \}, \{ value: "blocks", label: "Blocks" \}, \{ value: "source", label: "Source" \}\]/.test(e));
+  ok("applyLeftSection shows only the active section's panes", /el\.hidden = el\.getAttribute\("data-lsec"\) !== sec;/.test(e));
+  ok("the active section persists across reloads", /LEFT_SECTION_KEY = "authoring\.lpane\.active"/.test(e) && /localStorage\.getItem\(LEFT_SECTION_KEY\)/.test(e));
+  ok("switching to Source renders the reused topic nav", /if \(sec === "source"\) renderLeftSourceNav\(\);/.test(e));
+  ok("the Source nav reuses filterTopics + groupTopicsByProduct (not a bespoke list)", /function renderLeftSourceNav\(\)[\s\S]{0,400}filterTopics\(libComponents\(\), getActiveProduct\(\)[\s\S]{0,300}groupTopicsByProduct\(/.test(e));
+  ok("a Source row jumps into the Source stage on that topic", /__sourceActiveTopicId = t\.id;[\s\S]{0,160}setStage\("source"\);/.test(e));
+  ok("setStage re-applies the switcher's active section in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(e) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
 })();
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------

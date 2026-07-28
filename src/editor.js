@@ -380,6 +380,92 @@
   }
   /* @pure-recents-end */
 
+  // SPEC 7 (Editor Window Rework): a document is a cell in a two-axis matrix, not a
+  // fixed profile. Layout geometry (doc.meta.geo) x interactivity (doc.meta.interactive)
+  // sit on the SAME meta object as productId/stage. These are PURE helpers (DOM-free) so
+  // tests/run.js exercises them headlessly; the UI tickets (creation flow, cell switcher,
+  // capability inspector, static fallback) all consume this one model. `stage` from
+  // SPEC 1 is subsumed -- geo is the authoritative geometry; the three former stages are
+  // now presets over {geo, interactive}. An untagged legacy doc resolves to
+  // {reflow, interactive:true} = today's behaviour, so NO migration is needed and every
+  // existing course opens byte-identical.
+  /* @pure-doctype-start */
+  var DOCTYPE_GEOS = ["reflow", "frame", "paged"];
+  // The five named starting cells. Authors can recombine (any geo x interactivity) after
+  // creation, so the preset list is a convenience for the create flow, not an enum lock.
+  var DOCTYPE_PRESETS = [
+    { key: "elearning",  name: "eLearning",         geo: "reflow", interactive: true  },
+    { key: "deck",       name: "Presentation",      geo: "frame",  interactive: true  },
+    { key: "onepager",   name: "1-pager",           geo: "paged",  interactive: false },
+    { key: "quickstart", name: "Quick-start guide", geo: "paged",  interactive: false },
+    { key: "webdoc",     name: "Responsive doc",    geo: "reflow", interactive: false }
+  ];
+  // Geometry-specific Document-context tools (right inspector, nothing selected).
+  var DOCTYPE_COND_TOOLS = {
+    paged:  ["Margins", "Running header / footer", "Page breaks", "Page numbers"],
+    frame:  ["Frame size / aspect", "Slide transitions", "Animation"],
+    reflow: ["Breakpoint preview"]
+  };
+  function isValidGeo(geo) { return DOCTYPE_GEOS.indexOf(geo) !== -1; }
+  // Resolve a doc's matrix cell. Untagged/legacy docs -> {reflow, interactive:true}. An
+  // out-of-range geo falls back to reflow; interactive is strict -- only an explicit
+  // `false` turns a doc static (so an absent/legacy value stays interactive).
+  function docCell(d) {
+    var meta = (d && d.meta) || {};
+    var geo = isValidGeo(meta.geo) ? meta.geo : "reflow";
+    var interactive = meta.interactive === false ? false : true;
+    return { geo: geo, interactive: interactive };
+  }
+  // Write a doc's cell onto doc.meta ONLY -- never touches pages/blocks, so a cell change
+  // is lossless by construction. A falsy/invalid geo clears geo back to the reflow
+  // default; a non-boolean interactive clears it back to the interactive default.
+  function tagDocCell(d, geo, interactive) {
+    if (!d) return d;
+    if (!d.meta) d.meta = {};
+    if (isValidGeo(geo)) d.meta.geo = geo; else delete d.meta.geo;
+    if (interactive === true || interactive === false) d.meta.interactive = interactive;
+    else delete d.meta.interactive;
+    return d;
+  }
+  // preset key -> {geo, interactive}. Unknown key -> null (caller falls back to default).
+  function presetToCell(presetKey) {
+    for (var i = 0; i < DOCTYPE_PRESETS.length; i++) {
+      if (DOCTYPE_PRESETS[i].key === presetKey) {
+        return { geo: DOCTYPE_PRESETS[i].geo, interactive: DOCTYPE_PRESETS[i].interactive };
+      }
+    }
+    return null;
+  }
+  // {geo, interactive} -> the preset key that names that cell, or null when the cell is a
+  // recombination no preset covers (the matrix allows cells outside the five presets).
+  function cellToPreset(geo, interactive) {
+    for (var i = 0; i < DOCTYPE_PRESETS.length; i++) {
+      if (DOCTYPE_PRESETS[i].geo === geo && DOCTYPE_PRESETS[i].interactive === interactive) {
+        return DOCTYPE_PRESETS[i].key;
+      }
+    }
+    return null;
+  }
+  // Geometry tool list for the Document-context inspector. Unknown geo -> the reflow set
+  // (matches the default geo).
+  function condToolsFor(geo) {
+    return (DOCTYPE_COND_TOOLS[geo] || DOCTYPE_COND_TOOLS.reflow).slice();
+  }
+  // SPEC 7 static fallback: block types that mount runtime.js for learner interactivity. In a
+  // STATIC cell (doc.meta.interactive === false) these are hidden from the Blocks library so a
+  // static document can't gain new interactive content. Existing ones are NEVER dropped -- they
+  // simply render their static output (the authoring canvas already renders without the learner
+  // runtime; the degrade is only visible in Demo/export, a follow-up), and toggling back to
+  // interactive restores them, so the toggle is lossless.
+  var INTERACTIVE_BLOCK_TYPES = {
+    quiz: 1, hotspot: 1, checkbox: 1, navButton: 1,
+    accordion: 1, cardReveal: 1, sequence: 1, cardDeck: 1, htmlEmbed: 1, webEmbed: 1
+  };
+  function isInteractiveBlockType(t) { return !!INTERACTIVE_BLOCK_TYPES[t]; }
+  // A palette item is offered when the cell is interactive, OR the item is not an interactive type.
+  function paletteAllowsType(type, interactive) { return interactive !== false || !isInteractiveBlockType(type); }
+  /* @pure-doctype-end */
+
   var saveStateEl = null;
   var saveFailed = false;
   var saveFailAlerted = false;   // one blocking alert per failure episode
@@ -1291,6 +1377,13 @@
   // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
   window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants,
     unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct };
+  // SPEC 7 matrix doc-type model -- the pure surface the Editor Window Rework tickets
+  // (creation flow, cell switcher, capability inspector, static fallback, file picker
+  // grouping) consume so the {geo, interactive} logic lives in exactly one place.
+  window.__docType = { docCell: docCell, tagDocCell: tagDocCell, presetToCell: presetToCell,
+    cellToPreset: cellToPreset, condToolsFor: condToolsFor, isValidGeo: isValidGeo,
+    isInteractiveBlockType: isInteractiveBlockType, paletteAllowsType: paletteAllowsType,
+    PRESETS: DOCTYPE_PRESETS, GEOS: DOCTYPE_GEOS };
   // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
   // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
   // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
@@ -1442,19 +1535,43 @@
   // is the DS IconButton (Lucide plus). Re-skin only — the switch/close/new-doc
   // handlers are unchanged. A legacy chip fallback keeps the bar working if the
   // control library is ever absent.
+  // SPEC 7 (product-filtered tabs): the global product picker scopes the visible tabs. A tab
+  // shows when its doc matches the active product ("" = All products -> every open tab). An
+  // untagged doc has no productId, so it only ever shows under All products -- the same rule
+  // Product Rail uses everywhere else (an untagged doc is never silently attributed to a
+  // filter). PURE (no DOM) so tests/run.js exercises the predicate headlessly.
+  /* @pure-tabscope-start */
+  function visibleTabIds(openIds, reg, activeProduct) {
+    var pid = activeProduct || "";
+    return (openIds || []).filter(function (id) {
+      var d = reg && reg[id];
+      if (!d) return false;
+      if (!pid) return true; // All products
+      return !!(d.meta && d.meta.productId === pid);
+    });
+  }
+  /* @pure-tabscope-end */
+
   function renderTabs() {
     var container = document.getElementById("toolbar-tabs");
     if (!container) return;
     container.innerHTML = "";
     var U = window.VersoUI;
-    openDocIds.forEach(function (id) {
+    var activeProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var shown = visibleTabIds(openDocIds, registry, activeProduct);
+    shown.forEach(function (id) {
       var d = registry[id];
       if (!d) return;
       var title = d.meta.title || id;
+      // Per-Product colour dot, keyed on the stable productId (not the mutable name) so the
+      // colour never shifts when a product is renamed. Untagged docs get no dot.
+      var pid = d.meta && d.meta.productId;
+      var dotColour = pid ? colourForName(pid) : null;
       if (U && U.DocumentTab) {
         container.appendChild(U.DocumentTab({
           label: title,
           active: id === activeDocId,
+          dot: dotColour,
           onSelect: function () { switchDoc(id); },
           onClose: function () { closeTab(id); }
         }));
@@ -1526,6 +1643,17 @@
     renderTabs();
     renderVariantSwitch(); // rebuild the top-bar variant pill for the NEW doc (else it shows the old doc's variants / goes blank)
     renderVersionSwitch(); // #206: same for the software-version switcher
+    syncCellChip(); // SPEC 7: reflect the new doc's matrix cell in the header chip
+  }
+
+  // SPEC 7: after the product picker changes, re-scope the tab strip. If the active doc fell
+  // out of scope and other tabs are visible, activate the first visible one (switchDoc rebuilds
+  // the strip + canvas). If NOTHING is in scope, leave the active doc as-is and just redraw the
+  // (now empty-but-for-＋) strip -- the file-picker is how the author opens one in that product.
+  function reconcileActiveTabToScope() {
+    var shown = visibleTabIds(openDocIds, registry, (typeof getActiveProduct === "function") ? getActiveProduct() : "");
+    if (shown.length && shown.indexOf(activeDocId) === -1) { switchDoc(shown[0]); return; }
+    renderTabs();
   }
 
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
@@ -1573,6 +1701,15 @@
     meta.appendChild(h("span", "vbrowser-card__sep", "·"));
     meta.appendChild(h("span", "vbrowser-card__when", formatRelativeTime(d.meta && d.meta.updatedAt, Date.now())));
     main.appendChild(titleEl); main.appendChild(meta);
+    // SPEC 7: a badge row — Product (if tagged), interactive/static, and an open-state mark.
+    var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { interactive: true };
+    var pid = d.meta && d.meta.productId;
+    var pname = (pid && window.ProductsStore && window.ProductsStore[pid]) ? window.ProductsStore[pid].name : null;
+    var badges = h("div", "vbrowser-card__badges");
+    if (pname) badges.appendChild(h("span", "vbrowser-card__badge", pname));
+    badges.appendChild(h("span", "vbrowser-card__badge", cell.interactive ? "Interactive" : "Static"));
+    if (id === activeDocId || openDocIds.indexOf(id) !== -1) badges.appendChild(h("span", "vbrowser-card__badge vbrowser-card__badge--open", "Open"));
+    main.appendChild(badges);
     var menuBtn = iconBtn("more-horizontal", "Course actions"); menuBtn.classList.add("vbrowser-card__menu");
     menuBtn.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -1687,14 +1824,53 @@
     cards.forEach(function (c) { thumbObserver.observe(c); });
   }
 
+  // SPEC 7 file-picker: the doc browser groups documents BY DOC TYPE (geometry cell), each group
+  // colour-coded. Grouping is pure (takes a geoOf resolver) so tests/run.js exercises it headlessly.
+  var BROWSER_GEO = {
+    reflow: { label: "Reflow", colour: "#0d99ff" },
+    frame:  { label: "Fixed frame", colour: "#9747ff" },
+    paged:  { label: "Paged", colour: "#14ae5c" }
+  };
+  /* @pure-browser-geo-start */
+  var BROWSER_GEO_ORDER = ["reflow", "frame", "paged"];
+  function groupDocIdsByGeo(ids, reg, geoOf) {
+    var by = { reflow: [], frame: [], paged: [] };
+    (ids || []).forEach(function (id) {
+      var d = reg && reg[id]; if (!d) return;
+      var geo = geoOf ? geoOf(d) : "reflow";
+      if (!by[geo]) geo = "reflow"; // unknown geo groups under reflow
+      by[geo].push(id);
+    });
+    return BROWSER_GEO_ORDER.filter(function (g) { return by[g].length; })
+      .map(function (g) { return { geo: g, ids: by[g] }; });
+  }
+  /* @pure-browser-geo-end */
   function renderBrowserGrid() {
     if (!browserUI) return;
     var grid = browserUI.grid; grid.innerHTML = "";
-    var ids = Object.keys(registry).filter(function (id) { return courseMatchesQuery(registry[id], browserQuery); });
+    // Respect the global product scope (like the tabs) + the search query.
+    var scope = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var ids = Object.keys(registry).filter(function (id) {
+      return courseMatchesQuery(registry[id], browserQuery) && docMatchesProductStage(registry[id], scope, null);
+    });
     ids.sort(function (x, y) { return recentsCompare(registry[x], registry[y]); });
     if (!ids.length) { grid.appendChild(buildBrowserEmpty()); return; }
-    var cards = ids.map(function (id) { var c = buildBrowserCard(id, registry[id]); grid.appendChild(c); return c; });
-    observeThumbs(cards);
+    var groups = groupDocIdsByGeo(ids, registry, function (d) {
+      return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d).geo : "reflow";
+    });
+    var allCards = [];
+    groups.forEach(function (grp) {
+      var gm = BROWSER_GEO[grp.geo] || BROWSER_GEO.reflow;
+      var head = h("div", "vbrowser__group");
+      var dot = h("span", "vbrowser__group-dot"); dot.style.background = gm.colour; head.appendChild(dot);
+      head.appendChild(h("span", "vbrowser__group-title", gm.label));
+      head.appendChild(h("span", "vbrowser__group-count", String(grp.ids.length)));
+      grid.appendChild(head);
+      var inner = h("div", "vbrowser__grid-inner");
+      grp.ids.forEach(function (id) { var c = buildBrowserCard(id, registry[id]); inner.appendChild(c); allCards.push(c); });
+      grid.appendChild(inner);
+    });
+    observeThumbs(allCards);
   }
 
   function ensureBrowser() {
@@ -1877,7 +2053,11 @@
   }
   function clearHeaderFooterDefault() { try { localStorage.removeItem(HF_DEFAULT_KEY); } catch (e) {} }
 
-  function createBlankDoc(title, code) {
+  // SPEC 7: `opts` (optional) = { productId, geo, interactive } from the product-first create
+  // flow. When present, the new doc is stamped with its Product (doc.meta.productId) and its
+  // matrix cell (doc.meta.geo/interactive) at birth. Omitted -> an untagged doc = today's
+  // {reflow, interactive} default, so the old callers are unchanged.
+  function createBlankDoc(title, code, opts) {
     if (registry[code]) {
       alert("A course with code '" + code + "' already exists.");
       return;
@@ -1900,6 +2080,9 @@
         }
       ]
     };
+    opts = opts || {};
+    if (opts.productId) tagDocProductStage(newDoc, opts.productId, null);
+    if (opts.geo) tagDocCell(newDoc, opts.geo, opts.interactive); // preset {geo, interactive}
     registry[code] = newDoc;
     saveRegistry(registry);
     openDocIds.push(code);
@@ -1994,6 +2177,12 @@
     // dialog routes through the DS modal shell (VersoUI.Modal) — issue #19. modal
     // + box are assigned from the shell below.
     var modal, box, titleIn, codeIn;
+    // SPEC 7 product-first creation: the new doc is born in a Product (defaults to the current
+    // picker scope) and a matrix-cell preset (defaults to eLearning). Resolved to
+    // {geo, interactive} via the doc-type model at create time.
+    var DT = window.__docType;
+    var newDocProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var newDocPreset = "elearning";
     var btnImport = window.VersoUI.Button({ variant: "secondary", label: "Import…", onClick: function () {
       pickCourseFile(function (imported) { importDocToRegistry(imported); modal.remove(); });
     } });
@@ -2016,7 +2205,8 @@
         var title = titleIn.value.trim();
         var code = codeIn.value.trim();
         if (!title || !code) { alert("Title and Code are required."); return; }
-        createBlankDoc(title, code);
+        var cell = (DT && DT.presetToCell(newDocPreset)) || { geo: "reflow", interactive: true };
+        createBlankDoc(title, code, { productId: newDocProduct, geo: cell.geo, interactive: cell.interactive });
         modal.remove();
         // Slice 2: MANDATORY backup-folder setup — prompt the picker immediately (still
         // within this click gesture, required for the native/FSA folder pickers). If the
@@ -2064,6 +2254,23 @@
     }
 
     modalSection(box, "New course");
+    // Product (defaults to the current scope) -> preset (matrix cell) -> name, per SPEC 7.
+    var prodRow = modalField(box, "Product");
+    prodRow.appendChild(window.VersoUI.Select({
+      options: productSelectOptions(window.ProductsStore),
+      value: newDocProduct,
+      onChange: function (v) { newDocProduct = v || ""; }
+    }));
+    if (DT && window.VersoUI.ChoiceCards) {
+      modalField(box, "Start from a preset");
+      box.appendChild(window.VersoUI.ChoiceCards({
+        options: DT.PRESETS.map(function (p) {
+          return { value: p.key, title: p.name, desc: (p.geo.charAt(0).toUpperCase() + p.geo.slice(1)) + " · " + (p.interactive ? "interactive" : "static") };
+        }),
+        value: newDocPreset,
+        onChange: function (v) { newDocPreset = v; }
+      }));
+    }
     titleIn = modalText(box, "Course title", "", "e.g. My New Course");
     codeIn = modalText(box, "Course code", "", "e.g. DRO-NEW-101");
   }
@@ -6651,6 +6858,15 @@
       ? "Live library instance, linked to “" + (def.name || block.ref) + "”. Edit the master in Settings → System → Component Library and every placement updates automatically."
       : "This instance's library master (“" + block.ref + "”) no longer exists. Detach to keep this placement as an editable copy, or remove it."));
 
+    // SPEC 7 two-way link: a block inserted from Source carries a sourceRef -- offer a jump back
+    // to its exact source topic (the reverse of the Source panel's where-used row).
+    if (block.sourceRef && block.sourceRef.topicId && window.VersoUI && window.VersoUI.Button) {
+      inspector.appendChild(window.VersoUI.Button({
+        variant: "secondary", icon: "link", label: "Open in Source",
+        onClick: function () { jumpToSourceTopic(block.sourceRef.topicId); }
+      }));
+    }
+
     // Product Rail: a facet switcher, shown only when the master carries named facets
     // (never for docTypeRenderings -- that's export-time-only, structurally never a
     // picker here). Switching only changes what THIS placement resolves to; it never
@@ -10438,7 +10654,7 @@
   function mountTopBar() {
     if (typeof document === "undefined") return;
     var Ic = window.Icon; if (!Ic) return;
-    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
+    var hosts = document.querySelectorAll(".toolbar [data-lucide], .editor-window [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
     Array.prototype.forEach.call(hosts, function (el) {
       var name = el.getAttribute("data-lucide");
       if (!name) return;
@@ -10494,7 +10710,7 @@
     __activeStage = stage;
     try { localStorage.setItem(STAGE_PERSIST_KEY, stage); } catch (e) {}
     if (typeof document === "undefined") return;
-    ["lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
+    if (typeof applyLeftSection === "function") applyLeftSection(_activeLeftSection); // SPEC 7: re-apply the left switcher's active section (Edit shows the panel; the switcher owns pane visibility)
     var ws = document.getElementById("workspace");
     if (ws) {
       ws.classList.remove("workspace--stage-source", "workspace--stage-publish");
@@ -10503,11 +10719,15 @@
     }
     var srcEl = document.getElementById("stage-source"); if (srcEl) srcEl.hidden = stage !== "source";
     var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
+    // SPEC 7: the editor-window header (tabs + doc controls) belongs to Edit only.
+    var edHdr = document.getElementById("editor-window-header"); if (edHdr) edHdr.hidden = stage !== "edit";
     STAGE_IDS.forEach(function (s) {
       var btn = document.getElementById("rail-tab-" + s);
       if (btn) btn.classList.toggle("is-active", s === stage);
     });
     if (stage === "source") renderSourceStage();
+    // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
+    if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
@@ -10525,6 +10745,63 @@
   }
   window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; } }; // boot + settings
 
+  // SPEC 7 (cell switcher + tiered mutability): the editor-header chip shows the document's matrix
+  // cell (geometry . interactivity) and opens a menu to change it AFTER creation. Tiered: toggling
+  // interactivity is free + immediate; a geometry-mode change warns (content reflows, may not survive
+  // 1:1) then re-renders the canvas into the new geometry. Reads/writes doc.meta via the pure
+  // doc-type model; a geometry change is reflected by mount() rebuilding the geo-classed canvas.
+  var CELL_GEO_LABEL = { reflow: "Reflow", frame: "Fixed frame", paged: "Paged" };
+  function currentCell() {
+    return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc) : { geo: "reflow", interactive: true };
+  }
+  function applyCellChange(geo, interactive) {
+    if (!window.__docType || !window.__docType.tagDocCell) return;
+    window.__docType.tagDocCell(doc, geo, interactive);
+    saveRegistry(registry);
+    mount();            // rebuild the geo-classed canvas + palette (static fallback rides render)
+    syncCellChip();
+  }
+  function setCellInteractive(on) {
+    var c = currentCell();
+    if (c.interactive === on) return;
+    applyCellChange(c.geo, on); // immediate, no warning (free per tiered mutability)
+  }
+  function setCellGeo(geo) {
+    var c = currentCell();
+    if (c.geo === geo) return;
+    // Guarded: a geometry-mode switch reflows content and may not survive 1:1.
+    confirmModal("Change layout mode?",
+      "Switching to " + (CELL_GEO_LABEL[geo] || geo) + " reflows this document's content into the new geometry. It may not survive 1:1 -- you can switch back, but check the result.",
+      function () { applyCellChange(geo, c.interactive); },
+      { okLabel: "Change & reflow" });
+  }
+  function openCellMenu(anchor) {
+    var c = currentCell();
+    var items = [{ head: "Geometry" }];
+    ["reflow", "frame", "paged"].forEach(function (g) {
+      items.push({ label: CELL_GEO_LABEL[g], active: c.geo === g, onClick: function () { setCellGeo(g); } });
+    });
+    items.push({ sep: true });
+    items.push({ head: "Interactivity" });
+    items.push({ label: "Interactive", active: c.interactive === true, onClick: function () { setCellInteractive(true); } });
+    items.push({ label: "Static", active: c.interactive === false, onClick: function () { setCellInteractive(false); } });
+    var r = anchor.getBoundingClientRect();
+    showContextMenu(r.left, r.bottom + 6, items);
+  }
+  function syncCellChip() {
+    if (typeof document === "undefined") return;
+    var chip = document.getElementById("editor-cell-chip"); if (!chip) return;
+    var c = currentCell();
+    chip.textContent = (CELL_GEO_LABEL[c.geo] || c.geo) + " · " + (c.interactive ? "Interactive" : "Static");
+    chip.classList.toggle("is-static", !c.interactive);
+  }
+  function mountCellChip() {
+    if (typeof document === "undefined") return;
+    var chip = document.getElementById("editor-cell-chip"); if (!chip) return;
+    if (!chip.__wired) { chip.__wired = true; chip.addEventListener("click", function () { openCellMenu(chip); }); }
+    syncCellChip();
+  }
+
   // Persistent top-bar product context (Product Rail): "" = All products. In-memory
   // only for now -- every stage reads it through window.__productRail.getActiveProduct().
   var __activeProduct = "";
@@ -10538,7 +10815,7 @@
     host.appendChild(U.Select({
       options: productSelectOptions(window.ProductsStore),
       value: __activeProduct,
-      onChange: function (v) { setActiveProduct(v); renderSourceStage(); } // re-resolve the Product's one document
+      onChange: function (v) { setActiveProduct(v); renderSourceStage(); reconcileActiveTabToScope(); } // re-resolve the Product's document + re-scope the Edit tabs
     }));
   }
   window.__productRail.getActiveProduct = getActiveProduct;
@@ -11559,8 +11836,9 @@
       used.forEach(function (u) {
         var row = h("button", "source-stage__linked-row", u.docTitle);
         row.type = "button";
-        row.title = "Open " + u.docTitle;
-        row.addEventListener("click", function () { openCourseFromBrowser(u.docCode); setStage("edit"); });
+        row.title = "Open " + u.docTitle + " and select the linked block";
+        // SPEC 7 two-way link: jump to the EXACT linked block, not just the document.
+        row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
         sourceBody.appendChild(row);
       });
     }
@@ -13445,6 +13723,28 @@
     // #162: the canvas backdrop is an Appearance sectionGroup (canonical taxonomy), so the
     // document panel reads with the same grammar as the block inspectors.
     beginSections();
+    // SPEC 7 capability inspector: with nothing selected the Document context leads with the
+    // document's matrix cell + the geometry-specific tools (condToolsFor). No top strip -- these
+    // live in the inspector like every other document control. Changing the cell (header chip)
+    // re-mounts, so this section updates live.
+    var _cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc) : { geo: "reflow", interactive: true };
+    sectionGroup("Layout", "Document type", function (secBody) {
+      var _i = inspector; inspector = secBody;
+      try {
+        inspector.appendChild(h("div", "insp-hint",
+          (CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " · " + (_cell.interactive ? "Interactive" : "Static") +
+          " — change it from the cell chip in the editor header."));
+        var tools = (window.__docType && window.__docType.condToolsFor) ? window.__docType.condToolsFor(_cell.geo) : [];
+        if (tools.length) {
+          inspector.appendChild(sub((CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " tools"));
+          tools.forEach(function (t) {
+            var row = h("div", "insp-row insp-doc-tool");
+            row.appendChild(h("span", "insp-row__label", t));
+            inspector.appendChild(row);
+          });
+        }
+      } finally { inspector = _i; }
+    });
     sectionGroup("Appearance", "Canvas", function (secBody) {
       var _i = inspector; inspector = secBody;
       try {
@@ -17007,11 +17307,27 @@
 
   // shows the device viewport line so you can gauge how much content sits below
   // the fold. Real scrolling lives in demo mode, not the authoring canvas.
+  // SPEC 7 canvas geometry: a page renders through the SAME renderPage() in every geometry
+  // (pure-render invariant held); only the frame CONTAINER changes per doc.meta.geo. reflow
+  // = today's fluid vertical flow (no rule -> pixel-identical). frame = a fixed one-screen
+  // surface that clips + warns on overflow. paged = a page-height surface with page-break
+  // guides, so content flows across page sections. These two helpers are PURE (headless-
+  // tested); the geometry itself is CSS on `.world.geo-<geo> .frame`, driven off this class.
+  /* @pure-geo-canvas-start */
+  function worldGeoClass(geo) { return "geo-" + (geo === "frame" || geo === "paged" ? geo : "reflow"); }
+  function frameContentOverflows(scrollH, clientH) { return clientH > 0 && scrollH > clientH + 2; }
+  /* @pure-geo-canvas-end */
+  var _worldGeo = "reflow";
+
   function buildWorld() {
     world = h("div", "world");
     frameDescs = [];
     var deviceH = BREAKPOINTS[activeBp].h;
     var renderDoc = currentDoc(); // base doc, or the resolved doc when previewing a variant
+    // Geometry cell drives the frame container (reflow / frame / paged). Untagged/legacy docs
+    // resolve to reflow via the doc-type model -> today's canvas, unchanged.
+    _worldGeo = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(renderDoc).geo : "reflow";
+    world.classList.add(worldGeoClass(_worldGeo));
 
     // JJJJ: group pages into chapter COLUMNS; each page's column X is known now
     // (its row Y is set after measure in layoutColumns). page.id -> {col,row}.
@@ -17181,6 +17497,12 @@
     colY.forEach(function (y) { if (y != null && y - GAP_Y > maxH) maxH = y - GAP_Y; });
     worldH = maxH || FRAME_H;
     world.style.height = worldH + "px";
+    // SPEC 7: in fixed-frame geometry a page is clipped to one screen -- flag any frame whose
+    // content overflows so the canvas shows the amber warning (never silently spawns a slide).
+    // Measured here (post-attach) before culling, alongside the height reads above.
+    if (_worldGeo === "frame") frameDescs.forEach(function (f) {
+      if (f.frame) f.frame.classList.toggle("is-overflowing", frameContentOverflows(f.frame.scrollHeight, f.frame.clientHeight));
+    });
     // Perf (#150): now that the TRUE heights are measured + stacked, pin each frame's
     // contain-intrinsic-size to its measured height and enable content-visibility:auto,
     // so the browser SKIPS painting + laying-out pages scrolled out of the viewport. The
@@ -18373,8 +18695,15 @@
       if (view === "grid" && U && U.BlockGrid) return U.BlockGrid({ minColWidth: 84 });
       return h("div", "asset-group__list");
     }
+    // SPEC 7: in a static cell, hide interactive block types from the library (existing blocks
+    // are untouched -- this only gates what NEW content can be added).
+    var cellInteractive = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc).interactive : true;
     var order = [], byGroup = {};
     LIBRARY.forEach(function (item, idx) {
+      // A palette item's block type lives in item.make() (the item itself has no .type). Cache it
+      // on first read, then gate on the cell: a static cell hides interactive types.
+      if (item.__bt === undefined) item.__bt = item.type || (item.make ? (item.make() || {}).type : null);
+      if (!paletteAllowsType(item.__bt, cellInteractive)) return; // static cell: skip interactive types
       var g = item.group || "Blocks";
       if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
       byGroup[g].push({ item: item, idx: idx });
@@ -18500,85 +18829,108 @@
     focusFrame(currentPage);
     reselectBlockNode(block, "block"); // select the new block so repeated inserts stack after it
   }
-  // SS: the left panel stacks N panes (Structure, Blocks, Components — all visible),
-  // each collapsible, with a draggable split between every adjacent pair adjusting
-  // their combined height share. Generalized from a hard-coded two-pane model so a
-  // pane can be added/removed without touching the split math (#component-library
-  // reorg: added the third "Components" pane).
-  var LPANE_ORDER = [
-    { id: "lpane-structure", key: "structure", share: 6 },
-    { id: "lpane-blocks", key: "blocks", share: 4 },
-    { id: "lpane-components", key: "components", share: 3 }
-  ];
-  function wireLeftPanes() {
+  // SPEC 7 (decision 11): the left panel is a single 3-way switcher -- Structure . Blocks .
+  // Source -- with equal billing (Source insertion is a primary use now, not a bolt-on). Each
+  // .lpane carries data-lsec; the active section's pane(s) show and the rest drop out. Components
+  // folds INTO Blocks (James's call), so the Blocks section shows the Insert palette with the
+  // Reusable-components pane beneath it. The last-active section persists across reloads.
+  var LEFT_SECTIONS = ["structure", "blocks", "source"];
+  var LEFT_SECTION_KEY = "authoring.lpane.active";
+  var _activeLeftSection = "structure";
+  function applyLeftSection(sec) {
+    if (LEFT_SECTIONS.indexOf(sec) === -1) sec = "structure";
+    _activeLeftSection = sec;
+    try { localStorage.setItem(LEFT_SECTION_KEY, sec); } catch (e) {}
+    var panel = document.querySelector(".panel--left"); if (!panel) return;
+    Array.prototype.forEach.call(panel.querySelectorAll(".lpane[data-lsec]"), function (el) {
+      el.hidden = el.getAttribute("data-lsec") !== sec;
+    });
+    mountLeftSwitcher(); // re-render so the active segment reflects the state (also on programmatic switches)
+    if (sec === "source") renderLeftSourceNav();
+  }
+  function mountLeftSwitcher() {
+    var host = document.getElementById("lpane-switch"); if (!host) return;
+    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
+    host.innerHTML = "";
+    host.appendChild(U.SegmentedControl({
+      size: "sm",
+      options: [{ value: "structure", label: "Structure" }, { value: "blocks", label: "Blocks" }, { value: "source", label: "Source" }],
+      value: _activeLeftSection,
+      onChange: function (v) { applyLeftSection(v); }
+    }));
+  }
+  // The Edit left panel's Source section reuses the Source stage's topic list (same filterTopics /
+  // groupTopicsByProduct, product-scoped). A row opens that topic in the Source stage -- the quick
+  // jump from Edit into source. (Drag-to-canvas source insertion is source-insert-two-way-jump.)
+  function renderLeftSourceNav() {
+    var host = document.getElementById("tab-source"); if (!host) return;
+    host.innerHTML = "";
+    var topics = filterTopics(libComponents(), getActiveProduct(), "");
+    if (!topics.length) {
+      host.appendChild(h("div", "source-stage__empty", "No source document yet. Open the Source stage to import or add topics."));
+      return;
+    }
+    groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
+      host.appendChild(h("div", "source-stage__group-label", g.label));
+      g.topics.forEach(function (t) {
+        var row = h("div", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""));
+        var label = h("button", "source-stage__topic-label", t.name || "Untitled topic");
+        label.type = "button";
+        label.title = "Open in the Source stage";
+        label.addEventListener("click", function () {
+          __sourceActiveTopicId = t.id;
+          try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, t.id); } catch (e) {}
+          setStage("source");
+        });
+        row.appendChild(label);
+        // SPEC 7: insert this source topic as a live-linked block on the current page.
+        var ins = h("button", "source-stage__insert"); ins.type = "button";
+        ins.innerHTML = window.Icon ? window.Icon("plus") : "+";
+        ins.title = "Insert as a linked block on the current page";
+        ins.setAttribute("aria-label", "Insert " + (t.name || "topic") + " as a linked block");
+        ins.addEventListener("click", function (e) { e.stopPropagation(); insertSourceLinkedBlock(t.id); });
+        row.appendChild(ins);
+        host.appendChild(row);
+      });
+    });
+  }
+  // SPEC 7 source insert: a source topic becomes its own live-linked block. The instance keeps
+  // ref = the topic master id (so libraryWhereUsedDetail's "Linked in N" registers with no extra
+  // plumbing) AND a sourceRef back-reference so the block's link can jump back to its topic. The
+  // topic's prose renders through resolveFacetTemplate (facet pointer), the same live-link path
+  // any libraryInstance uses -- the cell only supplies constraints, never a second render path.
+  function insertSourceLinkedBlock(topicId) {
+    if (!topicId) return;
+    var block = { type: "libraryInstance", id: mintId(), ref: topicId, sourceRef: { topicId: topicId } };
+    // Point the placement at the topic's first facet so it resolves a template (a facet-only
+    // topic master has no def.template to fall back to); the inspector's facet switcher can change it.
+    var def = resolveComponentDef(topicId);
+    if (def && def.facets) { var fk = Object.keys(def.facets); if (fk.length) block.facet = fk[0]; }
+    insertBlock(block);
+  }
+  // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
+  function jumpToSourceTopic(topicId) {
+    if (!topicId) return;
+    __sourceActiveTopicId = topicId;
+    try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, topicId); } catch (e) {}
+    setStage("source");
+  }
+  // Two-way link, direction 1: open the doc, land in Edit, and select the exact linked block.
+  function jumpToLinkedBlock(docCode, blockId) {
+    openCourseFromBrowser(docCode);
+    setStage("edit");
+    var b = blockById(blockId);
+    if (b) {
+      var pi = findPageOfBlock(b);
+      if (pi != null && pi >= 0) { focusFrame(pi); setActivePage(pi); }
+      reselectBlockNode(b, "block");
+    }
+  }
+  function wireLeftSwitcher() {
     renderAssets();
     renderComponentsPalette();
-    var panel = document.querySelector(".panel--left");
-    var panes = LPANE_ORDER.map(function (o) {
-      return { el: document.getElementById(o.id), key: o.key, share: o.share };
-    }).filter(function (o) { return o.el; });
-    var splits = Array.prototype.slice.call(panel ? panel.querySelectorAll(".lpane-split") : []);
-    if (!panel || panes.length < 2) return;
-
-    function syncSplits() {
-      // a split between pane i and pane i+1 only matters (is shown) when BOTH are open
-      splits.forEach(function (split, i) {
-        var a = panes[i], b = panes[i + 1];
-        var bothOpen = a && b && !a.el.classList.contains("is-collapsed") && !b.el.classList.contains("is-collapsed");
-        split.style.display = bothOpen ? "" : "none";
-      });
-    }
-    // restore collapse state + wire collapse toggles
-    panes.forEach(function (o) {
-      var key = "authoring.lpane." + o.key;
-      var v = null; try { v = localStorage.getItem(key); } catch (e) {}
-      if (v === "1") o.el.classList.add("is-collapsed");
-      var head = o.el.querySelector(".lpane__head");
-      if (head) head.addEventListener("click", function (e) {
-        if (e.target.closest(".outliner-add-btn")) return; // let the + button through
-        o.el.classList.toggle("is-collapsed");
-        try { localStorage.setItem(key, o.el.classList.contains("is-collapsed") ? "1" : "0"); } catch (_) {}
-        syncSplits();
-      });
-    });
-    syncSplits();
-
-    // each adjacent pair's split ratio is stored independently, so dragging one
-    // split only redistributes the two panes touching it, leaving the rest alone.
-    function applyShares() { panes.forEach(function (o) { o.el.style.flexGrow = String(o.share); }); }
-    splits.forEach(function (split, i) {
-      var a = panes[i], b = panes[i + 1];
-      if (!a || !b) return;
-      var combined = a.share + b.share;
-      var r = a.share / combined;
-      var storeKey = "authoring.lpane.split." + i;
-      try {
-        var s = localStorage.getItem(storeKey);
-        if (!s && i === 0) s = localStorage.getItem("authoring.lpane.split"); // pre-reorg key
-        if (s) r = Math.min(0.85, Math.max(0.15, parseFloat(s)));
-      } catch (e) {}
-      a.share = combined * r; b.share = combined * (1 - r);
-    });
-    applyShares();
-
-    splits.forEach(function (split, i) {
-      var a = panes[i], b = panes[i + 1];
-      if (!a || !b) return;
-      var combined = a.share + b.share;
-      split.addEventListener("mousedown", function (e) {
-        e.preventDefault(); split.classList.add("is-dragging");
-        function move(ev) {
-          var aRect = a.el.getBoundingClientRect(), bRect = b.el.getBoundingClientRect();
-          var top = aRect.top, span = (bRect.bottom - top) || 1;
-          var ratio = Math.min(0.85, Math.max(0.15, (ev.clientY - top) / span));
-          a.share = combined * ratio; b.share = combined * (1 - ratio);
-          applyShares();
-          try { localStorage.setItem("authoring.lpane.split." + i, String(ratio)); } catch (_) {}
-        }
-        function up() { split.classList.remove("is-dragging"); document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); }
-        document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
-      });
-    });
+    try { var saved = localStorage.getItem(LEFT_SECTION_KEY); if (LEFT_SECTIONS.indexOf(saved) !== -1) _activeLeftSection = saved; } catch (e) {}
+    applyLeftSection(_activeLeftSection);
   }
 
   // ---- mount / re-mount (preserves view) -----------------------------------
@@ -18618,8 +18970,9 @@
     renderStructure();
     renderAssets(); // keep the Blocks palette current
     renderComponentsPalette(); // keep the Components pane current (My Components / Blocks / Pages)
+    if (typeof syncCellChip === "function") syncCellChip(); // SPEC 7: reflect the doc's cell in the header chip after any rebuild
     renderModelView();
-    
+
     restoreSelection();
     
     updateHistoryButtons();
@@ -21145,6 +21498,7 @@
     renderCopyEditorDoc(); // slices 2-3: paint + bind the course copy
     renderCopyEditorTools(); // slice 4: word count + Find & replace
     scheduleSpellcheck(); // P0: mark typos across the whole copy document
+    syncViewToggle(); // reflect Read in the header Build/Read control
   }
   function exitCopyEditor() {
     var st = window.copyEditorNextState({ open: copyEditorIsOpen() }, "exit");
@@ -21160,8 +21514,30 @@
         focusFrame(p); setActivePage(p); setSelection("page", p);
       }
     }
+    syncViewToggle(); // reflect Build in the header Build/Read control
   }
   function toggleCopyEditor() { if (copyEditorIsOpen()) exitCopyEditor(); else enterCopyEditor(); }
+  // SPEC 7 (decision 14): a Build/Read segmented control in the editor header is the in-flow
+  // way to switch between the authoring canvas (Build) and the per-doc copy view (Read = the
+  // copy editor). It stays in sync however the copy editor is opened/closed (rail button, Esc).
+  // Preview stays its own separate glyph.
+  function currentViewMode() { return copyEditorIsOpen() ? "read" : "build"; }
+  function mountViewToggle() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("editor-view-toggle"); if (!host) return;
+    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
+    host.innerHTML = "";
+    host.appendChild(U.SegmentedControl({
+      size: "sm",
+      options: [{ value: "build", label: "Build" }, { value: "read", label: "Read" }],
+      value: currentViewMode(),
+      onChange: function (v) {
+        if (v === "read") { if (!copyEditorIsOpen()) enterCopyEditor(); }
+        else if (copyEditorIsOpen()) exitCopyEditor();
+      }
+    }));
+  }
+  function syncViewToggle() { mountViewToggle(); } // re-render so the active segment reflects the real state
   function wireCopyEditor() {
     var btn = document.getElementById("copy-editor-btn");
     if (btn) btn.addEventListener("click", enterCopyEditor);
@@ -21271,6 +21647,18 @@
     demoBpBtns = Array.prototype.slice.call(document.querySelectorAll("#demo-bp .bp-btn"));
     demoBpBtns.forEach(function (b) { b.addEventListener("click", function () { demoBp = b.getAttribute("data-bp"); renderDemo(); }); });
     document.getElementById("demo-enter").addEventListener("click", enterDemo);
+    // SPEC 7: Send-to-publish is relocated into the editor header. Real behaviour (wire to
+    // addToQueue) lands in the send-to-publish-wire ticket; a stub confirmation for now.
+    var sendPub = document.getElementById("send-to-publish-btn");
+    if (sendPub && !sendPub.__wired) {
+      sendPub.__wired = true;
+      sendPub.addEventListener("click", function () {
+        var t = h("div", "collab-toast", "Send to publish — coming soon");
+        document.body.appendChild(t);
+        requestAnimationFrame(function () { t.classList.add("is-on"); });
+        setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2400);
+      });
+    }
     document.getElementById("demo-exit").addEventListener("click", exitDemo);
     document.getElementById("demo-prev").addEventListener("click", function () { stepDemo(-1); });
     document.getElementById("demo-next").addEventListener("click", function () { stepDemo(1); });
@@ -22417,8 +22805,14 @@
     var r = anchor.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 6, items);
   }
+  // SPEC 7: the variant (outer axis) + version (inner axis) glyphs live at the left of the
+  // editor-window toolbar row (#editor-doc-axes). Fall back to the global bar's right group
+  // if the editor header isn't present (defensive; the header is static in index.html).
+  function axisSwitchHost() {
+    return document.getElementById("editor-doc-axes") || document.querySelector(".toolbar__group--right");
+  }
   function renderVariantSwitch() {
-    var host = document.querySelector(".toolbar__group--right");
+    var host = axisSwitchHost();
     if (!host) return;
     if (!variantWrapEl) {
       variantWrapEl = h("button", "tool variant-glyph"); variantWrapEl.type = "button";
@@ -22564,7 +22958,7 @@
     showContextMenu(r.left, r.bottom + 6, items);
   }
   function renderVersionSwitch() {
-    var host = document.querySelector(".toolbar__group--right");
+    var host = axisSwitchHost();
     if (!host) return;
     if (!versionWrapEl) {
       versionWrapEl = h("button", "tool version-glyph"); versionWrapEl.type = "button";
@@ -22760,13 +23154,15 @@
   wireDemo();
   applyUiTheme(uiThemeIsLight()); // #44: restore the saved editor-chrome light/dark theme
   wireCopyEditor(); // #116: full-screen copy-editor view (rail glyph opens, Close/Esc returns)
+  mountViewToggle(); // SPEC 7: Build/Read segmented control in the editor header
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
+  mountCellChip(); // SPEC 7: the matrix-cell chip (geometry . interactivity) in the editor header
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
   mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
   mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
   refreshCourseWeight(); // §308: initial course-weight readout
-  wireLeftPanes();
+  wireLeftSwitcher();
   wireRightTabs();
   // HH: restore the right-panel Design/Interact mode before the boot mount so the
   // canvas + panel render in the saved mode (setInteractMode persists it on change).

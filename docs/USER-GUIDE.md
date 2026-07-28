@@ -20,7 +20,7 @@ Build and export your first course in a few minutes.
 1. **Open Verso.** Launch the desktop app, or open `index.html` in a browser (serve the folder
    over `http://` so export and fonts work — see §2).
 2. **Add a page.** In the **Structure** panel on the left, click **+** to add a page.
-3. **Add a block.** Open the **Blocks** palette (below Structure) and click **Heading**, then
+3. **Add a block.** Switch the left panel to **Blocks** and click **Heading**, then
    **Paragraph**. Click the text on the canvas and type.
 4. **Preview it.** Click **▶ Demo** (or press ⌘P) to see the page exactly as a learner will.
    Press **Esc** to return.
@@ -48,6 +48,21 @@ Verso is a plain web app — nothing to install.
 Your work **saves automatically to this browser** (IndexedDB) as you go; the **All changes
 saved** status in the top bar confirms it.
 
+**Create a document.** The **＋** beside the tabs opens **New document**: pick a **Product**
+(defaults to the one you're scoped to), a **preset** — the starting matrix cell (eLearning,
+Presentation, 1-pager, Quick-start guide, Responsive doc), each shown as *geometry · interactive
+or static* — then a **title** and **code**. The document is born in that Product and that cell;
+you can change the cell later. The same dialog also opens a saved course, imports a document, or
+loads a sample.
+
+**Change the document type later.** The **cell chip** in the editor header (e.g. *Reflow ·
+Interactive*) opens a small menu to change the document's matrix cell after creation. Toggling
+**Interactive / Static** applies at once; switching the **geometry** (Reflow / Fixed frame /
+Paged) warns first, because content reflows into the new geometry and may not survive 1:1 — you
+can switch back. In a **Static** document the interactive block types (Quiz, Image hotspots,
+Web/HTML Embed, Accordion, Card Reveal, and the rest) are hidden from the Blocks library; any
+interactive blocks you already placed are kept, and turning interactivity back on restores them.
+
 > **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
 > before clearing browser data or switching machines (§15).
 
@@ -56,23 +71,43 @@ saved** status in the top bar confirms it.
 ## 3. The workspace
 
 Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (centre), and the
-**Inspector** (right), under a top toolbar.
+**Inspector** (right). A slim **global bar** runs across the very top, and the Edit stage has its
+own **editor header** beneath it.
 
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
-- **Toolbar (top).** Light/dark toggle, save status, **Undo/Redo**, **Fit all**, **Comment
-  mode**, **Demo**, and the **Import & Export** menu (CSV import, SCORM export, JSON backup).
-  Open courses appear as tabs on the left.
-- **Left (three stacked, collapsible panes).** **Structure** — the outliner of chapters and
-  pages as a tree. **Blocks** — the insert palette for built-in block types (Text, Media,
-  Layout, Interactive…). **Components** — the browse/insert surface for reusable components:
-  **My Components** (course-local), **Blocks** and **Pages** (the shared cross-course library,
-  §9). Drag the thin divider between any two panes to resize them; click a pane's header to
-  collapse it.
+- **Global bar (very top).** App-level only: the **Verso** mark, the **product picker** (sets the
+  active product across Source, Edit and Publish — and **scopes the open tabs** to that product;
+  "All products" shows every open tab) and the **storage-health dot**.
+- **Editor header (Edit stage).** Everything about the document you're editing lives here. The
+  **file-picker** (▤, browse all courses — a browser **grouped by document type**, colour-coded,
+  each card showing its product, interactive/static and whether it's open; it respects the product
+  scope and opens automatically when no course is open) and the **open-course tabs** — each carrying
+  a per-product colour dot so a mixed set stays legible — sit on the tab row; the
+  **variant/version** selectors, the **light/dark** toggle (it flips the *document*, not the app
+  chrome), the **▶ Demo** preview and **Send to publish** sit on the row below. It shows only in
+  the Edit stage.
+- **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
+  panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
+  palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
+  components** beneath it: **My Components** (course-local), **Blocks** and **Pages** (the shared
+  cross-course library, §9). **Source** — the source-topic list for the active product; click a
+  topic to open it in the Source stage, or press its **+** to insert it as a **live-linked block**
+  on the current page (a 🔗 instance — edit the source and every placement updates). From the
+  block's instance settings, **Open in Source** jumps back to its topic; and in the Source stage a
+  topic's **Linked in** list jumps to the exact block that uses it. The panel remembers which
+  section you last used.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
-  pinch) to zoom. Every page is a live, editable render of what the learner will see.
-- **Inspector (right).** Context-sensitive: with nothing selected it shows **document**
-  settings; select a block and it shows that block's settings.
+  pinch) to zoom. Every page is a live, editable render of what the learner will see. The board
+  follows the document's **geometry** (set by its preset, §2): **reflow** flows content down a
+  fluid page (eLearning / web); **fixed frame** shows each page as one fixed screen and clips
+  anything past it with an amber *overflows* warning (decks); **paged** shows page-break guide
+  lines, so content reads across pages (print / guides). The same blocks render in every geometry.
+- **Inspector (right).** Context-sensitive: with nothing selected it shows the **Document**
+  context — the document type (its geometry · interactivity) with that geometry's tools (paged →
+  margins / running header-footer / page breaks / page numbers; frame → frame size / transitions /
+  animation; reflow → breakpoint preview) — then the canvas backdrop. Select a block and it shows
+  that block's settings instead.
 
 ---
 
@@ -118,9 +153,9 @@ the full catalogue.
 
 ![Click a page in the outliner; the highlight marks the page you're editing.](docs/assets/annotated-navigate.webp "The highlight marks the active page."){poster=docs/assets/annotated-navigate-still.webp}
 
-**Insert a block.** Open the **Blocks** palette and click or drag a block onto a page — or into
-a container (**Card**, **Columns**, **Card Reveal**). For a reusable component you've already
-saved (§9), use the **Components** pane instead.
+**Insert a block.** Switch the left panel to **Blocks** and click or drag a block onto a page — or
+into a container (**Card**, **Columns**, **Card Reveal**). For a reusable component you've already
+saved (§9), use the **Reusable components** beneath the palette in the same Blocks section.
 
 **Select and drill in.** One click selects the outermost container under the cursor; each
 further click drills one level in (container → block → text). **Double-click** jumps straight
@@ -366,7 +401,7 @@ one carousel.
 
 Select nothing, and the Inspector shows document-wide design controls.
 
-- **Light / dark.** The top-bar **☾** toggles the palette you preview. Learners get a toggle
+- **Light / dark.** The editor header's **☾** toggles the palette you preview. Learners get a toggle
   too; the palette crossfades between modes (tunable under **Motion**; respects reduce-motion).
 - **Theme.** Edit the colour tokens for each mode — background, ink, accent, success, and so on.
 - **Saved Text Styles.** Create named styles (font, size, weight, spacing, case, alignment,
@@ -426,13 +461,14 @@ A course can carry **product variants** (e.g. two hardware models) that share mo
 differ in specifics. You author one **flagship**; each variant is a thin layer of overrides on
 top, so unchanged copy stays shared and you maintain one source.
 
-- **Switch flagship or variant** from the top bar. **Flagship** is the editable master; picking
+- **Switch flagship or variant** from the editor header. **Flagship** is the editable master; picking
   a variant shows a read-only preview. Edit a variant's wording where variant edits are allowed,
   and the change lands only on that variant's override.
 - A block with no override for the current variant simply **inherits** the flagship copy.
 
-**Compare side by side.** Open the **Copy editor** (the file-text glyph in the left rail) for a
-full-screen, plain-text view of all course copy. With variants, a **Single | Side by side**
+**Compare side by side.** Switch the editor header's **Build / Read** toggle to **Read** (or use
+the file-text glyph in the left rail) for a plain-text view of all course copy; **Build** returns
+you to the canvas. With variants, a **Single | Side by side**
 toggle appears: **Side by side** adds one column per variant. A held variant cell is read-only
 behind a lock — click the lock to edit it; a block with no variant yet shows a **+** to create
 its copy from the flagship. Click into any row to select some text and use the **B / I / U /

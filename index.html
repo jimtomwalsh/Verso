@@ -14,43 +14,26 @@
 <body>
   <!-- ==================== top toolbar ==================== -->
   <header class="toolbar">
-    <div class="toolbar__group toolbar__group--left" style="flex: 1 1 auto; align-self: stretch; align-items: flex-end; padding-top: 6px;">
+    <!-- SPEC 7 (Editor Window Rework, decision 8): the global bar is APP-LEVEL chrome only
+         -- brand + the persistent product context + storage health. Everything doc-relative
+         (tabs, file-picker, variant/version, light/dark, Preview, Send-to-publish) lives in
+         the editor-window header below (#editor-window-header), present only in the Edit stage. -->
+    <div class="toolbar__group toolbar__group--left" style="flex: 1 1 auto; align-self: stretch; align-items: center;">
       <span class="toolbar__brand" aria-hidden="true">Verso<span class="toolbar__brand-dot">.</span></span>
       <!-- Product Rail: persistent product context for all three rail stages (Source/Edit/
            Publish). Populated from window.ProductsStore + "All products" by mountProductPicker()
            (a VersoUI.Select instance — see the editor script). -->
       <div class="product-picker" id="product-picker-host" title="Active product — filters Source, Edit and Publish"></div>
-      <button class="tool toolbar__home" id="home-btn" data-lucide="layout-grid" title="Home — all courses"></button>
-      <div class="toolbar-tabs" id="toolbar-tabs"></div>
     </div>
 
     <div class="toolbar__group toolbar__group--right">
-      <!-- #92c: the desktop/tablet/mobile breakpoint switch moved behind the Preview
-           chevron (see #preview-bp-btn below) to declutter the top bar. -->
-      <!-- Icon-only tools: glyphs are hydrated from the Lucide Icon accessor
-           (src/icons.js) at boot via Editor.mountTopBar(); markup stays svg-free
-           so the DS conformance gate holds. data-lucide names the glyph. -->
-      <!-- NNN: light/dark AUTHORING palette toggle (quick switch/test) -->
-      <!-- #89: recents (save-menu), Help and Export relocated to the left rail. -->
-      <button class="tool" id="mode-toggle" data-lucide="moon" title="Toggle light / dark palette"></button>
-      <span class="toolbar__divider"></span>
       <!-- #92: hidden by default; only the data-loss FAIL state renders text here. -->
       <div class="save-state save-state--saved" id="save-state" role="status" aria-live="polite" hidden></div>
       <!-- #92b storage-health dot: green healthy / amber getting full / red near-quota or
            a save failure. Click opens a popover (backend, quota %, course weight). Replaces
-           the "Saved" text + the standalone course-weight readout. -->
+           the "Saved" text + the standalone course-weight readout. Collab-presence avatars
+           insert themselves at the head of this group (session-level, not doc chrome). -->
       <button class="storage-dot storage-dot--ok" id="storage-dot" title="Storage healthy — click for details" aria-label="Storage health"></button>
-      <!-- #86: find, zoom, grid and comment relocated to the floating canvas overlay bar.
-           #92: undo/redo removed (Cmd/Ctrl+Z / Shift+Z); the null-guarded wiring no-ops. -->
-      <span class="toolbar__divider"></span>
-      <!-- DS action-priority: Preview (Demo) is the single accent-blue PRIMARY;
-           built into a vds-btn primary by Editor.mountTopBar(). #92c: the chevron
-           opens the device-breakpoint menu (desktop/tablet/mobile) that used to be
-           the standalone bp-switch group. -->
-      <div class="preview-cluster">
-        <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
-        <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview device size"></button>
-      </div>
     </div>
   </header>
 
@@ -83,6 +66,49 @@
       </div>
     </nav>
 
+    <!-- SPEC 7 (Editor Window Rework): the Edit stage's own header. Present ONLY in Edit
+         (setStage toggles [hidden]); spans the columns over the left panel + canvas +
+         inspector. Two rows per the DSLMS editor mockup (design-system/ui_kits/editor/
+         TopBar.jsx): a TAB ROW (file-picker + open-doc tabs) and a TOOLBAR ROW (doc-scoping
+         variant/version at the left; light/dark + Preview + Send-to-publish at the right).
+         The file-picker (#home-btn), tabs (#toolbar-tabs), light/dark (#mode-toggle) and the
+         preview cluster relocated here from the global bar. Variant/version glyphs mount into
+         #editor-doc-axes. The cell chip, geometry canvas and left-panel 3-way are later tickets. -->
+    <div class="editor-window" id="editor-window-header" hidden>
+      <div class="editor-window__tabrow">
+        <button class="tool editor-window__filepicker" id="home-btn" data-lucide="layout-grid" title="Browse all courses"></button>
+        <div class="toolbar-tabs" id="toolbar-tabs"></div>
+      </div>
+      <div class="editor-window__toolrow">
+        <!-- SPEC 7: the matrix-cell chip (geometry . interactive). Click to change the cell after
+             creation -- tiered mutability: interactivity toggles immediately; a geometry change warns
+             (content reflows) then re-renders. Mounted by mountCellChip(). -->
+        <button class="editor-window__cell" id="editor-cell-chip" type="button" title="Document type — geometry and interactivity"></button>
+        <span class="toolbar__divider"></span>
+        <!-- SPEC 7 (decision 14): Build/Read view toggle. Build = the authoring canvas; Read = the
+             per-doc copy view (the copy editor), reachable in-flow instead of the old rail button.
+             A VersoUI.SegmentedControl mounts here. Preview stays its own glyph (right). -->
+        <div class="editor-window__view" id="editor-view-toggle"></div>
+        <span class="toolbar__divider"></span>
+        <!-- doc-scoping axes: variant (outer) then software-version (inner) mount here. -->
+        <div class="editor-window__axes" id="editor-doc-axes"></div>
+        <div class="editor-window__spacer"></div>
+        <!-- NNN: light/dark AUTHORING palette toggle — flips the DOCUMENT theme, not the chrome. -->
+        <button class="tool" id="mode-toggle" data-lucide="moon" title="Toggle light / dark palette"></button>
+        <span class="toolbar__divider"></span>
+        <!-- DS action-priority: Preview (Demo) is the single accent-blue PRIMARY; built into a
+             vds-btn primary by Editor.mountTopBar(). The chevron opens the device-breakpoint menu. -->
+        <div class="preview-cluster">
+          <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
+          <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview device size"></button>
+        </div>
+        <!-- SPEC 6 entry point: relocated here by SPEC 7 (decision 14). Wires to addToQueue in
+             the send-to-publish-wire ticket; a stub toast for now. Neutral glyph beside the one
+             accent primary (Preview) -- one primary per surface. -->
+        <button class="tool editor-window__publish" id="send-to-publish-btn" data-lucide="upload" title="Send to publish queue"></button>
+      </div>
+    </div>
+
     <!-- Product Rail Source stage: left nav (search + topic list grouped by Product,
          source-stage-nav-article) + a flowing, directly-editable article for the
          selected topic (source-topic-content-authoring: click a heading/body to edit
@@ -112,13 +138,15 @@
       <span class="stage-placeholder__desc">You'll pick, configure and queue documents here — this stage isn't built yet.</span>
     </div>
 
-    <!-- left: layers / pages / components -->
+    <!-- left: SPEC 7 (decision 11) — a single 3-way switcher: Structure . Blocks . Source
+         (Source gets equal billing now that source insertion is a primary use). Each .lpane
+         carries data-lsec; the switcher (mounted into #lpane-switch, wired in wireLeftSwitcher)
+         shows the panes for the active section and hides the rest, persisting the last-active.
+         Components folds INTO Blocks (James's call): the Blocks section shows the Insert palette
+         with the Reusable-components pane beneath it. -->
     <aside class="panel panel--left">
-      <!-- SS: Structure + Blocks + Components are STACKED (all visible), each
-           collapsible, with a draggable split between each adjacent pair
-           (wired in wireLeftPanes, generalized to N panes). -->
-      <div class="lpane lpane--structure" id="lpane-structure">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Structure</span></div>
+      <div class="lpane-switch" id="lpane-switch"></div>
+      <div class="lpane lpane--structure" id="lpane-structure" data-lsec="structure">
         <div class="lpane__body" id="tab-structure">
           <div class="panel-section">
             <div class="panel-section__title panel-section__title--sticky" style="display: flex; align-items: center; justify-content: space-between;">
@@ -133,9 +161,7 @@
           </div>
         </div>
       </div>
-      <div class="lpane-split" id="lpane-split-0"></div>
-      <div class="lpane lpane--blocks" id="lpane-blocks">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Blocks</span></div>
+      <div class="lpane lpane--blocks" id="lpane-blocks" data-lsec="blocks">
         <div class="lpane__body" id="tab-assets">
           <div class="panel-section">
             <div class="panel-section__title panel-section__title--row">
@@ -147,16 +173,18 @@
           </div>
         </div>
       </div>
-      <div class="lpane-split" id="lpane-split-1"></div>
-      <div class="lpane lpane--components" id="lpane-components">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Components</span></div>
+      <!-- Components folded into the Blocks section (data-lsec="blocks"): a sub-pane beneath the palette. -->
+      <div class="lpane lpane--components" id="lpane-components" data-lsec="blocks">
+        <div class="lpane__head lpane__head--sub"><span class="lpane__title">Reusable components</span></div>
         <div class="lpane__body" id="tab-components">
           <div class="panel-section">
-            <div class="panel-section__title">Reusable components</div>
             <div id="components-palette-list"></div>
             <div class="insp-hint">Click to insert. My Components are course-local copies; Blocks and Pages are live-linked to the shared library.</div>
           </div>
         </div>
+      </div>
+      <div class="lpane lpane--source" id="lpane-source" data-lsec="source" hidden>
+        <div class="lpane__body" id="tab-source"></div>
       </div>
       <div class="panel-resizer" id="resizer-left"></div>
     </aside>
