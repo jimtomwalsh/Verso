@@ -584,8 +584,9 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
 
 - **The left rail is the document's table of contents.** Chapters sit at the top level with a twirl
   to fold their headings in or out; click any entry to jump to it; the entry you're reading
-  highlights as you scroll. Drag a chapter to move that whole chapter (and everything under it)
-  within the document.
+  highlights as you scroll. The button above the outline collapses every chapter at once (and
+  expands them again). Drag a chapter to move that whole chapter (and everything under it) within
+  the document — the dragged row dims and a line shows exactly where it will land.
 - **Find in the document.** The search field above the outline finds your text anywhere in the
   document — headings and body copy — as you type. It shows a match count ("3 / 12"); press Enter
   (or the up/down arrows next to the count) to jump between hits, each scrolled to and highlighted.

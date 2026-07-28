@@ -492,7 +492,14 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    VersoUI.TreeItem rows (.vds-tree-item). These add only the TOC-specific tier accents on top
    of the DSLMS TreeItem base -- chapter rows read bolder, the scroll-spy current entry gets the
    accent left-border used by the in-doc TOC it replaces. */
-.source-toc__row { cursor: pointer; }
+.source-toc__row { cursor: pointer; position: relative; }
+/* B1: collapse-all / expand-all toggle, right-aligned above the outline. */
+.source-toc__tools { display: flex; justify-content: flex-end; padding: var(--space-1) var(--space-2) var(--space-2); }
+/* B2: chapter drag feedback -- dim the row being dragged, and make the insertion line
+   full-width + thicker than the faint 2px shared marker so the drop target reads clearly.
+   (The .source-toc__row is now position:relative so the ::before/::after anchor to it.) */
+.source-toc__row.is-dragging { opacity: 0.4; }
+.source-toc__row.tree-drop-before::before, .source-toc__row.tree-drop-after::after { left: 0; right: 0; height: 3px; }
 .source-toc__row--chapter .vds-tree-item__label,
 .source-toc__row--chapter.vds-tree-item .vds-tree-item__label { font-weight: 600; color: var(--text-primary); }
 .source-toc__row[draggable="true"] { cursor: grab; }

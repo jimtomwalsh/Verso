@@ -10826,8 +10826,8 @@
   // one document via SourceDoc.moveChapter.
   function wireSourceChapterDrag(row, key) {
     row.setAttribute("draggable", "true");
-    row.addEventListener("dragstart", function (e) { __sourceChapterDrag = { key: key }; try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {} e.stopPropagation(); });
-    row.addEventListener("dragend", function () { __sourceChapterDrag = null; clearTreeMarks(); });
+    row.addEventListener("dragstart", function (e) { __sourceChapterDrag = { key: key }; row.classList.add("is-dragging"); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {} e.stopPropagation(); });
+    row.addEventListener("dragend", function () { __sourceChapterDrag = null; row.classList.remove("is-dragging"); clearTreeMarks(); });
     row.addEventListener("dragover", function (e) {
       if (!__sourceChapterDrag || __sourceChapterDrag.key === key) return;
       e.preventDefault(); e.stopPropagation();
@@ -10880,6 +10880,24 @@
     if (q) { kept = {}; __sourceFindMatches.forEach(function (m) { var hk = SD.headingKeyForNode(model, m.nodeKey); if (hk) kept[hk] = 1; }); }
     function keep(key) { return !q || (kept && kept[key]); }
     var tree = SD.outline(model), rendered = 0;
+    // B1: collapse-all / expand-all. One toggle atop the outline -- if any chapter is open it
+    // collapses them all, else it re-expands them (clears the per-chapter overrides). Hidden
+    // during an active find (the filter force-opens every matching chapter, so it's a no-op).
+    var expandableKeys = tree.filter(function (ch) { return (ch.children || []).length > 0; }).map(function (ch) { return ch.key; });
+    if (!q && expandableKeys.length && U.IconButton) {
+      var anyOpen = expandableKeys.some(function (k) { return __sourceOpenChapters[k] !== false; });
+      var tools = h("div", "source-toc__tools");
+      tools.appendChild(U.IconButton({
+        icon: "list-collapse",
+        label: anyOpen ? "Collapse all chapters" : "Expand all chapters",
+        onClick: function () {
+          if (anyOpen) expandableKeys.forEach(function (k) { __sourceOpenChapters[k] = false; });
+          else expandableKeys.forEach(function (k) { delete __sourceOpenChapters[k]; });
+          renderSourceTopicList();
+        }
+      }));
+      host.appendChild(tools);
+    }
     tree.forEach(function (ch) {
       var kids = (ch.children || []).filter(function (k) { return keep(k.key); });
       if (q && !keep(ch.key) && !kids.length) return; // chapter has no hit anywhere -> filtered out
