@@ -8535,6 +8535,11 @@ section("Product Rail: Publish presets (T2)");
   ok("publishOptionsForRow merges the preset overrides onto defaultOptions()", /Object\.assign\(base, PP\.optionsFor\(publishPresets\(\), row\.preset \|\| "master"\)\)/.test(e));
   ok("adding a doc recalls its last-used preset (zero-config re-queue)", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e));
   ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
+
+  // T4: one shared addToQueue action + the Edit-stage top-bar entry point
+  ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
+  ok("the shared action recalls the doc's last-used preset and toasts the pending count", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e) && /publishToast\("Added to the publish queue/.test(e));
+  ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
 })();
 
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----

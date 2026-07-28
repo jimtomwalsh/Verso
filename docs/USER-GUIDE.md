@@ -772,6 +772,10 @@ a refresh and a stage-switch.
   (all documents when no Product is selected). Click **+** on a row to add it to the queue, or use
   **Add current document** at the top to queue the document you have open. A solo export is just a
   queue of one.
+- **Send straight from the editor.** You don't have to switch stages first: the top-bar **Import &
+  export** (⋯) menu has **Send to publish queue**, which drops the document you're editing into the
+  queue with its remembered preset — no configuration — and confirms with a small toast. Queue a few
+  in a row, then switch to Publish and run them.
 - **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
   **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
   that's already queued re-arms it rather than duplicating it.
@@ -784,8 +788,7 @@ a refresh and a stage-switch.
   `.zip` (using that row's preset) and downloaded. Done rows stay in the queue, greyed, with their
   result — the queue isn't cleared, so you can see what shipped.
 
-This is an early view — a chosen save folder, staleness dots, and a "Send to publish queue" button in
-the editor arrive in later updates.
+This is an early view — a chosen save folder and staleness dots arrive in later updates.
 
 ---
 

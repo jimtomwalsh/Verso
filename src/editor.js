@@ -1304,14 +1304,26 @@
     });
     host.appendChild(list);
   }
-  function addDocToPublishQueue(docId) {
+  // A tiny transient confirmation toast (reuses the shared .collab-toast style), for actions taken
+  // away from the Publish stage -- e.g. "Send to publish queue" from the Edit-stage top bar.
+  function publishToast(msg) {
+    var t = h("div", "collab-toast", msg); document.body.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add("is-on"); });
+    setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2600);
+  }
+  // The ONE shared "queue this document" action (T4). Adds the doc with its remembered preset (T2),
+  // no configure step, no duplicate row (re-arms an existing one). Used by every entry point: the
+  // Publish-stage picker rows AND the Edit-stage top-bar "Send to publish queue". Toasts the count.
+  function addToQueue(docId) {
     var PQ = window.PublishQueue, PP = window.PublishPresets, d = registry[docId]; if (!PQ || !d) return;
-    // recall the preset this document last published with (T2), so a re-queue is zero-config
-    var preset = PP ? PP.lastForDoc(publishPresets(), docId) : "master";
+    var preset = PP ? PP.lastForDoc(publishPresets(), docId) : "master"; // zero-config recall
     PQ.addDoc(publishQueue(), docId, { title: (d.meta && d.meta.title) || docId, preset: preset });
     savePublishQueue();
     renderPublishQueue();
+    var n = PQ.pendingRows(publishQueue()).length;
+    publishToast("Added to the publish queue — " + n + " pending.");
   }
+  function addDocToPublishQueue(docId) { addToQueue(docId); } // back-compat name used by the picker rows
   // Right pane: the persistent queue, one row per document (title + status + remove), and one
   // Publish button that runs every pending row sequentially through buildPackage.
   function renderPublishQueue() {
@@ -23019,6 +23031,10 @@
   // unconditionally (verso-format.js loads AFTER editor.js) — exportVersoPackage guards
   // on window.VersoFormat at click time.
   window.Editor.registerPipelineButton("Export .verso (project)", exportVersoPackage, false);
+  // Product Rail Epic 6 (T4): fast-track the open document into the persistent Publish queue with its
+  // remembered preset, no configure step -- the early-stage single-export path. Sits in the top-bar
+  // overflow beside the other IO actions; the Publish stage's picker rows are the other entry point.
+  window.Editor.registerPipelineButton("Send to publish queue", function () { if (activeDocId && registry[activeDocId]) addToQueue(activeDocId); }, false);
   // #69: the guarded browser->file cutover. Registered ONLY when the native store glue is
   // present (Verso desktop shell with the rebuilt bridge) -> invisible in a plain browser,
   // so it can never be triggered where it cannot safely run.
