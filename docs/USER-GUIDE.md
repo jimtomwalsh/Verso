@@ -62,9 +62,11 @@ own **editor header** beneath it.
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
 - **Global bar (very top).** App-level only: the **Verso** mark, the **product picker** (sets the
-  active product across Source, Edit and Publish) and the **storage-health dot**.
+  active product across Source, Edit and Publish — and **scopes the open tabs** to that product;
+  "All products" shows every open tab) and the **storage-health dot**.
 - **Editor header (Edit stage).** Everything about the document you're editing lives here. The
-  **file-picker** (▤, browse all courses) and the **open-course tabs** sit on the tab row; the
+  **file-picker** (▤, browse all courses) and the **open-course tabs** — each carrying a per-product
+  colour dot so a mixed set stays legible — sit on the tab row; the
   **variant/version** selectors, the **light/dark** toggle (it flips the *document*, not the app
   chrome), the **▶ Demo** preview and **Send to publish** sit on the row below. It shows only in
   the Edit stage.
