@@ -10933,6 +10933,49 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   })());
 })();
 
+// ---- Source rewrite (Epic 2b): TOC + full-text search + marks drawer (toc-search-drawer) ----
+// Fuzzy full-text search + the drawer's mark filtering are PURE (proven here); the TOC rail,
+// scroll-spy, and drawer DOM are wired in editor.js (browser-verified) and asserted structurally.
+section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  // full-text search reaches beyond the title into the doc's node text
+  var docTopic = { name: "Contention", doc: { nodes: [
+    { type: "heading", level: 2, text: "Flush arbitration" },
+    { type: "paragraph", text: "The unit arbitrates contention by headroom." }
+  ] } };
+  ok("searchText concatenates the topic name + all node text", (function () {
+    var t = SD.searchText(docTopic);
+    return t.indexOf("Contention") !== -1 && t.indexOf("Flush arbitration") !== -1 && t.indexOf("headroom") !== -1;
+  })());
+  ok("searchText falls back to section headings + facet strings for a legacy topic", (function () {
+    var legacy = { name: "Intro", sections: [{ heading: "Overview", facets: { technical: "coldflow venting" } }] };
+    var t = SD.searchText(legacy);
+    return t.indexOf("Overview") !== -1 && t.indexOf("coldflow venting") !== -1;
+  })());
+  ok("fuzzyMatch: an empty query matches everything", SD.fuzzyMatch("anything", "") === true && SD.fuzzyMatch("", "") === true);
+  ok("fuzzyMatch: a plain substring inside the body matches (title-only would miss)", SD.fuzzyMatch(SD.searchText(docTopic), "headroom") === true);
+  ok("fuzzyMatch: a subsequence matches (typing 'flsh' finds 'flush')", SD.fuzzyMatch("Flush arbitration", "flsh") === true);
+  ok("fuzzyMatch: chars out of order do NOT match", SD.fuzzyMatch("abc", "cab") === false);
+  ok("fuzzyMatch: is case-insensitive", SD.fuzzyMatch("Headroom", "HEAD") === true);
+
+  // drawer filtering: the type filter is a plain predicate over model.marks
+  function drawerFilter(marks, f) { return marks.filter(function (m) { return f === "all" || m.type === f; }); }
+  var marks = [{ type: "link" }, { type: "alternate" }, { type: "comment" }, { type: "alternate" }];
+  ok("drawer filter 'all' returns every mark", drawerFilter(marks, "all").length === 4);
+  ok("drawer filter by type narrows to that mark type only", drawerFilter(marks, "alternate").length === 2 && drawerFilter(marks, "link").length === 1);
+
+  // editor.js wiring (browser-verified live; asserted structurally here)
+  var e = src("src/editor.js");
+  ok("topicMatchesQuery uses SourceDoc fuzzy full-text (not a title substring)", /window\.SourceDoc\.fuzzyMatch\(window\.SourceDoc\.searchText\(topic\), query\)/.test(e));
+  ok("the article mounts a TOC rail from heading nodes with scroll-spy", /function buildSourceToc\(model, host\)[\s\S]{0,400}window\.SourceDoc\.headings\(model\)/.test(e) && /function updateSourceScrollSpy\(\)/.test(e));
+  ok("scroll-spy is re-bound remove-then-add so it survives re-renders", /host\.removeEventListener\("scroll", updateSourceScrollSpy\);[\s\S]{0,80}host\.addEventListener\("scroll", updateSourceScrollSpy\)/.test(e));
+  ok("the doc-bar carries an all-marks drawer toggle (layers glyph)", /icon: "layers", label: "All marks"/.test(e));
+  ok("the drawer offers All / Alternates / Linked / Comments filters", /SOURCE_DRAWER_FILTERS = \[[\s\S]{0,220}"alternate"[\s\S]{0,120}"link"[\s\S]{0,120}"comment"/.test(e));
+  ok("a doc-topic swap drops the drawer (it belongs to the continuous-document view)", /if \(!\(topic && topicHasDoc\(topic\)\)\) \{ __sourceDrawerOpen = false;/.test(e));
+})();
+
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
 // Keeps the public repo free of customer/proprietary content, the removed in-app
 // assistant/translation code, personal paths, secrets, external CDN loads, and

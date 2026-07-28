@@ -379,8 +379,39 @@
     return model;
   }
 
+  // ---- full-text search (toc-search-drawer) ---------------------------------
+  // Every searchable word on a topic: its name + all node text (continuous doc) or,
+  // for a legacy section topic, each section heading + every facet string. The Source
+  // nav search matches this instead of the title only (spec 2.3).
+  function searchText(topic) {
+    if (!topic) return "";
+    var parts = [topic.name || ""];
+    if (topic.doc && topic.doc.nodes && topic.doc.nodes.length) {
+      topic.doc.nodes.forEach(function (n) { parts.push(nodeText(n)); });
+    } else {
+      (topic.sections || []).forEach(function (sec) {
+        if (sec.heading) parts.push(sec.heading);
+        var f = sec.facets || {};
+        Object.keys(f).forEach(function (k) { if (typeof f[k] === "string") parts.push(f[k]); });
+      });
+    }
+    return parts.join(" ");
+  }
+  // Fuzzy subsequence match: every char of `needle` appears in `hay` in order (case-
+  // insensitive). An empty needle matches everything; this is the standard "fuzzy" feel
+  // (typing "flsh" finds "flush") while still matching plain substrings.
+  function fuzzyMatch(hay, needle) {
+    var n = String(needle == null ? "" : needle).toLowerCase();
+    if (!n) return true;
+    var h = String(hay == null ? "" : hay).toLowerCase();
+    var i = 0;
+    for (var j = 0; j < h.length && i < n.length; j++) if (h[j] === n[i]) i++;
+    return i === n.length;
+  }
+
   var _pure = {
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
+    searchText: searchText, fuzzyMatch: fuzzyMatch,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
     create: create, ensureKeys: ensureKeys, headings: headings,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
@@ -401,6 +432,7 @@
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping,
+    searchText: searchText, fuzzyMatch: fuzzyMatch,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
   };

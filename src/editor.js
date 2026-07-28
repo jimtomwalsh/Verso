@@ -10495,10 +10495,15 @@
   /* @source-stage-start */
   var DETAIL_FACETS = ["technical", "digestible", "dotpoint"];
   function isValidFacet(f) { return DETAIL_FACETS.indexOf(f) !== -1; }
+  // Fuzzy full-text search across the topic (name + every heading/paragraph/facet), not the
+  // title only -- so an author finds a topic by a phrase inside it (spec 2.3, toc-search-drawer).
+  // Falls back to a title substring if SourceDoc isn't loaded (defensive; it always is).
   function topicMatchesQuery(topic, query) {
     if (!query) return true;
-    var name = (topic && topic.name) || "";
-    return name.toLowerCase().indexOf(String(query).toLowerCase()) !== -1;
+    if (typeof window !== "undefined" && window.SourceDoc && window.SourceDoc.fuzzyMatch) {
+      return window.SourceDoc.fuzzyMatch(window.SourceDoc.searchText(topic), query);
+    }
+    return ((topic && topic.name) || "").toLowerCase().indexOf(String(query).toLowerCase()) !== -1;
   }
   // Every kind:"topic" master, narrowed to the active product context ("" = All
   // products -> every topic) and a search query. Untagged (productId-less) topics
@@ -10697,6 +10702,8 @@
   var __sourceDocModel = null;     // the live SourceDoc model for __sourceDocModelTopicId
   var __sourceDocModelTopicId = null;
   var __sourceMarksEngine = null;  // the SourceMarks painting engine bound to the mounted article
+  var __sourceDrawerOpen = false;  // the on-demand all-marks drawer (toc-search-drawer)
+  var __sourceDrawerFilter = "all"; // all | alternate | link | comment
   // Product Rail (md-topic-import bulk-delete): checkboxes stay OFF by default (a
   // clean, single-click-to-open list, same as before bulk-delete existed) -- "Select"
   // unlocks them, mirroring the familiar Photos/Files/Gmail toggle rather than always
@@ -11186,6 +11193,9 @@
     var host = document.getElementById("source-stage-article"); if (!host) return;
     host.innerHTML = "";
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    // the all-marks drawer belongs to the continuous-document view only -- drop it when the
+    // active topic isn't a doc topic (the doc path re-syncs it against the live model below).
+    if (!(topic && topicHasDoc(topic))) { __sourceDrawerOpen = false; var __orphanDrawer = document.querySelector("[data-source-drawer]"); if (__orphanDrawer) __orphanDrawer.remove(); }
     if (!topic || topic.kind !== "topic") {
       host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
       renderSourceInfoPanel(null);
@@ -11487,11 +11497,19 @@
   function renderSourceNodeArticle(topic, host) {
     var SD = window.SourceDoc, SM = window.SourceMarks;
     var model = ensureSourceDocModel(topic);
+    var layout = h("div", "source-doc__layout");
+    var toc = buildSourceToc(model, host);
+    if (toc) layout.appendChild(toc);
     var col = h("div", "source-doc__col");
     var art = h("article", "source-doc"); art.setAttribute("spellcheck", "false");
     model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNode(n)); });
     col.appendChild(art);
-    host.appendChild(col);
+    layout.appendChild(col);
+    host.appendChild(layout);
+    // scroll-spy: re-bound each render (host survives innerHTML clears), so remove-then-add.
+    host.removeEventListener("scroll", updateSourceScrollSpy);
+    host.addEventListener("scroll", updateSourceScrollSpy);
+    requestAnimationFrame(updateSourceScrollSpy);
 
     // per-block contentEditable when unlocked; the keydown guard (below) enforces the lock so
     // marks stay clickable + annotation stays live even when locked.
@@ -11535,6 +11553,7 @@
 
     host.appendChild(buildSourceDocBar(topic));
     host.appendChild(buildSourceSelBar(topic));
+    renderSourceDrawer(); // re-sync the all-marks drawer to the live model after a re-render
   }
 
   function applySourceLockState(art) {
@@ -11561,10 +11580,12 @@
     var lockLbl = h("span", "source-docbar__lbl", __sourceUnlocked ? "Source editable" : "Source locked");
     var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); updateSourceDocBar(); } }) : h("button", null, "Marks");
     marksBtn.classList.add("source-docbar__btn");
+    var drawerBtn = U && U.IconButton ? U.IconButton({ icon: "layers", label: "All marks", active: __sourceDrawerOpen, onClick: function () { toggleSourceDrawer(); } }) : h("button", null, "Marks list");
+    drawerBtn.classList.add("source-docbar__btn");
     var revertBtn = h("button", "source-docbar__revert", "Revert to sections");
     revertBtn.type = "button"; revertBtn.title = "Discard the continuous-document view and return to the section editor (section data is kept)";
     revertBtn.addEventListener("click", function () { revertTopicDoc(topic); });
-    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(revertBtn);
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(drawerBtn); bar.appendChild(revertBtn);
     bar.setAttribute("data-source-docbar", "1");
     return bar;
   }
@@ -11573,6 +11594,113 @@
     var old = host.querySelector("[data-source-docbar]"); if (!old) return;
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     var fresh = buildSourceDocBar(topic); old.parentNode.replaceChild(fresh, old);
+  }
+
+  // The left TOC / navigator (spec 2.3): heading nodes, clickable to jump, with a scroll-spy
+  // highlight on the section in view. Sticky beside the article. Returns null when the doc has
+  // no headings (nothing to navigate) so the reading column keeps its full width.
+  function buildSourceToc(model, host) {
+    var heads = window.SourceDoc.headings(model);
+    if (!heads.length) return null;
+    var nav = h("nav", "source-doc__toc"); nav.setAttribute("aria-label", "Document outline");
+    nav.appendChild(h("div", "source-doc__toc-label", "On this page"));
+    heads.forEach(function (hd) {
+      var item = h("button", "source-doc__toc-item source-doc__toc-item--l" + (hd.level || 2), hd.text || "Untitled");
+      item.type = "button"; item.setAttribute("data-toc-key", hd.key); item.title = hd.text || "";
+      item.addEventListener("click", function () {
+        var target = host.querySelector('[data-node="' + hd.key + '"]');
+        if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+      nav.appendChild(item);
+    });
+    return nav;
+  }
+  // Highlights the TOC item whose heading is the last one scrolled above the top of the
+  // reading pane -- the section the author is currently reading.
+  function updateSourceScrollSpy() {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var toc = host.querySelector(".source-doc__toc"); if (!toc) return;
+    var top = host.getBoundingClientRect().top + 12;
+    var heads = Array.prototype.slice.call(host.querySelectorAll(".source-doc__h[data-node]"));
+    var currentKey = heads.length ? heads[0].getAttribute("data-node") : null;
+    heads.forEach(function (el) { if (el.getBoundingClientRect().top <= top) currentKey = el.getAttribute("data-node"); });
+    Array.prototype.forEach.call(toc.querySelectorAll(".source-doc__toc-item"), function (it) {
+      it.classList.toggle("is-current", it.getAttribute("data-toc-key") === currentKey);
+    });
+  }
+
+  // The on-demand all-marks drawer (spec 2.3): the marks list is demoted from the primary
+  // view to a dock-bar drawer, filtered All / Alternates / Linked / Comments so the three mark
+  // types are never read mixed. Clicking a row activates + scrolls to that mark in the article.
+  function toggleSourceDrawer() {
+    __sourceDrawerOpen = !__sourceDrawerOpen;
+    renderSourceDrawer();
+    updateSourceDocBar();
+  }
+  var SOURCE_DRAWER_FILTERS = [
+    { key: "all", label: "All" },
+    { key: "alternate", label: "Alternates" },
+    { key: "link", label: "Linked" },
+    { key: "comment", label: "Comments" }
+  ];
+  function onSourceDrawerKey(ev) {
+    if (ev.key === "Escape") { __sourceDrawerOpen = false; renderSourceDrawer(); updateSourceDocBar(); }
+  }
+  function renderSourceDrawer() {
+    var existing = document.querySelector("[data-source-drawer]"); if (existing) existing.remove();
+    document.removeEventListener("keydown", onSourceDrawerKey);
+    if (!__sourceDrawerOpen) return;
+    document.addEventListener("keydown", onSourceDrawerKey); // light-dismiss (Escape)
+    var model = __sourceDocModel; if (!model) return;
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    var SD = window.SourceDoc;
+    var drawer = h("aside", "source-drawer"); drawer.setAttribute("data-source-drawer", "1");
+    drawer.setAttribute("aria-label", "All marks");
+    var head = h("div", "source-drawer__head");
+    head.appendChild(h("div", "source-drawer__title", "Marks"));
+    var close = h("button", "source-drawer__close"); close.type = "button"; close.title = "Close";
+    close.innerHTML = window.Icon ? window.Icon("x") : "close";
+    close.addEventListener("click", function () { toggleSourceDrawer(); });
+    head.appendChild(close);
+    drawer.appendChild(head);
+    // single-select filter -> the canonical SegmentedControl (DSLMS: pick-exactly-one is a
+    // segmented control, not bespoke chips; converges with the facet toggle in this stage).
+    var filters = h("div", "source-drawer__filters");
+    if (window.VersoUI && window.VersoUI.SegmentedControl) {
+      filters.appendChild(window.VersoUI.SegmentedControl({
+        size: "sm",
+        options: SOURCE_DRAWER_FILTERS.map(function (f) { return { value: f.key, label: f.label }; }),
+        value: __sourceDrawerFilter,
+        onChange: function (v) { __sourceDrawerFilter = v; renderSourceDrawer(); }
+      }));
+    }
+    drawer.appendChild(filters);
+    // rows
+    var listWrap = h("div", "source-drawer__list");
+    var marks = (model.marks || []).filter(function (m) { return __sourceDrawerFilter === "all" || m.type === __sourceDrawerFilter; });
+    if (!marks.length) {
+      listWrap.appendChild(h("div", "source-drawer__empty", "No marks" + (__sourceDrawerFilter === "all" ? " yet." : " of this type.")));
+    } else {
+      marks.forEach(function (m) {
+        var meta = SD.markMeta(m), status = SD.markStatus(m);
+        var row = h("button", "source-drawer__row"); row.type = "button";
+        var dot = h("span", "source-drawer__dot source-drawer__dot--" + status.dot); dot.title = status.label;
+        var body = h("div", "source-drawer__row-body");
+        body.appendChild(h("div", "source-drawer__row-type " + meta.cls, meta.label));
+        var snip = SD.isObjectMark(m) ? ("[" + (m.anchor.nodeKey ? "object" : "mark") + "]") : (SD.anchorText(model, m.anchor) || "(empty)");
+        body.appendChild(h("div", "source-drawer__row-snip", snip));
+        row.appendChild(dot); row.appendChild(body);
+        row.addEventListener("click", function () {
+          if (__sourceMarksEngine) { __sourceMarksEngine.setActive(m.id); repaintSourceMarks(); }
+          var host = document.getElementById("source-stage-article");
+          var target = host && host.querySelector('[data-node="' + m.anchor.nodeKey + '"]');
+          if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+        });
+        listWrap.appendChild(row);
+      });
+    }
+    drawer.appendChild(listWrap);
+    document.body.appendChild(drawer);
   }
 
   // The contextual selection bar, above the highlight (canvas idiom): glyph rich-text
@@ -11765,7 +11893,7 @@
     host.innerHTML = "";
     var search = h("label", "vbrowser__search source-stage__search-field");
     search.innerHTML = window.Icon ? window.Icon("search") : "";
-    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "search topics";
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "search topics + text";
     input.value = __sourceSearchQuery;
     input.addEventListener("input", function () { __sourceSearchQuery = input.value; renderSourceTopicList(); });
     search.appendChild(input);
