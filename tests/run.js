@@ -2189,6 +2189,30 @@ section("editor-rework matrix doc-type");
   ok("tagDocCell is null-safe", g.tagDocCell(null, "paged", true) === null);
 })();
 
+// ---- SPEC 7: product-filtered tab scope (pure predicate) ----
+section("editor-rework tab scope");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-tabscope-start \*\/([\s\S]*?)\/\* @pure-tabscope-end \*\//);
+  if (!m) { ok("locate @pure-tabscope fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { visibleTabIds: visibleTabIds };")();
+  var reg = {
+    a: { meta: { title: "A", productId: "prod-a" } },
+    b: { meta: { title: "B", productId: "prod-b" } },
+    a2: { meta: { title: "A2", productId: "prod-a" } },
+    leg: { meta: { title: "Legacy" } } // untagged
+  };
+  var open = ["a", "b", "a2", "leg"];
+  ok("All products ('') shows every open tab", g.visibleTabIds(open, reg, "").join(",") === "a,b,a2,leg");
+  ok("All products (null) shows every open tab", g.visibleTabIds(open, reg, null).join(",") === "a,b,a2,leg");
+  ok("prod-a scope shows only prod-a tabs", g.visibleTabIds(open, reg, "prod-a").join(",") === "a,a2");
+  ok("prod-b scope shows only prod-b tabs", g.visibleTabIds(open, reg, "prod-b").join(",") === "b");
+  ok("an untagged doc never shows under a specific product", g.visibleTabIds(open, reg, "prod-a").indexOf("leg") === -1);
+  ok("a scope with no open tabs -> empty", g.visibleTabIds(open, reg, "prod-c").length === 0);
+  ok("ids with no registry entry are dropped", g.visibleTabIds(["a", "ghost"], reg, "").join(",") === "a");
+  ok("null-safe on empty inputs", g.visibleTabIds(null, reg, "").length === 0 && g.visibleTabIds(open, null, "").length === 0);
+})();
+
 // ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
 section("product-rail ProductsStore");
 (function () {
@@ -8491,7 +8515,7 @@ section("Product Rail: Source stage nav + article");
   // Wiring: setStage("source") triggers a render; the topic list re-renders on both
   // search input and the shared product-context change (Epic 1's dropdown).
   ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
-  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); \}/.test(e));
+  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(e));
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(e));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
   ok("the facet SegmentedControl re-renders the article, gated through isValidFacet", /onChange: function \(v\) \{ if \(!isValidFacet\(v\)\) return; __sourceActiveFacet = v; renderSourceArticle\(\); \}/.test(e));

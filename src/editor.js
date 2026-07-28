@@ -1521,19 +1521,43 @@
   // is the DS IconButton (Lucide plus). Re-skin only — the switch/close/new-doc
   // handlers are unchanged. A legacy chip fallback keeps the bar working if the
   // control library is ever absent.
+  // SPEC 7 (product-filtered tabs): the global product picker scopes the visible tabs. A tab
+  // shows when its doc matches the active product ("" = All products -> every open tab). An
+  // untagged doc has no productId, so it only ever shows under All products -- the same rule
+  // Product Rail uses everywhere else (an untagged doc is never silently attributed to a
+  // filter). PURE (no DOM) so tests/run.js exercises the predicate headlessly.
+  /* @pure-tabscope-start */
+  function visibleTabIds(openIds, reg, activeProduct) {
+    var pid = activeProduct || "";
+    return (openIds || []).filter(function (id) {
+      var d = reg && reg[id];
+      if (!d) return false;
+      if (!pid) return true; // All products
+      return !!(d.meta && d.meta.productId === pid);
+    });
+  }
+  /* @pure-tabscope-end */
+
   function renderTabs() {
     var container = document.getElementById("toolbar-tabs");
     if (!container) return;
     container.innerHTML = "";
     var U = window.VersoUI;
-    openDocIds.forEach(function (id) {
+    var activeProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var shown = visibleTabIds(openDocIds, registry, activeProduct);
+    shown.forEach(function (id) {
       var d = registry[id];
       if (!d) return;
       var title = d.meta.title || id;
+      // Per-Product colour dot, keyed on the stable productId (not the mutable name) so the
+      // colour never shifts when a product is renamed. Untagged docs get no dot.
+      var pid = d.meta && d.meta.productId;
+      var dotColour = pid ? colourForName(pid) : null;
       if (U && U.DocumentTab) {
         container.appendChild(U.DocumentTab({
           label: title,
           active: id === activeDocId,
+          dot: dotColour,
           onSelect: function () { switchDoc(id); },
           onClose: function () { closeTab(id); }
         }));
@@ -1605,6 +1629,16 @@
     renderTabs();
     renderVariantSwitch(); // rebuild the top-bar variant pill for the NEW doc (else it shows the old doc's variants / goes blank)
     renderVersionSwitch(); // #206: same for the software-version switcher
+  }
+
+  // SPEC 7: after the product picker changes, re-scope the tab strip. If the active doc fell
+  // out of scope and other tabs are visible, activate the first visible one (switchDoc rebuilds
+  // the strip + canvas). If NOTHING is in scope, leave the active doc as-is and just redraw the
+  // (now empty-but-for-＋) strip -- the file-picker is how the author opens one in that product.
+  function reconcileActiveTabToScope() {
+    var shown = visibleTabIds(openDocIds, registry, (typeof getActiveProduct === "function") ? getActiveProduct() : "");
+    if (shown.length && shown.indexOf(activeDocId) === -1) { switchDoc(shown[0]); return; }
+    renderTabs();
   }
 
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
@@ -10619,7 +10653,7 @@
     host.appendChild(U.Select({
       options: productSelectOptions(window.ProductsStore),
       value: __activeProduct,
-      onChange: function (v) { setActiveProduct(v); renderSourceStage(); } // re-resolve the Product's one document
+      onChange: function (v) { setActiveProduct(v); renderSourceStage(); reconcileActiveTabToScope(); } // re-resolve the Product's document + re-scope the Edit tabs
     }));
   }
   window.__productRail.getActiveProduct = getActiveProduct;

@@ -389,6 +389,8 @@
   function DocumentTab(props) {
     props = props || {};
     var tab = h("div", "vds-doctab" + (props.active ? " is-active" : ""));
+    // SPEC 7: an optional per-Product colour dot so a mixed set of tabs stays legible.
+    if (props.dot) { var dot = h("span", "vds-doctab__dot"); dot.style.background = props.dot; tab.appendChild(dot); }
     var name = h("button", "vds-doctab__label", props.label); name.type = "button";
     if (typeof props.onSelect === "function") name.addEventListener("click", props.onSelect);
     tab.appendChild(name);
