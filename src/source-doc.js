@@ -224,8 +224,72 @@
       if (isObjectMark(m) || m.anchor.nodeKey !== nodeKey) return;
       m.anchor = shiftAnchor(m.anchor, edit);
       refreshMark(model, m);
+      // A span breaking is a structural provenance event (spec 3.2 / 5), so it earns a
+      // discrete History entry even though the surrounding prose edit collapses to a commit.
+      if (m._brokeNow) { logHistory(model, { type: "mark-broken", markId: m.id, markType: m.type }); m._brokeNow = false; }
     });
     return { model: model, edit: edit };
+  }
+
+  // ---- range-mark engine: status, update-with-appended-copy, relationships ----
+  // The colour-dot status a mark shows (spec 3): red broken / yellow stale / green in-sync.
+  function markStatus(m) {
+    if (m.broken) return { dot: "red", label: "Broken -- the anchored text was deleted; downstream copies are orphaned" };
+    if (m.stale) return { dot: "yellow", label: "Stale -- the base changed since this alternate was written; needs re-sync" };
+    return { dot: "green", label: "In sync" };
+  }
+  // The permanent-id + type metadata a mark carries (spec 1.2): its distinct visual class and label.
+  function markMeta(m) {
+    return {
+      link: { cls: "sd-mark-link", label: "Linked" },
+      alternate: { cls: "sd-mark-alt", label: "Alternate" },
+      comment: { cls: "sd-mark-comment", label: "Comment" }
+    }[m.type] || { cls: "sd-mark-alt", label: "Mark" };
+  }
+  // Update-with-appended-copy (the "⟳ update" affordance, spec 3.1): a selection that extends
+  // PAST an existing mark's span captures the appended text into that mark, so the extension
+  // propagates downstream. End-exclusive is the default (typing after a span never auto-joins);
+  // this is the deliberate opt-in. Pushes undo; refreshes baseText so it's no longer stale/broken.
+  function updateMark(model, markId, anchor) {
+    var m = markById(model, markId);
+    if (!m) return null;
+    pushUndo(model);
+    m.anchor = { nodeKey: anchor.nodeKey, start: anchor.start, len: anchor.len };
+    m.baseText = anchorText(model, m.anchor);
+    m.stale = false; m.broken = false;
+    logHistory(model, { type: "mark-updated", markId: m.id, markType: m.type });
+    return m;
+  }
+  // Find the text mark (if any) that the given selection anchor EXTENDS -- i.e. the selection
+  // fully contains the mark's span in the same node and is strictly longer. Drives whether the
+  // selection toolbar shows "create" or flips to "⟳ update <existing>".
+  function markExtendedBy(model, anchor) {
+    if (!anchor || anchor.len == null) return null;
+    var selEnd = anchor.start + anchor.len;
+    var found = null;
+    (model.marks || []).forEach(function (m) {
+      if (isObjectMark(m) || m.broken || m.anchor.nodeKey !== anchor.nodeKey) return;
+      var mEnd = m.anchor.start + m.anchor.len;
+      if (anchor.start <= m.anchor.start && selEnd >= mEnd && anchor.len > m.anchor.len) {
+        if (!found || m.anchor.len > found.anchor.len) found = m; // prefer the largest contained mark
+      }
+    });
+    return found;
+  }
+  // Marks whose span overlaps a given range in a node (for hit-testing a click/selection).
+  function marksOverlapping(model, nodeKey, start, len) {
+    var end = start + len;
+    return (model.marks || []).filter(function (m) {
+      if (isObjectMark(m)) return m.anchor.nodeKey === nodeKey;
+      if (m.anchor.nodeKey !== nodeKey) return false;
+      var mEnd = m.anchor.start + m.anchor.len;
+      return m.anchor.start < end && mEnd > start; // strict overlap
+    });
+  }
+  function logHistory(model, entry) {
+    model.history = model.history || [];
+    model.history.unshift(entry);
+    return entry;
   }
 
   // ---- owned undo / redo ---------------------------------------------------
@@ -324,7 +388,9 @@
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
-    blocksFromText: blocksFromText, fromSections: fromSections
+    blocksFromText: blocksFromText, fromSections: fromSections,
+    markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory
   };
 
   var SourceDoc = {
@@ -333,6 +399,8 @@
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     applyTextEdit: applyTextEdit,
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
+    markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
   };

@@ -644,6 +644,34 @@ delete it. A count appears on the icon while a section has unresolved comments. 
 Comments section lists every comment on the topic (Open / Resolved), including any left
 "Orphaned" if the section they were on gets deleted — nothing is silently lost.
 
+**Continuous-document mode (beta).** A newer way to author a topic: instead of separate sections
+with Technical/Digestible/Dot-point versions, the whole topic reads and edits as **one continuous
+document** — like the manual it came from. Open a topic and click **Switch to continuous document
+(beta)** at the bottom of the article; your existing section text is carried over (nothing is lost,
+and **Revert to sections** in the bottom bar brings the old view back at any time).
+
+In this mode:
+
+- **The source is locked by default.** The signed-off prose is protected — a bar docked at the
+  bottom-centre shows a padlock; click it to **unlock** and edit the base text, click again to
+  lock. Trying to type while locked shows a brief reminder instead of changing anything.
+- **You can always annotate, even when locked.** Select any text and a small toolbar appears above
+  it. **Add an alternate** (another way to say the same thing, for a particular course or
+  audience) or **Comment** — both are available whether or not the source is unlocked. The
+  rich-text buttons (bold, italic, bullets) only appear once you've unlocked, since they change the
+  base prose. There is no "link" button here: linking a course to a piece of source happens in the
+  Edit stage, not Source.
+- **Marks ride your edits.** An alternate or comment is anchored to the exact span you selected;
+  as you edit around it the anchor moves with the text, and if you delete the anchored text the
+  mark is flagged as broken. **Ctrl/Cmd+Z** is a document-aware undo — it restores deleted text
+  *and* reconnects its mark, which the browser's own undo cannot do.
+- **Show/hide marks** with the eye button in the bottom bar. Marked spans are tinted by type
+  (linked / alternate / comment), so annotation never clutters plain reading.
+
+This is an early view — pinned side-panels for alternates and comments, and the variant columns,
+arrive in later updates; for now marks are added and shown, and the section editor above remains
+the full-featured path.
+
 ---
 
 *This guide reflects the app as built. When a screen doesn't match, the app — and the

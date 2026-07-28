@@ -656,6 +656,63 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .source-stage__linked-row:hover { text-decoration: underline; }
 
+/* ===== Source rewrite (Epic 2b): continuous-document article + marks + toolbars ===== */
+/* The node-model article. Reading-width column; text blocks are contentEditable when unlocked. */
+.source-doc__col { position: relative; max-width: 760px; margin: 0 auto; padding-bottom: 120px; }
+.source-doc { outline: none; color: var(--text-primary, var(--text-secondary)); font-size: var(--text-md, 15px); line-height: 1.65; }
+.source-doc__h { font-weight: 650; letter-spacing: -0.01em; margin: 1.4em 0 0.4em; }
+h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
+.source-doc__h:first-child { margin-top: 0; }
+.source-doc__p { margin: 0.7em 0; }
+.source-doc__list { margin: 0.6em 0; padding-left: 22px; }
+.source-doc__list li { margin: 0.25em 0; }
+.source-doc__callout { border-left: 3px solid var(--accent); background: var(--surface-panel); padding: 12px 16px; border-radius: 4px; margin: 1.1em 0; }
+.source-doc__callout-tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
+.source-doc__table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: var(--text-sm, 13px); }
+.source-doc__table td { border: 1px solid var(--border-strong); padding: 6px 9px; }
+.source-doc__figure { margin: 1.2em 0; text-align: center; }
+.source-doc__figure img { max-width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; }
+.source-doc__figure figcaption { font-size: 12px; color: var(--text-tertiary, var(--text-secondary)); margin-top: 6px; }
+.source-doc--unlocked [data-editable], .source-doc--unlocked [data-node-body] { box-shadow: inset 0 0 0 9999px transparent; }
+.source-doc--unlocked { }
+
+/* The three visually-distinct mark types (CSS Custom Highlight -- no wrapper spans). */
+::highlight(sd-link) { background-color: rgba(59, 108, 246, 0.16); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; }
+::highlight(sd-alt) { background-color: rgba(234, 179, 8, 0.20); }
+::highlight(sd-comment) { background-color: rgba(20, 184, 166, 0.16); text-decoration: underline dotted; text-decoration-color: rgb(20, 184, 166); text-decoration-thickness: 2px; }
+::highlight(sd-active) { background-color: rgba(234, 179, 8, 0.34); }
+::highlight(sd-stale) { background-color: rgba(249, 115, 22, 0.18); }
+::highlight(sd-broken) { background-color: rgba(239, 68, 68, 0.20); text-decoration: line-through; text-decoration-color: rgb(220, 38, 38); }
+
+/* Document-level bar, docked bottom-centre (canvas idiom). */
+.source-docbar { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--surface-inverse, #111827); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.28); }
+.source-docbar__lbl { color: var(--text-on-inverse, #cbd5e1); font-size: 11px; padding: 0 6px 0 4px; }
+.source-docbar__btn { color: #fff; }
+.source-docbar__revert { margin-left: 6px; font-size: 11px; color: var(--text-on-inverse, #cbd5e1); background: transparent; border: 1px solid rgba(255,255,255,0.22); border-radius: 7px; padding: 4px 8px; cursor: pointer; }
+.source-docbar__revert:hover { background: rgba(255,255,255,0.12); }
+
+/* Contextual selection bar, above the highlight (canvas idiom, glyph-only). */
+.source-selbar { position: absolute; z-index: 40; display: none; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }
+.source-selbar__btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; background: transparent; border: 0; color: #fff; border-radius: 6px; cursor: pointer; }
+.source-selbar__btn svg { width: 16px; height: 16px; }
+.source-selbar__btn:hover { background: rgba(255,255,255,0.14); }
+.source-selbar__update { color: #93c5fd; }
+.source-selbar__sep { width: 1px; height: 18px; background: rgba(255,255,255,0.2); margin: 0 3px; }
+
+.source-stage__convert-row { margin: 22px 0 8px; }
+.source-stage__convert-btn { font-size: var(--text-sm, 12px); color: var(--accent); background: transparent; border: 1px dashed var(--border-strong); border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+.source-stage__convert-btn:hover { background: var(--surface-panel); }
+
+.source-toast { position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%) translateY(10px); z-index: 60; background: var(--surface-inverse, #111827); color: #fff; font-size: 12.5px; padding: 8px 14px; border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.18s, transform 0.18s; pointer-events: none; max-width: 380px; }
+.source-toast.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.source-composer { position: absolute; z-index: 50; transform: translateX(-50%); width: 300px; background: var(--surface-panel); border: 1px solid var(--border-strong); border-radius: 9px; box-shadow: 0 10px 34px rgba(0,0,0,0.2); padding: 10px; }
+.source-composer__lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 6px; }
+.source-composer__text { width: 100%; min-height: 58px; font: inherit; font-size: 13px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px; resize: vertical; box-sizing: border-box; }
+.source-composer__row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.source-composer__btn { font: inherit; font-size: 12.5px; border: 1px solid var(--border-strong); background: var(--surface-canvas); color: var(--text-primary, var(--text-secondary)); padding: 5px 11px; border-radius: 6px; cursor: pointer; }
+.source-composer__btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* Product Rail top-bar dropdown (next to the brand) -- a plain VersoUI.Select host. */
 .product-picker { align-self: center; width: 140px; margin: 0 6px 0 2px; }
 .product-picker .vds-select { width: 100%; }

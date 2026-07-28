@@ -266,6 +266,9 @@
   <script src="src/ui-kit.js"></script>
   <!-- Product Rail: markdown-lite content render primitive (bold/inline-code/bullets). DOM-free, no editor coupling -- load order is not load-bearing, kept near ui-kit.js since both are shared chrome render helpers. -->
   <script src="src/markdown-lite.js"></script>
+  <!-- Source rewrite (Epic 2b): continuous-document node model + owned undo (DOM-free), and the range-mark painting engine (CSS Custom Highlight over live Ranges). Must load before editor.js, which mounts them in the Source stage. -->
+  <script src="src/source-doc.js"></script>
+  <script src="src/source-marks.js"></script>
   <!-- Product Rail: Markdown-manual importer (heading-depth-aware topic/section + variant-override parsing). DOM-free, no editor coupling -- load order is not load-bearing. -->
   <script src="src/markdown-import.js"></script>
   <!-- Product Rail: dependency-free line-level diff (the "Source updated" reconcile-conflict review). DOM-free, no editor coupling -- load order is not load-bearing. -->
