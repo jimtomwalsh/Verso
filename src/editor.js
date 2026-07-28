@@ -21147,6 +21147,7 @@
     renderCopyEditorDoc(); // slices 2-3: paint + bind the course copy
     renderCopyEditorTools(); // slice 4: word count + Find & replace
     scheduleSpellcheck(); // P0: mark typos across the whole copy document
+    syncViewToggle(); // reflect Read in the header Build/Read control
   }
   function exitCopyEditor() {
     var st = window.copyEditorNextState({ open: copyEditorIsOpen() }, "exit");
@@ -21162,8 +21163,30 @@
         focusFrame(p); setActivePage(p); setSelection("page", p);
       }
     }
+    syncViewToggle(); // reflect Build in the header Build/Read control
   }
   function toggleCopyEditor() { if (copyEditorIsOpen()) exitCopyEditor(); else enterCopyEditor(); }
+  // SPEC 7 (decision 14): a Build/Read segmented control in the editor header is the in-flow
+  // way to switch between the authoring canvas (Build) and the per-doc copy view (Read = the
+  // copy editor). It stays in sync however the copy editor is opened/closed (rail button, Esc).
+  // Preview stays its own separate glyph.
+  function currentViewMode() { return copyEditorIsOpen() ? "read" : "build"; }
+  function mountViewToggle() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("editor-view-toggle"); if (!host) return;
+    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
+    host.innerHTML = "";
+    host.appendChild(U.SegmentedControl({
+      size: "sm",
+      options: [{ value: "build", label: "Build" }, { value: "read", label: "Read" }],
+      value: currentViewMode(),
+      onChange: function (v) {
+        if (v === "read") { if (!copyEditorIsOpen()) enterCopyEditor(); }
+        else if (copyEditorIsOpen()) exitCopyEditor();
+      }
+    }));
+  }
+  function syncViewToggle() { mountViewToggle(); } // re-render so the active segment reflects the real state
   function wireCopyEditor() {
     var btn = document.getElementById("copy-editor-btn");
     if (btn) btn.addEventListener("click", enterCopyEditor);
@@ -22780,6 +22803,7 @@
   wireDemo();
   applyUiTheme(uiThemeIsLight()); // #44: restore the saved editor-chrome light/dark theme
   wireCopyEditor(); // #116: full-screen copy-editor view (rail glyph opens, Close/Esc returns)
+  mountViewToggle(); // SPEC 7: Build/Read segmented control in the editor header
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
   mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
