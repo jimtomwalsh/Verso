@@ -11156,6 +11156,17 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   var para = P.blocksFromText("Just a sentence.");
   ok("blocksFromText: plain text still a paragraph", para.length === 1 && para[0].type === "paragraph");
 
+  // --- #162: <br> folded in table cells; standalone thematic breaks dropped ---
+  var tbr = P.blocksFromText("| Name | Notes |\n| --- | --- |\n| Alpha | line one<br>line two |\n| Beta | x<br/>y |");
+  var trow = tbr.find(function (n) { return n.type === "table"; });
+  ok("blocksFromText: table cell <br>/<br/> folds to a space, no literal tag (#162)", !!trow && trow.rows[1][1] === "line one line two" && trow.rows[2][1] === "x y" && !JSON.stringify(trow.rows).match(/<br/i));
+  var hr = P.blocksFromText("Intro.\n\n---\n\nMiddle.\n\n***\n\nEnd.\n\n___\n\nLast.");
+  ok("blocksFromText: standalone --- / *** / ___ rules are dropped, never a literal paragraph (#162)", hr.every(function (n) { return !/^(-{3,}|\*{3,}|_{3,})$/.test((n.text || "").replace(/\s/g, "")); }) && hr.filter(function (n) { return n.type === "paragraph"; }).length === 4);
+  var hrSpaced = P.blocksFromText("Above.\n\n- - -\n\nBelow.");
+  ok("blocksFromText: a spaced '- - -' rule is also dropped", hrSpaced.length === 2 && hrSpaced.every(function (n) { return n.type === "paragraph"; }));
+  var dashList = P.blocksFromText("- real item\n- another");
+  ok("blocksFromText: a real '- ' list is NOT mistaken for a thematic break", dashList.length === 1 && dashList[0].type === "list" && dashList[0].items.length === 2);
+
   // --- inlineRuns: rich inline projection that PRESERVES plain-text offsets (source-rich-render) ---
   // The one invariant that keeps range-marks + applyTextEdit correct under rich rendering: the
   // concatenation of every run's text must reproduce the input byte-for-byte (markers included).

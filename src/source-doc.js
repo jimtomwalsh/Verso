@@ -970,6 +970,15 @@
   var TABLE_SEP_RE = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
   function isTableSeparator(line) { return TABLE_SEP_RE.test(line) && line.indexOf("-") !== -1; }
   function looksLikeTableRow(line) { return line.indexOf("|") !== -1; }
+  // A standalone thematic break: three or more of -, *, or _ on their own line (optionally spaced),
+  // NOT a table separator (those carry pipes / a preceding table row). Markdown renders it as a
+  // horizontal rule; source-doc has no rule node, so on import we drop it rather than leak "---" as
+  // literal body text (#162).
+  var THEMATIC_BREAK_RE = /^\s*(?:-\s*){3,}$|^\s*(?:\*\s*){3,}$|^\s*(?:_\s*){3,}$/;
+  function isThematicBreak(line) { return THEMATIC_BREAK_RE.test(line) && line.indexOf("|") === -1; }
+  // A converted-PDF/manual cell often carries a literal <br> for its internal line breaks; fold it to
+  // a space so it reads as one cell instead of showing the tag verbatim (#162).
+  function foldCellBreaks(s) { return String(s == null ? "" : s).replace(/<br\s*\/?>/gi, " ").replace(/\s{2,}/g, " ").trim(); }
   // Split one table row into trimmed cells. Tolerates optional leading/trailing pipes and honours a
   // backslash-escaped pipe (the mdCell export escapes "|" as "\|", so import must unescape it).
   function splitTableRow(line) {
@@ -977,10 +986,10 @@
     var cells = [], cur = "";
     for (var i = 0; i < s.length; i++) {
       if (s[i] === "\\" && s[i + 1] === "|") { cur += "|"; i++; continue; }
-      if (s[i] === "|") { cells.push(cur.trim()); cur = ""; continue; }
+      if (s[i] === "|") { cells.push(foldCellBreaks(cur)); cur = ""; continue; }
       cur += s[i];
     }
-    cells.push(cur.trim());
+    cells.push(foldCellBreaks(cur));
     return cells;
   }
   // Parse inline Markdown (**bold** / __bold__ / *italic* / _italic_ / `code`) out of a raw string
@@ -1053,6 +1062,10 @@
         nodes.push(tnode);
         continue;
       }
+      // A standalone thematic break (---, ***, ___) closes any open block and is dropped, so it
+      // never surfaces as a literal "---" paragraph (#162). Checked before the list rules -- a rule
+      // is never a list item (no "- " + content), so the order is safe.
+      if (isThematicBreak(line)) { flushP(); flushL(); continue; }
       var b = UNORDERED_ITEM_RE.exec(line);
       var o = b ? null : ORDERED_ITEM_RE.exec(line);
       if (b) {
