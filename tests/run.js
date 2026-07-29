@@ -8496,6 +8496,11 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("productSelectOptions handles an empty/missing store", g.productSelectOptions({}).length === 1 && g.productSelectOptions(undefined).length === 1);
   ok("productSelectOptions falls back to id when a product has no name", g.productSelectOptions({ x: {} })[1].label === "x");
 
+  // product-scope-persist: the active product survives a refresh (mirrors STAGE_PERSIST_KEY).
+  ok("setActiveProduct persists to verso.activeProduct (removes the pref on 'All products')", /var PRODUCT_PERSIST_KEY = "verso\.activeProduct";/.test(e) && /function setActiveProduct\(id\)[\s\S]{0,220}localStorage\.setItem\(PRODUCT_PERSIST_KEY, __activeProduct\)[\s\S]{0,120}removeItem\(PRODUCT_PERSIST_KEY\)/.test(e));
+  ok("restoreActiveProduct validates the stored id against ProductsStore + clears a stale one", /function restoreActiveProduct\(\)[\s\S]{0,320}window\.ProductsStore\[saved\]\) __activeProduct = saved;[\s\S]{0,120}removeItem\(PRODUCT_PERSIST_KEY\)/.test(e));
+  ok("mountProductPicker restores the persisted scope on first mount (boot)", /function mountProductPicker\(\)[\s\S]{0,120}restoreActiveProduct\(\);/.test(e));
+
   // index.html wiring: exactly 3 rail segments (Source/Edit/Publish free-form, no
   // gating), Edit active by default (preserves today's boot-straight-into-canvas
   // behaviour), the pinned bottom actions untouched, and a top-bar product-picker host.
