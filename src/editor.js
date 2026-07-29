@@ -11056,13 +11056,34 @@
     b.addEventListener("click", function () { openSettingsModal("project"); });
   }
 
-  // Persistent top-bar product context (Product Rail): "" = All products. In-memory
-  // only for now -- every stage reads it through window.__productRail.getActiveProduct().
+  // Persistent top-bar product context (Product Rail): "" = All products. Persisted across
+  // refresh (mirrors STAGE_PERSIST_KEY) so a chosen product scope survives a reload on every
+  // stage; every stage reads it through window.__productRail.getActiveProduct().
+  var PRODUCT_PERSIST_KEY = "verso.activeProduct";
   var __activeProduct = "";
-  function setActiveProduct(id) { __activeProduct = id || ""; }
+  var __productRestored = false;
+  function setActiveProduct(id) {
+    __activeProduct = id || "";
+    try {
+      if (__activeProduct) localStorage.setItem(PRODUCT_PERSIST_KEY, __activeProduct);
+      else localStorage.removeItem(PRODUCT_PERSIST_KEY); // "All products" clears the pref
+    } catch (e) {}
+  }
   function getActiveProduct() { return __activeProduct; }
+  // Restore once at first mount (ProductsStore is loaded by then). Validate the stored id still
+  // exists -> a deleted Product falls back cleanly to "All products" (and clears the stale pref).
+  function restoreActiveProduct() {
+    if (__productRestored) return;
+    __productRestored = true;
+    try {
+      var saved = localStorage.getItem(PRODUCT_PERSIST_KEY);
+      if (saved && window.ProductsStore && window.ProductsStore[saved]) __activeProduct = saved;
+      else if (saved) { try { localStorage.removeItem(PRODUCT_PERSIST_KEY); } catch (e2) {} }
+    } catch (e) {}
+  }
   function mountProductPicker() {
     if (typeof document === "undefined") return;
+    restoreActiveProduct(); // first mount = boot; restore the persisted scope before building the Select
     var host = document.getElementById("product-picker-host"); if (!host) return;
     host.innerHTML = "";
     var U = window.VersoUI; if (!U || !U.Select) return;
