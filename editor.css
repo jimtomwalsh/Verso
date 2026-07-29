@@ -1059,6 +1059,13 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 
 /* Contextual selection bar, above the highlight (canvas idiom, glyph-only). */
 .source-selbar { position: absolute; z-index: 40; display: none; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }
+/* floating-format-bar: the above-selection B/I/U bar on the Edit canvas -- same idiom as the Source
+   selbar, but fixed-positioned (viewport coords from the selection rect). Editor chrome only. */
+.canvas-fmtbar { position: fixed; z-index: 60; display: inline-flex; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }
+.canvas-fmtbar__btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; background: transparent; border: 0; color: #fff; border-radius: 6px; cursor: pointer; }
+.canvas-fmtbar__btn svg { width: 16px; height: 16px; }
+.canvas-fmtbar__btn:hover { background: rgba(255,255,255,0.14); }
+.canvas-fmtbar__btn.is-active { color: var(--accent); background: rgba(255,255,255,0.14); }
 .source-selbar__btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; background: transparent; border: 0; color: #fff; border-radius: 6px; cursor: pointer; }
 .source-selbar__btn svg { width: 16px; height: 16px; }
 .source-selbar__btn:hover { background: rgba(255,255,255,0.14); }

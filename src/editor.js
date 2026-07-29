@@ -16020,6 +16020,61 @@
     c = c.nodeType === 1 ? c : c.parentNode;
     return (c && c.closest) ? c.closest("a[href]") : null;
   }
+  // ---- Above-selection floating format bar on the Edit canvas (floating-format-bar-to-edit-canvas) ----
+  // The same above-the-selection glyph bar idiom the Source stage uses (buildSourceSelBar), brought to
+  // the main Edit canvas. It appears on a non-collapsed text selection inside an editable [data-edit]
+  // field with the inline format actions -- bold / italic / underline, the SAME inline-exec set as the
+  // inspector's FORMAT_TOGGLES (one config, two surfaces). Clicking runs execCommand, which fires the
+  // field's own input -> writeModel commit (identical to typing), so there is no separate write path.
+  // Editor chrome only; never in the shipped course. Positioned fixed above the selection.
+  /* @canvas-fmtbar-start */
+  var FMTBAR_GLYPH = { bold: "bold", italic: "italic", underline: "underline" };
+  var __canvasFmtBar = null;
+  // The editable canvas text field a DOM point sits in, or null (a live contentEditable [data-edit]).
+  function canvasEditableFieldOf(node) {
+    var el = (node && node.nodeType === 3) ? node.parentNode : node;
+    var f = (el && el.closest) ? el.closest("[data-edit].is-editable") : null;
+    return (f && f.getAttribute("contenteditable") === "true") ? f : null;
+  }
+  function hideCanvasFmtBar() { if (__canvasFmtBar) { __canvasFmtBar.remove(); __canvasFmtBar = null; } }
+  function syncCanvasFmtBarActive(bar) {
+    Array.prototype.forEach.call(bar.querySelectorAll("[data-cmd]"), function (b) {
+      var on = false; try { on = document.queryCommandState(b.getAttribute("data-cmd")); } catch (e) {}
+      b.classList.toggle("is-active", on);
+    });
+  }
+  function ensureCanvasFmtBar() {
+    if (__canvasFmtBar) return __canvasFmtBar;
+    var bar = h("div", "canvas-fmtbar"); bar.setAttribute("data-canvas-fmtbar", "1");
+    FORMAT_TOGGLES.filter(function (t) { return t.kind === "inline-exec"; }).forEach(function (t) {
+      var b = h("button", "canvas-fmtbar__btn"); b.type = "button"; b.title = t.title;
+      b.setAttribute("data-cmd", t.cmd);
+      var glyph = FMTBAR_GLYPH[t.cmd];
+      if (glyph && window.Icon) b.innerHTML = window.Icon(glyph); else b.textContent = t.label;
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
+      b.addEventListener("click", function () { document.execCommand(t.cmd, false, null); syncCanvasFmtBarActive(bar); });
+      bar.appendChild(b);
+    });
+    document.body.appendChild(bar);
+    __canvasFmtBar = bar; return bar;
+  }
+  // Shows/positions the bar for a text selection in a canvas field; hides it otherwise. The Source
+  // stage's own selbar owns [data-node] selections, so this only ever binds to [data-edit] fields --
+  // the two never collide.
+  function onCanvasSelectionChange() {
+    if (typeof document === "undefined") return;
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) { hideCanvasFmtBar(); return; }
+    var r = sel.getRangeAt(0);
+    if (!canvasEditableFieldOf(r.commonAncestorContainer)) { hideCanvasFmtBar(); return; }
+    var rect = r.getBoundingClientRect();
+    if (!rect || !rect.width) { hideCanvasFmtBar(); return; }
+    var bar = ensureCanvasFmtBar();
+    syncCanvasFmtBarActive(bar);
+    bar.style.left = (rect.left + rect.width / 2) + "px";
+    bar.style.top = rect.top + "px"; // a CSS transform centres + lifts it above the selection
+  }
+  /* @canvas-fmtbar-end */
   function buildFormatToggleBar(io) {
     var bar = h("div", "prop-toggle-row");
     var execBtns = [];
@@ -24663,6 +24718,8 @@
   // canvas + panel render in the saved mode (setInteractMode persists it on change).
   try { if (localStorage.getItem(INTERACT_MODE_KEY) === "1") { interactMode = true; canvas.classList.add("is-interact"); syncRightTabs(); } } catch (e) {}
   window.addEventListener("keydown", function (e) { if (e.key === "Escape" && picking) { endPick(); renderInspector(); } });
+  document.addEventListener("selectionchange", onCanvasSelectionChange); // floating-format-bar: above-selection B/I/U on the Edit canvas
+  window.addEventListener("scroll", hideCanvasFmtBar, true); // keep the fixed bar from lagging the selection on scroll
   wireResizers();
   renderVariantSwitch();
   renderVersionSwitch(); // #206: software-version switcher (second top-bar glyph)
