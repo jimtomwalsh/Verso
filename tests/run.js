@@ -11909,7 +11909,7 @@ section("Source image A1: width clamp + snap (pure core)");
   var t = src("src/editor.js");
   var m = t.match(/\/\* @pure-imgwidth-start \*\/([\s\S]*?)\/\* @pure-imgwidth-end \*\//);
   if (!m) { ok("locate @pure-imgwidth fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { clampSourceImgWidth: clampSourceImgWidth, snapSourceImgWidth: snapSourceImgWidth };")();
+  var g = new Function(m[1] + "\nreturn { clampSourceImgWidth: clampSourceImgWidth, snapSourceImgWidth: snapSourceImgWidth, sourceImgAlign: sourceImgAlign };")();
   // clamp: blank/NaN -> 100 (full width); below 20 floors; above 100 caps.
   ok("clamp NaN -> 100", g.clampSourceImgWidth("") === 100 && g.clampSourceImgWidth(undefined) === 100);
   ok("clamp floors at 20", g.clampSourceImgWidth(5) === 20 && g.clampSourceImgWidth(20) === 20);
@@ -11921,6 +11921,10 @@ section("Source image A1: width clamp + snap (pure core)");
   ok("snap catches near-25/75/100", g.snapSourceImgWidth(27) === 25 && g.snapSourceImgWidth(73) === 75 && g.snapSourceImgWidth(97) === 100);
   ok("snap leaves an in-between value (rounded)", g.snapSourceImgWidth(60) === 60 && g.snapSourceImgWidth(41.4) === 41);
   ok("snap boundary is ~4%", g.snapSourceImgWidth(45) === 45 && g.snapSourceImgWidth(46) === 50);
+  // A2 align: centre is the default (no style); left/right apply; anything else falls to centre.
+  ok("align centre default -> ''", g.sourceImgAlign({}) === "" && g.sourceImgAlign({ align: "center" }) === "" && g.sourceImgAlign(null) === "");
+  ok("align left/right apply", g.sourceImgAlign({ align: "left" }) === "left" && g.sourceImgAlign({ align: "right" }) === "right");
+  ok("align junk -> centre", g.sourceImgAlign({ align: "middle" }) === "");
 })();
 
 section("Source rewrite: object (image/table) marks (Epic 2b)");

@@ -1016,6 +1016,7 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-selbar__btn svg { width: 16px; height: 16px; }
 .source-selbar__btn:hover { background: rgba(255,255,255,0.14); }
 .source-selbar__update { color: #93c5fd; }
+.source-selbar__btn.is-active { color: var(--accent); background: rgba(255,255,255,0.14); }
 .source-selbar__sep { width: 1px; height: 18px; background: rgba(255,255,255,0.2); margin: 0 3px; }
 
 .source-stage__convert-row { margin: 22px 0 8px; }
