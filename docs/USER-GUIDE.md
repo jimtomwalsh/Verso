@@ -804,6 +804,10 @@ In this mode:
 - **Align an image.** When an image is selected, its floating toolbar also has align **left /
   centre / right** (centre is the default). Choosing one positions a resized image within the column;
   a full-width image looks the same whichever you pick. The choice persists with the document.
+- **Place images side by side.** The image toolbar's **columns** button puts the selected image
+  beside the next one, in a row (up to three across). Each image in the row keeps its own size and
+  its own comments / alternates / links. Select an image already in a row and the same button
+  **takes it back out**. Text stays full width above and below the row.
 - **Staleness keeps alternates honest.** If you later change the base text, any alternate written
   against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark

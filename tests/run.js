@@ -11927,6 +11927,68 @@ section("Source image A1: width clamp + snap (pure core)");
   ok("align junk -> centre", g.sourceImgAlign({ align: "middle" }) === "");
 })();
 
+// ---- A3: side-by-side image row container (product-rail-source-image-side-by-side-row) -------
+section("Source image A3: row container nesting + mark-key stability");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function freshModel() {
+    return SD.create([
+      { type: "paragraph", text: "Intro." },
+      { type: "image", src: "a.png", caption: "A" },
+      { type: "image", src: "b.png", caption: "B" },
+      { type: "image", src: "c.png", caption: "C" },
+      { type: "paragraph", text: "Outro." }
+    ]);
+  }
+  var model = freshModel();
+  var aKey = model.nodes[1].key, bKey = model.nodes[2].key, cKey = model.nodes[3].key;
+  // an object mark on image A must survive nesting (anchored by key, key must not change)
+  var mk = SD.addMark(model, { type: "alternate", anchor: { nodeKey: aKey }, alt: "alt A" });
+
+  // combine A + next (B) into a row
+  ok("combineIntoRow wraps A + B into a row", SD.combineIntoRow(model, aKey) === true);
+  ok("row replaced the two top-level images", model.nodes.length === 4 && model.nodes[1].type === "row" && model.nodes[1].children.length === 2);
+  ok("row children kept their keys (marks stay attached)", model.nodes[1].children[0].key === aKey && model.nodes[1].children[1].key === bKey);
+  ok("nodeByKey descends into the row to find a child", SD.nodeByKey(model, aKey) && SD.nodeByKey(model, aKey).src === "a.png");
+  ok("the alternate on A is still resolvable + not broken after nesting", SD.objectAlternatesFor(model, aKey).length === 1 && !SD.refreshMark(model, mk).broken);
+  ok("rowOf locates the child's row", SD.rowOf(model, bKey) && SD.rowOf(model, bKey).childIndex === 1);
+
+  // grow the row to 3: the row's LAST child (B) pulls in the following image C
+  ok("combineIntoRow grows the row via its last child (max 3)", SD.combineIntoRow(model, bKey) === true);
+  var theRow = model.nodes.find(function (n) { return n.type === "row"; });
+  ok("row now holds 3 images", theRow.children.length === 3 && theRow.children[2].key === cKey);
+  // a full (3-child) row is never grown past 3
+  var m5 = SD.create([{ type: "image", src: "v.png" }, { type: "image", src: "w.png" }, { type: "image", src: "x.png" }, { type: "image", src: "y.png" }]);
+  SD.combineIntoRow(m5, m5.nodes[1].key);          // w + x -> row(2); nodes: [v, row(w,x), y]
+  var r5 = m5.nodes[1];
+  SD.combineIntoRow(m5, r5.children[1].key);        // row's last child pulls in y -> row(3); nodes: [v, row(3)]
+  ok("an image joins a row that has room (grows to 3)", m5.nodes[1].type === "row" && m5.nodes[1].children.length === 3);
+  ok("a full 3-image row refuses a 4th (image before it)", SD.combineIntoRow(m5, m5.nodes[0].key) === false && m5.nodes[1].children.length === 3);
+
+  // round-trips through toJSON/fromJSON with children intact
+  var round = SD.fromJSON(SD.toJSON(model));
+  var rr = round.nodes.find(function (n) { return n.type === "row"; });
+  ok("row round-trips through toJSON/fromJSON with children", rr && rr.children.length === 3 && rr.children[0].key === aKey);
+  ok("nodeByKey descends after a round-trip", SD.nodeByKey(round, bKey) && SD.nodeByKey(round, bKey).src === "b.png");
+
+  // un-nest: remove B; the row keeps A + C, B drops back to top level
+  var freed = SD.removeFromRow(round, bKey);
+  ok("removeFromRow frees the child back to top level", freed === bKey && round.nodes.some(function (n) { return n.key === bKey && n.type === "image"; }));
+  var rr2 = round.nodes.find(function (n) { return n.type === "row"; });
+  ok("row keeps its other children after un-nest", rr2 && rr2.children.length === 2);
+
+  // dissolve: a row falling to one child becomes a plain image again
+  var m3 = SD.create([{ type: "image", src: "x.png" }, { type: "image", src: "y.png" }]);
+  var xKey = m3.nodes[0].key;
+  SD.combineIntoRow(m3, xKey);
+  SD.removeFromRow(m3, xKey);
+  ok("a row of one dissolves back into a plain image", !m3.nodes.some(function (n) { return n.type === "row"; }) && m3.nodes.length === 2);
+
+  // combine no-ops when there's nothing to place beside (last image, or non-image neighbour)
+  var m4 = SD.create([{ type: "image", src: "solo.png" }, { type: "paragraph", text: "text" }]);
+  ok("combineIntoRow no-ops with a non-image neighbour", SD.combineIntoRow(m4, m4.nodes[0].key) === false);
+})();
+
 section("Source rewrite: object (image/table) marks (Epic 2b)");
 (function () {
   var SD = require(path.join(ROOT, "src/source-doc.js"));
