@@ -8986,14 +8986,12 @@ section("Product Rail: Source stage info panel");
   // side panel in the app uses.
   ok("'Linked in (N)' is a sub-head folded into the Source section (both are document-origin facts)", /source-info__subhead", "Linked in \(" \+ used\.length \+ "\)"/.test(e));
   ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History"\)/.test(e));
-  // source-stage-comments: a topic-wide overview alongside the per-section thread
-  // panels, mirroring renderCommentList's own Open/Resolved/Orphaned split.
-  ok("Comments section uses the canonical panelSection() helper, titled with the count", /panelSection\(host, "Comments \(" \+ comments\.length \+ "\)"\)/.test(e));
-  ok("renderSourceInfoPanel renders the legacy Comments accordion only for non-doc topics (doc topics use the Comments filter tab)", /renderSourceCommentsPanel\(host, topic\);\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
-  ok("empty comments renders a named empty state, not a blank section", /No comments yet\./.test(e));
-  ok("comments split into Open\/Resolved\/Orphaned groups, reusing the same split shape as the canvas's renderCommentList", /group\("Open", open\);/.test(e) && /group\("Resolved", resolved\);/.test(e) && /group\("Orphaned", orphaned\);/.test(e));
-  ok("orphan classification reuses sourceCommentIsOrphaned (a section deleted out from under its comment)", /if \(sourceCommentIsOrphaned\(c, topic\)\) orphaned\.push\(c\);/.test(e));
-  ok("each comment row reuses the canvas's own comment-row\/comment-row__dot\/comment-row__snip classes verbatim", /h\("div", "comment-row" \+ \(sourceCommentIsOrphaned\(c, topic\) \? " is-orphan" : ""\)\)/.test(e) && /h\("span", "comment-row__dot"\)/.test(e) && /h\("div", "comment-row__snip"/.test(e));
+  // #163: the standalone Comments accordion is retired. Comments live ONLY in the Marks section's
+  // Comments filter tab, so the info panel never double-renders them. The legacy !hasDoc branch ends
+  // at its Linked-in loop (no renderSourceCommentsPanel call), and the function itself is gone.
+  ok("the standalone renderSourceCommentsPanel accordion is retired (#163)", !/function renderSourceCommentsPanel\(/.test(e) && !/renderSourceCommentsPanel\(host, topic\)/.test(e));
+  ok("the Marks section carries a Comments filter tab -- comments' single home", /SOURCE_MARK_FILTERS = \[[\s\S]{0,220}\{ key: "comment", label: "Comments"/.test(e));
+  ok("the legacy !hasDoc branch renders only the Linked-in list, then closes (no comments accordion)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);\s*\n\s*\}\);\s*\n\s*\}\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
   ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(e) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(e));

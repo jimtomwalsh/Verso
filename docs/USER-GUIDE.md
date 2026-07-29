@@ -763,9 +763,9 @@ records your edits and annotations (see "History records what changed and why").
 
 **Comments.** The same comment/discussion feature as the canvas editor, for this wiki. Click the
 comment icon next to any section to open its thread — write a note, reply, mark it Resolved, or
-delete it. A count appears on the icon while a section has unresolved comments. The info panel's
-Comments section lists every comment on the topic (Open / Resolved), including any left
-"Orphaned" if the section they were on gets deleted — nothing is silently lost.
+delete it. A count appears on the icon while a section has unresolved comments. In continuous-document
+mode the right-hand panel's **Marks** section has a **Comments** filter tab that lists every comment on
+the topic — that is their single home (there is no separate comments accordion beneath it).
 
 **Continuous-document mode (beta).** A newer way to author a topic: instead of separate sections
 with Technical/Digestible/Dot-point versions, the whole topic reads and edits as **one continuous
