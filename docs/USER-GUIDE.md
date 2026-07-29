@@ -670,7 +670,13 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   on, the document reads and edits as normal (Flagship). Turn a variant on and every paragraph that
   differs **splits into side-by-side columns** — one per shown variant — while paragraphs they all
   share stay a single column; a paragraph a variant omits shows "Not in this variant". The column
-  view is for comparison and is **read-only** — turn the variants off to edit again.
+  view is for comparison and is **read-only for text** — turn the variants off to edit again.
+- **A variant can have its own image.** Images are the exception to the read-only column view.
+  When variants are shown, each image column has a **swap** button — pick a file and that variant
+  gets its own picture, while the others keep the base (Flagship) image. A named variant can also be
+  **hidden** (eye-off) so the image doesn't appear in it, or given an image where the base has none.
+  Unlock the source first. Previewing or exporting a variant then uses that variant's image, falling
+  back to the base whenever a variant has no image of its own.
 - **The first import into a new Product** builds the continuous document straight away — you land in
   the one-document view (chapters in the outline), not an intermediate per-topic list.
 

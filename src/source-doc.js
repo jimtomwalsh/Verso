@@ -638,6 +638,46 @@
     if (allSame && first.present) return { mode: "shared", text: first.text, cols: cols };
     return { mode: "split", cols: cols };
   }
+  // B2: the image twin of nodeForVariant -> { present, src, alt, caption, source }. Mirrors the
+  // presence/absence rules (absent / baseAbsent) but resolves src/alt/caption: a variant with its
+  // own src overrides ("override"); otherwise it inherits the Flagship image ("inherited"). This is
+  // how a variant can carry a different picture (info is often locked inside an image).
+  function imageForVariant(node, variant) {
+    var bSrc = node && node.src, bAlt = node && node.alt, bCap = node && node.caption;
+    var ov = node && node.variants && node.variants[variant];
+    if (isFlagship(variant)) {
+      if (node.baseAbsent) return { present: false, src: null, alt: null, caption: null, source: "absent" };
+      return { present: true, src: bSrc, alt: bAlt, caption: bCap, source: "flagship" };
+    }
+    if (ov) {
+      if (ov.absent) return { present: false, src: null, alt: null, caption: null, source: "absent" };
+      if (ov.src != null) return { present: true, src: ov.src, alt: ov.alt != null ? ov.alt : bAlt, caption: ov.caption != null ? ov.caption : bCap, source: "override" };
+    }
+    if (node.baseAbsent) return { present: false, src: null, alt: null, caption: null, source: "absent" };
+    return { present: true, src: bSrc, alt: bAlt, caption: bCap, source: "inherited" };
+  }
+  // B2: give a variant its own image src (and optionally alt/caption). Flagship writes the base
+  // image; a named variant writes an override (and clears any absent flag). Pushes undo. Presence/
+  // absence reuse removeNodeFromVariant / restoreNodeToVariant, which already generalise to any node.
+  function setVariantImage(model, nodeKey, variant, src, opts) {
+    var node = nodeByKey(model, nodeKey); if (!node || node.type !== "image") return null;
+    opts = opts || {};
+    pushUndo(model);
+    if (isFlagship(variant)) {
+      node.src = src;
+      if ("alt" in opts) node.alt = opts.alt;
+      if ("caption" in opts) node.caption = opts.caption;
+      node.baseAbsent = false;
+    } else {
+      var ov = ensureVariants(node)[variant] || {};
+      ov.src = src;
+      if ("alt" in opts) ov.alt = opts.alt;
+      if ("caption" in opts) ov.caption = opts.caption;
+      delete ov.absent;
+      ensureVariants(node)[variant] = ov;
+    }
+    return node;
+  }
   function ensureVariants(node) { if (!node.variants) node.variants = {}; return node.variants; }
   // Diverge (or set) a variant's wording. Flagship writes the base text; a named variant writes an
   // override. Pushes undo. This is divergence type 2 (diverged wording).
@@ -1324,7 +1364,7 @@
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     rowOf: rowOf, combineIntoRow: combineIntoRow, removeFromRow: removeFromRow,
-    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, imageForVariant: imageForVariant, setVariantImage: setVariantImage, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
   };
 
   var SourceDoc = {
@@ -1342,7 +1382,7 @@
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     rowOf: rowOf, combineIntoRow: combineIntoRow, removeFromRow: removeFromRow,
-    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, imageForVariant: imageForVariant, setVariantImage: setVariantImage, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     toMarkdown: toMarkdown,
     toJSON: toJSON, fromJSON: fromJSON,

@@ -11993,6 +11993,46 @@ section("Source image A3: row container nesting + mark-key stability");
   ok("combineIntoRow no-ops with a non-image neighbour", SD.combineIntoRow(m4, m4.nodes[0].key) === false);
 })();
 
+// ---- B2: per-variant image swap (product-rail-source-image-variant-swap) ---------------------
+section("Source image B2: per-variant image resolve + set");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "image", src: "base.png", alt: "Base", caption: "Cap" }]);
+  var key = model.nodes[0].key, V = "Compact";
+
+  // Flagship + an unset variant both resolve to the base image (inherited fall-through).
+  var f = SD.imageForVariant(model.nodes[0], SD.FLAGSHIP);
+  ok("Flagship resolves the base src/alt/caption", f.present && f.src === "base.png" && f.alt === "Base" && f.caption === "Cap" && f.source === "flagship");
+  var inh = SD.imageForVariant(model.nodes[0], V);
+  ok("a variant with no override inherits the base image", inh.present && inh.src === "base.png" && inh.source === "inherited");
+
+  // set a variant override -> that variant swaps src; Flagship is untouched.
+  SD.setVariantImage(model, key, V, "compact.png", { alt: "Compact art" });
+  var ov = SD.imageForVariant(model.nodes[0], V);
+  ok("a variant override swaps just that variant's src", ov.present && ov.src === "compact.png" && ov.alt === "Compact art" && ov.source === "override");
+  ok("the override inherits the base caption when not given", ov.caption === "Cap");
+  ok("Flagship still resolves the base image after a variant override", SD.imageForVariant(model.nodes[0], SD.FLAGSHIP).src === "base.png");
+
+  // presence/absence reuse the generic remove/restore.
+  SD.removeNodeFromVariant(model, key, V);
+  ok("a variant can hide the image (absent)", SD.imageForVariant(model.nodes[0], V).present === false);
+  SD.restoreNodeToVariant(model, key, V);
+  ok("restore drops the override too -> back to inherited base", SD.imageForVariant(model.nodes[0], V).src === "base.png" && SD.imageForVariant(model.nodes[0], V).source === "inherited");
+
+  // setVariantImage on Flagship replaces the base for everyone that inherits.
+  SD.setVariantImage(model, key, SD.FLAGSHIP, "newbase.png");
+  ok("setting Flagship replaces the base image", model.nodes[0].src === "newbase.png" && SD.imageForVariant(model.nodes[0], V).src === "newbase.png");
+
+  // round-trips through toJSON/fromJSON with the override intact.
+  SD.setVariantImage(model, key, V, "c2.png");
+  var round = SD.fromJSON(SD.toJSON(model));
+  ok("a per-variant image override round-trips", SD.imageForVariant(round.nodes[0], V).src === "c2.png" && SD.imageForVariant(round.nodes[0], SD.FLAGSHIP).src === "newbase.png");
+
+  // setVariantImage refuses a non-image node (guards the type).
+  var m2 = SD.create([{ type: "paragraph", text: "hi" }]);
+  ok("setVariantImage no-ops on a non-image node", SD.setVariantImage(m2, m2.nodes[0].key, V, "x.png") === null);
+})();
+
 section("Source rewrite: object (image/table) marks (Epic 2b)");
 (function () {
   var SD = require(path.join(ROOT, "src/source-doc.js"));
@@ -12486,7 +12526,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(e));
   ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(e));
   ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(e));
-  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(n, shown\)/.test(e));
+  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(topic, n, shown\)/.test(e));
   ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
   ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
   ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));
