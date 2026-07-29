@@ -680,6 +680,28 @@
     return { showBar: true, showRT: !!unlocked, showUpdate: upd, showAlt: !upd, showComment: !upd };
   }
   // Marks whose span overlaps a given range in a node (for hit-testing a click/selection).
+  // source-link 09: which linked LOCATIONS a base-edit session changed. A link mark counts as
+  // "edited" when its current covered text differs from the wording snapshotted before the edit
+  // session (oldTextByMark[markId]); an edited mark's locations that show BASE (no altId) are
+  // affected (they'll change under the edit), alternate-pinned ones are not. Pure -> the editor
+  // supplies the pre-edit snapshot + the where-used locations; this decides the blast radius.
+  //   oldTextByMark: { markId: "<wording before the edit>" }
+  //   locations:     [{ markId, altId, docCode, blockId, kind }]
+  //   -> { affected:[base-showing, edited], pinned:[alt-pinned, edited], editedMarks:[markId] }
+  function sourceEditImpact(model, oldTextByMark, locations) {
+    var edited = {};
+    (model.marks || []).forEach(function (m) {
+      if (m.type !== "link") return;
+      var old = oldTextByMark ? oldTextByMark[m.id] : undefined;
+      if (old != null && old !== markText(model, m)) edited[m.id] = true;
+    });
+    var affected = [], pinned = [];
+    (locations || []).forEach(function (loc) {
+      if (!edited[loc.markId]) return;
+      if (loc.altId) pinned.push(loc); else affected.push(loc);
+    });
+    return { affected: affected, pinned: pinned, editedMarks: Object.keys(edited) };
+  }
   function marksOverlapping(model, nodeKey, start, len) {
     var end = start + len;
     return (model.marks || []).filter(function (m) {
@@ -1234,7 +1256,7 @@
     blocksFromText: blocksFromText, fromSections: fromSections,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
-    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, sourceEditImpact: sourceEditImpact, logHistory: logHistory,
     selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
@@ -1251,7 +1273,7 @@
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
-    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, sourceEditImpact: sourceEditImpact, logHistory: logHistory,
     selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,

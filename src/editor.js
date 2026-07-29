@@ -12345,9 +12345,17 @@
     var next = !!v;
     if (next === __sourceUnlocked) { applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); return; }
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
-    if (next) beginSourceEditSession(); else flushSourceEditSession(topic, { prompt: opts.prompt });
-    __sourceUnlocked = next;
-    applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+    if (next) {
+      beginSourceEditSession();
+      snapshotSourceLinkBase(); // 09: snapshot linked-passage wording so lock can warn + fork
+      __sourceUnlocked = true;
+      applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+      return;
+    }
+    // Locking: if the edit session changed wording that other documents link, warn first (09).
+    var impact = sourceBaseEditImpact();
+    if (impact.affected.length && window.VersoUI && window.VersoUI.Button) { showSourceBaseEditModal(topic, impact, opts); return; }
+    finalizeSourceLock(topic, opts);
   }
 
   // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
@@ -12536,37 +12544,78 @@
     var m = SD.markById(model, __sourceWhereUsedMarkId);
     if (!m || m.type !== "link") { __sourceWhereUsedMarkId = null; return; }
     var host = document.getElementById("source-stage-article"); if (!host) return;
-    var crumbs = SD.whereUsedForMark(m);
+    // 10: the REAL, live where-used -- every block/span in any document that links this passage,
+    // walked from the registry (placement links carry no stored crumb list). Each row jumps to the
+    // exact block in Edit; an alternate can be pushed to all or a chosen subset of these locations.
+    var used = sourceLinkWhereUsed(__sourceActiveTopicId, m.id);
     var panel = h("aside", "source-altpanel source-wherepanel"); panel.setAttribute("data-source-wherepanel", "1");
     panel.setAttribute("aria-label", "Where this is linked");
     var head = h("div", "source-altpanel__head");
     var glyph = h("span", "source-wherepanel__glyph"); glyph.innerHTML = window.Icon ? window.Icon("link") : "";
     head.appendChild(glyph);
-    head.appendChild(h("div", "source-altpanel__title", "Linked in " + crumbs.length));
+    head.appendChild(h("div", "source-altpanel__title", "Linked in " + used.length));
     var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
     close.innerHTML = window.Icon ? window.Icon("x") : "close";
     close.addEventListener("click", function () { closeSourceWherePanel(); });
     head.appendChild(close);
     panel.appendChild(head);
-    if (!crumbs.length) {
-      // a link mark with no destinations yet -- the empty state (spec: absent handling)
+    if (!used.length) {
       panel.appendChild(h("div", "source-altpanel__field insp-hint", "Not linked in any document yet."));
     } else {
-      // one canonical VersoUI.Breadcrumb per destination (Document > Section > Location) -- the
-      // Document crumb carries the navigate-out onClick (its {label,onClick} contract); the trailing
-      // crumbs are read-only context, last auto-emphasised. Reuses the DS component, not a one-off.
-      crumbs.forEach(function (c) {
-        var dest = h("div", "source-wherepanel__dest");
-        var items = [c.docCode ? { label: c.doc, onClick: function () { openCourseFromBrowser(c.docCode); setStage("edit"); } } : c.doc];
-        if (c.section) items.push(c.section);
-        if (c.location) items.push(c.location);
-        dest.appendChild(window.VersoUI && window.VersoUI.Breadcrumb ? window.VersoUI.Breadcrumb({ items: items }) : document.createTextNode(items.map(function (x) { return x.label || x; }).join(" › ")));
-        panel.appendChild(dest);
+      used.forEach(function (loc) {
+        var row = h("button", "source-wherepanel__row"); row.type = "button";
+        row.title = "Open " + loc.docTitle + " and select the linked " + (loc.kind === "span" ? "span" : "block");
+        row.appendChild(h("span", "source-wherepanel__row-doc", loc.docTitle));
+        row.appendChild(h("span", "source-wherepanel__row-tag" + (loc.altId ? " is-alt" : ""), loc.altId ? "alternate" : "base"));
+        row.addEventListener("click", function () { jumpToLinkedBlock(loc.docCode, loc.blockId); });
+        panel.appendChild(row);
       });
+      // Push an alternate out to the linked documents (all, or a picked subset). Never automatic.
+      var alts = sourceLinkAlternates(model, m);
+      if (alts.length && window.VersoUI && window.VersoUI.Button) {
+        var pushWrap = h("div", "source-wherepanel__push");
+        pushWrap.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", icon: "arrow-up-to-line", label: "Push an alternate…", onClick: function () { openSourceAltPushDialog(m, alts, used); } }));
+        panel.appendChild(pushWrap);
+      }
     }
     host.appendChild(panel);
     positionSourceWherePanel();
     document.addEventListener("keydown", onSourceWherePanelKey);
+  }
+  // 10: push a forked wording to the documents that link a passage. Sets altId on each chosen
+  // location across whatever documents use it; base stays base until pushed (never automatic).
+  function pushSourceAlternate(markId, altId, locations) {
+    var reg = registry;
+    (locations || []).forEach(function (loc) { applyAltToLocation(reg, loc, altId); });
+    saveRegistry(reg); decorateSourceLinks();
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (topic) renderSourceWherePanel(topic); // refresh the base/alternate tags
+    sourceToast("Pushed to " + locations.length + " place" + (locations.length === 1 ? "" : "s") + ".");
+  }
+  function openSourceAltPushDialog(link, alts, used) {
+    var selectedAlt = alts[0].id, chosen = used.map(function () { return true; });
+    var shell = dsModalShell({
+      title: "Push an alternate", subtitle: "Send a forked wording to the documents that link this passage.",
+      primaryLabel: "Push",
+      onPrimary: function () {
+        var locs = used.filter(function (loc, i) { return chosen[i]; });
+        if (!locs.length || !selectedAlt) return;
+        pushSourceAlternate(link.id, selectedAlt, locs); shell.modal.close();
+      }
+    });
+    var altField = modalField(shell.body, "Alternate");
+    var altRow = h("div", "prop-toggle-row");
+    alts.forEach(function (alt) {
+      var b = h("button", "prop-toggle" + (alt.id === selectedAlt ? " is-on" : "")); b.type = "button";
+      b.textContent = alt.tag || sourceAltSnippet(alt.alt);
+      b.addEventListener("click", function () { selectedAlt = alt.id; Array.prototype.forEach.call(altRow.querySelectorAll(".prop-toggle"), function (x) { x.classList.remove("is-on"); }); b.classList.add("is-on"); });
+      altRow.appendChild(b);
+    });
+    altField.appendChild(altRow);
+    var locField = modalField(shell.body, "Apply to");
+    used.forEach(function (loc, i) {
+      locField.appendChild(window.VersoUI.Checkbox({ label: loc.docTitle + " (" + (loc.altId ? "alternate" : "base") + ")", checked: true, onChange: function (v) { chosen[i] = v; } }));
+    });
   }
   function renderSourceAltPanel(topic) {
     var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
@@ -19672,7 +19721,117 @@
     showContextMenu(x, y, items);
   }
 
+  // ==== source-link 09/10: live where-used + base-edit warning + alternate push =================
+  // The real, live where-used for a source link mark: every block (or inline span) in ANY document
+  // that references it, computed by walking the registry (like libraryWhereUsedDetail) so it never
+  // drifts from a stored list. altId per location = whether that placement shows base or a fork.
+  function sourceLinkWhereUsed(masterId, markId) {
+    var out = [], reg = registry; // the LIVE in-memory registry (getRegistry() returns a stale storage copy)
+    Object.keys(reg).forEach(function (code) {
+      var d = reg[code]; if (!d) return;
+      var title = (d.meta && d.meta.title) || code;
+      walkBlocks(d, function (b) {
+        if (b.sourceLink && b.sourceLink.masterId === masterId && (!markId || b.sourceLink.markId === markId)) {
+          out.push({ docCode: code, docTitle: title, blockId: b.id, markId: b.sourceLink.markId, altId: b.sourceLink.altId || null, kind: "block" });
+        }
+        if (b.text && typeof b.text === "string" && b.text.indexOf("data-source-link=") !== -1) {
+          var probe = document.createElement("div"); probe.innerHTML = b.text;
+          Array.prototype.forEach.call(probe.querySelectorAll("span[data-source-link]"), function (sp) {
+            if (sp.getAttribute("data-master") !== masterId) return;
+            var mid = sp.getAttribute("data-source-link"); if (markId && mid !== markId) return;
+            out.push({ docCode: code, docTitle: title, blockId: b.id, markId: mid, altId: sp.getAttribute("data-alt") || null, kind: "span" });
+          });
+        }
+      });
+    });
+    return out;
+  }
+  // Set/clear a where-used location's altId in ITS OWN document (block field or inline span data-alt).
+  // Shared by the 09 fork + the 10 push.
+  function applyAltToLocation(reg, loc, altId) {
+    var d = reg[loc.docCode]; if (!d) return;
+    walkBlocks(d, function (b) {
+      if (b.id !== loc.blockId) return;
+      if (loc.kind === "span") {
+        var host = document.createElement("div"); host.innerHTML = b.text || "";
+        var sp = host.querySelector('span[data-source-link="' + loc.markId + '"]');
+        if (sp) { if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt"); b.text = host.innerHTML; }
+      } else if (b.sourceLink) {
+        if (altId) b.sourceLink.altId = altId; else delete b.sourceLink.altId;
+      }
+    });
+  }
+
+  // --- 09: base-edit warning + fork (fires at LOCK, matching the unlock->lock commit model) ---
+  var __sourceLinkOldText = null, __sourcePreEditModelJson = null;
+  // On unlock: snapshot each link mark's current wording (so "fork" can freeze it) + the whole model
+  // (so "cancel" can revert the edits). Only when the doc actually carries link marks.
+  function snapshotSourceLinkBase() {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    if (!SD || !model || !(model.marks || []).some(function (m) { return m.type === "link"; })) return;
+    __sourceLinkOldText = {};
+    (model.marks || []).forEach(function (m) { if (m.type === "link") __sourceLinkOldText[m.id] = SD.markText(model, m); });
+    __sourcePreEditModelJson = SD.toJSON(model);
+  }
+  // The blast radius of the just-finished edit session: base-showing locations of edited link marks.
+  function sourceBaseEditImpact() {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    if (!SD || !model || !__sourceLinkOldText) return { affected: [], pinned: [], editedMarks: [] };
+    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(__sourceActiveTopicId, null));
+  }
+  // "Keep as-is (fork)": freeze each edited link mark's OLD wording as an alternate on the master,
+  // and pin every affected (base-showing) location -- in whatever document uses it -- to that
+  // alternate. The source base then moves on; those placements keep the old words.
+  function forkAffectedToAlternate(impact) {
+    var SD = window.SourceDoc, model = __sourceDocModel, reg = registry, byMark = {};
+    impact.affected.forEach(function (loc) { (byMark[loc.markId] = byMark[loc.markId] || []).push(loc); });
+    Object.keys(byMark).forEach(function (markId) {
+      var link = SD.markById(model, markId); if (!link) return;
+      var oldText = __sourceLinkOldText[markId];
+      var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: oldText, tag: "Frozen", baseText: oldText });
+      byMark[markId].forEach(function (loc) { applyAltToLocation(reg, loc, alt.id); });
+    });
+    saveRegistry(reg); // the alternate marks on the master persist via the lock's own commit
+  }
+  function finalizeSourceLock(topic, opts) {
+    flushSourceEditSession(topic, { prompt: opts.prompt });
+    __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+  }
+  function revertSourceEditSession(topic) {
+    var SD = window.SourceDoc;
+    if (SD && __sourcePreEditModelJson && topic) {
+      __sourceDocModel = SD.fromJSON(__sourcePreEditModelJson); __sourceDocModelTopicId = topic.id;
+      persistSourceDocModel(topic, __sourceDocModel);
+    }
+    __sourceEditSession = null; __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    renderSourceArticle();
+    sourceToast("Edit cancelled.");
+  }
+  // The three-way warning shown at lock when the edit changed linked passages (09).
+  function showSourceBaseEditModal(topic, impact, opts) {
+    var n = impact.affected.length, resolved = false;
+    var forkBtn = window.VersoUI.Button({ variant: "secondary", label: "Keep as-is (fork)", onClick: function () {
+      resolved = true; forkAffectedToAlternate(impact); shell.modal.close(); finalizeSourceLock(topic, opts);
+      sourceToast("Kept " + n + " linked place" + (n === 1 ? "" : "s") + " on the old wording.");
+    } });
+    var shell = dsModalShell({
+      title: "This source is linked in " + n + " place" + (n === 1 ? "" : "s"),
+      subtitle: "Your edit changes wording that other documents link. Choose what those linked copies do.",
+      primaryLabel: "Update all",
+      cancelLabel: "Cancel edit",
+      extras: [forkBtn],
+      onPrimary: function () { resolved = true; shell.modal.close(); finalizeSourceLock(topic, opts); sourceToast("Updated " + n + " linked place" + (n === 1 ? "" : "s") + "."); },
+      onClose: function () { if (resolved) return; revertSourceEditSession(topic); } // Cancel / Escape / scrim = revert
+    });
+    shell.body.appendChild(h("div", "insp-hint", "Update all — the linked copies re-resolve to your new wording. Keep as-is — freeze their current wording as an alternate, then your source moves on. Cancel — undo this edit."));
+  }
+
   window.__sourceLink = { // browser-verify hooks
+    sourceLinkWhereUsed: sourceLinkWhereUsed, snapshotSourceLinkBase: snapshotSourceLinkBase,
+    sourceBaseEditImpact: sourceBaseEditImpact, forkAffectedToAlternate: forkAffectedToAlternate,
+    pushSourceAlternate: pushSourceAlternate, applyAltToLocation: applyAltToLocation,
     armSourceLinkPlacement: armSourceLinkPlacement, placeArmedSourceLink: placeArmedSourceLink,
     jumpSourcePanelToMark: jumpSourcePanelToMark, panelSelectionDescriptor: panelSelectionDescriptor,
     startSourceLinkDrag: startSourceLinkDrag, pageIndexFromPoint: pageIndexFromPoint,

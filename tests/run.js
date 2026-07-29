@@ -11028,6 +11028,53 @@ section("SPEC 8: source-link 08 — alternates from the canvas");
   ok("an object (figure) link defers alternates in v1 (whole-block; figure-swap is a follow-up)", /if \(SD\.isObjectMark\(link\)\) \{ sourceToast\("Object \(figure\) alternates are coming soon\."\); return; \}/.test(e));
 })();
 
+// ---- SPEC 8 source-link 09: base-edit warning + fork ----
+section("SPEC 8: source-link 09 — base-edit warning + fork");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  // Pure sourceEditImpact: a link mark whose wording changed since the snapshot is "edited"; its
+  // base-showing locations are affected, alternate-pinned ones are not.
+  var m = SD.create([{ type: "paragraph", key: "p", text: "Charge to 80 percent for storage." }]);
+  var link = SD.addMark(m, { type: "link", anchor: { nodeKey: "p", start: 0, len: 26 } });
+  var old = {}; old[link.id] = SD.markText(m, link); // snapshot BEFORE the edit
+  SD.replaceRange(m, { nodeKey: "p", start: 10, len: 2 }, "50"); // 80 -> 50 (inside the link)
+  var locs = [
+    { markId: link.id, altId: null, docCode: "A", blockId: "b1" },
+    { markId: link.id, altId: null, docCode: "B", blockId: "b2" },
+    { markId: link.id, altId: "alt_x", docCode: "C", blockId: "b3" } // pinned to an alternate
+  ];
+  var impact = SD.sourceEditImpact(m, old, locs);
+  ok("sourceEditImpact: an edited link mark's base-showing locations are affected", impact.affected.length === 2 && impact.affected.every(function (l) { return !l.altId; }));
+  ok("sourceEditImpact: an alternate-pinned location is NOT affected by a base edit", impact.pinned.length === 1 && impact.pinned[0].altId === "alt_x");
+  ok("sourceEditImpact: the edited mark is reported", impact.editedMarks.length === 1 && impact.editedMarks[0] === link.id);
+  ok("sourceEditImpact: a base edit OUTSIDE any link changes nothing", (function () {
+    var m2 = SD.create([{ type: "paragraph", key: "p", text: "hello world here" }]);
+    var lk = SD.addMark(m2, { type: "link", anchor: { nodeKey: "p", start: 0, len: 5 } }); // "hello"
+    var o = {}; o[lk.id] = SD.markText(m2, lk);
+    SD.replaceRange(m2, { nodeKey: "p", start: 12, len: 4 }, "there"); // edit "here", outside the link
+    var im = SD.sourceEditImpact(m2, o, [{ markId: lk.id, altId: null, docCode: "A", blockId: "b" }]);
+    return im.affected.length === 0 && im.editedMarks.length === 0;
+  })());
+
+  var e = src("src/editor.js");
+  ok("the warning fires at LOCK (unlock snapshots, lock computes impact + shows the modal)", /snapshotSourceLinkBase\(\); \/\/ 09[\s\S]{0,400}var impact = sourceBaseEditImpact\(\);\s*if \(impact\.affected\.length && window\.VersoUI[\s\S]{0,80}showSourceBaseEditModal\(topic, impact, opts\); return; \}/.test(e));
+  ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]{0,500}onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(e) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(e));
+  ok("fork freezes each edited mark's OLD wording as an alternate + pins every affected location", /function forkAffectedToAlternate\(impact\)[\s\S]{0,600}alt: oldText, tag: "Frozen"[\s\S]{0,120}applyAltToLocation\(reg, loc, alt\.id\)[\s\S]{0,200}saveRegistry\(reg\)/.test(e));
+  ok("cancel reverts the model to the pre-edit snapshot", /function revertSourceEditSession\(topic\)[\s\S]{0,200}SD\.fromJSON\(__sourcePreEditModelJson\)/.test(e));
+})();
+
+// ---- SPEC 8 source-link 10: source-stage where-used + alternate push ----
+section("SPEC 8: source-link 10 — where-used + push");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(e));
+  ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1500}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
+  ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(e));
+  ok("the push dialog picks an alternate + a subset of locations (Checkbox per location)", /function openSourceAltPushDialog\(link, alts, used\)[\s\S]{0,1700}window\.VersoUI\.Checkbox\(\{ label: loc\.docTitle[\s\S]{0,120}chosen\[i\] = v/.test(e));
+  ok("push sets altId on each chosen location across documents + persists (saveRegistry); base stays base until pushed", /function pushSourceAlternate\(markId, altId, locations\)[\s\S]{0,200}applyAltToLocation\(reg, loc, altId\)[\s\S]{0,60}saveRegistry\(reg\)/.test(e));
+  ok("the where-used rows + push affordance carry their own chrome CSS", /\.source-wherepanel__row/.test(css) && /\.source-wherepanel__push/.test(css));
+})();
+
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
 // Foundation of the Source-stage rewrite (spec 2b). The whole rewrite rests on two
@@ -11943,9 +11990,9 @@ section("Source rewrite: where-used panel (Epic 2b)");
   // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
   var e = src("src/editor.js");
   ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(e) && /function renderSourceWherePanel\(topic\)/.test(e));
-  ok("the panel titles 'Linked in N' from the crumb count", /source-altpanel__title", "Linked in " \+ crumbs\.length/.test(e));
-  ok("each destination is a canonical VersoUI.Breadcrumb that navigates out to the course", /window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(e) && /openCourseFromBrowser\(c\.docCode\); setStage\("edit"\)/.test(e));
-  ok("a linked span with no destinations shows the empty state", /if \(!crumbs\.length\) \{[\s\S]{0,220}Not linked in any document yet\./.test(e));
+  ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10)", /source-altpanel__title", "Linked in " \+ used\.length/.test(e) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(e));
+  ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
+  ok("a link with no live uses shows the empty state", /if \(!used\.length\) \{[\s\S]{0,160}Not linked in any document yet\./.test(e));
   ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(e) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(e));
   ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(e) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(e));
   ok("it is READ-ONLY: no addMark/link creation inside the where-used panel", !/function renderSourceWherePanel\(topic\)[\s\S]{0,1400}SD\.addMark/.test(e));
