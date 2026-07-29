@@ -8908,9 +8908,12 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
     /h\("div", "source-stage__diff-line source-stage__diff-line--" \+ op\.type, prefix \+ op\.text\)/.test(e));
   ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(e));
 
-  // Provenance display: the info panel's new "Source" section, absent for a hand-created topic.
-  ok("the info panel always has a Source section (imported provenance, or an 'authored in Verso' note)", /var sourceBody = panelSection\(host, "Source", \{ collapsible: true \}\);\s*\n\s*if \(topic\.source\) \{/.test(e) && /Authored in Verso \(no imported source\)\./.test(e));
-  ok("Source section shows the file, then version/publish-date only if at least one was supplied", /var meta = \[topic\.source\.version, topic\.source\.publishDate\]\.filter\(Boolean\)\.join\(" · "\);/.test(e));
+  // Provenance MOVED under the document header (source-provenance-bug); the sidebar keeps only Linked in.
+  ok("provenance renders under the document header, not the sidebar", /headEl\.appendChild\(renderSourceProvenanceLine\(topic\)\);/.test(e) && /function renderSourceProvenanceLine\(topic\)[\s\S]{0,220}"Imported from " \+ \(src\.file/.test(e));
+  ok("the sidebar Source section no longer carries the provenance line (single source of truth)", /panelSection\(host, "Source", \{ collapsible: true \}\);[\s\S]{0,200}libraryWhereUsedDetail/.test(e) && e.indexOf('"Authored in Verso (no imported source)."') === -1);
+  // bug fix: a unified master reports its real imported source (not "authored in Verso").
+  ok("resolveTopicSource inherits an imported stamp from an archived constituent of a master", /function resolveTopicSource\(topic\)[\s\S]{0,280}topic\.sourceMaster[\s\S]{0,200}t\.archivedInto === topic\.id && t\.source\) return t\.source/.test(e));
+  ok("migrateProductToUnifiedDoc copies the constituents' imported source onto the master", /if \(!master\.source\) \{\s*var imported = topics\.filter\(function \(t\) \{ return t && t\.source; \}\)\[0\];[\s\S]{0,120}master\.source = imported\.source;/.test(e));
 
   // Chrome-only invariant.
   var renderJs3 = src("src/render.js");
