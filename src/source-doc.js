@@ -412,6 +412,51 @@
     return { model: model, mergedKey: firstKey, caret: { nodeKey: firstKey, offset: mergePoint } };
   }
 
+  // Split a text block at a caret offset into two blocks -- the INVERSE of replaceRange's merge, so
+  // pressing Enter in the continuous doc makes a new paragraph. The head keeps [0,offset); a new
+  // paragraph node inserted right after holds [offset,end). Marks re-anchor: a mark entirely before
+  // the split stays; one entirely after moves to the new node (offset-shifted); one straddling the
+  // split becomes a two-block mark. A non-text block (list/table/image) just gets a new empty
+  // paragraph after it. One owned-undo step. Returns { model, newKey, caret:{nodeKey,offset} }.
+  var SPLITTABLE = { paragraph: 1, heading: 1, callout: 1 };
+  function splitNode(model, nodeKey, offset) {
+    var node = nodeByKey(model, nodeKey);
+    if (!node) return { model: model, newKey: null, caret: null };
+    pushUndo(model);
+    var k; do { k = nextId(model, "n"); } while (nodeByKey(model, k));
+    var idx = (model.nodes || []).indexOf(node);
+    if (!SPLITTABLE[node.type]) { // Enter after a list/table/image drops a fresh paragraph below it
+      model.nodes.splice(idx + 1, 0, { type: "paragraph", key: k, text: "" });
+      logHistory(model, { type: "node-split", nodeKey: nodeKey });
+      return { model: model, newKey: k, caret: { nodeKey: k, offset: 0 } };
+    }
+    var t = nodeText(node);
+    offset = Math.max(0, Math.min(offset | 0, t.length));
+    setNodeText(node, t.slice(0, offset));
+    model.nodes.splice(idx + 1, 0, { type: "paragraph", key: k, text: t.slice(offset) });
+    (model.marks || []).forEach(function (m) {
+      if (isObjectMark(m)) return;
+      if (isMultiBlock(m)) {
+        // an endpoint on the split node rides the split; interior nodes stay covered (order-derived)
+        if (m.anchor.nodeKey === nodeKey && m.anchor.start >= offset) { m.anchor.nodeKey = k; m.anchor.start -= offset; }
+        if (m.endAnchor.nodeKey === nodeKey && (m.endAnchor.len || 0) > offset) { m.endAnchor.nodeKey = k; m.endAnchor.len = (m.endAnchor.len || 0) - offset; }
+        refreshMark(model, m);
+        return;
+      }
+      if (m.anchor.nodeKey !== nodeKey) return;
+      var s = m.anchor.start, e = s + (m.anchor.len || 0);
+      if (e <= offset) { /* entirely before -> unchanged */ }
+      else if (s >= offset) { m.anchor.nodeKey = k; m.anchor.start = s - offset; } // entirely after -> new node
+      else { // straddles -> a two-block mark: head [s, offset) + tail [0, e-offset) on the new node
+        m.anchor = { nodeKey: nodeKey, start: s, len: offset - s };
+        m.endAnchor = { nodeKey: k, start: 0, len: e - offset };
+      }
+      refreshMark(model, m);
+    });
+    logHistory(model, { type: "node-split", nodeKey: nodeKey });
+    return { model: model, newKey: k, caret: { nodeKey: k, offset: 0 } };
+  }
+
   // ---- range-mark engine: status, update-with-appended-copy, relationships ----
   // The colour-dot status a mark shows (spec 3): red broken / yellow stale / green in-sync.
   function markStatus(m) {
@@ -1153,6 +1198,7 @@
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange,
+    splitNode: splitNode,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
@@ -1172,6 +1218,7 @@
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange,
+    splitNode: splitNode,
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
