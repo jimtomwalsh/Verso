@@ -10229,6 +10229,21 @@ section("#116 copy-editor shell");
   ok("invariant: no copy-editor leak into course.css", src("src/course.css").indexOf("copyedit") === -1);
 })();
 
+// chrome invariant (product-rail-editor-fb-chrome-invariant-defullscreen): the file picker
+// (.vbrowser) and the Read/copy view (.copyedit) must NOT go full-screen -- they are contained
+// below the global top bar (.toolbar, 44px) and right of the left rail (--rail-w), so the product
+// picker + stage rail stay visible + interactive. Demo/Preview stays inset:0 (sanctioned exception).
+section("chrome invariant: file picker + Read view are contained, not full-screen");
+(function () {
+  var css = src("editor.css");
+  function block(sel){ var m = css.match(new RegExp("\\" + sel + " \\{[^}]*\\}")); return m ? m[0] : ""; }
+  var copyedit = block(".copyedit"), vbrowser = block(".vbrowser");
+  ok(".copyedit is contained (top 44 + left --rail-w), not inset:0", /position: fixed; top: 44px; left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(copyedit) && copyedit.indexOf("inset: 0") === -1);
+  ok(".vbrowser is contained (top 44 + left --rail-w), not inset:0", /position: fixed; top: 44px; left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(vbrowser) && vbrowser.indexOf("inset: 0") === -1);
+  // Demo/Preview is the sanctioned full-screen exception -- must stay inset:0.
+  ok(".demo (Preview) stays full-screen (inset:0)", /\.demo \{[^}]*position: fixed; inset: 0/.test(css));
+})();
+
 // ---- #175 copy-editor inline rich-format toolbar (B/I/U + inline weight on variant text) ----
 // ---- #170/#158: ONE shared, config-driven formatting toggle-bar --------------
 section("#170/#158 shared formatting toggle-bar");
