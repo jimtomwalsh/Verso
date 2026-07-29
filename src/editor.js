@@ -1326,6 +1326,39 @@
     try { writeStore(localStorage, PUBLISH_QUEUE_KEY, JSON.stringify(PQ.toJSON(__publishQueue))); } catch (e) {}
   }
 
+  // ---- Release history (Product Rail Epic 6) — the append-only whole-family export log --------------
+  // Every completed Publish run appends ONE immutable release record (ReleaseHistory model) capturing
+  // what was published together. Persisted through the same k/v seam as the queue; append-only.
+  var RELEASE_HISTORY_KEY = "authoring.releaseHistory";
+  var __releaseHistory = null;
+  function loadReleaseHistory() {
+    var RH = window.ReleaseHistory; if (!RH) return null;
+    try { var raw = localStorage.getItem(RELEASE_HISTORY_KEY); if (raw) return RH.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return RH.create();
+  }
+  function releaseHistory() { if (!__releaseHistory) __releaseHistory = loadReleaseHistory(); return __releaseHistory; }
+  function saveReleaseHistory() {
+    var RH = window.ReleaseHistory; if (!RH || !__releaseHistory) return;
+    try { writeStore(localStorage, RELEASE_HISTORY_KEY, JSON.stringify(RH.toJSON(__releaseHistory))); } catch (e) {}
+  }
+  // One release entry for a document published in a run: its identity + the export options it went out
+  // with + the source-version stamps it was built against (auditable against later Ground-Truth drift).
+  function releaseEntryForRow(row) {
+    var d = registry[row.docId] || {}, meta = d.meta || {};
+    var opts = publishOptionsForRow(row);
+    var gtv = {}; docLinkedMasterIds(d).forEach(function (id) { gtv[id] = currentMasterVersions()[id]; });
+    return {
+      docId: row.docId,
+      code: meta.code || "",
+      stage: meta.stage || "",
+      title: row.title || meta.title || row.docId,
+      exportFormat: opts.format || "",
+      variant: opts.variant || "",
+      version: opts.version || "",
+      groundTruthVersions: gtv
+    };
+  }
+
   // ---- Publish presets (Product Rail Epic 6, T2) — app-global output presets -------------------
   // Named export-option bundles (PublishPresets model). App-global, persisted through the same k/v
   // seam; each queue row references a preset by id, resolved to real options at Publish time.
@@ -1476,7 +1509,7 @@
     head.appendChild(pub);
     host.appendChild(head);
     var rows = (q.rows || []);
-    if (!rows.length) { host.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); return; }
+    if (!rows.length) { host.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); renderPublishHistory(host); return; }
     var list = h("div", "publish-queuelist");
     rows.forEach(function (r) {
       var row = h("div", "publish-queuerow is-" + r.status);
@@ -1503,6 +1536,35 @@
       list.appendChild(row);
     });
     host.appendChild(list);
+    renderPublishHistory(host);
+  }
+  // Release history (Epic 6): the append-only whole-family export log, newest first, each release
+  // expandable to its per-document entries (format / variant / version). Provenance only -- it never
+  // re-exports or mutates a package; a collapsed, secondary section under the live queue.
+  function renderPublishHistory(host) {
+    var RH = window.ReleaseHistory; if (!RH) return;
+    var releases = RH.list(releaseHistory());
+    if (!releases.length) return; // nothing published yet -> no empty section noise
+    var wrap = h("div", "publish-history");
+    wrap.appendChild(h("div", "publish-history__title", "Release history"));
+    releases.forEach(function (rel) {
+      var det = h("details", "publish-release");
+      var sum = h("summary", "publish-release__sum");
+      sum.appendChild(h("span", "publish-release__when", formatRelativeTime(rel.createdAt, Date.now())));
+      sum.appendChild(h("span", "publish-release__count", rel.entries.length + " doc" + (rel.entries.length === 1 ? "" : "s")));
+      det.appendChild(sum);
+      var body = h("div", "publish-release__body");
+      (rel.entries || []).forEach(function (en) {
+        var row = h("div", "publish-release__entry");
+        row.appendChild(h("span", "publish-release__entry-title", en.title));
+        var tags = [en.exportFormat, en.variant, en.version].filter(Boolean).join(" · ");
+        if (tags) row.appendChild(h("span", "publish-release__entry-tags", tags));
+        body.appendChild(row);
+      });
+      det.appendChild(body);
+      wrap.appendChild(det);
+    });
+    host.appendChild(wrap);
   }
   function publishStatusLabel(r) {
     if (r.status === "running") return "Publishing…";
@@ -1585,10 +1647,16 @@
     if (!pend.length || __publishRunning) return;
     __publishRunning = true;
     var originalId = activeDocId, i = 0;
+    var runEntries = []; // whole-family release record: one entry per successfully-published row this run
     renderPublishQueue();
     function finish() {
       __publishRunning = false;
       if (activeDocId !== originalId && registry[originalId]) switchDoc(originalId);
+      // Write ONE immutable release record for everything that published together this run (Epic 6).
+      if (runEntries.length && window.ReleaseHistory) {
+        window.ReleaseHistory.append(releaseHistory(), { productId: getActiveProduct(), createdAt: Date.now(), entries: runEntries });
+        saveReleaseHistory();
+      }
       savePublishQueue(); renderPublishQueue();
     }
     function step() {
@@ -1601,6 +1669,9 @@
           .then(function () { return SX.buildPackage(publishOptionsForRow(row)); })
           .then(function (pkg) { return downloadPublishPackage(pkg); })
           .then(function (res) {
+            // Capture the release entry BEFORE the baseline snapshot, so groundTruthVersions reflects
+            // the source versions this package was actually built against.
+            runEntries.push(releaseEntryForRow(row));
             PQ.setStatus(q, row.id, "done", res);
             // staleness-tracking: a finished export IS this document's new "last published" baseline.
             snapshotGroundTruthBaseline(registry[row.docId]); saveRegistry(registry);

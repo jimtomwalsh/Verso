@@ -547,6 +547,19 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .publish-pickrow__stale { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 1; color: var(--accent); background: var(--surface-raised, rgba(127,127,127,0.14)); }
 .publish-empty { font-size: var(--text-sm, 12px); color: var(--text-secondary); padding: 8px 4px; }
 .publish-queuelist { display: flex; flex-direction: column; gap: 6px; }
+/* Epic 6: the append-only whole-family release log -- a secondary, collapsed section under the live
+   queue. Provenance only; each release expands to its per-document entries. */
+.publish-history { margin-top: 18px; border-top: 1px solid var(--border-subtle); padding-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.publish-history__title { font-size: var(--text-sm, 12px); font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }
+.publish-release { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-panel); }
+.publish-release__sum { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; cursor: pointer; list-style: none; font-size: var(--text-sm, 12px); }
+.publish-release__sum::-webkit-details-marker { display: none; }
+.publish-release__when { color: var(--text-primary); font-weight: 600; }
+.publish-release__count { color: var(--text-secondary); font-size: var(--text-xs, 11px); }
+.publish-release__body { padding: 2px 12px 10px; display: flex; flex-direction: column; gap: 4px; }
+.publish-release__entry { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.publish-release__entry-title { font-size: var(--text-xs, 11px); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.publish-release__entry-tags { flex: 0 0 auto; font-size: 10px; color: var(--text-tertiary, var(--text-secondary)); }
 .publish-queuerow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-panel); }
 .publish-queuerow__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .publish-queuerow__title { font-size: var(--text-sm, 12px); font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

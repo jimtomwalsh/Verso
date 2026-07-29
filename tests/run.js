@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -8677,6 +8677,36 @@ section("Product Rail: Publish queue store (T1)");
   ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
   ok("index.html loads publish-queue.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/publish-queue.js") > -1 && idx.indexOf("src/publish-queue.js") < idx.indexOf("src/editor.js");
+  })());
+})();
+
+// ---- product-rail-whole-family-export-release-record: the append-only release log ----
+// Every completed Publish run appends ONE immutable release record. The ReleaseHistory model is a
+// pure, DOM-free store (no Date.now/Math.random -- the caller supplies createdAt); append-only, minted
+// releaseId, reverse-chron list, round-trips. The editor wiring writes it once per run in finish().
+section("Product Rail: Release history store (whole-family export)");
+(function () {
+  var RH = require(path.join(ROOT, "src/release-history.js"));
+  var e = src("src/editor.js");
+  var s = RH.create();
+  ok("create() -> empty append-only store", s.releases.length === 0 && s._seq === 0);
+  var r1 = RH.append(s, { productId: "prodA", createdAt: 1000, entries: [{ docId: "d1", title: "Doc 1", exportFormat: "scorm12", version: "V001" }] });
+  ok("append mints a releaseId + freezes the verso-release shape", r1 && r1.type === "verso-release" && r1.schema === RH.SCHEMA && r1.releaseId === "rel-1" && r1.productId === "prodA" && r1.createdAt === 1000 && r1.entries.length === 1);
+  ok("append deep-clones entries (later caller mutation can't reach into the record)", (function () { var src = [{ docId: "d9", title: "X" }]; var rec = RH.append(s, { createdAt: 2000, entries: src }); src[0].title = "MUTATED"; return rec.entries[0].title === "X"; })());
+  var r3 = RH.append(s, { createdAt: 3000, entries: [{ docId: "d2" }, { docId: "d3" }] });
+  ok("append is the ONLY mutation -- no update/remove is exported", typeof RH.update === "undefined" && typeof RH.remove === "undefined" && typeof RH.setStatus === "undefined");
+  ok("list() is reverse-chronological (newest first)", (function () { var l = RH.list(s); return l[0].createdAt === 3000 && l[l.length - 1].createdAt === 1000; })());
+  ok("round-trips through toJSON/fromJSON (records + the id counter preserved)", (function () { var back = RH.fromJSON(JSON.parse(JSON.stringify(RH.toJSON(s)))); return back.releases.length === s.releases.length && back._seq === s._seq && back.releases[0].releaseId === "rel-1"; })());
+  ok("fromJSON drops a malformed record with no entries array", (function () { var back = RH.fromJSON({ _seq: 5, releases: [{ releaseId: "rel-x" }, { releaseId: "rel-y", entries: [] }] }); return back.releases.length === 1 && back.releases[0].releaseId === "rel-y"; })());
+
+  // Editor wiring: the store loads/saves through the durable seam, and a run writes exactly one record.
+  ok("release history loads + persists through the durable key/value seam", /RELEASE_HISTORY_KEY = "authoring.releaseHistory"/.test(e) && /writeStore\(localStorage, RELEASE_HISTORY_KEY, JSON\.stringify\(RH\.toJSON\(__releaseHistory\)\)\)/.test(e));
+  ok("runPublishQueue accumulates a release entry per DONE row and appends ONE record on finish", /runEntries\.push\(releaseEntryForRow\(row\)\);/.test(e) && /if \(runEntries\.length && window\.ReleaseHistory\) \{[\s\S]{0,220}ReleaseHistory\.append\(releaseHistory\(\), \{ productId: getActiveProduct\(\), createdAt: Date\.now\(\), entries: runEntries \}\);/.test(e));
+  ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row\)[\s\S]{0,400}exportFormat: opts\.format[\s\S]{0,120}groundTruthVersions: gtv/.test(e));
+  ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row\)\);[\s\S]{0,200}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
+  ok("the Publish stage renders a collapsed reverse-chron Release history (details/summary), entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,400}RH\.list\(releaseHistory\(\)\)[\s\S]{0,1200}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
+  ok("index.html loads release-history.js before editor.js", (function () {
+    var idx = src("index.html"); return idx.indexOf("src/release-history.js") > -1 && idx.indexOf("src/release-history.js") < idx.indexOf("src/editor.js");
   })());
 })();
 
