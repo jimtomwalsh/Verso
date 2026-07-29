@@ -8807,7 +8807,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(e) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(e));
   ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
-    /row\.appendChild\(U\.IconButton\(\{ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
+    /row\.appendChild\(U\.IconButton\(\{ icon: "download", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
   ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
 
   // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
@@ -8868,7 +8868,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
       && !/function deleteSelectedTopics/.test(e) && !/function moveSelectedTopicsModal/.test(e)
       && !/function topicNeedsReview/.test(e) && !/function structMoveTopic/.test(e) && !/function exitSelectMode/.test(e);
   })());
-  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,700}icon: "upload", label: "Import from Markdown/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
+  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,700}icon: "download", label: "Import from Markdown/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
 
   // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
   // confirms with the author first, and covers both "no ambiguity" fast-paths.
@@ -8942,7 +8942,7 @@ section("Product Rail: Source stage info panel");
   // source-stage-comments: a topic-wide overview alongside the per-section thread
   // panels, mirroring renderCommentList's own Open/Resolved/Orphaned split.
   ok("Comments section uses the canonical panelSection() helper, titled with the count", /panelSection\(host, "Comments \(" \+ comments\.length \+ "\)"\)/.test(e));
-  ok("renderSourceInfoPanel renders Comments last (after the Source section), same render pass", /renderSourceCommentsPanel\(host, topic\);\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
+  ok("renderSourceInfoPanel renders the legacy Comments accordion only for non-doc topics (doc topics use the Comments filter tab)", /renderSourceCommentsPanel\(host, topic\);\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
   ok("empty comments renders a named empty state, not a blank section", /No comments yet\./.test(e));
   ok("comments split into Open\/Resolved\/Orphaned groups, reusing the same split shape as the canvas's renderCommentList", /group\("Open", open\);/.test(e) && /group\("Resolved", resolved\);/.test(e) && /group\("Orphaned", orphaned\);/.test(e));
   ok("orphan classification reuses sourceCommentIsOrphaned (a section deleted out from under its comment)", /if \(sourceCommentIsOrphaned\(c, topic\)\) orphaned\.push\(c\);/.test(e));
@@ -10980,6 +10980,27 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   var para = P.blocksFromText("Just a sentence.");
   ok("blocksFromText: plain text still a paragraph", para.length === 1 && para[0].type === "paragraph");
 
+  // --- inlineRuns: rich inline projection that PRESERVES plain-text offsets (source-rich-render) ---
+  // The one invariant that keeps range-marks + applyTextEdit correct under rich rendering: the
+  // concatenation of every run's text must reproduce the input byte-for-byte (markers included).
+  function joins(s) { return P.inlineRuns(s).map(function (r) { return r.text; }).join(""); }
+  ok("inlineRuns: plain text -> one text run, join === input", (function () { var r = P.inlineRuns("plain words"); return r.length === 1 && r[0].kind === "text" && joins("plain words") === "plain words"; })());
+  ok("inlineRuns: bold offset invariant (join === input, markers kept)", joins("a **bold** z") === "a **bold** z");
+  ok("inlineRuns: inline code offset invariant", joins("run `code` now") === "run `code` now");
+  ok("inlineRuns: multiple + adjacent emphasis all preserve length", (function () { var s = "**one** mid `two` **three**"; return joins(s) === s && s.length === joins(s).length; })());
+  ok("inlineRuns: the ** / ` delimiters are flagged marker:true, the inner text is not", (function () {
+    var r = P.inlineRuns("x **b** y");
+    var markers = r.filter(function (t) { return t.marker; });
+    var inner = r.filter(function (t) { return t.kind === "bold" && !t.marker; });
+    return markers.length === 2 && markers[0].text === "**" && markers[1].text === "**" && inner.length === 1 && inner[0].text === "b";
+  })());
+  ok("inlineRuns: an unclosed marker passes through as literal text (graceful, offsets intact)", (function () { var s = "a **half open"; var r = P.inlineRuns(s); return joins(s) === s && r.every(function (t) { return t.kind === "text"; }); })());
+  ok("inlineRuns: empty string -> a single empty text run (never crashes projection)", (function () { var r = P.inlineRuns(""); return r.length === 1 && r[0].text === "" && r[0].kind === "text"; })());
+  ok("inlineRuns grammar matches MarkdownLite.INLINE_RE (bold + code, no italic/nesting)", (function () {
+    // single-asterisk italic is NOT a model convention, so it must survive as literal text
+    var s = "this *is not* italic"; return joins(s) === s && P.inlineRuns(s).every(function (t) { return t.kind === "text"; });
+  })());
+
   // --- boundary riding: type inside grows, type at edge holds (start-incl / end-excl) ---
   ok("shiftAnchor: insertion strictly inside grows the span", (function () {
     var e = P.diffText("the quick fox", "the quick brown fox"); // insert "brown " at 10
@@ -11527,14 +11548,18 @@ section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
 section("Source v2: one consolidated right panel (spec 2c section 3)");
 (function () {
   var e = src("src/editor.js");
-  ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /if \(topicHasDoc\(topic\)\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(e));
+  ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /var hasDoc = topicHasDoc\(topic\);\s*\n\s*if \(hasDoc\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(e));
   ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(e));
   ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(e));
   ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));
   ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface", /function applySourceInfoVisibility\(\)[\s\S]{0,140}el\.style\.display = __sourceInfoOpen \? "" : "none";/.test(e));
-  ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,320}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(e));
+  ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,900}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(e));
   ok("the active mark's row is highlighted (is-active) in the Marks list", /"source-drawer__row" \+ \(m\.id === __sourceActiveMarkId \? " is-active" : ""\)/.test(e));
   ok("panel visibility + Marks controls are exposed on __sourceRw for verification", /setInfoOpen: function[\s\S]{0,400}infoOpen: function[\s\S]{0,400}revealMark: function/.test(e));
+  // source-rich-render: text nodes are projected through paintSourceInline (offset-preserving),
+  // NOT raw el.textContent, so bold/code render as formatting while the mark offsets stay put.
+  ok("renderSourceDocNode projects heading/paragraph/callout through paintSourceInline (rich, offset-safe)", /el = h\("p", "source-doc__p"\); paintSourceInline\(el, SD\.nodeText\(node\)\)/.test(e) && /paintSourceInline\(el, SD\.nodeText\(node\)\); el\.setAttribute\("data-editable", "1"\); }/.test(e));
+  ok("paintSourceInline keeps ** / ` markers in the DOM (hidden) so el.textContent round-trips to applyTextEdit", /function paintSourceInline\(el, text\)[\s\S]{0,700}source-md-mk[\s\S]{0,200}mk\.textContent = r\.text/.test(e) && /if \(runs\.length === 1 && runs\[0\]\.kind === "text"\) \{ el\.textContent = runs\[0\]\.text; return; }/.test(e));
 })();
 
 // ---- Source rewrite (Epic 2b): demand-driven alternates + staleness (alternates-staleness) ----
@@ -12175,7 +12200,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(e));
   ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(e));
   ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(e) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(e));
-  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,200}icon: "upload", label: "Import from Markdown/.test(e));
+  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,200}icon: "download", label: "Import from Markdown/.test(e));
   ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(e));
   ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(e) && /it\.classList\.toggle\("is-selected", on\)/.test(e));
   ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(e));

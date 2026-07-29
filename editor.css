@@ -665,7 +665,11 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    `label`) that swaps contents by mode instead of appending a new row per feature --
    see renderSourceToolbar. Sits between the search field and the list. */
 .source-stage__nav-actions { padding: 0 6px 6px; flex: 0 0 auto; }
-.source-stage__toolbar { display: flex; align-items: center; gap: 2px; }
+/* icon-button-sizing: keep the three TOC top buttons on ONE row and enlarge them (~30%) so
+   they read clearly at the top of the Source navigator. */
+.source-stage__toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+.source-stage__toolbar .vds-iconbtn { width: 28px; height: 28px; }
+.source-stage__toolbar .vds-iconbtn svg { width: 19px; height: 19px; }
 .source-stage__toolbar-badge-wrap { position: relative; display: inline-flex; }
 .source-stage__toolbar-badge { position: absolute; top: -3px; right: -3px; pointer-events: none; }
 
@@ -824,6 +828,12 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__h:first-child { margin-top: 0; }
 .source-doc__p { margin: 0.7em 0; }
+/* source-rich-render: bold / inline-code render as formatting. The literal ** / ` markers are kept
+   in the DOM (span.source-md-mk) so text offsets stay identical, but hidden from view + from the
+   caret. display:none also keeps them out of contentEditable caret navigation. */
+.source-md-mk { display: none; }
+.source-doc__b { font-weight: 700; }
+.source-doc__code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.92em; background: var(--surface-raised, rgba(127,127,127,.12)); padding: 0.08em 0.32em; border-radius: 3px; }
 /* spec 2d: variant comparison columns. A diverged node splits into side-by-side columns inside the
    reading column (never a new panel); shared nodes stay full-width. */
 .source-doc__vrow { display: flex; gap: var(--space-4); margin: 0.7em 0; align-items: stretch; }
@@ -2766,13 +2776,13 @@ details[open] .disc__caret {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 20px; /* icon-button-sizing: ~30% larger so the top-row buttons are easy to hit */
   font-weight: 500;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
   border-radius: 4px;
   transition: background 0.15s, color 0.15s;
 }
@@ -2783,7 +2793,7 @@ details[open] .disc__caret {
 /* The collapse-tree glyph is an inline SVG (viewBox-only, no width/height attrs), so
    without an explicit size it renders broken/invisible — every other glyph button sizes
    its svg the same way. (The + button is a text char, so it was unaffected.) */
-.outliner-add-btn svg { width: 18px; height: 18px; display: block; }
+.outliner-add-btn svg { width: 20px; height: 20px; display: block; }
 
 .prop-grid-row {
   display: flex;
@@ -3402,6 +3412,9 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .vds-doctab { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 12px; border-radius: var(--radius-sm, 2px) var(--radius-sm, 2px) 0 0; color: var(--text-secondary); font-size: var(--text-sm, 11px); cursor: pointer; }
 .vds-doctab.is-active { background: var(--surface-canvas); color: var(--text-primary); }
 .vds-doctab__dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; } /* SPEC 7: per-Product colour dot */
+.vds-doctab__glyph { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--icon-idle, #999); } /* tab-doctype-glyph: doc-type marker */
+.vds-doctab__glyph svg { width: 14px; height: 14px; }
+.vds-doctab.is-active .vds-doctab__glyph { color: var(--icon-strong, var(--text-primary)); }
 /* SPEC 7 ChoiceCards: a single-select grid of preset/mode cards (create flow, cell switcher). */
 .vds-choicecards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .vds-choicecard {

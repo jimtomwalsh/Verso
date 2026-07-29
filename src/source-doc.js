@@ -61,6 +61,33 @@
   }
   function isTextNode(node) { return node && node.type !== "image"; }
 
+  // ---- offset-preserving inline tokeniser (source-rich-render) -------------
+  // Splits a node's canonical text into runs, tagging bold (**..**) and inline code (`..`) using
+  // the SAME grammar as MarkdownLite.INLINE_RE (bold + code, no nesting). The delimiter runs are
+  // kept as their own runs flagged `marker:true`. The invariant that makes rich rendering safe:
+  //   runs.map(r => r.text).join("") === input, character for character.
+  // So a DOM projection that emits every run's text (the markers merely hidden by CSS) keeps the
+  // plain-text offsets the range-marks + applyTextEdit math anchor to completely unchanged -- the
+  // rich layer is purely visual, never a re-indexing of the model.
+  var INLINE_RUN_RE = /\*\*([^*]+?)\*\*|`([^`]+?)`/g;
+  function inlineRuns(text) {
+    var s = String(text == null ? "" : text);
+    var runs = [], last = 0, m;
+    INLINE_RUN_RE.lastIndex = 0;
+    while ((m = INLINE_RUN_RE.exec(s))) {
+      if (m.index > last) runs.push({ text: s.slice(last, m.index), kind: "text" });
+      var kind = m[1] != null ? "bold" : "code";
+      var delim = kind === "bold" ? "**" : "`";
+      runs.push({ text: delim, kind: kind, marker: true });
+      runs.push({ text: m[1] != null ? m[1] : m[2], kind: kind });
+      runs.push({ text: delim, kind: kind, marker: true });
+      last = INLINE_RUN_RE.lastIndex;
+    }
+    if (last < s.length) runs.push({ text: s.slice(last), kind: "text" });
+    if (!runs.length) runs.push({ text: "", kind: "text" });
+    return runs;
+  }
+
   // Write edited plain text back into a node's typed shape (inverse of nodeText for the
   // single-text kinds; list/table keep their structure -- an edit to their joined text
   // re-splits on the same separators). Keeps the model canonical after a contentEditable edit.
@@ -1190,7 +1217,7 @@
   }
 
   var _pure = {
-    nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
+    nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode, inlineRuns: inlineRuns,
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
@@ -1214,7 +1241,7 @@
 
   var SourceDoc = {
     create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
-    nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
+    nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange,
