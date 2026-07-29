@@ -919,6 +919,10 @@ a refresh and a stage-switch.
 - **Publish.** One **Publish** button runs every pending row in turn: each is packaged as a SCORM
   `.zip` (using that row's preset) and downloaded. Done rows stay in the queue, greyed, with their
   result — the queue isn't cleared, so you can see what shipped.
+- **Release history.** Each Publish run records **one** timestamped release entry under the queue —
+  a light provenance log of what went out together. Expand a release to see every document in it with
+  its format, variant and version. It's a read-only audit trail (it never re-exports anything); to
+  publish a whole product family as one release, queue its documents and run them together.
 
 This is an early view — a chosen save folder and staleness dots arrive in later updates.
 
