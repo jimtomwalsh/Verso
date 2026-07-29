@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -8606,7 +8606,7 @@ section("Product Rail: Source stage nav + article");
   var idx = src("index.html");
   ok("stage-source is the real source-stage shell, not the .stage-placeholder centered stand-in", /class="source-stage" id="stage-source"/.test(idx));
   ok("source-stage nav + search + topic-list + article mount points present", /id="source-stage-search"/.test(idx) && /id="source-topic-list"/.test(idx) && /id="source-stage-article"/.test(idx));
-  ok("stage-publish keeps the placeholder shell (its own ticket, untouched)", /class="stage-placeholder" id="stage-publish"/.test(idx));
+  ok("stage-publish is the real 2-pane publish stage (pick + queue), not the placeholder", /class="publish-stage" id="stage-publish"/.test(idx) && /id="publish-pick"/.test(idx) && /id="publish-queue"/.test(idx));
 
   // Wiring: setStage("source") triggers a render; the topic list re-renders on both
   // search input and the shared product-context change (Epic 1's dropdown).
@@ -8622,6 +8622,106 @@ section("Product Rail: Source stage nav + article");
   ok("render() never reads Source-stage state", renderJs.indexOf("__sourceActiveTopicId") === -1 && renderJs.indexOf("renderSourceStage") === -1);
   var courseCss = src("src/course.css");
   ok("course.css carries no source-stage chrome classes", courseCss.indexOf("source-stage") === -1);
+})();
+
+// ---- product-rail-publish-queue-t1: persistent publish queue store + pane + run ----
+// The Publish stage is a persistent queue of per-document jobs (AE render-queue model). The STATE
+// is a pure store (add / remove / run / complete transitions); the pane UI + the buildPackage run
+// loop mount on top and are browser-verified. This section guards the pure store + the wiring.
+section("Product Rail: Publish queue store (T1)");
+(function () {
+  var PQ = require(path.join(ROOT, "src/publish-queue.js"));
+  var q = PQ.create();
+  ok("create() is an empty queue", q.rows.length === 0 && q._seq === 0);
+  var r1 = PQ.addDoc(q, "COURSE-A", { title: "Course A" });
+  ok("addDoc queues one row per document with a stable id + pending status", q.rows.length === 1 && r1.docId === "COURSE-A" && r1.status === "pending" && !!r1.id);
+  ok("addDoc defaults the title from meta and a preset id", r1.title === "Course A" && r1.preset === "master");
+  var r1b = PQ.addDoc(q, "COURSE-A", { title: "Course A (renamed)" });
+  ok("re-adding the same document RE-ARMS its row (no duplicate)", q.rows.length === 1 && r1b.id === r1.id && r1b.title === "Course A (renamed)");
+  var r2 = PQ.addDoc(q, "COURSE-B", { title: "Course B" });
+  ok("a second distinct document is a second row", q.rows.length === 2 && r2.id !== r1.id);
+  ok("pendingRows lists both while both are pending", PQ.pendingRows(q).length === 2 && PQ.hasPending(q) === true);
+  PQ.setStatus(q, r1.id, "running");
+  ok("setStatus running clears any prior result and drops it out of pending", PQ.rowById(q, r1.id).status === "running" && PQ.rowById(q, r1.id).result === null && PQ.pendingRows(q).length === 1);
+  PQ.setStatus(q, r1.id, "done", { to: "download", path: "COURSE-A_V001_SCORM.zip" });
+  ok("setStatus done records the result path and stays out of pending", PQ.rowById(q, r1.id).status === "done" && PQ.rowById(q, r1.id).result.path.indexOf("COURSE-A") === 0 && PQ.pendingRows(q).length === 1);
+  ok("an unknown status is ignored (never a stray state)", (function () { PQ.setStatus(q, r1.id, "wat"); return PQ.rowById(q, r1.id).status === "done"; })());
+  ok("re-adding a done document re-arms it to pending (re-publish)", (function () { PQ.addDoc(q, "COURSE-A", {}); return PQ.rowById(q, r1.id).status === "pending" && PQ.rowById(q, r1.id).result === null; })());
+  PQ.removeRow(q, r2.id);
+  ok("removeRow drops just that row", q.rows.length === 1 && PQ.rowByDoc(q, "COURSE-B") === null);
+  ok("the queue round-trips through toJSON/fromJSON", (function () {
+    var back = PQ.fromJSON(JSON.parse(JSON.stringify(PQ.toJSON(q))));
+    return back.rows.length === 1 && back.rows[0].docId === "COURSE-A" && back._seq === q._seq;
+  })());
+  ok("fromJSON reverts a mid-run 'running' row to pending (a reload can't leave it stuck)", (function () {
+    var mid = PQ.create(); var rr = PQ.addDoc(mid, "X", {}); PQ.setStatus(mid, rr.id, "running");
+    var back = PQ.fromJSON(JSON.parse(JSON.stringify(PQ.toJSON(mid))));
+    return back.rows[0].status === "pending";
+  })());
+  ok("fromJSON is tolerant of a malformed blob (starts empty, never throws)", PQ.fromJSON(null).rows.length === 0 && PQ.fromJSON({ rows: "nope" }).rows.length === 0);
+  ok("fromJSON drops rows with no docId", PQ.fromJSON({ rows: [{ title: "orphan" }, { docId: "Y" }] }).rows.length === 1);
+
+  // Editor wiring (grep guards -- the DOM behaviour is browser-verified)
+  var e = src("src/editor.js");
+  ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(e));
+  ok("the queue persists through the durable key/value writer", /writeStore\(localStorage, PUBLISH_QUEUE_KEY, JSON\.stringify\(PQ\.toJSON\(__publishQueue\)\)\)/.test(e));
+  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
+  ok("index.html loads publish-queue.js before editor.js", (function () {
+    var idx = src("index.html"); return idx.indexOf("src/publish-queue.js") > -1 && idx.indexOf("src/publish-queue.js") < idx.indexOf("src/editor.js");
+  })());
+})();
+
+// ---- product-rail-publish-queue-t2: app-level output presets ----
+// A preset is a named bundle of export-option overrides applied onto defaultOptions() at publish time.
+// 3 built-ins ship; authors save/rename/delete their own; a doc remembers its last-used preset. Pure
+// store + resolution here; the row dropdown / save-as modal are browser-verified.
+section("Product Rail: Publish presets (T2)");
+(function () {
+  var PP = require(path.join(ROOT, "src/publish-presets.js"));
+  var s = PP.create();
+  ok("three built-ins ship (Master / Review copy / Lightweight)", (function () {
+    var b = PP.builtins(); return b.length === 3 && b[0].id === "master" && b[1].id === "review" && b[2].id === "lightweight";
+  })());
+  ok("Master applies no overrides; Review copy sets reviewFile; Lightweight lowers maxImageDim", (function () {
+    return Object.keys(PP.optionsFor(s, "master")).length === 0
+      && PP.optionsFor(s, "review").reviewFile === true && PP.optionsFor(s, "review").learnerTheme === false
+      && PP.optionsFor(s, "lightweight").maxImageDim === 1200;
+  })());
+  ok("an unknown preset id resolves to Master (never strands a row)", PP.presetById(s, "nope").id === "master" && Object.keys(PP.optionsFor(s, "nope")).length === 0);
+  var custom = PP.saveCustom(s, "My tight build", { optimiseMedia: true, imageQuality: 0.6 });
+  ok("saveCustom adds an app-global custom preset with its overrides", (function () {
+    return custom.id.indexOf("preset-") === 0 && !custom.builtin && PP.optionsFor(s, custom.id).imageQuality === 0.6 && PP.allPresets(s).length === 4;
+  })());
+  ok("renameCustom renames a custom preset; a built-in can't be renamed", (function () {
+    PP.renameCustom(s, custom.id, "Tight"); PP.renameCustom(s, "master", "Nope");
+    return PP.presetName(s, custom.id) === "Tight" && PP.presetName(s, "master") === "Master";
+  })());
+  ok("a doc remembers its last-used preset; a re-visit recalls it", (function () {
+    PP.setLastForDoc(s, "COURSE-A", custom.id);
+    return PP.lastForDoc(s, "COURSE-A") === custom.id && PP.lastForDoc(s, "COURSE-UNSEEN") === "master";
+  })());
+  ok("deleting a custom preset falls its documents back to Master", (function () {
+    PP.deleteCustom(s, custom.id);
+    return PP.allPresets(s).length === 3 && PP.lastForDoc(s, "COURSE-A") === "master";
+  })());
+  ok("the preset store round-trips through toJSON/fromJSON (built-ins are never persisted as custom)", (function () {
+    var s2 = PP.create(); var c = PP.saveCustom(s2, "Keep", { reviewFile: true }); PP.setLastForDoc(s2, "D", c.id);
+    var back = PP.fromJSON(JSON.parse(JSON.stringify(PP.toJSON(s2))));
+    return back.custom.length === 1 && back.custom[0].name === "Keep" && PP.lastForDoc(back, "D") === c.id && PP.allPresets(back).length === 4;
+  })());
+  ok("fromJSON drops any built-in id smuggled into custom + tolerates a malformed blob", PP.fromJSON({ custom: [{ id: "master", name: "x" }, { id: "p9", name: "ok" }] }).custom.length === 1 && PP.fromJSON(null).custom.length === 0);
+
+  // Editor wiring (grep guards -- the dropdown + modal are browser-verified)
+  var e = src("src/editor.js");
+  ok("the run loop packages each row with its resolved preset options, not bare defaults", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e));
+  ok("publishOptionsForRow merges the preset overrides onto defaultOptions()", /Object\.assign\(base, PP\.optionsFor\(publishPresets\(\), row\.preset \|\| "master"\)\)/.test(e));
+  ok("adding a doc recalls its last-used preset (zero-config re-queue)", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e));
+  ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
+
+  // T4: one shared addToQueue action + the Edit-stage top-bar entry point
+  ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
+  ok("the shared action recalls the doc's last-used preset and toasts the pending count", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e) && /publishToast\("Added to the publish queue/.test(e));
+  ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
 })();
 
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----

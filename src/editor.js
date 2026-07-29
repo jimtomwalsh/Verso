@@ -1308,6 +1308,256 @@
   }
   window.ProductsStore = loadProducts();
   function saveProducts() { try { productsAdapter().writeProducts(JSON.stringify(window.ProductsStore)); } catch (e) {} }
+
+  // ---- Publish queue (Product Rail Epic 6, T1) — the persistent Publish-stage queue -----------
+  // A single app-global queue (PublishQueue model, src/publish-queue.js), persisted through the
+  // durable key/value writer (writeStore) so it survives refresh + stage-switches. Lazily loaded
+  // on first use; every mutation calls savePublishQueue().
+  var PUBLISH_QUEUE_KEY = "authoring.publishQueue";
+  var __publishQueue = null;
+  function loadPublishQueue() {
+    var PQ = window.PublishQueue; if (!PQ) return null;
+    try { var raw = localStorage.getItem(PUBLISH_QUEUE_KEY); if (raw) return PQ.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return PQ.create();
+  }
+  function publishQueue() { if (!__publishQueue) __publishQueue = loadPublishQueue(); return __publishQueue; }
+  function savePublishQueue() {
+    var PQ = window.PublishQueue; if (!PQ || !__publishQueue) return;
+    try { writeStore(localStorage, PUBLISH_QUEUE_KEY, JSON.stringify(PQ.toJSON(__publishQueue))); } catch (e) {}
+  }
+
+  // ---- Publish presets (Product Rail Epic 6, T2) — app-global output presets -------------------
+  // Named export-option bundles (PublishPresets model). App-global, persisted through the same k/v
+  // seam; each queue row references a preset by id, resolved to real options at Publish time.
+  var PUBLISH_PRESETS_KEY = "authoring.publishPresets";
+  var __publishPresets = null;
+  function loadPublishPresets() {
+    var PP = window.PublishPresets; if (!PP) return null;
+    try { var raw = localStorage.getItem(PUBLISH_PRESETS_KEY); if (raw) return PP.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return PP.create();
+  }
+  function publishPresets() { if (!__publishPresets) __publishPresets = loadPublishPresets(); return __publishPresets; }
+  function savePublishPresets() {
+    var PP = window.PublishPresets; if (!PP || !__publishPresets) return;
+    try { writeStore(localStorage, PUBLISH_PRESETS_KEY, JSON.stringify(PP.toJSON(__publishPresets))); } catch (e) {}
+  }
+  // Resolve a row's preset id to real export options: the exporter defaults with the preset's
+  // overrides applied on top (T2). Falls back to plain defaults if presets aren't available.
+  function publishOptionsForRow(row) {
+    var SX = window.SCORMExport, PP = window.PublishPresets;
+    var base = (SX && SX.defaultOptions) ? SX.defaultOptions() : {};
+    if (!PP || !row) return base;
+    return Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
+  }
+  // The documents the picker offers: every registry doc, scoped to the active Product when one is
+  // set (untagged docs drop out of a Product-scoped view), sorted by title. docId = the registry key.
+  function publishPickDocs() {
+    var pid = getActiveProduct(), out = [];
+    Object.keys(registry).forEach(function (id) {
+      var d = registry[id]; if (!d) return;
+      if (pid && !docMatchesProductStage(d, pid, null)) return;
+      out.push({ id: id, title: (d.meta && d.meta.title) || id });
+    });
+    out.sort(function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; });
+    return out;
+  }
+  function mountPublishStage() {
+    if (typeof document === "undefined") return;
+    renderPublishPick();
+    renderPublishQueue();
+  }
+  // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
+  // shortcut to queue the currently-open document (the fast single-export path -- a queue-of-one).
+  function renderPublishPick() {
+    var host = document.getElementById("publish-pick"); if (!host) return;
+    var U = window.VersoUI;
+    host.innerHTML = "";
+    host.appendChild(h("div", "publish-pane__title", "Documents"));
+    if (registry[activeDocId]) {
+      var addCur = U ? U.Button({ variant: "secondary", full: true, icon: "plus", label: "Add current document", onClick: function () { addDocToPublishQueue(activeDocId); } }) : h("button", null, "Add current document");
+      addCur.classList.add("publish-pane__addcur");
+      host.appendChild(addCur);
+    }
+    var list = h("div", "publish-picklist");
+    var docs = publishPickDocs();
+    if (!docs.length) { list.appendChild(h("div", "publish-empty", "No documents" + (getActiveProduct() ? " in this Product" : "") + " yet.")); }
+    docs.forEach(function (d) {
+      var row = h("div", "publish-pickrow");
+      row.appendChild(h("span", "publish-pickrow__title", d.title));
+      var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
+      row.appendChild(add);
+      list.appendChild(row);
+    });
+    host.appendChild(list);
+  }
+  // A tiny transient confirmation toast (reuses the shared .collab-toast style), for actions taken
+  // away from the Publish stage -- e.g. "Send to publish queue" from the Edit-stage top bar.
+  function publishToast(msg) {
+    var t = h("div", "collab-toast", msg); document.body.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add("is-on"); });
+    setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2600);
+  }
+  // The ONE shared "queue this document" action (T4). Adds the doc with its remembered preset (T2),
+  // no configure step, no duplicate row (re-arms an existing one). Used by every entry point: the
+  // Publish-stage picker rows AND the Edit-stage top-bar "Send to publish queue". Toasts the count.
+  function addToQueue(docId) {
+    var PQ = window.PublishQueue, PP = window.PublishPresets, d = registry[docId]; if (!PQ || !d) return;
+    var preset = PP ? PP.lastForDoc(publishPresets(), docId) : "master"; // zero-config recall
+    PQ.addDoc(publishQueue(), docId, { title: (d.meta && d.meta.title) || docId, preset: preset });
+    savePublishQueue();
+    renderPublishQueue();
+    var n = PQ.pendingRows(publishQueue()).length;
+    publishToast("Added to the publish queue — " + n + " pending.");
+  }
+  function addDocToPublishQueue(docId) { addToQueue(docId); } // back-compat name used by the picker rows
+  // Right pane: the persistent queue, one row per document (title + status + remove), and one
+  // Publish button that runs every pending row sequentially through buildPackage.
+  function renderPublishQueue() {
+    var host = document.getElementById("publish-queue"); if (!host) return;
+    var U = window.VersoUI, PQ = window.PublishQueue; if (!PQ) return;
+    var q = publishQueue();
+    host.innerHTML = "";
+    var head = h("div", "publish-pane__head");
+    head.appendChild(h("div", "publish-pane__title", "Publish queue"));
+    var pending = PQ.pendingRows(q).length;
+    var pubLabel = __publishRunning ? "Publishing…" : ("Publish" + (pending ? " (" + pending + ")" : ""));
+    var pub = U ? U.Button({ variant: "primary", icon: "upload", label: pubLabel, onClick: runPublishQueue }) : h("button", null, pubLabel);
+    if (!pending || __publishRunning) pub.setAttribute("disabled", "disabled");
+    head.appendChild(pub);
+    host.appendChild(head);
+    var rows = (q.rows || []);
+    if (!rows.length) { host.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); return; }
+    var list = h("div", "publish-queuelist");
+    rows.forEach(function (r) {
+      var row = h("div", "publish-queuerow is-" + r.status);
+      var main = h("div", "publish-queuerow__main");
+      main.appendChild(h("span", "publish-queuerow__title", r.title));
+      var meta = h("div", "publish-queuerow__meta");
+      // preset chip -> a menu to switch preset / save-as / rename / delete (T2). Frozen at add-time;
+      // clicking re-picks. Disabled while the row is running.
+      var PP = window.PublishPresets;
+      var chip = h("button", "publish-chip", PP ? PP.presetName(publishPresets(), r.preset || "master") : (r.preset || "master"));
+      chip.type = "button"; chip.title = "Output preset";
+      if (r.status !== "running") chip.addEventListener("click", function (ev) {
+        var rr = (ev.currentTarget || ev.target).getBoundingClientRect();
+        openPublishPresetMenu(r.id, rr.left, rr.bottom + 4);
+      });
+      meta.appendChild(chip);
+      meta.appendChild(h("span", "publish-queuerow__status", publishStatusLabel(r)));
+      main.appendChild(meta);
+      row.appendChild(main);
+      if (r.status !== "running") {
+        var rm = U ? U.IconButton({ icon: "x", label: "Remove from the queue", onClick: function () { PQ.removeRow(q, r.id); savePublishQueue(); renderPublishQueue(); } }) : h("button", null, "x");
+        row.appendChild(rm);
+      }
+      list.appendChild(row);
+    });
+    host.appendChild(list);
+  }
+  function publishStatusLabel(r) {
+    if (r.status === "running") return "Publishing…";
+    if (r.status === "done") return "Done" + (r.result && r.result.path ? " · " + r.result.path : "");
+    if (r.status === "error") return "Failed" + (r.result && r.result.path ? " · " + r.result.path : "");
+    return "Pending";
+  }
+  // The preset menu on a queue row (T2): pick any preset (built-in or custom) for this row, save the
+  // current one under a new name, or rename/delete a custom preset. Picking also records the choice as
+  // the document's last-used preset so a re-queue is zero-config.
+  function openPublishPresetMenu(rowId, x, y) {
+    var PQ = window.PublishQueue, PP = window.PublishPresets; if (!PQ || !PP) return;
+    var q = publishQueue(), store = publishPresets();
+    var row = PQ.rowById(q, rowId); if (!row) return;
+    var items = [{ head: "Output preset" }];
+    PP.allPresets(store).forEach(function (p) {
+      items.push({ label: p.name, active: (row.preset || "master") === p.id, onClick: function () {
+        row.preset = p.id; PP.setLastForDoc(store, row.docId, p.id);
+        savePublishQueue(); savePublishPresets(); renderPublishQueue();
+      } });
+    });
+    items.push({ sep: true });
+    items.push({ label: "Save current as new preset…", onClick: function () {
+      promptPublishPresetName("Save output preset", PP.presetName(store, row.preset || "master") + " copy", function (name) {
+        var np = PP.saveCustom(store, name, PP.optionsFor(store, row.preset || "master"));
+        if (np) { row.preset = np.id; PP.setLastForDoc(store, row.docId, np.id); savePublishQueue(); savePublishPresets(); renderPublishQueue(); }
+      });
+    } });
+    if (!PP.isBuiltin(row.preset || "master")) {
+      items.push({ label: "Rename preset…", onClick: function () {
+        promptPublishPresetName("Rename preset", PP.presetName(store, row.preset), function (name) {
+          PP.renameCustom(store, row.preset, name); savePublishPresets(); renderPublishQueue();
+        });
+      } });
+      items.push({ label: "Delete preset", danger: true, onClick: function () {
+        PP.deleteCustom(store, row.preset); row.preset = "master";
+        savePublishPresets(); savePublishQueue(); renderPublishQueue();
+      } });
+    }
+    showContextMenu(x, y, items);
+  }
+  // A minimal DS name modal (no raw prompt()): a single TextField + Save/Cancel. Reused for save +
+  // rename of an output preset. onOk receives the trimmed name (never fires on a blank name).
+  function promptPublishPresetName(title, initial, onOk) {
+    var UI = window.VersoUI; if (!UI || !UI.Modal) return;
+    var field = UI.TextField({ value: initial || "" });
+    var inputEl = field.input || (field.querySelector && field.querySelector("input,textarea"));
+    var body = h("div"); body.appendChild(field);
+    var modal;
+    function commit() {
+      var val = (inputEl && inputEl.value != null ? inputEl.value : "").trim();
+      if (!val) return;
+      if (modal && modal.close) modal.close();
+      onOk(val);
+    }
+    var footer = h("div");
+    footer.appendChild(UI.Button({ variant: "secondary", label: "Cancel", onClick: function () { if (modal && modal.close) modal.close(); } }));
+    footer.appendChild(UI.Button({ variant: "primary", label: "Save", onClick: commit }));
+    modal = UI.Modal({ title: title, children: body, footer: footer });
+    document.body.appendChild(modal);
+    if (inputEl) { setTimeout(function () { inputEl.focus(); inputEl.select && inputEl.select(); }, 0); inputEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); commit(); } }); }
+  }
+  // Download a built package (T1 fallback; the File System Access folder-write is T3's save-path).
+  function downloadPublishPackage(pkg) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(pkg.blob); a.download = pkg.name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    return { to: "download", path: pkg.name };
+  }
+  var __publishRunning = false;
+  // Run every PENDING row sequentially: switch to that doc so buildPackage reads it, build a SCORM
+  // package with the default options, deliver (download), and record the result. The active doc is
+  // restored at the end. Done rows stay (greyed) with their result; the queue is not auto-emptied.
+  function runPublishQueue() {
+    var PQ = window.PublishQueue, SX = window.SCORMExport; if (!PQ || !SX) return;
+    if (location.protocol === "file:") { window.alert("Publish needs the http:// origin so it can bundle fonts, course.css and interactions.\n\nRun ./serve.command and open http://localhost:8123, then Publish again."); return; }
+    var q = publishQueue();
+    var pend = PQ.pendingRows(q);
+    if (!pend.length || __publishRunning) return;
+    __publishRunning = true;
+    var originalId = activeDocId, i = 0;
+    renderPublishQueue();
+    function finish() {
+      __publishRunning = false;
+      if (activeDocId !== originalId && registry[originalId]) switchDoc(originalId);
+      savePublishQueue(); renderPublishQueue();
+    }
+    function step() {
+      if (i >= pend.length) { finish(); return; }
+      var row = pend[i++];
+      if (!registry[row.docId]) { PQ.setStatus(q, row.id, "error", { to: "error", path: "document not found" }); savePublishQueue(); renderPublishQueue(); step(); return; }
+      PQ.setStatus(q, row.id, "running"); renderPublishQueue();
+      var run = function () {
+        Promise.resolve()
+          .then(function () { return SX.buildPackage(publishOptionsForRow(row)); })
+          .then(function (pkg) { return downloadPublishPackage(pkg); })
+          .then(function (res) { PQ.setStatus(q, row.id, "done", res); })
+          .catch(function (e) { PQ.setStatus(q, row.id, "error", { to: "error", path: String((e && e.message) || e) }); })
+          .then(function () { savePublishQueue(); renderPublishQueue(); step(); });
+      };
+      if (activeDocId !== row.docId) { switchDoc(row.docId); requestAnimationFrame(run); } else run();
+    }
+    step();
+  }
   // Creates a Product container and persists it; the sole write path other Product Rail
   // tickets (new-product-flow, promote-to-product) build their UI on top of.
   function createProduct(name) {
@@ -10726,6 +10976,7 @@
       if (btn) btn.classList.toggle("is-active", s === stage);
     });
     if (stage === "source") renderSourceStage();
+    if (stage === "publish") mountPublishStage();
     // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
     if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
   }
@@ -23280,6 +23531,10 @@
   // unconditionally (verso-format.js loads AFTER editor.js) — exportVersoPackage guards
   // on window.VersoFormat at click time.
   window.Editor.registerPipelineButton("Export .verso (project)", exportVersoPackage, false);
+  // Product Rail Epic 6 (T4): fast-track the open document into the persistent Publish queue with its
+  // remembered preset, no configure step -- the early-stage single-export path. Sits in the top-bar
+  // overflow beside the other IO actions; the Publish stage's picker rows are the other entry point.
+  window.Editor.registerPipelineButton("Send to publish queue", function () { if (activeDocId && registry[activeDocId]) addToQueue(activeDocId); }, false);
   // #69: the guarded browser->file cutover. Registered ONLY when the native store glue is
   // present (Verso desktop shell with the rebuilt bridge) -> invisible in a plain browser,
   // so it can never be triggered where it cannot safely run.
