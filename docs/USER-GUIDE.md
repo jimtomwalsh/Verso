@@ -78,8 +78,8 @@ own **editor header** beneath it.
 
 - **Global bar (very top).** App-level only: the **Verso** mark, the **product picker** (sets the
   active product across Source, Edit and Publish — and **scopes the open tabs** to that product;
-  "All products" shows every open tab; your choice is **remembered across refresh**) and the
-  **storage-health dot**.
+  "All products" shows every open tab; your choice is **remembered across refresh**), a **＋** beside
+  it to **create a new product** from scratch, and the **storage-health dot**.
 - **Editor header (Edit stage).** Everything about the document you're editing lives here, on one
   bar split into three zones by faint dividers. **Tabs** (left): the **file-picker** (▤, browse all
   courses — a browser **grouped by document type**, colour-coded, each card showing its product,

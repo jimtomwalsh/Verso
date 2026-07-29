@@ -11092,6 +11092,25 @@
       value: __activeProduct,
       onChange: function (v) { setActiveProduct(v); renderSourceStage(); reconcileActiveTabToScope(); } // re-resolve the Product's document + re-scope the Edit tabs
     }));
+    // new-product-button: a "+" beside the picker creates an empty Product from scratch (the only
+    // other path, Promote to Product, tags an already-open course -- it can't make a net-new one).
+    if (U.IconButton) {
+      var addBtn = U.IconButton({ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt });
+      addBtn.classList.add("product-picker__add");
+      host.appendChild(addBtn);
+    }
+  }
+  // Create an empty Product from a single-field name modal, then select it (scope switches to it).
+  // First-document creation is handled by the editor's empty-state file picker once the scope is set.
+  function newProductPrompt() {
+    promptModal("New product", "Product name", "", function (v) {
+      var name = (v || "").trim(); if (!name) return;
+      var prod = createProduct(name); if (!prod) return;
+      setActiveProduct(prod.id);
+      mountProductPicker();          // rebuild the dropdown with the new Product selected
+      renderSourceStage();
+      reconcileActiveTabToScope();   // re-scope the Edit tabs to the new (empty) Product
+    });
   }
   window.__productRail.getActiveProduct = getActiveProduct;
   window.__productRail.setActiveProduct = setActiveProduct;
