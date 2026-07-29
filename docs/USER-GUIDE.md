@@ -814,5 +814,35 @@ remains the full-featured path.
 
 ---
 
+## 19. Product Rail: Publish stage (early)
+
+The **Publish** rail tab is a **persistent publish queue** — like a render queue. You line up the
+documents you want to package, then run them all with one button; the queue is saved, so it survives
+a refresh and a stage-switch.
+
+- **Left — pick documents.** A list of your documents, scoped to the Product chosen in the top bar
+  (all documents when no Product is selected). Click **+** on a row to add it to the queue, or use
+  **Add current document** at the top to queue the document you have open. A solo export is just a
+  queue of one.
+- **Send straight from the editor.** You don't have to switch stages first: the top-bar **Import &
+  export** (⋯) menu has **Send to publish queue**, which drops the document you're editing into the
+  queue with its remembered preset — no configuration — and confirms with a small toast. Queue a few
+  in a row, then switch to Publish and run them.
+- **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
+  **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
+  that's already queued re-arms it rather than duplicating it.
+- **Presets.** Each queue row shows an **output preset** chip — click it to switch the row's preset,
+  save the current settings as a new named preset, or rename/delete one of your own. Three come built
+  in: **Master** (full quality), **Review copy** (adds the reviewer file, learner theme off), and
+  **Lightweight** (optimises media hard for a smaller package). Presets are shared across the app, and
+  each document remembers the preset it last used, so re-queuing it is one click.
+- **Publish.** One **Publish** button runs every pending row in turn: each is packaged as a SCORM
+  `.zip` (using that row's preset) and downloaded. Done rows stay in the queue, greyed, with their
+  result — the queue isn't cleared, so you can see what shipped.
+
+This is an early view — a chosen save folder and staleness dots arrive in later updates.
+
+---
+
 *This guide reflects the app as built. When a screen doesn't match, the app — and the
 `SCHEMA-TEMPLATE-GUIDE.md` and `SPEC-*.md` docs in this folder — are the source of truth.*
