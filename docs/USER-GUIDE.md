@@ -99,12 +99,13 @@ own **editor header** beneath it.
   panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
   palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
   components** beneath it: **My Components** (course-local), **Blocks** and **Pages** (the shared
-  cross-course library, §9). **Source** — the source-topic list for the active product; click a
-  topic to open it in the Source stage, or press its **+** to insert it as a **live-linked block**
-  on the current page (a 🔗 instance — edit the source and every placement updates). From the
-  block's instance settings, **Open in Source** jumps back to its topic; and in the Source stage a
-  topic's **Linked in** list jumps to the exact block that uses it. The panel remembers which
-  section you last used.
+  cross-course library, §9). **Source** — a **read-only, live view of the open document's product
+  source**: the same source document you'd see in the Source stage, in a narrow reading column,
+  with a **search box** (type to find, Enter / Shift+Enter to cycle matches) and a **table of
+  contents** that jumps to a chapter and tracks where you're reading. It keys off the document you
+  have open (its product), not the product picker, so it always matches the course in front of you.
+  It's read-only — all source editing stays in the Source stage. The panel remembers which section
+  you last used. (Placing linked copy from here onto the canvas is arriving next.)
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
   pinch) to zoom. Every page is a live, editable render of what the learner will see. The board
   follows the document's **geometry** (set by its preset, §2): **reflow** flows content down a
