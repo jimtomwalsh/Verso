@@ -11903,6 +11903,26 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
 // An image or table is a first-class markable OBJECT: its mark is a node-id reference (anchor
 // with no start/len), stable by construction -- nothing to survive when surrounding prose is
 // edited. The model half is pure (proven here); the selection + create UX is wired in editor.js.
+// ---- A1: source image resize width core (product-rail-source-image-resize-handles) --------
+section("Source image A1: width clamp + snap (pure core)");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-imgwidth-start \*\/([\s\S]*?)\/\* @pure-imgwidth-end \*\//);
+  if (!m) { ok("locate @pure-imgwidth fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { clampSourceImgWidth: clampSourceImgWidth, snapSourceImgWidth: snapSourceImgWidth };")();
+  // clamp: blank/NaN -> 100 (full width); below 20 floors; above 100 caps.
+  ok("clamp NaN -> 100", g.clampSourceImgWidth("") === 100 && g.clampSourceImgWidth(undefined) === 100);
+  ok("clamp floors at 20", g.clampSourceImgWidth(5) === 20 && g.clampSourceImgWidth(20) === 20);
+  ok("clamp caps at 100", g.clampSourceImgWidth(140) === 100 && g.clampSourceImgWidth(100) === 100);
+  ok("clamp passes a mid value", g.clampSourceImgWidth(63) === 63);
+  ok("clamp parses a percent string", g.clampSourceImgWidth("47%") === 47);
+  // snap: within ~4% of a stop magnetises; otherwise rounds and stays free.
+  ok("snap catches near-50", g.snapSourceImgWidth(52) === 50 && g.snapSourceImgWidth(48) === 50);
+  ok("snap catches near-25/75/100", g.snapSourceImgWidth(27) === 25 && g.snapSourceImgWidth(73) === 75 && g.snapSourceImgWidth(97) === 100);
+  ok("snap leaves an in-between value (rounded)", g.snapSourceImgWidth(60) === 60 && g.snapSourceImgWidth(41.4) === 41);
+  ok("snap boundary is ~4%", g.snapSourceImgWidth(45) === 45 && g.snapSourceImgWidth(46) === 50);
+})();
+
 section("Source rewrite: object (image/table) marks (Epic 2b)");
 (function () {
   var SD = require(path.join(ROOT, "src/source-doc.js"));

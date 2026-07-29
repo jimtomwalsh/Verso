@@ -12065,13 +12065,43 @@
   // are contentEditable so the base prose can be edited when unlocked; structural blocks (list/
   // table/image) render for reading in v1 (cell/list editing is fast-follow, spec 6) but still
   // carry marks. Marks paint over whatever text these blocks contain via the engine.
+  /* @pure-imgwidth-start */
+  // A1 (source image resize): width is stored as node.imgWidth = % of the column, so render
+  // is pure (editor == export). Blank/>=100 = full width. These two helpers are the pure core
+  // exercised by tests/run.js.
+  function clampSourceImgWidth(w) {
+    w = parseFloat(w);
+    if (isNaN(w)) return 100;
+    return Math.max(20, Math.min(100, w));
+  }
+  // Free-drag with a light magnetic snap at 25/50/75/100% (within ~4% of a stop).
+  function snapSourceImgWidth(pct) {
+    var stops = [25, 50, 75, 100];
+    for (var i = 0; i < stops.length; i++) { if (Math.abs(pct - stops[i]) <= 4) return stops[i]; }
+    return Math.round(pct);
+  }
+  /* @pure-imgwidth-end */
+
   function renderSourceDocNode(node) {
     var SD = window.SourceDoc, el;
     if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
     else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); cb.textContent = SD.nodeText(node); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
     else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
     else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row) { var tr = h("tr"); (row || []).forEach(function (c) { tr.appendChild(h("td", null, c)); }); el.appendChild(tr); }); }
-    else if (node.type === "image") { el = h("figure", "source-doc__figure"); var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt; el.appendChild(im); if (node.caption) el.appendChild(h("figcaption", null, node.caption)); }
+    else if (node.type === "image") {
+      // A1: the image sits inside a sized wrap so the L/R resize handles pin to the image edges
+      // (not the full-width figure). Width = node.imgWidth % of the column, applied purely.
+      el = h("figure", "source-doc__figure");
+      var wrap = h("span", "source-doc__imgwrap");
+      var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt;
+      var iw = clampSourceImgWidth(node.imgWidth == null ? 100 : node.imgWidth);
+      if (iw < 100) wrap.style.width = iw + "%";
+      wrap.appendChild(im);
+      wrap.appendChild(h("span", "source-doc__handle source-doc__handle--l"));
+      wrap.appendChild(h("span", "source-doc__handle source-doc__handle--r"));
+      el.appendChild(wrap);
+      if (node.caption) el.appendChild(h("figcaption", null, node.caption));
+    }
     else { el = h("p", "source-doc__p"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
     el.setAttribute("data-node", node.key);
     // image/table = a first-class markable OBJECT (a node-id mark, no text span). Tag it so a
@@ -12140,6 +12170,7 @@
 
     __sourceMarksEngine = SM.create({ root: art, model: model });
     repaintSourceMarks();
+    wireSourceImageResize(topic, art, model);
 
     // A cross-paragraph edit (typing/deleting over a selection that spans blocks, or a Backspace/Delete
     // that would merge two paragraphs) can't be left to the browser -- with one editing host it would
@@ -12230,6 +12261,7 @@
     // clicking a painted mark activates it (contextual view is the alternates/comments tickets;
     // here we confirm the hit-test + active repaint work).
     art.addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".source-doc__handle")) return; // resize handle, not a select
       if (!__sourceShowMarks) return;
       // an image/table is a whole-node OBJECT: a click on it selects the object (not a text span)
       // and offers the same alternate/comment actions, anchored by node id (spec 6).
@@ -12945,6 +12977,44 @@
     while ((n = tw.nextNode())) { if (acc + n.length >= offset) { target = n; to = offset - acc; break; } acc += n.length; }
     if (!target) { target = el; to = 0; }
     try { var rg = document.createRange(); rg.setStart(target, to); rg.collapse(true); var s = window.getSelection(); s.removeAllRanges(); s.addRange(rg); } catch (e) {}
+  }
+  // A1: drag the L/R grab handles on a selected source image to resize it live. Width is symmetric
+  // about the image centre (newWidth = 2 x |pointerX - centreX|), snapped lightly to 25/50/75/100%,
+  // and committed to node.imgWidth on release (a base edit -> gated behind the unlock, like prose).
+  function wireSourceImageResize(topic, art, model) {
+    art.addEventListener("pointerdown", function (e) {
+      var handle = e.target && e.target.closest ? e.target.closest(".source-doc__handle") : null;
+      if (!handle) return;
+      var fig = handle.closest(".source-doc__figure[data-node]"); if (!fig) return;
+      e.preventDefault(); e.stopPropagation();
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to resize the image."); return; }
+      var nodeKey = fig.getAttribute("data-node");
+      var wrap = fig.querySelector(".source-doc__imgwrap"); if (!wrap) return;
+      var figRect = fig.getBoundingClientRect();
+      var colW = figRect.width, centreX = figRect.left + figRect.width / 2;
+      if (!colW) return;
+      var guide = h("span", "source-doc__resize-guide"); wrap.appendChild(guide);
+      fig.classList.add("is-resizing");
+      var lastPct = clampSourceImgWidth(wrap.style.width ? parseFloat(wrap.style.width) : 100);
+      function move(ev) {
+        var pct = snapSourceImgWidth(clampSourceImgWidth(2 * Math.abs(ev.clientX - centreX) / colW * 100));
+        lastPct = pct;
+        wrap.style.width = pct >= 100 ? "" : pct + "%";
+      }
+      function up() {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        if (guide.parentNode) guide.remove();
+        fig.classList.remove("is-resizing");
+        var node = (model.nodes || []).find(function (n) { return n.key === nodeKey; });
+        if (node) {
+          if (lastPct >= 100) delete node.imgWidth; else node.imgWidth = lastPct;
+          persistSourceDocModel(topic, model);
+        }
+      }
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
   }
   function positionSourceSelBar(bar, r) {
     var host = document.getElementById("source-stage-article"); if (!host || !bar || !r) return;
