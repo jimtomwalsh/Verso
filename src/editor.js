@@ -2304,6 +2304,11 @@
       pickCourseFile(function (imported) { importDocToRegistry(imported); closeBrowser(); });
     });
     bar.appendChild(importBtn);
+    // new-product-empty-landing: create a Product straight from the browser header. newProductPrompt
+    // sets it as the active scope and re-opens this browser onto its (empty) grid.
+    var newProdBtn = h("button", "vbrowser__btn", "New Product");
+    newProdBtn.addEventListener("click", function () { newProductPrompt(); });
+    bar.appendChild(newProdBtn);
     var newBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "New course");
     newBtn.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
     bar.appendChild(newBtn);
@@ -11215,8 +11220,13 @@
       var prod = createProduct(name); if (!prod) return;
       setActiveProduct(prod.id);
       mountProductPicker();          // rebuild the dropdown with the new Product selected
-      renderSourceStage();
+      // new-product-empty-landing: land on the Edit-stage document browser, empty (no documents are
+      // tagged to the new Product yet), rather than a bespoke per-stage prompt. Creating a document
+      // from that empty browser pre-stamps it with this Product (showNewDocDialog reads the scope).
+      setStage("edit");
       reconcileActiveTabToScope();   // re-scope the Edit tabs to the new (empty) Product
+      renderSourceStage();           // keep the Source stage's own doc bound for when it's opened
+      openBrowser();                 // the empty document browser for the new Product
     });
   }
   window.__productRail.getActiveProduct = getActiveProduct;
