@@ -19373,6 +19373,15 @@
 
     // ---- reading column (read-only projection; the SAME renderSourceDocNode the stage uses) ----
     (model.nodes || []).forEach(function (n) { docCol.appendChild(renderSourceDocNode(n)); });
+    // 07: a source figure is draggable as one unit -> a linked image block. Object-anchor descriptor
+    // (no start/len). Images aren't text-selectable, so a pointerdown-drag on the figure is safe.
+    Array.prototype.forEach.call(docCol.querySelectorAll("figure.source-doc__figure[data-object]"), function (figEl) {
+      figEl.classList.add("edit-source__figure");
+      figEl.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault();
+        startSourceLinkDrag({ anchor: { nodeKey: figEl.getAttribute("data-node") } }, ev);
+      });
+    });
     // Scroll-spy: highlight the TOC entry for the last heading scrolled above the top.
     docCol.addEventListener("scroll", function () {
       if (!tocRows.length) return;
@@ -19488,14 +19497,49 @@
   // format-split (05): source structure -> destination block type. heading lvl1 -> Heading 1
   // (heading block), heading lvl2/3 -> Heading 2 (subheading block), paragraph/callout -> Body.
   var SOURCE_LINK_BLOCK_TYPE = { h1: "heading", h2: "subheading", body: "paragraph" };
-  // The armed drop: run the format-split planner over the armed range and insert ONE locked, live-
-  // linked text block per contiguous same-format run (in document order), each in the destination's
-  // matching preset. A single-format range yields one block; consecutive same-format nodes stay in
-  // one block (its covered nodes joined by line breaks). Each block resolves live via 01 + bakes.
-  function placeArmedSourceLink() {
+  var SOURCE_LINK_TEXT_TYPES = { heading: 1, subheading: 1, paragraph: 1, note: 1, quote: 1 };
+  // A drop target counts as "a text block to merge into" (06) only if it's an editable text block
+  // that isn't itself a whole-block linked placement (don't nest a link inside a link).
+  function isSourceLinkTextBlock(b) { return !!(b && SOURCE_LINK_TEXT_TYPES[b.type] && !b.sourceLink); }
+  // The armed drop. Dropping ONTO an existing text block appends a locked linked inline span there
+  // (06); dropping in a gap runs the format-split planner and inserts one linked block per same-
+  // format run (05). Optional (cx,cy) = the drop point (from the drag or the armed click); absent ->
+  // gap placement on the current page.
+  function placeArmedSourceLink(cx, cy) {
     var a = __armedSourceLink; if (!a) return false;
     __armedSourceLink = null;
     document.body.classList.remove("is-arming-source-link");
+    // An object anchor (no start/len) is a figure link (07) -> always a new linked image block.
+    var isObject = !!(a.descriptor && a.descriptor.anchor && a.descriptor.anchor.len == null);
+    if (cx != null) {
+      if (!isObject) {
+        var el = document.elementFromPoint(cx, cy);
+        var blockEl = el && el.closest ? el.closest(".canvas-block") : null;
+        if (blockEl && isSourceLinkTextBlock(blockEl.__block)) return dropInlineSourceLink(a, blockEl.__block);
+      }
+      var pi = pageIndexFromPoint(cx, cy); if (pi >= 0) setActivePage(pi);
+    }
+    return isObject ? placeSourceLinkImage(a) : placeSourceLinkBlocks(a);
+  }
+  // 07: drop a source figure -> a new linked image block. The link is an OBJECT mark (anchor
+  // {nodeKey}, no start/len); the image block resolves its src/alt from the figure node via 01.
+  function placeSourceLinkImage(a) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor }); // object mark (len null)
+    master.doc = SD.toJSON(model); saveLibrary();
+    insertBlock({ type: "image", id: mintId(), sourceLink: { masterId: a.masterId, markId: mk.id } });
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel();
+    sourceToast("Linked image placed.");
+    return true;
+  }
+  // 05: gap placement -- run the format-split planner and insert ONE locked, live-linked text block
+  // per contiguous same-format run (each in the destination's matching preset). A single-format range
+  // yields one block; consecutive same-format nodes stay in one block joined by line breaks.
+  function placeSourceLinkBlocks(a) {
     var SD = window.SourceDoc;
     var master = libComponents()[a.masterId];
     if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
@@ -19510,6 +19554,27 @@
     decorateSourceLinks();
     if (_activeLeftSection === "source") renderEditSourcePanel(); // repaint so newly-linked passages highlight
     sourceToast(plan.length > 1 ? ("Placed " + plan.length + " linked blocks.") : "Linked block placed.");
+    return true;
+  }
+  function slEscape(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  // 06: drop onto a text block -> append a locked, live-linked inline span to that block. The whole
+  // dropped range flattens to ONE link mark (you're merging into body prose; the 05 format-split is
+  // between-block only). Owned text around the span stays editable; the span is contenteditable=false
+  // (locked) and resolves live via 01's #120-style inline post-pass, baking at export.
+  function dropInlineSourceLink(a, block) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor, endAnchor: a.descriptor.endAnchor });
+    master.doc = SD.toJSON(model); saveLibrary();
+    pushHistory();
+    var span = '<span data-source-link="' + mk.id + '" data-master="' + a.masterId + '">' + slEscape(SD.markText(model, mk)) + '</span>';
+    block.text = (block.text ? block.text + " " : "") + span;
+    reapplyBlock(block);
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel();
+    sourceToast("Linked span added.");
     return true;
   }
   // 04: the destination page under a drop point (its .frame -> .page[data-page-id] -> doc index).
@@ -19537,10 +19602,8 @@
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
       ghost.remove(); document.body.classList.remove("is-dragging-source-link"); clearTarget();
       if (!frameElementUnder(e.clientX, e.clientY)) { sourceToast("Dropped outside the canvas — nothing placed."); return; }
-      var pi = pageIndexFromPoint(e.clientX, e.clientY);
-      if (pi >= 0) setActivePage(pi);
       __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
-      placeArmedSourceLink();
+      placeArmedSourceLink(e.clientX, e.clientY); // routes to inline-span (onto a text block) or gap placement
     }
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     move(ev);
@@ -19567,6 +19630,14 @@
         badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); jumpSourcePanelToMark(b.sourceLink.masterId, b.sourceLink.markId); });
         node.appendChild(badge);
       }
+    });
+    // 06: per-span indicator inside a mixed block -- each locked linked inline span gets its own
+    // contextual link cue + click-to-jump (distinct from the whole-block badge above).
+    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block span[data-source-link]"), function (sp) {
+      sp.classList.add("is-source-linked-span");
+      if (sp.__slWired) return; sp.__slWired = true;
+      sp.title = "Linked from source — click to jump to the source passage";
+      sp.addEventListener("click", function (e) { e.stopPropagation(); jumpSourcePanelToMark(sp.getAttribute("data-master"), sp.getAttribute("data-source-link")); });
     });
   }
   // Panel: highlight passages already linked into the OPEN document (a persistent cue, distinct from
@@ -19596,7 +19667,7 @@
     document.addEventListener("click", function (e) {
       if (!__armedSourceLink) return;
       var cv = document.getElementById("canvas-viewport");
-      if (cv && cv.contains(e.target)) { e.preventDefault(); e.stopPropagation(); placeArmedSourceLink(); }
+      if (cv && cv.contains(e.target)) { e.preventDefault(); e.stopPropagation(); placeArmedSourceLink(e.clientX, e.clientY); }
     }, true);
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && __armedSourceLink) { e.preventDefault(); cancelArmedSourceLink(); } });
   }
