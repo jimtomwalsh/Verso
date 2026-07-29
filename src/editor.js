@@ -19909,11 +19909,18 @@
     var model = SD.fromJSON(master.doc);
     var plan = SD.planLinkedBlocks(model, a.descriptor);
     if (!plan.length) return false;
-    plan.forEach(function (run) {
-      var mk = SD.addMark(model, { type: "link", anchor: run.anchor, endAnchor: run.endAnchor });
-      insertBlock({ type: SOURCE_LINK_BLOCK_TYPE[run.format] || "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: mk.id } });
+    // Mint every link mark and PERSIST them to the master BEFORE inserting any block (#161): insertBlock
+    // renders the canvas, and the render resolver (resolveSourceLinkContent) reads master.doc to fill the
+    // linked copy live. Persisting AFTER the insert loop (the old order) meant that first render saw the
+    // pre-mark master.doc, markById returned null, and the block rendered blank + collapsed until an
+    // unrelated re-render. placeSourceLinkImage already persists before its insertBlock -- match it.
+    var markIds = plan.map(function (run) {
+      return SD.addMark(model, { type: "link", anchor: run.anchor, endAnchor: run.endAnchor }).id;
     });
     master.doc = SD.toJSON(model); saveLibrary();
+    plan.forEach(function (run, i) {
+      insertBlock({ type: SOURCE_LINK_BLOCK_TYPE[run.format] || "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: markIds[i] } });
+    });
     decorateSourceLinks();
     if (_activeLeftSection === "source") renderEditSourcePanel(); // repaint so newly-linked passages highlight
     sourceToast(plan.length > 1 ? ("Placed " + plan.length + " linked blocks.") : "Linked block placed.");
