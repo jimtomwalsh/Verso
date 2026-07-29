@@ -691,10 +691,11 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
 The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
 authoring a chapter's text, importing, annotations, history and comments all work as described.
 
-**Attaching a course to a Product.** Open a course, then **Save/Recents → Promote to Product…**.
-Pick an existing Product or create a new one, choose a Format (eLearning, Presentations, or Print
-docs), and promote. This only tags the course — its content is never touched. The top-bar Product
-dropdown then lets you switch between every course, and the Source wiki, for that Product.
+**Attaching a course to a Product.** In the file picker (the **Home** button), open a course card's
+**⋯** menu and choose **Promote to Product…**. Pick an existing Product or create a new one, choose a
+Format (eLearning, Presentations, or Print docs), and promote. This only tags the course — its content
+is never touched. The top-bar Product dropdown then lets you switch between every course, and the
+Source wiki, for that Product.
 
 **Exporting the source to Markdown.** On the **Source** stage, the **Product actions** menu (the ⋯
 button by the toolbar) has **Export to Markdown** — it downloads the Product's whole continuous
@@ -702,8 +703,8 @@ document as a portable `.md` file (named after the Product). Headings, paragraph
 bullet and numbered lists, tables, images, and callouts all come across, so it round-trips with the
 Markdown import. Nothing is changed in the app; it's a save-a-copy.
 
-**Unlinking and deleting.** To detach a course from its Product, open it and choose **Save/Recents →
-Remove from Product** (the course and its content stay; only the tag is removed). On the **Source**
+**Unlinking and deleting.** To detach a course from its Product, open its card's **⋯** menu in the file
+picker and choose **Remove from Product** (the course and its content stay; only the tag is removed). On the **Source**
 stage, the **Product actions** menu (the ⋯ button by the toolbar) lets you **Unlink all courses** from
 a Product, **Delete source document** (clears the whole continuous document but keeps the Product), or
 **Delete Product** (removes the Product entirely, including its source and the tag on any linked

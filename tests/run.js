@@ -2578,16 +2578,16 @@ section("#69 migration cutover");
   ok("loadProducts reads via productsAdapter, not a hardcoded localStorage call", /function loadProducts\(\) \{[\s\S]{0,200}productsAdapter\(\)\.readProducts\(\)/.test(ed));
   ok("saveProducts writes via productsAdapter, not a hardcoded localStorage call", /function saveProducts\(\) \{ try \{ productsAdapter\(\)\.writeProducts\(JSON\.stringify\(window\.ProductsStore\)\); \} catch \(e\) \{\} \}/.test(ed));
   ok("store-native.js carries the same readProducts/writeProducts pair as readLibrary/writeLibrary", /readProducts: function \(\) \{ return productsCache; \}/.test(src("src/store-native.js")) && /writeProducts: function \(json\)/.test(src("src/store-native.js")));
-  // WIRING (Product Rail): "Promote to Product" -- a per-course-only save-menu action
-  // that writes ONLY doc.meta.productId/stage, never content, never a bulk variant.
-  ok("'Promote to Product…' is wired into the save menu's action list", /action\("Promote to Product…", function \(\) \{ promoteToProductModal\(\); \}\)/.test(ed));
-  ok("no bulk/batch variant exists anywhere (only ever operates on the single `doc`)", (ed.match(/promoteToProductModal\(/g) || []).length === 2); // definition + the one call site above
-  var ptmStart = ed.indexOf("function promoteToProductModal()");
-  ok("promoteToProductModal found", ptmStart !== -1);
+  // WIRING (Product Rail): "Promote to Product" -- folded into the file picker's per-card menu
+  // (side-rail-cleanup slice 2); parameterised by the specific card's doc, writes ONLY its meta.
+  ok("'Promote to Product…' is wired into the file picker's per-card menu, on the card's doc", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ed));
+  ok("promoteToProductModal has ONE UI call site (the per-card menu) + its definition", (ed.match(/promoteToProductModal\(/g) || []).length === 2);
+  var ptmStart = ed.indexOf("function promoteToProductModal(targetDoc)");
+  ok("promoteToProductModal found (parameterised by targetDoc)", ptmStart !== -1);
   var ptmBody = ed.slice(ptmStart, ptmStart + 1900);
   ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
   ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Format"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
-  ok("writes ONLY doc.meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(doc, pid, stage\);\s*\n\s*saveRegistry\(registry\);/.test(ptmBody));
+  ok("writes ONLY the target doc's meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(td, pid, stage\);\s*\n\s*saveRegistry\(registry\);/.test(ptmBody));
   ok("A1: onPrimary dismisses the modal (shell.modal.close) + refreshes the product context (mountProductPicker)", /saveRegistry\(registry\);\s*\n\s*shell\.modal\.close\(\);\s*\n\s*mountProductPicker\(\);/.test(ptmBody));
   ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
@@ -8508,7 +8508,12 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("rail has exactly the 3 new segments", /id="rail-tab-source"/.test(idx) && /id="rail-tab-edit"/.test(idx) && /id="rail-tab-publish"/.test(idx));
   ok("old single Document tab is gone", idx.indexOf('id="rail-tab-document"') === -1);
   ok("Edit is the default active segment", /id="rail-tab-edit" data-rail-tab="edit"[^>]*class="[^"]*"|class="rail-btn rail-tab is-active" id="rail-tab-edit"/.test(idx));
-  ok("pinned bottom rail actions unchanged (Settings, Help/Docs, Recents)", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && /id="save-menu-btn"/.test(idx));
+  // side-rail-cleanup slice 2: the rail keeps Help + Settings; the Recents/file-actions popover is
+  // retired (recents + Promote/Remove/store-path folded into the file picker).
+  ok("pinned bottom rail actions = Settings + Help/Docs; the save-menu popover is retired", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && !/id="save-menu-btn"/.test(idx));
+  ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
+  ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(e) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(e));
+  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(e) && /\.vbrowser__foot/.test(src("editor.css")));
   ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
   // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
   ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(e) && /function mountProductPicker/.test(e));
@@ -8858,7 +8863,7 @@ section("Product Rail: Source stage variant columns");
   ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
   ok("lifecycle: deleteProductSource removes the master + every topic tagged to the Product", /function deleteProductSource\(pid\)[\s\S]{0,400}c\.kind === "topic" && c\.productId === pid[\s\S]{0,200}delete comps\[product\.groundTruthId\]/.test(e));
   ok("lifecycle: deleteProduct clears the source, unlinks its courses, and removes the entry", /function deleteProduct\(pid\)[\s\S]{0,200}deleteProductSource\(pid\);\s*unlinkAllCoursesFromProduct\(pid\);\s*delete window\.ProductsStore\[pid\]/.test(e));
-  ok("lifecycle: the save menu offers Remove from Product only for a linked course", /doc\.meta\.productId && window\.ProductsStore\[doc\.meta\.productId\][\s\S]{0,200}action\("Remove from Product"[\s\S]{0,300}unlinkDocFromProduct\(doc\)/.test(e));
+  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,400}if \(linked\) \{[\s\S]{0,120}"Remove from Product"[\s\S]{0,600}unlinkDocFromProduct\(d\)/.test(e));
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");

@@ -1766,14 +1766,17 @@
   // dsSelect pattern Find & Replace's variant picker already established, not a new
   // control -- see modalField(box, "Apply to") at the Find & Replace call site.
   var PRODUCT_STAGE_OPTS = [["eLearning", "elearning"], ["Presentations", "presentations"], ["Print docs", "printDocs"]];
-  function promoteToProductModal() {
-    if (!doc) return;
+  // targetDoc defaults to the active doc (top-bar / header entry points); the file picker's per-card
+  // menu passes a specific registry doc so any course can be promoted without opening it first.
+  function promoteToProductModal(targetDoc) {
+    var td = targetDoc || doc;
+    if (!td) return;
     var NEW_KEY = "__new__";
     var products = window.ProductsStore || {};
     var productKeys = Object.keys(products);
     var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
     var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
-    var stage = (doc.meta && doc.meta.stage) || "elearning";
+    var stage = (td.meta && td.meta.stage) || "elearning";
     var newNameVal = "";
     var shell = dsModalShell({
       title: "Promote to Product",
@@ -1787,7 +1790,7 @@
           pid = createProduct(name).id;
         }
         pushHistory();
-        tagDocProductStage(doc, pid, stage);
+        tagDocProductStage(td, pid, stage);
         saveRegistry(registry);
         shell.modal.close();
         mountProductPicker(); // refresh the top-bar product context so the new/changed Product shows
@@ -2176,16 +2179,29 @@
       }, { danger: true, okLabel: "Delete" });
   }
   function showCourseMenu(x, y, id) {
-    if (!registry[id]) return;
-    showContextMenu(x, y, [
+    var d = registry[id]; if (!d) return;
+    // side-rail-cleanup slice 2: Promote / Remove-from-Product folded in from the retired save-menu, so
+    // the file picker is the one home for file actions. Remove only shows when the course is tagged.
+    var linkedPid = d.meta && d.meta.productId;
+    var linked = !!(linkedPid && window.ProductsStore && window.ProductsStore[linkedPid]);
+    var items = [
       { label: "Open", onClick: function () { openCourseFromBrowser(id); } },
       { label: "Duplicate", onClick: function () { duplicateCourse(id); } },
       { label: "Rename…", onClick: function () { renameCourse(id); } },
       { sep: true },
-      { label: "Export .verso", onClick: function () { exportVersoPackage(registry[id]); } },
-      { sep: true },
-      { label: "Delete", danger: true, onClick: function () { deleteCourse(id); } }
-    ]);
+      { label: "Promote to Product…", onClick: function () { promoteToProductModal(d); } }
+    ];
+    if (linked) {
+      items.push({ label: "Remove from Product", onClick: function () {
+        var pname = (window.ProductsStore[linkedPid].name) || "this Product";
+        confirmModal("Remove from Product?", "Unlinks “" + ((d.meta && d.meta.title) || id) + "” from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(d); mountProductPicker(); renderBrowserGrid(); }, { okLabel: "Remove", danger: true });
+      } });
+    }
+    items.push({ sep: true });
+    items.push({ label: "Export .verso", onClick: function () { exportVersoPackage(registry[id]); } });
+    items.push({ sep: true });
+    items.push({ label: "Delete", danger: true, onClick: function () { deleteCourse(id); } });
+    showContextMenu(x, y, items);
   }
 
   function buildBrowserEmpty() {
@@ -2289,9 +2305,14 @@
     closeBtn.addEventListener("click", closeBrowser);
     bar.appendChild(closeBtn);
     var grid = h("div", "vbrowser__grid");
-    overlay.appendChild(bar); overlay.appendChild(grid);
+    // side-rail-cleanup slice 2: the "where are my files" store path, folded in from the retired
+    // save-menu, so the picker carries every file affordance the popover used to.
+    var foot = h("div", "vbrowser__foot");
+    foot.appendChild(h("span", "vbrowser__foot-label", "Files stored in"));
+    foot.appendChild(h("span", "vbrowser__foot-path", storeLocationText()));
+    overlay.appendChild(bar); overlay.appendChild(grid); overlay.appendChild(foot);
     document.body.appendChild(overlay);
-    browserUI = { overlay: overlay, grid: grid, input: input };
+    browserUI = { overlay: overlay, grid: grid, input: input, foot: foot };
     return browserUI;
   }
 
@@ -2319,20 +2340,12 @@
     });
   })();
 
-  // ---- #75 Save / recents menu (top-bar dropdown) ---------------------------
-  // A condensed version of the browser for quick access without leaving the
-  // editor: recent courses (mini snapshots), Save as a copy (duplicate into the
-  // library), Open (import .verso), and a read-only "where are my files" store
-  // path. Reuses the same recents/thumbnail/duplicate/import single-source paths.
-  var saveMenuEl = null;
-  function onSaveMenuOutside(e) {
-    if (saveMenuEl && !saveMenuEl.contains(e.target) && e.target.id !== "save-menu-btn") closeSaveMenu();
-  }
-  function closeSaveMenu() {
-    if (!saveMenuEl) return;
-    saveMenuEl.remove(); saveMenuEl = null;
-    document.removeEventListener("mousedown", onSaveMenuOutside, true);
-  }
+  // ---- File store location -------------------------------------------------
+  // side-rail-cleanup slice 2: the #75 rail save/recents popover is RETIRED. Its recents were a
+  // subset of the file picker's grid; its actions (Save-as-copy = Duplicate, Open = Import,
+  // Promote / Remove-from-Product, and this store path) now all live in the picker (ensureBrowser
+  // + showCourseMenu), so the picker is the one home for file management. storeLocationText survives
+  // -- the picker footer reads it for the "where are my files" line.
   function storeLocationText() {
     var backend = "browser";
     try { backend = localStorage.getItem(STORAGE_BACKEND_KEY) || "browser"; } catch (_) {}
@@ -2340,60 +2353,6 @@
       ? "~/Library/Application Support/Verso/store"
       : "This browser (localStorage + IndexedDB)";
   }
-  function openSaveMenu(anchor) {
-    closeSaveMenu();
-    var menu = h("div", "vsavemenu");
-    menu.appendChild(h("div", "vsavemenu__head", "Recent courses"));
-    var ids = Object.keys(registry).sort(function (a, b) { return recentsCompare(registry[a], registry[b]); }).slice(0, 6);
-    if (!ids.length) menu.appendChild(h("div", "vsavemenu__empty", "No courses yet"));
-    ids.forEach(function (id) {
-      var d = registry[id];
-      var row = h("div", "vsavemenu__row" + (id === activeDocId ? " is-active" : ""));
-      var thumb = renderCourseThumb(d); thumb.classList.add("vsavemenu__thumb");
-      var main = h("div", "vsavemenu__main");
-      var t = h("div", "vsavemenu__title", (d.meta && d.meta.title) || id); t.title = t.textContent;
-      main.appendChild(t); main.appendChild(h("div", "vsavemenu__code", (d.meta && d.meta.code) || id));
-      row.appendChild(thumb); row.appendChild(main);
-      row.appendChild(h("div", "vsavemenu__when", formatRelativeTime(d.meta && d.meta.updatedAt, Date.now())));
-      row.addEventListener("click", function () { closeSaveMenu(); openCourseFromBrowser(id); });
-      menu.appendChild(row);
-      thumb.__renderThumb(); // few rows -> render eagerly
-    });
-    menu.appendChild(h("div", "vsavemenu__sep"));
-    function action(label, fn) {
-      var a = h("div", "vsavemenu__action", label);
-      a.addEventListener("click", function () { closeSaveMenu(); fn(); });
-      menu.appendChild(a);
-    }
-    action("Save as a copy", function () { if (activeDocId) duplicateCourse(activeDocId); });
-    action("Open…", function () { pickCourseFile(function (imported) { importDocToRegistry(imported); }); });
-    action("Promote to Product…", function () { promoteToProductModal(); });
-    if (doc && doc.meta && doc.meta.productId && window.ProductsStore[doc.meta.productId]) {
-      action("Remove from Product", function () {
-        var pname = window.ProductsStore[doc.meta.productId].name || "this Product";
-        confirmModal("Remove from Product?", "Unlinks this course from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(doc); mountProductPicker(); }, { okLabel: "Remove", danger: true });
-      });
-    }
-    menu.appendChild(h("div", "vsavemenu__sep"));
-    menu.appendChild(h("div", "vsavemenu__head", "Where are my files"));
-    menu.appendChild(h("div", "vsavemenu__path", storeLocationText()));
-    document.body.appendChild(menu);
-    var r = anchor.getBoundingClientRect();
-    var top = r.bottom + 6;
-    if (top + menu.offsetHeight > window.innerHeight - 8) top = Math.max(8, r.top - menu.offsetHeight - 6);
-    menu.style.top = top + "px";
-    menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + "px";
-    saveMenuEl = menu;
-    setTimeout(function () { document.addEventListener("mousedown", onSaveMenuOutside, true); }, 0);
-  }
-  function saveMenuIsOpen() { return !!saveMenuEl; }
-  (function wireSaveMenu() {
-    var b = document.getElementById("save-menu-btn");
-    if (b) b.addEventListener("click", function () { if (saveMenuEl) closeSaveMenu(); else openSaveMenu(b); });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && saveMenuIsOpen()) { e.preventDefault(); closeSaveMenu(); }
-    });
-  })();
 
   // ---- Shared "header & footer default for new courses" ---------------------
   // A machine-level default (localStorage, cross-project) captured from any course's
@@ -23411,9 +23370,8 @@
       return !!block;
     },
     closeTourBuilder: function () { closeTourBuilder(); },
-    // #75 save / recents dropdown — open under the top-bar history button.
-    openSaveMenu: function () { var b = document.getElementById("save-menu-btn"); openSaveMenu(b || document.body); },
-    closeSaveMenu: function () { closeSaveMenu(); },
+    // side-rail-cleanup slice 2: the #75 save/recents popover is retired -- the file picker
+    // (Editor.openBrowser) is now the one home for recents + file actions.
     // #74 card actions (also reached via each card's "…" menu) — exposed for wiring/verify.
     duplicateCourse: function (id) { duplicateCourse(id); },
     renameCourse: function (id) { renameCourse(id); },
