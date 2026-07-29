@@ -19207,7 +19207,7 @@
       el.hidden = el.getAttribute("data-lsec") !== sec;
     });
     mountLeftSwitcher(); // re-render so the active segment reflects the state (also on programmatic switches)
-    if (sec === "source") renderLeftSourceNav();
+    if (sec === "source") renderEditSourcePanel();
   }
   function mountLeftSwitcher() {
     var host = document.getElementById("lpane-switch"); if (!host) return;
@@ -19220,41 +19220,95 @@
       onChange: function (v) { applyLeftSection(v); }
     }));
   }
-  // The Edit left panel's Source section reuses the Source stage's topic list (same filterTopics /
-  // groupTopicsByProduct, product-scoped). A row opens that topic in the Source stage -- the quick
-  // jump from Edit into source. (Drag-to-canvas source insertion is source-insert-two-way-jump.)
-  function renderLeftSourceNav() {
+  // SPEC 8 (source-link 02): the Edit left-panel Source tab is a read-only, live view of the OPEN
+  // document's product source doc -- the same content the author sees in the Source stage, in a
+  // narrow reading column, with its own find (SourceDoc.findMatches + cycle) and a TOC
+  // (SourceDoc.outline, click-to-jump + scroll-spy). It keys off the open doc's product
+  // (doc.meta.productId), NOT the rail scope, so it always matches the course in front of you. All
+  // source editing stays in the Source stage (the single-host lesson) -- nothing here is editable.
+  function renderEditSourcePanel() {
     var host = document.getElementById("tab-source"); if (!host) return;
     host.innerHTML = "";
-    var topics = filterTopics(libComponents(), getActiveProduct(), "");
-    if (!topics.length) {
-      host.appendChild(h("div", "source-stage__empty", "No source document yet. Open the Source stage to import or add topics."));
+    var SD = window.SourceDoc, U = window.VersoUI;
+    var productId = (doc && doc.meta && doc.meta.productId) || "";
+    if (!productId) {
+      host.appendChild(h("div", "source-stage__empty", "This document isn't attached to a Product. Use Save/Recents -> Promote to Product to link it, then its source appears here."));
       return;
     }
-    groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
-      host.appendChild(h("div", "source-stage__group-label", g.label));
-      g.topics.forEach(function (t) {
-        var row = h("div", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""));
-        var label = h("button", "source-stage__topic-label", t.name || "Untitled topic");
-        label.type = "button";
-        label.title = "Open in the Source stage";
-        label.addEventListener("click", function () {
-          __sourceActiveTopicId = t.id;
-          try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, t.id); } catch (e) {}
-          setStage("source");
-        });
-        row.appendChild(label);
-        // SPEC 7: insert this source topic as a live-linked block on the current page.
-        var ins = h("button", "source-stage__insert"); ins.type = "button";
-        ins.innerHTML = window.Icon ? window.Icon("plus") : "+";
-        ins.title = "Insert as a linked block on the current page";
-        ins.setAttribute("aria-label", "Insert " + (t.name || "topic") + " as a linked block");
-        ins.addEventListener("click", function (e) { e.stopPropagation(); insertSourceLinkedBlock(t.id); });
-        row.appendChild(ins);
-        host.appendChild(row);
-      });
+    var master = productId ? sourceMasterFor(productId) : null;
+    if (!master || !master.doc || !SD) {
+      host.appendChild(h("div", "source-stage__empty", "This Product has no source document yet. Build it in the Source stage."));
+      return;
+    }
+    var model = SD.fromJSON(master.doc);
+    var wrap = h("div", "edit-source");
+
+    // ---- find (reuses SD.findMatches + a small local cycle, mirroring the Source stage). The
+    // search field reuses the shared .vbrowser__search chrome (same control as the doc browser +
+    // Source stage) rather than a bespoke input, for app-wide search parity. ----
+    var matches = [], findIdx = 0;
+    var searchBar = h("div", "edit-source__searchbar");
+    var search = h("label", "vbrowser__search");
+    search.innerHTML = window.Icon ? window.Icon("search") : "";
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "find in source"; input.spellcheck = false;
+    var count = h("span", "edit-source__count", "");
+    search.appendChild(input); search.appendChild(count);
+    searchBar.appendChild(search);
+    wrap.appendChild(searchBar);
+
+    var docCol = h("div", "edit-source__doc");
+    function clearFindHi() { Array.prototype.forEach.call(docCol.querySelectorAll(".is-find-current"), function (el) { el.classList.remove("is-find-current"); }); }
+    function scrollToHit(i) {
+      clearFindHi();
+      var mt = matches[i]; if (!mt) return;
+      var el = docCol.querySelector('[data-node="' + mt.nodeKey + '"]');
+      if (el) { el.classList.add("is-find-current"); el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    }
+    function runFind() {
+      var q = input.value.trim();
+      matches = q ? SD.findMatches(model, q) : [];
+      findIdx = 0;
+      count.textContent = q ? (matches.length ? (matches.length + " found") : "no matches") : "";
+      if (matches.length) scrollToHit(0); else clearFindHi();
+    }
+    function cycleFind(dir) {
+      if (!matches.length) return;
+      findIdx = (findIdx + dir + matches.length) % matches.length;
+      count.textContent = (findIdx + 1) + " / " + matches.length;
+      scrollToHit(findIdx);
+    }
+    input.addEventListener("input", runFind);
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); cycleFind(e.shiftKey ? -1 : 1); } });
+
+    // ---- table of contents (SD.outline: chapters + headings, click to jump, scroll-spy) ----
+    var outline = SD.outline(model), tocRows = [];
+    if (outline.length) {
+      var toc = h("nav", "edit-source__toc"); toc.setAttribute("aria-label", "Source outline");
+      function tocRow(node) {
+        // Reuse the shared .source-doc__toc-item row (look + is-current scroll-spy class the Source
+        // stage's own TOC uses) rather than a bespoke row.
+        var r = h("button", "source-doc__toc-item source-doc__toc-item--l" + (node.level || 2), node.text || "Untitled");
+        r.type = "button"; r.setAttribute("data-toc-key", node.key); r.title = node.text || "";
+        r.addEventListener("click", function () { var t = docCol.querySelector('[data-node="' + node.key + '"]'); if (t) t.scrollIntoView({ block: "start", behavior: "smooth" }); });
+        toc.appendChild(r); tocRows.push(r);
+      }
+      outline.forEach(function (ch) { tocRow(ch); (ch.children || []).forEach(tocRow); });
+      wrap.appendChild(toc);
+    }
+
+    // ---- reading column (read-only projection; the SAME renderSourceDocNode the stage uses) ----
+    (model.nodes || []).forEach(function (n) { docCol.appendChild(renderSourceDocNode(n)); });
+    // Scroll-spy: highlight the TOC entry for the last heading scrolled above the top.
+    docCol.addEventListener("scroll", function () {
+      if (!tocRows.length) return;
+      var top = docCol.getBoundingClientRect().top + 8, curKey = null;
+      Array.prototype.forEach.call(docCol.querySelectorAll(".source-doc__h[data-node]"), function (el) { if (el.getBoundingClientRect().top <= top) curKey = el.getAttribute("data-node"); });
+      tocRows.forEach(function (r) { r.classList.toggle("is-current", r.getAttribute("data-toc-key") === curKey); });
     });
+    wrap.appendChild(docCol);
+    host.appendChild(wrap);
   }
+  if (window.__productRail) window.__productRail.renderEditSourcePanel = renderEditSourcePanel; // browser-verify hook
   // SPEC 7 source insert: a source topic becomes its own live-linked block. The instance keeps
   // ref = the topic master id (so libraryWhereUsedDetail's "Linked in N" registers with no extra
   // plumbing) AND a sourceRef back-reference so the block's link can jump back to its topic. The

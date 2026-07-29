@@ -10925,7 +10925,7 @@ section("editor-rework source insert + two-way jump");
      /ref: topicId, sourceRef: \{ topicId: topicId \}/.test(e));
   ok("the placement is pointed at the topic's first facet so it resolves a template",
      /if \(def && def\.facets\) \{ var fk = Object\.keys\(def\.facets\); if \(fk\.length\) block\.facet = fk\[0\]; \}/.test(e));
-  ok("each source row exposes an insert affordance wired to the insert", /insertSourceLinkedBlock\(t\.id\)/.test(e));
+  ok("insertSourceLinkedBlock (the #137 whole-topic insert) remains defined (03 formally retires it)", /function insertSourceLinkedBlock\(topicId\)/.test(e));
   ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
   ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
   ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
@@ -10941,10 +10941,28 @@ section("editor-rework left-panel 3-way switcher");
   ok("the switcher offers Structure / Blocks / Source", /options: \[\{ value: "structure", label: "Structure" \}, \{ value: "blocks", label: "Blocks" \}, \{ value: "source", label: "Source" \}\]/.test(e));
   ok("applyLeftSection shows only the active section's panes", /el\.hidden = el\.getAttribute\("data-lsec"\) !== sec;/.test(e));
   ok("the active section persists across reloads", /LEFT_SECTION_KEY = "authoring\.lpane\.active"/.test(e) && /localStorage\.getItem\(LEFT_SECTION_KEY\)/.test(e));
-  ok("switching to Source renders the reused topic nav", /if \(sec === "source"\) renderLeftSourceNav\(\);/.test(e));
-  ok("the Source nav reuses filterTopics + groupTopicsByProduct (not a bespoke list)", /function renderLeftSourceNav\(\)[\s\S]{0,400}filterTopics\(libComponents\(\), getActiveProduct\(\)[\s\S]{0,300}groupTopicsByProduct\(/.test(e));
-  ok("a Source row jumps into the Source stage on that topic", /__sourceActiveTopicId = t\.id;[\s\S]{0,160}setStage\("source"\);/.test(e));
+  ok("switching to Source renders the read-only source-doc viewer (source-link 02)", /if \(sec === "source"\) renderEditSourcePanel\(\);/.test(e));
   ok("setStage re-applies the switcher's active section in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(e) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
+})();
+
+// ---- SPEC 8 source-link 02: Edit Source tab = read-only live source-doc viewer ----
+section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(doc && doc\.meta && doc\.meta\.productId\)/.test(e));
+  ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(e));
+  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a Product[\s\S]{0,600}This Product has no source document yet/.test(e));
+  ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(e));
+  ok("the panel is read-only: its function never sets contentEditable / applySourceLockState", (function () {
+    var start = e.indexOf("function renderEditSourcePanel()");
+    if (start === -1) return false;
+    var body = e.slice(start, e.indexOf("\n  function ", start + 20));
+    return body.indexOf("renderSourceDocNode") !== -1 && body.indexOf("contentEditable") === -1 && body.indexOf("applySourceLockState") === -1;
+  })());
+  ok("find reuses SourceDoc.findMatches + a next/prev cycle that scrolls to the hit", /matches = q \? SD\.findMatches\(model, q\) : \[\];/.test(e) && /function cycleFind\(dir\)[\s\S]{0,200}scrollToHit\(findIdx\)/.test(e));
+  ok("Enter / Shift+Enter cycle matches like the Source stage", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
+  ok("a TOC is built from SourceDoc.outline (chapters + headings), click-to-jump + scroll-spy", /var outline = SD\.outline\(model\)/.test(e) && /outline\.forEach\(function \(ch\) \{ tocRow\(ch\); \(ch\.children \|\| \[\]\)\.forEach\(tocRow\); \}\);/.test(e) && /docCol\.addEventListener\("scroll"[\s\S]{0,600}is-current/.test(e));
+  ok("the viewer reuses the shared .vbrowser__search field + .source-doc__toc-item rows (consistency-over-novelty), not bespoke controls", /h\("label", "vbrowser__search"\)/.test(e) && /h\("input", "vbrowser__search-input"\)/.test(e) && /"source-doc__toc-item source-doc__toc-item--l"/.test(e) && /\.edit-source__doc/.test(css));
 })();
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------

@@ -590,6 +590,20 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 /* Matches the outliner's child-row tier (.tree-block) -- same type token + radius. Row is
    now a container (checkbox + label button) rather than one bare button -- md-topic-import
    bulk-delete needs a click target for selection that's independent of "open this topic". */
+/* SPEC 8 (source-link 02): the Edit left-panel Source tab = a read-only, live source-doc viewer
+   (find + TOC + narrow reading column). Reuses the shared .vbrowser__search field, the shared
+   .source-doc__toc-item rows (+ is-current scroll-spy), and the .source-doc__* projection classes;
+   these thin containers only stack them in the narrow panel (the Source-stage TOC is a side rail). */
+.edit-source { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.edit-source__searchbar { flex: 0 0 auto; padding: 8px; border-bottom: 1px solid var(--border-subtle); }
+.edit-source__searchbar .vbrowser__search { width: 100%; }
+.edit-source__count { flex: 0 0 auto; font-size: 10px; color: var(--text-tertiary); padding-left: 4px; }
+.edit-source__toc { flex: 0 0 auto; max-height: 30%; overflow-y: auto; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
+.edit-source__doc { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 12px; }
+.edit-source__doc .source-doc__h { margin: 0.9em 0 0.3em; }
+.edit-source__doc .source-doc__h:first-child { margin-top: 0; }
+.edit-source__doc [data-node].is-find-current { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
 .source-stage__topic-row {
   display: flex; align-items: center; gap: 6px; width: 100%; position: relative;
   height: 26px; padding: 0 8px 0 4px; border-radius: var(--radius-xs);
