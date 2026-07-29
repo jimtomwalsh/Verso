@@ -12252,9 +12252,56 @@
     __sourceMarksEngine = SM.create({ root: art, model: model });
     repaintSourceMarks();
 
-    // base edits: read the edited block's text back into the model, shift marks, persist.
-    art.addEventListener("input", function (e) {
-      var block = e.target && e.target.closest ? e.target.closest("[data-node]") : null;
+    // A cross-paragraph edit (typing/deleting over a selection that spans blocks, or a Backspace/Delete
+    // that would merge two paragraphs) can't be left to the browser -- with one editing host it would
+    // mangle the block DOM. Intercept those before the input lands and route them through the model
+    // (SourceDoc.replaceRange), which merges + removes blocks and re-anchors marks. Single-block edits
+    // fall through to native editing + the input reconcile below.
+    art.addEventListener("beforeinput", function (e) {
+      if (!__sourceUnlocked) return; // locked: the keydown guard already refuses edits
+      var it = e.inputType || "";
+      if (it === "insertParagraph" || it === "insertLineBreak") { e.preventDefault(); return; } // blocks come from the model, not inline Enter
+      var isDelete = it.indexOf("delete") === 0;
+      var isInsert = it === "insertText" || it === "insertReplacementText" || it === "insertFromPaste";
+      if (!isDelete && !isInsert) return;
+      var anchor = __sourceMarksEngine && __sourceMarksEngine.selectionAnchor();
+      // (A) an edit replacing a MULTI-BLOCK selection
+      if (anchor && anchor.endAnchor) {
+        e.preventDefault();
+        var ins = isDelete ? "" : (e.data != null ? e.data : (e.dataTransfer ? e.dataTransfer.getData("text/plain") : ""));
+        afterSourceStructuralEdit(topic, model, SD.replaceRange(model, anchor, ins));
+        return;
+      }
+      // (B) a collapsed caret at a block boundary -> a Backspace/Delete that would merge two paragraphs
+      if (isDelete) {
+        var sel = window.getSelection();
+        if (!sel || !sel.isCollapsed || !sel.focusNode) return;
+        var block = sel.focusNode.nodeType === 3 ? sel.focusNode.parentNode : sel.focusNode;
+        block = block && block.closest ? block.closest("[data-node]") : null;
+        if (!block) return;
+        var caretOff = sourceCaretOffsetIn(block, sel.focusNode, sel.focusOffset);
+        var key = block.getAttribute("data-node");
+        var idx = model.nodes.findIndex(function (n) { return n.key === key; });
+        if (idx < 0) return;
+        var back = it === "deleteContentBackward", fwd = it === "deleteContentForward";
+        if (back && caretOff === 0 && idx > 0) {
+          var prev = model.nodes[idx - 1], prevLen = SD.nodeText(prev).length;
+          e.preventDefault();
+          afterSourceStructuralEdit(topic, model, SD.replaceRange(model, { nodeKey: prev.key, start: prevLen, len: 0, endAnchor: { nodeKey: key, start: 0, len: 0 } }, ""));
+        } else if (fwd && caretOff === SD.nodeText(model.nodes[idx]).length && idx < model.nodes.length - 1) {
+          var next = model.nodes[idx + 1], thisLen = SD.nodeText(model.nodes[idx]).length;
+          e.preventDefault();
+          afterSourceStructuralEdit(topic, model, SD.replaceRange(model, { nodeKey: key, start: thisLen, len: 0, endAnchor: { nodeKey: next.key, start: 0, len: 0 } }, ""));
+        }
+      }
+    });
+    // base edits: read the edited block's text back into the model, shift marks, persist. With one
+    // editing host the input event targets the article, so the edited block is found from the caret.
+    art.addEventListener("input", function () {
+      var sel = window.getSelection();
+      var fn = sel && sel.focusNode;
+      var host = fn ? (fn.nodeType === 3 ? fn.parentNode : fn) : null;
+      var block = host && host.closest ? host.closest("[data-node]") : null;
       if (!block) return;
       var res = SD.applyTextEdit(model, block.getAttribute("data-node"), block.textContent);
       recordSourceEdit(res && res.edit); // buffer for the unlock->lock History commit
@@ -12315,8 +12362,18 @@
   function applySourceLockState(art) {
     art = art || document.querySelector("#source-stage-article .source-doc");
     if (!art) return;
+    // Single editing host: the whole article is the one contentEditable region when unlocked, so a
+    // selection can span paragraphs. Per-block editable hosts confined every selection to one block --
+    // the browser cannot extend a selection across separate editing hosts -- which is why a
+    // cross-paragraph drag (comment / alternate / delete across paragraphs) was impossible in edit
+    // mode. Blocks inherit editability from the article; objects (image / table) stay non-editable so
+    // they remain whole-node selections rather than editable text.
+    art.contentEditable = __sourceUnlocked ? "true" : "false";
     Array.prototype.forEach.call(art.querySelectorAll('[data-editable], [data-node-body]'), function (el) {
-      el.contentEditable = __sourceUnlocked ? "true" : "false";
+      el.removeAttribute("contenteditable"); // inherit the article host
+    });
+    Array.prototype.forEach.call(art.querySelectorAll('[data-object="1"]'), function (el) {
+      el.contentEditable = "false";
     });
     art.classList.toggle("source-doc--unlocked", __sourceUnlocked);
   }
@@ -12915,6 +12972,29 @@
   // must use container-relative coords (same conversion as pinCardToSpan). Feeding it raw
   // viewport/page x pushed it right by the rail's width. left = the selection's CENTRE x; the CSS
   // transform: translate(-50%, -132%) then centres the bar over, and lifts it above, the selection.
+  // A cross-paragraph edit changes the block structure, so rebuild the article, persist, and restore
+  // the caret at the model position the edit reported (the seam where the merge happened).
+  function afterSourceStructuralEdit(topic, model, res) {
+    if (!res) return;
+    persistSourceDocModel(topic, model);
+    renderSourceArticle(); // full rebuild (nodes removed/merged) -> re-mounts the marks engine too
+    if (res.caret) placeSourceCaret(res.caret.nodeKey, res.caret.offset);
+  }
+  // Chars before a DOM point within a block element (the caret's plain-text offset in the block).
+  function sourceCaretOffsetIn(block, node, offset) {
+    try { var r = document.createRange(); r.selectNodeContents(block); r.setEnd(node, offset); return r.toString().length; }
+    catch (e) { return 0; }
+  }
+  // Place the caret at a plain-text offset within a block (walks the block's text nodes).
+  function placeSourceCaret(nodeKey, offset) {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var esc = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(nodeKey) : String(nodeKey).replace(/["\\\]]/g, "\\$&");
+    var el = host.querySelector('[data-node="' + esc + '"]'); if (!el) return;
+    var tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null), n, acc = 0, target = null, to = 0;
+    while ((n = tw.nextNode())) { if (acc + n.length >= offset) { target = n; to = offset - acc; break; } acc += n.length; }
+    if (!target) { target = el; to = 0; }
+    try { var rg = document.createRange(); rg.setStart(target, to); rg.collapse(true); var s = window.getSelection(); s.removeAllRanges(); s.addRange(rg); } catch (e) {}
+  }
   function positionSourceSelBar(bar, r) {
     var host = document.getElementById("source-stage-article"); if (!host || !bar || !r) return;
     var hr = host.getBoundingClientRect();

@@ -339,6 +339,79 @@
     return { model: model, edit: edit };
   }
 
+  // Replace the text covered by a selection ANCHOR (single- or multi-block) with `text` (empty for a
+  // delete). This is the model side of editing ACROSS paragraphs: with one contentEditable host a drag
+  // can now span blocks, so Backspace / Delete / typing over a multi-paragraph selection must merge and
+  // remove blocks through the model rather than let the browser mangle the DOM.
+  //   single-block -> reuse applyTextEdit (proven single-node mark shifting).
+  //   multi-block   -> the FIRST node keeps its head, the LAST node's tail merges onto it, every
+  //                    INTERIOR node is removed (standard "delete across paragraphs"). Marks in the
+  //                    surviving head/tail re-anchor onto the merged node; marks whose text was removed
+  //                    break (same as a single-block delete). One owned-undo step; multi-block mark
+  //                    interiors are re-derived. Returns { model, mergedKey, caret:{nodeKey,offset} }.
+  function replaceRange(model, anchor, text) {
+    text = text == null ? "" : String(text);
+    if (!anchor || anchor.nodeKey == null) return { model: model, mergedKey: null, caret: null };
+    // single-block (no endAnchor, or both ends in one node)
+    if (!anchor.endAnchor || anchor.endAnchor.nodeKey === anchor.nodeKey) {
+      var n0 = nodeByKey(model, anchor.nodeKey);
+      if (!n0) return { model: model, mergedKey: null, caret: null };
+      var t0 = nodeText(n0);
+      var s0 = Math.max(0, Math.min(anchor.start, t0.length));
+      var e0 = Math.max(s0, Math.min(anchor.start + (anchor.len || 0), t0.length));
+      applyTextEdit(model, anchor.nodeKey, t0.slice(0, s0) + text + t0.slice(e0));
+      return { model: model, mergedKey: anchor.nodeKey, caret: { nodeKey: anchor.nodeKey, offset: s0 + text.length } };
+    }
+    var first = nodeByKey(model, anchor.nodeKey), last = nodeByKey(model, anchor.endAnchor.nodeKey);
+    if (!first || !last) return { model: model, mergedKey: null, caret: null };
+    var ns = model.nodes || [];
+    var firstIdx = ns.indexOf(first), lastIdx = ns.indexOf(last);
+    if (firstIdx < 0 || lastIdx <= firstIdx) { // out of order / degenerate -> single-block on the first node
+      return replaceRange(model, { nodeKey: anchor.nodeKey, start: anchor.start, len: anchor.len || 0 }, text);
+    }
+    pushUndo(model);
+    var firstText = nodeText(first), lastText = nodeText(last);
+    var headLen = Math.max(0, Math.min(anchor.start, firstText.length));
+    var tailStart = Math.max(0, Math.min((anchor.endAnchor.start || 0) + (anchor.endAnchor.len || 0), lastText.length));
+    var merged = firstText.slice(0, headLen) + text + lastText.slice(tailStart);
+    var mergePoint = headLen + text.length; // offset in the merged node where the tail begins
+    var firstKey = first.key, lastKey = last.key, removed = {};
+    for (var i = firstIdx + 1; i <= lastIdx; i++) removed[ns[i].key] = true;
+    // Map a (nodeKey, offset) point through the merge. null -> the node is untouched (before/after).
+    function remap(nodeKey, off) {
+      if (nodeKey === firstKey) return { key: firstKey, off: off <= headLen ? off : mergePoint };
+      if (nodeKey === lastKey) return { key: firstKey, off: off <= tailStart ? mergePoint : mergePoint + (off - tailStart) };
+      if (removed[nodeKey]) return { key: firstKey, off: mergePoint }; // interior node -> collapsed to the seam
+      return null;
+    }
+    (model.marks || []).forEach(function (m) {
+      if (isObjectMark(m)) return; // whole-node marks re-check via refreshMark (removed node -> broken)
+      if (isMultiBlock(m)) {
+        var s = remap(m.anchor.nodeKey, m.anchor.start);
+        var e = remap(m.endAnchor.nodeKey, (m.endAnchor.start || 0) + (m.endAnchor.len || 0));
+        if (s === null && e === null) return; // wholly outside the edit
+        if (s === null) s = { key: m.anchor.nodeKey, off: m.anchor.start };
+        if (e === null) e = { key: m.endAnchor.nodeKey, off: (m.endAnchor.start || 0) + (m.endAnchor.len || 0) };
+        if (s.key === e.key) { m.anchor = { nodeKey: s.key, start: Math.min(s.off, e.off), len: Math.abs(e.off - s.off) }; delete m.endAnchor; }
+        else { m.anchor = { nodeKey: s.key, start: s.off, len: Math.max(0, merged.length - s.off) }; m.endAnchor = { nodeKey: e.key, start: 0, len: e.off }; }
+      } else {
+        var rs = remap(m.anchor.nodeKey, m.anchor.start);
+        if (rs === null) return;
+        var re = remap(m.anchor.nodeKey, m.anchor.start + m.anchor.len);
+        m.anchor = { nodeKey: rs.key, start: Math.min(rs.off, re.off), len: Math.abs(re.off - rs.off) };
+      }
+    });
+    setNodeText(first, merged);
+    model.nodes = ns.filter(function (n, idx) { return !(idx > firstIdx && idx <= lastIdx); });
+    (model.marks || []).forEach(function (m) {
+      refreshMark(model, m);
+      if (m._brokeNow) { logHistory(model, { type: "mark-broken", markId: m.id, markType: m.type }); }
+      m._brokeNow = false; m._staleNow = false; m._restoredNow = false;
+    });
+    logHistory(model, { type: "range-replaced", nodeKey: firstKey });
+    return { model: model, mergedKey: firstKey, caret: { nodeKey: firstKey, offset: mergePoint } };
+  }
+
   // ---- range-mark engine: status, update-with-appended-copy, relationships ----
   // The colour-dot status a mark shows (spec 3): red broken / yellow stale / green in-sync.
   function markStatus(m) {
@@ -1060,7 +1133,7 @@
     create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
-    applyTextEdit: applyTextEdit,
+    applyTextEdit: applyTextEdit, replaceRange: replaceRange,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
@@ -1079,7 +1152,7 @@
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
-    applyTextEdit: applyTextEdit,
+    applyTextEdit: applyTextEdit, replaceRange: replaceRange,
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
