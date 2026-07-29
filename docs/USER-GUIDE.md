@@ -84,7 +84,9 @@ own **editor header** beneath it.
   bar split into three zones by faint dividers. **Tabs** (left): the **file-picker** (▤, browse all
   courses — a browser **grouped by document type**, colour-coded, each card showing its product,
   interactive/static and whether it's open; it respects the product scope and opens automatically
-  when no course is open) and the **open-course tabs**, each carrying a per-product colour dot.
+  when no course is open) and the **open-course tabs**. Each tab carries a **doc-type glyph** (course,
+  presentation, or paged/print document) so a Product's course, one-pager and deck stay
+  distinguishable at a glance, plus a **per-product colour dot** (hover it to see which Product).
   **Document** (right of the tabs): a **Document-settings** button (⚙, opens this document's settings —
   **Document type** (geometry + interactivity, set once), Header & Footer, Learner nav, Theme and the
   rest; app-wide settings live under the left-rail cog), the **Build / Read** toggle (glyphs), and the
@@ -806,20 +808,29 @@ In this mode:
   each get their own entry: an alternate added, a mark going stale, broken, or restored, a comment
   opened or resolved. Import events (from the section view) and these doc events share one timeline,
   newest first.
+- **The document reads as formatted text.** Bold and `inline code` show as themselves in the
+  continuous view — not as literal `**` or `` ` `` marks — so the source reads like a finished
+  document, and range marks (comments, alternates, linked spans) stay anchored to exactly the same
+  words underneath.
 - **Show/hide marks** with the eye button in the bottom bar. Marked spans are tinted by type
-  (linked / alternate / comment), so annotation never clutters plain reading.
+  (linked / alternate / comment), so annotation never clutters plain reading. Jumping to a mark —
+  clicking a row in the panel, or an alternate — turns marks back on for you if they were hidden,
+  so the highlight you jumped to is always visible.
 - **Jump around with the outline.** A **table of contents** down the left side lists the document's
   headings; click one to jump to it, and the heading you're currently reading stays highlighted as
   you scroll. (The outline hides itself on a narrow window so the reading column keeps its width.)
 - **Find a topic by anything in it.** The topic search at the top of the left nav now matches the
   full text of every topic — a heading or a phrase inside the document, not just the title.
-- **One details panel on the right.** Everything about the document lives in a single right panel:
-  **Marks** (every alternate, link, and comment with a status dot — green in sync / amber stale /
-  red broken; filter to **Alternates**, **Linked**, or **Comments**, and click a row to jump to that
-  mark), **History** (the provenance timeline), **Source** (where the document came from, and where
-  it's used), and **Comments**. The bottom-bar panel button shows or hides it; selecting a mark opens
-  the panel to that mark. (This replaces the older split of a fixed info panel plus a separate
-  slide-over marks drawer.)
+- **One details panel on the right.** Everything about the document lives in a single right panel.
+  At the top is **Marks** — every alternate, link, and comment with a status dot (green in sync /
+  amber stale / red broken). A row of four **glyph filters** narrows the list: **All**, **Alternates**,
+  **Linked**, and **Comments** (hover any for its name); click a row to jump to that mark. The
+  **Linked** filter lists where this document is used downstream — one row per course block that
+  pulls it in — so it reflects real usage instead of reading as empty. Comments appear here under
+  the **Comments** filter, in one place (the old duplicate comments list below the panel is gone).
+  Below Marks sit **History** (the provenance timeline) and, for legacy per-topic sources, a
+  **Source** section. The bottom-bar panel button shows or hides the whole panel; selecting a mark
+  opens it to that mark.
 
 This is an early view — the variant columns arrive in a later update; the section editor above
 remains the full-featured path.

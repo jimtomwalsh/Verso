@@ -1802,6 +1802,14 @@
   }
   /* @pure-tabscope-end */
 
+  // tab-doctype-glyph: map a document's geometry cell -> {glyph, label} for the tab's leading
+  // doc-type marker. Keyed on geo (the doc-type spine the file-picker already groups by), so the
+  // tab glyph and the browser grouping read as one vocabulary.
+  var TAB_DOCTYPE_GLYPH = {
+    reflow: { icon: "layers", label: "Course" },
+    frame: { icon: "monitor", label: "Presentation" },
+    paged: { icon: "file-text", label: "Paged / print document" }
+  };
   function renderTabs() {
     var container = document.getElementById("toolbar-tabs");
     if (!container) return;
@@ -1817,11 +1825,20 @@
       // colour never shifts when a product is renamed. Untagged docs get no dot.
       var pid = d.meta && d.meta.productId;
       var dotColour = pid ? colourForName(pid) : null;
+      // Per-Product dot tooltip so its meaning is legible (it's a stable Product marker, NOT a
+      // changed-since-export cue).
+      var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
+      var dotTitle = pid ? ("Product: " + ((prod && prod.name) || pid)) : null;
+      var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { geo: "reflow" };
+      var dt = TAB_DOCTYPE_GLYPH[cell.geo] || TAB_DOCTYPE_GLYPH.reflow;
       if (U && U.DocumentTab) {
         container.appendChild(U.DocumentTab({
           label: title,
           active: id === activeDocId,
           dot: dotColour,
+          dotTitle: dotTitle,
+          icon: dt.icon,
+          typeLabel: dt.label,
           onSelect: function () { switchDoc(id); },
           onClose: function () { closeTab(id); }
         }));
@@ -7407,7 +7424,7 @@
       var nm = h("span", null, V); nm.style.fontWeight = "600"; nm.style.fontSize = "11px";
       var stt = h("span", null, own ? "Own image" : "Inherits flagship"); stt.style.fontSize = "9px"; stt.style.color = own ? "var(--color-accent, #e08600)" : "var(--text-secondary)";
       lbl.appendChild(nm); lbl.appendChild(stt); row.appendChild(lbl);
-      var upBtn = iconBtn("upload", own ? "Replace this variant's image" : "Add a variant version for " + V);
+      var upBtn = iconBtn("image-plus", own ? "Replace this variant's image" : "Add a variant version for " + V);
       upBtn.addEventListener("click", function () { uploadImageVariant(block, V, function () { reapplyBlock(block); reselectBlockNode(block, "block"); }); });
       row.appendChild(upBtn);
       if (own) {
@@ -7858,7 +7875,7 @@
     try {
     var isAssetSrc = typeof curScreen.visual === "string" && curScreen.visual.indexOf("asset:") === 0;
     var brow = h("div", "insp-inline-row");
-    var up = iconBtn("upload", isAssetSrc ? "Replace image / video / SVG" : "Upload image / video / SVG");
+    var up = iconBtn("image-plus", isAssetSrc ? "Replace image / video / SVG" : "Upload image / video / SVG");
     up.addEventListener("click", function () {
       var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*,.svg,video/*";
       inp.addEventListener("change", function () { var f = inp.files && inp.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { pushHistory(); curScreen.visual = assetRef(r.result, f); if (f.type && f.type.indexOf("video/") === 0) curScreen.kind = "video"; else curScreen.kind = "image"; refresh(); }; r.readAsDataURL(f); });
@@ -7993,7 +8010,7 @@
     // (scripts stripped; green = a tint on completion).
     var markerKind = block.markerHtml ? "HTML animation" : (block.markerSvg ? "SVG marker" : null);
     var mrow = h("div", "insp-inline-row");
-    var upM = iconBtn("upload", markerKind ? "Replace custom marker" : "Upload custom marker (SVG or HTML)");
+    var upM = iconBtn("image-plus", markerKind ? "Replace custom marker" : "Upload custom marker (SVG or HTML)");
     upM.addEventListener("click", function () {
       var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".svg,.html,.htm,image/svg+xml,text/html";
       inp.addEventListener("change", function () {
@@ -11347,7 +11364,7 @@
     if (!sourceMasterFor(activeSourceProductId())) {
       row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
     }
-    row.appendChild(U.IconButton({ icon: "upload", label: "Import from Markdown…", onClick: importMarkdownModal }));
+    row.appendChild(U.IconButton({ icon: "download", label: "Import from Markdown…", onClick: importMarkdownModal }));
     var lifePid = activeSourceProductId();
     if (lifePid && window.ProductsStore[lifePid]) {
       row.appendChild(U.IconButton({ icon: "more-horizontal", label: "Product actions", onClick: function (e) {
@@ -11984,32 +12001,32 @@
     var host = document.getElementById("source-stage-info"); if (!host) return;
     host.innerHTML = "";
     if (!topic) return;
-    // Marks -- the navigator, first (only when the topic is a continuous document with a live model)
-    if (topicHasDoc(topic)) renderSourceMarksSection(host, ensureSourceDocModel(topic));
+    // Marks -- the navigator, first (only when the topic is a continuous document with a live model).
+    // For a doc topic this section owns the Linked (where-used) + Comments tabs, so the old
+    // standalone Source "Linked in" block and the duplicate comments accordion are retired here --
+    // each mark type now appears in exactly one place (source-right-panel-consolidation parts 2-3).
+    var hasDoc = topicHasDoc(topic);
+    if (hasDoc) renderSourceMarksSection(host, ensureSourceDocModel(topic));
     // History
     renderHistoryTimeline(host, topic);
-    // Source -- provenance (which manual file/version/publish date this came from), then where the
-    // document is used downstream ("Linked in N"). Both are document-origin facts, so they share
-    // one section instead of the old separate top-of-panel "Linked in" block.
-    // Provenance now lives UNDER the document header (renderSourceProvenanceLine); this section keeps
-    // only the downstream "Linked in" usage, so provenance has a single source of truth.
-    var sourceBody = panelSection(host, "Source", { collapsible: true });
-    var used = libraryWhereUsedDetail(topic.id, getRegistry());
-    sourceBody.appendChild(h("div", "source-info__subhead", "Linked in (" + used.length + ")"));
-    if (!used.length) {
-      sourceBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
-    } else {
-      used.forEach(function (u) {
-        var row = h("button", "source-stage__linked-row", u.docTitle);
-        row.type = "button";
-        row.title = "Open " + u.docTitle + " and select the linked block";
-        // SPEC 7 two-way link: jump to the EXACT linked block, not just the document.
-        row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
-        sourceBody.appendChild(row);
-      });
+    // Legacy section topics have no marks tabs -- keep their standalone Linked-in list + comments.
+    if (!hasDoc) {
+      var sourceBody = panelSection(host, "Source", { collapsible: true });
+      var used = libraryWhereUsedDetail(topic.id, getRegistry());
+      sourceBody.appendChild(h("div", "source-info__subhead", "Linked in (" + used.length + ")"));
+      if (!used.length) {
+        sourceBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
+      } else {
+        used.forEach(function (u) {
+          var row = h("button", "source-stage__linked-row", u.docTitle);
+          row.type = "button";
+          row.title = "Open " + u.docTitle + " and select the linked block";
+          row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
+          sourceBody.appendChild(row);
+        });
+      }
+      renderSourceCommentsPanel(host, topic);
     }
-    // Comments
-    renderSourceCommentsPanel(host, topic);
     applySourceInfoVisibility();
   }
   // Show or hide the one consolidated panel (its single doc-bar toggle). Hidden -> the reading
@@ -12063,14 +12080,35 @@
   // are contentEditable so the base prose can be edited when unlocked; structural blocks (list/
   // table/image) render for reading in v1 (cell/list editing is fast-follow, spec 6) but still
   // carry marks. Marks paint over whatever text these blocks contain via the engine.
+  // source-rich-render: project a node's canonical text into `el` with bold/inline-code shown as
+  // FORMATTING rather than literal ** / ` markers. The delimiter characters stay in the DOM as
+  // hidden text nodes (span.source-md-mk { display:none }) so el.textContent -- what applyTextEdit
+  // reads back on every input, and what the mark engine's TreeWalker counts -- is byte-identical to
+  // the model text. The rich layer is therefore purely visual: mark offsets and edit math never
+  // shift. Plain text (no markers) takes the fast textContent path.
+  function paintSourceInline(el, text) {
+    var runs = (window.SourceDoc.inlineRuns ? window.SourceDoc.inlineRuns(text) : [{ text: String(text == null ? "" : text), kind: "text" }]);
+    if (runs.length === 1 && runs[0].kind === "text") { el.textContent = runs[0].text; return; }
+    var wrap = null;
+    runs.forEach(function (r) {
+      if (r.kind === "text") { wrap = null; el.appendChild(document.createTextNode(r.text)); return; }
+      if (r.marker) {
+        if (!wrap) { wrap = h(r.kind === "bold" ? "strong" : "code", r.kind === "bold" ? "source-doc__b" : "source-doc__code"); el.appendChild(wrap); }
+        var mk = h("span", "source-md-mk"); mk.textContent = r.text; wrap.appendChild(mk);
+        if (wrap.childNodes.length >= 3) wrap = null; // open-marker, inner, close-marker -> emphasis run complete
+      } else {
+        (wrap || el).appendChild(document.createTextNode(r.text));
+      }
+    });
+  }
   function renderSourceDocNode(node) {
     var SD = window.SourceDoc, el;
-    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
-    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); cb.textContent = SD.nodeText(node); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
+    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); paintSourceInline(el, SD.nodeText(node)); el.setAttribute("data-editable", "1"); }
+    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); paintSourceInline(cb, SD.nodeText(node)); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
     else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
     else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row) { var tr = h("tr"); (row || []).forEach(function (c) { tr.appendChild(h("td", null, c)); }); el.appendChild(tr); }); }
     else if (node.type === "image") { el = h("figure", "source-doc__figure"); var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt; el.appendChild(im); if (node.caption) el.appendChild(h("figcaption", null, node.caption)); }
-    else { el = h("p", "source-doc__p"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
+    else { el = h("p", "source-doc__p"); paintSourceInline(el, SD.nodeText(node)); el.setAttribute("data-editable", "1"); }
     el.setAttribute("data-node", node.key);
     // image/table = a first-class markable OBJECT (a node-id mark, no text span). Tag it so a
     // click selects the whole node and offers the same alternate/comment actions as a text span.
@@ -12751,19 +12789,27 @@
   // it is the FIRST section of the one consolidated right panel (see renderSourceMarksSection,
   // built by renderSourceInfoPanel). The filter set is shared. Clicking a row activates + scrolls
   // to that mark in the article, exactly as the drawer did.
+  // Glyph-mode filters (source-right-panel-consolidation): each carries an icon so the segmented
+  // control renders as four glyphs; the label becomes the tooltip.
   var SOURCE_MARK_FILTERS = [
-    { key: "all", label: "All" },
-    { key: "alternate", label: "Alternates" },
-    { key: "link", label: "Linked" },
-    { key: "comment", label: "Comments" }
+    { key: "all", label: "All", icon: "list" },
+    { key: "alternate", label: "Alternates", icon: "square-pen" },
+    { key: "link", label: "Linked", icon: "link" },
+    { key: "comment", label: "Comments", icon: "message-square" }
   ];
   // Reveal a mark in the consolidated panel: open the panel if hidden, highlight its row, and
   // scroll the article to it (the "selecting a mark opens the panel to that mark" behaviour).
   function revealSourceMark(m) {
     __sourceActiveMarkId = m.id;
+    // You clicked a mark (or an alternate) -- if marks are hidden, show them so the highlight
+    // you jumped to is actually visible (source-right-panel-consolidation part 4). Flip the flag
+    // before repaint (repaintSourceMarks reads it) and refresh pins + doc-bar toggle after.
+    var wasHidden = !__sourceShowMarks;
+    if (wasHidden) __sourceShowMarks = true;
     if (__sourceMarksEngine) { __sourceMarksEngine.setActive(m.id); repaintSourceMarks(); }
     if (!__sourceInfoOpen) { __sourceInfoOpen = true; applySourceInfoVisibility(); updateSourceDocBar(); }
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (wasHidden) { renderSourceCommentPins(topic); updateSourceDocBar(); }
     if (topic) renderSourceInfoPanel(topic);
     var host = document.getElementById("source-stage-article");
     var target = host && host.querySelector('[data-node="' + m.anchor.nodeKey + '"]');
@@ -12783,12 +12829,35 @@
     if (U && U.SegmentedControl) {
       body.appendChild(U.SegmentedControl({
         size: "sm",
-        options: SOURCE_MARK_FILTERS.map(function (f) { return { value: f.key, label: f.label }; }),
+        options: SOURCE_MARK_FILTERS.map(function (f) { return { value: f.key, label: f.label, icon: f.icon, title: f.label }; }),
         value: __sourceMarksFilter,
         onChange: function (v) { __sourceMarksFilter = v; var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; if (t) renderSourceInfoPanel(t); }
       }));
     }
     var listWrap = h("div", "source-marks__list");
+    // Linked filter = downstream where-used (this source doc linked INTO course documents), not
+    // type:"link" range-marks (which don't exist yet). Surfacing the real usage stops the Linked
+    // tab reading as permanently empty (source-right-panel-consolidation part 3).
+    if (__sourceMarksFilter === "link") {
+      var used = libraryWhereUsedDetail(__sourceActiveTopicId, getRegistry());
+      if (!used.length) {
+        listWrap.appendChild(h("div", "source-drawer__empty", "Not linked in any document yet."));
+      } else {
+        used.forEach(function (u) {
+          var row = h("button", "source-drawer__row"); row.type = "button";
+          row.title = "Open " + u.docTitle + " and select the linked block";
+          row.appendChild(h("span", "source-drawer__dot source-drawer__dot--ok"));
+          var rbody = h("div", "source-drawer__row-body");
+          rbody.appendChild(h("div", "source-drawer__row-type source-mark-link", "Linked in"));
+          rbody.appendChild(h("div", "source-drawer__row-snip", u.docTitle));
+          row.appendChild(rbody);
+          row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
+          listWrap.appendChild(row);
+        });
+      }
+      body.appendChild(listWrap);
+      return;
+    }
     var marks = (model.marks || []).filter(function (m) { return __sourceMarksFilter === "all" || m.type === __sourceMarksFilter; });
     if (!marks.length) {
       listWrap.appendChild(h("div", "source-drawer__empty", "No marks" + (__sourceMarksFilter === "all" ? " yet." : " of this type.")));
@@ -14448,7 +14517,7 @@
       inp.click();
     };
     var csvBtn = (window.VersoUI && window.VersoUI.Button)
-      ? window.VersoUI.Button({ variant: "secondary", full: true, icon: "upload", label: "Import CSV (Term, Definition)…", onClick: importCsv })
+      ? window.VersoUI.Button({ variant: "secondary", full: true, icon: "download", label: "Import CSV (Term, Definition)…", onClick: importCsv })
       : (function () { var b = h("button", "prop-btn", "Import CSV (Term, Definition)…"); b.addEventListener("click", importCsv); return b; })();
     c.appendChild(csvBtn);
 
