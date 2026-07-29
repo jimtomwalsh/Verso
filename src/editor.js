@@ -11070,6 +11070,10 @@
     var hasSource = !!sourceMasterFor(pid) || unifiableTopicsFor(pid).length > 0;
     showContextMenu(x, y, [
       { head: pname },
+      { label: "Export to Markdown", onClick: function () {
+        if (!hasSource) { window.alert("This Product has no source document to export."); return; }
+        exportProductSourceMarkdown(pid);
+      } },
       { label: "Unlink all courses", onClick: function () {
         var n = unlinkAllCoursesFromProduct(pid); mountProductPicker();
         window.alert(n ? ("Unlinked " + n + " course" + (n === 1 ? "" : "s") + " from “" + pname + "”.") : "No linked courses to unlink.");
@@ -11083,6 +11087,30 @@
         confirmModal("Delete Product?", "Deletes “" + pname + "” entirely -- its source document and its Product tag on any linked course. Cannot be undone.", function () { deleteProduct(pid); afterProductLifecycleChange(); }, { okLabel: "Delete", danger: true });
       } }
     ]);
+  }
+  // Export a Product's continuous source document to a portable Markdown (.md) file (pilot ask:
+  // "this source page should be exportable to .md"). Prefers the persisted unified master doc (it
+  // carries the author's edits); falls back to a freshly-concatenated model for a not-yet-unified
+  // Product. Serialisation is the pure SourceDoc.toMarkdown; download reuses the Blob idiom.
+  function sourceModelForExport(pid) {
+    var SD = window.SourceDoc; if (!SD) return null;
+    var master = sourceMasterFor(pid);
+    if (master && master.doc && master.doc.nodes && master.doc.nodes.length) return SD.fromJSON(master.doc);
+    return buildUnifiedModelFor(pid);
+  }
+  function exportProductSourceMarkdown(pid) {
+    var SD = window.SourceDoc;
+    var model = sourceModelForExport(pid);
+    if (!SD || !model || !model.nodes || !model.nodes.length) { window.alert("This Product has no source document to export."); return; }
+    var pname = (window.ProductsStore[pid] && window.ProductsStore[pid].name) || "source";
+    var slug = String(pname).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "source";
+    var md = SD.toMarkdown(model);
+    var blob = new Blob([md], { type: "text/markdown" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = slug + "-source.md";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    if (typeof sourceToast === "function") sourceToast("Exported “" + pname + "” source to Markdown.");
   }
   // After a delete, drop any dangling active-Product/topic state and re-render the stage + picker.
   function afterProductLifecycleChange() {
@@ -12113,6 +12141,60 @@
   }
 
   // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
+  // The block the next insert lands AFTER (spec 2b §6 / handoff C2: "after the currently selected
+  // block"): the object-selected node, else the block under the caret/selection, else the doc's last
+  // node. Insert targets a whole block, never the text caret.
+  function currentSourceBlockKey() {
+    if (__sourceObjectSelKey) return __sourceObjectSelKey;
+    var art = document.getElementById("source-stage-article");
+    var sel = window.getSelection && window.getSelection();
+    if (sel && sel.focusNode && art && art.contains(sel.focusNode)) {
+      var n = sel.focusNode.nodeType === 3 ? sel.focusNode.parentNode : sel.focusNode;
+      var el = n && n.closest ? n.closest("[data-node]") : null;
+      if (el) return el.getAttribute("data-node");
+    }
+    if (__sourceSelAnchor && __sourceSelAnchor.nodeKey) return __sourceSelAnchor.nodeKey;
+    var m = __sourceDocModel;
+    return (m && m.nodes && m.nodes.length) ? m.nodes[m.nodes.length - 1].key : null;
+  }
+  // Insert a node after the current block, persist, re-render the article, and select the new object
+  // so its alternate/comment actions are one click away. Shared by the image + table inserts.
+  function insertSourceNodeAfterCurrent(topic, node) {
+    var SD = window.SourceDoc, model = __sourceDocModel; if (!SD || !model) return;
+    var inserted = SD.insertNodeAfter(model, currentSourceBlockKey(), node);
+    persistSourceDocModel(topic, model);
+    renderSourceArticle(); // full clean rebuild (headEl + article + docbar + marks)
+    if (inserted && SD.isMarkableObjectNode && SD.isMarkableObjectNode(inserted)) selectSourceObject(topic, inserted.key);
+    return inserted;
+  }
+  // Toolbar image insert: pick a file, store it inline as a data-URI (the Source doc is never
+  // exported to SCORM, so the simple storage wins -- handoff C2), insert an image node after the
+  // current block. Alt defaults to the file name; caption/alt are editable later via the object.
+  function insertSourceImage(topic) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to insert an image."); return; }
+    var inp = h("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; inp.remove();
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var alt = String(f.name || "image").replace(/\.[^.]+$/, "");
+        insertSourceNodeAfterCurrent(topic, { type: "image", src: rd.result, alt: alt });
+        sourceToast("Image inserted.");
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  // Toolbar table insert: a 2x2 starter (header row + one body row) after the current block. Rich
+  // in-cell editing is the spec 2b §6 fast-follow; this is the create half -- the table renders and
+  // is markable/movable as an object immediately.
+  function insertSourceTable(topic) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to insert a table."); return; }
+    insertSourceNodeAfterCurrent(topic, { type: "table", rows: [["Column 1", "Column 2"], ["", ""]] });
+    sourceToast("Table inserted.");
+  }
   // Document-scope only; glyph-only IconButtons from the DS.
   function buildSourceDocBar(topic) {
     var U = window.VersoUI;
@@ -12126,7 +12208,17 @@
     // replaces the old all-marks-drawer toggle that stacked a second surface over the info aside.
     var panelBtn = U && U.IconButton ? U.IconButton({ icon: "columns-2", label: __sourceInfoOpen ? "Hide the details panel" : "Show the details panel", active: __sourceInfoOpen, onClick: function () { __sourceInfoOpen = !__sourceInfoOpen; applySourceInfoVisibility(); updateSourceDocBar(); } }) : h("button", null, "Panel");
     panelBtn.classList.add("source-docbar__btn");
-    bar.appendChild(lockLbl); bar.appendChild(lockBtn); bar.appendChild(marksBtn); bar.appendChild(panelBtn);
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn);
+    // Insert image / table -- base-content mutations, so shown ONLY when unlocked (the same rule as
+    // the selection bar's rich-text buttons). Each drops a new node after the current block.
+    if (__sourceUnlocked && U && U.IconButton) {
+      var imgBtn = U.IconButton({ icon: "image", label: "Insert an image after the current block", onClick: function () { insertSourceImage(topic); } });
+      imgBtn.classList.add("source-docbar__btn");
+      var tblBtn = U.IconButton({ icon: "table", label: "Insert a table after the current block", onClick: function () { insertSourceTable(topic); } });
+      tblBtn.classList.add("source-docbar__btn");
+      bar.appendChild(imgBtn); bar.appendChild(tblBtn);
+    }
+    bar.appendChild(marksBtn); bar.appendChild(panelBtn);
     bar.setAttribute("data-source-docbar", "1");
     return bar;
   }
@@ -12356,8 +12448,20 @@
       if (thread.length > 1) pin.appendChild(h("span", "source-commentpin__count", String(thread.length)));
       pin.addEventListener("click", function () { toggleSourceCommentThread(topic, m.id); });
       host.appendChild(pin);
-      pinCardToSpan(pin, m.id);
+      pinCardToSpan(pin, m.id); // sets top (tracks the span vertically)
+      anchorPinToTextMargin(pin, host); // sets left just right of the reading column (pilot feedback)
     });
+  }
+  // Anchor a comment pin just to the RIGHT of the text margin (the reading column's right edge),
+  // not out in the far gutter -- pilot feedback 2026-07-28. Clamped so it never leaves the host.
+  function anchorPinToTextMargin(pin, host) {
+    var col = host.querySelector(".source-doc__col") || host.querySelector(".source-doc");
+    if (!col) return;
+    var cr = col.getBoundingClientRect(), hr = host.getBoundingClientRect();
+    var left = cr.right - hr.left + host.scrollLeft + 6;
+    left = Math.min(left, host.clientWidth - 26); // keep it on-screen on a narrow viewport
+    pin.style.left = Math.max(8, left) + "px";
+    pin.style.right = "auto";
   }
   function onSourceCommentThreadKey(ev) { if (ev.key === "Escape") closeSourceCommentThread(); }
   // Outside-click light-dismiss, matching the canvas comment popover ("first outside click closes

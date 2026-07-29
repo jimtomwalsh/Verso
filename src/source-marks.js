@@ -96,6 +96,22 @@
       }
       return acc;
     }
+    // A live DOM Range for a WHOLE mark: single-block marks reuse rangeFor(anchor); a multi-block
+    // mark spans one Range from its first node's start offset to its last node's end offset -- a
+    // Range legally crosses block elements, and the CSS Custom Highlight tints every node between.
+    function rangeForMark(m) {
+      if (!sd.isMultiBlock(m)) return rangeFor(m.anchor);
+      var sEl = nodeEl(m.anchor.nodeKey), eEl = nodeEl(m.endAnchor.nodeKey);
+      if (!sEl || !eEl) return null;
+      var sp = walkToOffset(sEl, m.anchor.start), ep = walkToOffset(eEl, m.endAnchor.len);
+      if (!sp || !ep) return null;
+      try {
+        var r = document.createRange();
+        r.setStart(sp.node, sp.offset);
+        r.setEnd(ep.node, ep.offset);
+        return r;
+      } catch (e) { return null; }
+    }
     // The block element (data-node) that contains a DOM node, and its key.
     function blockOf(node) {
       node = node && node.nodeType === 3 ? node.parentNode : node;
@@ -103,19 +119,29 @@
       return el ? { el: el, key: el.getAttribute("data-node") } : null;
     }
 
-    // Read the current selection as a MODEL anchor {nodeKey,start,len}, or null if the selection
-    // is collapsed / spans blocks / is outside the root. This is the create/update entry point.
+    // Read the current selection as a MODEL anchor, or null if it is collapsed / outside the root.
+    // Same-block -> a single-block anchor {nodeKey,start,len}. A selection spanning 2+ blocks ->
+    // a multi-block anchor {nodeKey,start,len, endAnchor:{nodeKey,start,len}, multi:true}: the first
+    // node covered start..end, the last node covered 0..endOffset, interiors derived (D1: one word to
+    // the whole document). A DOM Range's start is always earlier in document order than its end.
     function selectionAnchor() {
       var sel = typeof window !== "undefined" && window.getSelection && window.getSelection();
       if (!sel || !sel.rangeCount) return null;
       var r = sel.getRangeAt(0);
       if (r.collapsed || !root.contains(r.commonAncestorContainer)) return null;
       var b1 = blockOf(r.startContainer), b2 = blockOf(r.endContainer);
-      if (!b1 || !b2 || b1.key !== b2.key) return null; // one block only (v1)
+      if (!b1 || !b2) return null;
       var s = offsetOf(b1.el, r.startContainer, r.startOffset);
-      var e = offsetOf(b1.el, r.endContainer, r.endOffset);
-      if (e < s) { var t = s; s = e; e = t; }
-      return { nodeKey: b1.key, start: s, len: e - s };
+      var e = offsetOf(b2.el, r.endContainer, r.endOffset);
+      if (b1.key === b2.key) {
+        if (e < s) { var t = s; s = e; e = t; }
+        if (e === s) return null;
+        return { nodeKey: b1.key, start: s, len: e - s };
+      }
+      // multi-block: cover the first node from s to its end, the last node from 0 to e.
+      var startNode = sd && sd.nodeByKey ? sd.nodeByKey(model, b1.key) : null;
+      var startLen = startNode ? sd.nodeText(startNode).length : s;
+      return { nodeKey: b1.key, start: s, len: Math.max(0, startLen - s), endAnchor: { nodeKey: b2.key, start: 0, len: e }, multi: true };
     }
 
     // The whole point: paint every mark into its type's highlight set, with active/stale/broken
@@ -129,7 +155,7 @@
       (model.marks || []).forEach(function (m) {
         if (sd.isObjectMark(m)) { decorateObject(m); return; } // object marks tint their node element, not a range
         sd.refreshMark(model, m);
-        var r = rangeFor(m.anchor);
+        var r = rangeForMark(m);
         if (!r) { m.broken = true; return; }
         if (m.broken) { reg.broken.add(r); return; }
         if (m.id === activeId) { reg.active.add(r); return; }
@@ -167,7 +193,7 @@
     // The bounding rect of a mark's painted span (for positioning a pinned panel / status dot).
     function rectFor(m) {
       if (sd.isObjectMark(m)) { var el = nodeEl(m.anchor.nodeKey); return el && el.getBoundingClientRect(); }
-      var r = rangeFor(m.anchor);
+      var r = rangeForMark(m);
       return r ? r.getBoundingClientRect() : null;
     }
 
@@ -176,6 +202,7 @@
       setModel: setModel,
       setActive: setActive,
       rangeFor: rangeFor,
+      rangeForMark: rangeForMark,
       selectionAnchor: selectionAnchor,
       markAtPoint: markAtPoint,
       rectFor: rectFor,

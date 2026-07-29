@@ -656,6 +656,12 @@ Pick an existing Product or create a new one, choose a Format (eLearning, Presen
 docs), and promote. This only tags the course — its content is never touched. The top-bar Product
 dropdown then lets you switch between every course, and the Source wiki, for that Product.
 
+**Exporting the source to Markdown.** On the **Source** stage, the **Product actions** menu (the ⋯
+button by the toolbar) has **Export to Markdown** — it downloads the Product's whole continuous
+document as a portable `.md` file (named after the Product). Headings, paragraphs, bold/`inline code`,
+bullet and numbered lists, tables, images, and callouts all come across, so it round-trips with the
+Markdown import. Nothing is changed in the app; it's a save-a-copy.
+
 **Unlinking and deleting.** To detach a course from its Product, open it and choose **Save/Recents →
 Remove from Product** (the course and its content stay; only the tag is removed). On the **Source**
 stage, the **Product actions** menu (the ⋯ button by the toolbar) lets you **Unlink all courses** from
@@ -738,6 +744,15 @@ In this mode:
   rich-text buttons (bold, italic, bullets) only appear once you've unlocked, since they change the
   base prose. There is no "link" button here: linking a course to a piece of source happens in the
   Edit stage, not Source.
+- **Select as little or as much as you like — one word to the whole document.** A selection that
+  spans several paragraphs is fine: the toolbar still appears, so an alternate or a comment can cover
+  a whole passage, not just a single paragraph. A multi-paragraph mark highlights across every
+  paragraph it covers and rides your edits the same way — edit the middle of it and it stays put.
+- **Insert an image or a table.** Once unlocked, the bottom bar shows an **image** and a **table**
+  button. Each drops the new block **after the block you're in** (or at the end of the document if you
+  haven't clicked into one). An image opens your file picker and is stored in the document itself; a
+  table starts as a small 2×2 you can build out. Both are whole **objects** — click to select, and the
+  same alternate / comment actions apply. (The buttons are hidden while the source is locked.)
 - **Alternates: one base, many renditions.** The base prose is the single source of truth. When a
   particular course needs to say a span differently, add an **alternate** — the same meaning, no new
   information — and optionally tag it with what it's *appropriate for* (e.g. "quick-start" or
@@ -760,8 +775,9 @@ In this mode:
   place it's used — a **Document › Section › Location** breadcrumb you can click to jump straight to
   that course. Source is one-way: it *shows* where things are linked; the linking itself happens in
   the Edit stage, not here. A span that isn't linked anywhere says so.
-- **Comments live in the margin.** Selecting text and choosing **Comment** drops a **pin in the
-  right-hand gutter** next to that span; the pin tracks the span as you scroll. Click a pin to open
+- **Comments live in the margin.** Selecting text and choosing **Comment** drops a small **blue
+  comment glyph just to the right of the text** next to that span; the pin tracks the span as you
+  scroll. It matches the canvas comment glyph — subtle, no box. Click a pin to open
   the thread in place — the same comment threads, replies, and Resolved control as the canvas
   editor, so a comment behaves the same everywhere. Add more comments or replies, tick **Resolved**
   when it's handled, and both events show up in History. Comments can be added while the source is
