@@ -12927,6 +12927,9 @@
     bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
     bar.appendChild(seg("alternate", "square-pen", "Add an alternate rendition"));
     bar.appendChild(seg("comment", "message-square", "Comment"));
+    // B1: create-link on a source OBJECT (image/table) -- closes the link gap so an image is a full
+    // source-of-truth object. Object-only (hidden for text, where linking stays Edit-stage).
+    bar.appendChild(seg("link", "link", "Add a link", "source-selbar__obj"));
     bar.appendChild(seg("update", "refresh-cw", "Update the mark to include the appended text", "source-selbar__update"));
     // A2: align segment -- shown only when an IMAGE object owns the bar (hidden for text + tables).
     bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
@@ -12936,7 +12939,7 @@
     bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
     bar.appendChild(seg("row", "columns-2", "Place beside next image", "source-selbar__img")); // A3
     bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
-    bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = "none"; });
+    bar.querySelectorAll(".source-selbar__img, .source-selbar__obj").forEach(function (b) { b.style.display = "none"; });
     bar.querySelector('[data-cmd="update"]').style.display = "none";
     bar.querySelectorAll("[data-cmd]").forEach(function (b) {
       b.addEventListener("click", function () { onSourceSelbarAction(topic, b.getAttribute("data-cmd")); });
@@ -13053,8 +13056,8 @@
     var el = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
     if (el) el.classList.remove("is-object-selected");
     __sourceObjectSelKey = null;
-    var bar = sourceSelBarEl(); // A2: drop the image-only align segment when the object deselects
-    if (bar) bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = "none"; });
+    var bar = sourceSelBarEl(); // drop the object-only controls (A2 align, B1 link) on deselect
+    if (bar) bar.querySelectorAll(".source-selbar__img, .source-selbar__obj").forEach(function (b) { b.style.display = "none"; });
   }
   // A2: light the active align glyph (centre is the default when node.align is unset).
   function syncSourceAlignActive(bar, align) {
@@ -13081,6 +13084,14 @@
       var upd = bar.querySelector('[data-cmd="update"]'); if (upd) upd.style.display = "none";
       bar.querySelector('[data-cmd="alternate"]').style.display = "";
       bar.querySelector('[data-cmd="comment"]').style.display = "";
+      // B1: every markable object (image/table) also gets create-link; lit if it already has one.
+      var linkBtn = bar.querySelector('[data-cmd="link"]');
+      if (linkBtn) {
+        linkBtn.style.display = "";
+        var hasLink = objectMarksOnNode(nodeKey).some(function (mk) { return mk.type === "link"; });
+        linkBtn.classList.toggle("is-active", hasLink);
+        linkBtn.title = hasLink ? "Show where this is linked" : "Add a link";
+      }
       // A2: an IMAGE object also gets the align segment (tables/other objects do not).
       var node = (__sourceDocModel && __sourceDocModel.nodes || []).find(function (n) { return n.key === nodeKey; });
       var isImg = node && node.type === "image";
@@ -13123,6 +13134,24 @@
       if (fig) fig.style.textAlign = (al === "center") ? "" : al;
       persistSourceDocModel(topic, __sourceDocModel);
       var bar = sourceSelBarEl(); if (bar) { syncSourceAlignActive(bar, al); if (fig) positionSourceSelBar(bar, fig.getBoundingClientRect()); }
+      return;
+    }
+    // B1: create-link on the selected object (image/table). If it already carries a link, just open
+    // the where-used panel. Annotation is ungated, so link-create stays available even when locked.
+    if (cmd === "link") {
+      if (!__sourceObjectSelKey) return;
+      var existLink = objectMarksOnNode(__sourceObjectSelKey).filter(function (mk) { return mk.type === "link"; });
+      var linkId;
+      if (existLink.length) { linkId = existLink[0].id; }
+      else {
+        var lm = SD.addMark(__sourceDocModel, { type: "link", anchor: { nodeKey: __sourceObjectSelKey } });
+        persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+        linkId = lm.id;
+        var lbtn = sourceSelBarEl() && sourceSelBarEl().querySelector('[data-cmd="link"]');
+        if (lbtn) { lbtn.classList.add("is-active"); lbtn.title = "Show where this is linked"; }
+        sourceToast("Link added. It will list where it's placed as you use it in courses.");
+      }
+      syncSourceWherePanel(topic, linkId);
       return;
     }
     // A3: "place beside next" -- combine this image with the adjacent one into a side-by-side row,

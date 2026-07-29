@@ -792,8 +792,9 @@ In this mode:
   an alternate opens a **panel pinned in the right margin** that tracks the span as you scroll,
   showing the **base vs the alternate**, a status dot, and Edit / Delete.
 - **Images and tables are markable too.** An image or a table is a whole **object** — click it (a
-  ring shows it's selected) and the same **Add an alternate** / **Comment** actions appear, so you
-  can attach, say, a simplified caption to a diagram or a note to a table. An object's mark is tied
+  ring shows it's selected) and the same **Add an alternate** / **Comment** / **Add a link** actions
+  appear, so you can attach, say, a simplified caption to a diagram, a note to a table, or a link on
+  an image (its **Linked in** panel then tracks where it's used). An object's mark is tied
   to the object itself, so it stays put no matter how you edit the prose around it; a marked object
   carries the same status tint as a marked span, and its alternate/comment opens the same margin
   panel (its "base" line names the object, e.g. "Image — <caption>").
