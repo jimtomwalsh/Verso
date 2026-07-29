@@ -905,6 +905,11 @@ a refresh and a stage-switch.
 - **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
   **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
   that's already queued re-arms it rather than duplicating it.
+- **Out-of-date badge.** A document row in the left list shows a small count chip when linked source
+  topics have changed since that document was last published — e.g. a **2** means two of its linked
+  source topics were edited since its last export. It's informational only: it never blocks or warns,
+  and it clears the moment you publish that document again (publishing sets the new baseline). A
+  document with no linked source content shows no chip.
 - **Presets.** Each queue row shows an **output preset** chip — click it to switch the row's preset,
   save the current settings as a new named preset, or rename/delete one of your own. Three come built
   in: **Master** (full quality), **Review copy** (adds the reviewer file, learner theme off), and

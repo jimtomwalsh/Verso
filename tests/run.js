@@ -8735,6 +8735,51 @@ section("Product Rail: Publish presets (T2)");
   ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\);/.test(e) && !/Send to publish — coming soon/.test(e));
 })();
 
+// ---- product-rail-staleness-tracking: Ground-Truth staleness (export-is-publish) ----
+section("Product Rail: Ground-Truth staleness");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @gt-staleness-start \*\/([\s\S]*?)\/\* @gt-staleness-end \*\//);
+  if (!m) { ok("locate @gt-staleness fence", false); return; }
+  // Inject the module deps the fenced core reaches for: a generic recursive block walk (mirrors the
+  // real walkBlocks visiting nested children) and a LibraryStore accessor.
+  var LIB = {};
+  var pre = "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b);" +
+            " ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.blocks); }\n" +
+            "function libComponents(){ return LIB; }\n";
+  var g = new Function("LIB", pre + m[1] + "\nreturn { docLinkedMasterIds: docLinkedMasterIds, groundTruthStaleCount: groundTruthStaleCount, currentMasterVersions: currentMasterVersions, snapshotGroundTruthBaseline: snapshotGroundTruthBaseline };")(LIB);
+
+  // A doc linking two distinct masters (one nested inside a column), plus a non-linked block.
+  var doc = { meta: {}, blocks: [
+    { type: "paragraph", id: "p1", sourceLink: { masterId: "mA", markId: "k1" } },
+    { type: "heading", id: "h1" },
+    { type: "columns", id: "c1", columns: [ [ { type: "image", id: "im1", sourceLink: { masterId: "mB", markId: "k2" } } ] ] },
+    { type: "paragraph", id: "p2", sourceLink: { masterId: "mA", markId: "k3" } } // same master again -> distinct still 2
+  ] };
+  var ids = g.docLinkedMasterIds(doc).sort();
+  ok("docLinkedMasterIds collects distinct linked masters incl. nested (mA, mB)", ids.length === 2 && ids[0] === "mA" && ids[1] === "mB");
+
+  // no-linked-content -> null (no badge, not a misleading 0)
+  ok("no linked Ground Truth content -> null", g.groundTruthStaleCount({ meta: {}, blocks: [ { type: "paragraph", id: "x" } ] }, { mA: 5 }) === null);
+
+  // never exported (no baseline) -> every linked master counts as changed
+  ok("no baseline (never exported) -> all linked masters counted", g.groundTruthStaleCount(doc, { mA: 10, mB: 20 }) === 2);
+
+  // zero-change: baseline equals current stamps -> 0
+  var docPub = { meta: { lastPublishedGroundTruthVersions: { mA: 10, mB: 20 } }, blocks: doc.blocks };
+  ok("baseline matches current stamps -> 0 changed", g.groundTruthStaleCount(docPub, { mA: 10, mB: 20 }) === 0);
+
+  // N-changed: one master bumped since baseline -> 1
+  ok("one linked master bumped since baseline -> 1 changed", g.groundTruthStaleCount(docPub, { mA: 11, mB: 20 }) === 1);
+
+  // snapshotGroundTruthBaseline records current stamps and zeroes the count
+  LIB.mA = { updatedAt: 30 }; LIB.mB = { updatedAt: 40 };
+  var fresh = { meta: {}, blocks: doc.blocks };
+  g.snapshotGroundTruthBaseline(fresh);
+  ok("snapshot writes doc.meta.lastPublishedGroundTruthVersions from live stamps", fresh.meta.lastPublishedGroundTruthVersions.mA === 30 && fresh.meta.lastPublishedGroundTruthVersions.mB === 40);
+  ok("after snapshot the staleness count is 0 (freshly published baseline)", g.groundTruthStaleCount(fresh, g.currentMasterVersions()) === 0);
+})();
+
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
 section("Product Rail: Source stage variant columns");
 (function () {

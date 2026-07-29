@@ -1361,6 +1361,46 @@
     out.sort(function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; });
     return out;
   }
+  // ---- Product Rail: Ground-Truth staleness (export-is-publish tracking) ----
+  // A document links Ground Truth through block.sourceLink.masterId; each linked master carries a
+  // version stamp (master.updatedAt via stampMasterVersion, bumped on every content edit). At export
+  // we snapshot every linked master's stamp into doc.meta.lastPublishedGroundTruthVersions; the
+  // staleness count is how many linked masters have changed since that baseline. UI-only, never a
+  // gate. All four helpers are pure (fixture-testable in tests/run.js).
+  /* @gt-staleness-start */
+  function docLinkedMasterIds(doc) {
+    var ids = {};
+    walkBlocks(doc, function (b) { if (b && b.sourceLink && b.sourceLink.masterId) ids[b.sourceLink.masterId] = 1; });
+    return Object.keys(ids);
+  }
+  // Count distinct linked masters whose current stamp differs from the doc's last-published baseline.
+  // Returns null when the doc links NO Ground Truth content -> no badge (not a misleading "0 changed").
+  // A master absent from the baseline (newly linked, or a doc never yet exported) counts as changed.
+  function groundTruthStaleCount(doc, currentVersions) {
+    if (!doc) return null;
+    var ids = docLinkedMasterIds(doc);
+    if (!ids.length) return null;
+    var baseline = (doc.meta && doc.meta.lastPublishedGroundTruthVersions) || {};
+    var n = 0;
+    ids.forEach(function (id) { if (baseline[id] !== currentVersions[id]) n++; });
+    return n;
+  }
+  // Current stamp map from the live LibraryStore (masterId -> updatedAt).
+  function currentMasterVersions() {
+    var comps = (typeof libComponents === "function" && libComponents()) || {}, out = {};
+    Object.keys(comps).forEach(function (k) { if (comps[k]) out[k] = comps[k].updatedAt; });
+    return out;
+  }
+  // Baseline reset: record every linked master's current stamp as this doc's new "last published"
+  // point -- the instant a document finishes exporting (solo or whole-family), its badge -> 0.
+  function snapshotGroundTruthBaseline(doc) {
+    if (!doc) return;
+    var cur = currentMasterVersions(), snap = {};
+    docLinkedMasterIds(doc).forEach(function (id) { snap[id] = cur[id]; });
+    doc.meta = doc.meta || {};
+    doc.meta.lastPublishedGroundTruthVersions = snap;
+  }
+  /* @gt-staleness-end */
   function mountPublishStage() {
     if (typeof document === "undefined") return;
     renderPublishPick();
@@ -1381,9 +1421,19 @@
     var list = h("div", "publish-picklist");
     var docs = publishPickDocs();
     if (!docs.length) { list.appendChild(h("div", "publish-empty", "No documents" + (getActiveProduct() ? " in this Product" : "") + " yet.")); }
+    var vers = currentMasterVersions();
     docs.forEach(function (d) {
       var row = h("div", "publish-pickrow");
       row.appendChild(h("span", "publish-pickrow__title", d.title));
+      // staleness-tracking: informational count of linked Ground Truth topics changed since this
+      // document's last export. null (no linked content) shows nothing; 0 shows nothing (in sync);
+      // >0 shows a small count chip. Never blocks or warns -- the author can still queue it freely.
+      var stale = groundTruthStaleCount(registry[d.id], vers);
+      if (stale) {
+        var badge = h("span", "publish-pickrow__stale", String(stale));
+        badge.title = stale + " linked source topic" + (stale === 1 ? "" : "s") + " changed since this document was last published";
+        row.appendChild(badge);
+      }
       var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
       row.appendChild(add);
       list.appendChild(row);
@@ -1550,7 +1600,11 @@
         Promise.resolve()
           .then(function () { return SX.buildPackage(publishOptionsForRow(row)); })
           .then(function (pkg) { return downloadPublishPackage(pkg); })
-          .then(function (res) { PQ.setStatus(q, row.id, "done", res); })
+          .then(function (res) {
+            PQ.setStatus(q, row.id, "done", res);
+            // staleness-tracking: a finished export IS this document's new "last published" baseline.
+            snapshotGroundTruthBaseline(registry[row.docId]); saveRegistry(registry);
+          })
           .catch(function (e) { PQ.setStatus(q, row.id, "error", { to: "error", path: String((e && e.message) || e) }); })
           .then(function () { savePublishQueue(); renderPublishQueue(); step(); });
       };
