@@ -974,8 +974,9 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-composer__btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* Product Rail top-bar dropdown (next to the brand) -- a plain VersoUI.Select host. */
-.product-picker { align-self: center; width: 140px; margin: 0 6px 0 2px; }
-.product-picker .vds-select { width: 100%; }
+.product-picker { align-self: center; display: flex; align-items: center; gap: 4px; margin: 0 6px 0 2px; }
+.product-picker .vds-select { width: 140px; }
+.product-picker__add { flex: 0 0 auto; }
 
 /* #89 left icon rail: a fixed-width glyph column.
    Top nav-tab glyphs (swap the adjacent panel) + bottom pinned action glyphs. */

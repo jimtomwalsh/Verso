@@ -8510,6 +8510,9 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("Edit is the default active segment", /id="rail-tab-edit" data-rail-tab="edit"[^>]*class="[^"]*"|class="rail-btn rail-tab is-active" id="rail-tab-edit"/.test(idx));
   ok("pinned bottom rail actions unchanged (Settings, Help/Docs, Recents)", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && /id="save-menu-btn"/.test(idx));
   ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
+  // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
+  ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(e) && /function mountProductPicker/.test(e));
+  ok("newProductPrompt creates a Product then selects it (create + setActiveProduct + rebuild)", /function newProductPrompt\(\)[\s\S]{0,260}createProduct\(name\);[\s\S]{0,120}setActiveProduct\(prod\.id\);[\s\S]{0,80}mountProductPicker\(\);/.test(e));
   ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
   ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
 
