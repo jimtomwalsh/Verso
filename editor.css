@@ -876,12 +876,10 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
 h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__h:first-child { margin-top: 0; }
 .source-doc__p { margin: 0.7em 0; }
-/* source-rich-render: bold / inline-code render as formatting. The literal ** / ` markers are kept
-   in the DOM (span.source-md-mk) so text offsets stay identical, but hidden from view + from the
-   caret. display:none also keeps them out of contentEditable caret navigation. */
-.source-md-mk { display: none; }
-.source-doc__b { font-weight: 700; }
-.source-doc__code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.92em; background: var(--surface-raised, rgba(127,127,127,.12)); padding: 0.08em 0.32em; border-radius: 3px; }
+/* source import hardening: inline **bold**/*italic*/`code` are lifted into structured format
+   runs (node.formats) at import and rendered by fillSourceInline as transparent strong/em/code --
+   the model text stays plain so mark offsets line up. code gets a subtle chip. */
+.source-doc code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; background: var(--surface-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs, 2px); padding: 0 4px; }
 /* spec 2d: variant comparison columns. A diverged node splits into side-by-side columns inside the
    reading column (never a new panel); shared nodes stay full-width. */
 .source-doc__vrow { display: flex; gap: var(--space-4); margin: 0.7em 0; align-items: stretch; }

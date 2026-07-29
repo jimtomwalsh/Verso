@@ -8171,7 +8171,7 @@ section("UI kit seam");
   ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(e));
   ok("#88 IMAGE_DECL exposes the box stroke (fill/radius stay off)", /var IMAGE_DECL = \{ fill: false, stroke: true, radius: false \};/.test(e));
   ok("#88 imageChromeIo maps hasStroke/colour/width to block.box + clears legacy border", /function imageChromeIo\(block\)[\s\S]{0,400}return !!\(block\.box && block\.box\.border\)[\s\S]{0,900}block\.box\.border = true;[\s\S]{0,200}delete block\.box\.border; delete block\.box\.borderColor; delete block\.box\.borderWidth;[\s\S]{0,120}delete block\.border;/.test(e));
-  ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,900}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
+  ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,1100}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
   // Ticket 7 (2/n) — text blocks (heading/paragraph/note) two-level.
   ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(e));
   ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,200}sub\("Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
@@ -12056,6 +12056,60 @@ section("Source image B2: per-variant image resolve + set");
   // setVariantImage refuses a non-image node (guards the type).
   var m2 = SD.create([{ type: "paragraph", text: "hi" }]);
   ok("setVariantImage no-ops on a non-image node", SD.setVariantImage(m2, m2.nodes[0].key, V, "x.png") === null);
+})();
+
+// ---- Markdown import hardening: tables, HTML comments, inline formatting ----------------------
+section("Source import: robust markdown -> rich nodes (tables, comments, inline)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var P = SD._pure;
+
+  // inline parser: lifts **bold** / *italic* / `code` out to formats[] over PLAIN text (so marks
+  // stay aligned). Underscore emphasis only at a word boundary (snake_case stays literal).
+  var b = P.parseInline("A **bold** and *italic* and `code` bit.");
+  ok("inline: plain text has the markers stripped", b.text === "A bold and italic and code bit.");
+  ok("inline: bold run located over plain text", b.formats.some(function (f) { return f.style === "bold" && b.text.substr(f.start, f.len) === "bold"; }));
+  ok("inline: italic + code runs located", b.formats.some(function (f) { return f.style === "italic" && b.text.substr(f.start, f.len) === "italic"; }) && b.formats.some(function (f) { return f.style === "code" && b.text.substr(f.start, f.len) === "code"; }));
+  ok("inline: snake_case is NOT italicised", P.parseInline("call some_function_name now").text === "call some_function_name now" && P.parseInline("call some_function_name now").formats.length === 0);
+  ok("inline: __bold__ and escaped \\* both handled", P.parseInline("__x__ and \\*lit\\*").text === "x and *lit*" && P.parseInline("__x__").formats[0].style === "bold");
+
+  // a bullet followed by bold markup formats correctly (the reported bug: bold after a dot point)
+  var listNodes = SD.create(SD._pure.blocksFromText("- first **strong** item\n- second one")).nodes;
+  ok("bullet with **bold** -> list node with itemFormats (markers stripped)", listNodes.length === 1 && listNodes[0].type === "list" && listNodes[0].items[0] === "first strong item" && listNodes[0].itemFormats[0][0].style === "bold");
+
+  // a markdown pipe table becomes a real table node (not paragraphs of pipe text)
+  var md = "Intro line.\n\n| Name | Role |\n| --- | --- |\n| Ana | Lead |\n| Bo | Dev |\n\nOutro.";
+  var tnodes = SD.create(SD._pure.blocksFromText(md)).nodes;
+  var tbl = tnodes.filter(function (n) { return n.type === "table"; })[0];
+  ok("pipe table parses to a table node with header + body rows", !!tbl && tbl.rows.length === 3 && tbl.rows[0][0] === "Name" && tbl.rows[2][1] === "Dev");
+  ok("the pipe/dash lines do NOT leak in as paragraph text", !tnodes.some(function (n) { return n.type === "paragraph" && /\|/.test(n.text) && /---/.test(n.text); }));
+  ok("text around the table still parses as paragraphs", tnodes[0].type === "paragraph" && tnodes[0].text === "Intro line." && tnodes[tnodes.length - 1].text === "Outro.");
+
+  // table cells carry inline formatting too
+  var mdf = "| Col |\n| --- |\n| a **bold** cell |";
+  var tf = SD.create(SD._pure.blocksFromText(mdf)).nodes[0];
+  ok("table cell inline formatting is lifted to cellFormats", tf.rows[1][0] === "a bold cell" && tf.cellFormats[1][0][0].style === "bold");
+
+  // HTML comments (PDF page markers) are stripped on import
+  var mdc = "Before.\n\n<!-- Page 43 -->\n\nAfter.\n\nInline <!-- x --> kept clean.";
+  var cnodes = SD.create(SD._pure.blocksFromText(mdc)).nodes;
+  ok("whole-line HTML comment is dropped (no <!-- --> paragraph)", !cnodes.some(function (n) { return /<!--/.test(SD.nodeText(n)); }));
+  ok("inline HTML comment is stripped from a line", cnodes.some(function (n) { return n.type === "paragraph" && /Inline\s+kept clean\./.test(n.text); }));
+
+  // export round-trips inline formatting + tables back to markdown
+  var model = SD.create(SD._pure.blocksFromText("A **bold** word.\n\n| H |\n| --- |\n| v |"));
+  var out = SD.toMarkdown(model);
+  ok("toMarkdown re-emits **bold**", /A \*\*bold\*\* word\./.test(out));
+  ok("toMarkdown re-emits a pipe table", /\| H \|/.test(out) && /\| --- \|/.test(out) && /\| v \|/.test(out));
+  // and re-importing that markdown yields the same rich structure (idempotent shape)
+  var reNodes = SD.create(SD._pure.blocksFromText(out)).nodes;
+  ok("re-import round-trips: bold paragraph + table survive", reNodes[0].text === "A bold word." && reNodes[0].formats[0].style === "bold" && reNodes.some(function (n) { return n.type === "table" && n.rows[1][0] === "v"; }));
+
+  // editing a formatted node drops its now-stale format runs (safe fallback, base text usually locked)
+  var em = SD.create([{ type: "paragraph", text: "x", key: "n1" }]);
+  em.nodes[0].formats = [{ start: 0, len: 1, style: "bold" }];
+  SD.applyTextEdit(em, "n1", "xy");
+  ok("applyTextEdit drops stale formats on a real text change", !em.nodes[0].formats);
 })();
 
 section("Source rewrite: object (image/table) marks (Epic 2b)");

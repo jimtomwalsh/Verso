@@ -7539,7 +7539,9 @@
       // per-mode). Sections buffer + emit in PanelLayout order via endSections.
       // VV state-conditional: with no image the alt/size/light-dark/per-mode controls are
       // meaningless, so only the Content section shows until a source is set.
-      var hasImage = !!(block.src || block.srcLight || block.srcDark);
+      // A source-linked image resolves its pixels at render time (block.src stays empty), so count a
+      // live source link as "has an image" too -- else its Layout/Appearance/Behaviour controls hide.
+      var hasImage = !!(block.src || block.srcLight || block.srcDark || (block.sourceLink && block.sourceLink.markId));
       beginSections();
 
       // Content — source (URL / upload), alt, per-variant versions, caption.
@@ -10974,6 +10976,10 @@
 
   var __activeStage = "edit";
   var STAGE_PERSIST_KEY = "verso.activeStage"; // persist the active stage so a refresh returns here, not Edit
+  // The canvas viewport is display:none on Source/Publish, so any fit computed while it's hidden
+  // measures a 0x0 rect and lands the author in blank space. Frame the content ONCE the first time
+  // Edit is shown with a laid-out canvas; later Edit entries keep the author's pan.
+  var __framedWhileVisible = false;
   function setStage(stage) {
     if (!isValidStage(stage)) return;
     __activeStage = stage;
@@ -10998,6 +11004,16 @@
     if (stage === "publish") mountPublishStage();
     // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
     if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
+    // Frame the content the first time Edit is actually visible (see __framedWhileVisible). rAF so the
+    // canvas has a real, non-zero rect before fitAll measures it.
+    if (stage === "edit" && !__framedWhileVisible && typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () {
+        if (__framedWhileVisible || __activeStage !== "edit") return;
+        var r = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
+        if (!r || r.width < 2 || r.height < 2) return; // still hidden / not laid out yet
+        view.ready = false; fitAll(); __framedWhileVisible = true;
+      });
+    }
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
@@ -12082,27 +12098,6 @@
   // are contentEditable so the base prose can be edited when unlocked; structural blocks (list/
   // table/image) render for reading in v1 (cell/list editing is fast-follow, spec 6) but still
   // carry marks. Marks paint over whatever text these blocks contain via the engine.
-  // source-rich-render: project a node's canonical text into `el` with bold/inline-code shown as
-  // FORMATTING rather than literal ** / ` markers. The delimiter characters stay in the DOM as
-  // hidden text nodes (span.source-md-mk { display:none }) so el.textContent -- what applyTextEdit
-  // reads back on every input, and what the mark engine's TreeWalker counts -- is byte-identical to
-  // the model text. The rich layer is therefore purely visual: mark offsets and edit math never
-  // shift. Plain text (no markers) takes the fast textContent path.
-  function paintSourceInline(el, text) {
-    var runs = (window.SourceDoc.inlineRuns ? window.SourceDoc.inlineRuns(text) : [{ text: String(text == null ? "" : text), kind: "text" }]);
-    if (runs.length === 1 && runs[0].kind === "text") { el.textContent = runs[0].text; return; }
-    var wrap = null;
-    runs.forEach(function (r) {
-      if (r.kind === "text") { wrap = null; el.appendChild(document.createTextNode(r.text)); return; }
-      if (r.marker) {
-        if (!wrap) { wrap = h(r.kind === "bold" ? "strong" : "code", r.kind === "bold" ? "source-doc__b" : "source-doc__code"); el.appendChild(wrap); }
-        var mk = h("span", "source-md-mk"); mk.textContent = r.text; wrap.appendChild(mk);
-        if (wrap.childNodes.length >= 3) wrap = null; // open-marker, inner, close-marker -> emphasis run complete
-      } else {
-        (wrap || el).appendChild(document.createTextNode(r.text));
-      }
-    });
-  }
   /* @pure-imgwidth-start */
   // A1 (source image resize): width is stored as node.imgWidth = % of the column, so render
   // is pure (editor == export). Blank/>=100 = full width. These two helpers are the pure core
@@ -12126,12 +12121,30 @@
   }
   /* @pure-imgwidth-end */
 
+  // Fill an element with text, wrapping inline-format runs (from Markdown import) in transparent
+  // <strong>/<em>/<code>. The wrappers do NOT change the element's text content or length, so the
+  // mark engine (which walks text nodes by character offset) still lines up on the plain model text.
+  function fillSourceInline(el, text, runs) {
+    text = String(text == null ? "" : text);
+    if (!runs || !runs.length) { el.textContent = text; return; }
+    var sorted = runs.slice().sort(function (a, b) { return a.start - b.start; });
+    var pos = 0;
+    sorted.forEach(function (r) {
+      if (!r || r.start < pos || r.start > text.length) return; // defensive: skip overlaps / stale runs
+      if (r.start > pos) el.appendChild(document.createTextNode(text.slice(pos, r.start)));
+      var tag = r.style === "bold" ? "strong" : r.style === "italic" ? "em" : "code";
+      var span = document.createElement(tag);
+      span.textContent = text.slice(r.start, r.start + r.len);
+      el.appendChild(span); pos = r.start + r.len;
+    });
+    if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
+  }
   function renderSourceDocNode(node) {
     var SD = window.SourceDoc, el;
-    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); paintSourceInline(el, SD.nodeText(node)); el.setAttribute("data-editable", "1"); }
-    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); paintSourceInline(cb, SD.nodeText(node)); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
-    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
-    else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row) { var tr = h("tr"); (row || []).forEach(function (c) { tr.appendChild(h("td", null, c)); }); el.appendChild(tr); }); }
+    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
+    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); fillSourceInline(cb, SD.nodeText(node), node.formats); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
+    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it, ix) { var liEl = h("li"); fillSourceInline(liEl, it, node.itemFormats && node.itemFormats[ix]); el.appendChild(liEl); }); }
+    else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row, ri) { var tr = h("tr"); (row || []).forEach(function (c, ci) { var td = h("td"); fillSourceInline(td, c, node.cellFormats && node.cellFormats[ri] && node.cellFormats[ri][ci]); tr.appendChild(td); }); el.appendChild(tr); }); }
     else if (node.type === "row") {
       // A3: a row lays its image children side by side. Each child renders through the normal path
       // so it keeps its own key (marks stay attached), its width (A1) and its align chrome.
@@ -12153,7 +12166,7 @@
       if (node.caption) el.appendChild(h("figcaption", null, node.caption));
       var al = sourceImgAlign(node); if (al) el.style.textAlign = al; // A2: centre is the default
     }
-    else { el = h("p", "source-doc__p"); paintSourceInline(el, SD.nodeText(node)); el.setAttribute("data-editable", "1"); }
+    else { el = h("p", "source-doc__p"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
     el.setAttribute("data-node", node.key);
     // image/table = a first-class markable OBJECT (a node-id mark, no text span). Tag it so a
     // click selects the whole node and offers the same alternate/comment actions as a text span.
