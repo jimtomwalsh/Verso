@@ -22929,16 +22929,15 @@
     demoBpBtns = Array.prototype.slice.call(document.querySelectorAll("#demo-bp .bp-btn"));
     demoBpBtns.forEach(function (b) { b.addEventListener("click", function () { demoBp = b.getAttribute("data-bp"); renderDemo(); }); });
     document.getElementById("demo-enter").addEventListener("click", enterDemo);
-    // SPEC 7: Send-to-publish is relocated into the editor header. Real behaviour (wire to
-    // addToQueue) lands in the send-to-publish-wire ticket; a stub confirmation for now.
+    // SPEC 7 (send-to-publish-wire): the editor-header glyph adds the active document to the standing
+    // publish queue via the ONE shared addToQueue -- its remembered preset (T2), no configure step,
+    // re-arming (never duplicating) a row that already exists, and toasting the running pending count.
     var sendPub = document.getElementById("send-to-publish-btn");
     if (sendPub && !sendPub.__wired) {
       sendPub.__wired = true;
       sendPub.addEventListener("click", function () {
-        var t = h("div", "collab-toast", "Send to publish — coming soon");
-        document.body.appendChild(t);
-        requestAnimationFrame(function () { t.classList.add("is-on"); });
-        setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2400);
+        if (activeDocId && registry[activeDocId]) addToQueue(activeDocId);
+        else publishToast("Open a document first to send it to the publish queue.");
       });
     }
     document.getElementById("demo-exit").addEventListener("click", exitDemo);

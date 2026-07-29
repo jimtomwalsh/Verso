@@ -8731,6 +8731,8 @@ section("Product Rail: Publish presets (T2)");
   ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
   ok("the shared action recalls the doc's last-used preset and toasts the pending count", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e) && /publishToast\("Added to the publish queue/.test(e));
   ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
+  // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
+  ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\);/.test(e) && !/Send to publish — coming soon/.test(e));
 })();
 
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
