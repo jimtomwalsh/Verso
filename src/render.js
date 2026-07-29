@@ -1313,6 +1313,18 @@
       return wrap;
     },
     image: function (block) {
+      // SPEC 8 (source-link 07): a linked image block resolves its src/alt LIVE from the source
+      // figure via the 01 resolver (object branch), then renders + bakes exactly like any image.
+      // Pure: work on a shallow copy so the doc block is never mutated.
+      if (block.sourceLink && block.sourceLink.markId && window.resolveSourceLinkContent) {
+        var rlink = window.resolveSourceLinkContent(block.sourceLink.masterId, block.sourceLink.markId, block.sourceLink.altId || null, null);
+        if (rlink && rlink.type === "object") {
+          var c = {}; for (var ck in block) { if (Object.prototype.hasOwnProperty.call(block, ck)) c[ck] = block[ck]; }
+          c.src = rlink.src || block.src;
+          c.alt = (rlink.alt != null && rlink.alt !== "") ? rlink.alt : block.alt;
+          block = c;
+        }
+      }
       // Item Y — per-asset light/dark contrast (a SEPARATE dimension from the
       // CSV/product variant system; nothing here touches resolveVariant):
       //   - srcLight/srcDark: per-mode raster sources, swapped purely by

@@ -4102,6 +4102,7 @@
     refreshCanvasSelection();
     decorateVariantVersionBadges(frame); // #148: re-add the version-cycle badge on this page's image blocks
     decorateStyleAudit(frame); // #145: re-mark unstyled text blocks on this page
+    decorateSourceLinks(frame); // source-link 03: re-add the link indicator on this page's linked blocks
   }
   // Rebuild only the page a block lives on (falls back to full mount if it can't be located).
   function reapplyBlock(block) {
@@ -4140,6 +4141,7 @@
     if (interactMode) decorateInteractHandle();
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
+    decorateSourceLinks(); // source-link 03: link indicator on placed source-linked blocks
   }
   window.__reapplyPage = reapplyPage; // perf/test hook
   window.__perf = { // perf-measurement hooks (harmless; used to profile the re-render paths)
@@ -7537,7 +7539,9 @@
       // per-mode). Sections buffer + emit in PanelLayout order via endSections.
       // VV state-conditional: with no image the alt/size/light-dark/per-mode controls are
       // meaningless, so only the Content section shows until a source is set.
-      var hasImage = !!(block.src || block.srcLight || block.srcDark);
+      // A source-linked image resolves its pixels at render time (block.src stays empty), so count a
+      // live source link as "has an image" too -- else its Layout/Appearance/Behaviour controls hide.
+      var hasImage = !!(block.src || block.srcLight || block.srcDark || (block.sourceLink && block.sourceLink.markId));
       beginSections();
 
       // Content — source (URL / upload), alt, per-variant versions, caption.
@@ -10972,6 +10976,10 @@
 
   var __activeStage = "edit";
   var STAGE_PERSIST_KEY = "verso.activeStage"; // persist the active stage so a refresh returns here, not Edit
+  // The canvas viewport is display:none on Source/Publish, so any fit computed while it's hidden
+  // measures a 0x0 rect and lands the author in blank space. Frame the content ONCE the first time
+  // Edit is shown with a laid-out canvas; later Edit entries keep the author's pan.
+  var __framedWhileVisible = false;
   function setStage(stage) {
     if (!isValidStage(stage)) return;
     __activeStage = stage;
@@ -10996,6 +11004,16 @@
     if (stage === "publish") mountPublishStage();
     // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
     if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
+    // Frame the content the first time Edit is actually visible (see __framedWhileVisible). rAF so the
+    // canvas has a real, non-zero rect before fitAll measures it.
+    if (stage === "edit" && !__framedWhileVisible && typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () {
+        if (__framedWhileVisible || __activeStage !== "edit") return;
+        var r = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
+        if (!r || r.width < 2 || r.height < 2) return; // still hidden / not laid out yet
+        view.ready = false; fitAll(); __framedWhileVisible = true;
+      });
+    }
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
@@ -11444,7 +11462,15 @@
     var pid = getActiveProduct();
     if (pid && window.ProductsStore[pid]) return pid;
     var keys = Object.keys(window.ProductsStore || {});
-    for (var i = 0; i < keys.length; i++) { if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) { setActiveProduct(keys[i]); return keys[i]; } }
+    for (var i = 0; i < keys.length; i++) {
+      if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) {
+        // Before the saved scope is restored (boot), auto-pick in memory ONLY -- persisting here would
+        // overwrite the author's saved Product with a default before restoreActiveProduct reads it,
+        // which is exactly the "refresh resets the dropdown" bug.
+        if (__productRestored) setActiveProduct(keys[i]); else __activeProduct = keys[i];
+        return keys[i];
+      }
+    }
     return keys[0] || "";
   }
   // Resolve the active Product's unified-doc master, migrating on first entry when the Product
@@ -11589,8 +11615,7 @@
     var expandableKeys = tree.filter(function (ch) { return (ch.children || []).length > 0; }).map(function (ch) { return ch.key; });
     if (!q && expandableKeys.length && U.IconButton) {
       var anyOpen = expandableKeys.some(function (k) { return __sourceOpenChapters[k] !== false; });
-      var tools = h("div", "source-toc__tools");
-      tools.appendChild(U.IconButton({
+      var collapseBtn = U.IconButton({
         icon: "list-collapse",
         label: anyOpen ? "Collapse all chapters" : "Expand all chapters",
         onClick: function () {
@@ -11598,8 +11623,13 @@
           else expandableKeys.forEach(function (k) { delete __sourceOpenChapters[k]; });
           renderSourceTopicList();
         }
-      }));
-      host.appendChild(tools);
+      });
+      // Sit on the SAME row as New topic / Import / Product actions (built by renderSourceToolbar just
+      // above) rather than in its own full-width strip atop the tree. Falls back to a strip if the
+      // toolbar row isn't there.
+      var toolbarRow = document.querySelector("#source-stage-nav-actions .source-stage__toolbar");
+      if (toolbarRow) toolbarRow.appendChild(collapseBtn);
+      else { var tools = h("div", "source-toc__tools"); tools.appendChild(collapseBtn); host.appendChild(tools); }
     }
     tree.forEach(function (ch) {
       var kids = (ch.children || []).filter(function (k) { return keep(k.key); });
@@ -12080,35 +12110,79 @@
   // are contentEditable so the base prose can be edited when unlocked; structural blocks (list/
   // table/image) render for reading in v1 (cell/list editing is fast-follow, spec 6) but still
   // carry marks. Marks paint over whatever text these blocks contain via the engine.
-  // source-rich-render: project a node's canonical text into `el` with bold/inline-code shown as
-  // FORMATTING rather than literal ** / ` markers. The delimiter characters stay in the DOM as
-  // hidden text nodes (span.source-md-mk { display:none }) so el.textContent -- what applyTextEdit
-  // reads back on every input, and what the mark engine's TreeWalker counts -- is byte-identical to
-  // the model text. The rich layer is therefore purely visual: mark offsets and edit math never
-  // shift. Plain text (no markers) takes the fast textContent path.
-  function paintSourceInline(el, text) {
-    var runs = (window.SourceDoc.inlineRuns ? window.SourceDoc.inlineRuns(text) : [{ text: String(text == null ? "" : text), kind: "text" }]);
-    if (runs.length === 1 && runs[0].kind === "text") { el.textContent = runs[0].text; return; }
-    var wrap = null;
-    runs.forEach(function (r) {
-      if (r.kind === "text") { wrap = null; el.appendChild(document.createTextNode(r.text)); return; }
-      if (r.marker) {
-        if (!wrap) { wrap = h(r.kind === "bold" ? "strong" : "code", r.kind === "bold" ? "source-doc__b" : "source-doc__code"); el.appendChild(wrap); }
-        var mk = h("span", "source-md-mk"); mk.textContent = r.text; wrap.appendChild(mk);
-        if (wrap.childNodes.length >= 3) wrap = null; // open-marker, inner, close-marker -> emphasis run complete
-      } else {
-        (wrap || el).appendChild(document.createTextNode(r.text));
-      }
+  /* @pure-imgwidth-start */
+  // A1 (source image resize): width is stored as node.imgWidth = % of the column, so render
+  // is pure (editor == export). Blank/>=100 = full width. These two helpers are the pure core
+  // exercised by tests/run.js.
+  function clampSourceImgWidth(w) {
+    w = parseFloat(w);
+    if (isNaN(w)) return 100;
+    return Math.max(20, Math.min(100, w));
+  }
+  // Free-drag with a light magnetic snap at 25/50/75/100% (within ~4% of a stop).
+  function snapSourceImgWidth(pct) {
+    var stops = [25, 50, 75, 100];
+    for (var i = 0; i < stops.length; i++) { if (Math.abs(pct - stops[i]) <= 4) return stops[i]; }
+    return Math.round(pct);
+  }
+  // A2 (source image align): align stored as node.align; centre is the default (no style, so a
+  // full-width image reads the same either way). Returns "left"/"right" to apply, or "" for centred.
+  function sourceImgAlign(node) {
+    var a = node && node.align;
+    return (a === "left" || a === "right") ? a : "";
+  }
+  /* @pure-imgwidth-end */
+
+  // Fill an element with text, wrapping inline-format runs (from Markdown import) in transparent
+  // <strong>/<em>/<code>. The wrappers do NOT change the element's text content or length, so the
+  // mark engine (which walks text nodes by character offset) still lines up on the plain model text.
+  function fillSourceInline(el, text, runs) {
+    text = String(text == null ? "" : text);
+    // An empty text block generates no line box in the contentEditable article, so it has zero height
+    // and is invisible -- an Enter at the end of a line splits off an empty paragraph that "vanishes"
+    // (History still logs the split). A trailing <br> gives the empty block a line to sit on.
+    if (!text) { el.appendChild(document.createElement("br")); return; }
+    if (!runs || !runs.length) { el.textContent = text; return; }
+    var sorted = runs.slice().sort(function (a, b) { return a.start - b.start; });
+    var pos = 0;
+    sorted.forEach(function (r) {
+      if (!r || r.start < pos || r.start > text.length) return; // defensive: skip overlaps / stale runs
+      if (r.start > pos) el.appendChild(document.createTextNode(text.slice(pos, r.start)));
+      var tag = r.style === "bold" ? "strong" : r.style === "italic" ? "em" : "code";
+      var span = document.createElement(tag);
+      span.textContent = text.slice(r.start, r.start + r.len);
+      el.appendChild(span); pos = r.start + r.len;
     });
+    if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
   }
   function renderSourceDocNode(node) {
     var SD = window.SourceDoc, el;
-    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); paintSourceInline(el, SD.nodeText(node)); el.setAttribute("data-editable", "1"); }
-    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); paintSourceInline(cb, SD.nodeText(node)); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
-    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
-    else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row) { var tr = h("tr"); (row || []).forEach(function (c) { tr.appendChild(h("td", null, c)); }); el.appendChild(tr); }); }
-    else if (node.type === "image") { el = h("figure", "source-doc__figure"); var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt; el.appendChild(im); if (node.caption) el.appendChild(h("figcaption", null, node.caption)); }
-    else { el = h("p", "source-doc__p"); paintSourceInline(el, SD.nodeText(node)); el.setAttribute("data-editable", "1"); }
+    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
+    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); fillSourceInline(cb, SD.nodeText(node), node.formats); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
+    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it, ix) { var liEl = h("li"); fillSourceInline(liEl, it, node.itemFormats && node.itemFormats[ix]); el.appendChild(liEl); }); }
+    else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row, ri) { var tr = h("tr"); (row || []).forEach(function (c, ci) { var td = h("td"); fillSourceInline(td, c, node.cellFormats && node.cellFormats[ri] && node.cellFormats[ri][ci]); tr.appendChild(td); }); el.appendChild(tr); }); }
+    else if (node.type === "row") {
+      // A3: a row lays its image children side by side. Each child renders through the normal path
+      // so it keeps its own key (marks stay attached), its width (A1) and its align chrome.
+      el = h("div", "source-doc__row");
+      (node.children || []).forEach(function (ch) { el.appendChild(renderSourceDocNode(ch)); });
+    }
+    else if (node.type === "image") {
+      // A1: the image sits inside a sized wrap so the L/R resize handles pin to the image edges
+      // (not the full-width figure). Width = node.imgWidth % of the column, applied purely.
+      el = h("figure", "source-doc__figure");
+      var wrap = h("span", "source-doc__imgwrap");
+      var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt;
+      var iw = clampSourceImgWidth(node.imgWidth == null ? 100 : node.imgWidth);
+      if (iw < 100) wrap.style.width = iw + "%";
+      wrap.appendChild(im);
+      wrap.appendChild(h("span", "source-doc__handle source-doc__handle--l"));
+      wrap.appendChild(h("span", "source-doc__handle source-doc__handle--r"));
+      el.appendChild(wrap);
+      if (node.caption) el.appendChild(h("figcaption", null, node.caption));
+      var al = sourceImgAlign(node); if (al) el.style.textAlign = al; // A2: centre is the default
+    }
+    else { el = h("p", "source-doc__p"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
     el.setAttribute("data-node", node.key);
     // image/table = a first-class markable OBJECT (a node-id mark, no text span). Tag it so a
     // click selects the whole node and offers the same alternate/comment actions as a text span.
@@ -12119,8 +12193,9 @@
   // spec 2d: render one node as a variant comparison. A node all shown variants agree on renders as
   // a single shared block (its normal element); a node that diverges splits into one column per shown
   // variant, each drawing its own wording or an explicit "not in this variant" state. Read-oriented.
-  function renderSourceDocNodeColumns(node, shown) {
+  function renderSourceDocNodeColumns(topic, node, shown) {
     var SD = window.SourceDoc;
+    if (node.type === "image") return renderSourceImageColumns(topic, node, shown); // B2
     var view = SD.variantView(node, shown);
     if (view.mode === "shared") { var el = renderSourceDocNode(node); el.classList.add("source-doc__shared"); return el; }
     var row = h("div", "source-doc__vrow"); row.setAttribute("data-node", node.key);
@@ -12132,6 +12207,63 @@
       row.appendChild(cell);
     });
     return row;
+  }
+  // B2: an image node compared across variants -- each column shows that variant's picture (its own
+  // src override, or the inherited Flagship one), or "Not in this variant". Unlike text (read-only in
+  // the columns view), an image is swappable per column: a Swap button picks a new file for JUST that
+  // variant, and a named variant can be removed/restored -- a discrete object action, not free-text
+  // editing that would fight contentEditable. Columns collapse to one shared image when they agree.
+  function renderSourceImageColumns(topic, node, shown) {
+    var SD = window.SourceDoc;
+    var cols = shown.map(function (v) { var r = SD.imageForVariant(node, v); r.variant = v; return r; });
+    var first = cols[0];
+    var allSame = cols.every(function (c) { return c.present === first.present && c.src === first.src; });
+    if (allSame && first.present) { var el = renderSourceDocNode(node); el.classList.add("source-doc__shared"); return el; }
+    var row = h("div", "source-doc__vrow"); row.setAttribute("data-node", node.key);
+    cols.forEach(function (c) {
+      var isFlag = SD.isFlagship(c.variant);
+      var cell = h("div", "source-doc__vcol" + (c.source === "override" ? " is-diverged" : "") + (!c.present ? " is-absent" : ""));
+      cell.appendChild(h("div", "source-doc__vcol-head", c.variant));
+      var acts = h("div", "source-vcol__imgacts");
+      function imgBtn(icon, title, fn) { var b = h("button", "source-vcol__imgbtn"); b.type = "button"; b.title = title; b.innerHTML = window.Icon ? window.Icon(icon) : ""; b.addEventListener("click", fn); return b; }
+      if (!c.present) {
+        cell.appendChild(h("div", "source-doc__vcol-absent", "Not in this variant"));
+        acts.appendChild(imgBtn("plus", "Add an image for " + c.variant, function () { pickImageForVariant(topic, node.key, c.variant); }));
+      } else {
+        var fig = h("figure", "source-doc__figure source-doc__vcol-fig");
+        var wrap = h("span", "source-doc__imgwrap");
+        var im = h("img"); if (c.src) im.src = c.src; if (c.alt) im.alt = c.alt;
+        var iw = clampSourceImgWidth(node.imgWidth == null ? 100 : node.imgWidth); if (iw < 100) wrap.style.width = iw + "%";
+        wrap.appendChild(im); fig.appendChild(wrap);
+        if (c.caption) fig.appendChild(h("figcaption", null, c.caption));
+        cell.appendChild(fig);
+        acts.appendChild(imgBtn("image", isFlag ? "Replace the base image" : "Swap image for " + c.variant, function () { pickImageForVariant(topic, node.key, c.variant); }));
+        if (!isFlag) acts.appendChild(imgBtn("eye-off", "Hide in " + c.variant, function () { SD.removeNodeFromVariant(__sourceDocModel, node.key, c.variant); persistSourceDocModel(topic, __sourceDocModel); renderSourceArticle(); }));
+        else if (c.source === "override") { /* Flagship always present */ }
+      }
+      cell.appendChild(acts);
+      row.appendChild(cell);
+    });
+    return row;
+  }
+  // B2: pick a file and set it as the image for one variant (Flagship replaces the base). Stored as a
+  // data-URI inline (the Source doc is never SCORM-exported -- same as insertSourceImage). Unlocked.
+  function pickImageForVariant(topic, nodeKey, variant) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to change a variant's image."); return; }
+    var inp = h("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        window.SourceDoc.setVariantImage(__sourceDocModel, nodeKey, variant, rd.result, { alt: String(f.name || "image").replace(/\.[^.]+$/, "") });
+        persistSourceDocModel(topic, __sourceDocModel);
+        renderSourceArticle();
+        sourceToast(window.SourceDoc.isFlagship(variant) ? "Base image replaced." : "Image set for " + variant + ".");
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
   }
 
   function renderSourceNodeArticle(topic, host) {
@@ -12154,7 +12286,7 @@
     var art = h("article", "source-doc" + (showCols ? " source-doc--cols" : "")); art.setAttribute("spellcheck", "false");
     if (showCols) {
       var shown = [SD.FLAGSHIP].concat(__sourceActiveVariants);
-      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNodeColumns(n, shown)); });
+      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNodeColumns(topic, n, shown)); });
     } else {
       model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNode(n)); });
     }
@@ -12176,6 +12308,7 @@
 
     __sourceMarksEngine = SM.create({ root: art, model: model });
     repaintSourceMarks();
+    wireSourceImageResize(topic, art, model);
 
     // A cross-paragraph edit (typing/deleting over a selection that spans blocks, or a Backspace/Delete
     // that would merge two paragraphs) can't be left to the browser -- with one editing host it would
@@ -12266,6 +12399,7 @@
     // clicking a painted mark activates it (contextual view is the alternates/comments tickets;
     // here we confirm the hit-test + active repaint work).
     art.addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".source-doc__handle")) return; // resize handle, not a select
       if (!__sourceShowMarks) return;
       // an image/table is a whole-node OBJECT: a click on it selects the object (not a text span)
       // and offers the same alternate/comment actions, anchored by node id (spec 6).
@@ -12381,9 +12515,17 @@
     var next = !!v;
     if (next === __sourceUnlocked) { applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); return; }
     var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
-    if (next) beginSourceEditSession(); else flushSourceEditSession(topic, { prompt: opts.prompt });
-    __sourceUnlocked = next;
-    applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+    if (next) {
+      beginSourceEditSession();
+      snapshotSourceLinkBase(); // 09: snapshot linked-passage wording so lock can warn + fork
+      __sourceUnlocked = true;
+      applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+      return;
+    }
+    // Locking: if the edit session changed wording that other documents link, warn first (09).
+    var impact = sourceBaseEditImpact();
+    if (impact.affected.length && window.VersoUI && window.VersoUI.Button) { showSourceBaseEditModal(topic, impact, opts); return; }
+    finalizeSourceLock(topic, opts);
   }
 
   // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
@@ -12572,37 +12714,78 @@
     var m = SD.markById(model, __sourceWhereUsedMarkId);
     if (!m || m.type !== "link") { __sourceWhereUsedMarkId = null; return; }
     var host = document.getElementById("source-stage-article"); if (!host) return;
-    var crumbs = SD.whereUsedForMark(m);
+    // 10: the REAL, live where-used -- every block/span in any document that links this passage,
+    // walked from the registry (placement links carry no stored crumb list). Each row jumps to the
+    // exact block in Edit; an alternate can be pushed to all or a chosen subset of these locations.
+    var used = sourceLinkWhereUsed(__sourceActiveTopicId, m.id);
     var panel = h("aside", "source-altpanel source-wherepanel"); panel.setAttribute("data-source-wherepanel", "1");
     panel.setAttribute("aria-label", "Where this is linked");
     var head = h("div", "source-altpanel__head");
     var glyph = h("span", "source-wherepanel__glyph"); glyph.innerHTML = window.Icon ? window.Icon("link") : "";
     head.appendChild(glyph);
-    head.appendChild(h("div", "source-altpanel__title", "Linked in " + crumbs.length));
+    head.appendChild(h("div", "source-altpanel__title", "Linked in " + used.length));
     var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
     close.innerHTML = window.Icon ? window.Icon("x") : "close";
     close.addEventListener("click", function () { closeSourceWherePanel(); });
     head.appendChild(close);
     panel.appendChild(head);
-    if (!crumbs.length) {
-      // a link mark with no destinations yet -- the empty state (spec: absent handling)
+    if (!used.length) {
       panel.appendChild(h("div", "source-altpanel__field insp-hint", "Not linked in any document yet."));
     } else {
-      // one canonical VersoUI.Breadcrumb per destination (Document > Section > Location) -- the
-      // Document crumb carries the navigate-out onClick (its {label,onClick} contract); the trailing
-      // crumbs are read-only context, last auto-emphasised. Reuses the DS component, not a one-off.
-      crumbs.forEach(function (c) {
-        var dest = h("div", "source-wherepanel__dest");
-        var items = [c.docCode ? { label: c.doc, onClick: function () { openCourseFromBrowser(c.docCode); setStage("edit"); } } : c.doc];
-        if (c.section) items.push(c.section);
-        if (c.location) items.push(c.location);
-        dest.appendChild(window.VersoUI && window.VersoUI.Breadcrumb ? window.VersoUI.Breadcrumb({ items: items }) : document.createTextNode(items.map(function (x) { return x.label || x; }).join(" › ")));
-        panel.appendChild(dest);
+      used.forEach(function (loc) {
+        var row = h("button", "source-wherepanel__row"); row.type = "button";
+        row.title = "Open " + loc.docTitle + " and select the linked " + (loc.kind === "span" ? "span" : "block");
+        row.appendChild(h("span", "source-wherepanel__row-doc", loc.docTitle));
+        row.appendChild(h("span", "source-wherepanel__row-tag" + (loc.altId ? " is-alt" : ""), loc.altId ? "alternate" : "base"));
+        row.addEventListener("click", function () { jumpToLinkedBlock(loc.docCode, loc.blockId); });
+        panel.appendChild(row);
       });
+      // Push an alternate out to the linked documents (all, or a picked subset). Never automatic.
+      var alts = sourceLinkAlternates(model, m);
+      if (alts.length && window.VersoUI && window.VersoUI.Button) {
+        var pushWrap = h("div", "source-wherepanel__push");
+        pushWrap.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", icon: "arrow-up-to-line", label: "Push an alternate…", onClick: function () { openSourceAltPushDialog(m, alts, used); } }));
+        panel.appendChild(pushWrap);
+      }
     }
     host.appendChild(panel);
     positionSourceWherePanel();
     document.addEventListener("keydown", onSourceWherePanelKey);
+  }
+  // 10: push a forked wording to the documents that link a passage. Sets altId on each chosen
+  // location across whatever documents use it; base stays base until pushed (never automatic).
+  function pushSourceAlternate(markId, altId, locations) {
+    var reg = registry;
+    (locations || []).forEach(function (loc) { applyAltToLocation(reg, loc, altId); });
+    saveRegistry(reg); decorateSourceLinks();
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (topic) renderSourceWherePanel(topic); // refresh the base/alternate tags
+    sourceToast("Pushed to " + locations.length + " place" + (locations.length === 1 ? "" : "s") + ".");
+  }
+  function openSourceAltPushDialog(link, alts, used) {
+    var selectedAlt = alts[0].id, chosen = used.map(function () { return true; });
+    var shell = dsModalShell({
+      title: "Push an alternate", subtitle: "Send a forked wording to the documents that link this passage.",
+      primaryLabel: "Push",
+      onPrimary: function () {
+        var locs = used.filter(function (loc, i) { return chosen[i]; });
+        if (!locs.length || !selectedAlt) return;
+        pushSourceAlternate(link.id, selectedAlt, locs); shell.modal.close();
+      }
+    });
+    var altField = modalField(shell.body, "Alternate");
+    var altRow = h("div", "prop-toggle-row");
+    alts.forEach(function (alt) {
+      var b = h("button", "prop-toggle" + (alt.id === selectedAlt ? " is-on" : "")); b.type = "button";
+      b.textContent = alt.tag || sourceAltSnippet(alt.alt);
+      b.addEventListener("click", function () { selectedAlt = alt.id; Array.prototype.forEach.call(altRow.querySelectorAll(".prop-toggle"), function (x) { x.classList.remove("is-on"); }); b.classList.add("is-on"); });
+      altRow.appendChild(b);
+    });
+    altField.appendChild(altRow);
+    var locField = modalField(shell.body, "Apply to");
+    used.forEach(function (loc, i) {
+      locField.appendChild(window.VersoUI.Checkbox({ label: loc.docTitle + " (" + (loc.altId ? "alternate" : "base") + ")", checked: true, onChange: function (v) { chosen[i] = v; } }));
+    });
   }
   function renderSourceAltPanel(topic) {
     var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
@@ -12900,8 +13083,19 @@
     bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
     bar.appendChild(seg("alternate", "square-pen", "Add an alternate rendition"));
     bar.appendChild(seg("comment", "message-square", "Comment"));
+    // B1: create-link on a source OBJECT (image/table) -- closes the link gap so an image is a full
+    // source-of-truth object. Object-only (hidden for text, where linking stays Edit-stage).
+    bar.appendChild(seg("link", "link", "Add a link", "source-selbar__obj"));
     bar.appendChild(seg("update", "refresh-cw", "Update the mark to include the appended text", "source-selbar__update"));
+    // A2: align segment -- shown only when an IMAGE object owns the bar (hidden for text + tables).
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
+    bar.appendChild(seg("align-left", "align-left", "Align left", "source-selbar__img"));
+    bar.appendChild(seg("align-center", "align-center", "Align centre", "source-selbar__img"));
+    bar.appendChild(seg("align-right", "align-right", "Align right", "source-selbar__img"));
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
+    bar.appendChild(seg("row", "columns-2", "Place beside next image", "source-selbar__img")); // A3
     bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
+    bar.querySelectorAll(".source-selbar__img, .source-selbar__obj").forEach(function (b) { b.style.display = "none"; });
     bar.querySelector('[data-cmd="update"]').style.display = "none";
     bar.querySelectorAll("[data-cmd]").forEach(function (b) {
       b.addEventListener("click", function () { onSourceSelbarAction(topic, b.getAttribute("data-cmd")); });
@@ -12964,6 +13158,44 @@
     if (!target) { target = el; to = 0; }
     try { var rg = document.createRange(); rg.setStart(target, to); rg.collapse(true); var s = window.getSelection(); s.removeAllRanges(); s.addRange(rg); } catch (e) {}
   }
+  // A1: drag the L/R grab handles on a selected source image to resize it live. Width is symmetric
+  // about the image centre (newWidth = 2 x |pointerX - centreX|), snapped lightly to 25/50/75/100%,
+  // and committed to node.imgWidth on release (a base edit -> gated behind the unlock, like prose).
+  function wireSourceImageResize(topic, art, model) {
+    art.addEventListener("pointerdown", function (e) {
+      var handle = e.target && e.target.closest ? e.target.closest(".source-doc__handle") : null;
+      if (!handle) return;
+      var fig = handle.closest(".source-doc__figure[data-node]"); if (!fig) return;
+      e.preventDefault(); e.stopPropagation();
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to resize the image."); return; }
+      var nodeKey = fig.getAttribute("data-node");
+      var wrap = fig.querySelector(".source-doc__imgwrap"); if (!wrap) return;
+      var figRect = fig.getBoundingClientRect();
+      var colW = figRect.width, centreX = figRect.left + figRect.width / 2;
+      if (!colW) return;
+      var guide = h("span", "source-doc__resize-guide"); wrap.appendChild(guide);
+      fig.classList.add("is-resizing");
+      var lastPct = clampSourceImgWidth(wrap.style.width ? parseFloat(wrap.style.width) : 100);
+      function move(ev) {
+        var pct = snapSourceImgWidth(clampSourceImgWidth(2 * Math.abs(ev.clientX - centreX) / colW * 100));
+        lastPct = pct;
+        wrap.style.width = pct >= 100 ? "" : pct + "%";
+      }
+      function up() {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        if (guide.parentNode) guide.remove();
+        fig.classList.remove("is-resizing");
+        var node = window.SourceDoc.nodeByKey(model, nodeKey); // descends into a row child (A3)
+        if (node) {
+          if (lastPct >= 100) delete node.imgWidth; else node.imgWidth = lastPct;
+          persistSourceDocModel(topic, model);
+        }
+      }
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
+  }
   function positionSourceSelBar(bar, r) {
     var host = document.getElementById("source-stage-article"); if (!host || !bar || !r) return;
     var hr = host.getBoundingClientRect();
@@ -12980,6 +13212,14 @@
     var el = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
     if (el) el.classList.remove("is-object-selected");
     __sourceObjectSelKey = null;
+    var bar = sourceSelBarEl(); // drop the object-only controls (A2 align, B1 link) on deselect
+    if (bar) bar.querySelectorAll(".source-selbar__img, .source-selbar__obj").forEach(function (b) { b.style.display = "none"; });
+  }
+  // A2: light the active align glyph (centre is the default when node.align is unset).
+  function syncSourceAlignActive(bar, align) {
+    bar.querySelectorAll(".source-selbar__img[data-cmd]").forEach(function (b) {
+      b.classList.toggle("is-active", b.getAttribute("data-cmd") === "align-" + align);
+    });
   }
   function selectSourceObject(topic, nodeKey) {
     var SD = window.SourceDoc;
@@ -13000,6 +13240,24 @@
       var upd = bar.querySelector('[data-cmd="update"]'); if (upd) upd.style.display = "none";
       bar.querySelector('[data-cmd="alternate"]').style.display = "";
       bar.querySelector('[data-cmd="comment"]').style.display = "";
+      // B1: every markable object (image/table) also gets create-link; lit if it already has one.
+      var linkBtn = bar.querySelector('[data-cmd="link"]');
+      if (linkBtn) {
+        linkBtn.style.display = "";
+        var hasLink = objectMarksOnNode(nodeKey).some(function (mk) { return mk.type === "link"; });
+        linkBtn.classList.toggle("is-active", hasLink);
+        linkBtn.title = hasLink ? "Show where this is linked" : "Add a link";
+      }
+      // A2: an IMAGE object also gets the align segment (tables/other objects do not).
+      var node = (__sourceDocModel && __sourceDocModel.nodes || []).find(function (n) { return n.key === nodeKey; });
+      var isImg = node && node.type === "image";
+      bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = isImg ? "" : "none"; });
+      if (isImg) {
+        syncSourceAlignActive(bar, sourceImgAlign(node) || "center");
+        // A3: the row button toggles meaning by context (in a row -> take out; else -> place beside).
+        var rowBtn = bar.querySelector('[data-cmd="row"]');
+        if (rowBtn) { var inRow = !!SD.rowOf(__sourceDocModel, nodeKey); rowBtn.title = inRow ? "Take out of the row" : "Place beside next image"; rowBtn.classList.toggle("is-active", inRow); }
+      }
       positionSourceSelBar(bar, el.getBoundingClientRect());
     }
     // if the object already carries an alternate or a link, open the matching contextual panel
@@ -13017,6 +13275,59 @@
     if (cmd === "bold" || cmd === "italic" || cmd === "list") {
       if (!__sourceUnlocked) return;
       if (cmd === "list") document.execCommand("insertUnorderedList"); else document.execCommand(cmd);
+      return;
+    }
+    // A2: align an image object. Live (set the figure's text-align, keep the selection), persist
+    // node.align (centre = the default, stored as none). A base edit -> gated behind the unlock.
+    if (cmd === "align-left" || cmd === "align-center" || cmd === "align-right") {
+      if (!__sourceObjectSelKey) return;
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to align the image."); return; }
+      var al = cmd.slice("align-".length);
+      var anode = window.SourceDoc.nodeByKey(__sourceDocModel, __sourceObjectSelKey); // row child too (A3)
+      if (!anode) return;
+      if (al === "center") delete anode.align; else anode.align = al;
+      var fig = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
+      if (fig) fig.style.textAlign = (al === "center") ? "" : al;
+      persistSourceDocModel(topic, __sourceDocModel);
+      var bar = sourceSelBarEl(); if (bar) { syncSourceAlignActive(bar, al); if (fig) positionSourceSelBar(bar, fig.getBoundingClientRect()); }
+      return;
+    }
+    // B1: create-link on the selected object (image/table). If it already carries a link, just open
+    // the where-used panel. Annotation is ungated, so link-create stays available even when locked.
+    if (cmd === "link") {
+      if (!__sourceObjectSelKey) return;
+      var existLink = objectMarksOnNode(__sourceObjectSelKey).filter(function (mk) { return mk.type === "link"; });
+      var linkId;
+      if (existLink.length) { linkId = existLink[0].id; }
+      else {
+        var lm = SD.addMark(__sourceDocModel, { type: "link", anchor: { nodeKey: __sourceObjectSelKey } });
+        persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+        linkId = lm.id;
+        var lbtn = sourceSelBarEl() && sourceSelBarEl().querySelector('[data-cmd="link"]');
+        if (lbtn) { lbtn.classList.add("is-active"); lbtn.title = "Show where this is linked"; }
+        sourceToast("Link added. It will list where it's placed as you use it in courses.");
+      }
+      syncSourceWherePanel(topic, linkId);
+      return;
+    }
+    // A3: "place beside next" -- combine this image with the adjacent one into a side-by-side row,
+    // or, if it's already in a row, take it back out. Structural -> gated behind the unlock.
+    if (cmd === "row") {
+      if (!__sourceObjectSelKey) return;
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to arrange images."); return; }
+      var selKey = __sourceObjectSelKey;
+      if (SD.rowOf(__sourceDocModel, selKey)) {
+        SD.removeFromRow(__sourceDocModel, selKey);
+        sourceToast("Took the image out of the row.");
+      } else if (SD.combineIntoRow(__sourceDocModel, selKey)) {
+        sourceToast("Placed the images side by side.");
+      } else {
+        sourceToast("Add another image right after this one to place them side by side.");
+        return;
+      }
+      persistSourceDocModel(topic, __sourceDocModel);
+      renderSourceArticle();
+      selectSourceObject(topic, selKey); // re-select the same image in its new home
       return;
     }
     if (cmd === "update" && __sourceUpdateTarget && __sourceSelAnchor) {
@@ -19310,6 +19621,10 @@
       return;
     }
     var model = SD.fromJSON(master.doc);
+    // source-link 03: keep the live master + model + its component id so the Place gesture can add a
+    // link mark to the master and persist it (and so the canvas can resolve placements back to it).
+    __editSourceMaster = master; __editSourceModel = model;
+    __editSourceMasterId = (window.ProductsStore[productId] && window.ProductsStore[productId].groundTruthId) || null;
     var wrap = h("div", "edit-source");
 
     // ---- find (reuses SD.findMatches + a small local cycle, mirroring the Source stage). The
@@ -19367,6 +19682,15 @@
 
     // ---- reading column (read-only projection; the SAME renderSourceDocNode the stage uses) ----
     (model.nodes || []).forEach(function (n) { docCol.appendChild(renderSourceDocNode(n)); });
+    // 07: a source figure is draggable as one unit -> a linked image block. Object-anchor descriptor
+    // (no start/len). Images aren't text-selectable, so a pointerdown-drag on the figure is safe.
+    Array.prototype.forEach.call(docCol.querySelectorAll("figure.source-doc__figure[data-object]"), function (figEl) {
+      figEl.classList.add("edit-source__figure");
+      figEl.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault();
+        startSourceLinkDrag({ anchor: { nodeKey: figEl.getAttribute("data-node") } }, ev);
+      });
+    });
     // Scroll-spy: highlight the TOC entry for the last heading scrolled above the top.
     docCol.addEventListener("scroll", function () {
       if (!tocRows.length) return;
@@ -19376,22 +19700,488 @@
     });
     wrap.appendChild(docCol);
     host.appendChild(wrap);
+
+    // source-link 03: paint passages already linked into the OPEN document (a persistent highlight,
+    // distinct from the transient find highlight), and honour a pending jump-to-source request.
+    paintPanelLinkedPassages(docCol, model);
+    // A text selection in the read-only column raises the floating "Place" bar (arm-then-click).
+    docCol.addEventListener("mouseup", function () { setTimeout(function () { maybeShowPlaceBar(docCol, model); }, 0); });
+    if (__pendingSourceJumpMark && __pendingSourceJumpMark.masterId === __editSourceMasterId) {
+      var jm = SD.markById(model, __pendingSourceJumpMark.markId);
+      __pendingSourceJumpMark = null;
+      if (jm) {
+        var jk = jm.anchor && jm.anchor.nodeKey;
+        var tel = jk && docCol.querySelector('[data-node="' + jk + '"]');
+        if (tel) { tel.classList.add("is-find-current"); setTimeout(function () { tel.scrollIntoView({ block: "center", behavior: "smooth" }); }, 0); }
+      }
+    }
   }
   if (window.__productRail) window.__productRail.renderEditSourcePanel = renderEditSourcePanel; // browser-verify hook
-  // SPEC 7 source insert: a source topic becomes its own live-linked block. The instance keeps
-  // ref = the topic master id (so libraryWhereUsedDetail's "Linked in N" registers with no extra
-  // plumbing) AND a sourceRef back-reference so the block's link can jump back to its topic. The
-  // topic's prose renders through resolveFacetTemplate (facet pointer), the same live-link path
-  // any libraryInstance uses -- the cell only supplies constraints, never a second render path.
-  function insertSourceLinkedBlock(topicId) {
-    if (!topicId) return;
-    var block = { type: "libraryInstance", id: mintId(), ref: topicId, sourceRef: { topicId: topicId } };
-    // Point the placement at the topic's first facet so it resolves a template (a facet-only
-    // topic master has no def.template to fall back to); the inspector's facet switcher can change it.
-    var def = resolveComponentDef(topicId);
-    if (def && def.facets) { var fk = Object.keys(def.facets); if (fk.length) block.facet = fk[0]; }
-    insertBlock(block);
+
+  // ==== source-link 03: select a range -> place a live-linked text block (arm-then-click) ========
+  // The panel viewer (02) is read-only, but its text is selectable. Selecting a range raises a
+  // small floating "Place" bar; Place creates a type:"link" mark on the source master and arms
+  // placement; the next canvas click drops one locked, live-linked text block that resolves through
+  // the 01 resolver. Cross-node selections (a heading through a paragraph) link as one passage.
+  var __editSourceMaster = null, __editSourceModel = null, __editSourceMasterId = null;
+  var __armedSourceLink = null;        // { masterId, markId } armed for the next canvas click
+  var __pendingSourceJumpMark = null;  // { masterId, markId } to scroll to after the panel re-renders
+
+  // Char offset of a DOM point within a block element's text (walks all text nodes -> matches the
+  // SourceDoc plain-text offset model the marks anchor to).
+  function panelCharOffset(blockEl, container, offset) {
+    var r = document.createRange();
+    r.selectNodeContents(blockEl);
+    try { r.setEnd(container, offset); } catch (e) { return 0; }
+    return r.toString().length;
   }
+  // Build a SourceDoc range descriptor {anchor, endAnchor?} from the current selection in the panel,
+  // or null when the selection is empty / collapsed / outside the reading column. Single-node ->
+  // one anchor; cross-node -> anchor (first node, start..end) + endAnchor (last node, 0..end),
+  // matching SourceDoc.addMark's multi-block shape.
+  function panelSelectionDescriptor(docCol, model) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    var rng = sel.getRangeAt(0);
+    if (!docCol.contains(rng.startContainer) || !docCol.contains(rng.endContainer)) return null;
+    var sEl = (rng.startContainer.nodeType === 3 ? rng.startContainer.parentNode : rng.startContainer);
+    var eEl = (rng.endContainer.nodeType === 3 ? rng.endContainer.parentNode : rng.endContainer);
+    var sBlock = sEl && sEl.closest ? sEl.closest("[data-node]") : null;
+    var eBlock = eEl && eEl.closest ? eEl.closest("[data-node]") : null;
+    if (!sBlock || !eBlock) return null;
+    var sKey = sBlock.getAttribute("data-node"), eKey = eBlock.getAttribute("data-node");
+    var sOff = panelCharOffset(sBlock, rng.startContainer, rng.startOffset);
+    var eOff = panelCharOffset(eBlock, rng.endContainer, rng.endOffset);
+    var SD = window.SourceDoc;
+    if (sKey === eKey) {
+      if (eOff <= sOff) return null;
+      return { anchor: { nodeKey: sKey, start: sOff, len: eOff - sOff } };
+    }
+    var sNode = SD.nodeByKey(model, sKey);
+    var sLen = sNode ? SD.nodeText(sNode).length : sOff;
+    return { anchor: { nodeKey: sKey, start: sOff, len: Math.max(0, sLen - sOff) }, endAnchor: { nodeKey: eKey, start: 0, len: eOff } };
+  }
+  function hidePlaceBar() { var b = document.querySelector("[data-source-placebar]"); if (b) b.remove(); }
+  function maybeShowPlaceBar(docCol, model) {
+    hidePlaceBar();
+    if (__armedSourceLink) return; // already arming -> don't stack
+    var desc = panelSelectionDescriptor(docCol, model);
+    if (!desc) return;
+    var sel = window.getSelection();
+    var rect = sel.getRangeAt(0).getBoundingClientRect();
+    var bar = h("div", "source-placebar"); bar.setAttribute("data-source-placebar", "1");
+    // 04: a grab handle starts a custom pointer-drag (decoupled from the text selection, which is why
+    // it's NOT native HTML5 DnD -- setting draggable would kill selecting text in the panel).
+    var grip = h("button", "source-placebar__grip"); grip.type = "button"; grip.title = "Drag onto the canvas to place";
+    grip.innerHTML = window.Icon ? window.Icon("grip-vertical") : "";
+    grip.addEventListener("pointerdown", function (ev) { ev.preventDefault(); startSourceLinkDrag(desc, ev); });
+    bar.appendChild(grip);
+    var btn = window.VersoUI && window.VersoUI.Button
+      ? window.VersoUI.Button({ variant: "primary", size: "sm", icon: "link", label: "Place", onClick: function () { armSourceLinkPlacement(desc); } })
+      : h("button", null, "Place");
+    if (!(window.VersoUI && window.VersoUI.Button)) btn.addEventListener("click", function () { armSourceLinkPlacement(desc); });
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+    bar.style.top = Math.max(8, rect.top - bar.offsetHeight - 8) + "px";
+    bar.style.left = Math.max(8, rect.left) + "px";
+  }
+  // Place: arm the next canvas click to drop the linked copy. Mark creation is DEFERRED to the drop
+  // (05): a range spanning formats splits into several linked blocks, each with its own link mark,
+  // so the marks are minted per run when the drop resolves — we carry the range descriptor, not a
+  // pre-made single mark.
+  function armSourceLinkPlacement(desc) {
+    if (!window.SourceDoc || !__editSourceModel || !__editSourceMasterId) return;
+    __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
+    document.body.classList.add("is-arming-source-link");
+    hidePlaceBar();
+    var s = window.getSelection(); if (s) s.removeAllRanges();
+    sourceToast("Linked passage armed — click a spot in the canvas to place it. Esc to cancel.");
+  }
+  function cancelArmedSourceLink() {
+    if (!__armedSourceLink) return;
+    __armedSourceLink = null;
+    document.body.classList.remove("is-arming-source-link");
+    sourceToast("Placement cancelled.");
+  }
+  // format-split (05): source structure -> destination block type. heading lvl1 -> Heading 1
+  // (heading block), heading lvl2/3 -> Heading 2 (subheading block), paragraph/callout -> Body.
+  var SOURCE_LINK_BLOCK_TYPE = { h1: "heading", h2: "subheading", body: "paragraph" };
+  var SOURCE_LINK_TEXT_TYPES = { heading: 1, subheading: 1, paragraph: 1, note: 1, quote: 1 };
+  // A drop target counts as "a text block to merge into" (06) only if it's an editable text block
+  // that isn't itself a whole-block linked placement (don't nest a link inside a link).
+  function isSourceLinkTextBlock(b) { return !!(b && SOURCE_LINK_TEXT_TYPES[b.type] && !b.sourceLink); }
+  // The armed drop. Dropping ONTO an existing text block appends a locked linked inline span there
+  // (06); dropping in a gap runs the format-split planner and inserts one linked block per same-
+  // format run (05). Optional (cx,cy) = the drop point (from the drag or the armed click); absent ->
+  // gap placement on the current page.
+  function placeArmedSourceLink(cx, cy) {
+    var a = __armedSourceLink; if (!a) return false;
+    __armedSourceLink = null;
+    document.body.classList.remove("is-arming-source-link");
+    // An object anchor (no start/len) is a figure link (07) -> always a new linked image block.
+    var isObject = !!(a.descriptor && a.descriptor.anchor && a.descriptor.anchor.len == null);
+    if (cx != null) {
+      if (!isObject) {
+        var el = document.elementFromPoint(cx, cy);
+        var blockEl = el && el.closest ? el.closest(".canvas-block") : null;
+        if (blockEl && isSourceLinkTextBlock(blockEl.__block)) return dropInlineSourceLink(a, blockEl.__block);
+      }
+      var pi = pageIndexFromPoint(cx, cy); if (pi >= 0) setActivePage(pi);
+    }
+    return isObject ? placeSourceLinkImage(a) : placeSourceLinkBlocks(a);
+  }
+  // 07: drop a source figure -> a new linked image block. The link is an OBJECT mark (anchor
+  // {nodeKey}, no start/len); the image block resolves its src/alt from the figure node via 01.
+  function placeSourceLinkImage(a) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor }); // object mark (len null)
+    master.doc = SD.toJSON(model); saveLibrary();
+    insertBlock({ type: "image", id: mintId(), sourceLink: { masterId: a.masterId, markId: mk.id } });
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel();
+    sourceToast("Linked image placed.");
+    return true;
+  }
+  // 05: gap placement -- run the format-split planner and insert ONE locked, live-linked text block
+  // per contiguous same-format run (each in the destination's matching preset). A single-format range
+  // yields one block; consecutive same-format nodes stay in one block joined by line breaks.
+  function placeSourceLinkBlocks(a) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var plan = SD.planLinkedBlocks(model, a.descriptor);
+    if (!plan.length) return false;
+    plan.forEach(function (run) {
+      var mk = SD.addMark(model, { type: "link", anchor: run.anchor, endAnchor: run.endAnchor });
+      insertBlock({ type: SOURCE_LINK_BLOCK_TYPE[run.format] || "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: mk.id } });
+    });
+    master.doc = SD.toJSON(model); saveLibrary();
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel(); // repaint so newly-linked passages highlight
+    sourceToast(plan.length > 1 ? ("Placed " + plan.length + " linked blocks.") : "Linked block placed.");
+    return true;
+  }
+  function slEscape(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  // 06: drop onto a text block -> append a locked, live-linked inline span to that block. The whole
+  // dropped range flattens to ONE link mark (you're merging into body prose; the 05 format-split is
+  // between-block only). Owned text around the span stays editable; the span is contenteditable=false
+  // (locked) and resolves live via 01's #120-style inline post-pass, baking at export.
+  function dropInlineSourceLink(a, block) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor, endAnchor: a.descriptor.endAnchor });
+    master.doc = SD.toJSON(model); saveLibrary();
+    pushHistory();
+    var span = '<span data-source-link="' + mk.id + '" data-master="' + a.masterId + '">' + slEscape(SD.markText(model, mk)) + '</span>';
+    block.text = (block.text ? block.text + " " : "") + span;
+    reapplyBlock(block);
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel();
+    sourceToast("Linked span added.");
+    return true;
+  }
+  // 04: the destination page under a drop point (its .frame -> .page[data-page-id] -> doc index).
+  function pageIndexFromPoint(cx, cy) {
+    var fr = frameElementUnder(cx, cy); if (!fr) return -1;
+    var pageEl = fr.querySelector(".page[data-page-id]");
+    var pid = pageEl && pageEl.getAttribute("data-page-id");
+    return pid ? (doc.pages || []).findIndex(function (p) { return p.id === pid; }) : -1;
+  }
+  // 04: the preferred placement gesture -- press the grab handle and drag the passage onto the
+  // canvas. A ghost follows the cursor; the page under the cursor lights up as the drop target;
+  // release resolves through the SAME placement the arm-then-click path uses (placeArmedSourceLink).
+  // Custom pointer events (not native DnD) so selecting text in the read-only panel still works.
+  function startSourceLinkDrag(desc, ev) {
+    hidePlaceBar();
+    var ghost = h("div", "source-link-ghost", "Linked copy"); document.body.appendChild(ghost);
+    document.body.classList.add("is-dragging-source-link");
+    function clearTarget() { var p = document.querySelector(".frame.is-drop-target"); if (p) p.classList.remove("is-drop-target"); }
+    function move(e) {
+      ghost.style.left = (e.clientX + 12) + "px"; ghost.style.top = (e.clientY + 12) + "px";
+      clearTarget();
+      var fr = frameElementUnder(e.clientX, e.clientY); if (fr) fr.classList.add("is-drop-target");
+    }
+    function up(e) {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      ghost.remove(); document.body.classList.remove("is-dragging-source-link"); clearTarget();
+      if (!frameElementUnder(e.clientX, e.clientY)) { sourceToast("Dropped outside the canvas — nothing placed."); return; }
+      __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
+      placeArmedSourceLink(e.clientX, e.clientY); // routes to inline-span (onto a text block) or gap placement
+    }
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    move(ev);
+  }
+  // Two-way jump (direction: canvas -> panel): clicking a linked block's indicator opens the Source
+  // tab and scrolls the panel to the exact source passage.
+  function jumpSourcePanelToMark(masterId, markId) {
+    __pendingSourceJumpMark = { masterId: masterId, markId: markId };
+    if (typeof applyLeftSection === "function") applyLeftSection("source"); // re-renders the panel, which honours the pending jump
+  }
+  // On-canvas link indicator: a small clickable badge on every placed linked block (editor chrome
+  // only -- never rendered into the shipped course). Idempotent; re-run after each render.
+  function decorateSourceLinks(scope) {
+    var root = scope || canvas; if (!root) return;
+    Array.prototype.forEach.call(root.querySelectorAll(".source-link-badge"), function (b) { b.remove(); });
+    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block"), function (node) {
+      node.classList.remove("is-source-linked");
+      var b = node.__block;
+      if (b && b.sourceLink && b.sourceLink.markId) {
+        node.classList.add("is-source-linked");
+        var badge = h("button", "source-link-badge"); badge.type = "button";
+        badge.innerHTML = window.Icon ? window.Icon("link") : "";
+        badge.title = "Linked from source — jump, or pick / create an alternate";
+        badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); openSourceLinkMenu({ kind: "block", block: b }, b.sourceLink.masterId, b.sourceLink.markId, e.clientX, e.clientY); });
+        node.appendChild(badge);
+      }
+    });
+    // 06: per-span indicator inside a mixed block -- each locked linked inline span gets its own
+    // contextual menu (jump + alternate), distinct from the whole-block badge above.
+    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block span[data-source-link]"), function (sp) {
+      sp.classList.add("is-source-linked-span");
+      if (sp.__slWired) return; sp.__slWired = true;
+      sp.title = "Linked from source — jump, or pick / create an alternate";
+      sp.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var owner = sp.closest ? sp.closest(".canvas-block") : null;
+        if (!owner || !owner.__block) return;
+        openSourceLinkMenu({ kind: "span", block: owner.__block, spanEl: sp, markId: sp.getAttribute("data-source-link") }, sp.getAttribute("data-master"), sp.getAttribute("data-source-link"), e.clientX, e.clientY);
+      });
+    });
+  }
+  // Panel: highlight passages already linked into the OPEN document (a persistent cue, distinct from
+  // the find highlight). A link mark counts as "used here" when a block in the open doc points at it.
+  function paintPanelLinkedPassages(docCol, model) {
+    var SD = window.SourceDoc;
+    var used = {};
+    walkBlocks(doc, function (b) { if (b.sourceLink && b.sourceLink.masterId === __editSourceMasterId && b.sourceLink.markId) used[b.sourceLink.markId] = 1; });
+    (model.marks || []).forEach(function (m) {
+      if (m.type !== "link" || !used[m.id]) return;
+      SD.markSpans(model, m).forEach(function (sp) {
+        var el = docCol.querySelector('[data-node="' + sp.nodeKey + '"]');
+        if (el) el.classList.add("is-source-linked-passage");
+      });
+    });
+  }
+  // ==== source-link 08: alternates (create + pick) from the canvas ==============================
+  // Linked copy is locked; the sanctioned way to say it differently in ONE place is an alternate --
+  // a named fork registered on the source master (so it's visible + pushable from the Source stage,
+  // 10) that this single placement points at via altId. A location shows base until an alternate is
+  // picked or pushed to it (never automatic). Text alternates are span/range-contextual.
+  function sourceAltSnippet(s) { s = String(s == null ? "" : s); return s.length > 32 ? s.slice(0, 32) + "…" : s; }
+  // Alternate marks anchored identically to a link mark (its candidate alternates).
+  function sourceLinkAlternates(model, link) {
+    var SD = window.SourceDoc, a = link.anchor, end = link.endAnchor;
+    return (model.marks || []).filter(function (m) {
+      if (m.type !== "alternate" || SD.isObjectMark(m) !== SD.isObjectMark(link)) return false;
+      if (!m.anchor || m.anchor.nodeKey !== a.nodeKey || m.anchor.start !== a.start || m.anchor.len !== a.len) return false;
+      if (!!end !== !!m.endAnchor) return false;
+      return !end || (m.endAnchor.nodeKey === end.nodeKey && m.endAnchor.len === end.len);
+    });
+  }
+  // The altId a target (a whole linked block, or one inline span inside a block) currently points at.
+  function sourceLinkTargetAlt(target) {
+    if (target.kind === "block") return (target.block.sourceLink && target.block.sourceLink.altId) || null;
+    return target.spanEl ? (target.spanEl.getAttribute("data-alt") || null) : null;
+  }
+  // Point a target at an alternate (altId) or back to base (null). Block -> block.sourceLink.altId;
+  // span -> data-alt on that span inside the owning block's rich text. This block/span ONLY.
+  function setSourceLinkTargetAlt(target, altId) {
+    if (target.kind === "block") {
+      if (!target.block.sourceLink) return;
+      if (altId) target.block.sourceLink.altId = altId; else delete target.block.sourceLink.altId;
+    } else {
+      var host = document.createElement("div"); host.innerHTML = target.block.text || "";
+      var sp = host.querySelector('span[data-source-link="' + target.markId + '"]');
+      if (!sp) return;
+      if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt");
+      target.block.text = host.innerHTML;
+    }
+    pushHistory(); reapplyBlock(target.block); decorateSourceLinks(); scheduleSave();
+    sourceToast(altId ? "Alternate applied to this block." : "Reset to base wording.");
+  }
+  // Create a new alternate wording on the source master, then point THIS target at it. Text only in
+  // v1 (an object/figure alternate is whole-block; figure-swap storage is a follow-up).
+  function createSourceAlternate(target, masterId, markId) {
+    var SD = window.SourceDoc, master = libComponents()[masterId];
+    if (!master || !master.doc) return;
+    var model = SD.fromJSON(master.doc);
+    var link = SD.markById(model, markId); if (!link) return;
+    if (SD.isObjectMark(link)) { sourceToast("Object (figure) alternates are coming soon."); return; }
+    var base = SD.markText(model, link);
+    var shell = dsModalShell({
+      title: "Create an alternate",
+      subtitle: "A named fork of this passage, applied to this block only. It registers on the source, so you can reuse or push it later.",
+      primaryLabel: "Create alternate",
+      onPrimary: function () {
+        var wording = (ta.value || "").trim();
+        if (!wording) { ta.focus(); return; }
+        var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: wording, tag: (nameIn.value || "").trim(), baseText: base });
+        master.doc = SD.toJSON(model); saveLibrary();
+        setSourceLinkTargetAlt(target, alt.id);
+        shell.modal.close();
+      }
+    });
+    var nameIn = modalText(shell.body, "Name (optional)", "", "e.g. Short form");
+    var lbl = modalField(shell.body, "Wording");
+    var ta = h("textarea", "prop-text modal-field__control"); ta.rows = 3; ta.value = base; lbl.appendChild(ta);
+    setTimeout(function () { ta.focus(); ta.select(); }, 0);
+  }
+  // The per-target source-link menu (badge / span indicator): jump to source, pick base or an
+  // existing alternate, or create a new one. Reuses the canonical context menu.
+  function openSourceLinkMenu(target, masterId, markId, x, y) {
+    var SD = window.SourceDoc, master = libComponents()[masterId];
+    var cur = sourceLinkTargetAlt(target);
+    var items = [{ label: "Jump to source", onClick: function () { jumpSourcePanelToMark(masterId, markId); } }, { sep: true },
+      { label: "Base wording", active: !cur, onClick: function () { setSourceLinkTargetAlt(target, null); } }];
+    if (master && master.doc) {
+      var model = SD.fromJSON(master.doc);
+      var link = SD.markById(model, markId);
+      if (link) sourceLinkAlternates(model, link).forEach(function (alt) {
+        items.push({ label: (alt.tag ? alt.tag + " — " : "") + sourceAltSnippet(alt.alt), active: cur === alt.id, onClick: function () { setSourceLinkTargetAlt(target, alt.id); } });
+      });
+    }
+    items.push({ sep: true }, { label: "Create an alternate…", onClick: function () { createSourceAlternate(target, masterId, markId); } });
+    showContextMenu(x, y, items);
+  }
+
+  // ==== source-link 09/10: live where-used + base-edit warning + alternate push =================
+  // The real, live where-used for a source link mark: every block (or inline span) in ANY document
+  // that references it, computed by walking the registry (like libraryWhereUsedDetail) so it never
+  // drifts from a stored list. altId per location = whether that placement shows base or a fork.
+  function sourceLinkWhereUsed(masterId, markId) {
+    var out = [], reg = registry; // the LIVE in-memory registry (getRegistry() returns a stale storage copy)
+    Object.keys(reg).forEach(function (code) {
+      var d = reg[code]; if (!d) return;
+      var title = (d.meta && d.meta.title) || code;
+      walkBlocks(d, function (b) {
+        if (b.sourceLink && b.sourceLink.masterId === masterId && (!markId || b.sourceLink.markId === markId)) {
+          out.push({ docCode: code, docTitle: title, blockId: b.id, markId: b.sourceLink.markId, altId: b.sourceLink.altId || null, kind: "block" });
+        }
+        if (b.text && typeof b.text === "string" && b.text.indexOf("data-source-link=") !== -1) {
+          var probe = document.createElement("div"); probe.innerHTML = b.text;
+          Array.prototype.forEach.call(probe.querySelectorAll("span[data-source-link]"), function (sp) {
+            if (sp.getAttribute("data-master") !== masterId) return;
+            var mid = sp.getAttribute("data-source-link"); if (markId && mid !== markId) return;
+            out.push({ docCode: code, docTitle: title, blockId: b.id, markId: mid, altId: sp.getAttribute("data-alt") || null, kind: "span" });
+          });
+        }
+      });
+    });
+    return out;
+  }
+  // Set/clear a where-used location's altId in ITS OWN document (block field or inline span data-alt).
+  // Shared by the 09 fork + the 10 push.
+  function applyAltToLocation(reg, loc, altId) {
+    var d = reg[loc.docCode]; if (!d) return;
+    walkBlocks(d, function (b) {
+      if (b.id !== loc.blockId) return;
+      if (loc.kind === "span") {
+        var host = document.createElement("div"); host.innerHTML = b.text || "";
+        var sp = host.querySelector('span[data-source-link="' + loc.markId + '"]');
+        if (sp) { if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt"); b.text = host.innerHTML; }
+      } else if (b.sourceLink) {
+        if (altId) b.sourceLink.altId = altId; else delete b.sourceLink.altId;
+      }
+    });
+  }
+
+  // --- 09: base-edit warning + fork (fires at LOCK, matching the unlock->lock commit model) ---
+  var __sourceLinkOldText = null, __sourcePreEditModelJson = null;
+  // On unlock: snapshot each link mark's current wording (so "fork" can freeze it) + the whole model
+  // (so "cancel" can revert the edits). Only when the doc actually carries link marks.
+  function snapshotSourceLinkBase() {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    if (!SD || !model || !(model.marks || []).some(function (m) { return m.type === "link"; })) return;
+    __sourceLinkOldText = {};
+    (model.marks || []).forEach(function (m) { if (m.type === "link") __sourceLinkOldText[m.id] = SD.markText(model, m); });
+    __sourcePreEditModelJson = SD.toJSON(model);
+  }
+  // The blast radius of the just-finished edit session: base-showing locations of edited link marks.
+  function sourceBaseEditImpact() {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    if (!SD || !model || !__sourceLinkOldText) return { affected: [], pinned: [], editedMarks: [] };
+    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(__sourceActiveTopicId, null));
+  }
+  // "Keep as-is (fork)": freeze each edited link mark's OLD wording as an alternate on the master,
+  // and pin every affected (base-showing) location -- in whatever document uses it -- to that
+  // alternate. The source base then moves on; those placements keep the old words.
+  function forkAffectedToAlternate(impact) {
+    var SD = window.SourceDoc, model = __sourceDocModel, reg = registry, byMark = {};
+    impact.affected.forEach(function (loc) { (byMark[loc.markId] = byMark[loc.markId] || []).push(loc); });
+    Object.keys(byMark).forEach(function (markId) {
+      var link = SD.markById(model, markId); if (!link) return;
+      var oldText = __sourceLinkOldText[markId];
+      var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: oldText, tag: "Frozen", baseText: oldText });
+      byMark[markId].forEach(function (loc) { applyAltToLocation(reg, loc, alt.id); });
+    });
+    saveRegistry(reg); // the alternate marks on the master persist via the lock's own commit
+  }
+  function finalizeSourceLock(topic, opts) {
+    flushSourceEditSession(topic, { prompt: opts.prompt });
+    __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+  }
+  function revertSourceEditSession(topic) {
+    var SD = window.SourceDoc;
+    if (SD && __sourcePreEditModelJson && topic) {
+      __sourceDocModel = SD.fromJSON(__sourcePreEditModelJson); __sourceDocModelTopicId = topic.id;
+      persistSourceDocModel(topic, __sourceDocModel);
+    }
+    __sourceEditSession = null; __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    renderSourceArticle();
+    sourceToast("Edit cancelled.");
+  }
+  // The three-way warning shown at lock when the edit changed linked passages (09).
+  function showSourceBaseEditModal(topic, impact, opts) {
+    var n = impact.affected.length, resolved = false;
+    var forkBtn = window.VersoUI.Button({ variant: "secondary", label: "Keep as-is (fork)", onClick: function () {
+      resolved = true; forkAffectedToAlternate(impact); shell.modal.close(); finalizeSourceLock(topic, opts);
+      sourceToast("Kept " + n + " linked place" + (n === 1 ? "" : "s") + " on the old wording.");
+    } });
+    var shell = dsModalShell({
+      title: "This source is linked in " + n + " place" + (n === 1 ? "" : "s"),
+      subtitle: "Your edit changes wording that other documents link. Choose what those linked copies do.",
+      primaryLabel: "Update all",
+      cancelLabel: "Cancel edit",
+      extras: [forkBtn],
+      onPrimary: function () { resolved = true; shell.modal.close(); finalizeSourceLock(topic, opts); sourceToast("Updated " + n + " linked place" + (n === 1 ? "" : "s") + "."); },
+      onClose: function () { if (resolved) return; revertSourceEditSession(topic); } // Cancel / Escape / scrim = revert
+    });
+    shell.body.appendChild(h("div", "insp-hint", "Update all — the linked copies re-resolve to your new wording. Keep as-is — freeze their current wording as an alternate, then your source moves on. Cancel — undo this edit."));
+  }
+
+  window.__sourceLink = { // browser-verify hooks
+    sourceLinkWhereUsed: sourceLinkWhereUsed, snapshotSourceLinkBase: snapshotSourceLinkBase,
+    sourceBaseEditImpact: sourceBaseEditImpact, forkAffectedToAlternate: forkAffectedToAlternate,
+    pushSourceAlternate: pushSourceAlternate, applyAltToLocation: applyAltToLocation,
+    armSourceLinkPlacement: armSourceLinkPlacement, placeArmedSourceLink: placeArmedSourceLink,
+    jumpSourcePanelToMark: jumpSourcePanelToMark, panelSelectionDescriptor: panelSelectionDescriptor,
+    startSourceLinkDrag: startSourceLinkDrag, pageIndexFromPoint: pageIndexFromPoint,
+    openSourceLinkMenu: openSourceLinkMenu, createSourceAlternate: createSourceAlternate,
+    setSourceLinkTargetAlt: setSourceLinkTargetAlt, sourceLinkAlternates: sourceLinkAlternates,
+    isArmed: function () { return !!__armedSourceLink; }
+  };
+  // One-time global wiring: while a linked passage is armed, the next canvas click PLACES it (capture
+  // phase, before the canvas's own click-select), and Escape cancels arming.
+  if (typeof document !== "undefined" && !window.__sourceLinkWired) {
+    window.__sourceLinkWired = true;
+    document.addEventListener("click", function (e) {
+      if (!__armedSourceLink) return;
+      var cv = document.getElementById("canvas-viewport");
+      if (cv && cv.contains(e.target)) { e.preventDefault(); e.stopPropagation(); placeArmedSourceLink(e.clientX, e.clientY); }
+    }, true);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && __armedSourceLink) { e.preventDefault(); cancelArmedSourceLink(); } });
+  }
+  // (source-link 03) The SPEC 7 / #137 whole-topic +-insert (insertSourceLinkedBlock) is retired:
+  // the Edit Source tab is now a read-only viewer (02) and copy is placed as a range-linked block
+  // via select-then-place (armSourceLinkPlacement above), not a whole-topic libraryInstance.
   // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
   function jumpToSourceTopic(topicId) {
     if (!topicId) return;

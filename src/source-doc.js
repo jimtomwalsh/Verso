@@ -28,7 +28,10 @@
 (function () {
   "use strict";
 
-  var NODE_TYPES = ["heading", "paragraph", "list", "table", "image", "callout"];
+  // "row" (A3) is a layout container holding 2-3 image children side by side. It carries no text
+  // and is not itself markable; its image children keep their own keys + marks (nesting must not
+  // change a key, or object marks orphan). Walkers that resolve a node by key descend into rows.
+  var NODE_TYPES = ["heading", "paragraph", "list", "table", "image", "callout", "row"];
   var MARK_TYPES = ["link", "alternate", "comment"];
 
   // ---- ids -----------------------------------------------------------------
@@ -59,7 +62,7 @@
         return "";
     }
   }
-  function isTextNode(node) { return node && node.type !== "image"; }
+  function isTextNode(node) { return node && node.type !== "image" && node.type !== "row"; }
 
   // ---- offset-preserving inline tokeniser (source-rich-render) -------------
   // Splits a node's canonical text into runs, tagging bold (**..**) and inline code (`..`) using
@@ -171,8 +174,66 @@
   }
   function nodeByKey(model, key) {
     var ns = model.nodes || [];
-    for (var i = 0; i < ns.length; i++) if (ns[i].key === key) return ns[i];
+    for (var i = 0; i < ns.length; i++) {
+      if (ns[i].key === key) return ns[i];
+      // A3: descend one level into a row so a nested image resolves by key (marks anchor by key).
+      if (ns[i].type === "row" && ns[i].children) {
+        for (var j = 0; j < ns[i].children.length; j++) if (ns[i].children[j].key === key) return ns[i].children[j];
+      }
+    }
     return null;
+  }
+  // A3: locate the row that owns a child image (by key) -> { row, rowIndex, childIndex } or null.
+  function rowOf(model, childKey) {
+    var ns = model.nodes || [];
+    for (var i = 0; i < ns.length; i++) {
+      if (ns[i].type === "row" && ns[i].children) {
+        for (var j = 0; j < ns[i].children.length; j++) if (ns[i].children[j].key === childKey) return { row: ns[i], rowIndex: i, childIndex: j };
+      }
+    }
+    return null;
+  }
+  // A3: "place beside next" -- wrap a top-level image and the adjacent image into a row (2-3 max).
+  // If the next node is already a row with room, the selected image joins it. Keys are preserved so
+  // marks stay attached. Returns true when something combined. No-op (false) if there's nothing to
+  // place beside, so the caller can toast.
+  function combineIntoRow(model, nodeKey) {
+    var ns = model.nodes || [];
+    // Case 1: a top-level image combines with the node right after it.
+    for (var i = 0; i < ns.length; i++) {
+      if (ns[i].key === nodeKey && ns[i].type === "image") {
+        var next = ns[i + 1];
+        if (!next) return false;
+        if (next.type === "image") {
+          var rk; do { rk = nextId(model, "n"); } while (nodeByKey(model, rk));
+          ns.splice(i, 2, { type: "row", key: rk, children: [ns[i], next] });
+          return true;
+        }
+        if (next.type === "row" && next.children && next.children.length < 3) { next.children.unshift(ns[i]); ns.splice(i, 1); return true; }
+        return false;
+      }
+    }
+    // Case 2: the LAST image in a row pulls in the following top-level image (grow to 3).
+    var loc = rowOf(model, nodeKey);
+    if (loc && loc.childIndex === loc.row.children.length - 1 && loc.row.children.length < 3) {
+      var after = ns[loc.rowIndex + 1];
+      if (after && after.type === "image") { loc.row.children.push(after); ns.splice(loc.rowIndex + 1, 1); return true; }
+    }
+    return false;
+  }
+  // A3: take a child image out of its row and drop it back as a top-level node just after the row.
+  // If the row falls to a single child, the row dissolves back into that lone image. Keys preserved.
+  // Returns the freed child's key (for reselect) or null.
+  function removeFromRow(model, childKey) {
+    var loc = rowOf(model, childKey); if (!loc) return null;
+    var ns = model.nodes || [], child = loc.row.children.splice(loc.childIndex, 1)[0];
+    ns.splice(loc.rowIndex + 1, 0, child);
+    if (loc.row.children.length === 1) {
+      // dissolve: replace the row with its remaining lone image, in place
+      var lone = loc.row.children[0];
+      var ri = ns.indexOf(loc.row); if (ri >= 0) ns.splice(ri, 1, lone);
+    }
+    return child.key;
   }
   function markById(model, id) {
     var ms = model.marks || [];
@@ -234,6 +295,35 @@
     return m;
   }
   function isObjectMark(m) { return m && m.anchor && m.anchor.len == null; }
+
+  // ---- source-link 05: format-split planner (pure) --------------------------
+  // Split a link range into one block-spec per CONTIGUOUS same-format run, in document order, so a
+  // cross-format drop (a heading through a paragraph) becomes a heading block then a body block,
+  // each styled to the destination doc's matching preset. Consecutive same-format nodes stay in ONE
+  // run (rendered as one block, its covered nodes joined by line breaks). A format change starts a
+  // new run. Pure -> the editor's multi-block placement is testable headlessly.
+  //   in:  a range descriptor { anchor:{nodeKey,start,len}, endAnchor?:{...} }
+  //   out: [{ format:"h1"|"h2"|"body", anchor, endAnchor? }, ...] over each run's sub-range
+  function nodeFormat(n) {
+    if (n && n.type === "heading") return isChapterNode(n) ? "h1" : "h2";
+    return "body";
+  }
+  function planLinkedBlocks(model, descriptor) {
+    if (!descriptor || !descriptor.anchor) return [];
+    var spans = markSpans(model, { anchor: descriptor.anchor, endAnchor: descriptor.endAnchor });
+    var runs = [], cur = null;
+    spans.forEach(function (sp) {
+      var fmt = nodeFormat(nodeByKey(model, sp.nodeKey));
+      if (!cur || cur.format !== fmt) { cur = { format: fmt, spans: [] }; runs.push(cur); }
+      cur.spans.push(sp);
+    });
+    return runs.map(function (run) {
+      var first = run.spans[0], last = run.spans[run.spans.length - 1];
+      var d = { format: run.format, anchor: { nodeKey: first.nodeKey, start: first.start, len: first.len } };
+      if (last.nodeKey !== first.nodeKey) d.endAnchor = { nodeKey: last.nodeKey, start: 0, len: last.len };
+      return d;
+    });
+  }
   // The live text a text mark currently covers, read from the model (never the DOM).
   function anchorText(model, anchor) {
     if (!anchor || anchor.len == null) return "";
@@ -335,6 +425,10 @@
     if (edit.removed === 0 && edit.inserted === 0) return { model: model, edit: edit };
     if (!opts.noUndo) pushUndo(model);
     setNodeText(node, newText);
+    // Inline-format runs (from Markdown import) are offsets over the OLD text; once the base text is
+    // edited they'd point at the wrong characters, so drop them rather than paint stale bold. Base
+    // text is normally locked, so this is a rare, safe fallback (the edited node just reads as plain).
+    if (node.formats) delete node.formats;
     var editedLen = nodeText(node).length; // the node now holds newText
     (model.marks || []).forEach(function (m) {
       if (isObjectMark(m)) return;
@@ -575,6 +669,46 @@
     if (allSame && first.present) return { mode: "shared", text: first.text, cols: cols };
     return { mode: "split", cols: cols };
   }
+  // B2: the image twin of nodeForVariant -> { present, src, alt, caption, source }. Mirrors the
+  // presence/absence rules (absent / baseAbsent) but resolves src/alt/caption: a variant with its
+  // own src overrides ("override"); otherwise it inherits the Flagship image ("inherited"). This is
+  // how a variant can carry a different picture (info is often locked inside an image).
+  function imageForVariant(node, variant) {
+    var bSrc = node && node.src, bAlt = node && node.alt, bCap = node && node.caption;
+    var ov = node && node.variants && node.variants[variant];
+    if (isFlagship(variant)) {
+      if (node.baseAbsent) return { present: false, src: null, alt: null, caption: null, source: "absent" };
+      return { present: true, src: bSrc, alt: bAlt, caption: bCap, source: "flagship" };
+    }
+    if (ov) {
+      if (ov.absent) return { present: false, src: null, alt: null, caption: null, source: "absent" };
+      if (ov.src != null) return { present: true, src: ov.src, alt: ov.alt != null ? ov.alt : bAlt, caption: ov.caption != null ? ov.caption : bCap, source: "override" };
+    }
+    if (node.baseAbsent) return { present: false, src: null, alt: null, caption: null, source: "absent" };
+    return { present: true, src: bSrc, alt: bAlt, caption: bCap, source: "inherited" };
+  }
+  // B2: give a variant its own image src (and optionally alt/caption). Flagship writes the base
+  // image; a named variant writes an override (and clears any absent flag). Pushes undo. Presence/
+  // absence reuse removeNodeFromVariant / restoreNodeToVariant, which already generalise to any node.
+  function setVariantImage(model, nodeKey, variant, src, opts) {
+    var node = nodeByKey(model, nodeKey); if (!node || node.type !== "image") return null;
+    opts = opts || {};
+    pushUndo(model);
+    if (isFlagship(variant)) {
+      node.src = src;
+      if ("alt" in opts) node.alt = opts.alt;
+      if ("caption" in opts) node.caption = opts.caption;
+      node.baseAbsent = false;
+    } else {
+      var ov = ensureVariants(node)[variant] || {};
+      ov.src = src;
+      if ("alt" in opts) ov.alt = opts.alt;
+      if ("caption" in opts) ov.caption = opts.caption;
+      delete ov.absent;
+      ensureVariants(node)[variant] = ov;
+    }
+    return node;
+  }
   function ensureVariants(node) { if (!node.variants) node.variants = {}; return node.variants; }
   // Diverge (or set) a variant's wording. Flagship writes the base text; a named variant writes an
   // override. Pushes undo. This is divergence type 2 (diverged wording).
@@ -678,6 +812,28 @@
     return { showBar: true, showRT: !!unlocked, showUpdate: upd, showAlt: !upd, showComment: !upd };
   }
   // Marks whose span overlaps a given range in a node (for hit-testing a click/selection).
+  // source-link 09: which linked LOCATIONS a base-edit session changed. A link mark counts as
+  // "edited" when its current covered text differs from the wording snapshotted before the edit
+  // session (oldTextByMark[markId]); an edited mark's locations that show BASE (no altId) are
+  // affected (they'll change under the edit), alternate-pinned ones are not. Pure -> the editor
+  // supplies the pre-edit snapshot + the where-used locations; this decides the blast radius.
+  //   oldTextByMark: { markId: "<wording before the edit>" }
+  //   locations:     [{ markId, altId, docCode, blockId, kind }]
+  //   -> { affected:[base-showing, edited], pinned:[alt-pinned, edited], editedMarks:[markId] }
+  function sourceEditImpact(model, oldTextByMark, locations) {
+    var edited = {};
+    (model.marks || []).forEach(function (m) {
+      if (m.type !== "link") return;
+      var old = oldTextByMark ? oldTextByMark[m.id] : undefined;
+      if (old != null && old !== markText(model, m)) edited[m.id] = true;
+    });
+    var affected = [], pinned = [];
+    (locations || []).forEach(function (loc) {
+      if (!edited[loc.markId]) return;
+      if (loc.altId) pinned.push(loc); else affected.push(loc);
+    });
+    return { affected: affected, pinned: pinned, editedMarks: Object.keys(edited) };
+  }
   function marksOverlapping(model, nodeKey, start, len) {
     var end = start + len;
     return (model.marks || []).filter(function (m) {
@@ -809,31 +965,107 @@
   // ORDERED_RE, carried over -- the continuous-doc rewrite had dropped the ordered branch, so
   // numbered lines collapsed into one paragraph).
   var ORDERED_ITEM_RE = /^(\d+)\.\s+(.*)$/;
-  var UNORDERED_ITEM_RE = /^-\s+(.*)$/;
+  var UNORDERED_ITEM_RE = /^[-*+]\s+(.*)$/;
+  // A Markdown table separator row: pipes, dashes, colons and spaces, with at least one dash.
+  var TABLE_SEP_RE = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
+  function isTableSeparator(line) { return TABLE_SEP_RE.test(line) && line.indexOf("-") !== -1; }
+  function looksLikeTableRow(line) { return line.indexOf("|") !== -1; }
+  // Split one table row into trimmed cells. Tolerates optional leading/trailing pipes and honours a
+  // backslash-escaped pipe (the mdCell export escapes "|" as "\|", so import must unescape it).
+  function splitTableRow(line) {
+    var s = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+    var cells = [], cur = "";
+    for (var i = 0; i < s.length; i++) {
+      if (s[i] === "\\" && s[i + 1] === "|") { cur += "|"; i++; continue; }
+      if (s[i] === "|") { cells.push(cur.trim()); cur = ""; continue; }
+      cur += s[i];
+    }
+    cells.push(cur.trim());
+    return cells;
+  }
+  // Parse inline Markdown (**bold** / __bold__ / *italic* / _italic_ / `code`) out of a raw string
+  // into PLAIN text + format runs [{start,len,style}] over that plain text. The model text stays
+  // plain, so a mark's character offset means the same in the model and the rendered DOM (the render
+  // wraps runs in transparent <strong>/<em>/<code>, which the text-walking mark engine sees through).
+  // Underscore emphasis only fires at a word boundary so snake_case identifiers are left literal;
+  // unmatched markers and backslash-escaped markers stay literal. Non-nesting (a bold span's inner
+  // text is taken literally) -- enough for real imported manuals, and it never produces overlaps.
+  function parseInline(raw) {
+    raw = String(raw == null ? "" : raw);
+    var out = "", runs = [], i = 0, n = raw.length;
+    function boundaryOK(idx) { return idx === 0 || /\s/.test(raw[idx - 1]) || /[([{"'>]/.test(raw[idx - 1]); }
+    while (i < n) {
+      var ch = raw[i], nx = raw[i + 1];
+      if (ch === "\\" && i + 1 < n && "*_`\\".indexOf(nx) !== -1) { out += nx; i += 2; continue; }
+      if (ch === "`") { var c = raw.indexOf("`", i + 1); if (c > i + 1 || (c === i + 1)) { if (c > i) { var s0 = out.length; out += raw.slice(i + 1, c); runs.push({ start: s0, len: out.length - s0, style: "code" }); i = c + 1; continue; } } }
+      if ((ch === "*" || ch === "_") && nx === ch) {
+        if (ch === "*" || boundaryOK(i)) {
+          var mk = ch + ch, e = raw.indexOf(mk, i + 2);
+          if (e > i + 1 && raw.slice(i + 2, e).trim()) { var s1 = out.length; out += raw.slice(i + 2, e); runs.push({ start: s1, len: out.length - s1, style: "bold" }); i = e + 2; continue; }
+        }
+      }
+      if (ch === "*" || ch === "_") {
+        if (ch === "*" || boundaryOK(i)) {
+          var e2 = raw.indexOf(ch, i + 1);
+          if (e2 > i + 1 && raw.slice(i + 1, e2).trim() && raw[i + 1] !== ch) { var s2 = out.length; out += raw.slice(i + 1, e2); runs.push({ start: s2, len: out.length - s2, style: "italic" }); i = e2 + 1; continue; }
+        }
+      }
+      out += ch; i++;
+    }
+    return { text: out, formats: runs };
+  }
+  // Build a paragraph node from raw text, lifting inline formatting into a formats[] run list (only
+  // set when there is formatting, so plain paragraphs stay clean).
+  function inlineNode(type, raw, extra) {
+    var p = parseInline(raw), node = extra || {};
+    node.type = type; node.text = p.text;
+    if (p.formats.length) node.formats = p.formats;
+    return node;
+  }
   function blocksFromText(text) {
-    var lines = String(text == null ? "" : text).replace(/\r\n/g, "\n").split("\n");
-    var nodes = [], para = [], list = [], listOrdered = false, listStart = 1;
-    function flushP() { if (para.length) { nodes.push({ type: "paragraph", text: para.join(" ") }); para = []; } }
+    // Strip HTML comments first (page markers like "<!-- Page 43 -->" from converted PDFs, and any
+    // multi-line comment) so they never surface as body text.
+    var clean = String(text == null ? "" : text).replace(/\r\n/g, "\n").replace(/<!--[\s\S]*?-->/g, "");
+    var lines = clean.split("\n");
+    var nodes = [], para = [], list = [], listFmts = [], listOrdered = false, listStart = 1;
+    function flushP() { if (para.length) { nodes.push(inlineNode("paragraph", para.join(" "))); para = []; } }
     function flushL() {
       if (!list.length) return;
       var node = { type: "list", ordered: listOrdered, items: list.slice() };
+      if (listFmts.some(function (f) { return f && f.length; })) node.itemFormats = listFmts.slice();
       if (listOrdered && listStart !== 1) node.start = listStart; // a list starting at N renders <ol start="N">
-      nodes.push(node); list = [];
+      nodes.push(node); list = []; listFmts = [];
     }
-    lines.forEach(function (line) {
+    function pushItem(raw) { var p = parseInline(raw); list.push(p.text); listFmts.push(p.formats.length ? p.formats : null); }
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      // A Markdown pipe table: a row line immediately followed by a separator row. Collect the header
+      // + every following pipe row into a real table node (rows of inline-formatted cells).
+      if (looksLikeTableRow(line) && li + 1 < lines.length && isTableSeparator(lines[li + 1]) && !isTableSeparator(line)) {
+        flushP(); flushL();
+        var rows = [splitTableRow(line)]; li += 2; // skip the separator row
+        while (li < lines.length && looksLikeTableRow(lines[li]) && lines[li].trim() !== "" && !isTableSeparator(lines[li])) { rows.push(splitTableRow(lines[li])); li++; }
+        li--; // the outer loop will ++ past the last consumed row
+        var cellFormats = rows.map(function (r) { return r.map(function (c) { var p = parseInline(c); return p.formats.length ? p.formats : null; }); });
+        var plainRows = rows.map(function (r) { return r.map(function (c) { return parseInline(c).text; }); });
+        var tnode = { type: "table", rows: plainRows };
+        if (cellFormats.some(function (r) { return r.some(Boolean); })) tnode.cellFormats = cellFormats;
+        nodes.push(tnode);
+        continue;
+      }
       var b = UNORDERED_ITEM_RE.exec(line);
       var o = b ? null : ORDERED_ITEM_RE.exec(line);
       if (b) {
         if (list.length && listOrdered) flushL(); // switching ordered -> unordered starts a new list
-        flushP(); listOrdered = false; list.push(b[1]);
+        flushP(); listOrdered = false; pushItem(b[1]);
       } else if (o) {
         if (list.length && !listOrdered) flushL(); // switching unordered -> ordered starts a new list
         flushP();
         if (!list.length) { listOrdered = true; listStart = parseInt(o[1], 10) || 1; }
-        list.push(o[2]);
+        pushItem(o[2]);
       } else if (line.trim() === "") { flushP(); flushL(); }
       else { flushL(); para.push(line.trim()); }
-    });
+    }
     flushP(); flushL();
     return nodes;
   }
@@ -1174,16 +1406,32 @@
   // in node text, so they emit as-is; each block type maps to standard Markdown. Pure + DOM-free ->
   // headlessly testable and reusable anywhere. Chapter headings (level 1) become `# `.
   function mdCell(c) { return String(c == null ? "" : c).replace(/\|/g, "\\|"); }
+  // Re-insert the inline markers for a node's format runs so import->export round-trips (import lifts
+  // **bold**/*italic*/`code` OUT of the text into formats[]; this puts them back). Plain when no runs.
+  function inlineToMarkdown(text, runs) {
+    text = String(text == null ? "" : text);
+    if (!runs || !runs.length) return text;
+    var sorted = runs.slice().sort(function (a, b) { return a.start - b.start; });
+    var out = "", pos = 0;
+    sorted.forEach(function (r) {
+      if (!r || r.start < pos || r.start > text.length) return;
+      out += text.slice(pos, r.start);
+      var mk = r.style === "bold" ? "**" : r.style === "code" ? "`" : "*";
+      out += mk + text.slice(r.start, r.start + r.len) + mk;
+      pos = r.start + r.len;
+    });
+    return out + text.slice(pos);
+  }
   function nodeToMarkdown(node) {
     if (!node) return "";
     switch (node.type) {
       case "heading": {
         var lvl = Math.max(1, Math.min(6, node.level || 2));
-        return new Array(lvl + 1).join("#") + " " + (node.text || "");
+        return new Array(lvl + 1).join("#") + " " + inlineToMarkdown(node.text || "", node.formats);
       }
-      case "paragraph": return String(node.text == null ? "" : node.text);
+      case "paragraph": return inlineToMarkdown(node.text == null ? "" : node.text, node.formats);
       case "callout": {
-        var t = String(node.text == null ? "" : node.text);
+        var t = inlineToMarkdown(node.text == null ? "" : node.text, node.formats);
         var lines = t.split("\n");
         return lines.map(function (line, i) {
           return "> " + (i === 0 && node.tag ? "**" + node.tag + "** " : "") + line;
@@ -1191,15 +1439,17 @@
       }
       case "list": {
         var ordered = !!node.ordered;
-        return (node.items || []).map(function (it, i) { return (ordered ? (i + 1) + ". " : "- ") + it; }).join("\n");
+        return (node.items || []).map(function (it, i) { return (ordered ? (i + 1) + ". " : "- ") + inlineToMarkdown(it, node.itemFormats && node.itemFormats[i]); }).join("\n");
       }
       case "table": {
         var rows = node.rows || [];
         if (!rows.length) return "";
+        var cf = node.cellFormats || [];
+        function cell(c, ri, ci) { return mdCell(inlineToMarkdown(c, cf[ri] && cf[ri][ci])); }
         var head = rows[0] || [], out = [];
-        out.push("| " + head.map(mdCell).join(" | ") + " |");
+        out.push("| " + head.map(function (c, ci) { return cell(c, 0, ci); }).join(" | ") + " |");
         out.push("| " + head.map(function () { return "---"; }).join(" | ") + " |");
-        for (var i = 1; i < rows.length; i++) out.push("| " + (rows[i] || []).map(mdCell).join(" | ") + " |");
+        for (var i = 1; i < rows.length; i++) out.push("| " + (rows[i] || []).map(function (c, ci) { return cell(c, i, ci); }).join(" | ") + " |");
         return out.join("\n");
       }
       case "image": {
@@ -1208,6 +1458,8 @@
         if (node.caption && node.caption !== alt) md += "\n\n*" + node.caption + "*";
         return md;
       }
+      case "row": // A3: emit each side-by-side image on its own line -- Markdown has no row primitive
+        return (node.children || []).map(nodeToMarkdown).filter(Boolean).join("\n\n");
       default: return String(node.text == null ? "" : node.text);
     }
   }
@@ -1217,7 +1469,7 @@
   }
 
   var _pure = {
-    nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode, inlineRuns: inlineRuns,
+    nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
@@ -1229,19 +1481,20 @@
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
-    blocksFromText: blocksFromText, fromSections: fromSections,
+    blocksFromText: blocksFromText, fromSections: fromSections, parseInline: parseInline,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
-    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, sourceEditImpact: sourceEditImpact, logHistory: logHistory,
     selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
-    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
+    rowOf: rowOf, combineIntoRow: combineIntoRow, removeFromRow: removeFromRow,
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, imageForVariant: imageForVariant, setVariantImage: setVariantImage, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
   };
 
   var SourceDoc = {
     create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
-    nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns,
+    nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange,
@@ -1249,11 +1502,12 @@
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
-    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, sourceEditImpact: sourceEditImpact, logHistory: logHistory,
     selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
-    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
+    rowOf: rowOf, combineIntoRow: combineIntoRow, removeFromRow: removeFromRow,
+    FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, imageForVariant: imageForVariant, setVariantImage: setVariantImage, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     toMarkdown: toMarkdown,
     toJSON: toJSON, fromJSON: fromJSON,

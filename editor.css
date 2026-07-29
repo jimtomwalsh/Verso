@@ -603,6 +603,40 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .edit-source__doc .source-doc__h { margin: 0.9em 0 0.3em; }
 .edit-source__doc .source-doc__h:first-child { margin-top: 0; }
 .edit-source__doc [data-node].is-find-current { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+/* source-link 03: a passage already linked into the OPEN document (persistent cue, distinct from find). */
+.edit-source__doc [data-node].is-source-linked-passage { background: var(--accent-quiet); border-radius: 3px; box-shadow: -4px 0 0 var(--accent-quiet), 4px 0 0 var(--accent-quiet); }
+
+/* source-link 03: the floating "Place" bar raised at a panel text selection (arm-then-click). */
+.source-placebar { position: fixed; z-index: 60; display: flex; align-items: center; gap: 6px; padding: 4px; background: var(--surface-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); box-shadow: 0 6px 20px rgba(0, 0, 0, .28); }
+/* 04: the sel-bar grab handle + the custom pointer-drag ghost + the drop-target frame highlight. */
+.source-placebar__grip { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 24px; padding: 0; border: none; background: transparent; color: var(--icon-idle); cursor: grab; border-radius: var(--radius-sm, 2px); }
+.source-placebar__grip:hover { color: var(--icon-strong, var(--text-primary)); background: var(--surface-hover); }
+.source-placebar__grip svg { width: 14px; height: 14px; }
+.source-link-ghost { position: fixed; z-index: 70; pointer-events: none; padding: 4px 10px; font-size: 11px; color: #fff; background: var(--accent); border-radius: 999px; box-shadow: 0 4px 14px rgba(0, 0, 0, .32); opacity: .95; }
+body.is-dragging-source-link, body.is-dragging-source-link * { cursor: grabbing !important; user-select: none !important; }
+.frame.is-drop-target { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* while arming, the canvas invites a placement click. */
+body.is-arming-source-link #canvas-viewport { cursor: copy; }
+/* a placed, live-linked (locked) text block on the canvas: a subtle linked treatment + a clickable
+   link indicator badge. Editor chrome only -- never in the shipped course. */
+.canvas-block.is-source-linked { position: relative; }
+.source-link-badge { position: absolute; top: 3px; right: 3px; z-index: 5; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--surface-panel); color: var(--accent); cursor: pointer; opacity: 0; transition: opacity var(--dur-fast, 120ms); }
+.canvas-block.is-source-linked:hover .source-link-badge, .canvas-block.is-source-linked.selected .source-link-badge { opacity: 1; }
+.source-link-badge svg { width: 12px; height: 12px; }
+.source-link-badge:hover { border-color: var(--accent); background: var(--accent-quiet); }
+/* 06: a locked, live-linked inline span inside a mixed text block -- its own contextual cue. */
+.is-source-linked-span { background: var(--accent-quiet); border-radius: 3px; padding: 0 2px; cursor: pointer; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.is-source-linked-span:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+/* 07: a source figure in the panel is draggable as one unit -> a linked image block. */
+.edit-source__figure { cursor: grab; }
+.edit-source__figure:hover { outline: 1px dashed var(--accent); outline-offset: 2px; }
+/* 10: the source-stage where-used panel's live location rows + push affordance. */
+.source-wherepanel__row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; text-align: left; background: transparent; border: none; border-radius: var(--radius-sm, 4px); padding: 6px 8px; cursor: pointer; color: var(--text-secondary); font-size: var(--text-sm, 11px); }
+.source-wherepanel__row:hover { background: var(--surface-hover); color: var(--text-primary); }
+.source-wherepanel__row-doc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-wherepanel__row-tag { flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-tertiary); }
+.source-wherepanel__row-tag.is-alt { color: var(--accent); }
+.source-wherepanel__push { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
 
 .source-stage__topic-row {
   display: flex; align-items: center; gap: 6px; width: 100%; position: relative;
@@ -679,9 +713,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    `label`) that swaps contents by mode instead of appending a new row per feature --
    see renderSourceToolbar. Sits between the search field and the list. */
 .source-stage__nav-actions { padding: 0 6px 6px; flex: 0 0 auto; }
-/* icon-button-sizing: keep the three TOC top buttons on ONE row and enlarge them (~30%) so
-   they read clearly at the top of the Source navigator. */
-.source-stage__toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+/* icon-button-sizing + glyph pass: keep every Source toolbar glyph (New topic / Import / Product
+   actions / collapse-all) on ONE row (nowrap) at a comfortable, consistent hit target -- the
+   collapse-all glyph used to sit apart and read too small. */
+.source-stage__toolbar { display: flex; align-items: center; gap: 2px; flex-wrap: nowrap; }
 .source-stage__toolbar .vds-iconbtn { width: 28px; height: 28px; }
 .source-stage__toolbar .vds-iconbtn svg { width: 19px; height: 19px; }
 .source-stage__toolbar-badge-wrap { position: relative; display: inline-flex; }
@@ -842,12 +877,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__h:first-child { margin-top: 0; }
 .source-doc__p { margin: 0.7em 0; }
-/* source-rich-render: bold / inline-code render as formatting. The literal ** / ` markers are kept
-   in the DOM (span.source-md-mk) so text offsets stay identical, but hidden from view + from the
-   caret. display:none also keeps them out of contentEditable caret navigation. */
-.source-md-mk { display: none; }
-.source-doc__b { font-weight: 700; }
-.source-doc__code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.92em; background: var(--surface-raised, rgba(127,127,127,.12)); padding: 0.08em 0.32em; border-radius: 3px; }
+/* source import hardening: inline **bold**/*italic*/`code` are lifted into structured format
+   runs (node.formats) at import and rendered by fillSourceInline as transparent strong/em/code --
+   the model text stays plain so mark offsets line up. code gets a subtle chip. */
+.source-doc code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; background: var(--surface-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs, 2px); padding: 0 4px; }
 /* spec 2d: variant comparison columns. A diverged node splits into side-by-side columns inside the
    reading column (never a new panel); shared nodes stay full-width. */
 .source-doc__vrow { display: flex; gap: var(--space-4); margin: 0.7em 0; align-items: stretch; }
@@ -858,6 +891,12 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__vcol.is-diverged .source-doc__vcol-head { color: var(--accent); }
 .source-doc__vcol-body { color: var(--text-primary); }
 .source-doc__vcol-absent { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+/* B2: per-variant image column -- the picture plus its swap/hide actions. */
+.source-doc__vcol-fig { margin: var(--space-3) 0 0; }
+.source-vcol__imgacts { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.source-vcol__imgbtn { display: inline-flex; align-items: center; justify-content: center; width: var(--control-md, 24px); height: var(--control-md, 24px); padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 4px); background: var(--surface-input); color: var(--icon-strong, var(--text-secondary)); cursor: pointer; }
+.source-vcol__imgbtn svg { width: 14px; height: 14px; }
+.source-vcol__imgbtn:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary); }
 .source-doc__cols-hint { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); margin: 0 0 var(--space-4); }
 .source-doc__list { margin: 0.6em 0; padding-left: 22px; }
 .source-doc__list li { margin: 0.25em 0; }
@@ -866,7 +905,19 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: var(--text-sm, 13px); }
 .source-doc__table td { border: 1px solid var(--border-strong); padding: 6px 9px; }
 .source-doc__figure { margin: 1.2em 0; text-align: center; }
+/* A3: a row lays 2-3 image figures side by side; each keeps its own width + align chrome. */
+.source-doc__row { display: flex; gap: var(--space-6, 12px); align-items: flex-start; margin: 1.2em 0; }
+.source-doc__row .source-doc__figure { flex: 1 1 0; margin: 0; min-width: 0; }
+/* A1: the image lives in a centred, width-sized wrap so the resize handles pin to the image edges. */
+.source-doc__imgwrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; vertical-align: top; }
 .source-doc__figure img { max-width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; }
+.source-doc__imgwrap > img { width: 100%; display: block; }
+/* A1: resize grab handles -- shown only when the image is object-selected (selection gates them). */
+.source-doc__handle { display: none; position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: var(--surface-raised); border: 1.5px solid var(--accent); border-radius: var(--radius-xs, 2px); cursor: ew-resize; z-index: 5; touch-action: none; }
+.source-doc__handle--l { left: -5px; }
+.source-doc__handle--r { right: -5px; }
+.source-doc__figure.is-object-selected .source-doc__handle { display: block; }
+.source-doc__resize-guide { position: absolute; top: -6px; bottom: -6px; left: 50%; width: 1px; background: var(--accent); opacity: 0.5; pointer-events: none; }
 .source-doc__figure figcaption { font-size: 12px; color: var(--text-tertiary, var(--text-secondary)); margin-top: 6px; }
 .source-doc--unlocked [data-editable], .source-doc--unlocked [data-node-body] { box-shadow: inset 0 0 0 9999px transparent; }
 .source-doc--unlocked { }
@@ -983,6 +1034,7 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-selbar__btn svg { width: 16px; height: 16px; }
 .source-selbar__btn:hover { background: rgba(255,255,255,0.14); }
 .source-selbar__update { color: #93c5fd; }
+.source-selbar__btn.is-active { color: var(--accent); background: rgba(255,255,255,0.14); }
 .source-selbar__sep { width: 1px; height: 18px; background: rgba(255,255,255,0.2); margin: 0 3px; }
 
 .source-stage__convert-row { margin: 22px 0 8px; }

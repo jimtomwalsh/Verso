@@ -8171,7 +8171,7 @@ section("UI kit seam");
   ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(e));
   ok("#88 IMAGE_DECL exposes the box stroke (fill/radius stay off)", /var IMAGE_DECL = \{ fill: false, stroke: true, radius: false \};/.test(e));
   ok("#88 imageChromeIo maps hasStroke/colour/width to block.box + clears legacy border", /function imageChromeIo\(block\)[\s\S]{0,400}return !!\(block\.box && block\.box\.border\)[\s\S]{0,900}block\.box\.border = true;[\s\S]{0,200}delete block\.box\.border; delete block\.box\.borderColor; delete block\.box\.borderWidth;[\s\S]{0,120}delete block\.border;/.test(e));
-  ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,900}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
+  ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,1100}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
   // Ticket 7 (2/n) — text blocks (heading/paragraph/note) two-level.
   ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(e));
   ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,200}sub\("Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
@@ -10919,13 +10919,8 @@ section("left-panel Components reorg");
 section("editor-rework source insert + two-way jump");
 (function () {
   var e = src("src/editor.js");
-  ok("a source row inserts a live-linked block (libraryInstance) with ref + back-reference",
-     /function insertSourceLinkedBlock\(topicId\)[\s\S]{0,320}var block = \{ type: "libraryInstance", id: mintId\(\), ref: topicId, sourceRef: \{ topicId: topicId \} \}/.test(e));
-  ok("the insert carries BOTH the master ref (for where-used) and the sourceRef backref (for the jump)",
-     /ref: topicId, sourceRef: \{ topicId: topicId \}/.test(e));
-  ok("the placement is pointed at the topic's first facet so it resolves a template",
-     /if \(def && def\.facets\) \{ var fk = Object\.keys\(def\.facets\); if \(fk\.length\) block\.facet = fk\[0\]; \}/.test(e));
-  ok("insertSourceLinkedBlock (the #137 whole-topic insert) remains defined (03 formally retires it)", /function insertSourceLinkedBlock\(topicId\)/.test(e));
+  ok("source-link 03 retires the #137 whole-topic insert (insertSourceLinkedBlock is gone)", !/function insertSourceLinkedBlock\(/.test(e));
+  ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(cx, cy\)/.test(e));
   ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
   ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
   ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
@@ -10964,6 +10959,122 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
   ok("a TOC is built from SourceDoc.outline (chapters + headings), click-to-jump + scroll-spy", /var outline = SD\.outline\(model\)/.test(e) && /outline\.forEach\(function \(ch\) \{ tocRow\(ch\); \(ch\.children \|\| \[\]\)\.forEach\(tocRow\); \}\);/.test(e) && /docCol\.addEventListener\("scroll"[\s\S]{0,600}is-current/.test(e));
   ok("the viewer reuses the shared .vbrowser__search field + .source-doc__toc-item rows (consistency-over-novelty), not bespoke controls", /h\("label", "vbrowser__search"\)/.test(e) && /h\("input", "vbrowser__search-input"\)/.test(e) && /"source-doc__toc-item source-doc__toc-item--l"/.test(e) && /\.edit-source__doc/.test(css));
 })();
+
+// ---- SPEC 8 source-link 03: select a range -> place a live-linked text block (arm-then-click) ----
+section("SPEC 8: source-link 03 — select + place a linked block");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  // A selection in the read-only panel builds a SourceDoc range descriptor: single-node -> one
+  // anchor; cross-node -> anchor(first, start..end) + endAnchor(last, 0..end), matching addMark.
+  ok("panelSelectionDescriptor builds a single-node OR cross-node range from the DOM selection", /function panelSelectionDescriptor\(docCol, model\)/.test(e) && /if \(sKey === eKey\) \{[\s\S]{0,140}return \{ anchor: \{ nodeKey: sKey, start: sOff, len: eOff - sOff \} \};/.test(e) && /endAnchor: \{ nodeKey: eKey, start: 0, len: eOff \}/.test(e));
+  ok("char offsets are measured against the block's text (Range.toString().length) — the SourceDoc offset model", /function panelCharOffset\(blockEl, container, offset\)[\s\S]{0,200}return r\.toString\(\)\.length;/.test(e));
+  ok("a text selection raises the floating Place bar (mouseup on the reading column)", /docCol\.addEventListener\("mouseup"[\s\S]{0,120}maybeShowPlaceBar\(docCol, model\)/.test(e) && /function maybeShowPlaceBar\(docCol, model\)/.test(e));
+  ok("Place arms the range descriptor (mark creation deferred to the drop, so format-split can mint per-run marks)", /function armSourceLinkPlacement\(desc\)[\s\S]{0,300}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \}/.test(e));
+  ok("gap placement runs planLinkedBlocks -> a type:link mark + one linked block per run (persist once)", /function placeSourceLinkBlocks\(a\)[\s\S]{0,400}SD\.planLinkedBlocks\(model, a\.descriptor\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)[\s\S]{0,200}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}saveLibrary\(\);/.test(e));
+  ok("the armed drop is coordinate-aware: onto a text block -> inline span (06), else gap placement", /function placeArmedSourceLink\(cx, cy\)[\s\S]{0,600}if \(blockEl && isSourceLinkTextBlock\(blockEl\.__block\)\) return dropInlineSourceLink\(a, blockEl\.__block\);/.test(e));
+  ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(e\.clientX, e\.clientY\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
+  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) opening the source-link menu (jump + alternates)", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}openSourceLinkMenu\(\{ kind: "block", block: b \}, b\.sourceLink\.masterId, b\.sourceLink\.markId/.test(e));
+  ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(e) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(e));
+  ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(e) && /\.is-source-linked-passage/.test(css));
+  ok("the indicator + place bar + arming cursor carry their own editor chrome CSS", /\.source-link-badge/.test(css) && /\.source-placebar/.test(css) && /is-arming-source-link #canvas-viewport/.test(css));
+  ok("decorateSourceLinks runs in the render passes (per-page frame + full reapplyStructural)", /decorateSourceLinks\(frame\);/.test(e) && /decorateSourceLinks\(\); \/\/ source-link 03/.test(e));
+})();
+
+// ---- SPEC 8 source-link 04: custom pointer-drag placement gesture ----
+section("SPEC 8: source-link 04 — pointer-drag placement");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("the Place bar carries a grab handle that starts a CUSTOM pointer-drag (pointerdown, not native DnD)", /var grip = h\("button", "source-placebar__grip"\)[\s\S]{0,260}grip\.addEventListener\("pointerdown", function \(ev\) \{ ev\.preventDefault\(\); startSourceLinkDrag\(desc, ev\); \}\)/.test(e));
+  ok("the drag is driven by custom pointer events (pointermove/pointerup on window), not native HTML5 DnD", /window\.addEventListener\("pointermove", move\); window\.addEventListener\("pointerup", up\);/.test(e) && /grip\.addEventListener\("pointerdown"/.test(e));
+  ok("the drag shows a ghost following the cursor + lights up the frame under it (drop target)", /function startSourceLinkDrag\(desc, ev\)[\s\S]{0,600}source-link-ghost[\s\S]{0,600}frameElementUnder\(e\.clientX, e\.clientY\); if \(fr\) fr\.classList\.add\("is-drop-target"\)/.test(e));
+  ok("releasing over the canvas resolves through the SAME placement as arm-then-click (placeArmedSourceLink)", /function up\(e\)[\s\S]{0,500}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \};[\s\S]{0,80}placeArmedSourceLink\(e\.clientX, e\.clientY\);/.test(e));
+  ok("the drop targets the page under the cursor (pageIndexFromPoint -> setActivePage)", /function pageIndexFromPoint\(cx, cy\)[\s\S]{0,300}data-page-id[\s\S]{0,200}findIndex/.test(e) && /var pi = pageIndexFromPoint\(cx, cy\); if \(pi >= 0\) setActivePage\(pi\);/.test(e));
+  ok("a drop outside the canvas places nothing", /if \(!frameElementUnder\(e\.clientX, e\.clientY\)\) \{ sourceToast\("Dropped outside the canvas[\s\S]{0,40}return; \}/.test(e));
+  ok("the ghost, grab handle + drop-target highlight carry their own chrome CSS", /\.source-link-ghost/.test(css) && /\.source-placebar__grip/.test(css) && /\.frame\.is-drop-target/.test(css));
+})();
+
+// ---- SPEC 8 source-link 06: drop onto a text block -> locked linked inline span ----
+section("SPEC 8: source-link 06 — inline span append");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("a drop onto an editable text block (not itself a linked block) routes to the inline path", /function isSourceLinkTextBlock\(b\)[\s\S]{0,120}SOURCE_LINK_TEXT_TYPES\[b\.type\] && !b\.sourceLink/.test(e));
+  ok("dropInlineSourceLink flattens the range to ONE link mark and appends a <span data-source-link> to the block's text", /function dropInlineSourceLink\(a, block\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor, endAnchor: a\.descriptor\.endAnchor \}\)[\s\S]{0,260}block\.text = \(block\.text \? block\.text \+ " " : ""\) \+ span;/.test(e));
+  ok("the appended span carries the mark + master ids (resolved live by 01's inline post-pass)", /var span = '<span data-source-link="' \+ mk\.id \+ '" data-master="' \+ a\.masterId \+ '">' \+ slEscape\(SD\.markText\(model, mk\)\)/.test(e));
+  ok("the block re-renders in place (reapplyBlock) so owned text + the locked span coexist", /function dropInlineSourceLink\(a, block\)[\s\S]{0,700}reapplyBlock\(block\);/.test(e));
+  ok("each inline linked span gets its OWN contextual menu (per-span, not one block badge)", /root\.querySelectorAll\("\.canvas-block span\[data-source-link\]"\)[\s\S]{0,300}is-source-linked-span[\s\S]{0,600}openSourceLinkMenu\(\{ kind: "span", block: owner\.__block, spanEl: sp/.test(e));
+  ok("the inline span indicator carries its own chrome CSS (distinct from the block badge)", /\.is-source-linked-span/.test(css));
+})();
+
+// ---- SPEC 8 source-link 07: drag a source figure -> a new linked image block ----
+section("SPEC 8: source-link 07 — linked image drop");
+(function () {
+  var e = src("src/editor.js"), r = src("src/render.js"), css = src("editor.css");
+  ok("render's image block resolves src/alt LIVE from the source figure (01 object branch), purely (shallow copy)", /image: function \(block\) \{[\s\S]{0,400}block\.sourceLink && block\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,300}rlink\.type === "object"[\s\S]{0,260}c\.src = rlink\.src \|\| block\.src[\s\S]{0,120}block = c;/.test(r));
+  ok("placement routes an OBJECT anchor (no start/len) to a linked IMAGE block, never inline/format-split", /var isObject = !!\(a\.descriptor && a\.descriptor\.anchor && a\.descriptor\.anchor\.len == null\);/.test(e) && /return isObject \? placeSourceLinkImage\(a\) : placeSourceLinkBlocks\(a\);/.test(e));
+  ok("placeSourceLinkImage adds an OBJECT link mark (anchor {nodeKey}, no len) + inserts an image block with sourceLink", /function placeSourceLinkImage\(a\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor \}\)[\s\S]{0,160}insertBlock\(\{ type: "image", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: mk\.id \} \}\)/.test(e));
+  ok("a source figure in the panel is draggable as one unit (pointerdown -> object-anchor drag)", /docCol\.querySelectorAll\("figure\.source-doc__figure\[data-object\]"\)[\s\S]{0,260}startSourceLinkDrag\(\{ anchor: \{ nodeKey: figEl\.getAttribute\("data-node"\) \} \}, ev\)/.test(e));
+  ok("the draggable figure carries its own grab-affordance CSS", /\.edit-source__figure/.test(css));
+})();
+
+// ---- SPEC 8 source-link 08: alternates — create + pick from the canvas ----
+section("SPEC 8: source-link 08 — alternates from the canvas");
+(function () {
+  var e = src("src/editor.js");
+  ok("the source-link menu offers jump, base, existing alternates, and create-an-alternate", /function openSourceLinkMenu\(target, masterId, markId, x, y\)[\s\S]{0,400}label: "Jump to source"[\s\S]{0,300}label: "Base wording", active: !cur[\s\S]{0,600}sourceLinkAlternates\(model, link\)\.forEach[\s\S]{0,400}label: "Create an alternate…"/.test(e));
+  ok("create-an-alternate adds a type:alternate mark to the MASTER (anchored like the link) + persists it", /function createSourceAlternate\(target, masterId, markId\)[\s\S]{0,900}SD\.addMark\(model, \{ type: "alternate", anchor: link\.anchor, endAnchor: link\.endAnchor, alt: wording[\s\S]{0,200}saveLibrary\(\);[\s\S]{0,120}setSourceLinkTargetAlt\(target, alt\.id\)/.test(e));
+  ok("a canvas alternate points only THIS block/span (altId), never other documents", /function setSourceLinkTargetAlt\(target, altId\)[\s\S]{0,120}if \(altId\) target\.block\.sourceLink\.altId = altId; else delete target\.block\.sourceLink\.altId;[\s\S]{0,300}sp\.setAttribute\("data-alt", altId\)/.test(e));
+  ok("picking base vs an alternate reads/writes the target's altId (block field or span data-alt)", /function sourceLinkTargetAlt\(target\)[\s\S]{0,120}target\.block\.sourceLink && target\.block\.sourceLink\.altId[\s\S]{0,120}target\.spanEl\.getAttribute\("data-alt"\)/.test(e));
+  ok("sourceLinkAlternates matches alternates anchored identically to the link (single or multi-block)", /function sourceLinkAlternates\(model, link\)[\s\S]{0,300}m\.type !== "alternate" \|\| SD\.isObjectMark\(m\) !== SD\.isObjectMark\(link\)[\s\S]{0,400}m\.endAnchor\.nodeKey === end\.nodeKey/.test(e));
+  ok("an object (figure) link defers alternates in v1 (whole-block; figure-swap is a follow-up)", /if \(SD\.isObjectMark\(link\)\) \{ sourceToast\("Object \(figure\) alternates are coming soon\."\); return; \}/.test(e));
+})();
+
+// ---- SPEC 8 source-link 09: base-edit warning + fork ----
+section("SPEC 8: source-link 09 — base-edit warning + fork");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  // Pure sourceEditImpact: a link mark whose wording changed since the snapshot is "edited"; its
+  // base-showing locations are affected, alternate-pinned ones are not.
+  var m = SD.create([{ type: "paragraph", key: "p", text: "Charge to 80 percent for storage." }]);
+  var link = SD.addMark(m, { type: "link", anchor: { nodeKey: "p", start: 0, len: 26 } });
+  var old = {}; old[link.id] = SD.markText(m, link); // snapshot BEFORE the edit
+  SD.replaceRange(m, { nodeKey: "p", start: 10, len: 2 }, "50"); // 80 -> 50 (inside the link)
+  var locs = [
+    { markId: link.id, altId: null, docCode: "A", blockId: "b1" },
+    { markId: link.id, altId: null, docCode: "B", blockId: "b2" },
+    { markId: link.id, altId: "alt_x", docCode: "C", blockId: "b3" } // pinned to an alternate
+  ];
+  var impact = SD.sourceEditImpact(m, old, locs);
+  ok("sourceEditImpact: an edited link mark's base-showing locations are affected", impact.affected.length === 2 && impact.affected.every(function (l) { return !l.altId; }));
+  ok("sourceEditImpact: an alternate-pinned location is NOT affected by a base edit", impact.pinned.length === 1 && impact.pinned[0].altId === "alt_x");
+  ok("sourceEditImpact: the edited mark is reported", impact.editedMarks.length === 1 && impact.editedMarks[0] === link.id);
+  ok("sourceEditImpact: a base edit OUTSIDE any link changes nothing", (function () {
+    var m2 = SD.create([{ type: "paragraph", key: "p", text: "hello world here" }]);
+    var lk = SD.addMark(m2, { type: "link", anchor: { nodeKey: "p", start: 0, len: 5 } }); // "hello"
+    var o = {}; o[lk.id] = SD.markText(m2, lk);
+    SD.replaceRange(m2, { nodeKey: "p", start: 12, len: 4 }, "there"); // edit "here", outside the link
+    var im = SD.sourceEditImpact(m2, o, [{ markId: lk.id, altId: null, docCode: "A", blockId: "b" }]);
+    return im.affected.length === 0 && im.editedMarks.length === 0;
+  })());
+
+  var e = src("src/editor.js");
+  ok("the warning fires at LOCK (unlock snapshots, lock computes impact + shows the modal)", /snapshotSourceLinkBase\(\); \/\/ 09[\s\S]{0,400}var impact = sourceBaseEditImpact\(\);\s*if \(impact\.affected\.length && window\.VersoUI[\s\S]{0,80}showSourceBaseEditModal\(topic, impact, opts\); return; \}/.test(e));
+  ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]{0,500}onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(e) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(e));
+  ok("fork freezes each edited mark's OLD wording as an alternate + pins every affected location", /function forkAffectedToAlternate\(impact\)[\s\S]{0,600}alt: oldText, tag: "Frozen"[\s\S]{0,120}applyAltToLocation\(reg, loc, alt\.id\)[\s\S]{0,200}saveRegistry\(reg\)/.test(e));
+  ok("cancel reverts the model to the pre-edit snapshot", /function revertSourceEditSession\(topic\)[\s\S]{0,200}SD\.fromJSON\(__sourcePreEditModelJson\)/.test(e));
+})();
+
+// ---- SPEC 8 source-link 10: source-stage where-used + alternate push ----
+section("SPEC 8: source-link 10 — where-used + push");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(e));
+  ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1500}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
+  ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(e));
+  ok("the push dialog picks an alternate + a subset of locations (Checkbox per location)", /function openSourceAltPushDialog\(link, alts, used\)[\s\S]{0,1700}window\.VersoUI\.Checkbox\(\{ label: loc\.docTitle[\s\S]{0,120}chosen\[i\] = v/.test(e));
+  ok("push sets altId on each chosen location across documents + persists (saveRegistry); base stays base until pushed", /function pushSourceAlternate\(markId, altId, locations\)[\s\S]{0,200}applyAltToLocation\(reg, loc, altId\)[\s\S]{0,60}saveRegistry\(reg\)/.test(e));
+  ok("the where-used rows + push affordance carry their own chrome CSS", /\.source-wherepanel__row/.test(css) && /\.source-wherepanel__push/.test(css));
+})();
+
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
 // Foundation of the Source-stage rewrite (spec 2b). The whole rewrite rests on two
@@ -11229,6 +11340,47 @@ section("SPEC 8: source-link 01 — link mark model + resolver wiring");
     var found = SD.markById(m, alt.id);
     return found && found.type === "alternate" && found.alt === "Store at half charge.";
   })());
+
+  // --- source-link 05: planLinkedBlocks format-split planner (pure) ---
+  function splitDoc() {
+    return SD.create([
+      { type: "heading", key: "c", level: 1, text: "Care and cleaning" }, // h1
+      { type: "heading", key: "s", level: 2, text: "Cleaning" },          // h2
+      { type: "paragraph", key: "p1", text: "Wipe the sensor." },         // body
+      { type: "paragraph", key: "p2", text: "Let it dry fully." }         // body
+    ]);
+  }
+  ok("planLinkedBlocks: a single-format range -> ONE block spec (its own sub-range)", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "p1", start: 0, len: 16 } });
+    return plan.length === 1 && plan[0].format === "body" && plan[0].anchor.nodeKey === "p1" && !plan[0].endAnchor;
+  })());
+  ok("planLinkedBlocks: a heading+paragraph range -> TWO blocks (h2, body) in document order", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "s", start: 0, len: 8 }, endAnchor: { nodeKey: "p1", start: 0, len: 16 } });
+    return plan.length === 2 && plan[0].format === "h2" && plan[0].anchor.nodeKey === "s" && plan[1].format === "body" && plan[1].anchor.nodeKey === "p1";
+  })());
+  ok("planLinkedBlocks: two consecutive SAME-format nodes stay in ONE block (joined by a line break at render)", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "p1", start: 0, len: 16 }, endAnchor: { nodeKey: "p2", start: 0, len: 17 } });
+    return plan.length === 1 && plan[0].format === "body" && plan[0].anchor.nodeKey === "p1" && plan[0].endAnchor && plan[0].endAnchor.nodeKey === "p2";
+  })());
+  ok("planLinkedBlocks: a chapter (level-1) heading maps to the h1 format, a level-2 to h2", (function () {
+    var d = splitDoc();
+    var p1 = SD.planLinkedBlocks(d, { anchor: { nodeKey: "c", start: 0, len: 5 } });
+    var p2 = SD.planLinkedBlocks(d, { anchor: { nodeKey: "s", start: 0, len: 5 } });
+    return p1[0].format === "h1" && p2[0].format === "h2";
+  })());
+  ok("planLinkedBlocks: heading -> paragraph -> heading is THREE runs (format change starts a new block)", (function () {
+    var d = SD.create([
+      { type: "heading", key: "h1", level: 2, text: "A" },
+      { type: "paragraph", key: "p", text: "body text here" },
+      { type: "heading", key: "h2", level: 2, text: "B" }
+    ]);
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "h1", start: 0, len: 1 }, endAnchor: { nodeKey: "h2", start: 0, len: 1 } });
+    return plan.length === 3 && plan[0].format === "h2" && plan[1].format === "body" && plan[2].format === "h2";
+  })());
+  ok("placement maps planner formats to destination block types (h1->heading, h2->subheading, body->paragraph)", /SOURCE_LINK_BLOCK_TYPE = \{ h1: "heading", h2: "subheading", body: "paragraph" \}/.test(src("src/editor.js")));
 
   // --- render.js resolver wiring (source-string: render.js is DOM-coupled, not require-able) ---
   var r = src("src/render.js");
@@ -11561,7 +11713,11 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   // contextual selection bar: rich-text unlocked-only; alternate + comment always; NO create-link
   ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(e));
   ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
-  ok("NO create-link action on the Source selection bar (linking is Edit-stage)", !/seg\("link"/.test(e) && !/data-cmd="link"/.test(e));
+  // B1: create-link IS on the bar now, but object-only (source-selbar__obj) -- a text selection
+  // still never sees it (it's default-hidden and only un-hidden in selectSourceObject).
+  ok("create-link is present as an OBJECT-only action (source-selbar__obj)", /seg\("link", "link", "Add a link", "source-selbar__obj"\)/.test(e));
+  ok("the object-only controls are hidden by default (shown only on object select)", /\.source-selbar__img, \.source-selbar__obj"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
+  ok("the object selbar creates a link object-mark anchored by nodeKey", /cmd === "link"[\s\S]{0,320}addMark\(__sourceDocModel, \{ type: "link", anchor: \{ nodeKey: __sourceObjectSelKey \} \}\)/.test(e));
   // the selection bar is centred over the selection: positioned in #source-stage-article-relative
   // coords (subtract the container's viewport left + add its scroll), NOT raw page x -- else the
   // left rail's width pushed it off to the right. Both selection paths route through the helper.
@@ -11637,10 +11793,11 @@ section("Source v2: one consolidated right panel (spec 2c section 3)");
   ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,900}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(e));
   ok("the active mark's row is highlighted (is-active) in the Marks list", /"source-drawer__row" \+ \(m\.id === __sourceActiveMarkId \? " is-active" : ""\)/.test(e));
   ok("panel visibility + Marks controls are exposed on __sourceRw for verification", /setInfoOpen: function[\s\S]{0,400}infoOpen: function[\s\S]{0,400}revealMark: function/.test(e));
-  // source-rich-render: text nodes are projected through paintSourceInline (offset-preserving),
-  // NOT raw el.textContent, so bold/code render as formatting while the mark offsets stay put.
-  ok("renderSourceDocNode projects heading/paragraph/callout through paintSourceInline (rich, offset-safe)", /el = h\("p", "source-doc__p"\); paintSourceInline\(el, SD\.nodeText\(node\)\)/.test(e) && /paintSourceInline\(el, SD\.nodeText\(node\)\); el\.setAttribute\("data-editable", "1"\); }/.test(e));
-  ok("paintSourceInline keeps ** / ` markers in the DOM (hidden) so el.textContent round-trips to applyTextEdit", /function paintSourceInline\(el, text\)[\s\S]{0,700}source-md-mk[\s\S]{0,200}mk\.textContent = r\.text/.test(e) && /if \(runs\.length === 1 && runs\[0\]\.kind === "text"\) \{ el\.textContent = runs\[0\]\.text; return; }/.test(e));
+  // source import hardening: text nodes are projected through fillSourceInline with the node's
+  // structured format runs (node.formats), NOT raw el.textContent, so bold/italic/code render as
+  // formatting while the model text stays plain and the mark offsets stay put.
+  ok("renderSourceDocNode projects heading/paragraph/callout through fillSourceInline(el, text, formats)", /el = h\("p", "source-doc__p"\); fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\)/.test(e) && /fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\); el\.setAttribute\("data-editable", "1"\); }/.test(e));
+  ok("fillSourceInline wraps runs in transparent strong/em/code without changing el.textContent (offset-safe)", /function fillSourceInline\(el, text, runs\)[\s\S]{0,800}if \(!runs \|\| !runs\.length\) \{ el\.textContent = text; return; }[\s\S]{0,800}span\.textContent = text\.slice\(r\.start, r\.start \+ r\.len\)/.test(e));
 })();
 
 // ---- Source rewrite (Epic 2b): demand-driven alternates + staleness (alternates-staleness) ----
@@ -11776,6 +11933,205 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
 // An image or table is a first-class markable OBJECT: its mark is a node-id reference (anchor
 // with no start/len), stable by construction -- nothing to survive when surrounding prose is
 // edited. The model half is pure (proven here); the selection + create UX is wired in editor.js.
+// ---- A1: source image resize width core (product-rail-source-image-resize-handles) --------
+section("Source image A1: width clamp + snap (pure core)");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-imgwidth-start \*\/([\s\S]*?)\/\* @pure-imgwidth-end \*\//);
+  if (!m) { ok("locate @pure-imgwidth fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { clampSourceImgWidth: clampSourceImgWidth, snapSourceImgWidth: snapSourceImgWidth, sourceImgAlign: sourceImgAlign };")();
+  // clamp: blank/NaN -> 100 (full width); below 20 floors; above 100 caps.
+  ok("clamp NaN -> 100", g.clampSourceImgWidth("") === 100 && g.clampSourceImgWidth(undefined) === 100);
+  ok("clamp floors at 20", g.clampSourceImgWidth(5) === 20 && g.clampSourceImgWidth(20) === 20);
+  ok("clamp caps at 100", g.clampSourceImgWidth(140) === 100 && g.clampSourceImgWidth(100) === 100);
+  ok("clamp passes a mid value", g.clampSourceImgWidth(63) === 63);
+  ok("clamp parses a percent string", g.clampSourceImgWidth("47%") === 47);
+  // snap: within ~4% of a stop magnetises; otherwise rounds and stays free.
+  ok("snap catches near-50", g.snapSourceImgWidth(52) === 50 && g.snapSourceImgWidth(48) === 50);
+  ok("snap catches near-25/75/100", g.snapSourceImgWidth(27) === 25 && g.snapSourceImgWidth(73) === 75 && g.snapSourceImgWidth(97) === 100);
+  ok("snap leaves an in-between value (rounded)", g.snapSourceImgWidth(60) === 60 && g.snapSourceImgWidth(41.4) === 41);
+  ok("snap boundary is ~4%", g.snapSourceImgWidth(45) === 45 && g.snapSourceImgWidth(46) === 50);
+  // A2 align: centre is the default (no style); left/right apply; anything else falls to centre.
+  ok("align centre default -> ''", g.sourceImgAlign({}) === "" && g.sourceImgAlign({ align: "center" }) === "" && g.sourceImgAlign(null) === "");
+  ok("align left/right apply", g.sourceImgAlign({ align: "left" }) === "left" && g.sourceImgAlign({ align: "right" }) === "right");
+  ok("align junk -> centre", g.sourceImgAlign({ align: "middle" }) === "");
+})();
+
+// ---- A3: side-by-side image row container (product-rail-source-image-side-by-side-row) -------
+section("Source image A3: row container nesting + mark-key stability");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function freshModel() {
+    return SD.create([
+      { type: "paragraph", text: "Intro." },
+      { type: "image", src: "a.png", caption: "A" },
+      { type: "image", src: "b.png", caption: "B" },
+      { type: "image", src: "c.png", caption: "C" },
+      { type: "paragraph", text: "Outro." }
+    ]);
+  }
+  var model = freshModel();
+  var aKey = model.nodes[1].key, bKey = model.nodes[2].key, cKey = model.nodes[3].key;
+  // an object mark on image A must survive nesting (anchored by key, key must not change)
+  var mk = SD.addMark(model, { type: "alternate", anchor: { nodeKey: aKey }, alt: "alt A" });
+
+  // combine A + next (B) into a row
+  ok("combineIntoRow wraps A + B into a row", SD.combineIntoRow(model, aKey) === true);
+  ok("row replaced the two top-level images", model.nodes.length === 4 && model.nodes[1].type === "row" && model.nodes[1].children.length === 2);
+  ok("row children kept their keys (marks stay attached)", model.nodes[1].children[0].key === aKey && model.nodes[1].children[1].key === bKey);
+  ok("nodeByKey descends into the row to find a child", SD.nodeByKey(model, aKey) && SD.nodeByKey(model, aKey).src === "a.png");
+  ok("the alternate on A is still resolvable + not broken after nesting", SD.objectAlternatesFor(model, aKey).length === 1 && !SD.refreshMark(model, mk).broken);
+  ok("rowOf locates the child's row", SD.rowOf(model, bKey) && SD.rowOf(model, bKey).childIndex === 1);
+
+  // grow the row to 3: the row's LAST child (B) pulls in the following image C
+  ok("combineIntoRow grows the row via its last child (max 3)", SD.combineIntoRow(model, bKey) === true);
+  var theRow = model.nodes.find(function (n) { return n.type === "row"; });
+  ok("row now holds 3 images", theRow.children.length === 3 && theRow.children[2].key === cKey);
+  // a full (3-child) row is never grown past 3
+  var m5 = SD.create([{ type: "image", src: "v.png" }, { type: "image", src: "w.png" }, { type: "image", src: "x.png" }, { type: "image", src: "y.png" }]);
+  SD.combineIntoRow(m5, m5.nodes[1].key);          // w + x -> row(2); nodes: [v, row(w,x), y]
+  var r5 = m5.nodes[1];
+  SD.combineIntoRow(m5, r5.children[1].key);        // row's last child pulls in y -> row(3); nodes: [v, row(3)]
+  ok("an image joins a row that has room (grows to 3)", m5.nodes[1].type === "row" && m5.nodes[1].children.length === 3);
+  ok("a full 3-image row refuses a 4th (image before it)", SD.combineIntoRow(m5, m5.nodes[0].key) === false && m5.nodes[1].children.length === 3);
+
+  // round-trips through toJSON/fromJSON with children intact
+  var round = SD.fromJSON(SD.toJSON(model));
+  var rr = round.nodes.find(function (n) { return n.type === "row"; });
+  ok("row round-trips through toJSON/fromJSON with children", rr && rr.children.length === 3 && rr.children[0].key === aKey);
+  ok("nodeByKey descends after a round-trip", SD.nodeByKey(round, bKey) && SD.nodeByKey(round, bKey).src === "b.png");
+
+  // un-nest: remove B; the row keeps A + C, B drops back to top level
+  var freed = SD.removeFromRow(round, bKey);
+  ok("removeFromRow frees the child back to top level", freed === bKey && round.nodes.some(function (n) { return n.key === bKey && n.type === "image"; }));
+  var rr2 = round.nodes.find(function (n) { return n.type === "row"; });
+  ok("row keeps its other children after un-nest", rr2 && rr2.children.length === 2);
+
+  // dissolve: a row falling to one child becomes a plain image again
+  var m3 = SD.create([{ type: "image", src: "x.png" }, { type: "image", src: "y.png" }]);
+  var xKey = m3.nodes[0].key;
+  SD.combineIntoRow(m3, xKey);
+  SD.removeFromRow(m3, xKey);
+  ok("a row of one dissolves back into a plain image", !m3.nodes.some(function (n) { return n.type === "row"; }) && m3.nodes.length === 2);
+
+  // combine no-ops when there's nothing to place beside (last image, or non-image neighbour)
+  var m4 = SD.create([{ type: "image", src: "solo.png" }, { type: "paragraph", text: "text" }]);
+  ok("combineIntoRow no-ops with a non-image neighbour", SD.combineIntoRow(m4, m4.nodes[0].key) === false);
+})();
+
+// ---- B2: per-variant image swap (product-rail-source-image-variant-swap) ---------------------
+section("Source image B2: per-variant image resolve + set");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "image", src: "base.png", alt: "Base", caption: "Cap" }]);
+  var key = model.nodes[0].key, V = "Compact";
+
+  // Flagship + an unset variant both resolve to the base image (inherited fall-through).
+  var f = SD.imageForVariant(model.nodes[0], SD.FLAGSHIP);
+  ok("Flagship resolves the base src/alt/caption", f.present && f.src === "base.png" && f.alt === "Base" && f.caption === "Cap" && f.source === "flagship");
+  var inh = SD.imageForVariant(model.nodes[0], V);
+  ok("a variant with no override inherits the base image", inh.present && inh.src === "base.png" && inh.source === "inherited");
+
+  // set a variant override -> that variant swaps src; Flagship is untouched.
+  SD.setVariantImage(model, key, V, "compact.png", { alt: "Compact art" });
+  var ov = SD.imageForVariant(model.nodes[0], V);
+  ok("a variant override swaps just that variant's src", ov.present && ov.src === "compact.png" && ov.alt === "Compact art" && ov.source === "override");
+  ok("the override inherits the base caption when not given", ov.caption === "Cap");
+  ok("Flagship still resolves the base image after a variant override", SD.imageForVariant(model.nodes[0], SD.FLAGSHIP).src === "base.png");
+
+  // presence/absence reuse the generic remove/restore.
+  SD.removeNodeFromVariant(model, key, V);
+  ok("a variant can hide the image (absent)", SD.imageForVariant(model.nodes[0], V).present === false);
+  SD.restoreNodeToVariant(model, key, V);
+  ok("restore drops the override too -> back to inherited base", SD.imageForVariant(model.nodes[0], V).src === "base.png" && SD.imageForVariant(model.nodes[0], V).source === "inherited");
+
+  // setVariantImage on Flagship replaces the base for everyone that inherits.
+  SD.setVariantImage(model, key, SD.FLAGSHIP, "newbase.png");
+  ok("setting Flagship replaces the base image", model.nodes[0].src === "newbase.png" && SD.imageForVariant(model.nodes[0], V).src === "newbase.png");
+
+  // round-trips through toJSON/fromJSON with the override intact.
+  SD.setVariantImage(model, key, V, "c2.png");
+  var round = SD.fromJSON(SD.toJSON(model));
+  ok("a per-variant image override round-trips", SD.imageForVariant(round.nodes[0], V).src === "c2.png" && SD.imageForVariant(round.nodes[0], SD.FLAGSHIP).src === "newbase.png");
+
+  // setVariantImage refuses a non-image node (guards the type).
+  var m2 = SD.create([{ type: "paragraph", text: "hi" }]);
+  ok("setVariantImage no-ops on a non-image node", SD.setVariantImage(m2, m2.nodes[0].key, V, "x.png") === null);
+})();
+
+// ---- Markdown import hardening: tables, HTML comments, inline formatting ----------------------
+section("Source import: robust markdown -> rich nodes (tables, comments, inline)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var P = SD._pure;
+
+  // inline parser: lifts **bold** / *italic* / `code` out to formats[] over PLAIN text (so marks
+  // stay aligned). Underscore emphasis only at a word boundary (snake_case stays literal).
+  var b = P.parseInline("A **bold** and *italic* and `code` bit.");
+  ok("inline: plain text has the markers stripped", b.text === "A bold and italic and code bit.");
+  ok("inline: bold run located over plain text", b.formats.some(function (f) { return f.style === "bold" && b.text.substr(f.start, f.len) === "bold"; }));
+  ok("inline: italic + code runs located", b.formats.some(function (f) { return f.style === "italic" && b.text.substr(f.start, f.len) === "italic"; }) && b.formats.some(function (f) { return f.style === "code" && b.text.substr(f.start, f.len) === "code"; }));
+  ok("inline: snake_case is NOT italicised", P.parseInline("call some_function_name now").text === "call some_function_name now" && P.parseInline("call some_function_name now").formats.length === 0);
+  ok("inline: __bold__ and escaped \\* both handled", P.parseInline("__x__ and \\*lit\\*").text === "x and *lit*" && P.parseInline("__x__").formats[0].style === "bold");
+
+  // a bullet followed by bold markup formats correctly (the reported bug: bold after a dot point)
+  var listNodes = SD.create(SD._pure.blocksFromText("- first **strong** item\n- second one")).nodes;
+  ok("bullet with **bold** -> list node with itemFormats (markers stripped)", listNodes.length === 1 && listNodes[0].type === "list" && listNodes[0].items[0] === "first strong item" && listNodes[0].itemFormats[0][0].style === "bold");
+
+  // a markdown pipe table becomes a real table node (not paragraphs of pipe text)
+  var md = "Intro line.\n\n| Name | Role |\n| --- | --- |\n| Ana | Lead |\n| Bo | Dev |\n\nOutro.";
+  var tnodes = SD.create(SD._pure.blocksFromText(md)).nodes;
+  var tbl = tnodes.filter(function (n) { return n.type === "table"; })[0];
+  ok("pipe table parses to a table node with header + body rows", !!tbl && tbl.rows.length === 3 && tbl.rows[0][0] === "Name" && tbl.rows[2][1] === "Dev");
+  ok("the pipe/dash lines do NOT leak in as paragraph text", !tnodes.some(function (n) { return n.type === "paragraph" && /\|/.test(n.text) && /---/.test(n.text); }));
+  ok("text around the table still parses as paragraphs", tnodes[0].type === "paragraph" && tnodes[0].text === "Intro line." && tnodes[tnodes.length - 1].text === "Outro.");
+
+  // table cells carry inline formatting too
+  var mdf = "| Col |\n| --- |\n| a **bold** cell |";
+  var tf = SD.create(SD._pure.blocksFromText(mdf)).nodes[0];
+  ok("table cell inline formatting is lifted to cellFormats", tf.rows[1][0] === "a bold cell" && tf.cellFormats[1][0][0].style === "bold");
+
+  // HTML comments (PDF page markers) are stripped on import
+  var mdc = "Before.\n\n<!-- Page 43 -->\n\nAfter.\n\nInline <!-- x --> kept clean.";
+  var cnodes = SD.create(SD._pure.blocksFromText(mdc)).nodes;
+  ok("whole-line HTML comment is dropped (no <!-- --> paragraph)", !cnodes.some(function (n) { return /<!--/.test(SD.nodeText(n)); }));
+  ok("inline HTML comment is stripped from a line", cnodes.some(function (n) { return n.type === "paragraph" && /Inline\s+kept clean\./.test(n.text); }));
+
+  // export round-trips inline formatting + tables back to markdown
+  var model = SD.create(SD._pure.blocksFromText("A **bold** word.\n\n| H |\n| --- |\n| v |"));
+  var out = SD.toMarkdown(model);
+  ok("toMarkdown re-emits **bold**", /A \*\*bold\*\* word\./.test(out));
+  ok("toMarkdown re-emits a pipe table", /\| H \|/.test(out) && /\| --- \|/.test(out) && /\| v \|/.test(out));
+  // and re-importing that markdown yields the same rich structure (idempotent shape)
+  var reNodes = SD.create(SD._pure.blocksFromText(out)).nodes;
+  ok("re-import round-trips: bold paragraph + table survive", reNodes[0].text === "A bold word." && reNodes[0].formats[0].style === "bold" && reNodes.some(function (n) { return n.type === "table" && n.rows[1][0] === "v"; }));
+
+  // editing a formatted node drops its now-stale format runs (safe fallback, base text usually locked)
+  var em = SD.create([{ type: "paragraph", text: "x", key: "n1" }]);
+  em.nodes[0].formats = [{ start: 0, len: 1, style: "bold" }];
+  SD.applyTextEdit(em, "n1", "xy");
+  ok("applyTextEdit drops stale formats on a real text change", !em.nodes[0].formats);
+})();
+
+// ---- Source/Editor feedback batch: UI regression guards ---------------------------------------
+section("Source/Editor feedback batch (UI wiring guards)");
+(function () {
+  var e = src("src/editor.js");
+  // Issue 1: the mark-filter tabs carry glyphs, and the SegmentedControl passes the icon through.
+  ok("mark-filter tabs carry Lucide icons (glyphs, not words)", /key: "all", label: "All", icon: "list"[\s\S]{0,220}key: "comment", label: "Comments", icon: "message-square"/.test(e));
+  ok("the filter SegmentedControl forwards each option's icon", /SOURCE_MARK_FILTERS\.map\(function \(f\) \{ return \{ value: f\.key, label: f\.label, icon: f\.icon/.test(e));
+  // Issue 2: the collapse-all button is placed on the shared toolbar row, not its own strip.
+  ok("collapse-all is appended to the shared source toolbar row", /querySelector\("#source-stage-nav-actions \.source-stage__toolbar"\)[\s\S]{0,120}toolbarRow\.appendChild\(collapseBtn\)/.test(e));
+  // Issue 3: an empty source text block gets a <br> so an Enter-split new line is visible.
+  ok("empty source block renders a <br> so it is not zero-height", /if \(!text\) \{ el\.appendChild\(document\.createElement\("br"\)\); return; \}/.test(e));
+  // Issue 4: an auto-picked Product is NOT persisted before the saved scope is restored.
+  ok("auto-pick does not clobber the saved Product before restore", /if \(__productRestored\) setActiveProduct\(keys\[i\]\); else __activeProduct = keys\[i\]/.test(e));
+  // Editor: entering Edit reframes the canvas once it is actually visible.
+  ok("entering Edit frames the canvas the first time it is visible", /stage === "edit" && !__framedWhileVisible[\s\S]{0,500}view\.ready = false; fitAll\(\); __framedWhileVisible = true/.test(e));
+  // Editor: a source-linked image counts as having an image (full inspector shows).
+  ok("a source-linked image gets the full image inspector", /var hasImage = !!\(block\.src \|\| block\.srcLight \|\| block\.srcDark \|\| \(block\.sourceLink && block\.sourceLink\.markId\)\)/.test(e));
+})();
+
 section("Source rewrite: object (image/table) marks (Epic 2b)");
 (function () {
   var SD = require(path.join(ROOT, "src/source-doc.js"));
@@ -11863,9 +12219,9 @@ section("Source rewrite: where-used panel (Epic 2b)");
   // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
   var e = src("src/editor.js");
   ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(e) && /function renderSourceWherePanel\(topic\)/.test(e));
-  ok("the panel titles 'Linked in N' from the crumb count", /source-altpanel__title", "Linked in " \+ crumbs\.length/.test(e));
-  ok("each destination is a canonical VersoUI.Breadcrumb that navigates out to the course", /window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(e) && /openCourseFromBrowser\(c\.docCode\); setStage\("edit"\)/.test(e));
-  ok("a linked span with no destinations shows the empty state", /if \(!crumbs\.length\) \{[\s\S]{0,220}Not linked in any document yet\./.test(e));
+  ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10)", /source-altpanel__title", "Linked in " \+ used\.length/.test(e) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(e));
+  ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
+  ok("a link with no live uses shows the empty state", /if \(!used\.length\) \{[\s\S]{0,160}Not linked in any document yet\./.test(e));
   ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(e) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(e));
   ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(e) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(e));
   ok("it is READ-ONLY: no addMark/link creation inside the where-used panel", !/function renderSourceWherePanel\(topic\)[\s\S]{0,1400}SD\.addMark/.test(e));
@@ -12269,7 +12625,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(e));
   ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(e));
   ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(e));
-  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(n, shown\)/.test(e));
+  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(topic, n, shown\)/.test(e));
   ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
   ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
   ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));

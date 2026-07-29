@@ -105,7 +105,26 @@ own **editor header** beneath it.
   contents** that jumps to a chapter and tracks where you're reading. It keys off the document you
   have open (its product), not the product picker, so it always matches the course in front of you.
   It's read-only — all source editing stays in the Source stage. The panel remembers which section
-  you last used. (Placing linked copy from here onto the canvas is arriving next.)
+  you last used.
+  **Placing linked copy.** Select any passage in this panel (a phrase, or a heading through a
+  paragraph in one sweep) and a small bar appears at the selection with a **drag handle** and a
+  **Place** button. Two ways to place it: **drag** the handle onto the canvas — a ghost follows your
+  cursor and the target page lights up — and release; or click **Place** then click a spot in the
+  canvas (**Esc** cancels). Either way the passage drops in as **live-linked** text in your
+  document's own styles. If your selection spans **different formats** — a heading and a paragraph —
+  it splits into one block per format (a heading block, then a body block), each independently
+  styleable with the normal text-block controls; two passages of the same format stay in one block.
+  Drop a passage **onto an existing text block** instead of into a gap and it merges in as a locked
+  **inline span** at that block, so one block can mix your own words with linked source copy — each
+  linked span carries its own indicator. Drag a source **figure** (a diagram) as a whole and it
+  drops as a linked **image** block. Linked copy is **locked** — you can't edit it directly, so it
+  can't drift from the source — and it updates automatically whenever the source wording changes. A
+  linked block (or span) shows a **link badge**; click it for a menu that jumps back to the exact
+  source passage, or lets you say it differently here. **Alternates** are the sanctioned way to
+  diverge without breaking the link: pick **Create an alternate…** to fork a named wording that
+  applies to *this block only* (and registers on the source, so you can reuse or push it later), or
+  pick an existing alternate — or **Base wording** to reset. Passages you've already linked into the
+  open document are **highlighted** in the panel, so you can see what you've used.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
   pinch) to zoom. Every page is a live, editable render of what the learner will see. The board
   follows the document's **geometry** (set by its preset, §2): **reflow** flows content down a
@@ -644,6 +663,11 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
   import**; an update keeps the parts you haven't changed (so any alternates or comments on them stay
   put) and only adds or removes what actually differs. There's no silent whole-document overwrite.
+- **What import turns into rich content.** Headings, bullet and numbered lists, and **tables** (pipe
+  tables) come in as real tables — not lines of text with dividers. Inline **bold**, *italic* and
+  `code` markup is formatted rather than shown as raw asterisks/backticks, including inside list items
+  and table cells. HTML page markers like `<!-- Page 43 -->` (common in PDF-to-Markdown conversions)
+  are stripped on the way in.
 - **Bringing in a variant's manual.** If your Product has variants declared, importing asks first
   whether the file updates the **Flagship** (the base) or a **variant**. Choosing a variant runs a
   **combine**: it reconciles that manual against the Flagship per paragraph and previews exactly what
@@ -653,7 +677,13 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   on, the document reads and edits as normal (Flagship). Turn a variant on and every paragraph that
   differs **splits into side-by-side columns** — one per shown variant — while paragraphs they all
   share stay a single column; a paragraph a variant omits shows "Not in this variant". The column
-  view is for comparison and is **read-only** — turn the variants off to edit again.
+  view is for comparison and is **read-only for text** — turn the variants off to edit again.
+- **A variant can have its own image.** Images are the exception to the read-only column view.
+  When variants are shown, each image column has a **swap** button — pick a file and that variant
+  gets its own picture, while the others keep the base (Flagship) image. A named variant can also be
+  **hidden** (eye-off) so the image doesn't appear in it, or given an image where the base has none.
+  Unlock the source first. Previewing or exporting a variant then uses that variant's image, falling
+  back to the base whenever a variant has no image of its own.
 - **The first import into a new Product** builds the continuous document straight away — you land in
   the one-document view (chapters in the outline), not an intermediate per-topic list.
 
@@ -775,21 +805,40 @@ In this mode:
   an alternate opens a **panel pinned in the right margin** that tracks the span as you scroll,
   showing the **base vs the alternate**, a status dot, and Edit / Delete.
 - **Images and tables are markable too.** An image or a table is a whole **object** — click it (a
-  ring shows it's selected) and the same **Add an alternate** / **Comment** actions appear, so you
-  can attach, say, a simplified caption to a diagram or a note to a table. An object's mark is tied
+  ring shows it's selected) and the same **Add an alternate** / **Comment** / **Add a link** actions
+  appear, so you can attach, say, a simplified caption to a diagram, a note to a table, or a link on
+  an image (its **Linked in** panel then tracks where it's used). An object's mark is tied
   to the object itself, so it stays put no matter how you edit the prose around it; a marked object
   carries the same status tint as a marked span, and its alternate/comment opens the same margin
   panel (its "base" line names the object, e.g. "Image — <caption>").
+- **Resize an image.** Select an image (with the source unlocked) and grab handles appear on its
+  left and right edges. Drag either handle to resize it live; it grows and shrinks about its centre,
+  with a light snap at 25 / 50 / 75 / 100% of the column width. Release to set the size — it persists
+  and travels with the document. Leave it at full width to fill the column.
+- **Align an image.** When an image is selected, its floating toolbar also has align **left /
+  centre / right** (centre is the default). Choosing one positions a resized image within the column;
+  a full-width image looks the same whichever you pick. The choice persists with the document.
+- **Place images side by side.** The image toolbar's **columns** button puts the selected image
+  beside the next one, in a row (up to three across). Each image in the row keeps its own size and
+  its own comments / alternates / links. Select an image already in a row and the same button
+  **takes it back out**. Text stays full width above and below the row.
 - **Staleness keeps alternates honest.** If you later change the base text, any alternate written
   against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
   reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
   Ctrl/Cmd+Z brings the text and the mark back.
-- **See where a span is used.** When a course links to a piece of this source, selecting the linked
-  span (or image/table) opens a read-only **"Linked in N"** panel in the right margin, one row per
-  place it's used — a **Document › Section › Location** breadcrumb you can click to jump straight to
-  that course. Source is one-way: it *shows* where things are linked; the linking itself happens in
-  the Edit stage, not here. A span that isn't linked anywhere says so.
+- **See where a span is used, and push a wording out.** When documents link a piece of this source,
+  selecting the linked span opens a **"Linked in N"** panel in the right margin — one row per place
+  it's used, each tagged **base** or **alternate**, and clicking a row opens that document in Edit
+  with the exact block selected. If the passage has alternates, **Push an alternate…** sends a
+  forked wording to those documents — all of them, or a chosen subset — so you can roll out a better
+  wording deliberately. A placement keeps showing **base** until an alternate is chosen for it or
+  pushed to it; pushes are never automatic. A span that isn't linked anywhere says so.
+- **Editing linked source warns first.** If you unlock and change wording that other documents link,
+  locking shows a **"linked in N places"** check before it propagates: **Update all** (the linked
+  copies re-resolve to your new wording), **Keep as-is (fork)** (freeze their current wording as an
+  alternate, then your source moves on), or **Cancel** (undo the edit). A placement already pinned to
+  an alternate is never touched by a base edit.
 - **Comments live in the margin.** Selecting text and choosing **Comment** drops a small **blue
   comment glyph just to the right of the text** next to that span; the pin tracks the span as you
   scroll. It matches the canvas comment glyph — subtle, no box. Click a pin to open
