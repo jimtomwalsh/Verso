@@ -8621,8 +8621,7 @@ section("Product Rail: Source stage nav + article");
   ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(e));
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(e));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
-  ok("the facet SegmentedControl re-renders the article, gated through isValidFacet", /onChange: function \(v\) \{ if \(!isValidFacet\(v\)\) return; __sourceActiveFacet = v; renderSourceArticle\(\); \}/.test(e));
-  ok("every column's body (single or multi) is rendered through the shared MarkdownLite primitive, not re-parsed", /window\.MarkdownLite \? window\.MarkdownLite\.render\(c\.text\)/.test(e));
+  // (facet SegmentedControl + per-section MarkdownLite column rendering retired with the section-cells path)
 
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
   var renderJs = src("src/render.js");
@@ -8895,8 +8894,8 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("the one-click (no-variant) path collects provenance for its single file before parsing/writing anything", /promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);/.test(e));
   ok("the multi-file modal path collects provenance for EVERY file (Flagship + each variant), not just the primary", /var entries = \[\{ key: "flagship", label: "Manual \(Flagship\)", file: primaryFile\.name \}\]\s*\.concat\(variantNames\.map\(function \(v\) \{ return \{ key: v, label: v, file: variantFiles\[v\]\.name \}; \}\)\);/.test(e));
 
-  // Conflict-flag UI: a visible, clickable marker on a flagged section, never silent.
-  ok("a flagged section shows a clickable 'Source updated' pill, built from the canonical Badge (tone=warning), not a bespoke button", /if \(sec\.sourceUpdate && window\.VersoUI && window\.VersoUI\.Badge\) \{\s*var flagPill = window\.VersoUI\.Badge\(\{ children: "Source updated", tone: "warning" \}\);/.test(e));
+  // (the per-section 'Source updated' conflict pill retired with the section-cells path; the Badge
+  // warning tone it introduced stays in the DS and is still asserted below)
   ok("Badge's canonical tone set was extended with 'warning' (design-system/components/structure/Badge), not hacked via an inline style override", /tone === "danger" \|\| tone === "warning" \|\| tone === "component"/.test(src("src/ui-kit.js")) &&
     /\.vds-badge--warning \{ background: var\(--warning, #e0a83e\); color: #1a1a1a; \}/.test(src("editor.css")));
   ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(e));
@@ -8915,139 +8914,6 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   ok("render() never reads bulk-select/reconcile/provenance state", renderJs3.indexOf("__sourceSelectedTopicIds") === -1 && renderJs3.indexOf("reconcileSection") === -1 && renderJs3.indexOf("sourceUpdate") === -1);
 })();
 
-// ---- product-rail-source-topic-content-authoring: section CRUD + markdown-lite toolbar ----
-section("Product Rail: Source topic content authoring");
-(function () {
-  var e = src("src/editor.js");
-  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
-  if (!m) { ok("locate @source-stage fence", false); return; }
-  var g = new Function(m[1] +
-    "\nreturn { addSection: addSection, removeSection: removeSection," +
-    " structMoveSection: structMoveSection, divergeSectionVariant: divergeSectionVariant," +
-    " sourceCommentsForSection: sourceCommentsForSection, sourceCommentIsOrphaned: sourceCommentIsOrphaned };")();
-
-  // Section CRUD -- plain array ops, callers own the updatedAt stamp + save.
-  var topic = { sections: [{ id: "s1", heading: "One" }, { id: "s2", heading: "Two" }] };
-  var added = g.addSection(topic);
-  ok("addSection appends a new empty section and returns it", topic.sections.length === 3 && topic.sections[2] === added && added.heading === "");
-  ok("a freshly added section has a technical facet ready to type into", added.facets && added.facets.technical === "");
-  g.removeSection(topic, 0);
-  ok("removeSection removes exactly the section at that index", topic.sections.length === 2 && topic.sections[0].id === "s2");
-  // structMoveSection: the drag-handle reorder, keyed on section id (not index) since
-  // that's what a real drag/drop event hands back.
-  var topic2 = { sections: [{ id: "a" }, { id: "b" }, { id: "c" }] };
-  g.structMoveSection(topic2, "c", "a", false);
-  ok("structMoveSection drops BEFORE the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "c,a,b");
-  g.structMoveSection(topic2, "c", "b", true);
-  ok("structMoveSection drops AFTER the ref section", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
-  g.structMoveSection(topic2, "a", "a", true);
-  ok("structMoveSection self-drop is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
-  g.structMoveSection(topic2, "missing", "a", true);
-  ok("structMoveSection with an unknown drag id is a silent no-op", topic2.sections.map(function (s) { return s.id; }).join(",") === "a,b,c");
-
-  // divergeSectionVariant: copies Flagship's CURRENT facets in, once -- never resets an
-  // existing override back to Flagship on a second call.
-  var sec = { facets: { technical: "flagship text" } };
-  var cloneFn = function (o) { return JSON.parse(JSON.stringify(o)); };
-  g.divergeSectionVariant(sec, "coastal", cloneFn);
-  ok("divergeSectionVariant copies Flagship's facets into a new override", sec.overrides.coastal.facets.technical === "flagship text");
-  sec.overrides.coastal.facets.technical = "author's coastal edit";
-  g.divergeSectionVariant(sec, "coastal", cloneFn);
-  ok("diverging an ALREADY-diverged variant is a no-op (never clobbers an existing edit)", sec.overrides.coastal.facets.technical === "author's coastal edit");
-  ok("divergeSectionVariant is a deep copy, not a shared reference", sec.overrides.coastal.facets !== sec.facets);
-
-  // source-stage-comments: sourceCommentsForSection / sourceCommentIsOrphaned.
-  var ctopic = {
-    sections: [{ id: "sec-1" }, { id: "sec-2" }],
-    comments: [
-      { id: "c1", anchor: { sectionId: "sec-1" } },
-      { id: "c2", anchor: { sectionId: "sec-2" } },
-      { id: "c3", anchor: { sectionId: "sec-1" } },
-      { id: "c4", anchor: { sectionId: "sec-deleted" } } // its section no longer exists
-    ]
-  };
-  ok("sourceCommentsForSection returns only comments anchored to that section", g.sourceCommentsForSection(ctopic, "sec-1").map(function (c) { return c.id; }).join(",") === "c1,c3");
-  ok("sourceCommentsForSection returns none for a section with no comments", g.sourceCommentsForSection({ sections: [], comments: [] }, "sec-x").length === 0);
-  ok("sourceCommentIsOrphaned is false for a comment anchored to a live section", g.sourceCommentIsOrphaned(ctopic.comments[0], ctopic) === false);
-  ok("sourceCommentIsOrphaned is true once its section no longer exists (e.g. deleted)", g.sourceCommentIsOrphaned(ctopic.comments[3], ctopic) === true);
-  ok("sourceCommentIsOrphaned is false for a comment with no anchor at all", g.sourceCommentIsOrphaned({ id: "c5" }, ctopic) === false);
-
-  // index.html / wiring: the article is directly editable (wiki-not-document framing).
-  ok("topic title is a real input, not read-only text", /source-stage__title-input/.test(e));
-  ok("section heading is a real input, not read-only text", /source-stage__heading-input/.test(e));
-  // source-stage-section-disclosure: up/down arrow buttons replaced by a single drag
-  // handle (drag IS the reorder affordance); actions are hover/focus-disclosed via CSS,
-  // not permanently visible.
-  ok("each section has a drag handle and a delete action", /iconBtn\("grip", "Drag to reorder"\)/.test(e) && /iconBtn\("trash-2", "Delete this section", true\)/.test(e));
-  ok("section actions are hover/focus-disclosed, not permanently visible", /\.source-stage__section-actions\s*\{[^}]*opacity:\s*0/.test(src("editor.css")) || /\.source-stage__section:hover \.source-stage__section-actions/.test(src("editor.css")));
-  ok("the drag handle is draggable and wires dragstart/drop for reorder", /gripBtn\.setAttribute\("draggable", "true"\)/.test(e) && /structMoveSection\(topic, dragId, sec\.id, after\)/.test(e));
-  ok("deleting a section confirms first (destructive action)", /confirmModal\("Delete section"/.test(e));
-  ok("an 'Add section' affordance exists at the end of the article", /source-stage__add-section/.test(e) && /\+ Add section/.test(e));
-
-  // source-stage-wysiwyg-editing: click-to-edit swaps a rendered body for a real
-  // contentEditable seeded with the SAME rendered HTML, not a raw markdown-lite
-  // textarea -- browsing OR editing a topic never shows raw ** markers.
-  ok("a body cell starts as rendered MarkdownLite output until clicked", /bodyEl\.addEventListener\("click", function \(\) \{ __sourceEditingCell = \{ sectionId: sec\.id, variant: c\.variant \}; renderSourceArticle\(\); \}\);/.test(e));
-  ok("the editing surface is a real contentEditable, not a textarea", /editEl\.contentEditable = "true";/.test(e) && e.indexOf('h("textarea", "source-stage__body-input")') === -1);
-  ok("the contentEditable is seeded with rendered HTML, so entering edit mode never flashes raw markdown", /editEl\.innerHTML = window\.MarkdownLite \? window\.MarkdownLite\.render\(c\.text\) : "";/.test(e));
-  ok("blurring the contentEditable commits via commitEditableCell AND swaps back to rendered view", /editEl\.addEventListener\("blur", function \(\) \{\s*\n\s*commitEditableCell\(topic, sec, c\.variant, editEl\);\s*\n\s*__sourceEditingCell = null;\s*\n\s*renderSourceArticle\(\);/.test(e));
-  ok("editing state resets when switching topics (no stray in-progress edit carried over)", /__sourceEditingCell = null; \/\/ don't carry an in-progress edit across topics/.test(e));
-  ok("the section widens while a cell within it is being edited, so the full block stays visible", /secEl\.classList\.add\("source-stage__section--editing"\);/.test(e));
-
-  // commitEditableCell: serializes via MarkdownLite.serialize, and guards a purely
-  // cosmetic open/close (nothing typed) from ever rewriting the stored string -- a
-  // naive round-trip could otherwise look like a change (render() itself is lossy in
-  // one direction, e.g. collapsing un-blank-line-separated newlines to spaces), which
-  // would falsely trip the re-import reconcile system's (#87) lastImportedText compare.
-  ok("commitEditableCell serializes the live contentEditable via MarkdownLite.serialize", /var newText = window\.MarkdownLite\.serialize\(editEl\);/.test(e));
-  ok("commitEditableCell compares against a re-serialize of the OLD text's own rendered form before writing (no-op guard)", /probe\.innerHTML = window\.MarkdownLite\.render\(oldText\);[\s\S]{0,80}var normalizedOld = window\.MarkdownLite\.serialize\(probe\);[\s\S]{0,120}if \(newText !== normalizedOld\)/.test(e));
-
-  // Contextual per-cell toolbar (source-stage-wysiwyg-editing): built fresh per editing
-  // cell via the SAME io.getNode()/io.onChange() adapter shape the canvas inspector's
-  // buildFormatToggleBar uses, rendered only next to the ONE cell being edited -- never
-  // a permanent fixture pinned to the top of the article regardless of what's active.
-  ok("no permanent top-of-article toolbar remains (it's per-editing-cell now)", e.indexOf('host.appendChild(toolbar);') === -1);
-  ok("the toolbar is built fresh per editing cell via buildSourceEditToolbar, closing over that cell's own element", /var toolbar = buildSourceEditToolbar\(\{ getNode: function \(\) \{ return editEl; \}, onChange: function \(\) \{\} \}\);/.test(e));
-  ok("Bold uses execCommand, not string-splicing", /execAndCommit\("bold"\)/.test(e) && /document\.execCommand\(cmd, false, arg \|\| null\);/.test(e));
-  ok("Bullet list uses execCommand('insertUnorderedList'), a real list toggle on the live selection", /execAndCommit\("insertUnorderedList"\)/.test(e));
-  ok("Inline code surrounds the live selection in a real <code> element (no native execCommand for it) and no-ops on a collapsed selection", /function wrapInlineCode\(\) \{[\s\S]{0,300}if \(range\.collapsed\) return;/.test(e));
-  ok("format toolbar buttons preventDefault on mousedown to preserve the field's selection (same trick the copy-editor bar uses)", /btn\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\); \/\/ keep the field's selection/.test(e));
-  // /verso-frontend Tier 2 (prior session): code/bullet toolbar buttons must match the
-  // existing B/I/U bar's OWN list-toggle convention (a real Icon(), prop-toggle--icon)
-  // rather than a text glyph -- "B" correctly stays plain text (matches that bar's B/I/U).
-  // Still true after the execCommand rewire -- same button shell, new wiring underneath.
-  ok("inline-code toolbar button uses the real code-xml icon, not a '<>' text glyph", /icon: "code-xml", title: "Inline code"/.test(e));
-  ok("bullet toolbar button uses the real list icon (matches the existing B/I/U bar's own list-toggle), not a '•' text glyph", /icon: "list", title: "Bullet list"/.test(e));
-  ok("icon toolbar buttons get the prop-toggle--icon class, same as the existing list-toggle button", /h\("button", "prop-toggle" \+ \(t\.icon \? " prop-toggle--icon" : ""\)\)/.test(e));
-
-  // Diverge affordance: a toggled-but-not-yet-diverged variant gets an explicit offer
-  // to start diverging, rather than silently having no column (which is correct, tested
-  // read-only behaviour from source-stage-variant-columns -- this ADDS to it, doesn't
-  // change it).
-  ok("a not-yet-diverged toggled variant offers a Diverge affordance per section", /var notDiverged = __sourceActiveVariants\.filter/.test(e) && /source-stage__diverge-btn/.test(e));
-  ok("clicking Diverge calls divergeSectionVariant then re-renders", /divergeSectionVariant\(sec, v, clone\);/.test(e));
-
-  // source-stage-comments: the canvas editor's comment system (makeComment/makeReply,
-  // comment-popover/comment-thread CSS), ported to Source stage -- storage on the topic
-  // itself (topic.comments), not doc.comments, since Product Rail topics are library
-  // content, not part of any course doc.
-  ok("the per-section comment button is always present (an affordance to start a thread even at zero)", /var commentBtn = iconBtn\("message-square", "Comments"\);/.test(e));
-  ok("a comment count only shows via the SAME iconButtonWithBadge convention the Needs-review chip uses, not a new pattern", /actions\.appendChild\(iconButtonWithBadge\(commentBtn, openCommentCount\)\);/.test(e));
-  ok("only OPEN (not resolved) comments count toward the badge", /var openCommentCount = sourceCommentsForSection\(topic, sec\.id\)\.filter\(function \(c\) \{ return !c\.done; \}\)\.length;/.test(e));
-  ok("clicking the comment button toggles that section's thread panel open/closed", /__sourceOpenCommentSectionId = \(__sourceOpenCommentSectionId === sec\.id\) \? null : sec\.id;/.test(e));
-  ok("a new comment is anchored to {sectionId} only, no dx\/dy\/pageId (no canvas\/zoom here to project a pixel position from)", /topic\.comments\.push\(makeComment\(\{ sectionId: sec\.id \}, v\)\);/.test(e));
-  ok("the thread panel reuses the canvas's own comment-thread\/comment-reply CSS classes verbatim, not new ones", /h\("div", "comment-thread source-stage__comment-panel"\)/.test(e) && /h\("div", "comment-reply"\)/.test(e));
-  ok("resolving a comment reuses the canonical Checkbox, deleting reuses the canvas's own comment-popover__del styling", /label: "Resolved"/.test(e) && /h\("button", "comment-popover__del", "Delete"\)/.test(e));
-  ok("a reply appends via makeReply, same as the canvas system", /c\.replies\.push\(makeReply\(v\)\);/.test(e));
-
-  // Chrome-only invariant.
-  var renderJs = src("src/render.js");
-  ok("render() never reads the authoring UI's editing state", renderJs.indexOf("__sourceEditingCell") === -1);
-  ok("render() never reads Source-stage comment state either", renderJs.indexOf("__sourceOpenCommentSectionId") === -1);
-  var courseCss2 = src("src/course.css");
-  ok("course.css carries no authoring-UI chrome classes", courseCss2.indexOf("source-stage__body--editing") === -1 && courseCss2.indexOf("source-stage__diverge") === -1 && courseCss2.indexOf("source-stage__comment") === -1);
-})();
-
 // ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
 section("Product Rail: Source stage info panel");
 (function () {
@@ -9060,7 +8926,7 @@ section("Product Rail: Source stage info panel");
   // Wiring: renderSourceArticle() drives the info panel from the SAME topic-selection
   // state as the article -- one source of truth, no separate re-fetch/resync path.
   ok("no topic selected -> info panel explicitly cleared (not left stale from the last topic)", /renderSourceInfoPanel\(null\);\s*\n\s*return;/.test(e));
-  ok("a selected topic drives the info panel from the SAME render pass as the article", /renderSourceInfoPanel\(topic\);\s*\n\s*\}\s*\n\s*\n\s*\/\/ Product Rail \(source-stage-info-panel\)/.test(e));
+  ok("a selected topic drives the info panel from the SAME render pass as the article", /renderSourceInfoPanel\(topic\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\n\s*\/\/ Product Rail \(source-stage-info-panel\)/.test(e));
 
   // renderSourceInfoPanel: reuses the canonical panelSection() helper (not a one-off
   // block) for both "Linked in" and "History" -- the same section chrome every other
@@ -11562,7 +11428,10 @@ section("Source rewrite: mark painting engine contract (Epic 2b)");
 section("Source rewrite: lock-toolbars wiring (Epic 2b)");
 (function () {
   var e = src("src/editor.js");
-  ok("renderSourceArticle routes a doc-topic to the node-model article (additive gate)", /if \(topicHasDoc\(topic\)\) \{[\s\S]{0,120}renderSourceNodeArticle\(topic, host\);/.test(e));
+  // section-cells retired: EVERY topic renders the continuous node-model article; a legacy section
+  // topic auto-converts on open (lossless), then falls through to the same render.
+  ok("renderSourceArticle auto-converts a legacy section topic to the continuous model on open", /if \(!topicHasDoc\(topic\) && window\.SourceDoc\) \{[\s\S]{0,260}topic\.doc = window\.SourceDoc\.toJSON\(_m\);/.test(e));
+  ok("renderSourceArticle then renders the node-model article unconditionally (no section-cells fallback)", /host\.appendChild\(headEl\);\s*\n\s*renderSourceNodeArticle\(topic, host\);/.test(e) && e.indexOf("__sourceEditingCell = { sectionId:") === -1);
   ok("topicHasDoc gates on the presence of a node tree", /function topicHasDoc\(topic\) \{ return !!\(topic && topic\.doc && topic\.doc\.nodes/.test(e));
   ok("convertTopicToDoc builds topic.doc from the shipped sections via SourceDoc.fromSections", /window\.SourceDoc\.fromSections\(topic, resolveTopicBaseText\)/.test(e) && /topic\.doc = window\.SourceDoc\.toJSON\(model\)/.test(e));
   ok("the live model is cached per topic so its owned undo stack survives re-renders", /function ensureSourceDocModel\(topic\)[\s\S]{0,200}__sourceDocModelTopicId === topic\.id/.test(e));
