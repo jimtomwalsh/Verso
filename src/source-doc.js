@@ -732,15 +732,34 @@
   // heading node, its resolved base (technical) text splits into paragraph/list nodes. Full
   // block fidelity (tables, callouts, images, nested lists) is the reconcile-rekey + render
   // ticket's job; this is enough to seed real content and give downstream tickets the seam.
+  // Parse plain text into source-doc nodes. Handles unordered ("- ") AND ordered ("1. ") lists;
+  // switching marker style flushes the current list into a separate node (mirrors markdown-lite's
+  // ORDERED_RE, carried over -- the continuous-doc rewrite had dropped the ordered branch, so
+  // numbered lines collapsed into one paragraph).
+  var ORDERED_ITEM_RE = /^(\d+)\.\s+(.*)$/;
+  var UNORDERED_ITEM_RE = /^-\s+(.*)$/;
   function blocksFromText(text) {
     var lines = String(text == null ? "" : text).replace(/\r\n/g, "\n").split("\n");
-    var nodes = [], para = [], list = [];
+    var nodes = [], para = [], list = [], listOrdered = false, listStart = 1;
     function flushP() { if (para.length) { nodes.push({ type: "paragraph", text: para.join(" ") }); para = []; } }
-    function flushL() { if (list.length) { nodes.push({ type: "list", ordered: false, items: list.slice() }); list = []; } }
+    function flushL() {
+      if (!list.length) return;
+      var node = { type: "list", ordered: listOrdered, items: list.slice() };
+      if (listOrdered && listStart !== 1) node.start = listStart; // a list starting at N renders <ol start="N">
+      nodes.push(node); list = [];
+    }
     lines.forEach(function (line) {
-      var b = /^-\s+(.*)$/.exec(line);
-      if (b) { flushP(); list.push(b[1]); }
-      else if (line.trim() === "") { flushP(); flushL(); }
+      var b = UNORDERED_ITEM_RE.exec(line);
+      var o = b ? null : ORDERED_ITEM_RE.exec(line);
+      if (b) {
+        if (list.length && listOrdered) flushL(); // switching ordered -> unordered starts a new list
+        flushP(); listOrdered = false; list.push(b[1]);
+      } else if (o) {
+        if (list.length && !listOrdered) flushL(); // switching unordered -> ordered starts a new list
+        flushP();
+        if (!list.length) { listOrdered = true; listStart = parseInt(o[1], 10) || 1; }
+        list.push(o[2]);
+      } else if (line.trim() === "") { flushP(); flushL(); }
       else { flushL(); para.push(line.trim()); }
     });
     flushP(); flushL();
