@@ -13640,8 +13640,11 @@
       if (!(name || "").trim()) return;
       var topic = createTopic(name, productId, []); // LibraryStore write, not doc -- no pushHistory
       __sourceActiveTopicId = topic.id;
-      renderSourceTopicList();
-      renderSourceArticle();
+      // new-product first-run: for an empty Product this is the FIRST chapter, so mint the unified
+      // master immediately (renderSourceStage -> ensureUnifiedDocForActiveProduct migrates the new
+      // topic into a master) rather than leaving a loose topic until the stage is re-entered. Matches
+      // the import path (finishMarkdownImport), so "start writing" and "import" seed the same way.
+      renderSourceStage();
     });
   }
 

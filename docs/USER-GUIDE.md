@@ -689,8 +689,10 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   **hidden** (eye-off) so the image doesn't appear in it, or given an image where the base has none.
   Unlock the source first. Previewing or exporting a variant then uses that variant's image, falling
   back to the base whenever a variant has no image of its own.
-- **The first import into a new Product** builds the continuous document straight away — you land in
-  the one-document view (chapters in the outline), not an intermediate per-topic list.
+- **Starting a new Product's source from scratch.** An empty Product's Source stage offers two ways
+  in: **New topic** (start writing) or **Import from Markdown…**. Either one seeds the Product's first
+  chapter and builds its continuous document straight away — you land in the one-document view
+  (chapters in the outline), not an intermediate per-topic list.
 
 The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
 authoring a chapter's text, importing, annotations, history and comments all work as described.
