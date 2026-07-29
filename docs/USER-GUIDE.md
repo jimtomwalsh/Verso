@@ -24,8 +24,8 @@ Build and export your first course in a few minutes.
    **Paragraph**. Click the text on the canvas and type.
 4. **Preview it.** Click **▶ Demo** (or press ⌘P) to see the page exactly as a learner will.
    Press **Esc** to return.
-5. **Export it.** Open **Import & Export → Export SCORM**. Upload the `.zip` to Moodle as a
-   SCORM activity.
+5. **Export it.** On the **Publish** stage, open the **Import & export** menu (beside the Publish
+   button) → **Export SCORM**. Upload the `.zip` to Moodle as a SCORM activity.
 
 > **Reassurance.** You can't lose work by exploring — every edit autosaves, and ⌘Z undoes.
 > There's no "save" button for normal editing.
@@ -515,8 +515,8 @@ whatever you were previewing at the moment you detached, not the master's flagsh
 
 ## 11. Importing from a spreadsheet (CSV)
 
-For bulk content, use **Import & Export → Import CSV**. Verso reads a flat schema
-(`Page, Location, Path, Field, Type, Value`) and builds pages, blocks, and native quizzes.
+For bulk content, use the **Publish** stage's **Import & export** menu → **Import CSV**. Verso reads a
+flat schema (`Page, Location, Path, Field, Type, Value`) and builds pages, blocks, and native quizzes.
 
 - See `SCHEMA-TEMPLATE-GUIDE.md` and `course_schema_template.csv` in the app folder for the
   exact columns and an example.
@@ -584,9 +584,10 @@ or dismiss it.
 
 ## 15. Publishing to SCORM
 
-**Import & Export → Export SCORM** builds a SCORM 1.2 `.zip`. All fonts, images, and HTML
-interactions are embedded, so the package is self-contained and runs offline. Upload the `.zip`
-to Moodle as a SCORM activity.
+On the **Publish** stage, the **Import & export** menu → **Export SCORM** builds a SCORM 1.2 `.zip`.
+All fonts, images, and HTML interactions are embedded, so the package is self-contained and runs
+offline. Upload the `.zip` to Moodle as a SCORM activity. (The queue's **Publish** button does the same
+SCORM packaging for one or many queued documents at once.)
 
 **For air-gapped Moodle,** run the **`/publish`** prep on the exported package before uploading —
 it embeds the Exo 2 fonts and forces an always-visible scrollbar (`scripts/scorm-publish.sh`).
