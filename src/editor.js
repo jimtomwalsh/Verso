@@ -11363,15 +11363,6 @@
   function sourceCommentsForSection(topic, sectionId) {
     return (topic.comments || []).filter(function (c) { return c.anchor && c.anchor.sectionId === sectionId; });
   }
-  // Mirrors commentIsOrphaned's block-cid-missing check (editor.js ~2153), keyed on a
-  // live section id instead of a canvas block's data-cid -- a section CAN be deleted out
-  // from under a comment (removeSection has no knowledge of topic.comments), so its
-  // thread needs a home to resurface in rather than silently vanishing.
-  function sourceCommentIsOrphaned(c, topic) {
-    var a = c && c.anchor;
-    if (!a || !a.sectionId) return false;
-    return !(topic.sections || []).some(function (s) { return s.id === a.sectionId; });
-  }
   /* @source-stage-end */
 
   var __sourceActiveTopicId = null;
@@ -12093,7 +12084,9 @@
     if (hasDoc) renderSourceMarksSection(host, ensureSourceDocModel(topic));
     // History
     renderHistoryTimeline(host, topic);
-    // Legacy section topics have no marks tabs -- keep their standalone Linked-in list + comments.
+    // Legacy section topics have no marks tabs -- keep their standalone Linked-in list. Comments are
+    // NOT re-rendered here: they already live in the Marks section's Comments tab, so a second
+    // standalone accordion just duplicated them (#163). The Comments tab is now their only home.
     if (!hasDoc) {
       var sourceBody = panelSection(host, "Source", { collapsible: true });
       var used = libraryWhereUsedDetail(topic.id, getRegistry());
@@ -12109,7 +12102,6 @@
           sourceBody.appendChild(row);
         });
       }
-      renderSourceCommentsPanel(host, topic);
     }
     applySourceInfoVisibility();
   }
@@ -13494,34 +13486,8 @@
   // panels -- Open/Resolved/Orphaned, mirroring renderCommentList's own split
   // (editor.js ~17819) and reusing its exact .comment-row/.comment-row__dot/
   // .comment-row__snip classes.
-  function renderSourceCommentsPanel(host, topic) {
-    var comments = topic.comments || [];
-    var commentsBody = panelSection(host, "Comments (" + comments.length + ")");
-    if (!comments.length) {
-      commentsBody.appendChild(h("div", "insp-hint", "No comments yet."));
-      return;
-    }
-    var open = [], resolved = [], orphaned = [];
-    comments.forEach(function (c) {
-      if (sourceCommentIsOrphaned(c, topic)) orphaned.push(c);
-      else if (c.done) resolved.push(c);
-      else open.push(c);
-    });
-    function group(label, list) {
-      if (!list.length) return;
-      commentsBody.appendChild(h("div", "source-stage__group-label", label + " (" + list.length + ")"));
-      list.forEach(function (c) {
-        var row = h("div", "comment-row" + (sourceCommentIsOrphaned(c, topic) ? " is-orphan" : ""));
-        var dot = h("span", "comment-row__dot"); dot.style.background = c.colour || "";
-        var snip = h("div", "comment-row__snip" + (c.body ? "" : " is-empty"), c.body || "Empty note");
-        row.appendChild(dot); row.appendChild(snip);
-        commentsBody.appendChild(row);
-      });
-    }
-    group("Open", open);
-    group("Resolved", resolved);
-    group("Orphaned", orphaned);
-  }
+  // #163: renderSourceCommentsPanel (the standalone Comments accordion) is retired -- comments live
+  // only in the Marks section's Comments filter tab now, so the panel never double-renders them.
 
   // md-topic-import + source-rw-history-timeline: a node-based vertical timeline tracing every
   // change on this topic -- newest first. Two provenance streams are merged (spec 5, hybrid
