@@ -410,10 +410,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .workspace > .source-stage,
 .workspace > .stage-placeholder { grid-row: 1 / -1; }
 
-/* SPEC 7 editor-window header: the Edit stage's own two-row header (DSLMS editor mockup
-   design-system/ui_kits/editor/TopBar.jsx). Row 1 = file-picker + open-doc tabs; row 2 =
-   doc-scoping axes (variant/version) at the left, light/dark + Preview + Send-to-publish at
-   the right. Only rendered in Edit (setStage toggles [hidden]). */
+/* edit-header-ia-v2: the Edit stage's header collapsed to ONE bar with three
+   divider-separated zones -- TABS (file-picker + open-doc tabs) | DOC (cell chip +
+   doc-settings + Build/Read + face-up variant/version dropdowns) | OUTPUT (Preview +
+   Send-to-publish). Only rendered in Edit (setStage toggles [hidden]). */
 .editor-window {
   display: flex; flex-direction: column;
   background: var(--surface-app);
@@ -421,22 +421,21 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   min-width: 0;
 }
 .editor-window[hidden] { display: none; }
-.editor-window__tabrow {
-  display: flex; align-items: flex-end;
-  height: var(--tabbar-height, 36px);
-  padding: 0 6px; gap: 4px;
-  border-bottom: 1px solid var(--border-subtle);
-  min-width: 0;
-}
-.editor-window__filepicker { flex: 0 0 auto; align-self: center; }
-.editor-window__tabrow .toolbar-tabs { flex: 1 1 auto; }
-.editor-window__toolrow {
+.editor-window__bar {
   display: flex; align-items: center;
-  height: 40px; padding: 0 8px; gap: 6px;
+  height: 44px; padding: 0 8px; gap: 6px;
   min-width: 0; overflow-x: auto; overflow-y: hidden;
 }
-.editor-window__axes { display: flex; align-items: center; gap: 2px; }
+.editor-window__zone { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* the tabs zone is the one that flexes; its tab strip takes the slack */
+.editor-window__zone--tabs { flex: 1 1 auto; align-items: flex-end; align-self: stretch; padding-top: 6px; }
+.editor-window__zone--tabs .toolbar-tabs { flex: 1 1 auto; }
+.editor-window__zone--doc, .editor-window__zone--output { flex: 0 0 auto; }
+.editor-window__filepicker { flex: 0 0 auto; align-self: center; }
+/* low-contrast hairline dividers between the three zones (DSLMS separator token) */
+.editor-window__sep { flex: 0 0 auto; width: 1px; align-self: center; height: 22px; background: var(--border-subtle); margin: 0 4px; }
 .editor-window__spacer { flex: 1 1 auto; }
+.editor-window__axes { display: flex; align-items: center; gap: 4px; }
 /* SPEC 7 matrix-cell chip: shows geometry . interactivity; opens the cell menu. */
 .editor-window__cell {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
@@ -447,6 +446,25 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .editor-window__cell:hover { background: var(--surface-hover); border-color: var(--border-strong); }
 .editor-window__cell.is-static { color: var(--text-secondary); }
+/* edit-header-ia-v2: face-up variant/version dropdowns -- named button + caret, name
+   truncates with ellipsis (full name in the menu + title tooltip). */
+.editor-window__axis-btn {
+  flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px;
+  max-width: 148px; height: 26px; padding: 0 6px 0 8px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border-input, var(--border-strong)); background: var(--surface-input);
+  color: var(--text-primary); font: var(--type-label); cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.editor-window__axis-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+.editor-window__axis-btn .axis-btn__icon { flex: 0 0 auto; display: inline-flex; color: var(--text-secondary); }
+.editor-window__axis-btn .axis-btn__icon svg { width: 14px; height: 14px; }
+.editor-window__axis-btn .axis-btn__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-window__axis-btn .axis-btn__caret { flex: 0 0 auto; display: inline-flex; color: var(--text-secondary); }
+.editor-window__axis-btn .axis-btn__caret svg { width: 12px; height: 12px; }
+/* active (previewing a non-default axis value): accent the border + icon */
+.editor-window__axis-btn.is-active { border-color: var(--accent, var(--border-strong)); }
+.editor-window__axis-btn.is-active .axis-btn__icon { color: var(--accent, var(--text-primary)); }
 
 .panel {
   position: relative;

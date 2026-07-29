@@ -68,44 +68,47 @@
 
     <!-- SPEC 7 (Editor Window Rework): the Edit stage's own header. Present ONLY in Edit
          (setStage toggles [hidden]); spans the columns over the left panel + canvas +
-         inspector. Two rows per the DSLMS editor mockup (design-system/ui_kits/editor/
-         TopBar.jsx): a TAB ROW (file-picker + open-doc tabs) and a TOOLBAR ROW (doc-scoping
-         variant/version at the left; light/dark + Preview + Send-to-publish at the right).
-         The file-picker (#home-btn), tabs (#toolbar-tabs), light/dark (#mode-toggle) and the
-         preview cluster relocated here from the global bar. Variant/version glyphs mount into
-         #editor-doc-axes. The cell chip, geometry canvas and left-panel 3-way are later tickets. -->
+         inspector. edit-header-ia-v2: ONE bar, three divider-separated zones -- TABS (file-picker
+         + open-doc tabs) | DOC (cell chip + doc-settings + Build/Read + face-up variant/version
+         dropdowns) | OUTPUT (Preview + Send-to-publish). Light/dark moved into the Preview
+         chevron menu; the standalone #mode-toggle is retired. -->
     <div class="editor-window" id="editor-window-header" hidden>
-      <div class="editor-window__tabrow">
-        <button class="tool editor-window__filepicker" id="home-btn" data-lucide="layout-grid" title="Browse all courses"></button>
-        <div class="toolbar-tabs" id="toolbar-tabs"></div>
-      </div>
-      <div class="editor-window__toolrow">
-        <!-- SPEC 7: the matrix-cell chip (geometry . interactive). Click to change the cell after
-             creation -- tiered mutability: interactivity toggles immediately; a geometry change warns
-             (content reflows) then re-renders. Mounted by mountCellChip(). -->
-        <button class="editor-window__cell" id="editor-cell-chip" type="button" title="Document type — geometry and interactivity"></button>
-        <span class="toolbar__divider"></span>
-        <!-- SPEC 7 (decision 14): Build/Read view toggle. Build = the authoring canvas; Read = the
-             per-doc copy view (the copy editor), reachable in-flow instead of the old rail button.
-             A VersoUI.SegmentedControl mounts here. Preview stays its own glyph (right). -->
-        <div class="editor-window__view" id="editor-view-toggle"></div>
-        <span class="toolbar__divider"></span>
-        <!-- doc-scoping axes: variant (outer) then software-version (inner) mount here. -->
-        <div class="editor-window__axes" id="editor-doc-axes"></div>
-        <div class="editor-window__spacer"></div>
-        <!-- NNN: light/dark AUTHORING palette toggle — flips the DOCUMENT theme, not the chrome. -->
-        <button class="tool" id="mode-toggle" data-lucide="moon" title="Toggle light / dark palette"></button>
-        <span class="toolbar__divider"></span>
-        <!-- DS action-priority: Preview (Demo) is the single accent-blue PRIMARY; built into a
-             vds-btn primary by Editor.mountTopBar(). The chevron opens the device-breakpoint menu. -->
-        <div class="preview-cluster">
-          <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
-          <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview device size"></button>
+      <div class="editor-window__bar">
+        <!-- Zone 1 -- tabs / file management -->
+        <div class="editor-window__zone editor-window__zone--tabs">
+          <button class="tool editor-window__filepicker" id="home-btn" data-lucide="layout-grid" title="Browse all courses"></button>
+          <div class="toolbar-tabs" id="toolbar-tabs"></div>
         </div>
-        <!-- SPEC 6 entry point: relocated here by SPEC 7 (decision 14). Wires to addToQueue in
-             the send-to-publish-wire ticket; a stub toast for now. Neutral glyph beside the one
-             accent primary (Preview) -- one primary per surface. -->
-        <button class="tool editor-window__publish" id="send-to-publish-btn" data-lucide="upload" title="Send to publish queue"></button>
+        <span class="editor-window__sep" aria-hidden="true"></span>
+        <!-- Zone 2 -- document settings + live switches (the "matrix" is the face-up controls) -->
+        <div class="editor-window__zone editor-window__zone--doc">
+          <!-- SPEC 7: the matrix-cell chip (geometry . interactive). Click to change the cell after
+               creation -- tiered mutability. Mounted by mountCellChip(). -->
+          <button class="editor-window__cell" id="editor-cell-chip" type="button" title="Document type — geometry and interactivity"></button>
+          <!-- edit-header-ia-v2: opens the type-aware Document settings modal (reuses the settings
+               modal's Project tab; app/system settings live behind the rail cog). Wired by mountDocSettingsBtn(). -->
+          <button class="tool editor-window__docsettings" id="doc-settings-btn" data-lucide="settings" title="Document settings"></button>
+          <!-- SPEC 7 (decision 14): Build/Read view toggle. Build = the authoring canvas; Read = the
+               per-doc copy view. A VersoUI.SegmentedControl mounts here; hidden where no Read view exists. -->
+          <div class="editor-window__view" id="editor-view-toggle"></div>
+          <!-- doc-scoping axes: variant (outer) then software-version (inner) mount here as
+               face-up named dropdowns (edit-header-ia-v2). -->
+          <div class="editor-window__axes" id="editor-doc-axes"></div>
+        </div>
+        <span class="editor-window__spacer"></span>
+        <span class="editor-window__sep" aria-hidden="true"></span>
+        <!-- Zone 3 -- output -->
+        <div class="editor-window__zone editor-window__zone--output">
+          <!-- DS action-priority: Preview (Demo) is the single accent-blue PRIMARY; built into a
+               vds-btn primary by Editor.mountTopBar(). The chevron opens the size + light/dark menu. -->
+          <div class="preview-cluster">
+            <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
+            <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview size and palette"></button>
+          </div>
+          <!-- SPEC 6 entry point: relocated here by SPEC 7 (decision 14). Wires to addToQueue in
+               the send-to-publish-wire ticket; a stub toast for now. -->
+          <button class="tool editor-window__publish" id="send-to-publish-btn" data-lucide="upload" title="Send to publish queue"></button>
+        </div>
       </div>
     </div>
 

@@ -9588,8 +9588,9 @@ section("line diff (LineDiff)");
     /function currentDoc\(\) \{\s*var d = doc;\s*if \(activeVariant\) d = window\.resolveVariant\(d, activeVariant\);\s*if \(activeVersion\) \{/.test(e));
   ok("isPreview() stays the conservative read-only gate (both axes)", /function isPreview\(\) \{ return !!activeVariant \|\| !!activeVersion; \}/.test(e));
   ok("setDoc drops a stale activeVersion the new doc lacks", /if \(activeVersion && \(doc\.versions \|\| \[\]\)\.indexOf\(activeVersion\) === -1\) activeVersion = null;/.test(e));
-  // SWITCHER: glyph, menu, newest = default, Base entry, order after the variant glyph.
-  ok("version glyph uses the 'history' icon", /versionWrapEl\.innerHTML = Ic \? Ic\("history"\)/.test(e));
+  // SWITCHER: face-up named dropdown (edit-header-ia-v2), menu, newest = default, Base entry,
+  // order after the variant control.
+  ok("version switch is a face-up axis button with the 'history' icon + a name label", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,260}axis-btn__icon[\s\S]{0,40}Ic\("history"\)[\s\S]{0,120}axis-btn__label/.test(e));
   ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(e));
   ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(e));
   ok("menu offers Base as the editable anchor (null activeVersion)", /active: !activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(e));
@@ -9610,6 +9611,35 @@ section("line diff (LineDiff)");
   ok("editor.css defines the teal version preview ring + badge (DSLMS --preview-version)", /\.canvas\.is-version-preview \{ box-shadow: inset 0 0 0 3px #0e9384/.test(css) && /\.version-preview-badge \{/.test(css));
   var ds = src("design-system/tokens/colors.css");
   ok("DSLMS anchors the version-axis hue (--preview-version)", /--preview-version: var\(--teal-500\);/.test(ds));
+})();
+
+// edit-header-ia-v2: the two-row editor header collapses to ONE bar with three
+// divider-separated zones (tabs | doc | output); variant/version become face-up named
+// dropdowns; light/dark moves into the Preview chevron menu; a Document-settings button
+// opens the settings modal's Project tab.
+section("edit-header-ia-v2: single-bar three-zone editor header");
+(function () {
+  var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
+  // MARKUP: one bar, three zones, two hairline seps, no leftover two-row structure.
+  ok("header is a single bar (no two-row tabrow/toolrow)", /editor-window__bar/.test(html) && html.indexOf("editor-window__tabrow") === -1 && html.indexOf("editor-window__toolrow") === -1);
+  ok("three zones: tabs | doc | output", /editor-window__zone--tabs/.test(html) && /editor-window__zone--doc/.test(html) && /editor-window__zone--output/.test(html));
+  ok("two hairline dividers between the zones", (html.match(/editor-window__sep/g) || []).length >= 2);
+  ok("Document-settings button lives in the header", /id="doc-settings-btn"/.test(html));
+  ok("standalone #mode-toggle is retired from the header", html.indexOf('id="mode-toggle"') === -1);
+  ok("cell chip, Build/Read toggle + axes host still present in the doc zone", /id="editor-cell-chip"/.test(html) && /id="editor-view-toggle"/.test(html) && /id="editor-doc-axes"/.test(html));
+  // FACE-UP DROPDOWNS: variant is a named axis button, not a glyph-only trigger.
+  ok("variant switch is a face-up axis button (layers icon + name label)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,260}axis-btn__icon[\s\S]{0,40}Ic\("layers"\)[\s\S]{0,120}axis-btn__label/.test(e));
+  ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(e));
+  ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(e));
+  // LIGHT/DARK now lives in the Preview chevron menu (size presets + palette, divider between).
+  ok("Preview chevron menu adds a Palette section with light/dark -> setMode", /head: "Palette"[\s\S]{0,220}setMode\("light"\)[\s\S]{0,120}setMode\("dark"\)/.test(e) && /function openPreviewBpMenu/.test(e));
+  // DOC-SETTINGS button opens the settings modal on the Project tab + wired at boot.
+  ok("mountDocSettingsBtn opens the settings modal on the Project tab", /function mountDocSettingsBtn\(\)[\s\S]{0,240}openSettingsModal\("project"\)/.test(e));
+  ok("mountDocSettingsBtn is wired at boot", /mountDocSettingsBtn\(\); \/\/ edit-header-ia-v2/.test(e));
+  // CSS: single-row bar + zones + face-up axis button + hairline sep.
+  ok("editor.css defines the single-row bar + zones", /\.editor-window__bar \{/.test(css) && /\.editor-window__zone \{/.test(css));
+  ok("editor.css defines the face-up axis button with ellipsis label", /\.editor-window__axis-btn \{/.test(css) && /\.axis-btn__label \{[^}]*text-overflow: ellipsis/.test(css));
+  ok("editor.css defines the low-contrast hairline sep (border-subtle)", /\.editor-window__sep \{[^}]*background: var\(--border-subtle\)/.test(css));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
