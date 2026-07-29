@@ -2012,7 +2012,10 @@ details[open] .disc__caret {
    Dark chrome bar (parity with .demo__bar) over a light document stage — the copy renders as a
    Word-doc-style page in slices 2-4. Verso UI only; never ships in the SCORM export. */
 .copyedit {
-  position: fixed; inset: 0; z-index: 100;
+  /* chrome invariant: contained to the workspace region -- below the global top bar (.toolbar,
+     44px) and right of the left rail (--rail-w) -- so the product picker + stage rail stay live.
+     (Demo/Preview stays inset:0; it is the sanctioned full-screen exception.) */
+  position: fixed; top: 44px; left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 100;
   display: flex; flex-direction: column;
   background: #0e0e0f;
 }
@@ -3492,7 +3495,9 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
    imported at the top of this file, so this matches the DS card spec 1:1.
    ============================================================ */
 .vbrowser {
-  position: fixed; inset: 0; z-index: 60;
+  /* chrome invariant: contained to the workspace region (below the 44px top bar, right of the
+     --rail-w rail) so the product picker + stage rail stay visible + interactive while browsing. */
+  position: fixed; top: 44px; left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 60;
   display: flex; flex-direction: column;
   background: var(--surface-app);
 }
