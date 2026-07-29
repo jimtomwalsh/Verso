@@ -19580,10 +19580,20 @@
     return { array: page.blocks, index: page.blocks.length };
   }
   function insertBlock(block) {
-    var page = doc.pages[currentPage];
     pushHistory(); // DDD: was undoable-gap — inserting a block from the palette couldn't be undone
     stampRoleStyle(block); // #145: auto-link a dropped text block (+ its children) to its type's theme role style
-    var L = insertLoc();
+    // #161 part 1: a source-link drop targets an explicit between-block gap (the drop-line the drag
+    // showed), not the selection-based insertLoc. __sourceLinkDropAt is set only for the duration of a
+    // source-link placement and auto-advances so a format-split's multiple blocks stack in order.
+    var L;
+    if (__sourceLinkDropAt && doc.pages[__sourceLinkDropAt.pageIndex]) {
+      var tp = doc.pages[__sourceLinkDropAt.pageIndex];
+      L = { array: tp.blocks, index: Math.max(0, Math.min(__sourceLinkDropAt.index, tp.blocks.length)) };
+      currentPage = __sourceLinkDropAt.pageIndex;
+      __sourceLinkDropAt.index = L.index + 1; // the next block in this placement lands after this one
+    } else {
+      L = insertLoc();
+    }
     L.array.splice(L.index, 0, block);
     reapplyStructural(findPageOfBlock(block)); // PERF: one page, not the world
     setActivePage(currentPage);
@@ -19746,6 +19756,40 @@
   var __editSourceMaster = null, __editSourceModel = null, __editSourceMasterId = null;
   var __armedSourceLink = null;        // { masterId, markId } armed for the next canvas click
   var __pendingSourceJumpMark = null;  // { masterId, markId } to scroll to after the panel re-renders
+  var __sourceLinkDropAt = null;       // #161 part 1: { pageIndex, index } explicit drop gap for a placement
+
+  // #161 part 1: the between-block gap under the cursor on the target page -> where a dropped linked
+  // block should land, plus the Y to draw the drop-line at. Only TOP-LEVEL page blocks are gap targets
+  // (a linked block drops between page blocks, not inside a column); returns null off any page.
+  function sourceLinkDropGap(cx, cy) {
+    var pi = pageIndexFromPoint(cx, cy); if (pi < 0) return null;
+    var fr = frameElementUnder(cx, cy); if (!fr) return null;
+    var page = doc.pages[pi]; if (!page) return null;
+    var tops = Array.prototype.filter.call(fr.querySelectorAll(".canvas-block"), function (el) {
+      return el.__block && page.blocks.indexOf(el.__block) !== -1; // top-level only (skip nested)
+    });
+    tops.sort(function (a, b) { return page.blocks.indexOf(a.__block) - page.blocks.indexOf(b.__block); });
+    var index = page.blocks.length, lineY = null;
+    for (var i = 0; i < tops.length; i++) {
+      var r = tops[i].getBoundingClientRect();
+      if (cy < r.top + r.height / 2) { index = page.blocks.indexOf(tops[i].__block); lineY = r.top; break; }
+    }
+    if (lineY == null) { // below every block -> the trailing gap
+      if (tops.length) lineY = tops[tops.length - 1].getBoundingClientRect().bottom;
+      else lineY = fr.getBoundingClientRect().top + 14; // empty page
+    }
+    return { pageIndex: pi, index: index, lineY: lineY, frameRect: fr.getBoundingClientRect() };
+  }
+  function hideSourceLinkDropLine() { var l = document.getElementById("source-link-dropline"); if (l) l.remove(); }
+  function showSourceLinkDropLine(cx, cy) {
+    var gap = sourceLinkDropGap(cx, cy);
+    if (!gap) { hideSourceLinkDropLine(); return; }
+    var line = document.getElementById("source-link-dropline");
+    if (!line) { line = h("div", "source-link-dropline"); line.id = "source-link-dropline"; document.body.appendChild(line); }
+    line.style.left = gap.frameRect.left + "px";
+    line.style.width = gap.frameRect.width + "px";
+    line.style.top = gap.lineY + "px";
+  }
 
   // Char offset of a DOM point within a block element's text (walks all text nodes -> matches the
   // SourceDoc plain-text offset model the marks anchor to).
@@ -19847,8 +19891,14 @@
         if (blockEl && isSourceLinkTextBlock(blockEl.__block)) return dropInlineSourceLink(a, blockEl.__block);
       }
       var pi = pageIndexFromPoint(cx, cy); if (pi >= 0) setActivePage(pi);
+      // #161 part 1: land the block(s) at the between-block gap under the cursor (where the drop-line
+      // showed), not at the current selection. Consumed by insertBlock, cleared after the placement.
+      var gap = sourceLinkDropGap(cx, cy);
+      if (gap) __sourceLinkDropAt = { pageIndex: gap.pageIndex, index: gap.index };
     }
-    return isObject ? placeSourceLinkImage(a) : placeSourceLinkBlocks(a);
+    var result = isObject ? placeSourceLinkImage(a) : placeSourceLinkBlocks(a);
+    __sourceLinkDropAt = null; // one placement only -- never leak the gap into ordinary insertBlock calls
+    return result;
   }
   // 07: drop a source figure -> a new linked image block. The link is an OBJECT mark (anchor
   // {nodeKey}, no start/len); the image block resolves its src/alt from the figure node via 01.
@@ -19929,14 +19979,28 @@
     var ghost = h("div", "source-link-ghost", "Linked copy"); document.body.appendChild(ghost);
     document.body.classList.add("is-dragging-source-link");
     function clearTarget() { var p = document.querySelector(".frame.is-drop-target"); if (p) p.classList.remove("is-drop-target"); }
+    // Dropping ONTO an editable text block appends an inline span there (06); dropping in a gap inserts
+    // a new block. Show the between-block drop-line only for the gap case; highlight the block for the
+    // inline case -- so the drag always previews exactly where the copy will land (#161 part 1).
+    var isObjDrag = !!(desc && desc.anchor && desc.anchor.len == null);
+    function overTextBlock(x, y) {
+      if (isObjDrag) return null; // a figure always becomes a new image block, never an inline span
+      var el = document.elementFromPoint(x, y); var be = el && el.closest ? el.closest(".canvas-block") : null;
+      return (be && isSourceLinkTextBlock(be.__block)) ? be : null;
+    }
+    function clearInlineTarget() { var b = document.querySelector(".canvas-block.is-sl-inline-target"); if (b) b.classList.remove("is-sl-inline-target"); }
     function move(e) {
       ghost.style.left = (e.clientX + 12) + "px"; ghost.style.top = (e.clientY + 12) + "px";
-      clearTarget();
+      clearTarget(); clearInlineTarget();
       var fr = frameElementUnder(e.clientX, e.clientY); if (fr) fr.classList.add("is-drop-target");
+      var tb = overTextBlock(e.clientX, e.clientY);
+      if (tb) { tb.classList.add("is-sl-inline-target"); hideSourceLinkDropLine(); }
+      else if (fr) { showSourceLinkDropLine(e.clientX, e.clientY); }
+      else { hideSourceLinkDropLine(); }
     }
     function up(e) {
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-      ghost.remove(); document.body.classList.remove("is-dragging-source-link"); clearTarget();
+      ghost.remove(); document.body.classList.remove("is-dragging-source-link"); clearTarget(); clearInlineTarget(); hideSourceLinkDropLine();
       if (!frameElementUnder(e.clientX, e.clientY)) { sourceToast("Dropped outside the canvas — nothing placed."); return; }
       __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
       placeArmedSourceLink(e.clientX, e.clientY); // routes to inline-span (onto a text block) or gap placement

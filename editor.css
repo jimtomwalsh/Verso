@@ -618,6 +618,11 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-link-ghost { position: fixed; z-index: 70; pointer-events: none; padding: 4px 10px; font-size: 11px; color: #fff; background: var(--accent); border-radius: 999px; box-shadow: 0 4px 14px rgba(0, 0, 0, .32); opacity: .95; }
 body.is-dragging-source-link, body.is-dragging-source-link * { cursor: grabbing !important; user-select: none !important; }
 .frame.is-drop-target { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* #161 part 1: the between-block drop-line shows exactly where a dragged linked passage will land as a
+   new block; the inline-target ring shows when the drop would instead append into an existing block. */
+.source-link-dropline { position: fixed; z-index: 68; height: 3px; margin-top: -1.5px; background: var(--accent); border-radius: 2px; pointer-events: none; box-shadow: 0 0 0 1px var(--surface-panel), 0 2px 8px rgba(0, 0, 0, .28); }
+.source-link-dropline::before { content: ""; position: absolute; left: -3px; top: -2.5px; width: 8px; height: 8px; border-radius: 999px; background: var(--accent); }
+.canvas-block.is-sl-inline-target { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: var(--radius-sm, 4px); }
 /* while arming, the canvas invites a placement click. */
 body.is-arming-source-link #canvas-viewport { cursor: copy; }
 /* a placed, live-linked (locked) text block on the canvas: a subtle linked treatment + a clickable
