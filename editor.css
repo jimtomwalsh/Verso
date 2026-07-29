@@ -548,6 +548,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 /* staleness-tracking: an informational count of linked source topics changed since last publish.
    A subtle chip -- never alarming, never a gate. Hidden entirely when in sync or no linked content. */
 .publish-pickrow__stale { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 1; color: var(--accent); background: var(--surface-raised, rgba(127,127,127,0.14)); }
+/* source-alignment: a passive % chip -- how much of the document is linked to approved source. */
+.publish-pickrow__align { flex: 0 0 auto; font-size: 10px; color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; }
 .publish-empty { font-size: var(--text-sm, 12px); color: var(--text-secondary); padding: 8px 4px; }
 .publish-queuelist { display: flex; flex-direction: column; gap: 6px; }
 /* Epic 6: the append-only whole-family release log -- a secondary, collapsed section under the live

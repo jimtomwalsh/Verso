@@ -706,6 +706,10 @@
     row("Used", _storageRatio != null ? Math.round(_storageRatio * 100) + "%" : "n/a");
     var weight = (typeof window.estimateCourseBytes === "function") ? _fmtBytes(window.estimateCourseBytes(doc)) : "-";
     row("Course weight", weight);
+    // source-alignment: share of this document's prose linked to approved source vs novel (live while
+    // editing). null (no prose) omits the row rather than showing a misleading 0%.
+    var apct = sourceAlignmentPct(doc);
+    if (apct != null) row("Source alignment", apct + "% linked");
     if (saveFailed) pop.appendChild(h("div", "storage-pop__note storage-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
     else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "storage-pop__note", adv.msg)); }
     var r = anchor.getBoundingClientRect();
@@ -1434,6 +1438,37 @@
     doc.meta.lastPublishedGroundTruthVersions = snap;
   }
   /* @gt-staleness-end */
+
+  // ---- Product Rail: source-alignment metric (linked-to-approved-source vs novel) ----
+  // What share of a document's prose is linked to approved source vs authored novel here. A whole
+  // source-linked block (block.sourceLink) counts all its words as linked; an inline `<span
+  // data-source-link>` counts the words inside it. Reuses frWords (the shared HTML-stripping word
+  // counter). Pure -> fixture-testable. Surfaced live in the Edit header + on the Publish rows.
+  /* @src-align-start */
+  function sourceLinkedSpanWords(html) {
+    var s = String(html == null ? "" : html), linked = 0, re = /<span\b[^>]*\bdata-source-link\b[^>]*>([\s\S]*?)<\/span>/gi, m;
+    while ((m = re.exec(s))) linked += frWords(m[1]);
+    return linked;
+  }
+  function sourceAlignment(doc) {
+    var linked = 0, total = 0;
+    walkBlocks(doc, function (b) {
+      if (!b || typeof b.text !== "string") return;
+      var w = frWords(b.text);
+      if (!w) return;
+      total += w;
+      if (b.sourceLink && b.sourceLink.markId) linked += w;       // whole-block linked
+      else linked += sourceLinkedSpanWords(b.text);               // inline linked spans
+    });
+    return { linkedWords: linked, totalWords: total, ratio: total ? linked / total : 0 };
+  }
+  // Format the ratio as a rounded percent string, or null when the doc has no prose to measure.
+  function sourceAlignmentPct(doc) {
+    var a = sourceAlignment(doc);
+    if (!a.totalWords) return null;
+    return Math.round(a.ratio * 100);
+  }
+  /* @src-align-end */
   function mountPublishStage() {
     if (typeof document === "undefined") return;
     renderPublishPick();
@@ -1466,6 +1501,13 @@
         var badge = h("span", "publish-pickrow__stale", String(stale));
         badge.title = stale + " linked source topic" + (stale === 1 ? "" : "s") + " changed since this document was last published";
         row.appendChild(badge);
+      }
+      // source-alignment: what share of this document is linked to approved source vs authored novel.
+      var apct = sourceAlignmentPct(registry[d.id]);
+      if (apct != null) {
+        var align = h("span", "publish-pickrow__align", apct + "% source");
+        align.title = apct + "% of this document's words are linked to approved source; the rest is novel copy authored here.";
+        row.appendChild(align);
       }
       var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
       row.appendChild(add);
