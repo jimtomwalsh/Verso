@@ -12897,12 +12897,15 @@
     }
     if (__sourceObjectSelKey) clearSourceObjectSel(); // a real text selection supersedes the object
     __sourceSelAnchor = anchor;
-    // ⟳ update if this selection extends past an existing mark; else offer create.
+    // ⟳ update if this selection extends past an existing mark; else offer create. The pure
+    // decision (SourceDoc.selbarDecision) keeps update/alt/comment visibility consistent for BOTH
+    // single- and multi-paragraph anchors -- a cross-paragraph selection still offers alt + comment.
     __sourceUpdateTarget = window.SourceDoc.markExtendedBy(__sourceDocModel, anchor);
+    var d = window.SourceDoc.selbarDecision(anchor, __sourceUpdateTarget, __sourceUnlocked);
     var upd = bar.querySelector('[data-cmd="update"]');
     var altB = bar.querySelector('[data-cmd="alternate"]'), cmtB = bar.querySelector('[data-cmd="comment"]');
-    upd.style.display = __sourceUpdateTarget ? "" : "none";
-    altB.style.display = __sourceUpdateTarget ? "none" : ""; cmtB.style.display = __sourceUpdateTarget ? "none" : "";
+    upd.style.display = d.showUpdate ? "" : "none";
+    altB.style.display = d.showAlt ? "" : "none"; cmtB.style.display = d.showComment ? "" : "none";
     var sel = window.getSelection(); var r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
     if (!r || !r.width) { bar.style.display = "none"; return; }
     positionSourceSelBar(bar, r);

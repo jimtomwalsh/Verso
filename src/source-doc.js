@@ -522,6 +522,16 @@
     });
     return found;
   }
+  // Pure visibility decision for the Source contextual selbar. Given the current selection anchor
+  // (null when there is no usable selection), the mark this selection extends (from markExtendedBy,
+  // single-block only), and whether the source is unlocked, decide which affordances the bar shows.
+  // No DOM, no positioning -- the caller still does the rect check + placement. Kept pure so the
+  // rule "a multi-paragraph selection still offers comment + alternate" is regression-guarded.
+  function selbarDecision(anchor, updateTarget, unlocked) {
+    if (!anchor) return { showBar: false, showRT: false, showUpdate: false, showAlt: false, showComment: false };
+    var upd = !!updateTarget; // extending an existing single-block mark -> offer update instead of create
+    return { showBar: true, showRT: !!unlocked, showUpdate: upd, showAlt: !upd, showComment: !upd };
+  }
   // Marks whose span overlaps a given range in a node (for hit-testing a click/selection).
   function marksOverlapping(model, nodeKey, start, len) {
     var end = start + len;
@@ -1058,6 +1068,7 @@
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
@@ -1073,6 +1084,7 @@
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,
     markExtendedBy: markExtendedBy, marksOverlapping: marksOverlapping, logHistory: logHistory,
+    selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
