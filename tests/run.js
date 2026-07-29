@@ -10920,7 +10920,7 @@ section("editor-rework source insert + two-way jump");
 (function () {
   var e = src("src/editor.js");
   ok("source-link 03 retires the #137 whole-topic insert (insertSourceLinkedBlock is gone)", !/function insertSourceLinkedBlock\(/.test(e));
-  ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(\)/.test(e));
+  ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(cx, cy\)/.test(e));
   ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
   ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
   ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
@@ -10970,8 +10970,9 @@ section("SPEC 8: source-link 03 — select + place a linked block");
   ok("char offsets are measured against the block's text (Range.toString().length) — the SourceDoc offset model", /function panelCharOffset\(blockEl, container, offset\)[\s\S]{0,200}return r\.toString\(\)\.length;/.test(e));
   ok("a text selection raises the floating Place bar (mouseup on the reading column)", /docCol\.addEventListener\("mouseup"[\s\S]{0,120}maybeShowPlaceBar\(docCol, model\)/.test(e) && /function maybeShowPlaceBar\(docCol, model\)/.test(e));
   ok("Place arms the range descriptor (mark creation deferred to the drop, so format-split can mint per-run marks)", /function armSourceLinkPlacement\(desc\)[\s\S]{0,300}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \}/.test(e));
-  ok("the armed drop runs planLinkedBlocks -> a type:link mark + one linked block per run (persist once)", /function placeArmedSourceLink\(\)[\s\S]{0,400}SD\.planLinkedBlocks\(model, a\.descriptor\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)[\s\S]{0,200}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}saveLibrary\(\);/.test(e));
-  ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
+  ok("gap placement runs planLinkedBlocks -> a type:link mark + one linked block per run (persist once)", /function placeSourceLinkBlocks\(a\)[\s\S]{0,400}SD\.planLinkedBlocks\(model, a\.descriptor\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)[\s\S]{0,200}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}saveLibrary\(\);/.test(e));
+  ok("the armed drop is coordinate-aware: onto a text block -> inline span (06), else gap placement", /function placeArmedSourceLink\(cx, cy\)[\s\S]{0,600}if \(blockEl && isSourceLinkTextBlock\(blockEl\.__block\)\) return dropInlineSourceLink\(a, blockEl\.__block\);/.test(e));
+  ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(e\.clientX, e\.clientY\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
   ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) that jumps to source", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}jumpSourcePanelToMark\(b\.sourceLink\.masterId, b\.sourceLink\.markId\)/.test(e));
   ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(e) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(e));
   ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(e) && /\.is-source-linked-passage/.test(css));
@@ -10986,10 +10987,33 @@ section("SPEC 8: source-link 04 — pointer-drag placement");
   ok("the Place bar carries a grab handle that starts a CUSTOM pointer-drag (pointerdown, not native DnD)", /var grip = h\("button", "source-placebar__grip"\)[\s\S]{0,260}grip\.addEventListener\("pointerdown", function \(ev\) \{ ev\.preventDefault\(\); startSourceLinkDrag\(desc, ev\); \}\)/.test(e));
   ok("the drag is driven by custom pointer events (pointermove/pointerup on window), not native HTML5 DnD", /window\.addEventListener\("pointermove", move\); window\.addEventListener\("pointerup", up\);/.test(e) && /grip\.addEventListener\("pointerdown"/.test(e));
   ok("the drag shows a ghost following the cursor + lights up the frame under it (drop target)", /function startSourceLinkDrag\(desc, ev\)[\s\S]{0,600}source-link-ghost[\s\S]{0,600}frameElementUnder\(e\.clientX, e\.clientY\); if \(fr\) fr\.classList\.add\("is-drop-target"\)/.test(e));
-  ok("releasing over the canvas resolves through the SAME placement as arm-then-click (placeArmedSourceLink)", /function up\(e\)[\s\S]{0,500}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \};[\s\S]{0,60}placeArmedSourceLink\(\);/.test(e));
-  ok("the drop targets the page under the cursor (pageIndexFromPoint -> setActivePage)", /function pageIndexFromPoint\(cx, cy\)[\s\S]{0,300}data-page-id[\s\S]{0,200}findIndex/.test(e) && /var pi = pageIndexFromPoint\(e\.clientX, e\.clientY\);\s*if \(pi >= 0\) setActivePage\(pi\);/.test(e));
+  ok("releasing over the canvas resolves through the SAME placement as arm-then-click (placeArmedSourceLink)", /function up\(e\)[\s\S]{0,500}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \};[\s\S]{0,80}placeArmedSourceLink\(e\.clientX, e\.clientY\);/.test(e));
+  ok("the drop targets the page under the cursor (pageIndexFromPoint -> setActivePage)", /function pageIndexFromPoint\(cx, cy\)[\s\S]{0,300}data-page-id[\s\S]{0,200}findIndex/.test(e) && /var pi = pageIndexFromPoint\(cx, cy\); if \(pi >= 0\) setActivePage\(pi\);/.test(e));
   ok("a drop outside the canvas places nothing", /if \(!frameElementUnder\(e\.clientX, e\.clientY\)\) \{ sourceToast\("Dropped outside the canvas[\s\S]{0,40}return; \}/.test(e));
   ok("the ghost, grab handle + drop-target highlight carry their own chrome CSS", /\.source-link-ghost/.test(css) && /\.source-placebar__grip/.test(css) && /\.frame\.is-drop-target/.test(css));
+})();
+
+// ---- SPEC 8 source-link 06: drop onto a text block -> locked linked inline span ----
+section("SPEC 8: source-link 06 — inline span append");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("a drop onto an editable text block (not itself a linked block) routes to the inline path", /function isSourceLinkTextBlock\(b\)[\s\S]{0,120}SOURCE_LINK_TEXT_TYPES\[b\.type\] && !b\.sourceLink/.test(e));
+  ok("dropInlineSourceLink flattens the range to ONE link mark and appends a <span data-source-link> to the block's text", /function dropInlineSourceLink\(a, block\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor, endAnchor: a\.descriptor\.endAnchor \}\)[\s\S]{0,260}block\.text = \(block\.text \? block\.text \+ " " : ""\) \+ span;/.test(e));
+  ok("the appended span carries the mark + master ids (resolved live by 01's inline post-pass)", /var span = '<span data-source-link="' \+ mk\.id \+ '" data-master="' \+ a\.masterId \+ '">' \+ slEscape\(SD\.markText\(model, mk\)\)/.test(e));
+  ok("the block re-renders in place (reapplyBlock) so owned text + the locked span coexist", /function dropInlineSourceLink\(a, block\)[\s\S]{0,700}reapplyBlock\(block\);/.test(e));
+  ok("each inline linked span gets its OWN contextual indicator + click-to-jump (per-span, not one block badge)", /root\.querySelectorAll\("\.canvas-block span\[data-source-link\]"\)[\s\S]{0,300}is-source-linked-span[\s\S]{0,220}jumpSourcePanelToMark\(sp\.getAttribute\("data-master"\), sp\.getAttribute\("data-source-link"\)\)/.test(e));
+  ok("the inline span indicator carries its own chrome CSS (distinct from the block badge)", /\.is-source-linked-span/.test(css));
+})();
+
+// ---- SPEC 8 source-link 07: drag a source figure -> a new linked image block ----
+section("SPEC 8: source-link 07 — linked image drop");
+(function () {
+  var e = src("src/editor.js"), r = src("src/render.js"), css = src("editor.css");
+  ok("render's image block resolves src/alt LIVE from the source figure (01 object branch), purely (shallow copy)", /image: function \(block\) \{[\s\S]{0,400}block\.sourceLink && block\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,300}rlink\.type === "object"[\s\S]{0,260}c\.src = rlink\.src \|\| block\.src[\s\S]{0,120}block = c;/.test(r));
+  ok("placement routes an OBJECT anchor (no start/len) to a linked IMAGE block, never inline/format-split", /var isObject = !!\(a\.descriptor && a\.descriptor\.anchor && a\.descriptor\.anchor\.len == null\);/.test(e) && /return isObject \? placeSourceLinkImage\(a\) : placeSourceLinkBlocks\(a\);/.test(e));
+  ok("placeSourceLinkImage adds an OBJECT link mark (anchor {nodeKey}, no len) + inserts an image block with sourceLink", /function placeSourceLinkImage\(a\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor \}\)[\s\S]{0,160}insertBlock\(\{ type: "image", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: mk\.id \} \}\)/.test(e));
+  ok("a source figure in the panel is draggable as one unit (pointerdown -> object-anchor drag)", /docCol\.querySelectorAll\("figure\.source-doc__figure\[data-object\]"\)[\s\S]{0,260}startSourceLinkDrag\(\{ anchor: \{ nodeKey: figEl\.getAttribute\("data-node"\) \} \}, ev\)/.test(e));
+  ok("the draggable figure carries its own grab-affordance CSS", /\.edit-source__figure/.test(css));
 })();
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
