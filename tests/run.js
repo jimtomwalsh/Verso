@@ -11713,7 +11713,11 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   // contextual selection bar: rich-text unlocked-only; alternate + comment always; NO create-link
   ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(e));
   ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
-  ok("NO create-link action on the Source selection bar (linking is Edit-stage)", !/seg\("link"/.test(e) && !/data-cmd="link"/.test(e));
+  // B1: create-link IS on the bar now, but object-only (source-selbar__obj) -- a text selection
+  // still never sees it (it's default-hidden and only un-hidden in selectSourceObject).
+  ok("create-link is present as an OBJECT-only action (source-selbar__obj)", /seg\("link", "link", "Add a link", "source-selbar__obj"\)/.test(e));
+  ok("the object-only controls are hidden by default (shown only on object select)", /\.source-selbar__img, \.source-selbar__obj"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
+  ok("the object selbar creates a link object-mark anchored by nodeKey", /cmd === "link"[\s\S]{0,320}addMark\(__sourceDocModel, \{ type: "link", anchor: \{ nodeKey: __sourceObjectSelKey \} \}\)/.test(e));
   // the selection bar is centred over the selection: positioned in #source-stage-article-relative
   // coords (subtract the container's viewport left + add its scroll), NOT raw page x -- else the
   // left rail's width pushed it off to the right. Both selection paths route through the helper.
