@@ -12204,7 +12204,7 @@
     var SD = window.SourceDoc, el;
     if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }
     else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); cb.textContent = SD.nodeText(node); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
-    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
+    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
     else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row) { var tr = h("tr"); (row || []).forEach(function (c) { tr.appendChild(h("td", null, c)); }); el.appendChild(tr); }); }
     else if (node.type === "image") { el = h("figure", "source-doc__figure"); var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt; el.appendChild(im); if (node.caption) el.appendChild(h("figcaption", null, node.caption)); }
     else { el = h("p", "source-doc__p"); el.textContent = SD.nodeText(node); el.setAttribute("data-editable", "1"); }

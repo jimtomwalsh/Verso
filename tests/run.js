@@ -11093,6 +11093,21 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   ok("diffText: replacement", (function () { var d = P.diffText("hello world", "hello there"); return d.removed > 0 && d.inserted > 0; })());
   ok("diffText: identical -> no-op", (function () { var d = P.diffText("same", "same"); return d.removed === 0 && d.inserted === 0; })());
 
+  // --- blocksFromText: ordered + unordered + mixed lists (source-ordered-lists regression) ---
+  var ol = P.blocksFromText("1. one\n2. two\n3. three");
+  ok("blocksFromText: '1. 2. 3.' -> ONE ordered list of 3 items (not a joined paragraph)", ol.length === 1 && ol[0].type === "list" && ol[0].ordered === true && ol[0].items.length === 3 && ol[0].items[0] === "one" && ol[0].items[2] === "three");
+  var ul = P.blocksFromText("- a\n- b");
+  ok("blocksFromText: unordered still parses as ordered:false", ul.length === 1 && ul[0].type === "list" && ul[0].ordered === false && ul[0].items.length === 2);
+  var mixed = P.blocksFromText("- a\n- b\n1. one\n2. two");
+  ok("blocksFromText: switching marker style flushes into SEPARATE list nodes", mixed.length === 2 && mixed[0].ordered === false && mixed[0].items.length === 2 && mixed[1].ordered === true && mixed[1].items.length === 2);
+  var mixed2 = P.blocksFromText("1. one\n2. two\n- a");
+  ok("blocksFromText: ordered -> unordered also flushes", mixed2.length === 2 && mixed2[0].ordered === true && mixed2[1].ordered === false);
+  var startAt = P.blocksFromText("3. three\n4. four");
+  ok("blocksFromText: a list starting at N carries start=N (renders <ol start>)", startAt[0].ordered === true && startAt[0].start === 3);
+  ok("blocksFromText: a list starting at 1 omits start (default)", ol[0].start === undefined);
+  var para = P.blocksFromText("Just a sentence.");
+  ok("blocksFromText: plain text still a paragraph", para.length === 1 && para[0].type === "paragraph");
+
   // --- boundary riding: type inside grows, type at edge holds (start-incl / end-excl) ---
   ok("shiftAnchor: insertion strictly inside grows the span", (function () {
     var e = P.diffText("the quick fox", "the quick brown fox"); // insert "brown " at 10
