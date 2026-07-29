@@ -537,6 +537,9 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .publish-pane__title { font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); }
 .publish-pane__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+/* side-rail-cleanup slice 2: the relocated Import/Export menu sits beside the Publish button. */
+.publish-pane__head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.publish-io { display: inline-flex; }
 .publish-pane__addcur { margin: 10px 0 6px; }
 .publish-picklist { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .publish-pickrow { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; border-radius: 6px; }
@@ -1089,7 +1092,6 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 }
 .left-rail__group { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; }
 .left-rail__actions { margin-top: auto; } /* pin the action glyphs to the bottom */
-.left-rail__pipeline { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .rail-btn {
   position: relative;
   display: inline-flex; align-items: center; justify-content: center;
@@ -1916,7 +1918,6 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 }
 .tool-primary:hover { filter: brightness(1.08); }
 .tool--more { font-size: 16px; line-height: 1; }
-#pipeline-actions { display: flex; align-items: center; gap: 6px; }
 .prop-input {
   width: 100%; font-family: inherit; font-size: 12px; line-height: 1.45;
   padding: 7px 8px; color: var(--text-primary);

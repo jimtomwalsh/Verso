@@ -7806,9 +7806,13 @@ section("panel system v2 — layout engine");
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(e));
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
-  // Phase 5 (D6): Export = primary top-bar button; secondary IO in a ⋯ overflow
-  ok("renderToolbarPipeline: primary Export (accent button) + ⋯ overflow into #pipeline-actions", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("pipeline-actions"\)[\s\S]*?pipelineButtons\.filter\(function \(b\) \{ return b\.accent; \}\)\[0\][\s\S]*?primary\.textContent = "Export"/.test(e));
-  ok("overflow menu = non-accent pipeline actions + Publish to Viewer", /pipelineButtons\.filter\(function \(b\) \{ return !b\.accent; \}\)\.forEach[\s\S]*?showContextMenu\(r\.right/.test(e));
+  // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
+  // stage as ONE "Import & export" menu into #publish-io, listing EVERY pipeline action (the SCORM
+  // export included -- the queue's Publish button is the primary export, so no separate Export glyph).
+  ok("renderToolbarPipeline renders one 'Import & export' menu into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)[\s\S]*?label: "Import & export"/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
+  ok("the menu lists every registered pipeline action + Publish to Viewer", /var items = pipelineButtons\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
+  ok("#pipeline-actions is gone from the rail (relocated to the Publish stage)", !/id="pipeline-actions"/.test(src("index.html")) && !/left-rail__pipeline/.test(src("index.html")));
+  ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,160}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
   // Phase 6 (D7): raw window.prompt/confirm replaced by shared in-app modals
   ok("promptModal + confirmModal route through the DS modal shell (VersoUI.Modal via dsModalShell)", /function dsModalShell\(opts\)[\s\S]*?window\.VersoUI\.Modal\([\s\S]*?function promptModal\(title, label, initial, onOk, subtitle\)[\s\S]*?dsModalShell\(\{[\s\S]*?function confirmModal\(title, message, onOk, opts\)[\s\S]*?dsModalShell\(\{/.test(e));

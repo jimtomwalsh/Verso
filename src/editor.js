@@ -1506,8 +1506,14 @@
     var pubLabel = __publishRunning ? "Publishing…" : ("Publish" + (pending ? " (" + pending + ")" : ""));
     var pub = U ? U.Button({ variant: "primary", icon: "upload", label: pubLabel, onClick: runPublishQueue }) : h("button", null, pubLabel);
     if (!pending || __publishRunning) pub.setAttribute("disabled", "disabled");
-    head.appendChild(pub);
+    // side-rail-cleanup slice 2: the relocated Import/Export menu sits with the Publish button (the
+    // stage's export/publish surface). #publish-io is filled by renderToolbarPipeline below.
+    var actions = h("div", "publish-pane__head-actions");
+    var io = h("div", "publish-io"); io.id = "publish-io";
+    actions.appendChild(io); actions.appendChild(pub);
+    head.appendChild(actions);
     host.appendChild(head);
+    renderToolbarPipeline(); // fill #publish-io with the "Import & export" menu
     var rows = (q.rows || []);
     if (!rows.length) { host.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); renderPublishHistory(host); return; }
     var list = h("div", "publish-queuelist");
@@ -10957,48 +10963,30 @@
   // in mountTopBar). The secondary IO (Import CSV, Publish to Viewer, JSON backup)
   // stays in the ⋯ overflow, now the DS IconButton. Re-skin only — Export fires
   // the same registered accent pipeline handler; the overflow menu is unchanged.
+  // side-rail-cleanup slice 2: the Import/Export pipeline is RELOCATED off the rail onto the Publish
+  // stage. It renders into #publish-io (built in the queue-pane head) as ONE "Import & export" menu
+  // holding every registered pipeline action -- including the accent SCORM export, which no longer
+  // needs its own glyph because the queue's Publish button is the primary export. Callers that used
+  // to keep the rail glyph in sync (registerPipelineButton) still re-render this menu.
   function renderToolbarPipeline() {
-    var host = document.getElementById("pipeline-actions"); if (!host) return;
+    var host = document.getElementById("publish-io"); if (!host) return;
     host.innerHTML = "";
     var U = window.VersoUI;
-    // #89: when mounted in the left rail, Export is a pinned GLYPH (not the labelled
-    // top-bar button). Same registered accent pipeline handler either way.
-    var inRail = !!(host.closest && host.closest(".left-rail"));
-    var exp = pipelineButtons.filter(function (b) { return b.accent; })[0];
-    if (exp) {
-      if (inRail && U && U.IconButton) {
-        host.appendChild(U.IconButton({
-          icon: "upload", label: "Export", size: "md",
-          title: "Export the course as a SCORM package", onClick: exp.onClick
-        }));
-      } else if (U && U.Button) {
-        host.appendChild(U.Button({
-          variant: "secondary", size: "md", icon: "upload", iconRight: "chevron-down",
-          label: "Export", title: "Export the course as a SCORM package", onClick: exp.onClick
-        }));
-      } else {
-        var primary = h("button", "tool-primary"); primary.type = "button";
-        primary.textContent = "Export"; primary.title = "Export the course as a SCORM package";
-        primary.addEventListener("click", exp.onClick);
-        host.appendChild(primary);
-      }
-    }
-    function openOverflow(anchor) {
-      var items = [];
-      pipelineButtons.filter(function (b) { return !b.accent; }).forEach(function (b) { items.push({ label: b.label, onClick: b.onClick }); });
+    function openMenu(anchor) {
+      var items = pipelineButtons.map(function (b) { return { label: b.label, onClick: b.onClick }; });
       items.push({ sep: true });
       items.push({ label: "Publish to Viewer…", onClick: function () { publishToViewer(); } }); // not a registered pipeline button
       var r = anchor.getBoundingClientRect();
       showContextMenu(r.right, r.bottom + 4, items);
     }
-    var more;
-    if (U && U.IconButton) {
-      more = U.IconButton({ icon: "more-horizontal", label: "Import & export", size: "md" });
+    var btn;
+    if (U && U.Button) {
+      btn = U.Button({ variant: "secondary", size: "sm", icon: "upload", iconRight: "chevron-down", label: "Import & export", title: "Import / export course data", onClick: function () { openMenu(btn); } });
     } else {
-      more = h("button", "tool tool--more"); more.type = "button"; more.title = "Import & export"; more.innerHTML = "⋯";
+      btn = h("button", "tool"); btn.type = "button"; btn.textContent = "Import & export"; btn.title = "Import / export course data";
+      btn.addEventListener("click", function () { openMenu(btn); });
     }
-    more.addEventListener("click", function () { openOverflow(more); });
-    host.appendChild(more);
+    host.appendChild(btn);
   }
 
   // Issue #12 (parent #22) — re-skin the editor top bar to the DS. Hydrate the
