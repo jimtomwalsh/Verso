@@ -803,6 +803,9 @@ In this mode:
   left and right edges. Drag either handle to resize it live; it grows and shrinks about its centre,
   with a light snap at 25 / 50 / 75 / 100% of the column width. Release to set the size — it persists
   and travels with the document. Leave it at full width to fill the column.
+- **Align an image.** When an image is selected, its floating toolbar also has align **left /
+  centre / right** (centre is the default). Choosing one positions a resized image within the column;
+  a full-width image looks the same whichever you pick. The choice persists with the document.
 - **Staleness keeps alternates honest.** If you later change the base text, any alternate written
   against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark

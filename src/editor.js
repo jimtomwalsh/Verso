@@ -12118,6 +12118,12 @@
     for (var i = 0; i < stops.length; i++) { if (Math.abs(pct - stops[i]) <= 4) return stops[i]; }
     return Math.round(pct);
   }
+  // A2 (source image align): align stored as node.align; centre is the default (no style, so a
+  // full-width image reads the same either way). Returns "left"/"right" to apply, or "" for centred.
+  function sourceImgAlign(node) {
+    var a = node && node.align;
+    return (a === "left" || a === "right") ? a : "";
+  }
   /* @pure-imgwidth-end */
 
   function renderSourceDocNode(node) {
@@ -12139,6 +12145,7 @@
       wrap.appendChild(h("span", "source-doc__handle source-doc__handle--r"));
       el.appendChild(wrap);
       if (node.caption) el.appendChild(h("figcaption", null, node.caption));
+      var al = sourceImgAlign(node); if (al) el.style.textAlign = al; // A2: centre is the default
     }
     else { el = h("p", "source-doc__p"); paintSourceInline(el, SD.nodeText(node)); el.setAttribute("data-editable", "1"); }
     el.setAttribute("data-node", node.key);
@@ -12984,7 +12991,13 @@
     bar.appendChild(seg("alternate", "square-pen", "Add an alternate rendition"));
     bar.appendChild(seg("comment", "message-square", "Comment"));
     bar.appendChild(seg("update", "refresh-cw", "Update the mark to include the appended text", "source-selbar__update"));
+    // A2: align segment -- shown only when an IMAGE object owns the bar (hidden for text + tables).
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
+    bar.appendChild(seg("align-left", "align-left", "Align left", "source-selbar__img"));
+    bar.appendChild(seg("align-center", "align-center", "Align centre", "source-selbar__img"));
+    bar.appendChild(seg("align-right", "align-right", "Align right", "source-selbar__img"));
     bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
+    bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = "none"; });
     bar.querySelector('[data-cmd="update"]').style.display = "none";
     bar.querySelectorAll("[data-cmd]").forEach(function (b) {
       b.addEventListener("click", function () { onSourceSelbarAction(topic, b.getAttribute("data-cmd")); });
@@ -13101,6 +13114,14 @@
     var el = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
     if (el) el.classList.remove("is-object-selected");
     __sourceObjectSelKey = null;
+    var bar = sourceSelBarEl(); // A2: drop the image-only align segment when the object deselects
+    if (bar) bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = "none"; });
+  }
+  // A2: light the active align glyph (centre is the default when node.align is unset).
+  function syncSourceAlignActive(bar, align) {
+    bar.querySelectorAll(".source-selbar__img[data-cmd]").forEach(function (b) {
+      b.classList.toggle("is-active", b.getAttribute("data-cmd") === "align-" + align);
+    });
   }
   function selectSourceObject(topic, nodeKey) {
     var SD = window.SourceDoc;
@@ -13121,6 +13142,11 @@
       var upd = bar.querySelector('[data-cmd="update"]'); if (upd) upd.style.display = "none";
       bar.querySelector('[data-cmd="alternate"]').style.display = "";
       bar.querySelector('[data-cmd="comment"]').style.display = "";
+      // A2: an IMAGE object also gets the align segment (tables/other objects do not).
+      var node = (__sourceDocModel && __sourceDocModel.nodes || []).find(function (n) { return n.key === nodeKey; });
+      var isImg = node && node.type === "image";
+      bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = isImg ? "" : "none"; });
+      if (isImg) syncSourceAlignActive(bar, sourceImgAlign(node) || "center");
       positionSourceSelBar(bar, el.getBoundingClientRect());
     }
     // if the object already carries an alternate or a link, open the matching contextual panel
@@ -13138,6 +13164,21 @@
     if (cmd === "bold" || cmd === "italic" || cmd === "list") {
       if (!__sourceUnlocked) return;
       if (cmd === "list") document.execCommand("insertUnorderedList"); else document.execCommand(cmd);
+      return;
+    }
+    // A2: align an image object. Live (set the figure's text-align, keep the selection), persist
+    // node.align (centre = the default, stored as none). A base edit -> gated behind the unlock.
+    if (cmd === "align-left" || cmd === "align-center" || cmd === "align-right") {
+      if (!__sourceObjectSelKey) return;
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to align the image."); return; }
+      var al = cmd.slice("align-".length);
+      var anode = (__sourceDocModel.nodes || []).find(function (n) { return n.key === __sourceObjectSelKey; });
+      if (!anode) return;
+      if (al === "center") delete anode.align; else anode.align = al;
+      var fig = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
+      if (fig) fig.style.textAlign = (al === "center") ? "" : al;
+      persistSourceDocModel(topic, __sourceDocModel);
+      var bar = sourceSelBarEl(); if (bar) { syncSourceAlignActive(bar, al); if (fig) positionSourceSelBar(bar, fig.getBoundingClientRect()); }
       return;
     }
     if (cmd === "update" && __sourceUpdateTarget && __sourceSelAnchor) {
