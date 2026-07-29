@@ -10919,13 +10919,8 @@ section("left-panel Components reorg");
 section("editor-rework source insert + two-way jump");
 (function () {
   var e = src("src/editor.js");
-  ok("a source row inserts a live-linked block (libraryInstance) with ref + back-reference",
-     /function insertSourceLinkedBlock\(topicId\)[\s\S]{0,320}var block = \{ type: "libraryInstance", id: mintId\(\), ref: topicId, sourceRef: \{ topicId: topicId \} \}/.test(e));
-  ok("the insert carries BOTH the master ref (for where-used) and the sourceRef backref (for the jump)",
-     /ref: topicId, sourceRef: \{ topicId: topicId \}/.test(e));
-  ok("the placement is pointed at the topic's first facet so it resolves a template",
-     /if \(def && def\.facets\) \{ var fk = Object\.keys\(def\.facets\); if \(fk\.length\) block\.facet = fk\[0\]; \}/.test(e));
-  ok("insertSourceLinkedBlock (the #137 whole-topic insert) remains defined (03 formally retires it)", /function insertSourceLinkedBlock\(topicId\)/.test(e));
+  ok("source-link 03 retires the #137 whole-topic insert (insertSourceLinkedBlock is gone)", !/function insertSourceLinkedBlock\(/.test(e));
+  ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(\)/.test(e));
   ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
   ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
   ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
@@ -10963,6 +10958,25 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
   ok("Enter / Shift+Enter cycle matches like the Source stage", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
   ok("a TOC is built from SourceDoc.outline (chapters + headings), click-to-jump + scroll-spy", /var outline = SD\.outline\(model\)/.test(e) && /outline\.forEach\(function \(ch\) \{ tocRow\(ch\); \(ch\.children \|\| \[\]\)\.forEach\(tocRow\); \}\);/.test(e) && /docCol\.addEventListener\("scroll"[\s\S]{0,600}is-current/.test(e));
   ok("the viewer reuses the shared .vbrowser__search field + .source-doc__toc-item rows (consistency-over-novelty), not bespoke controls", /h\("label", "vbrowser__search"\)/.test(e) && /h\("input", "vbrowser__search-input"\)/.test(e) && /"source-doc__toc-item source-doc__toc-item--l"/.test(e) && /\.edit-source__doc/.test(css));
+})();
+
+// ---- SPEC 8 source-link 03: select a range -> place a live-linked text block (arm-then-click) ----
+section("SPEC 8: source-link 03 — select + place a linked block");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  // A selection in the read-only panel builds a SourceDoc range descriptor: single-node -> one
+  // anchor; cross-node -> anchor(first, start..end) + endAnchor(last, 0..end), matching addMark.
+  ok("panelSelectionDescriptor builds a single-node OR cross-node range from the DOM selection", /function panelSelectionDescriptor\(docCol, model\)/.test(e) && /if \(sKey === eKey\) \{[\s\S]{0,140}return \{ anchor: \{ nodeKey: sKey, start: sOff, len: eOff - sOff \} \};/.test(e) && /endAnchor: \{ nodeKey: eKey, start: 0, len: eOff \}/.test(e));
+  ok("char offsets are measured against the block's text (Range.toString().length) — the SourceDoc offset model", /function panelCharOffset\(blockEl, container, offset\)[\s\S]{0,200}return r\.toString\(\)\.length;/.test(e));
+  ok("a text selection raises the floating Place bar (mouseup on the reading column)", /docCol\.addEventListener\("mouseup"[\s\S]{0,120}maybeShowPlaceBar\(docCol, model\)/.test(e) && /function maybeShowPlaceBar\(docCol, model\)/.test(e));
+  ok("Place adds a type:link mark to the master, persists it (saveLibrary), and arms placement", /function armSourceLinkPlacement\(desc\)[\s\S]{0,400}SD\.addMark\(__editSourceModel, \{ type: "link", anchor: desc\.anchor, endAnchor: desc\.endAnchor \}\)[\s\S]{0,200}saveLibrary\(\);[\s\S]{0,160}__armedSourceLink = \{ masterId: __editSourceMasterId, markId: mk\.id \}/.test(e));
+  ok("the armed canvas click places ONE locked, live-linked paragraph block (Body); base only", /function placeArmedSourceLink\(\)[\s\S]{0,300}insertBlock\(\{ type: "paragraph", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: a\.markId \} \}\)/.test(e));
+  ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
+  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) that jumps to source", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}jumpSourcePanelToMark\(b\.sourceLink\.masterId, b\.sourceLink\.markId\)/.test(e));
+  ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(e) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(e));
+  ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(e) && /\.is-source-linked-passage/.test(css));
+  ok("the indicator + place bar + arming cursor carry their own editor chrome CSS", /\.source-link-badge/.test(css) && /\.source-placebar/.test(css) && /is-arming-source-link #canvas-viewport/.test(css));
+  ok("decorateSourceLinks runs in the render passes (per-page frame + full reapplyStructural)", /decorateSourceLinks\(frame\);/.test(e) && /decorateSourceLinks\(\); \/\/ source-link 03/.test(e));
 })();
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------

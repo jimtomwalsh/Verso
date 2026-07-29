@@ -603,6 +603,20 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .edit-source__doc .source-doc__h { margin: 0.9em 0 0.3em; }
 .edit-source__doc .source-doc__h:first-child { margin-top: 0; }
 .edit-source__doc [data-node].is-find-current { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+/* source-link 03: a passage already linked into the OPEN document (persistent cue, distinct from find). */
+.edit-source__doc [data-node].is-source-linked-passage { background: var(--accent-quiet); border-radius: 3px; box-shadow: -4px 0 0 var(--accent-quiet), 4px 0 0 var(--accent-quiet); }
+
+/* source-link 03: the floating "Place" bar raised at a panel text selection (arm-then-click). */
+.source-placebar { position: fixed; z-index: 60; display: flex; align-items: center; gap: 6px; padding: 4px; background: var(--surface-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); box-shadow: 0 6px 20px rgba(0, 0, 0, .28); }
+/* while arming, the canvas invites a placement click. */
+body.is-arming-source-link #canvas-viewport { cursor: copy; }
+/* a placed, live-linked (locked) text block on the canvas: a subtle linked treatment + a clickable
+   link indicator badge. Editor chrome only -- never in the shipped course. */
+.canvas-block.is-source-linked { position: relative; }
+.source-link-badge { position: absolute; top: 3px; right: 3px; z-index: 5; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--surface-panel); color: var(--accent); cursor: pointer; opacity: 0; transition: opacity var(--dur-fast, 120ms); }
+.canvas-block.is-source-linked:hover .source-link-badge, .canvas-block.is-source-linked.selected .source-link-badge { opacity: 1; }
+.source-link-badge svg { width: 12px; height: 12px; }
+.source-link-badge:hover { border-color: var(--accent); background: var(--accent-quiet); }
 
 .source-stage__topic-row {
   display: flex; align-items: center; gap: 6px; width: 100%; position: relative;

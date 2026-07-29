@@ -103,7 +103,15 @@ own **editor header** beneath it.
   contents** that jumps to a chapter and tracks where you're reading. It keys off the document you
   have open (its product), not the product picker, so it always matches the course in front of you.
   It's read-only — all source editing stays in the Source stage. The panel remembers which section
-  you last used. (Placing linked copy from here onto the canvas is arriving next.)
+  you last used.
+  **Placing linked copy.** Select any passage in this panel (a phrase, or a heading through a
+  paragraph in one sweep) and a small **Place** bar appears at the selection. Click **Place**, then
+  click a spot in the canvas: the passage drops in as a **live-linked** text block in your
+  document's own Body style. Linked copy is **locked** — you can't edit it directly, so it can't
+  drift from the source — and it updates automatically whenever the source wording changes. A
+  linked block shows a **link badge**; click it to jump this panel back to the exact source passage.
+  Passages you've already linked into the open document are **highlighted** in the panel, so you can
+  see what you've used. Press **Esc** after Place to cancel before dropping.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
   pinch) to zoom. Every page is a live, editable render of what the learner will see. The board
   follows the document's **geometry** (set by its preset, §2): **reflow** flows content down a
