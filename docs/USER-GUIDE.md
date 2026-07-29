@@ -472,9 +472,8 @@ top, so unchanged copy stays shared and you maintain one source.
   and the change lands only on that variant's override.
 - A block with no override for the current variant simply **inherits** the flagship copy.
 
-**Compare side by side.** Switch the editor header's **Build / Read** toggle to **Read** (or use
-the file-text glyph in the left rail) for a plain-text view of all course copy; **Build** returns
-you to the canvas. With variants, a **Single | Side by side**
+**Compare side by side.** Switch the editor header's **Build / Read** toggle to **Read** for a
+plain-text view of all course copy; **Build** returns you to the canvas. With variants, a **Single | Side by side**
 toggle appears: **Side by side** adds one column per variant. A held variant cell is read-only
 behind a lock — click the lock to edit it; a block with no variant yet shows a **+** to create
 its copy from the flagship. Click into any row to select some text and use the **B / I / U /

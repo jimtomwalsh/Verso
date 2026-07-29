@@ -6253,7 +6253,7 @@ section("richer bullet lists");
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
   ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
-  ok("settings glyph (left rail) is wired to open the modal", /getElementById\("rail-settings-btn"\)[\s\S]*?openSettingsModal\(/.test(e));
+  ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(e));
   var ecss = src("editor.css");
   ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
   ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(e));
@@ -10222,14 +10222,14 @@ section("#116 copy-editor shell");
   ok("exit while already closed is a no-op (no restore)", next({ open: false }, "exit").restoreCanvas === false);
   ok("null current defaults to closed", next(null, "toggle").open === true);
   // wiring: rail glyph opens, Close/Esc exits, boot wires it, hidden overlay markup exists
-  ok("wiring: rail glyph opens the view", /getElementById\("copy-editor-btn"\)[\s\S]{0,80}addEventListener\("click", enterCopyEditor\)/.test(t));
+  ok("side-rail-cleanup: the copy-editor rail button wiring is retired (Build/Read enters Read view)", t.indexOf('getElementById("copy-editor-btn")') === -1);
   ok("wiring: Close button exits", /getElementById\("copyedit-exit"\)[\s\S]{0,80}addEventListener\("click", exitCopyEditor\)/.test(t));
   ok("wiring: Escape exits when open", /if \(!copyEditorIsOpen\(\)\) return;[\s\S]{0,120}exitCopyEditor\(\)/.test(t));
   ok("wiring: exit re-focuses the active page (canvas restore)", /function exitCopyEditor\(\)[\s\S]{0,700}focusFrame\(p\); setActivePage\(p\); setSelection\("page", p\)/.test(t));
   ok("wiring: wireCopyEditor called at boot", t.indexOf("wireCopyEditor();") !== -1);
   var html = src("index.html");
   ok("markup: copy-editor overlay is hidden by default", /<div id="copy-editor" class="copyedit" hidden>/.test(html));
-  ok("markup: rail glyph present", /id="copy-editor-btn"[\s\S]{0,60}data-lucide="file-text"/.test(html));
+  ok("side-rail-cleanup: the copy-editor rail button is retired from markup", html.indexOf('id="copy-editor-btn"') === -1);
   ok("markup: empty doc container for slices 2-4", /<div class="copyedit__doc" id="copyedit-doc"><\/div>/.test(html));
   // pure-render invariant: the copy editor is Verso UI only — render.js / course.css untouched
   ok("invariant: no copy-editor leak into render.js", src("src/render.js").indexOf("copyedit") === -1 && src("src/render.js").indexOf("copy-editor") === -1);
