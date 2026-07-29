@@ -82,11 +82,10 @@
         <span class="editor-window__sep" aria-hidden="true"></span>
         <!-- Zone 2 -- document settings + live switches (the "matrix" is the face-up controls) -->
         <div class="editor-window__zone editor-window__zone--doc">
-          <!-- SPEC 7: the matrix-cell chip (geometry . interactive). Click to change the cell after
-               creation -- tiered mutability. Mounted by mountCellChip(). -->
-          <button class="editor-window__cell" id="editor-cell-chip" type="button" title="Document type — geometry and interactivity"></button>
           <!-- edit-header-ia-v2: opens the type-aware Document settings modal (reuses the settings
-               modal's Project tab; app/system settings live behind the rail cog). Wired by mountDocSettingsBtn(). -->
+               modal's Project tab; app/system settings live behind the rail cog). The document type
+               (geometry . interactivity, set once) lives inside this modal now, not on the bar.
+               Wired by mountDocSettingsBtn(). -->
           <button class="tool editor-window__docsettings" id="doc-settings-btn" data-lucide="settings" title="Document settings"></button>
           <!-- SPEC 7 (decision 14): Build/Read view toggle. Build = the authoring canvas; Read = the
                per-doc copy view. A VersoUI.SegmentedControl mounts here; hidden where no Read view exists. -->
@@ -95,7 +94,6 @@
                face-up named dropdowns (edit-header-ia-v2). -->
           <div class="editor-window__axes" id="editor-doc-axes"></div>
         </div>
-        <span class="editor-window__spacer"></span>
         <span class="editor-window__sep" aria-hidden="true"></span>
         <!-- Zone 3 -- output -->
         <div class="editor-window__zone editor-window__zone--output">

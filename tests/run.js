@@ -2265,14 +2265,16 @@ section("editor-rework cell switcher");
 (function () {
   var e = src("src/editor.js");
   var html = src("index.html");
-  ok("the editor header carries a matrix-cell chip", /id="editor-cell-chip"/.test(html));
-  ok("the chip shows geometry . interactivity", /chip\.textContent = \(CELL_GEO_LABEL\[c\.geo\] \|\| c\.geo\) \+ " · " \+ \(c\.interactive \? "Interactive" : "Static"\)/.test(e));
+  // edit-header-ia-v2: the cell chip left the header bar; geometry/interactivity now live in the
+  // Document settings modal's "Document type" section (buildDocTypeBody). The cell MODEL is unchanged.
+  ok("the cell chip is retired from the header bar", html.indexOf('id="editor-cell-chip"') === -1);
+  ok("Document type is a settings section (first in the Project tab)", /\{ key: "docType", title: "Document type", build: buildDocTypeBody \}/.test(e));
+  ok("buildDocTypeBody offers the three geometries + an Interactive toggle (reusing the cell model)", /function buildDocTypeBody\(host\)[\s\S]{0,400}segmentedLive\("Geometry"[\s\S]{0,260}setCellGeo\(v\)[\s\S]{0,160}switchRow\("Interactive"[\s\S]{0,80}setCellInteractive\(on\)/.test(e));
   ok("interactivity toggles are IMMEDIATE (no warning)", /function setCellInteractive\(on\)[\s\S]{0,200}applyCellChange\(c\.geo, on\); \/\/ immediate, no warning/.test(e));
   ok("a geometry-mode change is GUARDED by a reflow warning", /function setCellGeo\(geo\)[\s\S]{0,320}confirmModal\("Change layout mode\?"/.test(e));
   ok("the geometry change re-renders the canvas via applyCellChange -> mount", /function applyCellChange\(geo, interactive\)[\s\S]{0,220}tagDocCell\(doc, geo, interactive\);[\s\S]{0,80}mount\(\);/.test(e));
   ok("the change writes the cell through the pure doc-type model, then saves", /window\.__docType\.tagDocCell\(doc, geo, interactive\);\s*\n\s*saveRegistry\(registry\);/.test(e));
-  ok("the chip menu offers all three geometries + both interactivity states", /\["reflow", "frame", "paged"\]\.forEach[\s\S]{0,200}head: "Interactivity"[\s\S]{0,160}label: "Interactive"[\s\S]{0,120}label: "Static"/.test(e));
-  ok("the chip is mounted at boot + re-synced on doc switch", /mountCellChip\(\); \/\/ SPEC 7/.test(e) && /syncCellChip\(\); \/\/ SPEC 7: reflect the new doc/.test(e));
+  ok("a geometry change re-renders the open Document settings so the segmented reflects it", /if \(sm && !sm\.hidden && typeof renderSettingsBody === "function"\) renderSettingsBody\(\);/.test(e));
 })();
 
 // ---- SPEC 7: capability inspector (Document context) ----
@@ -2282,7 +2284,7 @@ section("editor-rework capability inspector");
   ok("the Document inspector leads with a Document type section", /renderDocumentInspector\(\)[\s\S]{0,700}sectionGroup\("Layout", "Document type"/.test(e));
   ok("it reads the cell from the pure doc-type model", /window\.__docType\.docCell\(doc\)[\s\S]{0,500}CELL_GEO_LABEL\[_cell\.geo\]/.test(e));
   ok("it renders the geometry-specific tools from condToolsFor", /window\.__docType\.condToolsFor\(_cell\.geo\)[\s\S]{0,220}tools\.forEach/.test(e));
-  ok("the cell summary points at the header chip (no top strip)", /change it from the cell chip in the editor header/.test(e));
+  ok("the cell summary points at Document settings (cell chip retired)", /change it in Document settings \(the ⚙ in the editor header\)/.test(e));
   ok("the Document type section comes before the Canvas/Appearance section", e.indexOf('sectionGroup("Layout", "Document type"') < e.indexOf('sectionGroup("Appearance", "Canvas"'));
 })();
 
@@ -9590,7 +9592,7 @@ section("line diff (LineDiff)");
   ok("setDoc drops a stale activeVersion the new doc lacks", /if \(activeVersion && \(doc\.versions \|\| \[\]\)\.indexOf\(activeVersion\) === -1\) activeVersion = null;/.test(e));
   // SWITCHER: face-up named dropdown (edit-header-ia-v2), menu, newest = default, Base entry,
   // order after the variant control.
-  ok("version switch is a face-up axis button with the 'history' icon + a name label", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,260}axis-btn__icon[\s\S]{0,40}Ic\("history"\)[\s\S]{0,120}axis-btn__label/.test(e));
+  ok("version switch is a face-up axis button, words only (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,200}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/versionWrapEl\.innerHTML =[\s\S]{0,120}axis-btn__icon/.test(e));
   ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(e));
   ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(e));
   ok("menu offers Base as the editable anchor (null activeVersion)", /active: !activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(e));
@@ -9626,9 +9628,9 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   ok("two hairline dividers between the zones", (html.match(/editor-window__sep/g) || []).length >= 2);
   ok("Document-settings button lives in the header", /id="doc-settings-btn"/.test(html));
   ok("standalone #mode-toggle is retired from the header", html.indexOf('id="mode-toggle"') === -1);
-  ok("cell chip, Build/Read toggle + axes host still present in the doc zone", /id="editor-cell-chip"/.test(html) && /id="editor-view-toggle"/.test(html) && /id="editor-doc-axes"/.test(html));
-  // FACE-UP DROPDOWNS: variant is a named axis button, not a glyph-only trigger.
-  ok("variant switch is a face-up axis button (layers icon + name label)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,260}axis-btn__icon[\s\S]{0,40}Ic\("layers"\)[\s\S]{0,120}axis-btn__label/.test(e));
+  ok("Build/Read toggle + axes host present in the doc zone (cell chip retired)", html.indexOf('id="editor-cell-chip"') === -1 && /id="editor-view-toggle"/.test(html) && /id="editor-doc-axes"/.test(html));
+  // FACE-UP DROPDOWNS: variant is a WORDS-ONLY named axis button (no leading glyph; caret only).
+  ok("variant switch is a face-up axis button, words only (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,200}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/variantWrapEl\.innerHTML =[\s\S]{0,120}axis-btn__icon/.test(e));
   ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(e));
   ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(e));
   // LIGHT/DARK now lives in the Preview chevron menu (size presets + palette, divider between).
@@ -9640,6 +9642,11 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   ok("editor.css defines the single-row bar + zones", /\.editor-window__bar \{/.test(css) && /\.editor-window__zone \{/.test(css));
   ok("editor.css defines the face-up axis button with ellipsis label", /\.editor-window__axis-btn \{/.test(css) && /\.axis-btn__label \{[^}]*text-overflow: ellipsis/.test(css));
   ok("editor.css defines the low-contrast hairline sep (border-subtle)", /\.editor-window__sep \{[^}]*background: var\(--border-subtle\)/.test(css));
+  // TAB OVERFLOW (feedback): a long tab list scrolls INSIDE the tabs zone; the doc + output zones
+  // stay put. The bar never scrolls; the tabs zone shrinks (min-width:0) + its strip scrolls.
+  ok("the bar never scrolls (overflow hidden), absorbing overflow in the tab strip", /\.editor-window__bar \{[^}]*overflow: hidden/.test(css));
+  ok("the tabs zone shrinks + its strip scrolls internally", /\.editor-window__zone--tabs \{[^}]*min-width: 0/.test(css) && /\.editor-window__zone--tabs \.toolbar-tabs \{[^}]*min-width: 0; overflow-x: auto/.test(css));
+  ok("doc + output zones are fixed-size (never pushed by tabs)", /\.editor-window__zone--doc, \.editor-window__zone--output \{ flex: 0 0 auto; \}/.test(css));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
@@ -10315,7 +10322,7 @@ section("editor-rework Build/Read toggle");
 (function () {
   var e = src("src/editor.js");
   ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(e));
-  ok("the toggle offers Build + Read segments", /options: \[\{ value: "build", label: "Build" \}, \{ value: "read", label: "Read" \}\]/.test(e));
+  ok("the toggle offers Build + Read segments as GLYPHS (edit-header-ia-v2)", /options: \[\{ value: "build", icon: "square-pen", title: "Build" \}, \{ value: "read", icon: "file-text", title: "Read" \}\]/.test(e));
   ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(e));
   ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(e) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(e));
   ok("the toggle is mounted at boot", /mountViewToggle\(\); \/\/ SPEC 7/.test(e));

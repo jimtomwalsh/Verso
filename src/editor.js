@@ -11010,7 +11010,11 @@
     window.__docType.tagDocCell(doc, geo, interactive);
     saveRegistry(registry);
     mount();            // rebuild the geo-classed canvas + palette (static fallback rides render)
-    syncCellChip();
+    syncCellChip();     // no-op now the chip left the bar; harmless if re-added later
+    // edit-header-ia-v2: the geometry/interactivity controls now live in the Document settings
+    // modal -- re-render it so the segmented state reflects the change.
+    var sm = document.getElementById("settings-modal");
+    if (sm && !sm.hidden && typeof renderSettingsBody === "function") renderSettingsBody();
   }
   function setCellInteractive(on) {
     var c = currentCell();
@@ -11026,31 +11030,16 @@
       function () { applyCellChange(geo, c.interactive); },
       { okLabel: "Change & reflow" });
   }
-  function openCellMenu(anchor) {
-    var c = currentCell();
-    var items = [{ head: "Geometry" }];
-    ["reflow", "frame", "paged"].forEach(function (g) {
-      items.push({ label: CELL_GEO_LABEL[g], active: c.geo === g, onClick: function () { setCellGeo(g); } });
-    });
-    items.push({ sep: true });
-    items.push({ head: "Interactivity" });
-    items.push({ label: "Interactive", active: c.interactive === true, onClick: function () { setCellInteractive(true); } });
-    items.push({ label: "Static", active: c.interactive === false, onClick: function () { setCellInteractive(false); } });
-    var r = anchor.getBoundingClientRect();
-    showContextMenu(r.left, r.bottom + 6, items);
-  }
+  // edit-header-ia-v2: the geometry/interactivity picker moved off the header (the cell chip +
+  // its menu are retired) into the Document settings modal's "Document type" section
+  // (buildDocTypeBody). syncCellChip is kept as a safe no-op for the 3 legacy call sites (the chip
+  // element no longer exists, so it returns early) rather than re-plumbing them.
   function syncCellChip() {
     if (typeof document === "undefined") return;
     var chip = document.getElementById("editor-cell-chip"); if (!chip) return;
     var c = currentCell();
     chip.textContent = (CELL_GEO_LABEL[c.geo] || c.geo) + " · " + (c.interactive ? "Interactive" : "Static");
     chip.classList.toggle("is-static", !c.interactive);
-  }
-  function mountCellChip() {
-    if (typeof document === "undefined") return;
-    var chip = document.getElementById("editor-cell-chip"); if (!chip) return;
-    if (!chip.__wired) { chip.__wired = true; chip.addEventListener("click", function () { openCellMenu(chip); }); }
-    syncCellChip();
   }
   // edit-header-ia-v2: the header's Document-settings button opens the settings modal on the
   // Project tab -- the per-document/per-course settings (Header & Footer, Learner nav, Theme...).
@@ -14182,7 +14171,7 @@
       try {
         inspector.appendChild(h("div", "insp-hint",
           (CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " · " + (_cell.interactive ? "Interactive" : "Static") +
-          " — change it from the cell chip in the editor header."));
+          " — change it in Document settings (the ⚙ in the editor header)."));
         var tools = (window.__docType && window.__docType.condToolsFor) ? window.__docType.condToolsFor(_cell.geo) : [];
         if (tools.length) {
           inspector.appendChild(sub((CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " tools"));
@@ -14246,6 +14235,20 @@
     });
     host.appendChild(reset);
   }
+  // edit-header-ia-v2: the document type (geometry . interactivity) moved off the header bar into
+  // the Document settings modal -- it's set once, so it belongs here, not on a face-up control.
+  // Reuses the cell model (currentCell / setCellGeo / setCellInteractive); a geometry change still
+  // warns + reflows via setCellGeo's confirm.
+  function buildDocTypeBody(host) {
+    var body = panelSection(host, "Document type");
+    segmentedLive("Geometry",
+      [{ value: "reflow", label: "Reflow" }, { value: "frame", label: "Fixed frame" }, { value: "paged", label: "Paged" }],
+      function (v) { return currentCell().geo === v; },
+      function (v) { setCellGeo(v); },
+      body, true);
+    switchRow("Interactive", function () { return currentCell().interactive; }, function (on) { setCellInteractive(on); }, body, true);
+    body.appendChild(h("div", "insp-hint", "Set once per document. Geometry lays out the canvas — Reflow scrolls; Fixed frame and Paged are fixed-size. Changing geometry reflows existing content. Interactive allows interactive blocks; Static is print/read-oriented."));
+  }
   function getSettingsSections(tab) {
     if (tab === "system") return [
       { key: "canvas", title: "Canvas", build: function (host) {
@@ -14264,6 +14267,7 @@
       { key: "library", title: "Component Library", build: buildLibraryBody }
     ];
     return [
+      { key: "docType", title: "Document type", build: buildDocTypeBody },
       { key: "backup", title: "Backup", build: buildBackupBody },
       { key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody },
       { key: "nav", title: "Learner nav", build: function (host) { var n = footerCourseNav(); if (n) courseNavControls(n, host); else host.appendChild(h("div", "insp-hint", "Add a footer nav bar in Header & Footer first, then style it here.")); } }, // #168: canonical footer nav (was first-found, which could drift to a stray)
@@ -21984,7 +21988,9 @@
     host.innerHTML = "";
     host.appendChild(U.SegmentedControl({
       size: "sm",
-      options: [{ value: "build", label: "Build" }, { value: "read", label: "Read" }],
+      // edit-header-ia-v2 (feedback): glyphs, not words. Build = authoring canvas (square-pen);
+      // Read = the copy/read view (file-text). Titles carry the words for tooltip + a11y.
+      options: [{ value: "build", icon: "square-pen", title: "Build" }, { value: "read", icon: "file-text", title: "Read" }],
       value: currentViewMode(),
       onChange: function (v) {
         if (v === "read") { if (!copyEditorIsOpen()) enterCopyEditor(); }
@@ -23275,8 +23281,8 @@
     var Ic = window.Icon;
     if (!variantWrapEl) {
       variantWrapEl = h("button", "tool editor-window__axis-btn variant-glyph"); variantWrapEl.type = "button";
+      // edit-header-ia-v2 (feedback): words only -- no leading glyph. Just the name + a caret.
       variantWrapEl.innerHTML =
-        '<span class="axis-btn__icon">' + (Ic ? Ic("layers") : "") + '</span>' +
         '<span class="axis-btn__label"></span>' +
         '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       variantWrapEl.addEventListener("click", function () { openVariantMenu(variantWrapEl); });
@@ -23429,8 +23435,8 @@
     var Ic = window.Icon;
     if (!versionWrapEl) {
       versionWrapEl = h("button", "tool editor-window__axis-btn version-glyph"); versionWrapEl.type = "button";
+      // edit-header-ia-v2 (feedback): words only -- no leading glyph. Just the name + a caret.
       versionWrapEl.innerHTML =
-        '<span class="axis-btn__icon">' + (Ic ? Ic("history") : "") + '</span>' +
         '<span class="axis-btn__label"></span>' +
         '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       versionWrapEl.addEventListener("click", function () { openVersionMenu(versionWrapEl); });
@@ -23629,8 +23635,8 @@
   wireCopyEditor(); // #116: full-screen copy-editor view (rail glyph opens, Close/Esc returns)
   mountViewToggle(); // SPEC 7: Build/Read segmented control in the editor header
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
-  mountCellChip(); // SPEC 7: the matrix-cell chip (geometry . interactivity) in the editor header
-  mountDocSettingsBtn(); // edit-header-ia-v2: the header's Document-settings button
+  mountDocSettingsBtn(); // edit-header-ia-v2: the header's Document-settings button (the cell chip's
+  // geometry/interactivity moved INTO its modal -- the "Document type" settings section)
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
   mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
