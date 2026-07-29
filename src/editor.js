@@ -12164,8 +12164,9 @@
   // spec 2d: render one node as a variant comparison. A node all shown variants agree on renders as
   // a single shared block (its normal element); a node that diverges splits into one column per shown
   // variant, each drawing its own wording or an explicit "not in this variant" state. Read-oriented.
-  function renderSourceDocNodeColumns(node, shown) {
+  function renderSourceDocNodeColumns(topic, node, shown) {
     var SD = window.SourceDoc;
+    if (node.type === "image") return renderSourceImageColumns(topic, node, shown); // B2
     var view = SD.variantView(node, shown);
     if (view.mode === "shared") { var el = renderSourceDocNode(node); el.classList.add("source-doc__shared"); return el; }
     var row = h("div", "source-doc__vrow"); row.setAttribute("data-node", node.key);
@@ -12177,6 +12178,63 @@
       row.appendChild(cell);
     });
     return row;
+  }
+  // B2: an image node compared across variants -- each column shows that variant's picture (its own
+  // src override, or the inherited Flagship one), or "Not in this variant". Unlike text (read-only in
+  // the columns view), an image is swappable per column: a Swap button picks a new file for JUST that
+  // variant, and a named variant can be removed/restored -- a discrete object action, not free-text
+  // editing that would fight contentEditable. Columns collapse to one shared image when they agree.
+  function renderSourceImageColumns(topic, node, shown) {
+    var SD = window.SourceDoc;
+    var cols = shown.map(function (v) { var r = SD.imageForVariant(node, v); r.variant = v; return r; });
+    var first = cols[0];
+    var allSame = cols.every(function (c) { return c.present === first.present && c.src === first.src; });
+    if (allSame && first.present) { var el = renderSourceDocNode(node); el.classList.add("source-doc__shared"); return el; }
+    var row = h("div", "source-doc__vrow"); row.setAttribute("data-node", node.key);
+    cols.forEach(function (c) {
+      var isFlag = SD.isFlagship(c.variant);
+      var cell = h("div", "source-doc__vcol" + (c.source === "override" ? " is-diverged" : "") + (!c.present ? " is-absent" : ""));
+      cell.appendChild(h("div", "source-doc__vcol-head", c.variant));
+      var acts = h("div", "source-vcol__imgacts");
+      function imgBtn(icon, title, fn) { var b = h("button", "source-vcol__imgbtn"); b.type = "button"; b.title = title; b.innerHTML = window.Icon ? window.Icon(icon) : ""; b.addEventListener("click", fn); return b; }
+      if (!c.present) {
+        cell.appendChild(h("div", "source-doc__vcol-absent", "Not in this variant"));
+        acts.appendChild(imgBtn("plus", "Add an image for " + c.variant, function () { pickImageForVariant(topic, node.key, c.variant); }));
+      } else {
+        var fig = h("figure", "source-doc__figure source-doc__vcol-fig");
+        var wrap = h("span", "source-doc__imgwrap");
+        var im = h("img"); if (c.src) im.src = c.src; if (c.alt) im.alt = c.alt;
+        var iw = clampSourceImgWidth(node.imgWidth == null ? 100 : node.imgWidth); if (iw < 100) wrap.style.width = iw + "%";
+        wrap.appendChild(im); fig.appendChild(wrap);
+        if (c.caption) fig.appendChild(h("figcaption", null, c.caption));
+        cell.appendChild(fig);
+        acts.appendChild(imgBtn("image", isFlag ? "Replace the base image" : "Swap image for " + c.variant, function () { pickImageForVariant(topic, node.key, c.variant); }));
+        if (!isFlag) acts.appendChild(imgBtn("eye-off", "Hide in " + c.variant, function () { SD.removeNodeFromVariant(__sourceDocModel, node.key, c.variant); persistSourceDocModel(topic, __sourceDocModel); renderSourceArticle(); }));
+        else if (c.source === "override") { /* Flagship always present */ }
+      }
+      cell.appendChild(acts);
+      row.appendChild(cell);
+    });
+    return row;
+  }
+  // B2: pick a file and set it as the image for one variant (Flagship replaces the base). Stored as a
+  // data-URI inline (the Source doc is never SCORM-exported -- same as insertSourceImage). Unlocked.
+  function pickImageForVariant(topic, nodeKey, variant) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to change a variant's image."); return; }
+    var inp = h("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        window.SourceDoc.setVariantImage(__sourceDocModel, nodeKey, variant, rd.result, { alt: String(f.name || "image").replace(/\.[^.]+$/, "") });
+        persistSourceDocModel(topic, __sourceDocModel);
+        renderSourceArticle();
+        sourceToast(window.SourceDoc.isFlagship(variant) ? "Base image replaced." : "Image set for " + variant + ".");
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
   }
 
   function renderSourceNodeArticle(topic, host) {
@@ -12199,7 +12257,7 @@
     var art = h("article", "source-doc" + (showCols ? " source-doc--cols" : "")); art.setAttribute("spellcheck", "false");
     if (showCols) {
       var shown = [SD.FLAGSHIP].concat(__sourceActiveVariants);
-      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNodeColumns(n, shown)); });
+      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNodeColumns(topic, n, shown)); });
     } else {
       model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNode(n)); });
     }

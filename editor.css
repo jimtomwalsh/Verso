@@ -892,6 +892,12 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__vcol.is-diverged .source-doc__vcol-head { color: var(--accent); }
 .source-doc__vcol-body { color: var(--text-primary); }
 .source-doc__vcol-absent { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+/* B2: per-variant image column -- the picture plus its swap/hide actions. */
+.source-doc__vcol-fig { margin: var(--space-3) 0 0; }
+.source-vcol__imgacts { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.source-vcol__imgbtn { display: inline-flex; align-items: center; justify-content: center; width: var(--control-md, 24px); height: var(--control-md, 24px); padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 4px); background: var(--surface-input); color: var(--icon-strong, var(--text-secondary)); cursor: pointer; }
+.source-vcol__imgbtn svg { width: 14px; height: 14px; }
+.source-vcol__imgbtn:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary); }
 .source-doc__cols-hint { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); margin: 0 0 var(--space-4); }
 .source-doc__list { margin: 0.6em 0; padding-left: 22px; }
 .source-doc__list li { margin: 0.25em 0; }
