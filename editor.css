@@ -898,7 +898,7 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
 @media (max-width: 1080px) { .source-doc__toc { display: none; } }
 .source-doc { outline: none; color: var(--text-primary, var(--text-secondary)); font-size: var(--text-md, 15px); line-height: 1.65; }
 .source-doc__h { font-weight: 650; letter-spacing: -0.01em; margin: 1.4em 0 0.4em; }
-h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
+h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__h:first-child { margin-top: 0; }
 .source-doc__p { margin: 0.7em 0; }
 /* source import hardening: inline **bold**/*italic*/`code` are lifted into structured format

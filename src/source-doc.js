@@ -540,6 +540,44 @@
   // split becomes a two-block mark. A non-text block (list/table/image) just gets a new empty
   // paragraph after it. One owned-undo step. Returns { model, newKey, caret:{nodeKey,offset} }.
   var SPLITTABLE = { paragraph: 1, heading: 1, callout: 1 };
+  // Block-format reassignment (source-selbar-block-formats): change a text node's block type IN
+  // PLACE, keeping its key (marks stay anchored), its text (node.text is shared by heading/
+  // paragraph/callout) and its inline formats. Only heading/paragraph/callout reassign; structural
+  // nodes (list/table/image/row) are left untouched (returns null). Sets/clears the type-specific
+  // fields: heading.level (1/2/3), callout.tag. Owned undo so the change is a single undo step.
+  var BLOCK_FORMAT_TYPES = { heading: 1, paragraph: 1, callout: 1 };
+  function setNodeType(model, nodeKey, spec) {
+    spec = spec || {};
+    if (!BLOCK_FORMAT_TYPES[spec.type]) return null;
+    var node = nodeByKey(model, nodeKey);
+    if (!node || !(node.type === "heading" || node.type === "paragraph" || node.type === "callout")) return null;
+    if (node.type === spec.type) {
+      // same type -- only a heading level or a callout tag change actually mutates
+      if (spec.type === "heading" && node.level === (spec.level || 1)) return null;
+      if (spec.type === "paragraph") return null;
+      if (spec.type === "callout" && spec.tag == null) return null;
+    }
+    pushUndo(model);
+    node.type = spec.type;
+    if (spec.type === "heading") { node.level = (spec.level === 3) ? 3 : (spec.level === 2) ? 2 : 1; delete node.tag; }
+    else if (spec.type === "callout") { node.tag = (spec.tag != null) ? String(spec.tag) : (node.tag || "Caution"); delete node.level; }
+    else { delete node.level; delete node.tag; }
+    logHistory(model, { type: "node-reformat", nodeKey: nodeKey, to: spec.type });
+    return node;
+  }
+  // The keys of every node a selection anchor covers (first..last in document order); a single-node
+  // anchor yields one key. Lets a block-format action apply across a multi-paragraph selection.
+  function nodesInAnchor(model, anchor) {
+    if (!anchor || !anchor.nodeKey) return [];
+    if (!anchor.endAnchor || !anchor.endAnchor.nodeKey || anchor.endAnchor.nodeKey === anchor.nodeKey) return [anchor.nodeKey];
+    var ns = (model && model.nodes) || [], i0 = -1, i1 = -1;
+    for (var i = 0; i < ns.length; i++) { if (ns[i].key === anchor.nodeKey) i0 = i; if (ns[i].key === anchor.endAnchor.nodeKey) i1 = i; }
+    if (i0 < 0 || i1 < 0) return [anchor.nodeKey];
+    if (i1 < i0) { var t = i0; i0 = i1; i1 = t; }
+    var keys = [];
+    for (var j = i0; j <= i1; j++) keys.push(ns[j].key);
+    return keys;
+  }
   function splitNode(model, nodeKey, offset) {
     var node = nodeByKey(model, nodeKey);
     if (!node) return { model: model, newKey: null, caret: null };
@@ -1490,7 +1528,7 @@
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange,
-    splitNode: splitNode,
+    splitNode: splitNode, setNodeType: setNodeType, nodesInAnchor: nodesInAnchor,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
@@ -1511,7 +1549,7 @@
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange,
-    splitNode: splitNode,
+    splitNode: splitNode, setNodeType: setNodeType, nodesInAnchor: nodesInAnchor,
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
     alternatesFor: alternatesFor, pickAlternate: pickAlternate,

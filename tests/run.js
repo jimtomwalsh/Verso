@@ -11212,6 +11212,18 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   var dashList = P.blocksFromText("- real item\n- another");
   ok("blocksFromText: a real '- ' list is NOT mistaken for a thematic break", dashList.length === 1 && dashList[0].type === "list" && dashList[0].items.length === 2);
 
+  // --- source-selbar-block-formats: SD.setNodeType (block reassignment) + nodesInAnchor ---
+  var sn = SD.create([{ type: "paragraph", text: "Reassign me" }, { type: "paragraph", text: "second" }]); SD.ensureKeys(sn);
+  var sk0 = sn.nodes[0].key, sk1 = sn.nodes[1].key;
+  ok("setNodeType: paragraph -> heading level 1 keeps key + text, sets level", (function () { var n = P.setNodeType(sn, sk0, { type: "heading", level: 1 }); return n && n.key === sk0 && n.type === "heading" && n.level === 1 && n.text === "Reassign me"; })());
+  ok("setNodeType: heading -> Caution callout sets tag, clears level, keeps text", (function () { var n = P.setNodeType(sn, sk0, { type: "callout", tag: "Caution" }); return n && n.type === "callout" && n.tag === "Caution" && n.level === undefined && n.text === "Reassign me"; })());
+  ok("setNodeType: callout -> body paragraph clears level + tag", (function () { var n = P.setNodeType(sn, sk0, { type: "paragraph" }); return n && n.type === "paragraph" && n.level === undefined && n.tag === undefined; })());
+  ok("setNodeType: a no-op (already that exact type) returns null (no undo churn)", P.setNodeType(sn, sk0, { type: "paragraph" }) === null);
+  ok("setNodeType: a structural node (image/list/table/row) never reassigns", (function () { var m = SD.create([{ type: "image", src: "x" }, { type: "list", items: ["a"] }]); SD.ensureKeys(m); return P.setNodeType(m, m.nodes[0].key, { type: "heading" }) === null && P.setNodeType(m, m.nodes[1].key, { type: "paragraph" }) === null; })());
+  ok("setNodeType: an unknown target type is rejected", P.setNodeType(sn, sk0, { type: "image" }) === null && P.setNodeType(sn, sk0, { type: "list" }) === null);
+  ok("setNodeType: the change is a single OWNED-undo step (marks/undo ride the kept key)", (function () { var m = SD.create([{ type: "paragraph", text: "x" }]); SD.ensureKeys(m); P.setNodeType(m, m.nodes[0].key, { type: "heading", level: 2 }); return SD.canUndo(m) === true; })());
+  ok("nodesInAnchor: a single-node anchor -> one key; a multi-block anchor -> every covered key in order", (function () { var one = P.nodesInAnchor(sn, { nodeKey: sk0 }); var many = P.nodesInAnchor(sn, { nodeKey: sk0, endAnchor: { nodeKey: sk1 } }); return one.length === 1 && one[0] === sk0 && many.length === 2 && many[0] === sk0 && many[1] === sk1; })());
+
   // --- inlineRuns: rich inline projection that PRESERVES plain-text offsets (source-rich-render) ---
   // The one invariant that keeps range-marks + applyTextEdit correct under rich rendering: the
   // concatenation of every run's text must reproduce the input byte-for-byte (markers included).
@@ -11816,6 +11828,13 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   // contextual selection bar: rich-text unlocked-only; alternate + comment always; NO create-link
   ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(e));
   ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
+  // source-selbar-block-formats: H1 / H2 / Body / Caution block-format actions (unlock-gated __rt),
+  // grouped after the inline three; the four glyphs are vendored; the handler reassigns node type.
+  ok("selbar has H1/H2/Body/Caution block-format segs, all unlock-gated (__rt)", /seg\("fmt-h1", "heading-1", "Heading 1", "source-selbar__rt"\)[\s\S]{0,200}seg\("fmt-h2", "heading-2"[\s\S]{0,200}seg\("fmt-body", "pilcrow"[\s\S]{0,200}seg\("fmt-caution", "triangle-alert", "Caution box", "source-selbar__rt"\)/.test(e));
+  ok("the four block-format glyphs are vendored in icons.js", /"heading-1":/.test(src("src/icons.js")) && /"heading-2":/.test(src("src/icons.js")) && /"pilcrow":/.test(src("src/icons.js")) && /"triangle-alert":/.test(src("src/icons.js")));
+  ok("block-format is gated behind the unlock (a base edit), applied across the selection, rides SD.setNodeType", /if \(cmd === "fmt-h1" \|\| cmd === "fmt-h2" \|\| cmd === "fmt-body" \|\| cmd === "fmt-caution"\) \{[\s\S]{0,200}if \(!__sourceUnlocked\)[\s\S]{0,700}SD\.nodesInAnchor\(__sourceDocModel, __sourceSelAnchor\)[\s\S]{0,160}SD\.setNodeType\(__sourceDocModel, k, spec\)/.test(e));
+  ok("the reassignment persists + rebuilds the article (element type changed)", /keys\.forEach\(function \(k\) \{ if \(SD\.setNodeType\(__sourceDocModel, k, spec\)\) changed\+\+; \}\);[\s\S]{0,120}persistSourceDocModel\(topic, __sourceDocModel\);\s*\n\s*renderSourceArticle\(\);/.test(e));
+  ok("the source reading render is heading-level aware so H1/H2 read distinctly (h1/h2/h3 + h1 CSS)", /node\.level === 1 \? "h1" : node\.level === 3 \? "h3" : "h2"/.test(e) && /h1\.source-doc__h \{ font-size:/.test(src("editor.css")));
   // B1: create-link IS on the bar now, but object-only (source-selbar__obj) -- a text selection
   // still never sees it (it's default-hidden and only un-hidden in selectSourceObject).
   ok("create-link is present as an OBJECT-only action (source-selbar__obj)", /seg\("link", "link", "Add a link", "source-selbar__obj"\)/.test(e));
