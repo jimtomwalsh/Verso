@@ -799,6 +799,10 @@ In this mode:
   to the object itself, so it stays put no matter how you edit the prose around it; a marked object
   carries the same status tint as a marked span, and its alternate/comment opens the same margin
   panel (its "base" line names the object, e.g. "Image — <caption>").
+- **Resize an image.** Select an image (with the source unlocked) and grab handles appear on its
+  left and right edges. Drag either handle to resize it live; it grows and shrinks about its centre,
+  with a light snap at 25 / 50 / 75 / 100% of the column width. Release to set the size — it persists
+  and travels with the document. Leave it at full width to fill the column.
 - **Staleness keeps alternates honest.** If you later change the base text, any alternate written
   against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
