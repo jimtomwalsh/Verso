@@ -11866,55 +11866,11 @@
   // cell an author is actively typing into, and even that cell reads as formatted text.
   var __sourceEditingCell = null; // { sectionId, variant } | null
 
-  // Bold/inline-code/bullet-list toolbar for the ACTIVE contentEditable cell -- built
-  // fresh per editing cell (closes over that cell's own element directly, so no shared
-  // "active field" global is needed the way the old textarea-splicing toolbar used).
-  // Same io.getNode()/io.onChange() adapter SHAPE as the canvas inspector's
-  // buildFormatToggleBar (editor.js ~13223) for consistency, though Source stage keeps
-  // its own smaller button set (Bold/code/bullet, not italic/underline/link) since
-  // "list" here means an inline execCommand bullet toggle, not FORMAT_TOGGLES'
-  // "list-block" whole-block-type conversion -- a different operation entirely.
-  function buildSourceEditToolbar(io) {
-    var toolbar = h("div", "source-stage__edit-toolbar");
-    function execAndCommit(cmd, arg) {
-      return function () {
-        var node = io.getNode(); if (!node) return;
-        node.focus();
-        document.execCommand(cmd, false, arg || null);
-        io.onChange();
-      };
-    }
-    // No native execCommand wraps a selection in <code> -- surround it manually. A
-    // collapsed (empty) selection is a no-op (nothing to wrap), same guard the old
-    // marker-toggle had for an insertion point with no text selected.
-    function wrapInlineCode() {
-      var node = io.getNode(); if (!node) return;
-      node.focus();
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return;
-      var range = sel.getRangeAt(0);
-      if (range.collapsed) return;
-      var codeEl = document.createElement("code");
-      try { range.surroundContents(codeEl); }
-      catch (e) { codeEl.appendChild(range.extractContents()); range.insertNode(codeEl); }
-      sel.removeAllRanges();
-      var after = document.createRange(); after.selectNodeContents(codeEl); after.collapse(false);
-      sel.addRange(after);
-      io.onChange();
-    }
-    [{ label: "B", icon: null, title: "Bold", action: execAndCommit("bold") },
-     { label: null, icon: "code-xml", title: "Inline code", action: wrapInlineCode },
-     { label: null, icon: "list", title: "Bullet list", action: execAndCommit("insertUnorderedList") }]
-      .forEach(function (t) {
-        var btn = h("button", "prop-toggle" + (t.icon ? " prop-toggle--icon" : ""));
-        btn.type = "button"; btn.title = t.title;
-        if (t.icon) btn.innerHTML = Icon(t.icon); else btn.textContent = t.label;
-        btn.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
-        btn.addEventListener("click", t.action);
-        toolbar.appendChild(btn);
-      });
-    return toolbar;
-  }
+  // (#92) buildSourceEditToolbar is retired: the legacy per-cell Bold/code/bullet toolbar it built
+  // was superseded by the continuous-doc rewrite's floating selection bar (buildSourceSelBar), which
+  // owns Source-stage formatting now. It had no remaining callers, so the format-toolbar duplication
+  // #92 flagged is gone -- one live inspector-style bar (buildFormatToggleBar) + the Source selbar,
+  // which are deliberately different idioms.
   // Commits an edited cell's contentEditable content back to markdown-lite text. Guards
   // against a purely cosmetic open/close (click in, click away, nothing typed) ever
   // rewriting the stored string: some of render()'s own behaviour is lossy in one
