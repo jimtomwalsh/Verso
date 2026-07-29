@@ -10984,7 +10984,10 @@
     if (typeof document === "undefined") return;
     var rail = document.getElementById("left-rail"); if (!rail) return;
     var setBtn = document.getElementById("rail-settings-btn");
-    if (setBtn && !setBtn.__wired) { setBtn.__wired = true; setBtn.addEventListener("click", function () { openSettingsModal("project"); }); }
+    // side-rail-cleanup: the rail cog opens SYSTEM (app/machine) settings. Per-document/project
+    // settings now open from the editor header's Document-settings button (edit-header-ia-v2), so
+    // the rail no longer duplicates them.
+    if (setBtn && !setBtn.__wired) { setBtn.__wired = true; setBtn.addEventListener("click", function () { openSettingsModal("system"); }); }
     var tabs = rail.querySelectorAll(".rail-tab");
     Array.prototype.forEach.call(tabs, function (t) {
       if (t.__navWired) return; t.__navWired = true;
@@ -22000,8 +22003,8 @@
   }
   function syncViewToggle() { mountViewToggle(); } // re-render so the active segment reflects the real state
   function wireCopyEditor() {
-    var btn = document.getElementById("copy-editor-btn");
-    if (btn) btn.addEventListener("click", enterCopyEditor);
+    // side-rail-cleanup: the #copy-editor-btn rail button is retired; Read view is entered via the
+    // editor header's Build/Read toggle. Only the in-view exit + Escape are wired here now.
     var exit = document.getElementById("copyedit-exit");
     if (exit) exit.addEventListener("click", exitCopyEditor);
     document.addEventListener("keydown", function (e) {
