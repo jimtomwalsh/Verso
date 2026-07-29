@@ -4102,6 +4102,7 @@
     refreshCanvasSelection();
     decorateVariantVersionBadges(frame); // #148: re-add the version-cycle badge on this page's image blocks
     decorateStyleAudit(frame); // #145: re-mark unstyled text blocks on this page
+    decorateSourceLinks(frame); // source-link 03: re-add the link indicator on this page's linked blocks
   }
   // Rebuild only the page a block lives on (falls back to full mount if it can't be located).
   function reapplyBlock(block) {
@@ -4140,6 +4141,7 @@
     if (interactMode) decorateInteractHandle();
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
+    decorateSourceLinks(); // source-link 03: link indicator on placed source-linked blocks
   }
   window.__reapplyPage = reapplyPage; // perf/test hook
   window.__perf = { // perf-measurement hooks (harmless; used to profile the re-render paths)
@@ -19310,6 +19312,10 @@
       return;
     }
     var model = SD.fromJSON(master.doc);
+    // source-link 03: keep the live master + model + its component id so the Place gesture can add a
+    // link mark to the master and persist it (and so the canvas can resolve placements back to it).
+    __editSourceMaster = master; __editSourceModel = model;
+    __editSourceMasterId = (window.ProductsStore[productId] && window.ProductsStore[productId].groundTruthId) || null;
     var wrap = h("div", "edit-source");
 
     // ---- find (reuses SD.findMatches + a small local cycle, mirroring the Source stage). The
@@ -19376,22 +19382,174 @@
     });
     wrap.appendChild(docCol);
     host.appendChild(wrap);
+
+    // source-link 03: paint passages already linked into the OPEN document (a persistent highlight,
+    // distinct from the transient find highlight), and honour a pending jump-to-source request.
+    paintPanelLinkedPassages(docCol, model);
+    // A text selection in the read-only column raises the floating "Place" bar (arm-then-click).
+    docCol.addEventListener("mouseup", function () { setTimeout(function () { maybeShowPlaceBar(docCol, model); }, 0); });
+    if (__pendingSourceJumpMark && __pendingSourceJumpMark.masterId === __editSourceMasterId) {
+      var jm = SD.markById(model, __pendingSourceJumpMark.markId);
+      __pendingSourceJumpMark = null;
+      if (jm) {
+        var jk = jm.anchor && jm.anchor.nodeKey;
+        var tel = jk && docCol.querySelector('[data-node="' + jk + '"]');
+        if (tel) { tel.classList.add("is-find-current"); setTimeout(function () { tel.scrollIntoView({ block: "center", behavior: "smooth" }); }, 0); }
+      }
+    }
   }
   if (window.__productRail) window.__productRail.renderEditSourcePanel = renderEditSourcePanel; // browser-verify hook
-  // SPEC 7 source insert: a source topic becomes its own live-linked block. The instance keeps
-  // ref = the topic master id (so libraryWhereUsedDetail's "Linked in N" registers with no extra
-  // plumbing) AND a sourceRef back-reference so the block's link can jump back to its topic. The
-  // topic's prose renders through resolveFacetTemplate (facet pointer), the same live-link path
-  // any libraryInstance uses -- the cell only supplies constraints, never a second render path.
-  function insertSourceLinkedBlock(topicId) {
-    if (!topicId) return;
-    var block = { type: "libraryInstance", id: mintId(), ref: topicId, sourceRef: { topicId: topicId } };
-    // Point the placement at the topic's first facet so it resolves a template (a facet-only
-    // topic master has no def.template to fall back to); the inspector's facet switcher can change it.
-    var def = resolveComponentDef(topicId);
-    if (def && def.facets) { var fk = Object.keys(def.facets); if (fk.length) block.facet = fk[0]; }
-    insertBlock(block);
+
+  // ==== source-link 03: select a range -> place a live-linked text block (arm-then-click) ========
+  // The panel viewer (02) is read-only, but its text is selectable. Selecting a range raises a
+  // small floating "Place" bar; Place creates a type:"link" mark on the source master and arms
+  // placement; the next canvas click drops one locked, live-linked text block that resolves through
+  // the 01 resolver. Cross-node selections (a heading through a paragraph) link as one passage.
+  var __editSourceMaster = null, __editSourceModel = null, __editSourceMasterId = null;
+  var __armedSourceLink = null;        // { masterId, markId } armed for the next canvas click
+  var __pendingSourceJumpMark = null;  // { masterId, markId } to scroll to after the panel re-renders
+
+  // Char offset of a DOM point within a block element's text (walks all text nodes -> matches the
+  // SourceDoc plain-text offset model the marks anchor to).
+  function panelCharOffset(blockEl, container, offset) {
+    var r = document.createRange();
+    r.selectNodeContents(blockEl);
+    try { r.setEnd(container, offset); } catch (e) { return 0; }
+    return r.toString().length;
   }
+  // Build a SourceDoc range descriptor {anchor, endAnchor?} from the current selection in the panel,
+  // or null when the selection is empty / collapsed / outside the reading column. Single-node ->
+  // one anchor; cross-node -> anchor (first node, start..end) + endAnchor (last node, 0..end),
+  // matching SourceDoc.addMark's multi-block shape.
+  function panelSelectionDescriptor(docCol, model) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    var rng = sel.getRangeAt(0);
+    if (!docCol.contains(rng.startContainer) || !docCol.contains(rng.endContainer)) return null;
+    var sEl = (rng.startContainer.nodeType === 3 ? rng.startContainer.parentNode : rng.startContainer);
+    var eEl = (rng.endContainer.nodeType === 3 ? rng.endContainer.parentNode : rng.endContainer);
+    var sBlock = sEl && sEl.closest ? sEl.closest("[data-node]") : null;
+    var eBlock = eEl && eEl.closest ? eEl.closest("[data-node]") : null;
+    if (!sBlock || !eBlock) return null;
+    var sKey = sBlock.getAttribute("data-node"), eKey = eBlock.getAttribute("data-node");
+    var sOff = panelCharOffset(sBlock, rng.startContainer, rng.startOffset);
+    var eOff = panelCharOffset(eBlock, rng.endContainer, rng.endOffset);
+    var SD = window.SourceDoc;
+    if (sKey === eKey) {
+      if (eOff <= sOff) return null;
+      return { anchor: { nodeKey: sKey, start: sOff, len: eOff - sOff } };
+    }
+    var sNode = SD.nodeByKey(model, sKey);
+    var sLen = sNode ? SD.nodeText(sNode).length : sOff;
+    return { anchor: { nodeKey: sKey, start: sOff, len: Math.max(0, sLen - sOff) }, endAnchor: { nodeKey: eKey, start: 0, len: eOff } };
+  }
+  function hidePlaceBar() { var b = document.querySelector("[data-source-placebar]"); if (b) b.remove(); }
+  function maybeShowPlaceBar(docCol, model) {
+    hidePlaceBar();
+    if (__armedSourceLink) return; // already arming -> don't stack
+    var desc = panelSelectionDescriptor(docCol, model);
+    if (!desc) return;
+    var sel = window.getSelection();
+    var rect = sel.getRangeAt(0).getBoundingClientRect();
+    var bar = h("div", "source-placebar"); bar.setAttribute("data-source-placebar", "1");
+    var btn = window.VersoUI && window.VersoUI.Button
+      ? window.VersoUI.Button({ variant: "primary", size: "sm", icon: "link", label: "Place", onClick: function () { armSourceLinkPlacement(desc); } })
+      : h("button", null, "Place");
+    if (!(window.VersoUI && window.VersoUI.Button)) btn.addEventListener("click", function () { armSourceLinkPlacement(desc); });
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+    bar.style.top = Math.max(8, rect.top - bar.offsetHeight - 8) + "px";
+    bar.style.left = Math.max(8, rect.left) + "px";
+  }
+  // Place: add a type:"link" mark to the master over the selected range, persist it, and arm the
+  // next canvas click to drop the linked block. The base wording is captured on the mark.
+  function armSourceLinkPlacement(desc) {
+    var SD = window.SourceDoc;
+    if (!SD || !__editSourceModel || !__editSourceMasterId) return;
+    var mk = SD.addMark(__editSourceModel, { type: "link", anchor: desc.anchor, endAnchor: desc.endAnchor });
+    __editSourceMaster.doc = SD.toJSON(__editSourceModel);
+    saveLibrary();
+    __armedSourceLink = { masterId: __editSourceMasterId, markId: mk.id };
+    document.body.classList.add("is-arming-source-link");
+    hidePlaceBar();
+    var s = window.getSelection(); if (s) s.removeAllRanges();
+    sourceToast("Linked passage armed — click a spot in the canvas to place it. Esc to cancel.");
+    renderEditSourcePanel(); // repaint so the newly-linked passage highlights
+  }
+  function cancelArmedSourceLink() {
+    if (!__armedSourceLink) return;
+    __armedSourceLink = null;
+    document.body.classList.remove("is-arming-source-link");
+    sourceToast("Placement cancelled.");
+  }
+  // The armed canvas click: drop one locked, live-linked text block (base only; format-split is 05).
+  // Renders in the destination Body style (an ordinary paragraph block) and resolves live via 01.
+  function placeArmedSourceLink() {
+    var a = __armedSourceLink; if (!a) return false;
+    __armedSourceLink = null;
+    document.body.classList.remove("is-arming-source-link");
+    insertBlock({ type: "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: a.markId } });
+    decorateSourceLinks();
+    sourceToast("Linked block placed.");
+    return true;
+  }
+  // Two-way jump (direction: canvas -> panel): clicking a linked block's indicator opens the Source
+  // tab and scrolls the panel to the exact source passage.
+  function jumpSourcePanelToMark(masterId, markId) {
+    __pendingSourceJumpMark = { masterId: masterId, markId: markId };
+    if (typeof applyLeftSection === "function") applyLeftSection("source"); // re-renders the panel, which honours the pending jump
+  }
+  // On-canvas link indicator: a small clickable badge on every placed linked block (editor chrome
+  // only -- never rendered into the shipped course). Idempotent; re-run after each render.
+  function decorateSourceLinks(scope) {
+    var root = scope || canvas; if (!root) return;
+    Array.prototype.forEach.call(root.querySelectorAll(".source-link-badge"), function (b) { b.remove(); });
+    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block"), function (node) {
+      node.classList.remove("is-source-linked");
+      var b = node.__block;
+      if (b && b.sourceLink && b.sourceLink.markId) {
+        node.classList.add("is-source-linked");
+        var badge = h("button", "source-link-badge"); badge.type = "button";
+        badge.innerHTML = window.Icon ? window.Icon("link") : "";
+        badge.title = "Linked from source — click to jump to the source passage";
+        badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); jumpSourcePanelToMark(b.sourceLink.masterId, b.sourceLink.markId); });
+        node.appendChild(badge);
+      }
+    });
+  }
+  // Panel: highlight passages already linked into the OPEN document (a persistent cue, distinct from
+  // the find highlight). A link mark counts as "used here" when a block in the open doc points at it.
+  function paintPanelLinkedPassages(docCol, model) {
+    var SD = window.SourceDoc;
+    var used = {};
+    walkBlocks(doc, function (b) { if (b.sourceLink && b.sourceLink.masterId === __editSourceMasterId && b.sourceLink.markId) used[b.sourceLink.markId] = 1; });
+    (model.marks || []).forEach(function (m) {
+      if (m.type !== "link" || !used[m.id]) return;
+      SD.markSpans(model, m).forEach(function (sp) {
+        var el = docCol.querySelector('[data-node="' + sp.nodeKey + '"]');
+        if (el) el.classList.add("is-source-linked-passage");
+      });
+    });
+  }
+  window.__sourceLink = { // browser-verify hooks
+    armSourceLinkPlacement: armSourceLinkPlacement, placeArmedSourceLink: placeArmedSourceLink,
+    jumpSourcePanelToMark: jumpSourcePanelToMark, panelSelectionDescriptor: panelSelectionDescriptor,
+    isArmed: function () { return !!__armedSourceLink; }
+  };
+  // One-time global wiring: while a linked passage is armed, the next canvas click PLACES it (capture
+  // phase, before the canvas's own click-select), and Escape cancels arming.
+  if (typeof document !== "undefined" && !window.__sourceLinkWired) {
+    window.__sourceLinkWired = true;
+    document.addEventListener("click", function (e) {
+      if (!__armedSourceLink) return;
+      var cv = document.getElementById("canvas-viewport");
+      if (cv && cv.contains(e.target)) { e.preventDefault(); e.stopPropagation(); placeArmedSourceLink(); }
+    }, true);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && __armedSourceLink) { e.preventDefault(); cancelArmedSourceLink(); } });
+  }
+  // (source-link 03) The SPEC 7 / #137 whole-topic +-insert (insertSourceLinkedBlock) is retired:
+  // the Edit Source tab is now a read-only viewer (02) and copy is placed as a range-linked block
+  // via select-then-place (armSourceLinkPlacement above), not a whole-topic libraryInstance.
   // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
   function jumpToSourceTopic(topicId) {
     if (!topicId) return;
