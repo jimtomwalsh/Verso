@@ -79,14 +79,17 @@ own **editor header** beneath it.
 - **Global bar (very top).** App-level only: the **Verso** mark, the **product picker** (sets the
   active product across Source, Edit and Publish — and **scopes the open tabs** to that product;
   "All products" shows every open tab) and the **storage-health dot**.
-- **Editor header (Edit stage).** Everything about the document you're editing lives here. The
-  **file-picker** (▤, browse all courses — a browser **grouped by document type**, colour-coded,
-  each card showing its product, interactive/static and whether it's open; it respects the product
-  scope and opens automatically when no course is open) and the **open-course tabs** — each carrying
-  a per-product colour dot so a mixed set stays legible — sit on the tab row; the
-  **variant/version** selectors, the **light/dark** toggle (it flips the *document*, not the app
-  chrome), the **▶ Demo** preview and **Send to publish** sit on the row below. It shows only in
-  the Edit stage.
+- **Editor header (Edit stage).** Everything about the document you're editing lives here, on one
+  bar split into three zones by faint dividers. **Tabs** (left): the **file-picker** (▤, browse all
+  courses — a browser **grouped by document type**, colour-coded, each card showing its product,
+  interactive/static and whether it's open; it respects the product scope and opens automatically
+  when no course is open) and the **open-course tabs**, each carrying a per-product colour dot.
+  **Document** (centre): the **cell chip** (document type), a **Document-settings** button (⚙, opens
+  this document's settings — Header & Footer, Learner nav, Theme and the rest; app-wide settings live
+  under the left-rail cog), the **Build / Read** toggle, and the **variant** and **software-version**
+  selectors as **named dropdowns** (they show the current value — "Flagship", the version name — at a
+  glance). **Output** (right): the **▶ Demo** preview and **Send to publish**. **Light / dark** now
+  lives in the Demo button's **▾** menu, under the size presets. The header shows only in the Edit stage.
 - **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
   panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
   palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
@@ -401,8 +404,9 @@ one carousel.
 
 Select nothing, and the Inspector shows document-wide design controls.
 
-- **Light / dark.** The editor header's **☾** toggles the palette you preview. Learners get a toggle
-  too; the palette crossfades between modes (tunable under **Motion**; respects reduce-motion).
+- **Light / dark.** Open the **▾** menu on the **▶ Demo** button (under the size presets) and pick
+  **Light** or **Dark** to switch the palette you preview. Learners get a toggle too; the palette
+  crossfades between modes (tunable under **Motion**; respects reduce-motion).
 - **Theme.** Edit the colour tokens for each mode — background, ink, accent, success, and so on.
 - **Saved Text Styles.** Create named styles (font, size, weight, spacing, case, alignment,
   colour). Apply a style to any text; edit it once and every use updates. Renaming is safe —

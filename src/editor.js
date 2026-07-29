@@ -11052,6 +11052,17 @@
     if (!chip.__wired) { chip.__wired = true; chip.addEventListener("click", function () { openCellMenu(chip); }); }
     syncCellChip();
   }
+  // edit-header-ia-v2: the header's Document-settings button opens the settings modal on the
+  // Project tab -- the per-document/per-course settings (Header & Footer, Learner nav, Theme...).
+  // The System tab (app/machine settings) is reachable from the rail cog. Today's eLearning is the
+  // only shipped doc type, so the Project sections ARE its document settings; when other doc types
+  // land, getSettingsSections filters the list by the doc's type (the capability-driven seam).
+  function mountDocSettingsBtn() {
+    if (typeof document === "undefined") return;
+    var b = document.getElementById("doc-settings-btn"); if (!b || b.__wired) return;
+    b.__wired = true;
+    b.addEventListener("click", function () { openSettingsModal("project"); });
+  }
 
   // Persistent top-bar product context (Product Rail): "" = All products. In-memory
   // only for now -- every stage reads it through window.__productRail.getActiveProduct().
@@ -21223,6 +21234,12 @@
         onClick: function () { setBreakpoint(bp); }
       });
     });
+    // edit-header-ia-v2: light/dark moved off its own face-up slot into this menu (rarely used).
+    // Divider under the size presets, then the palette toggle.
+    items.push({ sep: true });
+    items.push({ head: "Palette" });
+    items.push({ label: "Light", active: activeMode === "light", onClick: function () { setMode("light"); } });
+    items.push({ label: "Dark", active: activeMode === "dark", onClick: function () { setMode("dark"); } });
     showContextMenu(r.right, r.bottom + 4, items);
   }
   function wireBpSwitch() {
@@ -23169,21 +23186,30 @@
   function axisSwitchHost() {
     return document.getElementById("editor-doc-axes") || document.querySelector(".toolbar__group--right");
   }
+  // edit-header-ia-v2: face-up NAMED dropdown (was a glyph-only trigger). Shows the active
+  // variant name ("Flagship" = base) at a glance; the name truncates with ellipsis (full name
+  // in the menu + title tooltip). Same click -> openVariantMenu; a control re-shape, not a re-wire.
   function renderVariantSwitch() {
     var host = axisSwitchHost();
     if (!host) return;
+    var Ic = window.Icon;
     if (!variantWrapEl) {
-      variantWrapEl = h("button", "tool variant-glyph"); variantWrapEl.type = "button";
+      variantWrapEl = h("button", "tool editor-window__axis-btn variant-glyph"); variantWrapEl.type = "button";
+      variantWrapEl.innerHTML =
+        '<span class="axis-btn__icon">' + (Ic ? Ic("layers") : "") + '</span>' +
+        '<span class="axis-btn__label"></span>' +
+        '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       variantWrapEl.addEventListener("click", function () { openVariantMenu(variantWrapEl); });
       host.insertBefore(variantWrapEl, host.firstChild);
     }
-    var Ic = window.Icon; variantWrapEl.innerHTML = Ic ? Ic("layers") : "";
     variantSwitchEl = variantWrapEl;
     syncVariantSwitch();
   }
   function syncVariantSwitch() {
     if (!variantWrapEl) return;
     var cur = activeVariant || "";
+    var lbl = variantWrapEl.querySelector(".axis-btn__label");
+    if (lbl) lbl.textContent = cur || "Flagship";
     variantWrapEl.classList.toggle("is-active", !!cur);
     variantWrapEl.setAttribute("aria-label", "Variant");
     variantWrapEl.title = cur
@@ -23315,23 +23341,32 @@
     var r = anchor.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 6, items);
   }
+  // edit-header-ia-v2: face-up NAMED dropdown twin of the variant switch. Shows the active
+  // version name, or the base version's name, or "Base" when the axis has none yet.
   function renderVersionSwitch() {
     var host = axisSwitchHost();
     if (!host) return;
+    var Ic = window.Icon;
     if (!versionWrapEl) {
-      versionWrapEl = h("button", "tool version-glyph"); versionWrapEl.type = "button";
+      versionWrapEl = h("button", "tool editor-window__axis-btn version-glyph"); versionWrapEl.type = "button";
+      versionWrapEl.innerHTML =
+        '<span class="axis-btn__icon">' + (Ic ? Ic("history") : "") + '</span>' +
+        '<span class="axis-btn__label"></span>' +
+        '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       versionWrapEl.addEventListener("click", function () { openVersionMenu(versionWrapEl); });
       // FIX 4a: order encodes nesting — variant (outer axis) then version (inner axis),
       // left->right. Insert AFTER the variant glyph if present, else at the group head.
       if (variantWrapEl && variantWrapEl.parentNode === host) host.insertBefore(versionWrapEl, variantWrapEl.nextSibling);
       else host.insertBefore(versionWrapEl, host.firstChild);
     }
-    var Ic = window.Icon; versionWrapEl.innerHTML = Ic ? Ic("history") : "";
     syncVersionSwitch();
   }
   function syncVersionSwitch() {
     if (!versionWrapEl) return;
     var cur = activeVersion || "";
+    var vs = versionNames(); var base = vs.length ? vs[0] : "";
+    var lbl = versionWrapEl.querySelector(".axis-btn__label");
+    if (lbl) lbl.textContent = cur || base || "Base";
     versionWrapEl.classList.toggle("is-active", !!cur);
     versionWrapEl.setAttribute("aria-label", "Software version");
     versionWrapEl.title = cur
@@ -23515,6 +23550,7 @@
   mountViewToggle(); // SPEC 7: Build/Read segmented control in the editor header
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
   mountCellChip(); // SPEC 7: the matrix-cell chip (geometry . interactivity) in the editor header
+  mountDocSettingsBtn(); // edit-header-ia-v2: the header's Document-settings button
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
   mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
