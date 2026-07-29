@@ -424,12 +424,16 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .editor-window__bar {
   display: flex; align-items: center;
   height: 44px; padding: 0 8px; gap: 6px;
-  min-width: 0; overflow-x: auto; overflow-y: hidden;
+  min-width: 0; overflow: hidden; /* the bar never scrolls -- overflow is absorbed by the tab strip */
 }
 .editor-window__zone { display: flex; align-items: center; gap: 6px; min-width: 0; }
-/* the tabs zone is the one that flexes; its tab strip takes the slack */
-.editor-window__zone--tabs { flex: 1 1 auto; align-items: flex-end; align-self: stretch; padding-top: 6px; }
-.editor-window__zone--tabs .toolbar-tabs { flex: 1 1 auto; }
+/* The tabs zone is the SOLE flex item and takes basis 0, so it always fills exactly the left
+   slack (bar width minus the fixed doc + output zones) -- its width does NOT depend on how many
+   tabs are open. A long tab list therefore scrolls INSIDE its own strip (min-width:0 +
+   overflow-x:auto), and the doc + output zones keep a stable position. */
+.editor-window__zone--tabs { flex: 1 1 0; min-width: 0; align-items: flex-end; align-self: stretch; padding-top: 6px; }
+.editor-window__zone--tabs .toolbar-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+/* doc + output are fixed-size and stay put no matter how many tabs are open */
 .editor-window__zone--doc, .editor-window__zone--output { flex: 0 0 auto; }
 .editor-window__filepicker { flex: 0 0 auto; align-self: center; }
 /* low-contrast hairline dividers between the three zones (DSLMS separator token) */
@@ -449,17 +453,19 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 /* edit-header-ia-v2: face-up variant/version dropdowns -- named button + caret, name
    truncates with ellipsis (full name in the menu + title tooltip). */
 .editor-window__axis-btn {
-  flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px;
-  max-width: 148px; height: 26px; padding: 0 6px 0 8px;
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  /* override the .tool base (fixed 28px square) -- these are labelled, content-width controls */
+  width: auto; max-width: 160px; height: 26px; padding: 0 6px 0 10px;
   border-radius: var(--radius-sm, 4px);
   border: 1px solid var(--border-input, var(--border-strong)); background: var(--surface-input);
   color: var(--text-primary); font: var(--type-label); cursor: pointer;
+  overflow: hidden; /* clip an extreme name at the button edge */
   transition: background 0.12s, border-color 0.12s;
 }
 .editor-window__axis-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-.editor-window__axis-btn .axis-btn__icon { flex: 0 0 auto; display: inline-flex; color: var(--text-secondary); }
-.editor-window__axis-btn .axis-btn__icon svg { width: 14px; height: 14px; }
-.editor-window__axis-btn .axis-btn__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the name sizes the button to its content (so "Flagship" always shows); a very long name
+   ellipsizes rather than collapsing to nothing. */
+.editor-window__axis-btn .axis-btn__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-window__axis-btn .axis-btn__caret { flex: 0 0 auto; display: inline-flex; color: var(--text-secondary); }
 .editor-window__axis-btn .axis-btn__caret svg { width: 12px; height: 12px; }
 /* active (previewing a non-default axis value): accent the border + icon */

@@ -84,12 +84,14 @@ own **editor header** beneath it.
   courses — a browser **grouped by document type**, colour-coded, each card showing its product,
   interactive/static and whether it's open; it respects the product scope and opens automatically
   when no course is open) and the **open-course tabs**, each carrying a per-product colour dot.
-  **Document** (centre): the **cell chip** (document type), a **Document-settings** button (⚙, opens
-  this document's settings — Header & Footer, Learner nav, Theme and the rest; app-wide settings live
-  under the left-rail cog), the **Build / Read** toggle, and the **variant** and **software-version**
-  selectors as **named dropdowns** (they show the current value — "Flagship", the version name — at a
-  glance). **Output** (right): the **▶ Demo** preview and **Send to publish**. **Light / dark** now
-  lives in the Demo button's **▾** menu, under the size presets. The header shows only in the Edit stage.
+  **Document** (right of the tabs): a **Document-settings** button (⚙, opens this document's settings —
+  **Document type** (geometry + interactivity, set once), Header & Footer, Learner nav, Theme and the
+  rest; app-wide settings live under the left-rail cog), the **Build / Read** toggle (glyphs), and the
+  **variant** and **software-version** selectors as **named dropdowns** (they show the current value —
+  "Flagship", the version name — at a glance). **Output** (far right): the **▶ Demo** preview and **Send
+  to publish**. **Light / dark** now lives in the Demo button's **▾** menu, under the size presets. When
+  many courses are open the tabs scroll within their own strip so this cluster never moves. The header
+  shows only in the Edit stage.
 - **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
   panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
   palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
