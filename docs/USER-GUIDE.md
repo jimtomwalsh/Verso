@@ -745,9 +745,15 @@ In this mode:
   base prose. There is no "link" button here: linking a course to a piece of source happens in the
   Edit stage, not Source.
 - **Select as little or as much as you like — one word to the whole document.** A selection that
-  spans several paragraphs is fine: the toolbar still appears, so an alternate or a comment can cover
-  a whole passage, not just a single paragraph. A multi-paragraph mark highlights across every
-  paragraph it covers and rides your edits the same way — edit the middle of it and it stays put.
+  spans several paragraphs (or titles) is fine, locked or unlocked: the toolbar still appears, so an
+  alternate or a comment can cover a whole passage, not just a single paragraph. A multi-paragraph
+  mark highlights across every paragraph it covers and rides your edits the same way — edit the middle
+  of it and it stays put.
+- **Editing across paragraphs.** Once unlocked, a selection that spans paragraphs edits as one: type
+  over it, or press Delete/Backspace, and the covered text goes — the paragraph you started in and the
+  one you ended in join into a single paragraph, and any paragraphs wholly inside the selection are
+  removed. A Backspace at the very start of a paragraph (or Delete at the very end) merges it with its
+  neighbour. Undo (Ctrl/Cmd+Z) puts the paragraphs back.
 - **Insert an image or a table.** Once unlocked, the bottom bar shows an **image** and a **table**
   button. Each drops the new block **after the block you're in** (or at the end of the document if you
   haven't clicked into one). An image opens your file picker and is stored in the document itself; a

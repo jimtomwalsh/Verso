@@ -11288,6 +11288,74 @@ section("Source rewrite: multi-block marks (one word to whole document, D1)");
   })());
 })();
 
+// ---- product-rail-source-selbar-multi-paragraph: editing ACROSS paragraphs (replaceRange) ----
+// With one contentEditable host a drag spans blocks, so Backspace/Delete/typing over a multi-paragraph
+// selection must merge + remove blocks through the model. replaceRange is the pure core: single-block
+// reuses applyTextEdit; multi-block keeps the first node's head, merges the last node's tail onto it,
+// removes interiors, and re-anchors surviving marks (deleted text breaks its marks, as a delete should).
+section("Source rewrite: edit across paragraphs (replaceRange)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function doc() {
+    return SD.create([
+      { type: "paragraph", key: "a", text: "Alpha bravo charlie." },   // 0..20
+      { type: "paragraph", key: "b", text: "Delta echo foxtrot." },    // interior
+      { type: "paragraph", key: "c", text: "Golf hotel india." }       // 0..17
+    ]);
+  }
+  ok("single-block delete removes just the covered chars", (function () {
+    var m = doc();
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 5 }, ""); // delete "bravo"
+    return SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha  charlie." && r.caret.offset === 6 && m.nodes.length === 3;
+  })());
+  ok("single-block replace swaps the covered chars for new text", (function () {
+    var m = doc();
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 5 }, "delta"); // bravo -> delta
+    return SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha delta charlie." && r.caret.offset === 11;
+  })());
+  ok("multi-paragraph delete merges first head + last tail and removes interior blocks", (function () {
+    var m = doc();
+    // select from a[6] ("bravo...") through c[5] ("Golf "|"hotel...") and delete
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    return m.nodes.length === 1 &&                      // interior "b" and last "c" both removed, tail merged onto "a"
+      SD.nodeByKey(m, "b") === null && SD.nodeByKey(m, "c") === null &&
+      SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha hotel india." &&
+      r.mergedKey === "a" && r.caret.offset === 6;
+  })());
+  ok("multi-paragraph replace inserts text at the seam", (function () {
+    var m = doc();
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "X");
+    return SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha Xhotel india." && r.caret.offset === 7 && m.nodes.length === 1;
+  })());
+  ok("a mark wholly inside a removed interior paragraph breaks", (function () {
+    var m = doc();
+    var mk = SD.addMark(m, { type: "comment", anchor: { nodeKey: "b", start: 0, len: 5 } }); // "Delta" in interior
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    return SD.markById(m, mk.id).broken === true;
+  })());
+  ok("a mark in the surviving head is untouched by a downstream multi-paragraph delete", (function () {
+    var m = doc();
+    var mk = SD.addMark(m, { type: "link", anchor: { nodeKey: "a", start: 0, len: 5 } }); // "Alpha" in the kept head
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    var after = SD.markById(m, mk.id);
+    return after.broken !== true && after.anchor.nodeKey === "a" && after.anchor.start === 0 && after.anchor.len === 5;
+  })());
+  ok("a mark in the surviving last-node tail re-anchors onto the merged node", (function () {
+    var m = doc();
+    var mk = SD.addMark(m, { type: "link", anchor: { nodeKey: "c", start: 5, len: 5 } }); // "hotel" (offset 5..10 in c)
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    var after = SD.markById(m, mk.id);
+    // merged = "Alpha " + "hotel india." ; "hotel" now sits at offset 6
+    return after.broken !== true && after.anchor.nodeKey === "a" && SD.anchorText(m, after.anchor) === "hotel";
+  })());
+  ok("undo restores the paragraphs a multi-paragraph delete merged", (function () {
+    var m = doc();
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    SD.undo(m);
+    return m.nodes.length === 3 && SD.nodeText(SD.nodeByKey(m, "b")) === "Delta echo foxtrot." && SD.nodeText(SD.nodeByKey(m, "c")) === "Golf hotel india.";
+  })());
+})();
+
 // ---- product-rail-source-rw-markdown-export: serialise the continuous doc back out to .md ----
 // The inverse of the import on-ramp: SourceDoc.toMarkdown(model) is a pure node-tree -> Markdown
 // string. Inline conventions (bold/`code`) already live in the node text, so they pass through;
@@ -11390,7 +11458,11 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   // two-layer lock
   ok("locked base prose refuses edits with an unlock reminder (annotation stays live)", /if \(!__sourceUnlocked && \(e\.key\.length === 1 \|\| e\.key === "Backspace"[\s\S]{0,160}sourceToast\("The source is locked/.test(e));
   ok("Ctrl\\+Z is the OWNED undo (native undo would not restore marks); Shift redo", /if \(e\.shiftKey\) SD\.redo\(model\); else SD\.undo\(model\);/.test(e));
-  ok("the lock toggles per-block contentEditable, not the whole article", /function applySourceLockState[\s\S]{0,360}el\.contentEditable = __sourceUnlocked \? "true" : "false";/.test(e));
+  // Single editing host: the article (not each block) carries contentEditable, so a selection can span
+  // paragraphs (per-block hosts confined it to one block). Objects stay non-editable.
+  ok("the lock toggles the WHOLE article as one editable host (blocks inherit; objects stay non-editable)", /function applySourceLockState[\s\S]*?art\.contentEditable = __sourceUnlocked \? "true" : "false";/.test(e) && /\[data-object="1"\][\s\S]{0,120}el\.contentEditable = "false";/.test(e));
+  ok("a cross-paragraph edit is routed through SourceDoc.replaceRange, not left to the browser", /addEventListener\("beforeinput"/.test(e) && /SD\.replaceRange\(model, anchor, ins\)/.test(e));
+  ok("a Backspace/Delete at a block boundary merges paragraphs through replaceRange", /back && caretOff === 0 && idx > 0[\s\S]{0,240}SD\.replaceRange\(model, \{ nodeKey: prev\.key/.test(e));
 
   // doc-level bar (bottom-centre): lock + marks only
   ok("doc-bar has a lock toggle (glyph swaps lock/lock-open) via the DS IconButton", /icon: __sourceUnlocked \? "lock-open" : "lock"/.test(e));
