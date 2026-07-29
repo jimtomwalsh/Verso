@@ -83,6 +83,10 @@
     // Structure outliner + Blocks palette (issue #13) — the DS LeftPanel iconography.
     "file-text": "<path d=\"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z\" /><path d=\"M14 2v4a2 2 0 0 0 2 2h4\" /><path d=\"M10 9H8\" /><path d=\"M16 13H8\" /><path d=\"M16 17H8\" />",
     "heading": "<path d=\"M6 12h12\" /><path d=\"M6 20V4\" /><path d=\"M18 20V4\" />",
+    "heading-1": "<path d=\"M4 12h8\" /><path d=\"M4 18V6\" /><path d=\"M12 18V6\" /><path d=\"m17 12 3-2v8\" />",
+    "heading-2": "<path d=\"M4 12h8\" /><path d=\"M4 18V6\" /><path d=\"M12 18V6\" /><path d=\"M21 18h-4c0-4 4-3 4-6 0-1.5-2-2.5-4-1\" />",
+    "pilcrow": "<path d=\"M13 4v16\" /><path d=\"M17 4v16\" /><path d=\"M19 4H9.5a4.5 4.5 0 0 0 0 9H13\" />",
+    "triangle-alert": "<path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\" /><path d=\"M12 9v4\" /><path d=\"M12 17h.01\" />",
     "type": "<polyline points=\"4 7 4 4 20 4 20 7\" /><line x1=\"9\" x2=\"15\" y1=\"20\" y2=\"20\" /><line x1=\"12\" x2=\"12\" y1=\"4\" y2=\"20\" />",
     "quote": "<path d=\"M10 11H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 3-1 4-4 5\" /><path d=\"M20 11h-4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 3-1 4-4 5\" />",
     "list": "<line x1=\"8\" x2=\"21\" y1=\"6\" y2=\"6\" /><line x1=\"8\" x2=\"21\" y1=\"12\" y2=\"12\" /><line x1=\"8\" x2=\"21\" y1=\"18\" y2=\"18\" /><line x1=\"3\" x2=\"3.01\" y1=\"6\" y2=\"6\" /><line x1=\"3\" x2=\"3.01\" y1=\"12\" y2=\"12\" /><line x1=\"3\" x2=\"3.01\" y1=\"18\" y2=\"18\" />",

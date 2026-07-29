@@ -784,8 +784,10 @@ In this mode:
   it. **Add an alternate** (another way to say the same thing, for a particular course or
   audience) or **Comment** — both are available whether or not the source is unlocked. The
   rich-text buttons (bold, italic, bullets) only appear once you've unlocked, since they change the
-  base prose. There is no "link" button here: linking a course to a piece of source happens in the
-  Edit stage, not Source.
+  base prose. Alongside them are four **block-format** buttons — **Heading 1**, **Heading 2**, **Body**
+  and **Caution box** — that reassign the selected paragraph's type (across several paragraphs if your
+  selection spans them), for the structure operating manuals rely on. There is no "link" button here:
+  linking a course to a piece of source happens in the Edit stage, not Source.
 - **Select as little or as much as you like — one word to the whole document.** A selection that
   spans several paragraphs (or titles) is fine, locked or unlocked: the toolbar still appears, so an
   alternate or a comment can cover a whole passage, not just a single paragraph. A multi-paragraph

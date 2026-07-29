@@ -12221,7 +12221,9 @@
   }
   function renderSourceDocNode(node) {
     var SD = window.SourceDoc, el;
-    if (node.type === "heading") { el = h(node.level === 3 ? "h3" : "h2", "source-doc__h"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
+    // level-aware so the selbar's H1/H2 read distinctly (source-selbar-block-formats): level 1 -> h1
+    // (also chapter headings, the top structure), level 2 -> h2, level 3 -> h3.
+    if (node.type === "heading") { el = h(node.level === 1 ? "h1" : node.level === 3 ? "h3" : "h2", "source-doc__h"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
     else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); fillSourceInline(cb, SD.nodeText(node), node.formats); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
     else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it, ix) { var liEl = h("li"); fillSourceInline(liEl, it, node.itemFormats && node.itemFormats[ix]); el.appendChild(liEl); }); }
     else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row, ri) { var tr = h("tr"); (row || []).forEach(function (c, ci) { var td = h("td"); fillSourceInline(td, c, node.cellFormats && node.cellFormats[ri] && node.cellFormats[ri][ci]); tr.appendChild(td); }); el.appendChild(tr); }); }
@@ -13144,6 +13146,14 @@
     bar.appendChild(seg("bold", "bold", "Bold", "source-selbar__rt"));
     bar.appendChild(seg("italic", "italic", "Italic", "source-selbar__rt"));
     bar.appendChild(seg("list", "list", "Dot points", "source-selbar__rt"));
+    // source-selbar-block-formats: block-format actions reassign the selected node's TYPE (H1/H2/Body/
+    // Caution box), for operating-manual parity. Base edits -> gated behind the unlock (__rt), grouped
+    // after the inline three with a separator. Tight set by design: these four + the inline three only.
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
+    bar.appendChild(seg("fmt-h1", "heading-1", "Heading 1", "source-selbar__rt"));
+    bar.appendChild(seg("fmt-h2", "heading-2", "Heading 2", "source-selbar__rt"));
+    bar.appendChild(seg("fmt-body", "pilcrow", "Body text", "source-selbar__rt"));
+    bar.appendChild(seg("fmt-caution", "triangle-alert", "Caution box", "source-selbar__rt"));
     bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
     bar.appendChild(seg("alternate", "square-pen", "Add an alternate rendition"));
     bar.appendChild(seg("comment", "message-square", "Comment"));
@@ -13339,6 +13349,24 @@
     if (cmd === "bold" || cmd === "italic" || cmd === "list") {
       if (!__sourceUnlocked) return;
       if (cmd === "list") document.execCommand("insertUnorderedList"); else document.execCommand(cmd);
+      return;
+    }
+    // source-selbar-block-formats: reassign the selected node(s)' block type. A base edit, so it is
+    // gated behind the unlock; applies across a multi-paragraph selection; rides marks (in-place, the
+    // node key is kept) + owned undo (SD.setNodeType). Rebuild the article since the element changes.
+    if (cmd === "fmt-h1" || cmd === "fmt-h2" || cmd === "fmt-body" || cmd === "fmt-caution") {
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to change a block's format."); return; }
+      if (!__sourceSelAnchor || !__sourceDocModel) return;
+      var spec = cmd === "fmt-h1" ? { type: "heading", level: 1 }
+        : cmd === "fmt-h2" ? { type: "heading", level: 2 }
+        : cmd === "fmt-body" ? { type: "paragraph" }
+        : { type: "callout", tag: "Caution" };
+      var keys = SD.nodesInAnchor(__sourceDocModel, __sourceSelAnchor);
+      var changed = 0;
+      keys.forEach(function (k) { if (SD.setNodeType(__sourceDocModel, k, spec)) changed++; });
+      if (!changed) return;
+      persistSourceDocModel(topic, __sourceDocModel);
+      renderSourceArticle(); // the element type changed -> full rebuild + re-mount marks
       return;
     }
     // A2: align an image object. Live (set the figure's text-align, keep the selection), persist
