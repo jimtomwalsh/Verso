@@ -1074,8 +1074,16 @@
   function editable(tag, className, obj, field, rich, styleKey) {
     var node = el(tag, className);
     var value = obj[field] == null ? "" : String(obj[field]);
+    // SPEC 8 (source-link 01): a linked text block's copy is produced LIVE by the resolver from
+    // its source master, not from the stored field. Resolves + bakes exactly like an inline
+    // data-source-link span; an unresolvable link falls back to whatever text the block holds.
+    if (rich && obj.sourceLink && obj.sourceLink.markId && window.resolveSourceLinkContent) {
+      var sl = window.resolveSourceLinkContent(obj.sourceLink.masterId, obj.sourceLink.markId, obj.sourceLink.altId || null, null);
+      if (sl && sl.type === "text") value = window.sourceLinkTextToHtml(sl.text);
+    }
     if (rich) node.innerHTML = value; else node.textContent = value;
     node.setAttribute("data-edit", field);
+    if (obj.sourceLink && obj.sourceLink.markId) node.setAttribute("data-source-link-block", "1"); // locked-copy marker (inert in the shipped course)
     if (rich) {
       node.setAttribute("data-rich", "1");
       var host = styleKey ? obj[styleKey] : obj; // per-field style host or the obj itself
@@ -1085,6 +1093,9 @@
       // block style, so each span cascades over (and overrides only its own props of)
       // the block-level style. Pure -> the same spans style identically in the export.
       resolveInlineStyles(node);
+      // SPEC 8 (source-link 01): resolve any locked `<span data-source-link>` to its live source
+      // copy in the same post-pass -- author-owned text + linked spans coexist; editor == export.
+      resolveSourceLinks(node);
       // Universal list styling: ANY rich text field can hold an inline <ul>/<ol> (made
       // from the shared Text panel, like bold). The author's marker style/colour/size +
       // custom glyph live on obj.listMarker* and are stamped here, so lists look identical
@@ -3214,6 +3225,81 @@
     return def.template || null;
   }
   window.resolveFacetTemplate = resolveFacetTemplate; // exposed for editor.js's detachLibraryInstance (bake the facet actually showing)
+
+  // ---- SPEC 8: Source->Edit live copy-linking, the render resolver (source-link 01) --------
+  // The twin of resolveFacetTemplate, for source links instead of library facets. A document
+  // block or inline span may carry a `sourceLink` reference {masterId, markId, altId?} pointing
+  // at a `type:"link"` mark on a product's unified source master (a topic component carrying a
+  // SourceDoc in `.doc`). This resolver reads that master's CURRENT source text and returns the
+  // linked passage live -- so editing the source propagates to every placement while authoring,
+  // and the SAME resolved text bakes into the SCORM export (buildPackage serialises this output).
+  //
+  // Pure-render invariant: it reads the master from doc.components / LibraryStore.components ONLY
+  // (the exact same lookup libraryInstance uses, which already bakes correctly at export), never
+  // editor UI state. Absent master / absent mark -> a clean null fallback, mirroring
+  // resolveFacetTemplate's absent-pointer behaviour, so a stale link never throws or blanks a page.
+  function sourceLinkMaster(masterId) {
+    if (!masterId) return null;
+    var docComps = (window.Editor && window.Editor.getDoc && window.Editor.getDoc() && window.Editor.getDoc().components) || null;
+    var libComps = (window.LibraryStore && window.LibraryStore.components) || {};
+    var def = (docComps && docComps[masterId]) || libComps[masterId] || null;
+    return def && def.doc ? def : null;
+  }
+  // resolveSourceLinkContent(masterId, markId, altId, hooks) ->
+  //   text link : { type:"text", text:"<live base or alternate wording>" }
+  //   object link: { type:"object", src, alt, caption }
+  //   unresolvable: null (caller keeps whatever literal text it already had)
+  // `hooks` is reserved for a future per-pass master source (parity with __libraryAxisContext);
+  // today the lookup above suffices. altId names an alternate mark on the master; absent -> base.
+  function resolveSourceLinkContent(masterId, markId, altId, hooks) {
+    var SD = window.SourceDoc;
+    if (!SD || !markId) return null;
+    var def = sourceLinkMaster(masterId);
+    if (!def) return null;
+    var model;
+    try { model = SD.fromJSON(def.doc); } catch (_) { return null; }
+    var mark = SD.markById(model, markId);
+    if (!mark) return null;
+    if (SD.isObjectMark(mark)) {
+      var n = SD.nodeByKey(model, mark.anchor.nodeKey);
+      if (!n) return null;
+      return { type: "object", src: n.src || "", alt: n.alt || "", caption: n.caption || "" };
+    }
+    // An alternate is its own mark on the master carrying the fork wording in `.alt`; base is the
+    // link mark's live covered text. altId present + resolvable -> that fork, else base.
+    var text = SD.markText(model, mark);
+    if (altId) {
+      var alt = SD.markById(model, altId);
+      if (alt && alt.type === "alternate" && alt.alt != null) text = alt.alt;
+    }
+    return { type: "text", text: text == null ? "" : String(text) };
+  }
+  window.resolveSourceLinkContent = resolveSourceLinkContent;
+
+  // Escape a resolver's plain text for insertion into a rich (innerHTML) field: HTML-safe, and
+  // model newlines (a multi-node link joins covered nodes with "\n") become <br>.
+  function sourceLinkTextToHtml(text) {
+    var s = String(text == null ? "" : text)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return s.replace(/\n/g, "<br>");
+  }
+  window.sourceLinkTextToHtml = sourceLinkTextToHtml;
+
+  // Post-pass twin of resolveInlineStyles: swap every locked `<span data-source-link>` inside a
+  // rendered rich field for the resolver's LIVE text. Runs in the same place + same purity as the
+  // #120 data-style-ref pass, so author-owned text and linked spans coexist in one block and both
+  // editor and export show identical resolved copy. Unresolvable span -> left as-is (its authored
+  // fallback text stays), never throws.
+  function resolveSourceLinks(node) {
+    if (!node || !node.querySelectorAll || !window.resolveSourceLinkContent) return;
+    var spans = node.querySelectorAll("span[data-source-link]");
+    for (var i = 0; i < spans.length; i++) {
+      var sp = spans[i];
+      var r = window.resolveSourceLinkContent(sp.getAttribute("data-master"), sp.getAttribute("data-source-link"), sp.getAttribute("data-alt") || null, null);
+      if (r && r.type === "text") { sp.textContent = r.text; sp.setAttribute("contenteditable", "false"); }
+    }
+  }
+  window.resolveSourceLinks = resolveSourceLinks;
 
   // Product-variant axis: build-time split (N packages). resolveVariant(doc, v) returns the
   // doc as it renders/exports for variant `v`. Hero is identity where nothing is tagged.

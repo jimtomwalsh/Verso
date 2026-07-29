@@ -11139,6 +11139,69 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   })());
 })();
 
+// ---- SPEC 8 source-link 01: linked-content model + render resolver (pure core) ----
+// The link mark lives on the source master's SourceDoc; the document block/span carries a
+// {masterId, markId, altId?} ref, never a copy. resolveSourceLinkContent (render.js) reads the
+// master's LIVE text so edits propagate and export bakes. We test the model side headlessly
+// (source-doc is require-able) + the render wiring by source-string (render.js needs a DOM, so its
+// runtime resolution + export bake are Puppeteer-verified in the browser-verify step).
+section("SPEC 8: source-link 01 — link mark model + resolver wiring");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function master() {
+    return SD.create([
+      { type: "heading", key: "h", level: 2, text: "Battery care" },
+      { type: "paragraph", key: "p", text: "Charge to 80% for storage." },
+      { type: "image", key: "img", src: "cell.png", alt: "A cell", caption: "Fig 1" }
+    ]);
+  }
+  // A link mark over a single-node range resolves to that node's live text (what the block bakes).
+  ok("a text link mark's covered text is the passage base (markText)", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "p", start: 0, len: 26 } });
+    return lk.type === "link" && SD.markText(m, lk) === "Charge to 80% for storage.";
+  })());
+  // A cross-node link (heading -> paragraph) stores anchor + endAnchor and covers both nodes.
+  ok("a cross-node link mark stores endAnchor and joins covered nodes with a newline", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "h", start: 0, len: 12 }, endAnchor: { nodeKey: "p", start: 0, len: 26 } });
+    return SD.isMultiBlock(lk) && lk.endAnchor.nodeKey === "p" && SD.markText(m, lk) === "Battery care\nCharge to 80% for storage.";
+  })());
+  // The link mark survives a JSON round-trip (the master persists as topic.doc) and is re-findable.
+  ok("a link mark round-trips through toJSON/fromJSON and markById re-finds it with live text", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "p", start: 0, len: 26 } });
+    var restored = SD.fromJSON(SD.toJSON(m));
+    var again = SD.markById(restored, lk.id);
+    return !!again && again.type === "link" && SD.markText(restored, again) === "Charge to 80% for storage.";
+  })());
+  // Object link: an image node has no text span -> resolver returns a figure descriptor.
+  ok("an object (image) link mark carries no text span and its node yields src/alt/caption", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "img" } }); // no start/len -> object mark
+    if (!SD.isObjectMark(lk)) return false;
+    var n = SD.nodeByKey(m, lk.anchor.nodeKey);
+    return n.src === "cell.png" && n.alt === "A cell" && n.caption === "Fig 1";
+  })());
+  // An alternate fork is its own mark carrying the fork wording in `.alt`, re-findable by id (altId).
+  ok("an alternate mark on the master carries fork wording in .alt, found by id (the resolver's altId)", (function () {
+    var m = master();
+    var alt = SD.addMark(m, { type: "alternate", anchor: { nodeKey: "p", start: 0, len: 26 }, alt: "Store at half charge." });
+    var found = SD.markById(m, alt.id);
+    return found && found.type === "alternate" && found.alt === "Store at half charge.";
+  })());
+
+  // --- render.js resolver wiring (source-string: render.js is DOM-coupled, not require-able) ---
+  var r = src("src/render.js");
+  ok("resolveSourceLinkContent is defined and exposed on window (twin of resolveFacetTemplate)", /function resolveSourceLinkContent\(masterId, markId, altId, hooks\)/.test(r) && /window\.resolveSourceLinkContent = resolveSourceLinkContent;/.test(r));
+  ok("the resolver reads the master from doc.components / LibraryStore.components only (pure, no editor UI state)", /function sourceLinkMaster\(masterId\)[\s\S]{0,400}window\.LibraryStore && window\.LibraryStore\.components[\s\S]{0,200}def\.doc \? def : null/.test(r));
+  ok("the resolver returns live base text via SD.markText, an alternate's .alt by altId, or an object descriptor", /SD\.markText\(model, mark\)/.test(r) && /alt\.type === "alternate" && alt\.alt != null/.test(r) && /type: "object", src: n\.src/.test(r));
+  ok("a linked TEXT BLOCK's field value is produced by the resolver before innerHTML (bakes like a span)", /obj\.sourceLink && obj\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,260}value = window\.sourceLinkTextToHtml\(sl\.text\)/.test(r));
+  ok("linked INLINE SPANS resolve in the SAME post-pass as data-style-ref (resolveSourceLinks after resolveInlineStyles)", /resolveInlineStyles\(node\);\s*[\s\S]{0,220}resolveSourceLinks\(node\);/.test(r) && /span\[data-source-link\]/.test(r));
+  ok("the resolver is a clean no-op fallback when the master or mark is absent (never throws/blanks)", /if \(!SD \|\| !markId\) return null;[\s\S]{0,120}if \(!def\) return null;[\s\S]{0,200}if \(!mark\) return null;/.test(r));
+  ok("resolved plain text is HTML-escaped and newlines become <br> for the rich field", /function sourceLinkTextToHtml\(text\)[\s\S]{0,220}replace\(\/&\/g, "&amp;"\)[\s\S]{0,200}replace\(\/\\n\/g, "<br>"\)/.test(r));
+})();
+
 // ---- source-enter-splits-paragraph: Enter in the continuous doc splits a block (was disabled) ----
 // splitNode is the inverse of replaceRange's merge: the head keeps [0,offset), a new paragraph after
 // holds [offset,end), and marks re-anchor (before stays / after moves / straddle -> two-block).
