@@ -11267,6 +11267,47 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   })());
 })();
 
+// ---- source-enter-splits-paragraph: Enter in the continuous doc splits a block (was disabled) ----
+// splitNode is the inverse of replaceRange's merge: the head keeps [0,offset), a new paragraph after
+// holds [offset,end), and marks re-anchor (before stays / after moves / straddle -> two-block).
+section("Source rewrite: splitNode (Enter makes a new paragraph)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var m = SD.create([{ type: "paragraph", text: "Hello world" }]);
+  var k = m.nodes[0].key;
+  var r = SD.splitNode(m, k, 5); // "Hello" | " world"
+  ok("splitNode: one paragraph -> two nodes at the caret", m.nodes.length === 2 && SD.nodeText(m.nodes[0]) === "Hello" && SD.nodeText(m.nodes[1]) === " world");
+  ok("splitNode: the second node is a paragraph with a fresh key", m.nodes[1].type === "paragraph" && m.nodes[1].key === r.newKey && r.newKey !== k);
+  ok("splitNode: caret lands at the start of the new node", r.caret && r.caret.nodeKey === r.newKey && r.caret.offset === 0);
+
+  // marks re-anchor around the split (offset 10 of "alpha beta gamma" -> "alpha beta" | " gamma")
+  var m2 = SD.create([{ type: "paragraph", text: "alpha beta gamma" }]);
+  var k2 = m2.nodes[0].key;
+  var before = SD.addMark(m2, { type: "comment", anchor: { nodeKey: k2, start: 0, len: 5 } });   // "alpha"
+  var after = SD.addMark(m2, { type: "comment", anchor: { nodeKey: k2, start: 11, len: 5 } });    // "gamma"
+  var straddle = SD.addMark(m2, { type: "comment", anchor: { nodeKey: k2, start: 3, len: 9 } });  // crosses the split
+  var r2 = SD.splitNode(m2, k2, 10);
+  ok("splitNode: a mark entirely before the split stays put", before.anchor.nodeKey === k2 && before.anchor.start === 0 && before.anchor.len === 5);
+  ok("splitNode: a mark entirely after moves to the new node, offset-shifted", after.anchor.nodeKey === r2.newKey && after.anchor.start === 1);
+  ok("splitNode: a mark straddling the split becomes a two-block mark", SD.isMultiBlock(straddle) && straddle.anchor.nodeKey === k2 && straddle.endAnchor.nodeKey === r2.newKey && straddle.endAnchor.len === 2);
+
+  // non-text block: Enter drops a fresh empty paragraph after it (no text split)
+  var m3 = SD.create([{ type: "list", ordered: false, items: ["a", "b"] }]);
+  var r3 = SD.splitNode(m3, m3.nodes[0].key, 0);
+  ok("splitNode on a non-text block inserts an empty paragraph after it", m3.nodes.length === 2 && m3.nodes[0].type === "list" && m3.nodes[1].type === "paragraph" && SD.nodeText(m3.nodes[1]) === "" && r3.caret.nodeKey === r3.newKey);
+
+  // owned undo: one split, one undo step, fully restored
+  var m4 = SD.create([{ type: "paragraph", text: "one two" }]);
+  SD.splitNode(m4, m4.nodes[0].key, 3);
+  ok("splitNode pushes owned undo", SD.canUndo(m4) === true);
+  SD.undo(m4);
+  ok("undo restores the single node", m4.nodes.length === 1 && SD.nodeText(m4.nodes[0]) === "one two");
+
+  // wiring: the continuous-doc beforeinput routes Enter through splitNode (no longer a dead preventDefault)
+  var e = src("src/editor.js");
+  ok("editor: Enter (insertParagraph/insertLineBreak) calls SD.splitNode via afterSourceStructuralEdit", /it === "insertParagraph" \|\| it === "insertLineBreak"/.test(e) && /afterSourceStructuralEdit\(topic, model, SD\.splitNode\(model, blk\.getAttribute\("data-node"\), off\)\)/.test(e));
+})();
+
 // ---- product-rail-source-rw-multi-block-marks: a mark spans one word to the whole document (D1) ----
 // SourceMarks.selectionAnchor() returned null for a selection spanning >1 block, so comment / link /
 // alternate never offered on a cross-paragraph selection. The model now lets a mark carry an

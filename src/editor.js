@@ -12284,7 +12284,20 @@
     art.addEventListener("beforeinput", function (e) {
       if (!__sourceUnlocked) return; // locked: the keydown guard already refuses edits
       var it = e.inputType || "";
-      if (it === "insertParagraph" || it === "insertLineBreak") { e.preventDefault(); return; } // blocks come from the model, not inline Enter
+      if (it === "insertParagraph" || it === "insertLineBreak") {
+        // Enter splits the current block into a new paragraph THROUGH the model (a single editing
+        // host over discrete blocks can't be left to the browser). Collapsed caret only; a rare
+        // Enter over a multi-char selection is left as a no-op (delete then press Enter).
+        e.preventDefault();
+        var selP = window.getSelection();
+        if (!selP || !selP.isCollapsed || !selP.focusNode) return;
+        var blk = selP.focusNode.nodeType === 3 ? selP.focusNode.parentNode : selP.focusNode;
+        blk = blk && blk.closest ? blk.closest("[data-node]") : null;
+        if (!blk) return;
+        var off = sourceCaretOffsetIn(blk, selP.focusNode, selP.focusOffset);
+        afterSourceStructuralEdit(topic, model, SD.splitNode(model, blk.getAttribute("data-node"), off));
+        return;
+      }
       var isDelete = it.indexOf("delete") === 0;
       var isInsert = it === "insertText" || it === "insertReplacementText" || it === "insertFromPaste";
       if (!isDelete && !isInsert) return;
