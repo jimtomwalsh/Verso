@@ -924,6 +924,11 @@ a refresh and a stage-switch.
   source topics were edited since its last export. It's informational only: it never blocks or warns,
   and it clears the moment you publish that document again (publishing sets the new baseline). A
   document with no linked source content shows no chip.
+- **Source-alignment score.** Each document row also shows a **"% source"** chip — the share of its
+  words that are linked to approved source material versus novel copy authored in the document. The
+  same score is available while editing (the storage-dot popover in the editor header shows a **Source
+  alignment** readout), so you can see at a glance how much of a document is signed-off source versus
+  original writing. Informational only; a document with no prose to measure shows no score.
 - **Presets.** Each queue row shows an **output preset** chip — click it to switch the row's preset,
   save the current settings as a new named preset, or rename/delete one of your own. Three come built
   in: **Master** (full quality), **Review copy** (adds the reviewer file, learner theme off), and

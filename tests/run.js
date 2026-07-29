@@ -8720,6 +8720,9 @@ section("Product Rail: Release history store (whole-family export)");
   ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row\)[\s\S]{0,400}exportFormat: opts\.format[\s\S]{0,120}groundTruthVersions: gtv/.test(e));
   ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row\)\);[\s\S]{0,200}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
   ok("the Publish stage renders a collapsed reverse-chron Release history (details/summary), entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,400}RH\.list\(releaseHistory\(\)\)[\s\S]{0,1200}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
+  // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover
+  ok("the Publish pick rows show a '% source' alignment chip (sourceAlignmentPct)", /var apct = sourceAlignmentPct\(registry\[d\.id\]\);[\s\S]{0,160}apct \+ "% source"/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
+  ok("the Edit-stage storage popover shows a live 'Source alignment' readout (sourceAlignmentPct of the open doc)", /var apct = sourceAlignmentPct\(doc\);[\s\S]{0,120}row\("Source alignment", apct \+ "% linked"\)/.test(e));
   ok("index.html loads release-history.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/release-history.js") > -1 && idx.indexOf("src/release-history.js") < idx.indexOf("src/editor.js");
   })());
@@ -8823,6 +8826,32 @@ section("Product Rail: Ground-Truth staleness");
   g.snapshotGroundTruthBaseline(fresh);
   ok("snapshot writes doc.meta.lastPublishedGroundTruthVersions from live stamps", fresh.meta.lastPublishedGroundTruthVersions.mA === 30 && fresh.meta.lastPublishedGroundTruthVersions.mB === 40);
   ok("after snapshot the staleness count is 0 (freshly published baseline)", g.groundTruthStaleCount(fresh, g.currentMasterVersions()) === 0);
+})();
+
+// ---- product-rail-source-alignment-metric: % linked-to-approved-source vs novel ----
+section("Product Rail: source-alignment metric");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @src-align-start \*\/([\s\S]*?)\/\* @src-align-end \*\//);
+  if (!m) { ok("locate @src-align fence", false); return; }
+  // Inject the two module deps the fenced core uses: frWords (HTML-stripping word count) + walkBlocks.
+  var pre = "function frWords(v){ var s=String(v==null?'':v).replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&[a-z0-9#]+;/gi,''); var w=s.match(/\\S+/g); return w?w.length:0; }\n" +
+            "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b); ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.pages); }\n";
+  var g = new Function(pre + m[1] + "\nreturn { sourceAlignment: sourceAlignment, sourceAlignmentPct: sourceAlignmentPct, sourceLinkedSpanWords: sourceLinkedSpanWords };")();
+
+  var doc = { pages: [ { blocks: [
+    { type: "paragraph", text: "one two three four" },                                   // 4 novel
+    { type: "paragraph", text: "aa bb cc dd", sourceLink: { markId: "m1" } },            // 4 linked (whole block)
+    { type: "paragraph", text: "pre <span data-source-link=\"m2\">linked words here</span> post" } // 5 total, 3 linked
+  ] } ] };
+  var a = g.sourceAlignment(doc);
+  ok("sourceAlignment sums total prose words across pages + nested blocks", a.totalWords === 13);
+  ok("a whole source-linked block counts ALL its words as linked", (function () { var d2 = { pages: [ { blocks: [ { type: "paragraph", text: "aa bb cc dd", sourceLink: { markId: "m1" } } ] } ] }; return g.sourceAlignment(d2).linkedWords === 4; })());
+  ok("an inline data-source-link span counts only its inner words as linked", g.sourceLinkedSpanWords("pre <span data-source-link=\"m2\">linked words here</span> post") === 3);
+  ok("sourceAlignment linked = whole-block + inline-span words (4 + 3 here)", a.linkedWords === 7);
+  ok("ratio = linked / total, pct rounds it", Math.abs(a.ratio - 7 / 13) < 1e-9 && g.sourceAlignmentPct(doc) === 54);
+  ok("a doc with no prose -> null pct (not a misleading 0%)", g.sourceAlignmentPct({ pages: [ { blocks: [ { type: "image", src: "x" } ] } ] }) === null);
+  ok("a fully-novel doc -> 0% linked", g.sourceAlignmentPct({ pages: [ { blocks: [ { type: "paragraph", text: "all my own words here" } ] } ] }) === 0);
 })();
 
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
