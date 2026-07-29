@@ -542,6 +542,9 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .publish-pickrow { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; border-radius: 6px; }
 .publish-pickrow:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
 .publish-pickrow__title { flex: 1 1 auto; min-width: 0; font-size: var(--text-sm, 12px); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* staleness-tracking: an informational count of linked source topics changed since last publish.
+   A subtle chip -- never alarming, never a gate. Hidden entirely when in sync or no linked content. */
+.publish-pickrow__stale { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 1; color: var(--accent); background: var(--surface-raised, rgba(127,127,127,0.14)); }
 .publish-empty { font-size: var(--text-sm, 12px); color: var(--text-secondary); padding: 8px 4px; }
 .publish-queuelist { display: flex; flex-direction: column; gap: 6px; }
 .publish-queuerow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-panel); }
