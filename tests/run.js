@@ -8907,8 +8907,11 @@ section("Product Rail: New Topic / Import from Markdown UI");
   ok("newTopicModal is blocked when no Product is active", /function newTopicModal\(\) \{\s*var productId = getActiveProduct\(\);\s*if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
   ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(e));
   var ntmStart = e.indexOf("function newTopicModal()");
-  var ntmBody = e.slice(ntmStart, ntmStart + 500);
+  var ntmBody = e.slice(ntmStart, ntmStart + 900);
   ok("newTopicModal never calls pushHistory() (LibraryStore write, not a doc edit)", ntmBody.indexOf("pushHistory()") === -1);
+  // new-product first-run: "start writing" mints the unified master immediately (via renderSourceStage
+  // -> ensureUnifiedDocForActiveProduct), matching the import path, instead of leaving a loose topic.
+  ok("newTopicModal mints the unified master immediately (renderSourceStage, not a loose renderSourceArticle)", /var topic = createTopic\(name, productId, \[\]\);[\s\S]{0,120}__sourceActiveTopicId = topic\.id;[\s\S]{0,500}renderSourceStage\(\);/.test(ntmBody) && ntmBody.indexOf("renderSourceTopicList();\n      renderSourceArticle();") === -1);
 
   // Import from Markdown: same active-Product gate, blocked without a chosen file, and
   // the variant file list is the Product's OWN declared variants (no free-form entry).
