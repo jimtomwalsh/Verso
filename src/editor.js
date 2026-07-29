@@ -11905,194 +11905,21 @@
     });
     headEl.appendChild(titleInput);
 
-    // Source rewrite: a topic that has been converted to the continuous-document model renders
-    // the new node-model article (lock + toolbars + marks) instead of the section+facet article.
-    if (topicHasDoc(topic)) {
-      host.appendChild(headEl);
-      renderSourceNodeArticle(topic, host);
-      renderSourceInfoPanel(topic);
-      return;
-    }
-
-    var U = window.VersoUI;
-    if (U && U.SegmentedControl) {
-      headEl.appendChild(U.SegmentedControl({
-        options: [{ value: "technical", label: "Technical" }, { value: "digestible", label: "Digestible" }, { value: "dotpoint", label: "Dot-point" }],
-        value: __sourceActiveFacet,
-        onChange: function (v) { if (!isValidFacet(v)) return; __sourceActiveFacet = v; renderSourceArticle(); }
-      }));
+    // Section-cells RETIRED (superseded by the continuous document): every topic now uses the
+    // continuous node-model article (lock + toolbars + marks). A legacy section topic auto-converts
+    // on open -- lossless, the section model only carried base prose in practice. An empty topic
+    // seeds one editable paragraph so it's never a dead, uneditable page.
+    if (!topicHasDoc(topic) && window.SourceDoc) {
+      var _m = window.SourceDoc.fromSections(topic, resolveTopicBaseText);
+      if (!_m.nodes.length) _m = window.SourceDoc.create([{ type: "paragraph", text: "" }]);
+      topic.doc = window.SourceDoc.toJSON(_m);
+      __sourceDocModel = null; __sourceDocModelTopicId = null;
+      stampTopicUpdated(topic);
     }
     host.appendChild(headEl);
-
-    var pillsRow = buildVariantPillsRow(topic);
-    if (pillsRow) host.appendChild(pillsRow);
-
-    (topic.sections || []).forEach(function (sec, secIdx) {
-      var secEl = h("div", "source-stage__section");
-      // Attach BEFORE building children (not at the end of the loop body) -- a
-      // contentEditable can only receive real focus once it's actually in the live
-      // document, and editEl.focus() below runs while this section is still being
-      // constructed. Latent in the old textarea version too (ta.focus() there was
-      // silently a no-op for the same reason); surfaced now by the no-op commit guard's
-      // own browser-verify, worth fixing properly rather than carrying forward.
-      host.appendChild(secEl);
-
-      var headingRow = h("div", "source-stage__heading-row");
-      var headingInput = h("input", "source-stage__heading source-stage__heading-input");
-      headingInput.type = "text"; headingInput.value = sec.heading || ""; headingInput.placeholder = "Section heading";
-      headingInput.addEventListener("change", function () { sec.heading = headingInput.value; stampTopicUpdated(topic); });
-      headingRow.appendChild(headingInput);
-      // md-topic-import re-import safety: this section changed BOTH here and in a
-      // re-imported source since the last import -- never silently overwritten (see
-      // MarkdownImport.reconcileSection), just flagged for a manual look. The canonical
-      // Badge (small status pill, design-system/components/structure/Badge) made
-      // clickable -- it takes no onClick itself, but returns a plain DOM node.
-      if (sec.sourceUpdate && window.VersoUI && window.VersoUI.Badge) {
-        var flagPill = window.VersoUI.Badge({ children: "Source updated", tone: "warning" });
-        flagPill.classList.add("source-stage__source-flag");
-        flagPill.title = "This section changed in the source since you last edited it here. Click to review.";
-        flagPill.addEventListener("click", function () { openSourceUpdateModal(topic, sec); });
-        headingRow.appendChild(flagPill);
-      }
-      // Hover/focus-disclosed (source-stage-section-disclosure): hidden until you're
-      // actually looking at this section, so the article reads as content first, not a
-      // wall of controls. A drag handle replaces the old up/down button pair (drag IS the
-      // reorder affordance); delete stays behind its existing confirm, just no longer
-      // permanently on display.
-      var actions = h("div", "source-stage__section-actions");
-      var gripBtn = iconBtn("grip", "Drag to reorder");
-      gripBtn.setAttribute("draggable", "true");
-      gripBtn.addEventListener("dragstart", function (e) {
-        __sourceSectionDrag = { id: sec.id };
-        try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
-        e.stopPropagation();
-      });
-      gripBtn.addEventListener("dragend", function () { __sourceSectionDrag = null; clearTreeMarks(); });
-      secEl.addEventListener("dragover", function (e) {
-        if (!__sourceSectionDrag || __sourceSectionDrag.id === sec.id) return;
-        e.preventDefault(); e.stopPropagation();
-        var r = secEl.getBoundingClientRect();
-        secEl.__after = (e.clientY - r.top) > r.height / 2;
-        clearTreeMarks();
-        secEl.classList.add(secEl.__after ? "tree-drop-after" : "tree-drop-before");
-      });
-      secEl.addEventListener("dragleave", function () { secEl.classList.remove("tree-drop-before", "tree-drop-after"); });
-      secEl.addEventListener("drop", function (e) {
-        if (!__sourceSectionDrag) return;
-        e.preventDefault(); e.stopPropagation();
-        var dragId = __sourceSectionDrag.id, after = secEl.__after;
-        __sourceSectionDrag = null; clearTreeMarks();
-        structMoveSection(topic, dragId, sec.id, after);
-        stampTopicUpdated(topic); renderSourceArticle();
-      });
-      // source-stage-comments: always clickable (starting the first comment needs an
-      // affordance even at zero), a count Badge overlays it only once there's something
-      // to show -- same iconButtonWithBadge (notification-bell) convention the Needs-
-      // review chip already established, not a new "only show when non-empty" pattern.
-      var openCommentCount = sourceCommentsForSection(topic, sec.id).filter(function (c) { return !c.done; }).length;
-      var commentBtn = iconBtn("message-square", "Comments");
-      commentBtn.classList.toggle("is-on", __sourceOpenCommentSectionId === sec.id);
-      commentBtn.addEventListener("click", function () {
-        __sourceOpenCommentSectionId = (__sourceOpenCommentSectionId === sec.id) ? null : sec.id;
-        renderSourceArticle();
-      });
-      var delBtn = iconBtn("trash-2", "Delete this section", true);
-      delBtn.addEventListener("click", function () {
-        confirmModal("Delete section", (sec.heading || "This section") + " will be removed from the topic.", function () {
-          removeSection(topic, secIdx); stampTopicUpdated(topic); renderSourceArticle();
-        });
-      });
-      actions.appendChild(gripBtn);
-      actions.appendChild(iconButtonWithBadge(commentBtn, openCommentCount));
-      actions.appendChild(delBtn);
-      headingRow.appendChild(actions);
-      secEl.appendChild(headingRow);
-
-      var cols = sectionColumns(sec, __sourceActiveVariants, __sourceActiveFacet);
-      var columned = cols.length > 1;
-      if (columned) secEl.classList.add("source-stage__section--columns");
-      var colHost = columned ? h("div", "source-stage__col-grid") : secEl;
-      if (columned) colHost.style.gridTemplateColumns = "repeat(" + cols.length + ", minmax(0, 1fr))";
-      cols.forEach(function (c) {
-        var wrap = columned ? h("div", "source-stage__col") : secEl;
-        if (columned) wrap.appendChild(h("div", "source-stage__col-label", c.variant == null ? "Flagship" : c.variant));
-        var editing = __sourceEditingCell && __sourceEditingCell.sectionId === sec.id && __sourceEditingCell.variant === c.variant;
-        if (editing) {
-          // A real contentEditable, seeded with the SAME rendered HTML the view shows --
-          // never a raw markdown-lite string in a textarea. Widen the section while
-          // editing so the whole block stays visible instead of clipping to the normal
-          // reading-width column.
-          secEl.classList.add("source-stage__section--editing");
-          var editEl = h("div", "source-stage__body source-stage__body--editing");
-          editEl.contentEditable = "true";
-          editEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
-          var toolbar = buildSourceEditToolbar({ getNode: function () { return editEl; }, onChange: function () {} });
-          wrap.appendChild(toolbar);
-          editEl.addEventListener("blur", function () {
-            commitEditableCell(topic, sec, c.variant, editEl);
-            __sourceEditingCell = null;
-            renderSourceArticle();
-          });
-          wrap.appendChild(editEl);
-          editEl.focus();
-          // land the cursor at the end, ready to type
-          var range = document.createRange(); range.selectNodeContents(editEl); range.collapse(false);
-          var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-        } else {
-          var bodyEl = h("div", "source-stage__body");
-          bodyEl.innerHTML = window.MarkdownLite ? window.MarkdownLite.render(c.text) : "";
-          bodyEl.title = "Click to edit";
-          bodyEl.addEventListener("click", function () { __sourceEditingCell = { sectionId: sec.id, variant: c.variant }; renderSourceArticle(); });
-          wrap.appendChild(bodyEl);
-        }
-        if (columned) colHost.appendChild(wrap);
-      });
-      if (columned) secEl.appendChild(colHost);
-
-      // Diverge affordance: any variant currently toggled but NOT yet diverged for
-      // this section doesn't get a column from sectionColumns (by design -- see
-      // source-stage-variant-columns), so offer to start one instead of hiding it.
-      var notDiverged = __sourceActiveVariants.filter(function (v) { return sectionOverrideVariants(sec).indexOf(v) === -1; });
-      if (notDiverged.length) {
-        var divergeRow = h("div", "source-stage__diverge-row");
-        notDiverged.forEach(function (v) {
-          var dBtn = h("button", "source-stage__diverge-btn", "Diverge for " + v);
-          dBtn.type = "button";
-          dBtn.addEventListener("click", function () {
-            divergeSectionVariant(sec, v, clone);
-            stampTopicUpdated(topic);
-            renderSourceArticle();
-          });
-          divergeRow.appendChild(dBtn);
-        });
-        secEl.appendChild(divergeRow);
-      }
-
-      if (__sourceOpenCommentSectionId === sec.id) secEl.appendChild(buildSourceCommentPanel(topic, sec));
-    });
-
-    var addBtn = h("button", "source-stage__add-section", "+ Add section");
-    addBtn.type = "button";
-    addBtn.addEventListener("click", function () {
-      addSection(topic);
-      stampTopicUpdated(topic);
-      renderSourceArticle();
-    });
-    host.appendChild(addBtn);
-
-    // Source rewrite on-ramp (Epic 2b): opt a topic into the continuous-document model. Additive
-    // and reversible -- the section data is kept, so a revert restores the section article.
-    if (window.SourceDoc) {
-      var convertRow = h("div", "source-stage__convert-row");
-      var convertBtn = h("button", "source-stage__convert-btn", "Switch to continuous document (beta)");
-      convertBtn.type = "button";
-      convertBtn.title = "Re-author this topic as one continuous rich-text document with range marks (the new Source model)";
-      convertBtn.addEventListener("click", function () { convertTopicToDoc(topic); });
-      convertRow.appendChild(convertBtn);
-      host.appendChild(convertRow);
-    }
-
+    renderSourceNodeArticle(topic, host);
     renderSourceInfoPanel(topic);
+    return;
   }
 
   // Product Rail (source-stage-info-panel): "Linked in" (where-used, jumps to the
