@@ -10969,14 +10969,27 @@ section("SPEC 8: source-link 03 — select + place a linked block");
   ok("panelSelectionDescriptor builds a single-node OR cross-node range from the DOM selection", /function panelSelectionDescriptor\(docCol, model\)/.test(e) && /if \(sKey === eKey\) \{[\s\S]{0,140}return \{ anchor: \{ nodeKey: sKey, start: sOff, len: eOff - sOff \} \};/.test(e) && /endAnchor: \{ nodeKey: eKey, start: 0, len: eOff \}/.test(e));
   ok("char offsets are measured against the block's text (Range.toString().length) — the SourceDoc offset model", /function panelCharOffset\(blockEl, container, offset\)[\s\S]{0,200}return r\.toString\(\)\.length;/.test(e));
   ok("a text selection raises the floating Place bar (mouseup on the reading column)", /docCol\.addEventListener\("mouseup"[\s\S]{0,120}maybeShowPlaceBar\(docCol, model\)/.test(e) && /function maybeShowPlaceBar\(docCol, model\)/.test(e));
-  ok("Place adds a type:link mark to the master, persists it (saveLibrary), and arms placement", /function armSourceLinkPlacement\(desc\)[\s\S]{0,400}SD\.addMark\(__editSourceModel, \{ type: "link", anchor: desc\.anchor, endAnchor: desc\.endAnchor \}\)[\s\S]{0,200}saveLibrary\(\);[\s\S]{0,160}__armedSourceLink = \{ masterId: __editSourceMasterId, markId: mk\.id \}/.test(e));
-  ok("the armed canvas click places ONE locked, live-linked paragraph block (Body); base only", /function placeArmedSourceLink\(\)[\s\S]{0,300}insertBlock\(\{ type: "paragraph", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: a\.markId \} \}\)/.test(e));
+  ok("Place arms the range descriptor (mark creation deferred to the drop, so format-split can mint per-run marks)", /function armSourceLinkPlacement\(desc\)[\s\S]{0,300}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \}/.test(e));
+  ok("the armed drop runs planLinkedBlocks -> a type:link mark + one linked block per run (persist once)", /function placeArmedSourceLink\(\)[\s\S]{0,400}SD\.planLinkedBlocks\(model, a\.descriptor\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)[\s\S]{0,200}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}saveLibrary\(\);/.test(e));
   ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
   ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) that jumps to source", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}jumpSourcePanelToMark\(b\.sourceLink\.masterId, b\.sourceLink\.markId\)/.test(e));
   ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(e) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(e));
   ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(e) && /\.is-source-linked-passage/.test(css));
   ok("the indicator + place bar + arming cursor carry their own editor chrome CSS", /\.source-link-badge/.test(css) && /\.source-placebar/.test(css) && /is-arming-source-link #canvas-viewport/.test(css));
   ok("decorateSourceLinks runs in the render passes (per-page frame + full reapplyStructural)", /decorateSourceLinks\(frame\);/.test(e) && /decorateSourceLinks\(\); \/\/ source-link 03/.test(e));
+})();
+
+// ---- SPEC 8 source-link 04: custom pointer-drag placement gesture ----
+section("SPEC 8: source-link 04 — pointer-drag placement");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("the Place bar carries a grab handle that starts a CUSTOM pointer-drag (pointerdown, not native DnD)", /var grip = h\("button", "source-placebar__grip"\)[\s\S]{0,260}grip\.addEventListener\("pointerdown", function \(ev\) \{ ev\.preventDefault\(\); startSourceLinkDrag\(desc, ev\); \}\)/.test(e));
+  ok("the drag is driven by custom pointer events (pointermove/pointerup on window), not native HTML5 DnD", /window\.addEventListener\("pointermove", move\); window\.addEventListener\("pointerup", up\);/.test(e) && /grip\.addEventListener\("pointerdown"/.test(e));
+  ok("the drag shows a ghost following the cursor + lights up the frame under it (drop target)", /function startSourceLinkDrag\(desc, ev\)[\s\S]{0,600}source-link-ghost[\s\S]{0,600}frameElementUnder\(e\.clientX, e\.clientY\); if \(fr\) fr\.classList\.add\("is-drop-target"\)/.test(e));
+  ok("releasing over the canvas resolves through the SAME placement as arm-then-click (placeArmedSourceLink)", /function up\(e\)[\s\S]{0,500}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \};[\s\S]{0,60}placeArmedSourceLink\(\);/.test(e));
+  ok("the drop targets the page under the cursor (pageIndexFromPoint -> setActivePage)", /function pageIndexFromPoint\(cx, cy\)[\s\S]{0,300}data-page-id[\s\S]{0,200}findIndex/.test(e) && /var pi = pageIndexFromPoint\(e\.clientX, e\.clientY\);\s*if \(pi >= 0\) setActivePage\(pi\);/.test(e));
+  ok("a drop outside the canvas places nothing", /if \(!frameElementUnder\(e\.clientX, e\.clientY\)\) \{ sourceToast\("Dropped outside the canvas[\s\S]{0,40}return; \}/.test(e));
+  ok("the ghost, grab handle + drop-target highlight carry their own chrome CSS", /\.source-link-ghost/.test(css) && /\.source-placebar__grip/.test(css) && /\.frame\.is-drop-target/.test(css));
 })();
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
@@ -11222,6 +11235,47 @@ section("SPEC 8: source-link 01 — link mark model + resolver wiring");
     var found = SD.markById(m, alt.id);
     return found && found.type === "alternate" && found.alt === "Store at half charge.";
   })());
+
+  // --- source-link 05: planLinkedBlocks format-split planner (pure) ---
+  function splitDoc() {
+    return SD.create([
+      { type: "heading", key: "c", level: 1, text: "Care and cleaning" }, // h1
+      { type: "heading", key: "s", level: 2, text: "Cleaning" },          // h2
+      { type: "paragraph", key: "p1", text: "Wipe the sensor." },         // body
+      { type: "paragraph", key: "p2", text: "Let it dry fully." }         // body
+    ]);
+  }
+  ok("planLinkedBlocks: a single-format range -> ONE block spec (its own sub-range)", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "p1", start: 0, len: 16 } });
+    return plan.length === 1 && plan[0].format === "body" && plan[0].anchor.nodeKey === "p1" && !plan[0].endAnchor;
+  })());
+  ok("planLinkedBlocks: a heading+paragraph range -> TWO blocks (h2, body) in document order", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "s", start: 0, len: 8 }, endAnchor: { nodeKey: "p1", start: 0, len: 16 } });
+    return plan.length === 2 && plan[0].format === "h2" && plan[0].anchor.nodeKey === "s" && plan[1].format === "body" && plan[1].anchor.nodeKey === "p1";
+  })());
+  ok("planLinkedBlocks: two consecutive SAME-format nodes stay in ONE block (joined by a line break at render)", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "p1", start: 0, len: 16 }, endAnchor: { nodeKey: "p2", start: 0, len: 17 } });
+    return plan.length === 1 && plan[0].format === "body" && plan[0].anchor.nodeKey === "p1" && plan[0].endAnchor && plan[0].endAnchor.nodeKey === "p2";
+  })());
+  ok("planLinkedBlocks: a chapter (level-1) heading maps to the h1 format, a level-2 to h2", (function () {
+    var d = splitDoc();
+    var p1 = SD.planLinkedBlocks(d, { anchor: { nodeKey: "c", start: 0, len: 5 } });
+    var p2 = SD.planLinkedBlocks(d, { anchor: { nodeKey: "s", start: 0, len: 5 } });
+    return p1[0].format === "h1" && p2[0].format === "h2";
+  })());
+  ok("planLinkedBlocks: heading -> paragraph -> heading is THREE runs (format change starts a new block)", (function () {
+    var d = SD.create([
+      { type: "heading", key: "h1", level: 2, text: "A" },
+      { type: "paragraph", key: "p", text: "body text here" },
+      { type: "heading", key: "h2", level: 2, text: "B" }
+    ]);
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "h1", start: 0, len: 1 }, endAnchor: { nodeKey: "h2", start: 0, len: 1 } });
+    return plan.length === 3 && plan[0].format === "h2" && plan[1].format === "body" && plan[2].format === "h2";
+  })());
+  ok("placement maps planner formats to destination block types (h1->heading, h2->subheading, body->paragraph)", /SOURCE_LINK_BLOCK_TYPE = \{ h1: "heading", h2: "subheading", body: "paragraph" \}/.test(src("src/editor.js")));
 
   // --- render.js resolver wiring (source-string: render.js is DOM-coupled, not require-able) ---
   var r = src("src/render.js");

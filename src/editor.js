@@ -19383,6 +19383,12 @@
     var sel = window.getSelection();
     var rect = sel.getRangeAt(0).getBoundingClientRect();
     var bar = h("div", "source-placebar"); bar.setAttribute("data-source-placebar", "1");
+    // 04: a grab handle starts a custom pointer-drag (decoupled from the text selection, which is why
+    // it's NOT native HTML5 DnD -- setting draggable would kill selecting text in the panel).
+    var grip = h("button", "source-placebar__grip"); grip.type = "button"; grip.title = "Drag onto the canvas to place";
+    grip.innerHTML = window.Icon ? window.Icon("grip-vertical") : "";
+    grip.addEventListener("pointerdown", function (ev) { ev.preventDefault(); startSourceLinkDrag(desc, ev); });
+    bar.appendChild(grip);
     var btn = window.VersoUI && window.VersoUI.Button
       ? window.VersoUI.Button({ variant: "primary", size: "sm", icon: "link", label: "Place", onClick: function () { armSourceLinkPlacement(desc); } })
       : h("button", null, "Place");
@@ -19392,20 +19398,17 @@
     bar.style.top = Math.max(8, rect.top - bar.offsetHeight - 8) + "px";
     bar.style.left = Math.max(8, rect.left) + "px";
   }
-  // Place: add a type:"link" mark to the master over the selected range, persist it, and arm the
-  // next canvas click to drop the linked block. The base wording is captured on the mark.
+  // Place: arm the next canvas click to drop the linked copy. Mark creation is DEFERRED to the drop
+  // (05): a range spanning formats splits into several linked blocks, each with its own link mark,
+  // so the marks are minted per run when the drop resolves — we carry the range descriptor, not a
+  // pre-made single mark.
   function armSourceLinkPlacement(desc) {
-    var SD = window.SourceDoc;
-    if (!SD || !__editSourceModel || !__editSourceMasterId) return;
-    var mk = SD.addMark(__editSourceModel, { type: "link", anchor: desc.anchor, endAnchor: desc.endAnchor });
-    __editSourceMaster.doc = SD.toJSON(__editSourceModel);
-    saveLibrary();
-    __armedSourceLink = { masterId: __editSourceMasterId, markId: mk.id };
+    if (!window.SourceDoc || !__editSourceModel || !__editSourceMasterId) return;
+    __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
     document.body.classList.add("is-arming-source-link");
     hidePlaceBar();
     var s = window.getSelection(); if (s) s.removeAllRanges();
     sourceToast("Linked passage armed — click a spot in the canvas to place it. Esc to cancel.");
-    renderEditSourcePanel(); // repaint so the newly-linked passage highlights
   }
   function cancelArmedSourceLink() {
     if (!__armedSourceLink) return;
@@ -19413,16 +19416,65 @@
     document.body.classList.remove("is-arming-source-link");
     sourceToast("Placement cancelled.");
   }
-  // The armed canvas click: drop one locked, live-linked text block (base only; format-split is 05).
-  // Renders in the destination Body style (an ordinary paragraph block) and resolves live via 01.
+  // format-split (05): source structure -> destination block type. heading lvl1 -> Heading 1
+  // (heading block), heading lvl2/3 -> Heading 2 (subheading block), paragraph/callout -> Body.
+  var SOURCE_LINK_BLOCK_TYPE = { h1: "heading", h2: "subheading", body: "paragraph" };
+  // The armed drop: run the format-split planner over the armed range and insert ONE locked, live-
+  // linked text block per contiguous same-format run (in document order), each in the destination's
+  // matching preset. A single-format range yields one block; consecutive same-format nodes stay in
+  // one block (its covered nodes joined by line breaks). Each block resolves live via 01 + bakes.
   function placeArmedSourceLink() {
     var a = __armedSourceLink; if (!a) return false;
     __armedSourceLink = null;
     document.body.classList.remove("is-arming-source-link");
-    insertBlock({ type: "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: a.markId } });
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var plan = SD.planLinkedBlocks(model, a.descriptor);
+    if (!plan.length) return false;
+    plan.forEach(function (run) {
+      var mk = SD.addMark(model, { type: "link", anchor: run.anchor, endAnchor: run.endAnchor });
+      insertBlock({ type: SOURCE_LINK_BLOCK_TYPE[run.format] || "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: mk.id } });
+    });
+    master.doc = SD.toJSON(model); saveLibrary();
     decorateSourceLinks();
-    sourceToast("Linked block placed.");
+    if (_activeLeftSection === "source") renderEditSourcePanel(); // repaint so newly-linked passages highlight
+    sourceToast(plan.length > 1 ? ("Placed " + plan.length + " linked blocks.") : "Linked block placed.");
     return true;
+  }
+  // 04: the destination page under a drop point (its .frame -> .page[data-page-id] -> doc index).
+  function pageIndexFromPoint(cx, cy) {
+    var fr = frameElementUnder(cx, cy); if (!fr) return -1;
+    var pageEl = fr.querySelector(".page[data-page-id]");
+    var pid = pageEl && pageEl.getAttribute("data-page-id");
+    return pid ? (doc.pages || []).findIndex(function (p) { return p.id === pid; }) : -1;
+  }
+  // 04: the preferred placement gesture -- press the grab handle and drag the passage onto the
+  // canvas. A ghost follows the cursor; the page under the cursor lights up as the drop target;
+  // release resolves through the SAME placement the arm-then-click path uses (placeArmedSourceLink).
+  // Custom pointer events (not native DnD) so selecting text in the read-only panel still works.
+  function startSourceLinkDrag(desc, ev) {
+    hidePlaceBar();
+    var ghost = h("div", "source-link-ghost", "Linked copy"); document.body.appendChild(ghost);
+    document.body.classList.add("is-dragging-source-link");
+    function clearTarget() { var p = document.querySelector(".frame.is-drop-target"); if (p) p.classList.remove("is-drop-target"); }
+    function move(e) {
+      ghost.style.left = (e.clientX + 12) + "px"; ghost.style.top = (e.clientY + 12) + "px";
+      clearTarget();
+      var fr = frameElementUnder(e.clientX, e.clientY); if (fr) fr.classList.add("is-drop-target");
+    }
+    function up(e) {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      ghost.remove(); document.body.classList.remove("is-dragging-source-link"); clearTarget();
+      if (!frameElementUnder(e.clientX, e.clientY)) { sourceToast("Dropped outside the canvas — nothing placed."); return; }
+      var pi = pageIndexFromPoint(e.clientX, e.clientY);
+      if (pi >= 0) setActivePage(pi);
+      __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
+      placeArmedSourceLink();
+    }
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    move(ev);
   }
   // Two-way jump (direction: canvas -> panel): clicking a linked block's indicator opens the Source
   // tab and scrolls the panel to the exact source passage.
@@ -19465,6 +19517,7 @@
   window.__sourceLink = { // browser-verify hooks
     armSourceLinkPlacement: armSourceLinkPlacement, placeArmedSourceLink: placeArmedSourceLink,
     jumpSourcePanelToMark: jumpSourcePanelToMark, panelSelectionDescriptor: panelSelectionDescriptor,
+    startSourceLinkDrag: startSourceLinkDrag, pageIndexFromPoint: pageIndexFromPoint,
     isArmed: function () { return !!__armedSourceLink; }
   };
   // One-time global wiring: while a linked passage is armed, the next canvas click PLACES it (capture

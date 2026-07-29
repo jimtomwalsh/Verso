@@ -207,6 +207,35 @@
     return m;
   }
   function isObjectMark(m) { return m && m.anchor && m.anchor.len == null; }
+
+  // ---- source-link 05: format-split planner (pure) --------------------------
+  // Split a link range into one block-spec per CONTIGUOUS same-format run, in document order, so a
+  // cross-format drop (a heading through a paragraph) becomes a heading block then a body block,
+  // each styled to the destination doc's matching preset. Consecutive same-format nodes stay in ONE
+  // run (rendered as one block, its covered nodes joined by line breaks). A format change starts a
+  // new run. Pure -> the editor's multi-block placement is testable headlessly.
+  //   in:  a range descriptor { anchor:{nodeKey,start,len}, endAnchor?:{...} }
+  //   out: [{ format:"h1"|"h2"|"body", anchor, endAnchor? }, ...] over each run's sub-range
+  function nodeFormat(n) {
+    if (n && n.type === "heading") return isChapterNode(n) ? "h1" : "h2";
+    return "body";
+  }
+  function planLinkedBlocks(model, descriptor) {
+    if (!descriptor || !descriptor.anchor) return [];
+    var spans = markSpans(model, { anchor: descriptor.anchor, endAnchor: descriptor.endAnchor });
+    var runs = [], cur = null;
+    spans.forEach(function (sp) {
+      var fmt = nodeFormat(nodeByKey(model, sp.nodeKey));
+      if (!cur || cur.format !== fmt) { cur = { format: fmt, spans: [] }; runs.push(cur); }
+      cur.spans.push(sp);
+    });
+    return runs.map(function (run) {
+      var first = run.spans[0], last = run.spans[run.spans.length - 1];
+      var d = { format: run.format, anchor: { nodeKey: first.nodeKey, start: first.start, len: first.len } };
+      if (last.nodeKey !== first.nodeKey) d.endAnchor = { nodeKey: last.nodeKey, start: 0, len: last.len };
+      return d;
+    });
+  }
   // The live text a text mark currently covers, read from the model (never the DOM).
   function anchorText(model, anchor) {
     if (!anchor || anchor.len == null) return "";
@@ -1190,7 +1219,7 @@
   }
 
   var _pure = {
-    nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
+    nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode, planLinkedBlocks: planLinkedBlocks,
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
@@ -1214,7 +1243,7 @@
 
   var SourceDoc = {
     create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
-    nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
+    nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange,
