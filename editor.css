@@ -608,6 +608,13 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 /* source-link 03: the floating "Place" bar raised at a panel text selection (arm-then-click). */
 .source-placebar { position: fixed; z-index: 60; display: flex; align-items: center; gap: 6px; padding: 4px; background: var(--surface-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 8px); box-shadow: 0 6px 20px rgba(0, 0, 0, .28); }
+/* 04: the sel-bar grab handle + the custom pointer-drag ghost + the drop-target frame highlight. */
+.source-placebar__grip { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 24px; padding: 0; border: none; background: transparent; color: var(--icon-idle); cursor: grab; border-radius: var(--radius-sm, 2px); }
+.source-placebar__grip:hover { color: var(--icon-strong, var(--text-primary)); background: var(--surface-hover); }
+.source-placebar__grip svg { width: 14px; height: 14px; }
+.source-link-ghost { position: fixed; z-index: 70; pointer-events: none; padding: 4px 10px; font-size: 11px; color: #fff; background: var(--accent); border-radius: 999px; box-shadow: 0 4px 14px rgba(0, 0, 0, .32); opacity: .95; }
+body.is-dragging-source-link, body.is-dragging-source-link * { cursor: grabbing !important; user-select: none !important; }
+.frame.is-drop-target { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* while arming, the canvas invites a placement click. */
 body.is-arming-source-link #canvas-viewport { cursor: copy; }
 /* a placed, live-linked (locked) text block on the canvas: a subtle linked treatment + a clickable
