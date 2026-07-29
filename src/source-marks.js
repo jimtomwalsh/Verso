@@ -119,6 +119,31 @@
       return el ? { el: el, key: el.getAttribute("data-node") } : null;
     }
 
+    // A live mouse drag across a paragraph boundary frequently leaves the selection's endpoint on
+    // an ELEMENT node (the article root, or a block element) with a child-index offset, not on a
+    // text node. blockOf(root) is null (the root carries no data-node), so a raw endpoint made
+    // selectionAnchor() return null and the contextual selbar vanished the instant the selection
+    // crossed a paragraph (product-rail-source-selbar-multi-paragraph). Normalise such a boundary
+    // point down to a concrete text position: for a start, the first text position at/after the
+    // point; for an end, the last text position at/before it -- which resolves to the correct block.
+    function endOffsetOf(node) { return node && node.nodeType === 3 ? node.length : (node ? node.childNodes.length : 0); }
+    function resolvePoint(container, offset, forStart) {
+      var guard = 0;
+      while (container && container.nodeType !== 3 && guard++ < 100) {
+        var kids = container.childNodes;
+        if (forStart) {
+          if (offset < kids.length) { container = kids[offset]; offset = 0; }              // descend into the node after the point
+          else if (kids.length) { container = kids[kids.length - 1]; offset = endOffsetOf(container); } // past the last child -> its end
+          else break;
+        } else {
+          if (offset > 0) { container = kids[offset - 1]; offset = endOffsetOf(container); } // descend into the node before the point, to its end
+          else if (kids.length) { container = kids[0]; offset = 0; }                        // at the very start -> start of the first child
+          else break;
+        }
+      }
+      return { node: container, offset: offset };
+    }
+
     // Read the current selection as a MODEL anchor, or null if it is collapsed / outside the root.
     // Same-block -> a single-block anchor {nodeKey,start,len}. A selection spanning 2+ blocks ->
     // a multi-block anchor {nodeKey,start,len, endAnchor:{nodeKey,start,len}, multi:true}: the first
@@ -129,10 +154,13 @@
       if (!sel || !sel.rangeCount) return null;
       var r = sel.getRangeAt(0);
       if (r.collapsed || !root.contains(r.commonAncestorContainer)) return null;
-      var b1 = blockOf(r.startContainer), b2 = blockOf(r.endContainer);
+      // Normalise element-node endpoints (a real cross-paragraph drag) to concrete text positions.
+      var sp = resolvePoint(r.startContainer, r.startOffset, true);
+      var ep = resolvePoint(r.endContainer, r.endOffset, false);
+      var b1 = blockOf(sp.node), b2 = blockOf(ep.node);
       if (!b1 || !b2) return null;
-      var s = offsetOf(b1.el, r.startContainer, r.startOffset);
-      var e = offsetOf(b2.el, r.endContainer, r.endOffset);
+      var s = offsetOf(b1.el, sp.node, sp.offset);
+      var e = offsetOf(b2.el, ep.node, ep.offset);
       if (b1.key === b2.key) {
         if (e < s) { var t = s; s = e; e = t; }
         if (e === s) return null;

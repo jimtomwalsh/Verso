@@ -11168,6 +11168,31 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
     var brokeEvents = (m5.history || []).filter(function (h) { return h.type === "mark-broken" && h.markId === lk.id; });
     return brokeEvents.length === 1;
   })());
+  // product-rail-source-selbar-multi-paragraph: the contextual selbar's visibility is a pure
+  // decision (anchor + updateTarget + unlocked). A multi-paragraph selection has no update target
+  // (⟳ is single-block only) yet MUST still offer alternate + comment -- the bug was the bar
+  // vanishing on a cross-paragraph selection. Guard the decision so it can't regress.
+  ok("selbarDecision: no anchor -> bar hidden entirely", (function () {
+    var d = SD.selbarDecision(null, null, true);
+    return d.showBar === false && d.showAlt === false && d.showComment === false && d.showUpdate === false;
+  })());
+  ok("selbarDecision: single-block selection with no extended mark -> create (alt + comment), no update", (function () {
+    var d = SD.selbarDecision({ nodeKey: "a", start: 0, len: 4 }, null, false);
+    return d.showBar === true && d.showAlt === true && d.showComment === true && d.showUpdate === false;
+  })());
+  ok("selbarDecision: MULTI-paragraph anchor still offers alternate + comment (the fixed bug)", (function () {
+    var d = SD.selbarDecision({ nodeKey: "a", start: 2, len: 6, endAnchor: { nodeKey: "b", start: 0, len: 5 }, multi: true }, null, true);
+    return d.showBar === true && d.showAlt === true && d.showComment === true && d.showUpdate === false;
+  })());
+  ok("selbarDecision: extending an existing single-block mark flips create -> ⟳ update", (function () {
+    var d = SD.selbarDecision({ nodeKey: "a", start: 0, len: 10 }, { id: "mk1" }, true);
+    return d.showBar === true && d.showUpdate === true && d.showAlt === false && d.showComment === false;
+  })());
+  ok("selbarDecision: rich-text buttons shown only when unlocked", (function () {
+    var locked = SD.selbarDecision({ nodeKey: "a", start: 0, len: 4 }, null, false);
+    var open = SD.selbarDecision({ nodeKey: "a", start: 0, len: 4 }, null, true);
+    return locked.showRT === false && open.showRT === true;
+  })());
 })();
 
 // ---- product-rail-source-rw-multi-block-marks: a mark spans one word to the whole document (D1) ----
