@@ -470,6 +470,28 @@
   //                    surviving head/tail re-anchor onto the merged node; marks whose text was removed
   //                    break (same as a single-block delete). One owned-undo step; multi-block mark
   //                    interiors are re-derived. Returns { model, mergedKey, caret:{nodeKey,offset} }.
+  // Source find-and-replace: replace every case-insensitive occurrence of `needle` with `replacement`
+  // across the document's text nodes (heading/paragraph/callout/list/table -- the same scope
+  // findMatches covers). Each edit rides applyTextEdit, so range-marks shift with the text; the whole
+  // pass is ONE owned-undo step. Returns the number of occurrences replaced. Case-insensitive to match
+  // the find (findMatches lowercases both sides).
+  function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  function replaceAll(model, needle, replacement) {
+    needle = String(needle == null ? "" : needle);
+    if (!needle || !model) return 0;
+    replacement = String(replacement == null ? "" : replacement);
+    var re = new RegExp(escapeRegExp(needle), "gi");
+    var count = 0, undone = false;
+    ((model.nodes) || []).slice().forEach(function (n) {
+      if (!isTextNode(n)) return;
+      var t = nodeText(n); re.lastIndex = 0;
+      var m = t.match(re); if (!m || !m.length) return;
+      count += m.length;
+      if (!undone) { pushUndo(model); undone = true; }
+      applyTextEdit(model, n.key, t.replace(re, function () { return replacement; }), { noUndo: true });
+    });
+    return count;
+  }
   function replaceRange(model, anchor, text) {
     text = text == null ? "" : String(text);
     if (!anchor || anchor.nodeKey == null) return { model: model, mergedKey: null, caret: null };
@@ -1527,7 +1549,7 @@
     create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
-    applyTextEdit: applyTextEdit, replaceRange: replaceRange,
+    applyTextEdit: applyTextEdit, replaceRange: replaceRange, replaceAll: replaceAll,
     splitNode: splitNode, setNodeType: setNodeType, nodesInAnchor: nodesInAnchor,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
@@ -1548,7 +1570,7 @@
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
-    applyTextEdit: applyTextEdit, replaceRange: replaceRange,
+    applyTextEdit: applyTextEdit, replaceRange: replaceRange, replaceAll: replaceAll,
     splitNode: splitNode, setNodeType: setNodeType, nodesInAnchor: nodesInAnchor,
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,

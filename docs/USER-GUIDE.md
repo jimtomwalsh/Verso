@@ -661,6 +661,10 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   (or the up/down arrows next to the count) to jump between hits, each scrolled to and highlighted.
   The outline narrows to the sections that contain a match, so it doubles as a filter, and it
   scrolls to and highlights the entry that owns the hit you're on so you never lose your place.
+- **Replace.** Under the find field is a **replace** box with **Replace** (the current match) and
+  **Replace all**. Since replacing edits the base prose, it's available only when the source is
+  **unlocked** — locked, it shows a reminder instead. Replace is case-insensitive (it matches the
+  find) and undoable as a single step; range marks (comments, alternates) ride the edit.
 - **The one action left in the rail is Import from Markdown.** Because there's one document, the old
   per-topic tools — new topic, select, delete, move, reorder topics — are gone. Import is now
   **additive**: pick a Markdown file (it can be a segment — just one chapter), and Verso shows a

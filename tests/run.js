@@ -11233,6 +11233,12 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
   ok("setNodeType: the change is a single OWNED-undo step (marks/undo ride the kept key)", (function () { var m = SD.create([{ type: "paragraph", text: "x" }]); SD.ensureKeys(m); P.setNodeType(m, m.nodes[0].key, { type: "heading", level: 2 }); return SD.canUndo(m) === true; })());
   ok("nodesInAnchor: a single-node anchor -> one key; a multi-block anchor -> every covered key in order", (function () { var one = P.nodesInAnchor(sn, { nodeKey: sk0 }); var many = P.nodesInAnchor(sn, { nodeKey: sk0, endAnchor: { nodeKey: sk1 } }); return one.length === 1 && one[0] === sk0 && many.length === 2 && many[0] === sk0 && many[1] === sk1; })());
 
+  // --- source-find-replace: SD.replaceAll (case-insensitive, across text nodes, marks ride, one undo) ---
+  ok("replaceAll: case-insensitive across heading/paragraph/list, returns the count", (function () { var m = SD.create([{ type: "heading", level: 1, text: "The Foo heading" }, { type: "paragraph", text: "foo FOO food" }, { type: "list", items: ["a foo item", "b"] }]); SD.ensureKeys(m); var c = SD.replaceAll(m, "foo", "BAR"); return c === 5 && m.nodes[0].text === "The BAR heading" && m.nodes[1].text === "BAR BAR BARd" && m.nodes[2].items[0] === "a BAR item"; })());
+  ok("replaceAll: an empty needle is a no-op (returns 0, no undo churn)", (function () { var m = SD.create([{ type: "paragraph", text: "x" }]); SD.ensureKeys(m); return SD.replaceAll(m, "", "y") === 0 && SD.canUndo(m) === false; })());
+  ok("replaceAll: the whole pass is ONE owned-undo step (undo restores the pre-replace text)", (function () { var m = SD.create([{ type: "paragraph", text: "aa aa aa" }, { type: "paragraph", text: "aa" }]); SD.ensureKeys(m); SD.replaceAll(m, "aa", "Z"); var afterCount = m.nodes[0].text; SD.undo(m); return afterCount === "Z Z Z" && m.nodes[0].text === "aa aa aa" && m.nodes[1].text === "aa"; })());
+  ok("replaceAll: a range-mark on a replaced node rides the edit (offsets shift, not orphaned)", (function () { var m = SD.create([{ type: "paragraph", text: "hello world" }]); SD.ensureKeys(m); var mk = SD.addMark(m, { type: "comment", anchor: { nodeKey: m.nodes[0].key, start: 6, len: 5 } }); SD.replaceAll(m, "hello", "hi"); SD.refreshMark(m, mk); return m.nodes[0].text === "hi world" && SD.anchorText(m, mk.anchor) === "world"; })());
+
   // --- inlineRuns: rich inline projection that PRESERVES plain-text offsets (source-rich-render) ---
   // The one invariant that keeps range-marks + applyTextEdit correct under rich rendering: the
   // concatenation of every run's text must reproduce the input byte-for-byte (markers included).
@@ -12779,6 +12785,11 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("cycling steps the cursor with wrap, scrolls to + paints the hit, refreshes the nav", /function cycleSourceFind\(dir\)[\s\S]{0,220}__sourceFindIndex \+ dir \+ __sourceFindMatches\.length\) % __sourceFindMatches\.length;[\s\S]{0,80}scrollToSourceFindHit/.test(e));
   ok("the match navigator shows N/total + prev/next only while a query is active", /function renderSourceFindNav\(\)[\s\S]{0,180}if \(!q\) \{ nav\.style\.display = "none"; return; \}[\s\S]{0,400}"Previous match"[\s\S]{0,160}"Next match"/.test(e));
   ok("Enter cycles next, Shift\\+Enter previous, in the find field", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleSourceFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
+  // source-find-replace: a replacement field + Replace (current) / Replace all under the find field
+  // (unified doc only); replacing is a base edit, so it's unlock-gated; both ride owned undo.
+  ok("the search mounts a Replace field + Replace / Replace all (unified doc only)", /var repRow = h\("div", "source-replace"\);[\s\S]{0,1100}replaceCurrentSourceMatch\(\)[\s\S]{0,200}replaceAllSourceMatches\(\)/.test(e) && /"replace"/.test(src("src/icons.js")));
+  ok("replace-current is unlock-gated + replaces the current match via replaceRange (owned undo)", /function replaceCurrentSourceMatch\(\)[\s\S]{0,200}if \(!__sourceUnlocked\) \{ sourceToast[\s\S]{0,200}__sourceFindMatches\[__sourceFindIndex\][\s\S]{0,160}SD\.replaceRange\(__sourceDocModel, \{ nodeKey: m\.nodeKey, start: m\.start, len: m\.len \}, __sourceReplaceQuery\)/.test(e));
+  ok("replace-all is unlock-gated + calls SD.replaceAll, then re-renders + toasts the count", /function replaceAllSourceMatches\(\)[\s\S]{0,300}if \(!__sourceUnlocked\)[\s\S]{0,300}SD\.replaceAll\(__sourceDocModel, q, __sourceReplaceQuery\)[\s\S]{0,300}Replaced " \+ n/.test(e));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------
