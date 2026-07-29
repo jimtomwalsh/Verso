@@ -19626,18 +19626,23 @@
         node.classList.add("is-source-linked");
         var badge = h("button", "source-link-badge"); badge.type = "button";
         badge.innerHTML = window.Icon ? window.Icon("link") : "";
-        badge.title = "Linked from source — click to jump to the source passage";
-        badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); jumpSourcePanelToMark(b.sourceLink.masterId, b.sourceLink.markId); });
+        badge.title = "Linked from source — jump, or pick / create an alternate";
+        badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); openSourceLinkMenu({ kind: "block", block: b }, b.sourceLink.masterId, b.sourceLink.markId, e.clientX, e.clientY); });
         node.appendChild(badge);
       }
     });
     // 06: per-span indicator inside a mixed block -- each locked linked inline span gets its own
-    // contextual link cue + click-to-jump (distinct from the whole-block badge above).
+    // contextual menu (jump + alternate), distinct from the whole-block badge above.
     Array.prototype.forEach.call(root.querySelectorAll(".canvas-block span[data-source-link]"), function (sp) {
       sp.classList.add("is-source-linked-span");
       if (sp.__slWired) return; sp.__slWired = true;
-      sp.title = "Linked from source — click to jump to the source passage";
-      sp.addEventListener("click", function (e) { e.stopPropagation(); jumpSourcePanelToMark(sp.getAttribute("data-master"), sp.getAttribute("data-source-link")); });
+      sp.title = "Linked from source — jump, or pick / create an alternate";
+      sp.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var owner = sp.closest ? sp.closest(".canvas-block") : null;
+        if (!owner || !owner.__block) return;
+        openSourceLinkMenu({ kind: "span", block: owner.__block, spanEl: sp, markId: sp.getAttribute("data-source-link") }, sp.getAttribute("data-master"), sp.getAttribute("data-source-link"), e.clientX, e.clientY);
+      });
     });
   }
   // Panel: highlight passages already linked into the OPEN document (a persistent cue, distinct from
@@ -19654,10 +19659,94 @@
       });
     });
   }
+  // ==== source-link 08: alternates (create + pick) from the canvas ==============================
+  // Linked copy is locked; the sanctioned way to say it differently in ONE place is an alternate --
+  // a named fork registered on the source master (so it's visible + pushable from the Source stage,
+  // 10) that this single placement points at via altId. A location shows base until an alternate is
+  // picked or pushed to it (never automatic). Text alternates are span/range-contextual.
+  function sourceAltSnippet(s) { s = String(s == null ? "" : s); return s.length > 32 ? s.slice(0, 32) + "…" : s; }
+  // Alternate marks anchored identically to a link mark (its candidate alternates).
+  function sourceLinkAlternates(model, link) {
+    var SD = window.SourceDoc, a = link.anchor, end = link.endAnchor;
+    return (model.marks || []).filter(function (m) {
+      if (m.type !== "alternate" || SD.isObjectMark(m) !== SD.isObjectMark(link)) return false;
+      if (!m.anchor || m.anchor.nodeKey !== a.nodeKey || m.anchor.start !== a.start || m.anchor.len !== a.len) return false;
+      if (!!end !== !!m.endAnchor) return false;
+      return !end || (m.endAnchor.nodeKey === end.nodeKey && m.endAnchor.len === end.len);
+    });
+  }
+  // The altId a target (a whole linked block, or one inline span inside a block) currently points at.
+  function sourceLinkTargetAlt(target) {
+    if (target.kind === "block") return (target.block.sourceLink && target.block.sourceLink.altId) || null;
+    return target.spanEl ? (target.spanEl.getAttribute("data-alt") || null) : null;
+  }
+  // Point a target at an alternate (altId) or back to base (null). Block -> block.sourceLink.altId;
+  // span -> data-alt on that span inside the owning block's rich text. This block/span ONLY.
+  function setSourceLinkTargetAlt(target, altId) {
+    if (target.kind === "block") {
+      if (!target.block.sourceLink) return;
+      if (altId) target.block.sourceLink.altId = altId; else delete target.block.sourceLink.altId;
+    } else {
+      var host = document.createElement("div"); host.innerHTML = target.block.text || "";
+      var sp = host.querySelector('span[data-source-link="' + target.markId + '"]');
+      if (!sp) return;
+      if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt");
+      target.block.text = host.innerHTML;
+    }
+    pushHistory(); reapplyBlock(target.block); decorateSourceLinks(); scheduleSave();
+    sourceToast(altId ? "Alternate applied to this block." : "Reset to base wording.");
+  }
+  // Create a new alternate wording on the source master, then point THIS target at it. Text only in
+  // v1 (an object/figure alternate is whole-block; figure-swap storage is a follow-up).
+  function createSourceAlternate(target, masterId, markId) {
+    var SD = window.SourceDoc, master = libComponents()[masterId];
+    if (!master || !master.doc) return;
+    var model = SD.fromJSON(master.doc);
+    var link = SD.markById(model, markId); if (!link) return;
+    if (SD.isObjectMark(link)) { sourceToast("Object (figure) alternates are coming soon."); return; }
+    var base = SD.markText(model, link);
+    var shell = dsModalShell({
+      title: "Create an alternate",
+      subtitle: "A named fork of this passage, applied to this block only. It registers on the source, so you can reuse or push it later.",
+      primaryLabel: "Create alternate",
+      onPrimary: function () {
+        var wording = (ta.value || "").trim();
+        if (!wording) { ta.focus(); return; }
+        var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: wording, tag: (nameIn.value || "").trim(), baseText: base });
+        master.doc = SD.toJSON(model); saveLibrary();
+        setSourceLinkTargetAlt(target, alt.id);
+        shell.modal.close();
+      }
+    });
+    var nameIn = modalText(shell.body, "Name (optional)", "", "e.g. Short form");
+    var lbl = modalField(shell.body, "Wording");
+    var ta = h("textarea", "prop-text modal-field__control"); ta.rows = 3; ta.value = base; lbl.appendChild(ta);
+    setTimeout(function () { ta.focus(); ta.select(); }, 0);
+  }
+  // The per-target source-link menu (badge / span indicator): jump to source, pick base or an
+  // existing alternate, or create a new one. Reuses the canonical context menu.
+  function openSourceLinkMenu(target, masterId, markId, x, y) {
+    var SD = window.SourceDoc, master = libComponents()[masterId];
+    var cur = sourceLinkTargetAlt(target);
+    var items = [{ label: "Jump to source", onClick: function () { jumpSourcePanelToMark(masterId, markId); } }, { sep: true },
+      { label: "Base wording", active: !cur, onClick: function () { setSourceLinkTargetAlt(target, null); } }];
+    if (master && master.doc) {
+      var model = SD.fromJSON(master.doc);
+      var link = SD.markById(model, markId);
+      if (link) sourceLinkAlternates(model, link).forEach(function (alt) {
+        items.push({ label: (alt.tag ? alt.tag + " — " : "") + sourceAltSnippet(alt.alt), active: cur === alt.id, onClick: function () { setSourceLinkTargetAlt(target, alt.id); } });
+      });
+    }
+    items.push({ sep: true }, { label: "Create an alternate…", onClick: function () { createSourceAlternate(target, masterId, markId); } });
+    showContextMenu(x, y, items);
+  }
+
   window.__sourceLink = { // browser-verify hooks
     armSourceLinkPlacement: armSourceLinkPlacement, placeArmedSourceLink: placeArmedSourceLink,
     jumpSourcePanelToMark: jumpSourcePanelToMark, panelSelectionDescriptor: panelSelectionDescriptor,
     startSourceLinkDrag: startSourceLinkDrag, pageIndexFromPoint: pageIndexFromPoint,
+    openSourceLinkMenu: openSourceLinkMenu, createSourceAlternate: createSourceAlternate,
+    setSourceLinkTargetAlt: setSourceLinkTargetAlt, sourceLinkAlternates: sourceLinkAlternates,
     isArmed: function () { return !!__armedSourceLink; }
   };
   // One-time global wiring: while a linked passage is armed, the next canvas click PLACES it (capture

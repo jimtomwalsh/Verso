@@ -119,9 +119,12 @@ own **editor header** beneath it.
   linked span carries its own indicator. Drag a source **figure** (a diagram) as a whole and it
   drops as a linked **image** block. Linked copy is **locked** — you can't edit it directly, so it
   can't drift from the source — and it updates automatically whenever the source wording changes. A
-  linked block (or span) shows a **link badge**; click it to jump this panel back to the exact source
-  passage. Passages you've already linked into the open document are **highlighted** in the panel, so
-  you can see what you've used.
+  linked block (or span) shows a **link badge**; click it for a menu that jumps back to the exact
+  source passage, or lets you say it differently here. **Alternates** are the sanctioned way to
+  diverge without breaking the link: pick **Create an alternate…** to fork a named wording that
+  applies to *this block only* (and registers on the source, so you can reuse or push it later), or
+  pick an existing alternate — or **Base wording** to reset. Passages you've already linked into the
+  open document are **highlighted** in the panel, so you can see what you've used.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
   pinch) to zoom. Every page is a live, editable render of what the learner will see. The board
   follows the document's **geometry** (set by its preset, §2): **reflow** flows content down a

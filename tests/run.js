@@ -10973,7 +10973,7 @@ section("SPEC 8: source-link 03 — select + place a linked block");
   ok("gap placement runs planLinkedBlocks -> a type:link mark + one linked block per run (persist once)", /function placeSourceLinkBlocks\(a\)[\s\S]{0,400}SD\.planLinkedBlocks\(model, a\.descriptor\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)[\s\S]{0,200}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}saveLibrary\(\);/.test(e));
   ok("the armed drop is coordinate-aware: onto a text block -> inline span (06), else gap placement", /function placeArmedSourceLink\(cx, cy\)[\s\S]{0,600}if \(blockEl && isSourceLinkTextBlock\(blockEl\.__block\)\) return dropInlineSourceLink\(a, blockEl\.__block\);/.test(e));
   ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(e\.clientX, e\.clientY\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
-  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) that jumps to source", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}jumpSourcePanelToMark\(b\.sourceLink\.masterId, b\.sourceLink\.markId\)/.test(e));
+  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) opening the source-link menu (jump + alternates)", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}openSourceLinkMenu\(\{ kind: "block", block: b \}, b\.sourceLink\.masterId, b\.sourceLink\.markId/.test(e));
   ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(e) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(e));
   ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(e) && /\.is-source-linked-passage/.test(css));
   ok("the indicator + place bar + arming cursor carry their own editor chrome CSS", /\.source-link-badge/.test(css) && /\.source-placebar/.test(css) && /is-arming-source-link #canvas-viewport/.test(css));
@@ -11001,7 +11001,7 @@ section("SPEC 8: source-link 06 — inline span append");
   ok("dropInlineSourceLink flattens the range to ONE link mark and appends a <span data-source-link> to the block's text", /function dropInlineSourceLink\(a, block\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor, endAnchor: a\.descriptor\.endAnchor \}\)[\s\S]{0,260}block\.text = \(block\.text \? block\.text \+ " " : ""\) \+ span;/.test(e));
   ok("the appended span carries the mark + master ids (resolved live by 01's inline post-pass)", /var span = '<span data-source-link="' \+ mk\.id \+ '" data-master="' \+ a\.masterId \+ '">' \+ slEscape\(SD\.markText\(model, mk\)\)/.test(e));
   ok("the block re-renders in place (reapplyBlock) so owned text + the locked span coexist", /function dropInlineSourceLink\(a, block\)[\s\S]{0,700}reapplyBlock\(block\);/.test(e));
-  ok("each inline linked span gets its OWN contextual indicator + click-to-jump (per-span, not one block badge)", /root\.querySelectorAll\("\.canvas-block span\[data-source-link\]"\)[\s\S]{0,300}is-source-linked-span[\s\S]{0,220}jumpSourcePanelToMark\(sp\.getAttribute\("data-master"\), sp\.getAttribute\("data-source-link"\)\)/.test(e));
+  ok("each inline linked span gets its OWN contextual menu (per-span, not one block badge)", /root\.querySelectorAll\("\.canvas-block span\[data-source-link\]"\)[\s\S]{0,300}is-source-linked-span[\s\S]{0,600}openSourceLinkMenu\(\{ kind: "span", block: owner\.__block, spanEl: sp/.test(e));
   ok("the inline span indicator carries its own chrome CSS (distinct from the block badge)", /\.is-source-linked-span/.test(css));
 })();
 
@@ -11015,6 +11015,19 @@ section("SPEC 8: source-link 07 — linked image drop");
   ok("a source figure in the panel is draggable as one unit (pointerdown -> object-anchor drag)", /docCol\.querySelectorAll\("figure\.source-doc__figure\[data-object\]"\)[\s\S]{0,260}startSourceLinkDrag\(\{ anchor: \{ nodeKey: figEl\.getAttribute\("data-node"\) \} \}, ev\)/.test(e));
   ok("the draggable figure carries its own grab-affordance CSS", /\.edit-source__figure/.test(css));
 })();
+
+// ---- SPEC 8 source-link 08: alternates — create + pick from the canvas ----
+section("SPEC 8: source-link 08 — alternates from the canvas");
+(function () {
+  var e = src("src/editor.js");
+  ok("the source-link menu offers jump, base, existing alternates, and create-an-alternate", /function openSourceLinkMenu\(target, masterId, markId, x, y\)[\s\S]{0,400}label: "Jump to source"[\s\S]{0,300}label: "Base wording", active: !cur[\s\S]{0,600}sourceLinkAlternates\(model, link\)\.forEach[\s\S]{0,400}label: "Create an alternate…"/.test(e));
+  ok("create-an-alternate adds a type:alternate mark to the MASTER (anchored like the link) + persists it", /function createSourceAlternate\(target, masterId, markId\)[\s\S]{0,900}SD\.addMark\(model, \{ type: "alternate", anchor: link\.anchor, endAnchor: link\.endAnchor, alt: wording[\s\S]{0,200}saveLibrary\(\);[\s\S]{0,120}setSourceLinkTargetAlt\(target, alt\.id\)/.test(e));
+  ok("a canvas alternate points only THIS block/span (altId), never other documents", /function setSourceLinkTargetAlt\(target, altId\)[\s\S]{0,120}if \(altId\) target\.block\.sourceLink\.altId = altId; else delete target\.block\.sourceLink\.altId;[\s\S]{0,300}sp\.setAttribute\("data-alt", altId\)/.test(e));
+  ok("picking base vs an alternate reads/writes the target's altId (block field or span data-alt)", /function sourceLinkTargetAlt\(target\)[\s\S]{0,120}target\.block\.sourceLink && target\.block\.sourceLink\.altId[\s\S]{0,120}target\.spanEl\.getAttribute\("data-alt"\)/.test(e));
+  ok("sourceLinkAlternates matches alternates anchored identically to the link (single or multi-block)", /function sourceLinkAlternates\(model, link\)[\s\S]{0,300}m\.type !== "alternate" \|\| SD\.isObjectMark\(m\) !== SD\.isObjectMark\(link\)[\s\S]{0,400}m\.endAnchor\.nodeKey === end\.nodeKey/.test(e));
+  ok("an object (figure) link defers alternates in v1 (whole-block; figure-swap is a follow-up)", /if \(SD\.isObjectMark\(link\)\) \{ sourceToast\("Object \(figure\) alternates are coming soon\."\); return; \}/.test(e));
+})();
+
 
 // ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
 // Foundation of the Source-stage rewrite (spec 2b). The whole rewrite rests on two
