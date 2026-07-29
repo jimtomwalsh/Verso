@@ -8522,6 +8522,12 @@ section("Product Rail: 3-stage rail + product dropdown");
   // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
   ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(e) && /function mountProductPicker/.test(e));
   ok("newProductPrompt creates a Product then selects it (create + setActiveProduct + rebuild)", /function newProductPrompt\(\)[\s\S]{0,260}createProduct\(name\);[\s\S]{0,120}setActiveProduct\(prod\.id\);[\s\S]{0,80}mountProductPicker\(\);/.test(e));
+  // new-product-empty-landing: '+ New Product' lands on the Edit-stage document browser (empty for a
+  // Product with zero docs, since renderBrowserGrid filters by the active product scope).
+  ok("newProductPrompt lands on the Edit-stage document browser (setStage edit + openBrowser)", /function newProductPrompt\(\)[\s\S]{0,900}setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(e));
+  ok("the browser header carries a 'New Product' action wired to newProductPrompt", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,120}newProductPrompt\(\);/.test(e));
+  ok("the document browser is scoped to the active product (empty state for a zero-doc Product)", /function renderBrowserGrid\(\)[\s\S]{0,400}getActiveProduct\(\)[\s\S]{0,300}docMatchesProductStage\(registry\[id\], scope, null\)/.test(e));
+  ok("a document created from the browser pre-stamps the active Product (createBlankDoc gets its id)", /var newDocProduct = \(typeof getActiveProduct === "function"\) \? getActiveProduct\(\) : "";/.test(e) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(e));
   ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
   ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
 
