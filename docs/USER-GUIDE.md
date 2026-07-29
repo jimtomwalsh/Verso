@@ -109,8 +109,9 @@ own **editor header** beneath it.
   **Placing linked copy.** Select any passage in this panel (a phrase, or a heading through a
   paragraph in one sweep) and a small bar appears at the selection with a **drag handle** and a
   **Place** button. Two ways to place it: **drag** the handle onto the canvas — a ghost follows your
-  cursor and the target page lights up — and release; or click **Place** then click a spot in the
-  canvas (**Esc** cancels). Either way the passage drops in as **live-linked** text in your
+  cursor, the target page lights up, and a **drop-line** shows the exact gap between blocks where it
+  will land — then release; or click **Place** then click a spot in the canvas (**Esc** cancels).
+  Either way the passage drops in at that spot as **live-linked** text in your
   document's own styles. If your selection spans **different formats** — a heading and a paragraph —
   it splits into one block per format (a heading block, then a body block), each independently
   styleable with the normal text-block controls; two passages of the same format stay in one block.
