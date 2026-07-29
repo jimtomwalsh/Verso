@@ -804,11 +804,18 @@ In this mode:
   History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
   reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
   Ctrl/Cmd+Z brings the text and the mark back.
-- **See where a span is used.** When a course links to a piece of this source, selecting the linked
-  span (or image/table) opens a read-only **"Linked in N"** panel in the right margin, one row per
-  place it's used — a **Document › Section › Location** breadcrumb you can click to jump straight to
-  that course. Source is one-way: it *shows* where things are linked; the linking itself happens in
-  the Edit stage, not here. A span that isn't linked anywhere says so.
+- **See where a span is used, and push a wording out.** When documents link a piece of this source,
+  selecting the linked span opens a **"Linked in N"** panel in the right margin — one row per place
+  it's used, each tagged **base** or **alternate**, and clicking a row opens that document in Edit
+  with the exact block selected. If the passage has alternates, **Push an alternate…** sends a
+  forked wording to those documents — all of them, or a chosen subset — so you can roll out a better
+  wording deliberately. A placement keeps showing **base** until an alternate is chosen for it or
+  pushed to it; pushes are never automatic. A span that isn't linked anywhere says so.
+- **Editing linked source warns first.** If you unlock and change wording that other documents link,
+  locking shows a **"linked in N places"** check before it propagates: **Update all** (the linked
+  copies re-resolve to your new wording), **Keep as-is (fork)** (freeze their current wording as an
+  alternate, then your source moves on), or **Cancel** (undo the edit). A placement already pinned to
+  an alternate is never touched by a base edit.
 - **Comments live in the margin.** Selecting text and choosing **Comment** drops a small **blue
   comment glyph just to the right of the text** next to that span; the pin tracks the span as you
   scroll. It matches the canvas comment glyph — subtle, no box. Click a pin to open
