@@ -11396,6 +11396,7 @@
   var __sourceActiveTopicId = null;
   var __sourceActiveFacet = "technical";
   var __sourceSearchQuery = "";
+  var __sourceReplaceQuery = ""; // source find-and-replace: the replacement text
   var __sourceActiveVariants = []; // reset whenever a different topic is selected
   // Source rewrite (Epic 2b, lock-toolbars): a topic renders the new continuous-document article
   // (node model + range marks + two-layer lock + canvas-idiom toolbars) once it carries a `doc`
@@ -13631,6 +13632,53 @@
     // populated by renderSourceFindNav (looked up by id) and stays put across cycling so the field
     // keeps focus.
     if (unified) { var findNav = h("div", "source-find-nav"); findNav.id = "source-find-nav"; host.appendChild(findNav); }
+    // Source find-AND-replace (unified doc only): a replacement field + Replace (current match) /
+    // Replace all. Replacing edits the base prose, so it is gated behind the unlock -- a locked doc
+    // shows a reminder instead. Both paths ride owned undo (replaceRange / replaceAll shift marks).
+    if (unified) {
+      var U = window.VersoUI;
+      var repRow = h("div", "source-replace");
+      var repWrap = h("label", "vbrowser__search source-stage__search-field source-replace__field");
+      repWrap.innerHTML = window.Icon ? window.Icon("replace") : "";
+      var repInput = h("input", "vbrowser__search-input"); repInput.type = "text"; repInput.placeholder = "replace with"; repInput.value = __sourceReplaceQuery;
+      repInput.addEventListener("input", function () { __sourceReplaceQuery = repInput.value; });
+      repWrap.appendChild(repInput);
+      repRow.appendChild(repWrap);
+      var repBtns = h("div", "source-replace__btns");
+      if (U && U.Button) {
+        var repOne = U.Button({ variant: "secondary", size: "sm", label: "Replace", title: "Replace the current match", onClick: function () { replaceCurrentSourceMatch(); } });
+        var repAll = U.Button({ variant: "secondary", size: "sm", label: "Replace all", title: "Replace every match", onClick: function () { replaceAllSourceMatches(); } });
+        repBtns.appendChild(repOne); repBtns.appendChild(repAll);
+      }
+      repRow.appendChild(repBtns);
+      host.appendChild(repRow);
+    }
+  }
+  // Replace the current find match (find-word-cycling's highlighted hit) with the replace text. Gated
+  // behind the unlock; rides replaceRange -> owned undo + mark-shift. Re-runs the find so the count +
+  // highlight track the edited document, staying on the same match index.
+  function replaceCurrentSourceMatch() {
+    var SD = window.SourceDoc, topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (!SD || !topic || !__sourceDocModel) return;
+    if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to replace text."); return; }
+    var m = __sourceFindMatches[__sourceFindIndex]; if (!m) { sourceToast("No match selected."); return; }
+    SD.replaceRange(__sourceDocModel, { nodeKey: m.nodeKey, start: m.start, len: m.len }, __sourceReplaceQuery);
+    persistSourceDocModel(topic, __sourceDocModel);
+    renderSourceArticle();
+    renderSourceTopicList(); // recomputes __sourceFindMatches against the edited doc
+    if (__sourceFindMatches.length) { if (__sourceFindIndex >= __sourceFindMatches.length) __sourceFindIndex = 0; scrollToSourceFindHit(__sourceFindMatches[__sourceFindIndex]); }
+  }
+  // Replace every match in the document (one owned-undo step). Gated behind the unlock; toasts the count.
+  function replaceAllSourceMatches() {
+    var SD = window.SourceDoc, topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (!SD || !topic || !__sourceDocModel) return;
+    if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to replace text."); return; }
+    var q = __sourceSearchQuery; if (!q) { sourceToast("Type something to find first."); return; }
+    var n = SD.replaceAll(__sourceDocModel, q, __sourceReplaceQuery);
+    persistSourceDocModel(topic, __sourceDocModel);
+    renderSourceArticle();
+    renderSourceTopicList();
+    sourceToast(n ? ("Replaced " + n + " match" + (n === 1 ? "" : "es") + ".") : "Nothing to replace.");
   }
 
   function newTopicModal() {

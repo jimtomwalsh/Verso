@@ -598,6 +598,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 /* Source v2 (find-word-cycling): the match navigator under the search field -- "3 / 12" + prev/
    next, only while a query is active. */
 .source-find-nav { display: flex; align-items: center; gap: 2px; padding: 4px 2px 0; }
+/* source find-and-replace: the replacement field + Replace / Replace all, under the find field. */
+.source-replace { display: flex; align-items: center; gap: 6px; padding: 6px 2px 0; }
+.source-replace__field { flex: 1 1 auto; min-width: 0; }
+.source-replace__btns { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .source-find-nav__count { flex: 1 1 auto; font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
 .source-stage__topics { flex: 1 1 auto; overflow-y: auto; padding: 0 4px 10px; }
 /* Matches the Structure outliner's chapter-grouping tier (.tree-chapter__name) --
