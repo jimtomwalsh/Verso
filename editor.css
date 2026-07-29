@@ -636,6 +636,9 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    the longest label ("Digestible") never truncates via .prop-toggle's ellipsis. */
 .source-stage__article-head .prop-toggle-row { min-width: 300px; }
 .source-stage__title { font-size: var(--text-lg, 18px); font-weight: 600; color: var(--text-primary); margin: 0; }
+/* provenance under the header: its own line (the head flex-wraps), muted */
+.source-stage__provenance { flex-basis: 100%; margin: -10px 0 0; font: var(--type-label); color: var(--text-secondary); }
+.source-stage__provenance.is-authored { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
 .source-stage__section { max-width: 640px; margin-bottom: 24px; position: relative; }
 .source-stage__heading { font-size: var(--text-md, 14px); font-weight: 600; color: var(--text-primary); margin: 0 0 6px; }
 .source-stage__body { font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary); }

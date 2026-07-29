@@ -11923,6 +11923,7 @@
       renderSourceTopicList(); // the left-nav row label must stay in sync
     });
     headEl.appendChild(titleInput);
+    headEl.appendChild(renderSourceProvenanceLine(topic)); // provenance pinned under the header
 
     // Section-cells RETIRED (superseded by the continuous document): every topic now uses the
     // continuous node-model article (lock + toolbars + marks). A legacy section topic auto-converts
@@ -11952,6 +11953,32 @@
   // an always-on info aside PLUS an overlay all-marks drawer that stacked on top of it (the
   // "double-up") -- with a single panel of canonical sections in navigator order: Marks (the mark
   // navigator, folded in from the drawer) / History / Source (provenance + where-used) / Comments.
+  // Resolve a topic's imported-source stamp. A unified master built from imported topics may carry no
+  // own stamp (older migrations) -- inherit it from an imported constituent (archivedInto === master.id).
+  function resolveTopicSource(topic) {
+    if (!topic) return null;
+    if (topic.source) return topic.source;
+    if (topic.sourceMaster) {
+      var comps = libComponents(), ids = Object.keys(comps);
+      for (var i = 0; i < ids.length; i++) { var t = comps[ids[i]]; if (t && t.archivedInto === topic.id && t.source) return t.source; }
+    }
+    return null;
+  }
+  // The provenance line shown UNDER the document header (moved out of the sidebar): where this doc
+  // came from (imported file + version/date), or that it was authored in Verso. Sets the reader's
+  // expectation up front.
+  function renderSourceProvenanceLine(topic) {
+    var src = resolveTopicSource(topic);
+    var el = h("div", "source-stage__provenance");
+    if (src) {
+      var meta = [src.version, src.publishDate].filter(Boolean).join(" · ");
+      el.textContent = "Imported from " + (src.file || "an unknown file") + (meta ? " · " + meta : "");
+    } else {
+      el.textContent = "Authored in Verso";
+      el.classList.add("is-authored");
+    }
+    return el;
+  }
   function renderSourceInfoPanel(topic) {
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-info"); if (!host) return;
@@ -11964,19 +11991,9 @@
     // Source -- provenance (which manual file/version/publish date this came from), then where the
     // document is used downstream ("Linked in N"). Both are document-origin facts, so they share
     // one section instead of the old separate top-of-panel "Linked in" block.
+    // Provenance now lives UNDER the document header (renderSourceProvenanceLine); this section keeps
+    // only the downstream "Linked in" usage, so provenance has a single source of truth.
     var sourceBody = panelSection(host, "Source", { collapsible: true });
-    if (topic.source) {
-      sourceBody.appendChild(h("div", "insp-hint", topic.source.file || "Unknown file"));
-      var meta = [topic.source.version, topic.source.publishDate].filter(Boolean).join(" · ");
-      if (meta) sourceBody.appendChild(h("div", "insp-hint", meta));
-      (Object.keys(topic.variantSources || {})).forEach(function (v) {
-        var vs = topic.variantSources[v];
-        var line = v + ": " + (vs.file || "Unknown file") + ([vs.version, vs.publishDate].filter(Boolean).length ? " (" + [vs.version, vs.publishDate].filter(Boolean).join(" · ") + ")" : "");
-        sourceBody.appendChild(h("div", "insp-hint", line));
-      });
-    } else {
-      sourceBody.appendChild(h("div", "insp-hint", "Authored in Verso (no imported source)."));
-    }
     var used = libraryWhereUsedDetail(topic.id, getRegistry());
     sourceBody.appendChild(h("div", "source-info__subhead", "Linked in (" + used.length + ")"));
     if (!used.length) {
@@ -13279,6 +13296,14 @@
     }
     master.doc = SD.toJSON(unified);
     master.updatedAt = Date.now();
+    // provenance fix: carry the imported source stamp onto the unified master so it reports the real
+    // origin, not "Authored in Verso". Take the first constituent that was imported; keep its
+    // variantSources too. (Already-migrated masters with no stamp are repaired read-time by
+    // resolveTopicSource.)
+    if (!master.source) {
+      var imported = topics.filter(function (t) { return t && t.source; })[0];
+      if (imported) { master.source = imported.source; if (imported.variantSources) master.variantSources = imported.variantSources; }
+    }
     product.groundTruthId = master.id;
     topics.forEach(function (t) { t.archivedInto = master.id; });
     saveLibrary();
