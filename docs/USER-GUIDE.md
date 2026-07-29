@@ -897,10 +897,11 @@ a refresh and a stage-switch.
   (all documents when no Product is selected). Click **+** on a row to add it to the queue, or use
   **Add current document** at the top to queue the document you have open. A solo export is just a
   queue of one.
-- **Send straight from the editor.** You don't have to switch stages first: the top-bar **Import &
-  export** (⋯) menu has **Send to publish queue**, which drops the document you're editing into the
-  queue with its remembered preset — no configuration — and confirms with a small toast. Queue a few
-  in a row, then switch to Publish and run them.
+- **Send straight from the editor.** You don't have to switch stages first: the **send** glyph in the
+  editor header (also on the top-bar **Import & export** ⋯ menu as **Send to publish queue**) drops the
+  document you're editing into the queue with its remembered preset — no configuration — and confirms
+  with a small toast showing how many are now pending. Sending a document that's already queued re-arms
+  its row rather than adding a second. Queue a few in a row, then switch to Publish and run them.
 - **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
   **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
   that's already queued re-arms it rather than duplicating it.
