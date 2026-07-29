@@ -4034,26 +4034,11 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 
 .toolbar__home { align-self: center; }
 
-/* #75 save / recents dropdown */
-.vsavemenu {
-  position: fixed; z-index: 9998; width: 300px; max-height: 70vh; overflow-y: auto;
-  padding: var(--space-2); background: var(--surface-raised);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-menu);
-}
-.vsavemenu__head { font: var(--type-section); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--tracking-caps); padding: var(--space-3) var(--space-3) var(--space-2); }
-.vsavemenu__empty { font: var(--type-label); color: var(--text-tertiary); padding: var(--space-2) var(--space-3) var(--space-4); }
-.vsavemenu__row { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3); border-radius: var(--radius-sm); cursor: pointer; }
-.vsavemenu__row:hover { background: var(--surface-hover); }
-.vsavemenu__row.is-active { background: var(--surface-selected); }
-.vsavemenu__thumb { width: 44px; flex: none; border-radius: var(--radius-xs); }
-.vsavemenu__main { min-width: 0; flex: 1 1 auto; }
-.vsavemenu__title { font: var(--type-label-strong); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vsavemenu__code { font: var(--type-label); color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vsavemenu__when { font: var(--type-label); color: var(--text-tertiary); white-space: nowrap; flex: none; }
-.vsavemenu__sep { height: 1px; background: var(--border-subtle); margin: var(--space-2) var(--space-3); }
-.vsavemenu__action { font: var(--type-label-strong); color: var(--text-primary); padding: var(--space-3); border-radius: var(--radius-sm); cursor: pointer; }
-.vsavemenu__action:hover { background: var(--surface-hover); }
-.vsavemenu__path { font: var(--type-mono); color: var(--text-secondary); padding: var(--space-2) var(--space-3) var(--space-3); word-break: break-all; }
+/* side-rail-cleanup slice 2: the file-picker footer -- the "where are my files" store path folded
+   in from the retired #75 save/recents popover. */
+.vbrowser__foot { flex: none; display: flex; align-items: baseline; gap: var(--space-3); padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border-subtle); }
+.vbrowser__foot-label { font: var(--type-label); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
+.vbrowser__foot-path { font: var(--type-mono); color: var(--text-secondary); word-break: break-all; }
 
 /* #148 — on-canvas variant version-cycle badge (image blocks with >=1 variant version).
    Editor chrome ONLY; the preview is a transient <img>.src swap, never doc/render state. */
