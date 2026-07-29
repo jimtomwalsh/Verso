@@ -12087,6 +12087,25 @@ section("Source import: robust markdown -> rich nodes (tables, comments, inline)
   ok("applyTextEdit drops stale formats on a real text change", !em.nodes[0].formats);
 })();
 
+// ---- Source/Editor feedback batch: UI regression guards ---------------------------------------
+section("Source/Editor feedback batch (UI wiring guards)");
+(function () {
+  var e = src("src/editor.js");
+  // Issue 1: the mark-filter tabs carry glyphs, and the SegmentedControl passes the icon through.
+  ok("mark-filter tabs carry Lucide icons (glyphs, not words)", /key: "all", label: "All", icon: "list"[\s\S]{0,220}key: "comment", label: "Comments", icon: "message-square"/.test(e));
+  ok("the filter SegmentedControl forwards each option's icon", /SOURCE_MARK_FILTERS\.map\(function \(f\) \{ return \{ value: f\.key, label: f\.label, icon: f\.icon/.test(e));
+  // Issue 2: the collapse-all button is placed on the shared toolbar row, not its own strip.
+  ok("collapse-all is appended to the shared source toolbar row", /querySelector\("#source-stage-nav-actions \.source-stage__toolbar"\)[\s\S]{0,120}toolbarRow\.appendChild\(collapseBtn\)/.test(e));
+  // Issue 3: an empty source text block gets a <br> so an Enter-split new line is visible.
+  ok("empty source block renders a <br> so it is not zero-height", /if \(!text\) \{ el\.appendChild\(document\.createElement\("br"\)\); return; \}/.test(e));
+  // Issue 4: an auto-picked Product is NOT persisted before the saved scope is restored.
+  ok("auto-pick does not clobber the saved Product before restore", /if \(__productRestored\) setActiveProduct\(keys\[i\]\); else __activeProduct = keys\[i\]/.test(e));
+  // Editor: entering Edit reframes the canvas once it is actually visible.
+  ok("entering Edit frames the canvas the first time it is visible", /stage === "edit" && !__framedWhileVisible[\s\S]{0,500}view\.ready = false; fitAll\(\); __framedWhileVisible = true/.test(e));
+  // Editor: a source-linked image counts as having an image (full inspector shows).
+  ok("a source-linked image gets the full image inspector", /var hasImage = !!\(block\.src \|\| block\.srcLight \|\| block\.srcDark \|\| \(block\.sourceLink && block\.sourceLink\.markId\)\)/.test(e));
+})();
+
 section("Source rewrite: object (image/table) marks (Epic 2b)");
 (function () {
   var SD = require(path.join(ROOT, "src/source-doc.js"));

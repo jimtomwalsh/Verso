@@ -714,6 +714,10 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
    see renderSourceToolbar. Sits between the search field and the list. */
 .source-stage__nav-actions { padding: 0 6px 6px; flex: 0 0 auto; }
 .source-stage__toolbar { display: flex; align-items: center; gap: 2px; }
+/* Give every Source toolbar glyph (New topic / Import / Product actions / collapse-all) a comfortable,
+   consistent hit target -- the collapse-all glyph used to sit apart and read too small. */
+.source-stage__toolbar .vds-iconbtn { width: 28px; height: 28px; }
+.source-stage__toolbar .vds-iconbtn svg { width: 19px; height: 19px; }
 .source-stage__toolbar-badge-wrap { position: relative; display: inline-flex; }
 .source-stage__toolbar-badge { position: absolute; top: -3px; right: -3px; pointer-events: none; }
 

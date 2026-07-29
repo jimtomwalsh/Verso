@@ -11445,7 +11445,15 @@
     var pid = getActiveProduct();
     if (pid && window.ProductsStore[pid]) return pid;
     var keys = Object.keys(window.ProductsStore || {});
-    for (var i = 0; i < keys.length; i++) { if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) { setActiveProduct(keys[i]); return keys[i]; } }
+    for (var i = 0; i < keys.length; i++) {
+      if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) {
+        // Before the saved scope is restored (boot), auto-pick in memory ONLY -- persisting here would
+        // overwrite the author's saved Product with a default before restoreActiveProduct reads it,
+        // which is exactly the "refresh resets the dropdown" bug.
+        if (__productRestored) setActiveProduct(keys[i]); else __activeProduct = keys[i];
+        return keys[i];
+      }
+    }
     return keys[0] || "";
   }
   // Resolve the active Product's unified-doc master, migrating on first entry when the Product
@@ -11590,8 +11598,7 @@
     var expandableKeys = tree.filter(function (ch) { return (ch.children || []).length > 0; }).map(function (ch) { return ch.key; });
     if (!q && expandableKeys.length && U.IconButton) {
       var anyOpen = expandableKeys.some(function (k) { return __sourceOpenChapters[k] !== false; });
-      var tools = h("div", "source-toc__tools");
-      tools.appendChild(U.IconButton({
+      var collapseBtn = U.IconButton({
         icon: "list-collapse",
         label: anyOpen ? "Collapse all chapters" : "Expand all chapters",
         onClick: function () {
@@ -11599,8 +11606,13 @@
           else expandableKeys.forEach(function (k) { delete __sourceOpenChapters[k]; });
           renderSourceTopicList();
         }
-      }));
-      host.appendChild(tools);
+      });
+      // Sit on the SAME row as New topic / Import / Product actions (built by renderSourceToolbar just
+      // above) rather than in its own full-width strip atop the tree. Falls back to a strip if the
+      // toolbar row isn't there.
+      var toolbarRow = document.querySelector("#source-stage-nav-actions .source-stage__toolbar");
+      if (toolbarRow) toolbarRow.appendChild(collapseBtn);
+      else { var tools = h("div", "source-toc__tools"); tools.appendChild(collapseBtn); host.appendChild(tools); }
     }
     tree.forEach(function (ch) {
       var kids = (ch.children || []).filter(function (k) { return keep(k.key); });
@@ -12109,6 +12121,10 @@
   // mark engine (which walks text nodes by character offset) still lines up on the plain model text.
   function fillSourceInline(el, text, runs) {
     text = String(text == null ? "" : text);
+    // An empty text block generates no line box in the contentEditable article, so it has zero height
+    // and is invisible -- an Enter at the end of a line splits off an empty paragraph that "vanishes"
+    // (History still logs the split). A trailing <br> gives the empty block a line to sit on.
+    if (!text) { el.appendChild(document.createElement("br")); return; }
     if (!runs || !runs.length) { el.textContent = text; return; }
     var sorted = runs.slice().sort(function (a, b) { return a.start - b.start; });
     var pos = 0;
@@ -12940,10 +12956,10 @@
   // built by renderSourceInfoPanel). The filter set is shared. Clicking a row activates + scrolls
   // to that mark in the article, exactly as the drawer did.
   var SOURCE_MARK_FILTERS = [
-    { key: "all", label: "All" },
-    { key: "alternate", label: "Alternates" },
-    { key: "link", label: "Linked" },
-    { key: "comment", label: "Comments" }
+    { key: "all", label: "All", icon: "list" },
+    { key: "alternate", label: "Alternates", icon: "square-pen" },
+    { key: "link", label: "Linked", icon: "link" },
+    { key: "comment", label: "Comments", icon: "message-square" }
   ];
   // Reveal a mark in the consolidated panel: open the panel if hidden, highlight its row, and
   // scroll the article to it (the "selecting a mark opens the panel to that mark" behaviour).
@@ -12971,7 +12987,7 @@
     if (U && U.SegmentedControl) {
       body.appendChild(U.SegmentedControl({
         size: "sm",
-        options: SOURCE_MARK_FILTERS.map(function (f) { return { value: f.key, label: f.label }; }),
+        options: SOURCE_MARK_FILTERS.map(function (f) { return { value: f.key, label: f.label, icon: f.icon, title: f.label }; }),
         value: __sourceMarksFilter,
         onChange: function (v) { __sourceMarksFilter = v; var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; if (t) renderSourceInfoPanel(t); }
       }));

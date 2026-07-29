@@ -661,6 +661,11 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
   import**; an update keeps the parts you haven't changed (so any alternates or comments on them stay
   put) and only adds or removes what actually differs. There's no silent whole-document overwrite.
+- **What import turns into rich content.** Headings, bullet and numbered lists, and **tables** (pipe
+  tables) come in as real tables — not lines of text with dividers. Inline **bold**, *italic* and
+  `code` markup is formatted rather than shown as raw asterisks/backticks, including inside list items
+  and table cells. HTML page markers like `<!-- Page 43 -->` (common in PDF-to-Markdown conversions)
+  are stripped on the way in.
 - **Bringing in a variant's manual.** If your Product has variants declared, importing asks first
   whether the file updates the **Flagship** (the base) or a **variant**. Choosing a variant runs a
   **combine**: it reconciles that manual against the Flagship per paragraph and previews exactly what
