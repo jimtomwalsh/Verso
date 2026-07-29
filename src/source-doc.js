@@ -156,24 +156,53 @@
     return (model.nodes || []).filter(function (n) { return n.type === "heading"; })
       .map(function (n) { return { key: n.key, level: n.level || 2, text: nodeText(n) }; });
   }
+  // Insert a node immediately AFTER the node keyed blockKey (or at the end when blockKey is null /
+  // not found -- the toolbar-insert decision: drop the new block after the selected one). The new
+  // node gets a fresh unique key; existing keys, marks (anchored by key) and variants ride along
+  // untouched. Pushes ONE undo. Returns the inserted node. Pure -> headlessly testable.
+  function insertNodeAfter(model, blockKey, node) {
+    if (!model) return null;
+    pushUndo(model);
+    var c = clone(node) || {};
+    if (NODE_TYPES.indexOf(c.type) === -1) c.type = "paragraph";
+    var k; do { k = nextId(model, "n"); } while (nodeByKey(model, k)); c.key = k;
+    model.nodes = model.nodes || [];
+    var at = model.nodes.length;
+    if (blockKey != null) { for (var i = 0; i < model.nodes.length; i++) { if (model.nodes[i].key === blockKey) { at = i + 1; break; } } }
+    model.nodes.splice(at, 0, c);
+    return c;
+  }
 
   // ---- marks ---------------------------------------------------------------
   // A text mark: {id,type,anchor:{nodeKey,start,len},variant,baseText,alt,comments,locations,stale,broken}.
   // An object mark (image/whole node): anchor:{nodeKey} (no start/len), kind inferred by absence of len.
   function addMark(model, spec) {
     pushUndo(model);
+    var a = spec.anchor || { nodeKey: null, start: 0, len: 0 };
+    // Store a CLEAN anchor -- the selection descriptor from SourceMarks.selectionAnchor() carries a
+    // nested endAnchor + a `multi` flag that must not leak into the persisted anchor.
     var m = {
       id: spec.id || nextId(model, "m"),
       type: MARK_TYPES.indexOf(spec.type) === -1 ? "alternate" : spec.type,
-      anchor: clone(spec.anchor) || { nodeKey: null, start: 0, len: 0 },
+      anchor: a.len == null ? { nodeKey: a.nodeKey } : { nodeKey: a.nodeKey, start: a.start, len: a.len },
       variant: spec.variant || "",
       tag: spec.tag != null ? spec.tag : "", // what an alternate is "appropriate for" (detail/doc-type/purpose)
-      baseText: spec.baseText != null ? spec.baseText : anchorText(model, spec.anchor),
+      baseText: null,
       alt: spec.alt != null ? spec.alt : null,
       comments: spec.comments ? clone(spec.comments) : [],
       locations: spec.locations ? clone(spec.locations) : null,
       stale: false, broken: false
     };
+    // A selection spanning 2+ nodes carries an endAnchor (the LAST covered node, start always 0);
+    // the mark then covers from anchor (the first node, to its end) through endAnchor, with every
+    // node between them covered whole and derived from document order (see markSpans). A same-node
+    // or object anchor stays single-block. This is the one word -> whole document range (D1). The
+    // endAnchor can arrive at spec.endAnchor OR nested on spec.anchor (the selection descriptor).
+    var end = spec.endAnchor || a.endAnchor;
+    if (end && end.nodeKey && a.len != null && end.nodeKey !== a.nodeKey) {
+      m.endAnchor = { nodeKey: end.nodeKey, start: 0, len: end.len || 0 };
+    }
+    m.baseText = spec.baseText != null ? spec.baseText : markText(model, m);
     model.marks.push(m);
     return m;
   }
@@ -185,15 +214,68 @@
     if (!n) return "";
     return nodeText(n).substr(anchor.start, anchor.len);
   }
+
+  // ---- multi-block marks: one word to the whole document (D1) ----------------
+  // A single-block mark anchors to one node (anchor {nodeKey,start,len}). A mark covering 2+ nodes
+  // ALSO carries endAnchor {nodeKey,start,len} for the LAST covered node (start always 0); anchor
+  // then describes the FIRST covered node (start..node end). Every node strictly between the two is
+  // covered whole, derived from document order -- so interior text stays fully covered however it is
+  // edited, and only the two endpoint offsets ride edits. Object marks (no len) are never multi-block.
+  function isMultiBlock(m) {
+    return !!(m && m.endAnchor && m.anchor && m.anchor.len != null && m.endAnchor.nodeKey && m.endAnchor.nodeKey !== m.anchor.nodeKey);
+  }
+  function nodeIndex(model, key) {
+    var ns = (model && model.nodes) || [];
+    for (var i = 0; i < ns.length; i++) if (ns[i].key === key) return i;
+    return -1;
+  }
+  // The ordered per-node sub-spans a mark covers: {nodeKey,start,len,whole}. Single-block -> the one
+  // anchor. Multi-block -> first node [anchor.start..end], interior nodes whole, last node
+  // [0..endAnchor.len]. Empty when an endpoint node is missing or the endpoints are out of document
+  // order (the mark is broken). Pure -> the painting engine and the text ops share one definition.
+  function markSpans(model, m) {
+    if (isObjectMark(m)) return [];
+    if (!isMultiBlock(m)) return [{ nodeKey: m.anchor.nodeKey, start: m.anchor.start, len: m.anchor.len, whole: false }];
+    var si = nodeIndex(model, m.anchor.nodeKey), ei = nodeIndex(model, m.endAnchor.nodeKey);
+    if (si < 0 || ei < 0 || ei < si) return [];
+    var out = [], ns = model.nodes;
+    for (var i = si; i <= ei; i++) {
+      var n = ns[i], full = nodeText(n).length;
+      if (i === si) out.push({ nodeKey: n.key, start: m.anchor.start, len: Math.max(0, full - m.anchor.start), whole: m.anchor.start === 0 });
+      else if (i === ei) out.push({ nodeKey: n.key, start: 0, len: Math.min(m.endAnchor.len, full), whole: false });
+      else out.push({ nodeKey: n.key, start: 0, len: full, whole: true });
+    }
+    return out;
+  }
+  // The live text a mark currently covers, read from the model (never the DOM): one node for a
+  // single-block mark, the covered slice of every node joined by newlines for a multi-block one.
+  // This is the canonical string baseText is set from and staleness is compared against.
+  function markText(model, m) {
+    if (isObjectMark(m)) return "";
+    if (!isMultiBlock(m)) return anchorText(model, m.anchor);
+    return markSpans(model, m).map(function (s) {
+      var n = nodeByKey(model, s.nodeKey); return n ? nodeText(n).substr(s.start, s.len) : "";
+    }).join("\n");
+  }
+  // Is `nodeKey` one of the interior (fully covered) nodes of a multi-block mark -- strictly between
+  // its first and last covered node in document order? Interior nodes carry no stored offsets (their
+  // coverage is derived), so an edit to one shifts nothing but still re-evaluates broken/stale.
+  function multiCoversInterior(model, m, nodeKey) {
+    var si = nodeIndex(model, m.anchor.nodeKey), ei = nodeIndex(model, m.endAnchor.nodeKey), k = nodeIndex(model, nodeKey);
+    return si >= 0 && ei >= 0 && k > si && k < ei;
+  }
   // Re-evaluate a mark's broken/stale flags against the current model text. Broken = the
   // anchored span emptied, or a long span lost >75% of its characters (a destructive delete,
   // matching the prototype's threshold). Stale = an alternate whose base span drifted from
   // the text it was written against (the sharpest provenance signal; spec 3.2).
   function refreshMark(model, m) {
     if (isObjectMark(m)) { m.broken = !nodeByKey(model, m.anchor.nodeKey); return m; }
-    var cur = anchorText(model, m.anchor);
+    var multi = isMultiBlock(m);
+    var cur = markText(model, m); // single node, or every covered node joined (multi-block)
     var wasBroken = m.broken;
-    m.broken = m.anchor.len <= 0 || cur.trim() === "";
+    // Broken = the covered text emptied: for a single-block mark its span went to zero; for a
+    // multi-block one an endpoint node vanished (markSpans []) or the whole covered text trimmed away.
+    m.broken = multi ? (markSpans(model, m).length === 0 || cur.trim() === "") : (m.anchor.len <= 0 || cur.trim() === "");
     if (!m.broken && m.baseText && m.baseText.length > 40 && cur.length < m.baseText.length * 0.25) m.broken = true;
     var wasStale = m.stale;
     if (!m.broken && m.type === "alternate" && m.alt != null) m.stale = (cur !== m.baseText);
@@ -226,9 +308,22 @@
     if (edit.removed === 0 && edit.inserted === 0) return { model: model, edit: edit };
     if (!opts.noUndo) pushUndo(model);
     setNodeText(node, newText);
+    var editedLen = nodeText(node).length; // the node now holds newText
     (model.marks || []).forEach(function (m) {
-      if (isObjectMark(m) || m.anchor.nodeKey !== nodeKey) return;
-      m.anchor = shiftAnchor(m.anchor, edit);
+      if (isObjectMark(m)) return;
+      if (isMultiBlock(m)) {
+        // Shift only the two endpoint offsets; interior nodes are covered whole and derived, so an
+        // edit to one needs no offset bookkeeping (only a broken/stale re-check). Skip marks whose
+        // covered range does not touch the edited node at all.
+        var atStart = m.anchor.nodeKey === nodeKey, atEnd = m.endAnchor.nodeKey === nodeKey;
+        if (!atStart && !atEnd && !multiCoversInterior(model, m, nodeKey)) return;
+        if (atStart) { m.anchor.start = mapPos(m.anchor.start, edit, "right"); m.anchor.len = Math.max(0, editedLen - m.anchor.start); }
+        // the last node's coverage always begins at 0, so only its END offset rides the edit (end-exclusive, left gravity)
+        if (atEnd) { m.endAnchor.len = Math.min(mapPos(m.endAnchor.len, edit, "left"), editedLen); }
+      } else {
+        if (m.anchor.nodeKey !== nodeKey) return;
+        m.anchor = shiftAnchor(m.anchor, edit);
+      }
       refreshMark(model, m);
       // A span breaking is a structural provenance event (spec 3.2 / 5), so it earns a
       // discrete History entry even though the surrounding prose edit collapses to a commit.
@@ -401,7 +496,12 @@
     if (!m) return null;
     pushUndo(model);
     m.anchor = { nodeKey: anchor.nodeKey, start: anchor.start, len: anchor.len };
-    m.baseText = anchorText(model, m.anchor);
+    // A new endAnchor re-spans the mark; its absence PRESERVES any existing one (the "reviewed"
+    // re-baseline passes only the first-node anchor of a multi-block mark and must keep its span).
+    if (anchor.endAnchor && anchor.endAnchor.nodeKey && anchor.endAnchor.nodeKey !== anchor.nodeKey) {
+      m.endAnchor = { nodeKey: anchor.endAnchor.nodeKey, start: 0, len: anchor.endAnchor.len || 0 };
+    }
+    m.baseText = markText(model, m);
     m.stale = false; m.broken = false;
     logHistory(model, { type: "mark-updated", markId: m.id, markType: m.type });
     return m;
@@ -410,11 +510,11 @@
   // fully contains the mark's span in the same node and is strictly longer. Drives whether the
   // selection toolbar shows "create" or flips to "⟳ update <existing>".
   function markExtendedBy(model, anchor) {
-    if (!anchor || anchor.len == null) return null;
+    if (!anchor || anchor.len == null || anchor.endAnchor) return null; // ⟳ update is single-block only
     var selEnd = anchor.start + anchor.len;
     var found = null;
     (model.marks || []).forEach(function (m) {
-      if (isObjectMark(m) || m.broken || m.anchor.nodeKey !== anchor.nodeKey) return;
+      if (isObjectMark(m) || isMultiBlock(m) || m.broken || m.anchor.nodeKey !== anchor.nodeKey) return;
       var mEnd = m.anchor.start + m.anchor.len;
       if (anchor.start <= m.anchor.start && selEnd >= mEnd && anchor.len > m.anchor.len) {
         if (!found || m.anchor.len > found.anchor.len) found = m; // prefer the largest contained mark
@@ -427,6 +527,11 @@
     var end = start + len;
     return (model.marks || []).filter(function (m) {
       if (isObjectMark(m)) return m.anchor.nodeKey === nodeKey;
+      if (isMultiBlock(m)) {
+        return markSpans(model, m).some(function (s) {
+          return s.nodeKey === nodeKey && s.start < end && (s.start + s.len) > start;
+        });
+      }
       if (m.anchor.nodeKey !== nodeKey) return false;
       var mEnd = m.anchor.start + m.anchor.len;
       return m.anchor.start < end && mEnd > start; // strict overlap
@@ -889,12 +994,62 @@
     return i === n.length;
   }
 
+  // ---- source v2: serialise the continuous document back out to Markdown (.md) ---------------
+  // The inverse of the import on-ramp (product-rail-source-rw-markdown-export). A node tree -> a
+  // portable Markdown string. Inline conventions (bold **x**, `inline code`) already live literally
+  // in node text, so they emit as-is; each block type maps to standard Markdown. Pure + DOM-free ->
+  // headlessly testable and reusable anywhere. Chapter headings (level 1) become `# `.
+  function mdCell(c) { return String(c == null ? "" : c).replace(/\|/g, "\\|"); }
+  function nodeToMarkdown(node) {
+    if (!node) return "";
+    switch (node.type) {
+      case "heading": {
+        var lvl = Math.max(1, Math.min(6, node.level || 2));
+        return new Array(lvl + 1).join("#") + " " + (node.text || "");
+      }
+      case "paragraph": return String(node.text == null ? "" : node.text);
+      case "callout": {
+        var t = String(node.text == null ? "" : node.text);
+        var lines = t.split("\n");
+        return lines.map(function (line, i) {
+          return "> " + (i === 0 && node.tag ? "**" + node.tag + "** " : "") + line;
+        }).join("\n");
+      }
+      case "list": {
+        var ordered = !!node.ordered;
+        return (node.items || []).map(function (it, i) { return (ordered ? (i + 1) + ". " : "- ") + it; }).join("\n");
+      }
+      case "table": {
+        var rows = node.rows || [];
+        if (!rows.length) return "";
+        var head = rows[0] || [], out = [];
+        out.push("| " + head.map(mdCell).join(" | ") + " |");
+        out.push("| " + head.map(function () { return "---"; }).join(" | ") + " |");
+        for (var i = 1; i < rows.length; i++) out.push("| " + (rows[i] || []).map(mdCell).join(" | ") + " |");
+        return out.join("\n");
+      }
+      case "image": {
+        var alt = node.alt || node.caption || "";
+        var md = "![" + alt + "](" + (node.src || "") + ")";
+        if (node.caption && node.caption !== alt) md += "\n\n*" + node.caption + "*";
+        return md;
+      }
+      default: return String(node.text == null ? "" : node.text);
+    }
+  }
+  function toMarkdown(model) {
+    var body = ((model && model.nodes) || []).map(nodeToMarkdown).join("\n\n");
+    return body.replace(/\n{3,}/g, "\n\n").replace(/^\n+|\n+$/g, "") + "\n";
+  }
+
   var _pure = {
     nodeText: nodeText, setNodeText: setNodeText, isTextNode: isTextNode,
+    nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
+    isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
@@ -909,9 +1064,10 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
+    isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit,
     undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo, pushUndo: pushUndo,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
@@ -921,6 +1077,7 @@
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
     FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
+    toMarkdown: toMarkdown,
     toJSON: toJSON, fromJSON: fromJSON,
     _pure: _pure
   };
