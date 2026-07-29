@@ -28,7 +28,10 @@
 (function () {
   "use strict";
 
-  var NODE_TYPES = ["heading", "paragraph", "list", "table", "image", "callout"];
+  // "row" (A3) is a layout container holding 2-3 image children side by side. It carries no text
+  // and is not itself markable; its image children keep their own keys + marks (nesting must not
+  // change a key, or object marks orphan). Walkers that resolve a node by key descend into rows.
+  var NODE_TYPES = ["heading", "paragraph", "list", "table", "image", "callout", "row"];
   var MARK_TYPES = ["link", "alternate", "comment"];
 
   // ---- ids -----------------------------------------------------------------
@@ -59,7 +62,7 @@
         return "";
     }
   }
-  function isTextNode(node) { return node && node.type !== "image"; }
+  function isTextNode(node) { return node && node.type !== "image" && node.type !== "row"; }
 
   // ---- offset-preserving inline tokeniser (source-rich-render) -------------
   // Splits a node's canonical text into runs, tagging bold (**..**) and inline code (`..`) using
@@ -171,8 +174,66 @@
   }
   function nodeByKey(model, key) {
     var ns = model.nodes || [];
-    for (var i = 0; i < ns.length; i++) if (ns[i].key === key) return ns[i];
+    for (var i = 0; i < ns.length; i++) {
+      if (ns[i].key === key) return ns[i];
+      // A3: descend one level into a row so a nested image resolves by key (marks anchor by key).
+      if (ns[i].type === "row" && ns[i].children) {
+        for (var j = 0; j < ns[i].children.length; j++) if (ns[i].children[j].key === key) return ns[i].children[j];
+      }
+    }
     return null;
+  }
+  // A3: locate the row that owns a child image (by key) -> { row, rowIndex, childIndex } or null.
+  function rowOf(model, childKey) {
+    var ns = model.nodes || [];
+    for (var i = 0; i < ns.length; i++) {
+      if (ns[i].type === "row" && ns[i].children) {
+        for (var j = 0; j < ns[i].children.length; j++) if (ns[i].children[j].key === childKey) return { row: ns[i], rowIndex: i, childIndex: j };
+      }
+    }
+    return null;
+  }
+  // A3: "place beside next" -- wrap a top-level image and the adjacent image into a row (2-3 max).
+  // If the next node is already a row with room, the selected image joins it. Keys are preserved so
+  // marks stay attached. Returns true when something combined. No-op (false) if there's nothing to
+  // place beside, so the caller can toast.
+  function combineIntoRow(model, nodeKey) {
+    var ns = model.nodes || [];
+    // Case 1: a top-level image combines with the node right after it.
+    for (var i = 0; i < ns.length; i++) {
+      if (ns[i].key === nodeKey && ns[i].type === "image") {
+        var next = ns[i + 1];
+        if (!next) return false;
+        if (next.type === "image") {
+          var rk; do { rk = nextId(model, "n"); } while (nodeByKey(model, rk));
+          ns.splice(i, 2, { type: "row", key: rk, children: [ns[i], next] });
+          return true;
+        }
+        if (next.type === "row" && next.children && next.children.length < 3) { next.children.unshift(ns[i]); ns.splice(i, 1); return true; }
+        return false;
+      }
+    }
+    // Case 2: the LAST image in a row pulls in the following top-level image (grow to 3).
+    var loc = rowOf(model, nodeKey);
+    if (loc && loc.childIndex === loc.row.children.length - 1 && loc.row.children.length < 3) {
+      var after = ns[loc.rowIndex + 1];
+      if (after && after.type === "image") { loc.row.children.push(after); ns.splice(loc.rowIndex + 1, 1); return true; }
+    }
+    return false;
+  }
+  // A3: take a child image out of its row and drop it back as a top-level node just after the row.
+  // If the row falls to a single child, the row dissolves back into that lone image. Keys preserved.
+  // Returns the freed child's key (for reselect) or null.
+  function removeFromRow(model, childKey) {
+    var loc = rowOf(model, childKey); if (!loc) return null;
+    var ns = model.nodes || [], child = loc.row.children.splice(loc.childIndex, 1)[0];
+    ns.splice(loc.rowIndex + 1, 0, child);
+    if (loc.row.children.length === 1) {
+      // dissolve: replace the row with its remaining lone image, in place
+      var lone = loc.row.children[0];
+      var ri = ns.indexOf(loc.row); if (ri >= 0) ns.splice(ri, 1, lone);
+    }
+    return child.key;
   }
   function markById(model, id) {
     var ms = model.marks || [];
@@ -1259,6 +1320,8 @@
         if (node.caption && node.caption !== alt) md += "\n\n*" + node.caption + "*";
         return md;
       }
+      case "row": // A3: emit each side-by-side image on its own line -- Markdown has no row primitive
+        return (node.children || []).map(nodeToMarkdown).filter(Boolean).join("\n\n");
       default: return String(node.text == null ? "" : node.text);
     }
   }
@@ -1287,6 +1350,7 @@
     selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
+    rowOf: rowOf, combineIntoRow: combineIntoRow, removeFromRow: removeFromRow,
     FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc
   };
 
@@ -1304,6 +1368,7 @@
     selbarDecision: selbarDecision,
     summarizeEdits: summarizeEdits, historyEntryView: historyEntryView,
     isMarkableObjectNode: isMarkableObjectNode, objectAlternatesFor: objectAlternatesFor, objectNodeLabel: objectNodeLabel, whereUsedForMark: whereUsedForMark,
+    rowOf: rowOf, combineIntoRow: combineIntoRow, removeFromRow: removeFromRow,
     FLAGSHIP: FLAGSHIP, isFlagship: isFlagship, nodeForVariant: nodeForVariant, variantView: variantView, setVariantText: setVariantText, removeNodeFromVariant: removeNodeFromVariant, restoreNodeToVariant: restoreNodeToVariant, variantsInDoc: variantsInDoc,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     toMarkdown: toMarkdown,

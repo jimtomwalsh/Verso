@@ -12132,6 +12132,12 @@
     else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); paintSourceInline(cb, SD.nodeText(node)); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
     else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it) { el.appendChild(h("li", null, it)); }); }
     else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row) { var tr = h("tr"); (row || []).forEach(function (c) { tr.appendChild(h("td", null, c)); }); el.appendChild(tr); }); }
+    else if (node.type === "row") {
+      // A3: a row lays its image children side by side. Each child renders through the normal path
+      // so it keeps its own key (marks stay attached), its width (A1) and its align chrome.
+      el = h("div", "source-doc__row");
+      (node.children || []).forEach(function (ch) { el.appendChild(renderSourceDocNode(ch)); });
+    }
     else if (node.type === "image") {
       // A1: the image sits inside a sized wrap so the L/R resize handles pin to the image edges
       // (not the full-width figure). Width = node.imgWidth % of the column, applied purely.
@@ -12996,6 +13002,8 @@
     bar.appendChild(seg("align-left", "align-left", "Align left", "source-selbar__img"));
     bar.appendChild(seg("align-center", "align-center", "Align centre", "source-selbar__img"));
     bar.appendChild(seg("align-right", "align-right", "Align right", "source-selbar__img"));
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
+    bar.appendChild(seg("row", "columns-2", "Place beside next image", "source-selbar__img")); // A3
     bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
     bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = "none"; });
     bar.querySelector('[data-cmd="update"]').style.display = "none";
@@ -13088,7 +13096,7 @@
         document.removeEventListener("pointerup", up);
         if (guide.parentNode) guide.remove();
         fig.classList.remove("is-resizing");
-        var node = (model.nodes || []).find(function (n) { return n.key === nodeKey; });
+        var node = window.SourceDoc.nodeByKey(model, nodeKey); // descends into a row child (A3)
         if (node) {
           if (lastPct >= 100) delete node.imgWidth; else node.imgWidth = lastPct;
           persistSourceDocModel(topic, model);
@@ -13146,7 +13154,12 @@
       var node = (__sourceDocModel && __sourceDocModel.nodes || []).find(function (n) { return n.key === nodeKey; });
       var isImg = node && node.type === "image";
       bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = isImg ? "" : "none"; });
-      if (isImg) syncSourceAlignActive(bar, sourceImgAlign(node) || "center");
+      if (isImg) {
+        syncSourceAlignActive(bar, sourceImgAlign(node) || "center");
+        // A3: the row button toggles meaning by context (in a row -> take out; else -> place beside).
+        var rowBtn = bar.querySelector('[data-cmd="row"]');
+        if (rowBtn) { var inRow = !!SD.rowOf(__sourceDocModel, nodeKey); rowBtn.title = inRow ? "Take out of the row" : "Place beside next image"; rowBtn.classList.toggle("is-active", inRow); }
+      }
       positionSourceSelBar(bar, el.getBoundingClientRect());
     }
     // if the object already carries an alternate or a link, open the matching contextual panel
@@ -13172,13 +13185,33 @@
       if (!__sourceObjectSelKey) return;
       if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to align the image."); return; }
       var al = cmd.slice("align-".length);
-      var anode = (__sourceDocModel.nodes || []).find(function (n) { return n.key === __sourceObjectSelKey; });
+      var anode = window.SourceDoc.nodeByKey(__sourceDocModel, __sourceObjectSelKey); // row child too (A3)
       if (!anode) return;
       if (al === "center") delete anode.align; else anode.align = al;
       var fig = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
       if (fig) fig.style.textAlign = (al === "center") ? "" : al;
       persistSourceDocModel(topic, __sourceDocModel);
       var bar = sourceSelBarEl(); if (bar) { syncSourceAlignActive(bar, al); if (fig) positionSourceSelBar(bar, fig.getBoundingClientRect()); }
+      return;
+    }
+    // A3: "place beside next" -- combine this image with the adjacent one into a side-by-side row,
+    // or, if it's already in a row, take it back out. Structural -> gated behind the unlock.
+    if (cmd === "row") {
+      if (!__sourceObjectSelKey) return;
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to arrange images."); return; }
+      var selKey = __sourceObjectSelKey;
+      if (SD.rowOf(__sourceDocModel, selKey)) {
+        SD.removeFromRow(__sourceDocModel, selKey);
+        sourceToast("Took the image out of the row.");
+      } else if (SD.combineIntoRow(__sourceDocModel, selKey)) {
+        sourceToast("Placed the images side by side.");
+      } else {
+        sourceToast("Add another image right after this one to place them side by side.");
+        return;
+      }
+      persistSourceDocModel(topic, __sourceDocModel);
+      renderSourceArticle();
+      selectSourceObject(topic, selKey); // re-select the same image in its new home
       return;
     }
     if (cmd === "update" && __sourceUpdateTarget && __sourceSelAnchor) {

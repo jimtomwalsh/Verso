@@ -900,6 +900,9 @@ h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
 .source-doc__table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: var(--text-sm, 13px); }
 .source-doc__table td { border: 1px solid var(--border-strong); padding: 6px 9px; }
 .source-doc__figure { margin: 1.2em 0; text-align: center; }
+/* A3: a row lays 2-3 image figures side by side; each keeps its own width + align chrome. */
+.source-doc__row { display: flex; gap: var(--space-6, 12px); align-items: flex-start; margin: 1.2em 0; }
+.source-doc__row .source-doc__figure { flex: 1 1 0; margin: 0; min-width: 0; }
 /* A1: the image lives in a centred, width-sized wrap so the resize handles pin to the image edges. */
 .source-doc__imgwrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; vertical-align: top; }
 .source-doc__figure img { max-width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; }
