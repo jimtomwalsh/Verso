@@ -10276,6 +10276,14 @@ section("#170/#158 shared formatting toggle-bar");
   ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   // exactly one config-driven toggle list in the whole file (no second duplicate copy).
   ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (e.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1);
+  // floating-format-bar-to-edit-canvas: an above-selection floating B/I/U bar on the Edit canvas,
+  // reusing FORMAT_TOGGLES' inline-exec set (one config, two surfaces) + the field's own input->commit.
+  var fb = slice(e, "/* @canvas-fmtbar-start */", "/* @canvas-fmtbar-end */");
+  ok("floating bar reuses the inline-exec FORMAT_TOGGLES (shared config, glyph icons)", /FORMAT_TOGGLES\.filter\(function \(t\) \{ return t\.kind === "inline-exec"; \}\)/.test(fb) && /FMTBAR_GLYPH = \{ bold: "bold", italic: "italic", underline: "underline" \}/.test(fb));
+  ok("clicking runs execCommand (no separate write path -- fires the field's own input->writeModel)", /document\.execCommand\(t\.cmd, false, null\); syncCanvasFmtBarActive\(bar\)/.test(fb) && fb.indexOf("writeModel") === -1);
+  ok("the bar binds ONLY to a live editable [data-edit] canvas field (never the Source [data-node] selbar)", /function canvasEditableFieldOf\(node\)[\s\S]{0,200}closest\("\[data-edit\]\.is-editable"\)[\s\S]{0,120}getAttribute\("contenteditable"\) === "true"/.test(fb));
+  ok("a collapsed / non-field selection hides the bar (no bar over a caret or outside a field)", /if \(!sel \|\| !sel\.rangeCount \|\| sel\.isCollapsed\) \{ hideCanvasFmtBar\(\); return; \}[\s\S]{0,160}if \(!canvasEditableFieldOf\(r\.commonAncestorContainer\)\) \{ hideCanvasFmtBar\(\); return; \}/.test(fb));
+  ok("the selection listener + the 'underline' glyph are wired", /document\.addEventListener\("selectionchange", onCanvasSelectionChange\)/.test(e) && /"underline":/.test(src("src/icons.js")) && /\.canvas-fmtbar__btn/.test(src("editor.css")));
 })();
 
 // ---- #170/#33: text<->list block-type conversion (pure) -----------------------
