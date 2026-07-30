@@ -71,33 +71,33 @@ interactive blocks you already placed are kept, and turning interactivity back o
 ## 3. The workspace
 
 Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (centre), and the
-**Inspector** (right). A slim **global bar** runs across the very top, and the Edit stage has its
-own **editor header** beneath it.
+**Inspector** (right). A single **top bar** runs across the very top of every stage.
 
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
-- **Global bar (very top).** App-level only: the **Verso** mark, the **product picker** (sets the
-  active product across Source, Edit and Publish — and **scopes the open tabs** to that product;
-  "All products" shows every open tab; your choice is **remembered across refresh**), a **＋** beside
-  it to **create a new product** from scratch, and the **storage-health dot**. Creating a product
-  (either the **＋** here or **New Product** in the document browser) makes it the active product and
-  drops you on its **document browser** — empty, since nothing is tagged to it yet; any course you
-  create from there is tagged to the new product automatically.
-- **Editor header (Edit stage).** Everything about the document you're editing lives here, on one
-  bar split into three zones by faint dividers. **Tabs** (left): the **file-picker** (▤, browse all
-  courses — a browser **grouped by document type**, colour-coded, each card showing its product,
+- **Top bar.** One bar carries everything, left to right. **Identity** (always shown): the **Verso**
+  mark, the **product picker** (sets the active product across Source, Edit and Publish — and
+  **scopes the open tabs** to that product; "All products" shows every open tab; your choice is
+  **remembered across refresh**), a **＋** to **create a new product** from scratch, and the
+  **storage-health dot** beside it. Creating a product (either the **＋** here or **New Product** in
+  the document browser) makes it the active product and drops you on its **document browser** —
+  empty, since nothing is tagged to it yet; any course you create from there is tagged to the new
+  product automatically.
+  The rest of the bar appears **only in the Edit stage** and covers the document you're editing, in
+  three zones split by faint dividers. **Tabs:** the **file-picker** (▤, browse all courses — a
+  browser **grouped by document type**, colour-coded, each card showing its product,
   interactive/static and whether it's open; it respects the product scope and opens automatically
   when no course is open) and the **open-course tabs**. Each tab carries a **doc-type glyph** (course,
   presentation, or paged/print document) so a Product's course, one-pager and deck stay
   distinguishable at a glance, plus a **per-product colour dot** (hover it to see which Product).
-  **Document** (right of the tabs): a **Document-settings** button (⚙, opens this document's settings —
+  **Document:** a **Document-settings** button (⚙, opens this document's settings —
   **Document type** (geometry + interactivity, set once), Header & Footer, Learner nav, Theme and the
   rest; app-wide settings live under the left-rail cog), the **Build / Read** toggle (glyphs), and the
   **variant** and **software-version** selectors as **named dropdowns** (they show the current value —
-  "Flagship", the version name — at a glance). **Output** (far right): the **▶ Demo** preview and **Send
-  to publish**. **Light / dark** now lives in the Demo button's **▾** menu, under the size presets. When
-  many courses are open the tabs scroll within their own strip so this cluster never moves. The header
-  shows only in the Edit stage.
+  "Flagship", the version name — at a glance). **Output:** the **▶ Demo** preview and **Send
+  to publish**. **Light / dark** lives in the Demo button's **▾** menu, under the size presets. When
+  many courses are open the tabs scroll within their own strip so the Document and Output clusters
+  never move. In Source and Publish the bar shows the Identity zone only.
 - **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
   panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
   palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable

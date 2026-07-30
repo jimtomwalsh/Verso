@@ -116,7 +116,9 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   position: relative;
   display: flex;
   align-items: center;
-  height: 44px;
+  gap: 6px;
+  /* uio-E-C01: one merged 40px top bar (DS --toolbar-height), was 44px. */
+  height: var(--toolbar-height, 40px);
   padding: 0 8px;
   background: var(--surface-app);
   border-bottom: 1px solid var(--border-subtle);
@@ -393,48 +395,41 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .workspace {
   flex: 1 1 auto;
   display: grid;
-  /* #89: leftmost fixed icon rail, then the (resizable) left panel, canvas, right panel. */
-  grid-template-columns: var(--rail-w, 44px) var(--left-w, 240px) 1fr var(--right-w, 248px);
-  /* SPEC 7: row 1 = the Edit-stage editor-window header (auto height, collapses to 0 when
-     hidden); row 2 = the panels + canvas + inspector. The rail spans both rows. */
-  grid-template-rows: auto 1fr;
+  /* #89: leftmost fixed icon rail, then the (resizable) left panel, canvas, right panel.
+     uio-E-C01: all shell widths resolve to DSLMS tokens (rail / panel-left / panel-right);
+     the resizers override --left-w / --right-w inline when dragged. */
+  grid-template-columns: var(--rail-w, 44px) var(--left-w) 1fr var(--right-w);
+  /* uio-E-C01: the Edit-stage doc header was merged up into the single .toolbar (EDIT-07), so
+     the workspace is now ONE row -- rail | left panel | canvas | inspector -- reclaiming the
+     ~44px the second bar used to take. */
+  grid-template-rows: 1fr;
+  /* uio-E-C01: default shell widths = DSLMS structural tokens (kills the 240-vs-280 fallback
+     drift). The resizers set --left-w / --right-w inline, overriding these. */
+  --left-w: var(--panel-left-width, 248px);
+  --right-w: var(--panel-right-width, 264px);
   min-height: 0;
   background: var(--surface-canvas);
   position: relative; /* #86: anchor for the floating canvas overlay bar */
 }
-/* SPEC 7 grid pinning: the rail spans full height; the editor header sits in row 1 over the
-   left panel + canvas + inspector; those three sit in row 2. Source/Publish stages span both
-   rows (the editor header is hidden for them). */
-.workspace > .left-rail { grid-column: 1; grid-row: 1 / -1; }
-.workspace > .editor-window { grid-column: 2 / -1; grid-row: 1; }
-.workspace > .panel--left { grid-column: 2; grid-row: 2; }
-.workspace > #canvas-viewport { grid-column: 3; grid-row: 2; }
-.workspace > .panel--right { grid-column: 4; grid-row: 2; }
-.workspace > .source-stage,
-.workspace > .stage-placeholder { grid-row: 1 / -1; }
+/* Grid pinning: rail | left panel | canvas | inspector, all one row. Source/Publish stages
+   span the panel..inspector columns (their own left nav / canvas region). */
+.workspace > .left-rail { grid-column: 1; }
+.workspace > .panel--left { grid-column: 2; }
+.workspace > #canvas-viewport { grid-column: 3; }
+.workspace > .panel--right { grid-column: 4; }
 
-/* edit-header-ia-v2: the Edit stage's header collapsed to ONE bar with three
-   divider-separated zones -- TABS (file-picker + open-doc tabs) | DOC (cell chip +
-   doc-settings + Build/Read + face-up variant/version dropdowns) | OUTPUT (Preview +
-   Send-to-publish). Only rendered in Edit (setStage toggles [hidden]). */
-.editor-window {
-  display: flex; flex-direction: column;
-  background: var(--surface-app);
-  border-bottom: 1px solid var(--border-strong);
-  min-width: 0;
-}
-.editor-window[hidden] { display: none; }
-.editor-window__bar {
-  display: flex; align-items: center;
-  height: 44px; padding: 0 8px; gap: 6px;
-  min-width: 0; overflow: hidden; /* the bar never scrolls -- overflow is absorbed by the tab strip */
-}
-.editor-window__zone { display: flex; align-items: center; gap: 6px; min-width: 0; }
-/* The tabs zone is the SOLE flex item and takes basis 0, so it always fills exactly the left
-   slack (bar width minus the fixed doc + output zones) -- its width does NOT depend on how many
-   tabs are open. A long tab list therefore scrolls INSIDE its own strip (min-width:0 +
-   overflow-x:auto), and the doc + output zones keep a stable position. */
-.editor-window__zone--tabs { flex: 1 1 0; min-width: 0; align-items: flex-end; align-self: stretch; padding-top: 6px; }
+/* uio-E-C01 (EDIT-07): the three Edit-stage doc zones now live directly in .toolbar. They show
+   only in Edit (.toolbar--edit, toggled by setStage); Source/Publish show identity only. */
+.toolbar .editor-window__zone,
+.toolbar .editor-window__sep--doc { display: none; }
+.toolbar.toolbar--edit .editor-window__zone { display: flex; }
+.toolbar.toolbar--edit .editor-window__sep--doc { display: block; }
+.editor-window__zone { align-items: center; gap: 6px; min-width: 0; }
+/* The tabs zone takes basis 0, so it fills exactly the slack (bar width minus the fixed doc +
+   output zones) -- its width does NOT depend on how many tabs are open. A long tab list scrolls
+   INSIDE its own strip (min-width:0 + overflow-x:auto); the doc + output zones keep a stable
+   position and never clip (Tier-2 reachability, #79/#80). */
+.editor-window__zone--tabs { flex: 1 1 0; min-width: 0; align-items: center; }
 .editor-window__zone--tabs .toolbar-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
 /* doc + output are fixed-size and stay put no matter how many tabs are open */
 .editor-window__zone--doc, .editor-window__zone--output { flex: 0 0 auto; }
@@ -495,11 +490,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .workspace.is-panels-hidden { grid-template-columns: 0 0 1fr 0; }
 .workspace.is-panels-hidden .panel { display: none; }
 .workspace.is-panels-hidden .left-rail { display: none; } /* #89: rail hides with the panels in zen/preview */
-.workspace.is-panels-hidden .editor-window { display: none; } /* SPEC 7: header hides with the panels too */
 /* `display:none` REMOVES the panels as grid items, so the lone remaining canvas
    auto-places into column 1 (the 0px track) -> it collapses to width:0 and the whole
-   window looks dark. Pin the canvas to span every track (and row 2) so it always fills. */
-.workspace.is-panels-hidden .canvas { grid-column: 1 / -1; grid-row: 2; }
+   window looks dark. Pin the canvas to span every track so it always fills. */
+.workspace.is-panels-hidden .canvas { grid-column: 1 / -1; }
 
 /* Product Rail (2026-07-27 DaVinci pivot): the rail's Source/Publish segments swap
    out the whole edit-only region (Structure/Blocks/Components + canvas + inspector)
@@ -2157,7 +2151,7 @@ details[open] .disc__caret {
   /* chrome invariant: contained to the workspace region -- below the global top bar (.toolbar,
      44px) and right of the left rail (--rail-w) -- so the product picker + stage rail stay live.
      (Demo/Preview stays inset:0; it is the sanctioned full-screen exception.) */
-  position: fixed; top: 44px; left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 100;
+  position: fixed; top: var(--toolbar-height, 40px); left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 100;
   display: flex; flex-direction: column;
   background: #0e0e0f;
 }
@@ -3642,7 +3636,7 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .vbrowser {
   /* chrome invariant: contained to the workspace region (below the 44px top bar, right of the
      --rail-w rail) so the product picker + stage rail stay visible + interactive while browsing. */
-  position: fixed; top: 44px; left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 60;
+  position: fixed; top: var(--toolbar-height, 40px); left: var(--rail-w, 44px); right: 0; bottom: 0; z-index: 60;
   display: flex; flex-direction: column;
   background: var(--surface-app);
 }
