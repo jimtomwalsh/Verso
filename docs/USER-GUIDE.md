@@ -168,6 +168,23 @@ Four ideas cover most of how Verso works.
   fonts, header/footer); select a block for that block's settings. Editing a text block shows its
   Type controls and its layout, spacing and appearance settings together in one scrolling panel.
 
+### Inherited and overridden settings
+
+Many settings are set once high up and followed everywhere below. Verso reads them down five
+levels: **System → Product → Course → Page → Block.** The nearest level that sets a value wins.
+
+A setting never shows as blank or "unset". It always shows the value that will actually apply,
+plus a small note at the end of the row telling you where that value came from:
+
+- **A grey scope name — "Course", "System".** The value is inherited. Change it at that level and
+  every page or block following it changes with it.
+- **A blue dot and a Reset link.** This one is set here, so it no longer follows its parent. Hover
+  **Reset** to see exactly what it would go back to and from which level. Clicking Reset applies
+  straight away — there is nothing to save, and ⌘Z undoes it like any other edit.
+- **A count in the section header — "3 overridden".** That section has three values set here
+  rather than inherited. It is the quick way to spot a block or page that has drifted from the
+  course.
+
 ---
 
 ## 5. Pages & chapters

@@ -9,6 +9,12 @@ export interface PanelSectionProps {
   defaultOpen?: boolean;
   /** Right-aligned header controls (e.g. an IconButton "+"). */
   actions?: React.ReactNode;
+  /**
+   * Scope roll-up — how many rows in this section carry their own value instead of an
+   * inherited one. Renders as "3 overridden" beside the title, in accent ink; 0 or
+   * undefined renders nothing. See readme "The UI spine" -> "Scope and inheritance".
+   */
+  overrideCount?: number;
   /** Top hairline divider. Default true (turn off for the first section). */
   divider?: boolean;
   style?: React.CSSProperties;

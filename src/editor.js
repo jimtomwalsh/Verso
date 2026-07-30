@@ -5660,7 +5660,11 @@
     var twirl = h("span", "insp-section__twirl" + (collapsed ? "" : " is-open"));
     var titleEl = h("span", "insp-section__title", title);
     var handle = h("span", "insp-section__drag"); handle.textContent = "∷"; handle.title = "Drag to reorder";
-    head.appendChild(twirl); head.appendChild(titleEl); head.appendChild(handle);
+    // uio-F03 roll-up: the header counts the rows in this section that carry their own value
+    // instead of inheriting one ("3 overridden"). Filled after buildFn, from the tally the
+    // inheritance tails push into. Empty (and invisible) when nothing is overridden.
+    var rollup = h("span", "insp-section__rollup");
+    head.appendChild(twirl); head.appendChild(titleEl); head.appendChild(rollup); head.appendChild(handle);
     var body = h("div", "insp-section__body");
     head.addEventListener("click", function () {
       if (panelEditMode) return; // in edit mode the header is a drag grip, not a collapse toggle
@@ -5668,7 +5672,15 @@
       sec.classList.toggle("is-collapsed", nowCollapsed); twirl.classList.toggle("is-open", !nowCollapsed);
       window.PanelLayout.setCollapsed(type, nowCollapsed);
     });
+    var prevTally = _scopeTally; _scopeTally = [];
     try { buildFn(body); } catch (e) {}
+    var overrides = overrideCount(_scopeTally); _scopeTally = prevTally;
+    rollup.textContent = rollupLabel(overrides);
+    if (overrides) {
+      sec.classList.add("has-overrides");
+      rollup.title = overrides + (overrides === 1 ? " value in this section is" : " values in this section are") +
+        " set here instead of inherited";
+    }
     sec.appendChild(head); sec.appendChild(body);
     if (_sectionBuf) _sectionBuf.push({ type: type, el: sec });
     return sec;
@@ -5841,15 +5853,16 @@
     sectionGroup("Behaviour", "Interaction gate", function (secBody) {
       var _i = inspector; inspector = secBody;
       try {
-      var gateVal = page.gateInteractions === true ? "on" : page.gateInteractions === false ? "off" : "inherit";
-      selectRow("Require interactions before Next", [["Inherit course default", "inherit"], ["Require on this page", "on"], ["Don't require", "off"]], gateVal, function (v) {
-        pushHistory();
-        if (v === "on") page.gateInteractions = true;
-        else if (v === "off") page.gateInteractions = false;
-        else delete page.gateInteractions;
-        mount(); setSelection("page", pi);
-      });
-      inspector.appendChild(h("div", "insp-hint", "Hold this page's Next until its interactions are done (hotspots, cards, sequences, accordions, quizzes, videos, checkboxes). 'Inherit' follows the course switch in Header & Footer → Progression."));
+      // uio-F03: was a tri-state picker with an explicit "Inherit course default" option —
+      // the exact "unset" the spine forbids. Now the switch always shows what will ACTUALLY
+      // apply on this page, and the tail says where that came from (or offers Reset).
+      var gateRes = resolveScoped(gateScopeChain(page), "gateInteractions", { at: "page" });
+      switchRow("Require interactions before Next", function () { return !!gateRes.value; },
+        function (v) { page.gateInteractions = !!v; mount(); setSelection("page", pi); }, inspector, false,
+        { inherit: { res: gateRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete page.gateInteractions; mount(); setSelection("page", pi);
+          } } });
+      inspector.appendChild(h("div", "insp-hint", "Hold this page's Next until its interactions are done (hotspots, cards, sequences, accordions, quizzes, videos, checkboxes). With nothing set here the page follows the course switch in Header & Footer → Progression."));
       } finally { inspector = _i; }
     });
 
@@ -6671,13 +6684,24 @@
       block.box = block.box || {};
       var box = block.box;
       function nodeOf() { return canvasNodeForBlock(block); }
-      function setBorder() { var n = nodeOf(); if (n) n.style.border = box.border ? ((box.borderWidth || 1) + "px solid " + (box.borderColor || "var(--color-hair)")) : ""; }
+      // uio-F03: the live preview follows the RESOLVED value (this block's own, else the
+      // course's captured type default, else the system default) — the same ladder the row
+      // shows and the same one render.js applies, so Reset previews correctly too.
+      function effBox(prop) { return resolveScoped(blockBoxChain(block), prop, { at: "block" }).value; }
+      function setBorder() { var n = nodeOf(); if (n) n.style.border = effBox("border") ? ((effBox("borderWidth") || 1) + "px solid " + (box.borderColor || "var(--color-hair)")) : ""; }
       // Condensed (James 2026-07-08): colours stacked, the two dimensional fields (border weight
       // + corner radius) paired two-up with glyphs — matching the case/align/spacing language.
       colorFieldFlat("Fill", box.fill, function (v) { var n = nodeOf(); if (v == null) { delete box.fill; if (n) n.style.background = ""; } else { box.fill = v; if (n) n.style.background = v; } renderModelView(); }, body);
       colorFieldFlat("Text", box.textColor, function (v) { var n = nodeOf(); if (v == null) { delete box.textColor; if (n) n.style.color = ""; } else { box.textColor = v; if (n) n.style.color = v; } renderModelView(); }, body);
-      switchRow("Stroke", function () { return !!box.border; }, function (v) { box.border = v; setBorder(); renderModelView(); renderInspector(); }, body);
-      if (box.border) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; setBorder(); renderModelView(); }, body);
+      // uio-F03: Stroke resolves down System -> Course type default -> Block, and the row
+      // carries the shared inheritance tail (named scope, or dot + Reset when set here).
+      var strokeRes = resolveScoped(blockBoxChain(block), "border", { at: "block" });
+      switchRow("Stroke", function () { return !!strokeRes.value; },
+        function (v) { box.border = v; setBorder(); renderModelView(); renderInspector(); }, body, false,
+        { inherit: { res: strokeRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete box.border; setBorder(); renderModelView(); renderInspector();
+          } } });
+      if (strokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; setBorder(); renderModelView(); }, body);
       // Stroke width + corner radius: canonical iconFields, live-applied, paired two-up.
       var weightField = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", title: "Stroke width",
         onchange: function (v) { pushHistory(); var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; setBorder(); renderModelView(); } }).wrap;
@@ -11083,12 +11107,16 @@
   // Labelled standalone switch row (for a boolean that is NOT a nest-enable).
   // A toggle sits in the shared settings row (uio-F01): label grows, the switch is the
   // control, right-aligned. Not a separate row anatomy.
-  function switchRow(labelText, get, set, target, noHistory) {
-    settingsRow({
+  // rowOpts (optional) forwards the shared row's slots — today `inherit` (uio-F03's scope
+  // tail) and `overflow` — so a toggle can carry them without a second row anatomy.
+  function switchRow(labelText, get, set, target, noHistory, rowOpts) {
+    var o = {
       label: labelText, variant: "insp-row--toggle", controlAlign: "end",
       host: target || inspector,
       control: switchEl(!!get(), function (v) { if (!noHistory) pushHistory(); set(v); })
-    });
+    };
+    if (rowOpts) { if (rowOpts.inherit) o.inherit = rowOpts.inherit; if (rowOpts.overflow) o.overflow = rowOpts.overflow; }
+    settingsRow(o);
   }
   // Visibility control = an EYE glyph (open / slashed). `visibleGet/Set` in terms of
   // VISIBLE (true = shown); the caller maps to whatever underlying flag it uses.
@@ -15856,7 +15884,13 @@
       b.appendChild(h("div", "insp-hint", "On: each chapter must pass its knowledge check (native quiz) before the learner can advance to the next; play it in demo mode to test. Add the chapter's dot-point summary to the quiz's \"Chapter summary\" list (on the quiz completion panel) — it shows once the learner passes."));
       // §5: auto-gate ALL interactions — one course-level DEFAULT switch (per-page override
       // lives in the page inspector). Default off.
-      switchRow("Require all interactions before Next", function () { return !!doc.gateAllInteractions; }, function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); }, b);
+      // uio-F03: the SAME ladder, seen from the Course rung — one primitive, two surfaces.
+      var courseGateRes = resolveScoped(gateScopeChain(null), "gateInteractions", { at: "course" });
+      switchRow("Require all interactions before Next", function () { return !!courseGateRes.value; },
+        function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector(); }, b, false,
+        { inherit: { res: courseGateRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector();
+          } } });
       b.appendChild(h("div", "insp-hint", "Course default: on every page the learner must finish its interactions — pass quizzes, view all hotspots, watch videos, tick checkboxes, reveal all cards, step through sequences, open every accordion section — before Next enables. The gated Next greys out and shows a reminder. Override per page in the page's settings. Interactions we can't detect (embedded HTML interactions) are skipped, so a page can never trap the learner."));
       // Author-overridable reminder copy (optional; blank -> the default sentence).
       var gmRow = h("div", "insp-row");
@@ -16420,8 +16454,15 @@
         c.appendChild(sub(type));
         colorFieldFlat("Fill", box.fill, function (v) { if (v == null) delete box.fill; else box.fill = v; commit(); }, c, { noHistory: true });
         colorFieldFlat("Text", box.textColor, function (v) { if (v == null) delete box.textColor; else box.textColor = v; commit(); }, c, { noHistory: true });
-        switchRow("Stroke", function () { return !!box.border; }, function (v) { if (v) box.border = true; else delete box.border; commit(); refreshSettingsPanes(); }, c);
-        if (box.border) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; commit(); }, c, { noHistory: true });
+        // uio-F03: the SAME row, at the COURSE rung — the type default overriding the system
+        // default. Proves one primitive reads correctly at any rung, in any surface.
+        var typeStrokeRes = resolveScoped(scopeChain([scopeRung("system", BOX_SYSTEM_DEFAULTS), scopeRung("course", box)]), "border", { at: "course" });
+        switchRow("Stroke", function () { return !!typeStrokeRes.value; },
+          function (v) { if (v) box.border = true; else delete box.border; commit(); refreshSettingsPanes(); }, c, false,
+          { inherit: { res: typeStrokeRes, format: onOffLabel, onReset: function () {
+              pushHistory(); delete box.border; commit(); refreshSettingsPanes();
+            } } });
+        if (typeStrokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; commit(); }, c, { noHistory: true });
         var wf = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", noHistory: true, title: "Stroke width",
           onchange: function (v) { var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; commit(); } }).wrap;
         var rf = iconField(Icon("radius"), { value: box.radius, unit: "px", placeholder: "0", step: 1, min: 0, max: 80, datalist: "dl-gap", noHistory: true, title: "Corner radius",
@@ -16940,18 +16981,193 @@
     sync();
     return note;
   }
+  // ---- Scope + inheritance (uio-F03 — the UI spine's five-rung ladder) -------------
+  // System -> Product -> Course -> Page -> Block. One ladder, one primitive, one visual
+  // language (design-system/readme.md, "The UI spine" -> "Scope and inheritance").
+  //
+  // DELIBERATELY PROPERTY-AGNOSTIC — read this before extending it.
+  // resolveScoped() takes the property being resolved as an ARGUMENT and never inspects it.
+  // It only hands the key to each rung's own reader. There is NO list of known settings in
+  // here, and nothing assumes the resolved value is a style or theme value: it can be a
+  // boolean, a number, a colour string, a classification code, an approval state — the
+  // resolver does not care and must never learn to care.
+  //
+  // A SECOND AXIS rides this same primitive by supplying two things and nothing else:
+  //   1. a different property key, and
+  //   2. a scope chain whose rungs read that axis's own storage (the rung's `read` is where
+  //      per-rung name mapping lives, so rungs may store the same idea under different keys).
+  // That is how uio-F07's export-control classification inherits down this ladder without a
+  // second, parallel inheritance path. A parallel path is the failure this shape prevents.
+  //
+  // Two seams keep it general:
+  //   rung.read(prop) -> NOT_SET, or the value this rung sets. null / false / 0 / "" are
+  //      REAL values; only NOT_SET means "this rung says nothing about that property".
+  //   opts.choose(a, b) -> optional winner-picker for axes where the deepest rung does not
+  //      simply win. Default is last-wins (the deepest rung that sets it). F07's "a block may
+  //      only override to something MORE restrictive" is exactly a choose().
+  //
+  // PURE: no DOM, no closures over editor state. Fenced for the headless regression guard.
+  /* @f03-start */
+  var SCOPE_LADDER = ["system", "product", "course", "page", "block"];
+  var SCOPE_LABELS = { system: "System", product: "Product", course: "Course", page: "Page", block: "Block" };
+  var NOT_SET = { __f03NotSet: true };   // sentinel: this rung sets nothing for this property
+
+  function scopeLabel(scope) { return SCOPE_LABELS[scope] || String(scope == null ? "" : scope); }
+  function scopeDepth(scope) { var i = SCOPE_LADDER.indexOf(scope); return i === -1 ? SCOPE_LADDER.length : i; }
+
+  // A rung backed by a plain object bag: own-property presence means "this rung sets it".
+  // Any axis that does not store its value in a bag supplies its own read() instead.
+  function scopeRung(scope, bag, label) {
+    return {
+      scope: scope, label: label || scopeLabel(scope),
+      read: function (prop) {
+        return (bag && Object.prototype.hasOwnProperty.call(bag, prop)) ? bag[prop] : NOT_SET;
+      }
+    };
+  }
+  // Order any set of rungs System -> Block; absent rungs are simply left out.
+  function scopeChain(rungs) {
+    return (rungs || []).filter(Boolean).slice().sort(function (a, b) { return scopeDepth(a.scope) - scopeDepth(b.scope); });
+  }
+
+  // Resolve one property down a chain, as seen from one rung (opts.at, default the deepest).
+  // Rungs deeper than `at` are not in play — a page row must not read a block's override.
+  function resolveScoped(chain, prop, opts) {
+    opts = opts || {};
+    chain = chain || [];
+    var at = opts.at || (chain.length ? chain[chain.length - 1].scope : null);
+    var atDepth = scopeDepth(at);
+    var trace = [], winner = NOT_SET, winScope = null, ownValue = NOT_SET, parent = null;
+    for (var i = 0; i < chain.length; i++) {
+      var r = chain[i];
+      if (scopeDepth(r.scope) > atDepth) continue;
+      var lab = r.label || scopeLabel(r.scope);
+      var v = r.read(prop);
+      trace.push({ scope: r.scope, label: lab, set: v !== NOT_SET, value: v === NOT_SET ? undefined : v });
+      if (v === NOT_SET) continue;
+      if (r.scope === at) ownValue = v;
+      else parent = { scope: r.scope, label: lab, value: v };   // nearest ancestor that sets it
+      if (winner === NOT_SET || !opts.choose) { winner = v; winScope = r.scope; }
+      else { var w = opts.choose(winner, v); if (w === v) { winner = v; winScope = r.scope; } else winner = w; }
+    }
+    var found = winner !== NOT_SET;
+    var overridden = ownValue !== NOT_SET;
+    return {
+      prop: prop,
+      at: at, atLabel: scopeLabel(at),
+      found: found,
+      value: found ? winner : undefined,          // what will ACTUALLY apply — never "unset"
+      scope: winScope,                            // the rung the applied value came from
+      scopeLabel: winScope ? scopeLabel(winScope) : null,
+      overridden: overridden,                     // this rung sets its own value
+      inherited: found && !overridden,
+      from: parent,                               // what Reset restores, and from where
+      trace: trace
+    };
+  }
+
+  // What a Reset does, expressed as data (the mutation stays at the call site).
+  // null = nothing to reset. restores = null means no rung above sets it, so the value clears.
+  function resetPlan(chain, prop, at) {
+    var res = resolveScoped(chain, prop, { at: at });
+    if (!res.overridden) return null;
+    return { prop: prop, clearAt: res.at, restores: res.from || null };
+  }
+  // Reset's tooltip must state WHAT it restores and FROM WHICH scope (spine requirement).
+  function resetTooltip(res, format) {
+    if (!res || !res.overridden) return "";
+    var f = format || String;
+    return res.from
+      ? "Reset to the " + res.from.label + " value: " + f(res.from.value)
+      : "Reset — nothing is set above " + res.atLabel + ", so this clears";
+  }
+  // Inherited copy: never "unset" — always what will apply, and where it comes from.
+  function inheritedTooltip(res, format) {
+    if (!res || !res.found) return "";
+    var f = format || String;
+    return "Inherited from " + (res.scopeLabel || "") + ": " + f(res.value);
+  }
+  // Section roll-up: how many of a section's rows carry their own value at this rung.
+  function overrideCount(resolutions) {
+    var n = 0;
+    (resolutions || []).forEach(function (r) { if (r && r.overridden) n++; });
+    return n;
+  }
+  function rollupLabel(n) { return n > 0 ? n + " overridden" : ""; }
+  /* @f03-end */
+
+  // The active sectionGroup's tally of resolutions, so a section header can count its own
+  // overrides without every call site plumbing a count back up. A stack, so nesting is safe.
+  var _scopeTally = null;
+  function tallyResolution(res) { if (_scopeTally && res) _scopeTally.push(res); }
+
+  // Builds the shared row's inheritance TAIL (uio-F01 left this slot empty for F03).
+  // Two states, one language, every surface:
+  //   inherited  -> the source scope named in tertiary ink (the control shows the value)
+  //   overridden -> a 4px accent dot + an inline Reset naming what it restores
+  // Reset is a LIVE edit, not a commit control: it writes immediately and Undo takes it back
+  // (the spine's save contract — no Save/Apply/Cancel/Done).
+  //   spec: { res (a resolveScoped result), format (value -> string), onReset () }
+  function inheritanceTail(spec) {
+    var res = spec && spec.res;
+    if (!res || !res.found) return null;
+    tallyResolution(res);
+    var wrap = h("span", "insp-inherit");
+    if (res.overridden) {
+      wrap.appendChild(h("span", "insp-row__override-dot"));
+      var btn = h("button", "insp-row__reset", "Reset"); btn.type = "button";
+      btn.title = resetTooltip(res, spec.format);
+      btn.addEventListener("click", function (ev) { ev.stopPropagation(); if (spec.onReset) spec.onReset(res); });
+      wrap.appendChild(btn);
+    } else {
+      var s = h("span", "insp-row__scope", res.scopeLabel);
+      s.title = inheritedTooltip(res, spec.format);
+      wrap.appendChild(s);
+    }
+    return wrap;
+  }
+  function onOffLabel(v) { return v ? "on" : "off"; }
+
+  // ---- The two ladders wired today (uio-F03) --------------------------------------
+  // Each is only a CHAIN — a list of rungs and how each rung reads the property. The
+  // resolver above is shared and knows nothing about either of them. Adding an axis means
+  // adding a chain builder here, never touching resolveScoped.
+
+  // Block appearance: System defaults -> the course's captured per-type default
+  // (doc.theme.blockStyles[type]) -> this block's own box. This RECONCILES with the cascade
+  // render.js already applies (resolveBlockBox: type default is the baseline, block.box
+  // wins); the ladder surfaces that existing model rather than adding a second one.
+  var BOX_SYSTEM_DEFAULTS = { border: false, borderWidth: 1, radius: 0 };
+  function blockBoxChain(block) {
+    var bs = getBlockStyles();
+    return scopeChain([
+      scopeRung("system", BOX_SYSTEM_DEFAULTS),
+      scopeRung("course", (bs && block && bs[block.type]) || {}),
+      scopeRung("block", (block && block.box) || {})
+    ]);
+  }
+  // Interaction gate: System (off) -> Course (doc.gateAllInteractions) -> Page
+  // (page.gateInteractions). The two upper rungs store the same idea under different keys,
+  // which is why per-rung name mapping lives in read() — the same seam a second axis uses.
+  function gateScopeChain(page) {
+    return scopeChain([
+      { scope: "system", label: "System", read: function () { return false; } },
+      { scope: "course", label: "Course", read: function () { return doc.gateAllInteractions ? true : NOT_SET; } },
+      page ? scopeRung("page", page) : null
+    ]);
+  }
+
   // ---- The shared settings/overlay row (uio-F01 — the UI spine's row anatomy) ------
   // ONE row reused identically across sheet / popover / inspector: a fixed label column,
   // the control beside it, an optional inheritance tail, and a hover-only overflow. It is
   // width-independent by construction (label fixed in px, control flexes, tail/overflow
   // fixed), so it renders identically at any panel width. A Switch is a control in this
   // row, not a different row (the toggle variant grows the label and right-aligns the
-  // control). The tail/overflow are the SLOTS only — the scope + inheritance model
-  // (uio-F03) fills the inherited / overridden / reset logic; here they are collapsed by
-  // default and unused. See design-system/readme.md "The UI spine" and
-  // design-system/components/controls/FieldRow.*.
-  //   opts: { label, control, tail (node), overflow ({title,onClick}), host, variant,
-  //           controlAlign ("end") }
+  // control). uio-F03 fills the inheritance tail: pass `inherit` and the row renders the
+  // inherited / overridden / Reset language from a resolveScoped result. See
+  // design-system/readme.md "The UI spine" and design-system/components/controls/FieldRow.*.
+  //   opts: { label, control, tail (node), inherit ({res,format,onReset}),
+  //           overflow ({title,onClick}), host, variant, controlAlign ("end") }
   function settingsRow(opts) {
     opts = opts || {};
     var row = h("div", "insp-row" + (opts.variant ? " " + opts.variant : ""));
@@ -16966,9 +17182,12 @@
       if (opts.controlAlign === "end" && opts.control.classList) opts.control.classList.add("insp-row__control--end");
       row.appendChild(opts.control);
     }
-    if (opts.tail) {
+    // uio-F03 fills the tail slot: pass `inherit` ({res, format, onReset}) and the row shows
+    // the scope/inheritance language; `tail` still takes a ready-made node.
+    var tailNode = opts.tail || (opts.inherit ? inheritanceTail(opts.inherit) : null);
+    if (tailNode) {
       var tail = h("div", "insp-row__tail");
-      tail.appendChild(opts.tail);
+      tail.appendChild(tailNode);
       row.appendChild(tail);
     }
     if (opts.overflow) {

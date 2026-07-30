@@ -5246,7 +5246,9 @@ section("auto-gate all interactions");
   ok("editor sets __gateAllInteractions on export", /window\.__gateAllInteractions = renderDoc\.gateAllInteractions \|\| null/.test(ed));
   ok("editor sets __gateAllInteractions on preview", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ed));
   ok("render stamps data-gate-all from the hook", /if \(window\.__gateAllInteractions\) root\.setAttribute\("data-gate-all", "1"\)/.test(rn));
-  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!doc\.gateAllInteractions;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
+  // uio-F03: the switch now reads the RESOLVED value down the scope ladder (System -> Course)
+  // and clears the course flag on Reset; the stored data is unchanged.
+  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
   // state buckets for the new signals
   ok("runtime adds viewed/revealed/quizDone/sequenceDone/accordionDone buckets", /var state = \{ visited: \{\}, watched: \{\}, checked: \{\}, viewed: \{\}, revealed: \{\}, quizDone: \{\}, sequenceDone: \{\}, accordionDone: \{\} \}/.test(rt));
   // completion emitters (decoupled, bubbling)
@@ -5310,7 +5312,9 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   ok("export sets __gateAllInteractions (no longer stale-global)", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ex));
   ok("export sets __gateMessage", /window\.__gateMessage = doc\.gateMessage \|\| null/.test(ex));
   // authoring: per-page override in the page inspector + course-level message field
-  ok("page inspector writes tri-state page.gateInteractions", /if \(v === "on"\) page\.gateInteractions = true;\s*else if \(v === "off"\) page\.gateInteractions = false;\s*else delete page\.gateInteractions;/.test(ed));
+  // uio-F03: still tri-state DATA (true / false / absent = inherit), but the picker's explicit
+  // "inherit" option is gone — the switch shows the resolved value and Reset clears the page flag.
+  ok("page inspector writes tri-state page.gateInteractions", /page\.gateInteractions = !!v;/.test(ed) && /delete page\.gateInteractions;/.test(ed));
   ok("progression panel exposes the reminder-message field", /gmIn\.value = doc\.gateMessage \|\| "";[\s\S]*?if \(v\) doc\.gateMessage = v; else delete doc\.gateMessage/.test(ed));
 })();
 
@@ -10190,6 +10194,155 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
   ok("it says why it can't be changed", /dchip\.title = "Destination · " \+ dest\.why;/.test(e));
   ok("the static chip drops the hover affordance and sits back one ink step", /\.publish-chip--static \{ cursor: default; color: var\(--text-tertiary, var\(--text-secondary\)\); \}/.test(css) && /\.publish-chip--static:hover \{ color: var\(--text-tertiary, var\(--text-secondary\)\); border-color: var\(--border-subtle\); \}/.test(css));
   ok("the filename takes the slack and the status pins right, like the history rows", /\.publish-queuerow__file \{ flex: 1 1 auto; min-width: 0;[^}]*text-overflow: ellipsis; \}/.test(css) && /\.publish-queuerow__status \{[^}]*margin-left: auto;/.test(css));
+})();
+
+// ---- uio-F03: scope + inheritance model (the five-rung ladder) -------------------
+// The UI spine's ladder System -> Product -> Course -> Page -> Block as ONE primitive with
+// one visual language. The resolver is pure and PROPERTY-AGNOSTIC by contract: it takes the
+// property as an argument, never inspects it, and never assumes the value is a style value.
+// The last block below proves that by resolving a NON-setting axis (a neutral three-level
+// classification with a "most restrictive wins" chooser) through the very same resolver —
+// which is how uio-F07's export-control classification becomes an ADDITION, not a second
+// inheritance path.
+section("uio-F03 scope + inheritance model");
+(function () {
+  var e = src("src/editor.js");
+  var css = src("editor.css");
+  var tokens = src("design-system/tokens/spacing.css");
+  var ds = src("design-system/readme.md");
+  var dts = src("design-system/components/panels/PanelSection.d.ts");
+  var m = e.match(/\/\* @f03-start \*\/([\s\S]*?)\/\* @f03-end \*\//);
+  if (!m) { ok("locate @f03 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { SCOPE_LADDER: SCOPE_LADDER, NOT_SET: NOT_SET, scopeRung: scopeRung, scopeChain: scopeChain," +
+    " resolveScoped: resolveScoped, resetPlan: resetPlan, resetTooltip: resetTooltip," +
+    " inheritedTooltip: inheritedTooltip, overrideCount: overrideCount, rollupLabel: rollupLabel };")();
+  var NOT_SET = g.NOT_SET;
+
+  ok("the ladder is the spine's five rungs, in order", g.SCOPE_LADDER.join(">") === "system>product>course>page>block");
+
+  // --- a fixture ladder: every rung is a plain bag, so one property can be set anywhere ---
+  function ladder(system, product, course, page, block) {
+    return g.scopeChain([
+      g.scopeRung("system", system || {}), g.scopeRung("product", product || {}),
+      g.scopeRung("course", course || {}), g.scopeRung("page", page || {}),
+      g.scopeRung("block", block || {})
+    ]);
+  }
+  // Resolution at each rung: the deepest rung that sets it wins, and names itself.
+  ok("system rung resolves when nothing below sets it", (function () {
+    var r = g.resolveScoped(ladder({ gap: 8 }), "gap");
+    return r.value === 8 && r.scope === "system" && r.inherited === true && r.overridden === false;
+  })());
+  ok("product beats system", g.resolveScoped(ladder({ gap: 8 }, { gap: 12 }), "gap").scope === "product");
+  ok("course beats product", g.resolveScoped(ladder({ gap: 8 }, { gap: 12 }, { gap: 16 }), "gap").scope === "course");
+  ok("page beats course", g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, { gap: 20 }), "gap").scope === "page");
+  ok("block beats page (and is its OWN value, so the row is overridden)", (function () {
+    var r = g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, { gap: 20 }, { gap: 24 }), "gap");
+    return r.value === 24 && r.scope === "block" && r.overridden === true && r.inherited === false;
+  })());
+  // The chain may be given in any order; it is sorted onto the ladder.
+  ok("rungs given out of order still resolve down the ladder", (function () {
+    var chain = g.scopeChain([g.scopeRung("block", {}), g.scopeRung("system", { gap: 8 }), g.scopeRung("course", { gap: 16 })]);
+    return g.resolveScoped(chain, "gap").scope === "course";
+  })());
+
+  // --- a value overridden at a MIDDLE rung, read from a deeper rung ---
+  var mid = ladder({ gap: 8 }, null, { gap: 16 }, {}, {});
+  var midRes = g.resolveScoped(mid, "gap", { at: "block" });
+  ok("a middle-rung override is INHERITED (not overridden) when read from the block", midRes.inherited === true && midRes.overridden === false);
+  ok("the inherited value names the scope it came from", midRes.value === 16 && midRes.scopeLabel === "Course");
+  ok("inherited copy states what will actually apply, never 'unset'", g.inheritedTooltip(midRes) === "Inherited from Course: 16");
+  ok("a page row cannot see a block's override (rungs below `at` are out of play)",
+    g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, {}, { gap: 99 }), "gap", { at: "page" }).value === 16);
+  // Falsy values are REAL values, not absence — the classic inheritance bug.
+  ok("false / 0 / \"\" are real values, only NOT_SET means unset", (function () {
+    var r = g.resolveScoped(ladder({ on: true }, null, { on: false }), "on", { at: "course" });
+    return r.value === false && r.overridden === true;
+  })());
+  ok("a rung that reads NOT_SET contributes nothing", (function () {
+    var chain = g.scopeChain([
+      { scope: "system", label: "System", read: function () { return 8; } },
+      { scope: "course", label: "Course", read: function () { return NOT_SET; } }
+    ]);
+    return g.resolveScoped(chain, "gap", { at: "course" }).scope === "system";
+  })());
+
+  // --- Reset restores the named PARENT value ---
+  var own = ladder({ gap: 8 }, null, { gap: 16 }, {}, { gap: 24 });
+  var ownRes = g.resolveScoped(own, "gap", { at: "block" });
+  var plan = g.resetPlan(own, "gap", "block");
+  ok("Reset targets the row's own rung and names what it restores", plan.clearAt === "block" && plan.restores.scope === "course" && plan.restores.value === 16);
+  ok("the Reset tooltip states the value AND the scope", g.resetTooltip(ownRes) === "Reset to the Course value: 16");
+  ok("clearing the own value really does return the named parent value", (function () {
+    var block = { gap: 24 };
+    var chain = ladder({ gap: 8 }, null, { gap: 16 }, {}, block);
+    delete block.gap;                                  // what the row's onReset does
+    var after = g.resolveScoped(chain, "gap", { at: "block" });
+    return after.value === 16 && after.scope === "course" && after.overridden === false;
+  })());
+  ok("an inherited row has nothing to reset", g.resetPlan(mid, "gap", "block") === null);
+  ok("with no rung above, Reset says it clears instead of naming a scope",
+    /^Reset — nothing is set above Block/.test(g.resetTooltip(g.resolveScoped(ladder(null, null, null, null, { gap: 24 }), "gap"))));
+
+  // --- the section roll-up count ---
+  ok("the roll-up counts only rows overridden at their own rung", g.overrideCount([ownRes, midRes, ownRes]) === 2);
+  ok("the roll-up reads '3 overridden'", g.rollupLabel(3) === "3 overridden");
+  ok("no overrides means no roll-up text at all", g.rollupLabel(0) === "" && g.overrideCount([]) === 0);
+
+  // --- PROOF: a NON-setting property rides the same resolver (the uio-F07 contract) ---
+  // A neutral, invented three-level classification. Nothing about it is a style or a theme
+  // value, its rungs store it under DIFFERENT keys, and it wants "most restrictive wins"
+  // rather than "deepest rung wins" — all of which the shared primitive absorbs.
+  var LEVELS = ["open", "limited", "closed"];
+  function mostRestrictive(a, b) { return LEVELS.indexOf(b) > LEVELS.indexOf(a) ? b : a; }
+  var product = { releaseLevel: "limited" };          // note: a different key per rung
+  var blockBag = { audienceLevel: "closed" };
+  var classChain = g.scopeChain([
+    { scope: "system", label: "System", read: function () { return "open"; } },
+    { scope: "product", label: "Product", read: function () { return product.releaseLevel; } },
+    { scope: "block", label: "Block", read: function (prop) { return Object.prototype.hasOwnProperty.call(blockBag, prop) ? blockBag[prop] : NOT_SET; } }
+  ]);
+  var cr = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+  ok("a non-setting axis resolves through the SAME resolver", cr.value === "closed" && cr.scope === "block" && cr.overridden === true);
+  ok("its Reset names the Product value it would restore", g.resetTooltip(cr) === "Reset to the Product value: limited");
+  ok("a block resolves the inherited classification when it sets none", (function () {
+    delete blockBag.audienceLevel;
+    var r = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+    return r.value === "limited" && r.scopeLabel === "Product" && r.inherited === true;
+  })());
+  ok("choose() lets a LESS restrictive block value lose to its parent (F07's rule)", (function () {
+    blockBag.audienceLevel = "open";                   // tries to loosen
+    var r = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+    delete blockBag.audienceLevel;
+    return r.value === "limited" && r.scope === "product";
+  })());
+  ok("the resolver never inspects the property key (no settings list in the pure core)",
+    !/gap|border|gateInteractions|theme|blockStyles/.test(m[1]));
+
+  // --- the wiring: the tail fills uio-F01's slot, no second row anatomy ---
+  ok("settingsRow fills its tail slot from `inherit` (no second row builder)", /var tailNode = opts\.tail \|\| \(opts\.inherit \? inheritanceTail\(opts\.inherit\) : null\)/.test(e));
+  ok("the tail renders inherited scope OR dot + Reset, nothing else", /function inheritanceTail\([\s\S]{0,900}?insp-row__override-dot[\s\S]{0,400}?insp-row__reset[\s\S]{0,400}?insp-row__scope/.test(e));
+  ok("switchRow can carry the tail without a divergent row", /function switchRow\(labelText, get, set, target, noHistory, rowOpts\)/.test(e));
+  ok("the section header counts its own overrides", /rollup\.textContent = rollupLabel\(overrides\)/.test(e));
+  ok("real rows carry the tail at three different rungs", (function () {
+    var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
+    var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
+    var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(e);
+    return atBlock && atPage && atCourse;
+  })());
+  ok("the retired inherit-as-an-option picker is gone (never show 'unset')", !/\["Inherit course default", "inherit"\]/.test(e));
+  // Reset is a live edit, not a commit control — the save contract stays intact.
+  ok("no Save/Apply/Cancel/Done arrived with the inheritance affordances", !/insp-row__(save|apply|cancel|done)/.test(e) && !/"insp-row__reset", "(Save|Apply|Cancel|Done)"/.test(e));
+
+  // --- the DS carries the tokens + the contract this is built to ---
+  ok("DS defines the one override-dot token", /--override-dot:\s*4px/.test(tokens));
+  ok("both the row dot and the section dot ride that one token",
+    /\.insp-row__override-dot \{[^}]*var\(--override-dot/.test(css) && /\.subdisc__dot \{[^}]*var\(--override-dot/.test(css));
+  ok("inherited scope reads in tertiary ink", /\.insp-row__scope \{[^}]*color: var\(--text-tertiary\)/.test(css));
+  ok("the section roll-up is styled and goes accent when non-empty", /\.insp-section__rollup \{/.test(css) && /\.insp-section\.has-overrides \.insp-section__rollup \{[^}]*var\(--accent\)/.test(css));
+  ok("the spine states the resolver is property-agnostic and forbids a parallel path", /property being\s*\n?resolved as an argument/.test(ds) && /parallel inheritance path is a hard fail/.test(ds));
+  ok("PanelSection declares the roll-up count", /overrideCount\?:\s*number/.test(dts));
 })();
 
 // uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
