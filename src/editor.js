@@ -13153,13 +13153,15 @@
   // it is the FIRST section of the one consolidated right panel (see renderSourceMarksSection,
   // built by renderSourceInfoPanel). The filter set is shared. Clicking a row activates + scrolls
   // to that mark in the article, exactly as the drawer did.
-  // Glyph-mode filters (source-right-panel-consolidation): each carries an icon so the segmented
-  // control renders as four glyphs; the label becomes the tooltip.
+  // uio-S-C01 (SRC-06): ONE labelled filter, not four unlabelled glyphs that duplicated it. Each
+  // segment states its type and carries a live count, so the filter also reads as the document's
+  // mark summary. Counts come from SourceDoc.markCounts, so a segment can never disagree with the
+  // list beneath it.
   var SOURCE_MARK_FILTERS = [
-    { key: "all", label: "All", icon: "list" },
-    { key: "alternate", label: "Alternates", icon: "square-pen" },
-    { key: "link", label: "Linked", icon: "link" },
-    { key: "comment", label: "Comments", icon: "message-square" }
+    { key: "all", label: "All", title: "Every mark" },
+    { key: "alternate", label: "Alt", title: "Alternates" },
+    { key: "link", label: "Linked", title: "Linked passages" },
+    { key: "comment", label: "Notes", title: "Comments" }
   ];
   // Reveal a mark in the consolidated panel: open the panel if hidden, highlight its row, and
   // scroll the article to it (the "selecting a mark opens the panel to that mark" behaviour).
@@ -13182,65 +13184,101 @@
     var rowEl = info && info.querySelector('.source-drawer__row[data-mark-id="' + m.id + '"]');
     if (rowEl) rowEl.scrollIntoView({ block: "nearest" });
   }
+  // uio-S-C01 (SRC-01): the count a mark row carries instead of one row per instance. A linked
+  // passage used by four documents is ONE row saying "in 4 docs" -- the destination list lives in
+  // the mark's own where-used card, which is where you act on it. Also decides the status dot: a
+  // comment whose whole thread is resolved goes grey rather than reading as live work.
+  function sourceMarkRowState(topic, model, m) {
+    var SD = window.SourceDoc, st = SD.markStatus(m);
+    var out = { dot: st.dot, dotTitle: st.label, meta: "" };
+    if (m.type === "link") {
+      var docs = {};
+      sourceLinkWhereUsed(__sourceActiveTopicId, m.id).forEach(function (u) { docs[u.docCode] = 1; });
+      var n = Object.keys(docs).length;
+      out.meta = n ? ("in " + n + " doc" + (n === 1 ? "" : "s")) : "not placed yet";
+    } else if (m.type === "alternate") {
+      var parts = [];
+      if (m.stale) parts.push("base changed");
+      if (m.tag) parts.push(String(m.tag));
+      out.meta = parts.join(" · ");
+    } else if (m.type === "comment") {
+      var thread = sourceCommentsForMark(topic, m.id);
+      var open = thread.filter(function (c) { return !c.done; }).length;
+      out.meta = open ? (open + " open") : (thread.length ? "resolved" : "");
+      if (!open && thread.length && !m.broken) { out.dot = "grey"; out.dotTitle = "Resolved"; }
+    }
+    return out;
+  }
   // The Marks section of the consolidated panel: the mark navigator (filter + rows), folded in
-  // from the retired drawer. Filtered All / Alternates / Linked / Comments so the three mark types
-  // are never read mixed; a row jumps to + highlights its mark.
+  // from the retired drawer. One labelled, counted filter (All / Alt / Linked / Notes) over one row
+  // per MARK -- a row jumps to + highlights its mark, and states its own location so it identifies
+  // itself without leaning on a truncated snippet (uio-S-C01, SRC-01/06).
   function renderSourceMarksSection(host, model) {
     var SD = window.SourceDoc, U = window.VersoUI;
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
     // Marks is the primary section of the consolidated panel -- render it title-less, straight
     // into the panel host (no "Marks" header), above the History/Source/Comments sections.
     var body = h("div", "source-marks__primary"); host.appendChild(body);
+    var counts = SD.markCounts(model);
     if (U && U.SegmentedControl) {
       body.appendChild(U.SegmentedControl({
         size: "sm",
-        options: SOURCE_MARK_FILTERS.map(function (f) { return { value: f.key, label: f.label, icon: f.icon, title: f.label }; }),
+        options: SOURCE_MARK_FILTERS.map(function (f) {
+          var n = counts[f.key] || 0;
+          return { value: f.key, label: f.label + " " + n, title: f.title + " (" + n + ")" };
+        }),
         value: __sourceMarksFilter,
         onChange: function (v) { __sourceMarksFilter = v; var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; if (t) renderSourceInfoPanel(t); }
       }));
     }
     var listWrap = h("div", "source-marks__list");
-    // Linked filter = downstream where-used (this source doc linked INTO course documents), not
-    // type:"link" range-marks (which don't exist yet). Surfacing the real usage stops the Linked
-    // tab reading as permanently empty (source-right-panel-consolidation part 3).
-    if (__sourceMarksFilter === "link") {
-      var used = libraryWhereUsedDetail(__sourceActiveTopicId, getRegistry());
-      if (!used.length) {
-        listWrap.appendChild(h("div", "source-drawer__empty", "Not linked in any document yet."));
-      } else {
-        used.forEach(function (u) {
-          var row = h("button", "source-drawer__row"); row.type = "button";
-          row.title = "Open " + u.docTitle + " and select the linked block";
-          row.appendChild(h("span", "source-drawer__dot source-drawer__dot--ok"));
-          var rbody = h("div", "source-drawer__row-body");
-          rbody.appendChild(h("div", "source-drawer__row-type source-mark-link", "Linked in"));
-          rbody.appendChild(h("div", "source-drawer__row-snip", u.docTitle));
-          row.appendChild(rbody);
-          row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
-          listWrap.appendChild(row);
-        });
-      }
-      body.appendChild(listWrap);
-      return;
-    }
     var marks = (model.marks || []).filter(function (m) { return __sourceMarksFilter === "all" || m.type === __sourceMarksFilter; });
     if (!marks.length) {
-      listWrap.appendChild(h("div", "source-drawer__empty", "No marks" + (__sourceMarksFilter === "all" ? " yet." : " of this type.")));
+      listWrap.appendChild(h("div", "source-drawer__empty", __sourceMarksFilter === "link"
+        ? "Nothing linked yet — select a passage and place it from the Edit stage."
+        : ("No marks" + (__sourceMarksFilter === "all" ? " yet." : " of this type."))));
     } else {
       marks.forEach(function (m) {
-        var meta = SD.markMeta(m), status = SD.markStatus(m);
+        var meta = SD.markMeta(m), state = sourceMarkRowState(topic, model, m);
         var row = h("button", "source-drawer__row" + (m.id === __sourceActiveMarkId ? " is-active" : "")); row.type = "button";
         row.setAttribute("data-mark-id", m.id);
-        var dot = h("span", "source-drawer__dot source-drawer__dot--" + status.dot); dot.title = status.label;
+        var dot = h("span", "source-drawer__dot source-drawer__dot--" + state.dot); dot.title = state.dotTitle;
         var rbody = h("div", "source-drawer__row-body");
-        rbody.appendChild(h("div", "source-drawer__row-type " + meta.cls, meta.label));
+        var head = h("div", "source-drawer__row-head");
+        head.appendChild(h("span", "source-drawer__row-type " + meta.cls, meta.label));
+        if (state.meta) head.appendChild(h("span", "source-drawer__row-count", state.meta));
+        rbody.appendChild(head);
         var snip = SD.isObjectMark(m) ? SD.objectNodeLabel(SD.nodeByKey(model, m.anchor.nodeKey)) : (SD.anchorText(model, m.anchor) || "(empty)");
         rbody.appendChild(h("div", "source-drawer__row-snip", snip));
+        var path = SD.markPath(model, m);
+        if (path) rbody.appendChild(h("div", "source-drawer__row-where", path));
         row.appendChild(dot); row.appendChild(rbody);
-        row.addEventListener("click", function () { revealSourceMark(m); });
+        row.addEventListener("click", function () {
+          revealSourceMark(m);
+          // a linked row opens the card that holds its destination list -- the instances the row
+          // deliberately no longer enumerates (SRC-01).
+          if (m.type === "link" && topic) syncSourceWherePanel(topic, m.id);
+        });
         listWrap.appendChild(row);
       });
     }
     body.appendChild(listWrap);
+    // The topic can ALSO be placed whole, as a library component instance -- a DIFFERENT mechanism
+    // from a link mark. It closes the list as one plain footnote rather than a fake mark row: it
+    // isn't a mark, so it must not wear a mark's row or borrow a mark colour (SRC-07's fixed
+    // palette only works if no hue does two jobs).
+    if (__sourceMarksFilter === "all" || __sourceMarksFilter === "link") {
+      var inst = libraryWhereUsedDetail(__sourceActiveTopicId, getRegistry());
+      var idocs = {}; inst.forEach(function (u) { idocs[u.docCode] = 1; });
+      var ni = Object.keys(idocs).length;
+      if (ni) {
+        var irow = h("button", "source-marks__rollup", "Also placed whole, as a component, in " + ni + " document" + (ni === 1 ? "" : "s") + ".");
+        irow.type = "button";
+        irow.title = "Open " + inst[0].docTitle + " and select the placed component";
+        irow.addEventListener("click", function () { jumpToLinkedBlock(inst[0].docCode, inst[0].blockId); });
+        body.appendChild(irow);
+      }
+    }
   }
 
   // The contextual selection bar, above the highlight (canvas idiom): glyph rich-text
