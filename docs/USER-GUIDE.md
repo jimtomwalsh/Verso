@@ -974,6 +974,13 @@ a refresh and a stage-switch.
   variant, version and preset; a document that failed is marked in the list. It's a read-only audit
   trail — it never re-exports anything. To publish a whole product family as one release, queue its
   documents and run them together.
+- **Finding the right document.** The Documents list states its scope and how many documents it's
+  showing, and carries a **search** field. The **sort** control beside the heading offers the three
+  orderings that matter: **Title**, **Drift** (most changed source first) and **Last published**,
+  which leads with anything never published and then works forward from the oldest — the two
+  documents most likely to need your attention, at the top. When something does need attention —
+  approved source has moved under it, or it has never gone out — a **Needs attention** filter
+  appears with its count. It only appears when there's something in it.
 - **Last published, per document.** Every row in the Documents list states when that document last
   actually went out and as what version ("Last published 12 Jun · v1.4"), or **Never published**.
   That's usually the fastest way to tell whether a re-publish is needed at all. The line is read

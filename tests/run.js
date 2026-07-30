@@ -9871,6 +9871,71 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
   ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
 })();
 
+// uio-P-C04 (PUB-12): the picker had no scope, count, search or sort — only alphabetical — so the
+// two orderings that decide publishing work (most drifted first, least recently published first)
+// were unreachable. The whole view is a pure function of the decorated rows.
+section("uio-P-C04: picker scope + count + search + sort + needs-attention");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  var m = e.match(/\/\* @publish-pick-start \*\/([\s\S]*?)\/\* @publish-pick-end \*\//);
+  if (!m) { ok("locate @publish-pick fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { publishPickView: publishPickView, publishNeedsAttention: publishNeedsAttention, PUBLISH_SORTS: PUBLISH_SORTS };")();
+  var view = g.publishPickView, needs = g.publishNeedsAttention;
+
+  var rows = [
+    { id: "a", title: "Zebra handbook", drift: 0, lastAt: 3000 },
+    { id: "b", title: "Alpha guide",    drift: 3, lastAt: 1000 },
+    { id: "c", title: "Mid card",       drift: 1, lastAt: 0    },   // never published
+    { id: "d", title: "Beta manual",    drift: 0, lastAt: 2000 }
+  ];
+  var ids = function (r) { return r.map(function (x) { return x.id; }).join(""); };
+
+  ok("the three orderings are Title / Drift / Last published", g.PUBLISH_SORTS.map(function (s) { return s.key; }).join() === "title,drift,last");
+  ok("title sort is alphabetical", ids(view(rows, { sort: "title" })) === "bdca");
+  ok("drift sort puts the most drifted first", ids(view(rows, { sort: "drift" })) === "bcda");
+  ok("a drift tie falls back to title, so the order is stable not arbitrary", ids(view(rows, { sort: "drift" })).slice(2) === "da");
+  // the trap: a never-published doc has lastAt 0, which a naive ascending sort treats as "oldest"
+  // by accident. It IS the most overdue, so it must lead deliberately — asserted, not incidental.
+  ok("last-published sort leads with NEVER published, then oldest first", ids(view(rows, { sort: "last" })) === "cbda");
+  ok("search matches the title, case-insensitively", ids(view(rows, { query: "MANUAL" })) === "d" && ids(view(rows, { query: "a" })) === "bdca");
+  ok("a search that matches nothing returns nothing (not everything)", view(rows, { query: "zzz" }).length === 0);
+  ok("needs attention = drifted OR never published", needs({ drift: 2, lastAt: 5 }) === true && needs({ drift: 0, lastAt: 0 }) === true && needs({ drift: 0, lastAt: 5 }) === false);
+  ok("the attention filter keeps only those", ids(view(rows, { filter: "attention", sort: "title" })) === "bc");
+  ok("search and filter compose", ids(view(rows, { filter: "attention", query: "card" })) === "c");
+  ok("the view never mutates the array it was handed", (function () { view(rows, { sort: "drift" }); return ids(rows) === "abcd"; })());
+  ok("a junk row set degrades to empty, not a throw", view(null, {}).length === 0 && view([null], {}).length === 0);
+
+  // --- the header states scope + the count of what is SHOWN, from the same array ---
+  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", \[pname, String\(docs\.length\)\]\.filter\(Boolean\)\.join\(" · "\)\)\)/.test(e));
+  ok("rows are decorated with drift + lastAt, then run through the pure view", /drift: groundTruthStaleCount\(registry\[d\.id\], vers\) \|\| 0, lastAt: last \? last\.at : 0/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
+
+  // --- sort is a MENU, not a cycling button: three orderings a cycle would hide ---
+  ok("sort opens the canonical menu with the current ordering ticked", /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Order by" \}\]\.concat\(PUBLISH_SORTS\.map/.test(e) && /active: __publishPickSort === s\.key/.test(e));
+  // it reuses the pane's EXISTING menu-opening value control (the queue row's preset chip) rather
+  // than inventing a second chrome for the same job.
+  ok("the sort trigger is a publish-chip, like its sibling the preset chip", /h\("button", "publish-chip publish-pick__sort"\)/.test(e) && /\.publish-pick__sort \{ flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; \}/.test(css));
+
+  // --- search reuses the SIBLING stage's field, not a new one ---
+  ok("search reuses the Source rail's search field pattern", /var search = h\("div", "vbrowser__search publish-pick__search"\);/.test(e) && /placeholder = "Search documents"/.test(e));
+  ok("typing keeps focus + caret (a re-render must not eject you from the field)", /var again = document\.querySelector\("\.publish-pick__search \.vbrowser__search-input"\);[\s\S]{0,140}again\.setSelectionRange\(again\.value\.length, again\.value\.length\)/.test(e));
+
+  // --- needs-attention is offered only when something needs it ---
+  ok("the attention filter appears only when the count is non-zero", /if \(attention && U && U\.SegmentedControl\)/.test(e));
+  ok("and it resets itself if the last attention row goes away", /else if \(__publishPickFilter !== "all"\) \{ __publishPickFilter = "all"; \}/.test(e));
+  ok("both segments carry live counts", /label: "All " \+ all\.length/.test(e) && /label: "Needs attention " \+ attention/.test(e));
+
+  // --- the header/search stay put; only the list scrolls ---
+  ok("the pick pane stopped scrolling as one strip", /\.publish-stage__pick \{[^}]*overflow: hidden;/.test(css) && /\.publish-stage__pick > \.publish-picklist \{ flex: 1 1 auto; min-height: 0; overflow-y: auto;/.test(css));
+  // the header runs edge-to-edge under its hairline, so the pane holds no padding for it to fight
+  // (a negative-margin bleed clipped the first character — caught in the browser, not headlessly).
+  ok("the pane has no padding of its own; each region carries its inset", /\.publish-stage__pick \{[^}]*padding: 0;\s*\}/.test(css) && !/\.publish-pick__head \{[^}]*margin: -12px/.test(css));
+  // vbrowser__search ships fixed at 260px and a `full` button at 100%; inside a 12px inset both
+  // overhang the pane. Every rail that embeds them overrides the width — same override here.
+  // (Both overflows were found by MEASURING the live pane, not by reading the markup.)
+  ok("the embedded search + full-width button are re-fitted to the inset column", /\.publish-pick__search\.vbrowser__search \{ width: auto;/.test(css) && /\.publish-stage__pick > \.publish-pane__addcur \{ width: auto; \}/.test(css));
+  ok("an empty RESULT reads differently from an empty product", /all\.length\s*\n?\s*\? "No document matches that\."/.test(e));
+})();
+
 // uio-P-C03 (PUB-10): release history answers "what did we ship?", so it fills the pane's empty
 // half instead of hiding collapsed below the queue — and every picker row states when that document
 // last actually went out.
