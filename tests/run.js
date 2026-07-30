@@ -7794,7 +7794,10 @@ section("panel system v2 — layout engine");
   ok("endSections emits in PanelLayout order", /function endSections\(container\)[\s\S]*?window\.PanelLayout\.orderSections\(_sectionBuf\)\.forEach/.test(e));
   ok("collapse toggle persists via setCollapsed", /window\.PanelLayout\.setCollapsed\(type, nowCollapsed\)/.test(e));
   ok("edit-mode wires section drag → PanelLayout.move + re-render", /function wireSectionDrag\(container\)[\s\S]*?window\.PanelLayout\.move\(dragged, order\.indexOf\(target\)\);\s*renderInspector\(\)/.test(e));
-  ok("Edit-layout bar only shows on panels with v2 sections (data-section-type)", /function maybeRenderLayoutBar\(\) \{ if \(inspector\.querySelector\("\.insp-section\[data-section-type\]"\)\) renderPanelLayoutBar\(\)/.test(e));
+  // uio-E-C05 (EDIT-09): the reorder entry moved to the panel ⋯ menu; the bar is now the on-state
+  // banner only. maybeRenderLayoutBar toggles the ⋯ visibility + renders the banner only where
+  // reorderable sections exist (panelHasReorderableSections reads .insp-section[data-section-type]).
+  ok("Edit-layout entry + banner gate on panels with v2 sections", /function panelHasReorderableSections\(\) \{ return !!inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(e) && /function maybeRenderLayoutBar\(\) \{[\s\S]{0,600}panelHasReorderableSections\(\)[\s\S]{0,400}renderPanelLayoutBar\(\)/.test(e));
   ok("layout bar has Edit + Reset (reset → PanelLayout.reset)", /reset\.addEventListener\("click", function \(\) \{ window\.PanelLayout\.reset\(\); renderInspector\(\); \}\)/.test(e));
   // Phase 2a: unified colorField (D5) — normalized value + resolver + token/custom/per-mode + recents
   ok("resolveColorField: token→var, per-mode→mode value, else hex", /window\.resolveColorField = function \(v, mode\) \{[\s\S]*?if \(v\.token\) return "var\(--color-" \+ v\.token \+ "\)";[\s\S]*?if \(v\.light \|\| v\.dark\) return \(mode === "dark" \? v\.dark : v\.light\)/.test(e));
@@ -8625,7 +8628,7 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("setStage() shows/hides both placeholder regions", /document\.getElementById\("stage-source"\); if \(srcEl\) srcEl\.hidden = stage !== "source";/.test(e) && /document\.getElementById\("stage-publish"\); if \(pubEl\) pubEl\.hidden = stage !== "publish";/.test(e));
   ok("mountLeftRail() reconciles to __activeStage on mount (single source of truth)", /setStage\(__activeStage\);/.test(e));
   ok("mountProductPicker() builds a VersoUI.Select from ProductsStore", /U\.Select\(\{\s*options: productSelectOptions\(window\.ProductsStore\)/.test(e));
-  ok("boot mounts the product picker alongside the left rail", /mountLeftRail\(\);[^\n]*\n\s*mountProductPicker\(\);/.test(e));
+  ok("boot mounts the product picker alongside the left rail", /mountLeftRail\(\);[\s\S]{0,160}mountProductPicker\(\);/.test(e));
   ok("__productRail exposes the shared product-context getter/setter (read by every stage)", /window\.__productRail\.getActiveProduct = getActiveProduct;/.test(e) && /window\.__productRail\.setActiveProduct = setActiveProduct;/.test(e));
 
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
@@ -9775,6 +9778,22 @@ section("uio-E-C04: labelled variant/version axes + off-base return chip");
   ok("chip wording tracks the real edit mode (read-only vs editing)", /var locked = !canvasEditable\(\)[\s\S]{0,240}"Read-only"[\s\S]{0,240}"Editing "/.test(e));
   ok("Return to base clears BOTH axes and flushes", /function returnToBase\(\) \{[\s\S]{0,160}activeVariant = null; activeVersion = null;[\s\S]{0,80}mount\(\)/.test(e));
   ok(".axis-return-chip has a locked (danger) variant + a button", /\.axis-return-chip \{/.test(css) && /\.axis-return-chip--locked \{/.test(css) && /\.axis-return-chip__btn \{/.test(css));
+})();
+
+// uio-E-C05 (EDIT-09/10): demote the two power-user affordances. The live JSON model hides behind
+// an off-by-default "Developer tools" system setting; "Edit layout" leaves the inspector top for
+// the panel ⋯ overflow menu, and its on-state becomes a scope-stating banner.
+section("uio-E-C05: JSON model behind Developer tools + reorder in the panel overflow menu");
+(function () {
+  var e = src("src/editor.js"), html = src("index.html");
+  // EDIT-10: developer-tools gate, off by default.
+  ok("Developer tools setting defaults OFF and gates the model panel", /function devToolsOn\(\) \{ try \{ return localStorage\.getItem\("authoring\.devtools"\) === "on"/.test(e) && /function applyDevToolsVisibility\(\)[\s\S]{0,160}modelDetails\.hidden = !on/.test(e));
+  ok("a Developer tools switch lives in system settings", /switchRow\("Developer tools", function \(\) \{ return devToolsOn\(\); \}/.test(e));
+  ok("the model view is enforced hidden at boot", /applyDevToolsVisibility\(\); \/\/ enforce the default-off state at boot/.test(e));
+  // EDIT-09: reorder demoted to the panel overflow menu; banner states scope.
+  ok("the panel has an overflow (⋯) button, hidden until it applies", /id="panel-overflow-btn"[^>]*hidden/.test(html) && /var ov = document\.getElementById\("panel-overflow-btn"\); if \(ov\) ov\.hidden = !has/.test(e));
+  ok("the overflow menu carries the demoted Reorder entry", /openPanelOverflowMenu[\s\S]{0,400}"Reorder inspector sections…"/.test(e));
+  ok("the layout bar is now an on-state banner stating the scope", /if \(!panelEditMode\) return;[\s\S]{0,200}insp-layout-bar__scope"/.test(e));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE

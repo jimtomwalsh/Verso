@@ -4770,6 +4770,22 @@
     modelViewT = setTimeout(function () { modelViewT = null; paintModelView(); }, 200);
   }
   if (modelDetails) modelDetails.addEventListener("toggle", function () { if (modelDetails.open) paintModelView(); }); // refresh on open
+  // uio-E-C05 (EDIT-10): the live JSON document model is a DEBUGGING affordance, not everyday
+  // authoring chrome. It is hidden unless the "Developer tools" system setting is on (off by
+  // default), so authors scrolling for a property never land on it.
+  function devToolsOn() { try { return localStorage.getItem("authoring.devtools") === "on"; } catch (e) { return false; } }
+  function applyDevToolsVisibility() {
+    if (!modelDetails) return;
+    var on = devToolsOn();
+    modelDetails.hidden = !on;
+    if (!on) modelDetails.open = false; // collapse when hidden so re-enabling starts closed
+  }
+  function setDevToolsEnabled(on) {
+    try { localStorage.setItem("authoring.devtools", on ? "on" : "off"); } catch (e) {}
+    applyDevToolsVisibility();
+    if (on) paintModelView();
+  }
+  applyDevToolsVisibility(); // enforce the default-off state at boot
 
   // ---- selection state -----------------------------------------------------
   var selection = { type: "none", node: null };
@@ -5223,29 +5239,55 @@
       });
     });
   }
-  // The "Edit panel layout" toggle bar (D3) — rendered atop the inspector. Off: a quiet gear.
-  // On: Done + Reset. Editor-chrome only; drag reorders section TYPES globally.
+  // uio-E-C05 (EDIT-09): section reordering is a once-in-a-while GLOBAL preference, so its entry
+  // point moved OFF the top of the inspector into the panel overflow menu ("Reorder inspector
+  // sections…"). This bar is now only the MODE BANNER while reordering is on: it states the scope
+  // (every block's inspector) + Done/Reset, so you always know what the drag is rearranging.
   function renderPanelLayoutBar() {
-    var bar = h("div", "insp-layout-bar" + (panelEditMode ? " is-editing" : ""));
-    var toggle = h("button", "insp-layout-bar__btn"); toggle.type = "button";
-    toggle.textContent = panelEditMode ? "Done" : "Edit layout";
-    toggle.title = "Reorder / collapse the panel sections (saved for you, not the course)";
-    toggle.addEventListener("click", function () { panelEditMode = !panelEditMode; renderInspector(); });
-    bar.appendChild(toggle);
-    if (panelEditMode) {
-      var reset = h("button", "insp-layout-bar__btn insp-layout-bar__btn--reset"); reset.type = "button";
-      reset.textContent = "Reset"; reset.title = "Restore the default section order + collapse";
-      reset.addEventListener("click", function () { window.PanelLayout.reset(); renderInspector(); });
-      bar.appendChild(reset);
-    }
+    if (!panelEditMode) return; // off: no top-of-panel control; the ⋯ menu is the entry point
+    var bar = h("div", "insp-layout-bar is-editing");
+    bar.appendChild(h("span", "insp-layout-bar__scope", "Reordering sections for every block’s inspector — saved for you, not the course."));
+    var done = h("button", "insp-layout-bar__btn"); done.type = "button";
+    done.textContent = "Done"; done.title = "Finish reordering";
+    done.addEventListener("click", function () { panelEditMode = false; renderInspector(); });
+    bar.appendChild(done);
+    var reset = h("button", "insp-layout-bar__btn insp-layout-bar__btn--reset"); reset.type = "button";
+    reset.textContent = "Reset"; reset.title = "Restore the default section order + collapse";
+    reset.addEventListener("click", function () { window.PanelLayout.reset(); renderInspector(); });
+    bar.appendChild(reset);
     inspector.insertBefore(bar, inspector.firstChild); // pin to the very top of the panel
+  }
+  // uio-E-C05 (EDIT-09): the panel overflow (⋯) menu. Holds the demoted "Reorder inspector
+  // sections…" entry, shown only when the current inspector actually has reorderable sections.
+  function panelHasReorderableSections() { return !!inspector.querySelector(".insp-section[data-section-type]"); }
+  function openPanelOverflowMenu(anchor) {
+    // The ⋯ button only shows when there ARE reorderable sections (see maybeRenderLayoutBar), so
+    // the menu always carries the reorder entry.
+    var items = [{ label: panelEditMode ? "Done reordering sections" : "Reorder inspector sections…",
+      onClick: function () { panelEditMode = !panelEditMode; renderInspector(); } }];
+    if (panelEditMode) items.push({ label: "Reset section order", onClick: function () { window.PanelLayout.reset(); renderInspector(); } });
+    var r = anchor.getBoundingClientRect();
+    showContextMenu(r.right - 4, r.bottom + 6, items);
+  }
+  function mountPanelOverflow() {
+    var btn = document.getElementById("panel-overflow-btn");
+    if (!btn || btn.__wired) return;
+    btn.__wired = true;
+    btn.addEventListener("click", function () { openPanelOverflowMenu(btn); });
   }
   // Show the Edit-layout bar only on panels that actually use v2 sections (else it's a dead control).
   // Only the PanelLayout-managed sections (sectionGroup -> data-section-type) are
   // drag-reorderable, so the Edit-layout bar shows only when THOSE exist. The DS
   // PanelSection wrappers (issue #14, no data-section-type) are plain collapsibles
   // and must not summon the bar on every block inspector.
-  function maybeRenderLayoutBar() { if (inspector.querySelector(".insp-section[data-section-type]")) renderPanelLayoutBar(); }
+  function maybeRenderLayoutBar() {
+    var has = panelHasReorderableSections();
+    // uio-E-C05 (EDIT-09): the ⋯ entry point shows only where reordering applies; the banner shows
+    // only while reordering is on. If a re-render drops the sections, leave edit mode so no orphan banner.
+    var ov = document.getElementById("panel-overflow-btn"); if (ov) ov.hidden = !has;
+    if (!has) { panelEditMode = false; return; }
+    renderPanelLayoutBar();
+  }
   window.__panelV2 = { beginSections: beginSections, sectionGroup: sectionGroup, endSections: endSections, setEditMode: function (v) { panelEditMode = v; }, getEditMode: function () { return panelEditMode; } }; // test hook
 
   function renderInspector() {
@@ -11047,7 +11089,7 @@
   function mountTopBar() {
     if (typeof document === "undefined") return;
     var Ic = window.Icon; if (!Ic) return;
-    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
+    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide], .panel-tabs [data-lucide]");
     Array.prototype.forEach.call(hosts, function (el) {
       var name = el.getAttribute("data-lucide");
       if (!name) return;
@@ -14679,6 +14721,9 @@
           // P0 spellcheck: mark misspellings across every text box, on or off selection.
           switchRow("Spellcheck", function () { return spellcheckOn(); }, function (v) { setSpellcheckEnabled(v); }, ifBody);
           ifBody.appendChild(h("div", "insp-hint", "Underlines likely typos in every text box on the canvas and in the copy editor, whether or not it's selected. Editor-only — never shown to learners or exported."));
+          // uio-E-C05 (EDIT-10): the live JSON document model is a developer affordance, off by default.
+          switchRow("Developer tools", function () { return devToolsOn(); }, function (v) { setDevToolsEnabled(v); }, ifBody);
+          ifBody.appendChild(h("div", "insp-hint", "Shows the live document model (JSON) below the inspector for debugging. Off by default; editor-only, never exported."));
         } },
       { key: "preview", title: "Preview sizes", build: buildPreviewSizesBody },
       { key: "library", title: "Component Library", build: buildLibraryBody }
@@ -24803,6 +24848,7 @@
   mountDocSettingsBtn(); // edit-header-ia-v2: the header's Document-settings button (the cell chip's
   // geometry/interactivity moved INTO its modal -- the "Document type" settings section)
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
+  mountPanelOverflow(); // uio-E-C05 (EDIT-09): wire the inspector panel's ⋯ overflow menu
   mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
   mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
