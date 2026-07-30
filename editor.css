@@ -615,11 +615,11 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .publish-pickrow { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; border-radius: 6px; }
 .publish-pickrow:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
 .publish-pickrow__title { flex: 1 1 auto; min-width: 0; font-size: var(--text-sm, 12px); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* staleness-tracking: an informational count of linked source topics changed since last publish.
-   A subtle chip -- never alarming, never a gate. Hidden entirely when in sync or no linked content. */
-.publish-pickrow__stale { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px; font-size: var(--text-2xs); font-weight: 600; line-height: 1; color: var(--accent); background: var(--surface-raised, rgba(127,127,127,0.14)); }
-/* source-alignment: a passive % chip -- how much of the document is linked to approved source. */
-.publish-pickrow__align { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; }
+/* uio-F04: drift / alignment / outputs on a picker row. All three are the canonical DS Badge
+   (.vds-badge--quiet), so these rules only hold them out of the flex stretch -- no second chip
+   design, no per-stage styling. The same classes on the queue rows below do the same job. */
+.publish-pickrow__drift, .publish-pickrow__align, .publish-pickrow__outputs,
+.publish-queuerow__drift, .publish-queuerow__align, .publish-queuerow__outputs { flex: 0 0 auto; }
 /* uio-P-C03 (PUB-10): the provenance line under each picker row — "when did this last go out, and
    as what version". Sits at the chrome baseline, indented to the title column. */
 /* uio-P-C06 (PUB-04): the row's leading tick box. The canonical DS Checkbox at its own 14px size --
@@ -635,7 +635,10 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .publish-pick__hidden-text { flex: 1 1 auto; min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .publish-pick__clear { flex: 0 0 auto; }
 .publish-pickitem { display: flex; flex-direction: column; }
-.publish-pickitem__last { padding: 0 4px 4px 8px; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* uio-F04: the row's meta line — its fact badges, then when it last went out. Below the title so a
+   row never trades its own name for its numbers. */
+.publish-pickitem__meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); padding: 0 var(--space-2) var(--space-2) var(--space-4); }
+.publish-pickitem__last { min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .publish-empty { font-size: var(--text-sm, 12px); color: var(--text-secondary); padding: 8px 4px; }
 .publish-queuelist { display: flex; flex-direction: column; gap: 6px; }
 /* Epic 6: the append-only whole-family release log. uio-P-C03 (PUB-10) promotes it from a collapsed
@@ -835,6 +838,11 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
 /* provenance under the header: its own line (the head flex-wraps), muted */
 .source-stage__provenance { flex-basis: 100%; margin: -10px 0 0; font: var(--type-label); color: var(--text-secondary); }
 .source-stage__provenance.is-authored { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+/* uio-F04 (SRC-12): the downstream-consequence strip, its own line under the provenance. Badges are
+   the canonical DS Badge; this only lays them out and mutes the scope note beside the alignment. */
+.source-stage__facts { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-3) 0 0; }
+.source-stage__facts:empty { display: none; }
+.source-stage__fact-scope { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
 .source-stage__section { max-width: 640px; margin-bottom: 24px; position: relative; }
 .source-stage__heading { font-size: var(--text-md, 14px); font-weight: 600; color: var(--text-primary); margin: 0 0 6px; }
 .source-stage__body { font-size: var(--text-sm, 13px); line-height: 1.6; color: var(--text-secondary); }
@@ -1879,6 +1887,11 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 .uiswitch:focus-visible, .insp-row__overflow:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
+/* uio-F04 (EDIT-06): the provenance line under the breadcrumb on a source-linked block -- where the
+   copy came from, plus the same fact badges the Publish rows carry. Read-only chrome, one row high. */
+.insp-provenance { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin: var(--space-1) 0 var(--space-4); min-height: var(--row-height, 28px); }
+.insp-provenance__label { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
+.insp-provenance__name { font-size: var(--text-sm); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
 /* SPEC 7: a geometry-tool entry row in the Document-context inspector. */
 .insp-doc-tool { display: flex; align-items: center; height: 26px; padding: 0 2px; color: var(--text-secondary); }
 .insp-doc-tool .insp-row__label { flex: 1 1 auto; font-size: var(--text-sm); color: var(--text-primary); }

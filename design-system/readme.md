@@ -167,6 +167,29 @@ One visual language for the state of a value, at any rung, in any surface:
   restores and from which scope.
 - **Section roll-up** — the section header counts its overrides ("3 overridden").
 
+### Cross-stage facts
+
+Some facts follow a document across Source, Edit and Publish — how much of it comes from approved
+source, what has drifted since it last went out, where a passage is used, how many packages it
+produces. These are read-only status, never controls, and they obey three rules:
+
+- **One resolver, one phrasing.** A fact is computed once and phrased once. If two stages state the
+  same fact, they call the same function and print the same words. A stage that phrases a fact its
+  own way is a divergence, not a variation.
+- **Drawn as the canonical `Badge`, `quiet`, `sm`.** They repeat down lists, which is exactly what
+  `quiet` is for. Never a bespoke chip, and never the accent (the accent belongs to the one primary
+  action on the surface).
+- **Silence over noise, honesty over a number.** A fact with nothing to say renders nothing — no
+  chip that only means "nothing here". A fact that cannot be computed says so in words ("Not
+  indexed"), never as a `0%` that reads as a failing score.
+
+Banded percentages use one scale, and the tone states the band without scolding: **success** at the
+top band, **warning** in the middle, **neutral** at the bottom. Red is reserved for something that
+is actually wrong.
+
+A fact badge sits on the row's own meta line, below the title, not beside it — a row must never
+trade its name for its numbers.
+
 ### Save contract
 
 **Autosave + live-apply + Undo.** There is no Save, Apply, Cancel or Done anywhere in a settings

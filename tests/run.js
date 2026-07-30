@@ -8180,7 +8180,9 @@ section("UI kit seam");
   ok("generic two-level shell defined (renderBlockTwoLevel)", /function renderBlockTwoLevel\(node, label, decl, renderContent, io, handlers\) \{/.test(e));
   ok("hotspot + sequence dispatched to the two-level shell (#160: hotspot depth-pure)", /renderBlockTwoLevel\(node, "Image hotspots", CONTENT_PURE_DECL/.test(e) && /renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\)/.test(e));
   ok("shell: crumbs, container chrome (actions-only at content level for a pureContent block), then specific content when entered (#160 depth-pure)",
-    /renderLayerCrumbs\(block, label\);[\s\S]{0,400}var chromeDecl = \(atContent && decl && decl\.pureContent\) \? ACTIONS_ONLY_DECL : decl;\s*renderContainerChrome\(inspector, chromeDecl[\s\S]{0,200}if \(atContent\) \{\s*renderContent\(node\);[\s\S]{0,200}Edit " \+ \(label/.test(e));
+    // uio-F04 (EDIT-06): a source-linked block's provenance line is appended between the crumb and the
+    // container chrome, so the window here allows for it.
+    /renderLayerCrumbs\(block, label\);\s*var prov = renderSourceLinkProvenance\(block\);\s*if \(prov\) inspector\.appendChild\(prov\);[\s\S]{0,400}var chromeDecl = \(atContent && decl && decl\.pureContent\) \? ACTIONS_ONLY_DECL : decl;\s*renderContainerChrome\(inspector, chromeDecl[\s\S]{0,200}if \(atContent\) \{\s*renderContent\(node\);[\s\S]{0,200}Edit " \+ \(label/.test(e));
   // #160: the depth-pure decls + actions-only swap exist.
   ok("#160 depth-pure decls (CONTENT_PURE_DECL / IMAGE_PURE_DECL / ACTIONS_ONLY_DECL)", /var CONTENT_PURE_DECL = \{ fill: false, stroke: false, radius: false, pureContent: true \};/.test(e) && /var IMAGE_PURE_DECL = \{ fill: false, stroke: true, radius: false, pureContent: true \};/.test(e) && /var ACTIONS_ONLY_DECL = \{ align: false, valign: false, width: false, padding: false, gap: false, spacing: false, fill: false, stroke: false, radius: false, actions: true \};/.test(e));
   ok("layer breadcrumb: page + container ancestry, each crumb selects that layer", /function blockAncestry\(block\)/.test(e) && /function renderLayerCrumbs\(block, label\)/.test(e) && /kind: "page"/.test(e));
@@ -8833,9 +8835,10 @@ section("Product Rail: Release history store (whole-family export)");
   // uio-P-C03 flipped the DEFAULT: reverse-chron and per-release expansion are unchanged, but the
   // section is now open and fills the pane's empty half instead of hiding collapsed below the queue.
   ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
-  // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover
-  ok("the Publish pick rows show a '% source' alignment chip (sourceAlignmentPct)", /var apct = sourceAlignmentPct\(registry\[d\.id\]\);[\s\S]{0,160}apct \+ "% source"/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
-  ok("the Edit-stage storage popover shows a live 'Source alignment' readout (sourceAlignmentPct of the open doc)", /var apct = sourceAlignmentPct\(doc\);[\s\S]{0,120}row\("Source alignment", apct \+ "% linked"\)/.test(e));
+  // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover.
+  // uio-F04 moved BOTH onto the shared resolver (f04DocFacts), so neither phrases the number itself.
+  ok("the Publish pick rows show the alignment badge from the shared resolver", /var facts = d\.facts \|\| f04DocFacts\(d\.id\);[\s\S]{0,300}f04Badge\(facts\.alignment, "publish-pickrow__align"\)/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
+  ok("the Edit-stage storage popover shows a live 'Source alignment' readout (from f04DocFacts)", /var stFacts = f04DocFacts\(activeDocId\);[\s\S]{0,120}row\("Source alignment", stFacts\.alignment\.label\)/.test(e));
   ok("index.html loads release-history.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/release-history.js") > -1 && idx.indexOf("src/release-history.js") < idx.indexOf("src/editor.js");
   })());
@@ -8909,7 +8912,7 @@ section("Product Rail: Ground-Truth staleness");
   var pre = "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b);" +
             " ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.blocks); }\n" +
             "function libComponents(){ return LIB; }\n";
-  var g = new Function("LIB", pre + m[1] + "\nreturn { docLinkedMasterIds: docLinkedMasterIds, groundTruthStaleCount: groundTruthStaleCount, currentMasterVersions: currentMasterVersions, snapshotGroundTruthBaseline: snapshotGroundTruthBaseline };")(LIB);
+  var g = new Function("LIB", pre + m[1] + "\nreturn { docLinkedMasterIds: docLinkedMasterIds, driftedMasterIds: driftedMasterIds, groundTruthStaleCount: groundTruthStaleCount, currentMasterVersions: currentMasterVersions, snapshotGroundTruthBaseline: snapshotGroundTruthBaseline };")(LIB);
 
   // A doc linking two distinct masters (one nested inside a column), plus a non-linked block.
   var doc = { meta: {}, blocks: [
@@ -8940,6 +8943,15 @@ section("Product Rail: Ground-Truth staleness");
   g.snapshotGroundTruthBaseline(fresh);
   ok("snapshot writes doc.meta.lastPublishedGroundTruthVersions from live stamps", fresh.meta.lastPublishedGroundTruthVersions.mA === 30 && fresh.meta.lastPublishedGroundTruthVersions.mB === 40);
   ok("after snapshot the staleness count is 0 (freshly published baseline)", g.groundTruthStaleCount(fresh, g.currentMasterVersions()) === 0);
+
+  // uio-F04: the count is DERIVED from the id list -- one computation, so a drift badge and a drift
+  // list can never disagree about what changed.
+  ok("driftedMasterIds names WHICH masters changed", g.driftedMasterIds(docPub, { mA: 11, mB: 20 }).join(",") === "mA");
+  ok("driftedMasterIds keeps the same null contract (no linked content)", g.driftedMasterIds({ meta: {}, blocks: [ { type: "paragraph", id: "x" } ] }, { mA: 5 }) === null);
+  ok("the count is exactly the length of that list, always", (function () {
+    var cases = [[docPub, { mA: 11, mB: 21 }], [docPub, { mA: 10, mB: 20 }], [doc, { mA: 1, mB: 2 }]];
+    return cases.every(function (c) { return g.groundTruthStaleCount(c[0], c[1]) === g.driftedMasterIds(c[0], c[1]).length; });
+  })());
 })();
 
 // ---- product-rail-source-alignment-metric: % linked-to-approved-source vs novel ----
@@ -9942,6 +9954,91 @@ section("uio-P-C05: format control on Publish, import on Source");
   ok("the DS ContextMenu contract documents the hint", /hint\?: string;/.test(ds));
 })();
 
+// uio-F04 (SRC-12 / EDIT-06 / PUB-01/02/14/15): four facts — alignment, drift, where-used and
+// variants-as-outputs — used to be phrased (and sometimes computed) separately in each stage. This
+// section pins the ONE resolver they now all read: its bands, its honest not-indexed and
+// never-published states, and the roll-up that makes the Source top bar and a Publish row agree.
+section("uio-F04: cross-stage data surfacing");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
+  if (!m) { ok("locate @f04 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { band: f04Band, alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment," +
+    " driftFact: f04DriftFact, whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact, BANDS: F04_BANDS };")();
+
+  // --- bands: >=85 verified / 60-84 mixed / <60 mostly novel, boundaries included ---
+  ok("band >=85 is verified (boundary included)", g.band(85).key === "verified" && g.band(100).key === "verified");
+  ok("band 60-84 is mixed (both boundaries)", g.band(60).key === "mixed" && g.band(84).key === "mixed");
+  ok("band <60 is mostly novel, 0 included", g.band(59).key === "novel" && g.band(0).key === "novel");
+  ok("no percent -> no band", g.band(null) === null);
+
+  // --- alignment: the number, the band, the tone, the sentence ---
+  var a = g.alignmentFact({ linkedWords: 78, totalWords: 100 }, true);
+  ok("alignment states the rounded percent and its band", a.pct === 78 && a.band === "mixed" && a.label === "78% aligned");
+  ok("alignment tone follows the band (mixed -> warning)", a.tone === "warning" && g.alignmentFact({ linkedWords: 9, totalWords: 10 }, true).tone === "success");
+  ok("the bottom band reads as a fact, not an alarm (neutral, not danger)", g.alignmentFact({ linkedWords: 1, totalWords: 10 }, true).tone === "neutral");
+  ok("a fully-linked document is 100% verified", g.alignmentFact({ linkedWords: 40, totalWords: 40 }, true).pct === 100);
+
+  // --- not indexed: a document with no prose, and a Product with no approved source ---
+  var noProse = g.alignmentFact({ linkedWords: 0, totalWords: 0 }, true);
+  ok("a document with no prose is 'Not indexed', never 0%", noProse.indexed === false && noProse.pct === null && noProse.label === "Not indexed");
+  ok("the no-prose reason names the missing prose", /no prose here to measure/.test(noProse.title));
+  var noSource = g.alignmentFact({ linkedWords: 0, totalWords: 500 }, false);
+  ok("prose but no approved source to measure against is also 'Not indexed', not 0%", noSource.indexed === false && noSource.pct === null);
+  ok("the no-source reason names the missing source document", /no approved source document/.test(noSource.title));
+  ok("a fully-novel INDEXED document is a real 0%, not 'Not indexed'", g.alignmentFact({ linkedWords: 0, totalWords: 500 }, true).pct === 0);
+
+  // --- roll-up: several documents as one number, by summing the SAME word counts ---
+  var d1 = g.alignmentFact({ linkedWords: 80, totalWords: 100 }, true);
+  var d2 = g.alignmentFact({ linkedWords: 20, totalWords: 100 }, true);
+  ok("the roll-up is word-weighted across documents (100/200 -> 50%)", g.rollUp([d1, d2]).pct === 50);
+  ok("ONE document's roll-up IS that document's number (this is what makes Source and Publish agree)", g.rollUp([d1]).pct === d1.pct);
+  ok("a roll-up over nothing is 'Not indexed'", g.rollUp([]).indexed === false && g.rollUp([noProse]).indexed === false);
+  ok("a not-indexed document contributes no words to a roll-up", g.rollUp([d1, noProse]).pct === d1.pct);
+
+  // --- drift: the four states, including the never-published document ---
+  var unlinked = g.driftFact(null, false);
+  ok("a document linking no source says nothing (no drift badge at all)", unlinked.state === "unlinked" && unlinked.label === "");
+  var never = g.driftFact(["mA", "mB"], false);
+  ok("a NEVER-published document reports 'unpublished', not '2 changed'", never.state === "unpublished" && never.count === 0 && never.label === "");
+  ok("the never-published reason says there is nothing to have drifted from", /Never published/.test(never.title));
+  var current = g.driftFact([], true);
+  ok("a published document with nothing changed stays quiet", current.state === "current" && current.label === "");
+  var drifted = g.driftFact(["mA", "mB"], true);
+  ok("a published document with changed source counts them and warns", drifted.state === "drifted" && drifted.count === 2 && drifted.label === "2 changed" && drifted.tone === "warning");
+  ok("drift carries the ids so a caller can list WHICH source changed", drifted.ids.join(",") === "mA,mB");
+  ok("drift singular/plural reads correctly", /1 linked source document changed/.test(g.driftFact(["mA"], true).title) && /2 linked source documents changed/.test(drifted.title));
+
+  // --- where-used: distinct DOCUMENTS, not raw placements ---
+  var used = g.whereUsedFact([{ docCode: "c1" }, { docCode: "c1" }, { docCode: "c2" }]);
+  ok("where-used counts distinct documents, not placements", used.docs === 2 && used.places === 3 && used.label === "Linked in 2");
+  ok("where-used states both numbers in its tooltip", /2 documents across 3 places/.test(used.title));
+  ok("an unused passage says so plainly", g.whereUsedFact([]).docs === 0 && g.whereUsedFact([]).label === "Not linked");
+
+  // --- variants as outputs: one document = flagship + N variants = N+1 packages ---
+  var out = g.outputsFact(["Coastal", "Desert"]);
+  ok("a document with 2 variants is 3 outputs, flagship first", out.count === 3 && out.names.join(",") === "Flagship,Coastal,Desert");
+  ok("the outputs tooltip names every package", /3 packages: Flagship, Coastal, Desert/.test(out.title));
+  ok("a document with no variants is one output (Flagship)", g.outputsFact([]).count === 1 && g.outputsFact(null).count === 1);
+  ok("empty variant names are ignored, never shipped as a blank package", g.outputsFact(["", null, "Pro"]).count === 2);
+
+  // --- the wiring: every surface reads the SAME resolver, none re-computes ---
+  ok("the adapter binds the resolver to the EXISTING Product Rail helpers, not new ones",
+    /alignment: f04AlignmentFact\(sourceAlignment\(d\), f04SourceIndexed\(d\)\)/.test(e) &&
+    /drift: f04DriftFact\(driftedMasterIds\(d, vers\), f04Published\(docId\)\)/.test(e) &&
+    /outputs: f04OutputsFact\(d\.variants\)/.test(e));
+  ok("'has this ever published' comes from the release log, not a second record", /function f04Published\(docId\)[\s\S]{0,220}RH\.lastPublishedFor\(releaseHistory\(\), docId\)/.test(e));
+  ok("where-used comes from sourceLinkWhereUsed, not a stored list", /f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, null\)\)/.test(e));
+  ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(e));
+  ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(e) && /\.source-stage__facts/.test(src("editor.css")));
+  ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,300}f04Badge\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
+  ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(src("editor.css")));
+  ok("every fact is drawn as the canonical DS Badge, quiet, never a bespoke chip", /function f04Badge\(fact, cls\)[\s\S]{0,320}U\.Badge\(\{ tone: fact\.tone \|\| "neutral", quiet: true, size: "sm"/.test(e));
+  ok("the retired one-off alignment + staleness chips are gone from the picker", !/publish-pickrow__stale/.test(e) && !/apct \+ "% source"/.test(e));
+  ok("a read API is exposed for the tickets that consume this layer (P-C01 / P-C08)", /window\.__f04 = \{[\s\S]{0,400}docFacts: f04DocFacts[\s\S]{0,400}productFacts: f04ProductFacts/.test(e));
+})();
+
 // uio-P-C04 (PUB-12): the picker had no scope, count, search or sort — only alphabetical — so the
 // two orderings that decide publishing work (most drifted first, least recently published first)
 // were unreachable. The whole view is a pure function of the decorated rows.
@@ -9978,7 +10075,8 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
 
   // --- the header states scope + the count of what is SHOWN, from the same array ---
   ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", \[pname, String\(docs\.length\)\]\.filter\(Boolean\)\.join\(" · "\)\)\)/.test(e));
-  ok("rows are decorated with drift + lastAt, then run through the pure view", /drift: groundTruthStaleCount\(registry\[d\.id\], vers\) \|\| 0, lastAt: last \? last\.at : 0/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
+  // uio-F04: the drift number now comes from the shared resolver's fact, not a second staleness call.
+  ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);\s*return \{ id: d\.id, title: d\.title, drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
 
   // --- sort is a MENU, not a cycling button: three orderings a cycle would hide ---
   ok("sort opens the canonical menu with the current ordering ticked", /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Order by" \}\]\.concat\(PUBLISH_SORTS\.map/.test(e) && /active: __publishPickSort === s\.key/.test(e));
@@ -10137,7 +10235,8 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
   ok("the publish rule contributes layout only, never the pill's look", /\.publish-release__outcome \{ flex: 0 0 auto; margin-left: auto; \}/.test(css));
 
   // --- last published per picker row ---
-  ok("each picker row carries its last-published line", /wrap\.appendChild\(h\("div", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
+  // uio-F04 moved this onto the row's shared meta line, beside the fact badges.
+  ok("each picker row carries its last-published line", /meta\.appendChild\(h\("span", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
   ok("never-published reads as a plain fact, not a warning", /if \(!last\) return "Never published";/.test(e));
   ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));
 })();
@@ -10871,7 +10970,7 @@ section("#170/#158 shared formatting toggle-bar");
 
   // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
   var insStart = e.indexOf("function renderFieldInspector(node)");
-  var insBody = e.slice(insStart, insStart + 7000);
+  var insBody = e.slice(insStart, insStart + 7400); // uio-F04 added the source-provenance line above these
   ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
   ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);

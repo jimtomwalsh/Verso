@@ -706,10 +706,10 @@
     row("Used", _storageRatio != null ? Math.round(_storageRatio * 100) + "%" : "n/a");
     var weight = (typeof window.estimateCourseBytes === "function") ? _fmtBytes(window.estimateCourseBytes(doc)) : "-";
     row("Course weight", weight);
-    // source-alignment: share of this document's prose linked to approved source vs novel (live while
-    // editing). null (no prose) omits the row rather than showing a misleading 0%.
-    var apct = sourceAlignmentPct(doc);
-    if (apct != null) row("Source alignment", apct + "% linked");
+    // uio-F04: share of this document's prose linked to approved source, phrased by the shared
+    // resolver so it matches the Publish row and the Source top bar word for word.
+    var stFacts = f04DocFacts(activeDocId);
+    if (stFacts) row("Source alignment", stFacts.alignment.label);
     if (saveFailed) pop.appendChild(h("div", "storage-pop__note storage-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
     else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "storage-pop__note", adv.msg)); }
     var r = anchor.getBoundingClientRect();
@@ -1629,17 +1629,22 @@
     walkBlocks(doc, function (b) { if (b && b.sourceLink && b.sourceLink.masterId) ids[b.sourceLink.masterId] = 1; });
     return Object.keys(ids);
   }
-  // Count distinct linked masters whose current stamp differs from the doc's last-published baseline.
-  // Returns null when the doc links NO Ground Truth content -> no badge (not a misleading "0 changed").
-  // A master absent from the baseline (newly linked, or a doc never yet exported) counts as changed.
-  function groundTruthStaleCount(doc, currentVersions) {
+  // WHICH linked masters have changed since the doc's last-published baseline. Returns null when the
+  // doc links NO Ground Truth content -> no badge (not a misleading "0 changed"). A master absent from
+  // the baseline (newly linked, or a doc never yet exported) counts as changed.
+  // uio-F04: this is the ONE staleness computation. The count below and every F04 surface derive from
+  // it, so a drift badge and a drift list can never disagree.
+  function driftedMasterIds(doc, currentVersions) {
     if (!doc) return null;
     var ids = docLinkedMasterIds(doc);
     if (!ids.length) return null;
     var baseline = (doc.meta && doc.meta.lastPublishedGroundTruthVersions) || {};
-    var n = 0;
-    ids.forEach(function (id) { if (baseline[id] !== currentVersions[id]) n++; });
-    return n;
+    return ids.filter(function (id) { return baseline[id] !== (currentVersions || {})[id]; });
+  }
+  // Count of the above. Same null contract.
+  function groundTruthStaleCount(doc, currentVersions) {
+    var drifted = driftedMasterIds(doc, currentVersions);
+    return drifted === null ? null : drifted.length;
   }
   // Current stamp map from the live LibraryStore (masterId -> updatedAt).
   function currentMasterVersions() {
@@ -1688,6 +1693,213 @@
     return Math.round(a.ratio * 100);
   }
   /* @src-align-end */
+
+  // ---- uio-F04: cross-stage data surfacing (the READ layer over the Product Rail) ----------------
+  // Four facts follow a document (and a source topic) across Source, Edit and Publish: how much of it
+  // comes from approved source, what has drifted since it last went out, where a passage is used, and
+  // how many packages it actually produces. Every stage used to phrase these itself, so the same fact
+  // read differently in three places -- or, worse, was computed twice.
+  //
+  // THE RULE: this layer INVENTS NOTHING. Its inputs are the Product Rail helpers that already exist
+  // -- sourceAlignment (@src-align), driftedMasterIds + currentMasterVersions (@gt-staleness),
+  // sourceLinkWhereUsed, ReleaseHistory.lastPublishedFor, and doc.variants. It turns those into one
+  // phrasing + one tone that every surface renders identically. A second staleness or alignment
+  // computation anywhere else is a hard fail.
+  //
+  // The fenced part is pure (plain values in, plain fact objects out) so tests/run.js can fixture it
+  // directly; the adapters below the fence do the binding to the live stores.
+  /* @f04-start */
+  // One band scale, everywhere. >=85 verified · 60-84 mixed · <60 mostly novel.
+  var F04_BANDS = [
+    { key: "verified", min: 85, label: "Verified" },
+    { key: "mixed", min: 60, label: "Mixed" },
+    { key: "novel", min: 0, label: "Mostly novel" }
+  ];
+  // Tones read as fact, not as scolding: novel copy is a legitimate authoring choice, so the bottom
+  // band is neutral rather than red. Red is reserved for something actually wrong.
+  var F04_BAND_TONE = { verified: "success", mixed: "warning", novel: "neutral" };
+  function f04Band(pct) {
+    if (pct == null) return null;
+    for (var i = 0; i < F04_BANDS.length; i++) if (pct >= F04_BANDS[i].min) return F04_BANDS[i];
+    return F04_BANDS[F04_BANDS.length - 1];
+  }
+  // ALIGNMENT. `alignment` is whatever sourceAlignment() returned ({linkedWords,totalWords}); pass
+  // `indexed:false` when there is no approved source to measure against at all. Both no-source and
+  // no-prose resolve to the SAME honest "Not indexed" state rather than a 0% that blames the author.
+  function f04AlignmentFact(alignment, indexed) {
+    var total = (alignment && alignment.totalWords) || 0;
+    var linked = (alignment && alignment.linkedWords) || 0;
+    if (indexed === false || !total) {
+      return {
+        indexed: false, pct: null, band: null, bandLabel: "Not indexed", tone: "neutral",
+        label: "Not indexed",
+        title: indexed === false
+          ? "Not indexed - there is no approved source document to measure this against yet."
+          : "Not indexed - there is no prose here to measure."
+      };
+    }
+    var pct = Math.round(linked / total * 100), band = f04Band(pct);
+    return {
+      indexed: true, pct: pct, band: band.key, bandLabel: band.label, tone: F04_BAND_TONE[band.key],
+      linkedWords: linked, totalWords: total,
+      label: pct + "% aligned",
+      title: pct + "% of these " + total + " words are linked to approved source (" + band.label.toLowerCase() +
+        "). The rest is novel copy authored here."
+    };
+  }
+  // Roll-up: several documents as ONE alignment number, by summing the same word counts the per-document
+  // fact uses. With a single document the roll-up IS that document's number, which is exactly why the
+  // Source top bar and a Publish row can never disagree.
+  function f04RollUpAlignment(alignments) {
+    var linked = 0, total = 0, indexed = false;
+    (alignments || []).forEach(function (a) {
+      if (!a) return;
+      linked += a.linkedWords || 0; total += a.totalWords || 0;
+      if (a.indexed !== false) indexed = true;
+    });
+    return f04AlignmentFact({ linkedWords: linked, totalWords: total }, indexed && total > 0);
+  }
+  // DRIFT. `driftedIds` is driftedMasterIds()'s answer (null = links no source at all); `published` is
+  // whether ReleaseHistory has ever recorded this document going out. A never-published document has
+  // nothing to have drifted FROM, so it reports "unpublished" instead of counting every linked topic as
+  // changed -- the misreading the raw count invited.
+  function f04DriftFact(driftedIds, published) {
+    if (driftedIds == null) {
+      return { state: "unlinked", count: 0, ids: [], tone: "neutral", label: "",
+        title: "This document links no approved source." };
+    }
+    if (!published) {
+      return { state: "unpublished", count: 0, ids: [], tone: "neutral", label: "",
+        title: "Never published, so there is no earlier version to have drifted from." };
+    }
+    if (!driftedIds.length) {
+      return { state: "current", count: 0, ids: [], tone: "neutral", label: "",
+        title: "Every linked source passage is as it was when this document was last published." };
+    }
+    var n = driftedIds.length;
+    return { state: "drifted", count: n, ids: driftedIds.slice(), tone: "warning",
+      label: n + " changed",
+      title: n + " linked source document" + (n === 1 ? "" : "s") + " changed since this document was last published." };
+  }
+  // WHERE-USED. `places` is sourceLinkWhereUsed()'s list of placements ({docCode,...}); this counts the
+  // distinct documents behind them, because "linked in 3 documents" is the fact an author acts on.
+  function f04WhereUsedFact(places) {
+    var docs = {}, n = 0;
+    (places || []).forEach(function (p) { if (p && p.docCode != null) docs[p.docCode] = 1; });
+    var codes = Object.keys(docs); n = codes.length;
+    return {
+      docs: n, docCodes: codes, places: (places || []).length, tone: "neutral",
+      label: n ? ("Linked in " + n) : "Not linked",
+      title: n
+        ? ("Used in " + n + " document" + (n === 1 ? "" : "s") + " across " + (places || []).length + " place" + ((places || []).length === 1 ? "" : "s") + ".")
+        : "Not currently linked in any document."
+    };
+  }
+  // VARIANTS AS OUTPUTS. One document with N variants is N+1 packages; the queue treats it as one row,
+  // which is why the real output count is invisible today. Flagship always leads the list.
+  function f04OutputsFact(variants) {
+    var vs = (variants || []).filter(function (v) { return v != null && String(v) !== ""; });
+    var names = ["Flagship"].concat(vs.map(String));
+    return {
+      count: names.length, names: names, variants: vs.map(String), tone: "neutral",
+      label: names.length + " outputs",
+      title: names.length === 1
+        ? "Publishing this document produces one package (Flagship)."
+        : "Publishing this document produces " + names.length + " packages: " + names.join(", ") + "."
+    };
+  }
+  /* @f04-end */
+
+  // ---- uio-F04 adapters: bind the pure resolver above to the live Product Rail stores --------------
+  // Nothing here computes a fact; each one only fetches an existing input and hands it over.
+  // Is there approved source to align this document against at all? A document tagged to a Product with
+  // no source document can never score, so it reads "Not indexed" rather than 0%.
+  function f04SourceIndexed(d) {
+    var pid = d && d.meta && d.meta.productId;
+    if (!pid) return true;                                    // untagged: fall back to "has prose" alone
+    if (typeof sourceMasterFor !== "function") return true;
+    return !!sourceMasterFor(pid) || (typeof unifiableTopicsFor === "function" && unifiableTopicsFor(pid).length > 0);
+  }
+  // Has this document ever actually gone out? Straight from the release log, the same record the
+  // picker's "Last published" line reads.
+  function f04Published(docId) {
+    var RH = window.ReleaseHistory;
+    return !!(RH && RH.lastPublishedFor && RH.lastPublishedFor(releaseHistory(), docId));
+  }
+  // The three document-scoped facts, for any surface, from one call.
+  function f04DocFacts(docId, versions) {
+    var d = registry[docId]; if (!d) return null;
+    var vers = versions || currentMasterVersions();
+    return {
+      docId: docId,
+      title: (d.meta && d.meta.title) || docId,
+      alignment: f04AlignmentFact(sourceAlignment(d), f04SourceIndexed(d)),
+      drift: f04DriftFact(driftedMasterIds(d, vers), f04Published(docId)),
+      outputs: f04OutputsFact(d.variants)
+    };
+  }
+  // Documents belonging to a Product (the same meta.productId tag the browser + picker scope by).
+  function f04ProductDocIds(pid) {
+    if (!pid) return [];
+    return Object.keys(registry).filter(function (code) {
+      var d = registry[code];
+      return !!(d && d.meta && d.meta.productId === pid);
+    });
+  }
+  // Product-scoped roll-up, plus (when a source topic is given) that topic's where-used and how many
+  // of the Product's published documents are behind it.
+  function f04ProductFacts(pid, masterId) {
+    var vers = currentMasterVersions();
+    var ids = f04ProductDocIds(pid);
+    var each = ids.map(function (id) { return f04DocFacts(id, vers); }).filter(Boolean);
+    var outputs = 0;
+    each.forEach(function (f) { outputs += f.outputs.count; });
+    var behind = masterId ? each.filter(function (f) {
+      return f.drift.state === "drifted" && f.drift.ids.indexOf(masterId) !== -1;
+    }) : [];
+    return {
+      productId: pid,
+      docIds: ids,
+      docs: each,
+      alignment: f04RollUpAlignment(each.map(function (f) { return f.alignment; })),
+      outputs: { count: outputs, tone: "neutral", label: outputs + " outputs",
+        title: outputs + " package" + (outputs === 1 ? "" : "s") + " across " + ids.length + " document" + (ids.length === 1 ? "" : "s") + "." },
+      whereUsed: masterId && typeof sourceLinkWhereUsed === "function"
+        ? f04WhereUsedFact(sourceLinkWhereUsed(masterId, null)) : null,
+      behind: { count: behind.length, tone: behind.length ? "warning" : "neutral",
+        label: behind.length ? (behind.length + " behind") : "",
+        title: behind.length
+          ? (behind.length + " published document" + (behind.length === 1 ? " is" : "s are") + " older than this source.")
+          : "Every published document here is up to date with this source." }
+    };
+  }
+  // The ONE way an F04 fact is drawn: the canonical DS Badge, quiet (these repeat down lists), small,
+  // carrying the fact's own tone + tooltip. Returns null for a fact with nothing to say, so a surface
+  // never has to decide when to hide one.
+  function f04Badge(fact, cls) {
+    if (!fact || !fact.label) return null;
+    var U = window.VersoUI;
+    var el = U && U.Badge
+      ? U.Badge({ tone: fact.tone || "neutral", quiet: true, size: "sm", children: [fact.label] })
+      : h("span", "vds-badge vds-badge--neutral vds-badge--sm vds-badge--quiet", fact.label);
+    if (cls) el.classList.add(cls);
+    if (fact.title) el.title = fact.title;
+    return el;
+  }
+  // Read API for the tickets that CONSUME this layer (uio-P-C01's alignment meter, uio-P-C08's variant
+  // roll-up chip, uio-S-M05, uio-E-M03) and for the browser-verify harness. Read-only: it renders
+  // nothing and mutates nothing.
+  window.__f04 = {
+    docFacts: f04DocFacts,
+    productFacts: f04ProductFacts,
+    productDocIds: f04ProductDocIds,
+    whereUsed: function (masterId) { return f04WhereUsedFact(sourceLinkWhereUsed(masterId, null)); },
+    bands: F04_BANDS,
+    band: f04Band,
+    _pure: { alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment, driftFact: f04DriftFact,
+      whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact }
+  };
+
   // uio-P-C03 (PUB-10): the picker row's provenance line. States the fact plainly when a document
   // has gone out, and states the absence just as plainly when it hasn't -- "never published" is
   // information, not an error, so it reads as a fact rather than a warning.
@@ -1724,11 +1936,14 @@
   // search/filter/sort. The header counts what the list shows, from the same array.
   // uio-P-C06: the render AND "Queue selected" both read the list from here, so the batch can only
   // ever contain rows the picker is showing.
+  // uio-F04: the row's facts come from f04DocFacts -- the same call the Source top bar and the Edit
+  // provenance line make -- so a number here can never disagree with the same number a stage away.
   function publishPickRows() {
     var vers = currentMasterVersions(), RH = window.ReleaseHistory;
     return publishPickDocs().map(function (d) {
       var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
-      return { id: d.id, title: d.title, drift: groundTruthStaleCount(registry[d.id], vers) || 0, lastAt: last ? last.at : 0 };
+      var facts = f04DocFacts(d.id, vers);
+      return { id: d.id, title: d.title, drift: facts ? facts.drift.count : 0, lastAt: last ? last.at : 0, facts: facts };
     });
   }
   // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
@@ -1821,22 +2036,6 @@
         row.appendChild(box);
       }
       row.appendChild(h("span", "publish-pickrow__title", d.title));
-      // staleness-tracking: informational count of linked Ground Truth topics changed since this
-      // document's last export. null (no linked content) shows nothing; 0 shows nothing (in sync);
-      // >0 shows a small count chip. Never blocks or warns -- the author can still queue it freely.
-      var stale = d.drift;
-      if (stale) {
-        var badge = h("span", "publish-pickrow__stale", String(stale));
-        badge.title = stale + " linked source topic" + (stale === 1 ? "" : "s") + " changed since this document was last published";
-        row.appendChild(badge);
-      }
-      // source-alignment: what share of this document is linked to approved source vs authored novel.
-      var apct = sourceAlignmentPct(registry[d.id]);
-      if (apct != null) {
-        var align = h("span", "publish-pickrow__align", apct + "% source");
-        align.title = apct + "% of this document's words are linked to approved source; the rest is novel copy authored here.";
-        row.appendChild(align);
-      }
       var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
       row.appendChild(add);
       // uio-P-C03 (PUB-10): "when did this last actually go out, and as what" — the line that
@@ -1844,7 +2043,23 @@
       // never disagree with the history below.
       var wrap = h("div", "publish-pickitem");
       wrap.appendChild(row);
-      wrap.appendChild(h("div", "publish-pickitem__last", publishLastLabel(d.id)));
+      // uio-F04 (PUB-01/02/15): drift, alignment and real output count, all from f04DocFacts and all
+      // drawn as the canonical DS Badge. They sit on the row's meta line, BELOW the title, for the
+      // same reason the queue row does it: three badges beside a title eat the title, and a document
+      // you cannot read the name of is worse than one whose numbers take a second line. A fact with
+      // nothing to say returns no badge, so an in-sync or never-published document stays quiet
+      // instead of carrying a chip that only means "nothing here". Never blocks or warns -- the
+      // author can still queue any of these freely.
+      var meta = h("div", "publish-pickitem__meta");
+      var facts = d.facts || f04DocFacts(d.id);
+      if (facts) {
+        [f04Badge(facts.drift, "publish-pickrow__drift"),
+         f04Badge(facts.alignment, "publish-pickrow__align"),
+         facts.outputs.count > 1 ? f04Badge(facts.outputs, "publish-pickrow__outputs") : null
+        ].forEach(function (b) { if (b) meta.appendChild(b); });
+      }
+      meta.appendChild(h("span", "publish-pickitem__last", publishLastLabel(d.id)));
+      wrap.appendChild(meta);
       list.appendChild(wrap);
     });
     host.appendChild(list);
@@ -2005,6 +2220,16 @@
         if (fname) { var fEl = h("span", "publish-queuerow__file", fname); fEl.title = "Writes " + fname; meta.appendChild(fEl); }
       }
       meta.appendChild(h("span", "publish-queuerow__status", publishStatusLabel(r)));
+      // uio-F04 (PUB-01/02/15): the same three facts the picker row states, on the row that is actually
+      // about to run -- so what you confirmed before queueing is still in front of you at the moment of
+      // publishing. Identical call, identical phrasing, identical badge.
+      var qf = f04DocFacts(r.docId);
+      if (qf) {
+        [f04Badge(qf.drift, "publish-queuerow__drift"),
+         f04Badge(qf.alignment, "publish-queuerow__align"),
+         qf.outputs.count > 1 ? f04Badge(qf.outputs, "publish-queuerow__outputs") : null
+        ].forEach(function (b) { if (b) meta.appendChild(b); });
+      }
       main.appendChild(meta);
       row.appendChild(main);
       if (r.status !== "running") {
@@ -7643,10 +7868,35 @@
   // SPEC-ui-kit (James, all-in-one): the universal chrome (Position/Layout/Appearance +
   // actions) is ALWAYS shown; double-clicking the block (or "Edit settings") reveals the
   // block-specific params BELOW it — one panel, not two views that replace.
+  // uio-F04 (EDIT-06): a source-linked block used to say only "linked" (a badge on the canvas). It now
+  // states the same facts every other stage states -- which source it came from, how many other
+  // documents use that passage, and whether the source has moved since this document last went out.
+  // Same resolver, same phrasing, same badge as the Publish row. uio-E-M03 adds the lock chip and the
+  // Edit-in-Source jump on top of this line.
+  function renderSourceLinkProvenance(block) {
+    if (!block || !block.sourceLink || !block.sourceLink.masterId) return null;
+    var masterId = block.sourceLink.masterId, markId = block.sourceLink.markId || null;
+    var comps = (typeof libComponents === "function" && libComponents()) || {};
+    var master = comps[masterId];
+    var line = h("div", "insp-provenance");
+    line.appendChild(h("span", "insp-provenance__label", "From source"));
+    line.appendChild(h("span", "insp-provenance__name", (master && master.name) || "an unknown source document"));
+    var used = f04WhereUsedFact(sourceLinkWhereUsed(masterId, markId));
+    var ub = f04Badge(used, "insp-provenance__fact"); if (ub) line.appendChild(ub);
+    var docFacts = f04DocFacts(activeDocId);
+    if (docFacts && docFacts.drift.state === "drifted" && docFacts.drift.ids.indexOf(masterId) !== -1) {
+      var db = f04Badge({ tone: "warning", label: "Source changed",
+        title: "This source document has changed since “" + docFacts.title + "” was last published." }, "insp-provenance__fact");
+      if (db) line.appendChild(db);
+    }
+    return line;
+  }
   function renderBlockTwoLevel(node, label, decl, renderContent, io, handlers) {
     var block = node.__block;
     var atContent = (enteredBlock === block);
     renderLayerCrumbs(block, label);
+    var prov = renderSourceLinkProvenance(block);
+    if (prov) inspector.appendChild(prov);
     // #160: depth-pure content level (panel-ia §1). A block opts in via decl.pureContent —
     // at CONTENT level the visible container chrome (Position / Layout / Appearance) is
     // suppressed so the panel shows ONLY the content's own canonical sections; the Actions
@@ -12613,6 +12863,7 @@
     });
     headEl.appendChild(titleInput);
     headEl.appendChild(renderSourceProvenanceLine(topic)); // provenance pinned under the header
+    headEl.appendChild(renderSourceFactsStrip(topic));     // uio-F04 (SRC-12): downstream consequence
 
     // Section-cells RETIRED (superseded by the continuous document): every topic now uses the
     // continuous node-model article (lock + toolbars + marks). A legacy section topic auto-converts
@@ -12667,6 +12918,32 @@
       el.classList.add("is-authored");
     }
     return el;
+  }
+  // uio-F04 (SRC-12): the Source stage never said what depends on the document being edited. This
+  // quiet strip sits under the title and states it: how far the Product's documents run on approved
+  // source, how many of them are behind THIS topic, where this topic is used, and how many packages
+  // the Product actually ships. Every number comes from f04ProductFacts -- the same resolver the
+  // Publish rows read -- so with one document in the Product the alignment badge here and the
+  // alignment badge on that document's Publish row are literally the same number.
+  function renderSourceFactsStrip(topic) {
+    var strip = h("div", "source-stage__facts");
+    var pid = activeSourceProductId();
+    var facts = f04ProductFacts(pid, topic && topic.id);
+    var docCount = facts.docIds.length;
+    var align = facts.alignment;
+    var alignEl = f04Badge(align, "source-stage__fact");
+    if (alignEl) {
+      // Scope stated in the tooltip AND beside the badge: this is a Product roll-up, not one
+      // document's score, and nobody should have to guess which.
+      alignEl.title = align.title + " Across " + docCount + " document" + (docCount === 1 ? "" : "s") + " in this Product.";
+      strip.appendChild(alignEl);
+      strip.appendChild(h("span", "source-stage__fact-scope", docCount + " document" + (docCount === 1 ? "" : "s")));
+    }
+    [facts.whereUsed ? f04Badge(facts.whereUsed, "source-stage__fact") : null,
+     f04Badge(facts.behind, "source-stage__fact"),
+     facts.outputs.count > docCount ? f04Badge(facts.outputs, "source-stage__fact") : null
+    ].forEach(function (b) { if (b) strip.appendChild(b); });
+    return strip;
   }
   function renderSourceInfoPanel(topic) {
     if (typeof document === "undefined") return;
@@ -17738,6 +18015,11 @@
     function apply() { window.applyTextStyle(node, s); renderModelView(); }
 
     var head = h("div", "prop-component"); head.appendChild(h("span", null, "Text")); inspector.appendChild(head);
+    // uio-F04 (EDIT-06): editing the text of a source-linked block is exactly when its provenance
+    // matters, so the same line the block inspector carries appears here too. Same call, so the two
+    // panels can never say different things about the same block.
+    var fieldProv = renderSourceLinkProvenance(obj);
+    if (fieldProv) inspector.appendChild(fieldProv);
 
     // Panel System v2 (D3): the flagship reference panel adopts the sectionGroup taxonomy —
     // a "Type" section (style picker + typeCluster + inline B/I/U/link) and a "Content"
