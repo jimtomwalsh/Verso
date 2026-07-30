@@ -9869,6 +9869,15 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
   ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
 })();
 
+// uio-P-C02 (PUB-03): the Publish button is the accent primary only when it has rows to run;
+// otherwise it's a quiet disabled secondary that states the reason on hover.
+section("uio-P-C02: Publish button — accent only when runnable, reason when disabled");
+(function () {
+  var e = src("src/editor.js");
+  ok("Publish is accent primary only when runnable, else secondary", /var canRun = !!pending && !__publishRunning;[\s\S]{0,200}variant: canRun \? "primary" : "secondary"/.test(e));
+  ok("the disabled Publish button carries the reason on hover", /if \(!canRun\) \{[\s\S]{0,160}pub\.title = __publishRunning \? "Publishing…" : "Nothing queued to publish/.test(e));
+})();
+
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
 // flagship — inline canvas edits capture into base.versionOverrides[version] (diffed against
 // base), base stays untouched, render/resolveVersion stay pure so editor==export holds.
