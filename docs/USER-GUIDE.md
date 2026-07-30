@@ -97,10 +97,14 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   showing the current value ("Flagship", the version name) at a glance. The moment either leaves
   base, a chip appears in the bar — **Read-only** when you're previewing (a variant preview locks
   the canvas) or **Editing <version>** when a software version is the editable flagship — with a
-  one-click **Return to base**. **Output:** the **▶ Demo** preview and **Send
-  to publish**. **Light / dark** lives in the Demo button's **▾** menu, under the size presets. When
+  one-click **Return to base**. **Output:** the **▶ Demo** preview and a labelled **Send to publish**
+  button that carries the **pending queue count** (how many documents are waiting to publish).
+  **Light / dark** lives in the Demo button's **▾** menu, under the size presets. When
   many courses are open the tabs scroll within their own strip so the Document and Output clusters
   never move. In Source and Publish the bar shows the Identity zone only.
+- **Stage rail (far left).** A slim icon rail names the three stages — **Source**, **Edit**,
+  **Publish** — as a stepper; click one to switch. Below them sit the **User guide** and
+  **Settings** glyphs.
 - **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
   panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
   palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable

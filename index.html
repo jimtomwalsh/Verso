@@ -54,7 +54,9 @@
         <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
         <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview size and palette"></button>
       </div>
-      <button class="tool editor-window__publish" id="send-to-publish-btn" data-lucide="send" title="Send to publish queue"></button>
+      <!-- uio-E-C08 (EDIT-15): a LABELLED secondary button (was an unlabelled paper-plane next to
+           the accent Play), carrying the pending queue count so "publish" reads clearly. -->
+      <button class="editor-window__publish" id="send-to-publish-btn" title="Send to publish queue"><span class="editor-window__publish-icon" data-lucide="send"></span><span class="editor-window__publish-label">Send to publish</span><span class="editor-window__publish-count" id="send-to-publish-count" hidden></span></button>
     </div>
 
     <div class="toolbar__group toolbar__group--right">
@@ -76,9 +78,12 @@
          segment switch (setStage(), in the editor script). -->
     <nav class="left-rail" id="left-rail" aria-label="Editor rail">
       <div class="left-rail__group left-rail__nav">
-        <button class="rail-btn rail-tab" id="rail-tab-source" data-rail-tab="source" data-lucide="book-open" title="Source" aria-label="Source"></button>
-        <button class="rail-btn rail-tab is-active" id="rail-tab-edit" data-rail-tab="edit" data-lucide="pen" title="Edit" aria-label="Edit"></button>
-        <button class="rail-btn rail-tab" id="rail-tab-publish" data-rail-tab="publish" data-lucide="upload" title="Publish" aria-label="Publish"></button>
+        <!-- uio-E-C08 (EDIT-15): the three stages are NAMED (icon over a 9px caption), so the rail
+             reads as a Source -> Edit -> Publish stepper instead of three unlabelled glyphs. The
+             glyph moves to an inner span so its caption sibling survives icon hydration. -->
+        <button class="rail-btn rail-tab" id="rail-tab-source" data-rail-tab="source" title="Source" aria-label="Source"><span class="rail-tab__icon" data-lucide="book-open"></span><span class="rail-tab__label">Source</span></button>
+        <button class="rail-btn rail-tab is-active" id="rail-tab-edit" data-rail-tab="edit" title="Edit" aria-label="Edit"><span class="rail-tab__icon" data-lucide="pen"></span><span class="rail-tab__label">Edit</span></button>
+        <button class="rail-btn rail-tab" id="rail-tab-publish" data-rail-tab="publish" title="Publish" aria-label="Publish"><span class="rail-tab__icon" data-lucide="upload"></span><span class="rail-tab__label">Publish</span></button>
         <!-- side-rail-cleanup: the Copy-editor rail button is retired -- Read view is now per-doc
              via the Build/Read toggle in the editor header. -->
       </div>

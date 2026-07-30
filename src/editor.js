@@ -1558,7 +1558,17 @@
     savePublishQueue();
     renderPublishQueue();
     var n = PQ.pendingRows(publishQueue()).length;
+    syncSendToPublishCount();
     publishToast("Added to the publish queue — " + n + " pending.");
+  }
+  // uio-E-C08 (EDIT-15): reflect the pending queue count on the Edit header's "Send to publish"
+  // button, so the destination + its backlog are legible without opening the Publish stage.
+  function syncSendToPublishCount() {
+    var el = document.getElementById("send-to-publish-count"); if (!el) return;
+    var PQ = window.PublishQueue;
+    var n = (PQ && __publishQueue !== undefined) ? PQ.pendingRows(publishQueue()).length : 0;
+    el.textContent = n ? String(n) : "";
+    el.hidden = !n;
   }
   function addDocToPublishQueue(docId) { addToQueue(docId); } // back-compat name used by the picker rows
   // Right pane: the persistent queue, one row per document (title + status + remove), and one
@@ -1581,6 +1591,7 @@
     actions.appendChild(io); actions.appendChild(pub);
     head.appendChild(actions);
     host.appendChild(head);
+    syncSendToPublishCount(); // uio-E-C08: keep the Edit header's count in step with every queue change
     renderToolbarPipeline(); // fill #publish-io with the "Import & export" menu
     var rows = (q.rows || []);
     if (!rows.length) { host.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); renderPublishHistory(host); return; }
@@ -23328,6 +23339,7 @@
         else publishToast("Open a document first to send it to the publish queue.");
       });
     }
+    syncSendToPublishCount(); // uio-E-C08: seed the pending count from the persisted queue at boot
     document.getElementById("demo-exit").addEventListener("click", exitDemo);
     document.getElementById("demo-prev").addEventListener("click", function () { stepDemo(-1); });
     document.getElementById("demo-next").addEventListener("click", function () { stepDemo(1); });
