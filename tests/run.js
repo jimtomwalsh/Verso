@@ -7838,7 +7838,7 @@ section("panel system v2 — layout engine");
   ok("renderToolbarPipeline renders one 'Import & export' menu into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)[\s\S]*?label: "Import & export"/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
   ok("the menu lists every registered pipeline action + Publish to Viewer", /var items = pipelineButtons\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
   ok("#pipeline-actions is gone from the rail (relocated to the Publish stage)", !/id="pipeline-actions"/.test(src("index.html")) && !/left-rail__pipeline/.test(src("index.html")));
-  ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,160}renderToolbarPipeline\(\);/.test(e));
+  ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,260}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
   // Phase 6 (D7): raw window.prompt/confirm replaced by shared in-app modals
   ok("promptModal + confirmModal route through the DS modal shell (VersoUI.Modal via dsModalShell)", /function dsModalShell\(opts\)[\s\S]*?window\.VersoUI\.Modal\([\s\S]*?function promptModal\(title, label, initial, onOk, subtitle\)[\s\S]*?dsModalShell\(\{[\s\S]*?function confirmModal\(title, message, onOk, opts\)[\s\S]*?dsModalShell\(\{/.test(e));
@@ -9815,6 +9815,20 @@ section("uio-E-C05: JSON model behind Developer tools + reorder in the panel ove
   ok("the panel has an overflow (⋯) button, hidden until it applies", /id="panel-overflow-btn"[^>]*hidden/.test(html) && /var ov = document\.getElementById\("panel-overflow-btn"\); if \(ov\) ov\.hidden = !has/.test(e));
   ok("the overflow menu carries the demoted Reorder entry", /openPanelOverflowMenu[\s\S]{0,400}"Reorder inspector sections…"/.test(e));
   ok("the layout bar is now an on-state banner stating the scope", /if \(!panelEditMode\) return;[\s\S]{0,200}insp-layout-bar__scope"/.test(e));
+})();
+
+// uio-E-C08 (EDIT-15): the rail names its three stages (icon over a caption), and "Send to publish"
+// is a labelled secondary button carrying the pending queue count.
+section("uio-E-C08: named stage rail + labelled Send-to-publish w/ count");
+(function () {
+  var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
+  // each stage tab = an icon span + a caption naming the stage
+  ok("rail stage tabs carry an icon span + a caption label", /rail-tab__icon" data-lucide="book-open"[\s\S]{0,80}rail-tab__label">Source</.test(html) && /rail-tab__label">Edit</.test(html) && /rail-tab__label">Publish</.test(html));
+  ok("the rail tab is styled icon-over-caption", /\.rail-tab \{ flex-direction: column;[\s\S]{0,300}\.rail-tab__label \{ font-size: var\(--text-2xs\)/.test(css));
+  // Send to publish = labelled button + a count span, wired to the pending count
+  ok("Send to publish is a labelled button with a count span", /editor-window__publish"[^>]*id="send-to-publish-btn"[\s\S]{0,200}publish-label">Send to publish<[\s\S]{0,120}id="send-to-publish-count"/.test(html));
+  ok("the button is styled as a labelled secondary button (not a bare .tool)", /\.editor-window__publish \{[\s\S]{0,200}border: 1px solid var\(--border-input/.test(css) && !/class="tool editor-window__publish"/.test(html));
+  ok("syncSendToPublishCount reflects pendingRows on the badge", /function syncSendToPublishCount\(\)[\s\S]{0,200}PQ\.pendingRows\(publishQueue\(\)\)\.length[\s\S]{0,120}el\.hidden = !n/.test(e) && /renderPublishQueue[\s\S]{0,400}syncSendToPublishCount\(\);/.test(e));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
