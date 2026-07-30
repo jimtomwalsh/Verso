@@ -11580,19 +11580,29 @@
     host.innerHTML = "";
     if (!window.VersoUI || !window.VersoUI.IconButton) return;
     var U = window.VersoUI;
+    // Top row = navigation / authoring actions (New topic, Import).
     var row = h("div", "source-stage__toolbar");
     if (!sourceMasterFor(activeSourceProductId())) {
       row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
     }
     row.appendChild(U.IconButton({ icon: "download", label: "Import from Markdown…", onClick: importMarkdownModal }));
-    var lifePid = activeSourceProductId();
-    if (lifePid && window.ProductsStore[lifePid]) {
-      row.appendChild(U.IconButton({ icon: "more-horizontal", label: "Product actions", onClick: function (e) {
-        var t = (e && (e.currentTarget || e.target)) || null; var r = t && t.getBoundingClientRect ? t.getBoundingClientRect() : { left: 0, bottom: 0 };
-        openProductActionsMenu(lifePid, r.left, r.bottom + 4);
-      } }));
-    }
     host.appendChild(row);
+    // uio-S-C05 (SRC-13): product-scope actions (incl. the destructive delete-document / delete-
+    // product) live in the FOOTER strip, away from navigation, so they read as acting on the
+    // Product and are never one click from ordinary outline navigation.
+    var footer = document.getElementById("source-stage-nav-footer");
+    if (footer) {
+      footer.innerHTML = "";
+      var lifePid = activeSourceProductId();
+      if (lifePid && window.ProductsStore[lifePid]) {
+        var frow = h("div", "source-stage__toolbar");
+        frow.appendChild(U.IconButton({ icon: "more-horizontal", label: "Product actions", onClick: function (e) {
+          var t = (e && (e.currentTarget || e.target)) || null; var r = t && t.getBoundingClientRect ? t.getBoundingClientRect() : { left: 0, bottom: 0 };
+          openProductActionsMenu(lifePid, r.left, r.bottom + 4);
+        } }));
+        footer.appendChild(frow);
+      }
+    }
   }
   // Product/source lifecycle menu (Source stage). Destructive items are confirm-gated; on delete we
   // reset the active Product + re-render so the stage never points at a document that no longer exists.
