@@ -178,5 +178,5 @@
   };
 
   window.Editor.registerPipelineButton("Export Schema", exportSchema);
-  window.Editor.registerPipelineButton("Import Schema", importSchema);
+  window.Editor.registerPipelineButton("Import Schema", importSchema, false, { direction: "import" }); // uio-P-C05: inbound -> the Source stage's Import menu
 })();

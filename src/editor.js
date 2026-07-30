@@ -1464,6 +1464,53 @@
     return s === "pending" || s === "running";
   }
   /* @publish-dest-end */
+  // uio-P-C05 (PUB-13): the Publish pane's one menu mixed INBOUND pipelines (Import CSV, Import
+  // Schema) with outbound ones, under a label that was half irrelevant. Direction is now data: the
+  // Source stage lists the imports (where import already lives), the Publish pane states only what
+  // it emits. Both stages read the SAME registered list, so a module that registers a new action
+  // lands on the right stage without either stage keeping its own copy.
+  //
+  // Direction is DECLARED at registration (registerPipelineButton's `opts.direction`). The label
+  // regex below is only the fallback for an action that never declared one: registerPipelineButton
+  // is public API, and a third-party caller naming something "Ingest CSV" must not silently land on
+  // the Publish pane. Declaring it is how you get it right; the guess is how old callers keep working.
+  /* @publish-format-start */
+  var PIPELINE_DIRECTIONS = ["import", "export"];
+  function pipelineDirection(label) { return /^\s*import\b/i.test(String(label == null ? "" : label)) ? "import" : "export"; }
+  function pipelineDirectionOf(btn) {
+    var declared = btn && btn.direction;
+    if (PIPELINE_DIRECTIONS.indexOf(declared) !== -1) return declared; // an explicit declaration always wins
+    return pipelineDirection(btn && btn.label);
+  }
+  function pipelineByDirection(btns, dir) {
+    return (btns || []).filter(function (b) { return b && pipelineDirectionOf(b) === dir; });
+  }
+  // Under an "Import" menu head the repeated prefix is noise ("Import CSV" -> "CSV…"). Every import
+  // opens a file picker, so the entry always ends in an ellipsis.
+  function importMenuLabel(label) {
+    var raw = String(label == null ? "" : label).trim();
+    var s = raw.replace(/^import\s+/i, "").trim() || raw;
+    return /(…|\.\.\.)$/.test(s) ? s : s + "…";
+  }
+  // The output formats, stated ONCE: the emitted one is marked selected, the rest carry a plain
+  // "Soon" state instead of smuggling "(soon)" into their names.
+  function publishFormatRows(formats, selected) {
+    return (formats || []).map(function (f) {
+      return { value: f.value, label: f.label, available: !!f.enabled, selected: f.value === selected, hint: f.enabled ? "" : "Soon" };
+    });
+  }
+  // What the queue will actually emit. Format is a PRESET option, so it is READ from the rows'
+  // resolved options — the Publish pane never becomes a second place that sets it. Presets that
+  // disagree read "Mixed" rather than picking a winner; an empty queue states the default.
+  function publishFormatSummary(formats, values, fallback) {
+    var uniq = [];
+    (values || []).forEach(function (v) { if (v && uniq.indexOf(v) === -1) uniq.push(v); });
+    if (uniq.length > 1) return { value: null, label: "Mixed", mixed: true };
+    var value = uniq[0] || fallback || "";
+    var match = (formats || []).filter(function (f) { return f.value === value; })[0];
+    return { value: value, label: (match && match.label) || value, mixed: false };
+  }
+  /* @publish-format-end */
   // The documents the picker offers: every registry doc, scoped to the active Product when one is
   // set (untagged docs drop out of a Product-scoped view), sorted by title. docId = the registry key.
   function publishPickDocs() {
@@ -1919,7 +1966,7 @@
     head.appendChild(actions);
     host.appendChild(head);
     syncSendToPublishCount(); // uio-E-C08: keep the Edit header's count in step with every queue change
-    renderToolbarPipeline(); // fill #publish-io with the "Import & export" menu
+    renderToolbarPipeline(); // fill #publish-io with the Format control + its export overflow
     // uio-P-C03 (PUB-10): the queue scrolls in its own region so Release history can take the space
     // the queue isn't using — the pane no longer scrolls as one long strip with history off-screen.
     var scroller = h("div", "publish-queue__body");
@@ -11468,30 +11515,66 @@
   // in mountTopBar). The secondary IO (Import CSV, Publish to Viewer, JSON backup)
   // stays in the ⋯ overflow, now the DS IconButton. Re-skin only — Export fires
   // the same registered accent pipeline handler; the overflow menu is unchanged.
-  // side-rail-cleanup slice 2: the Import/Export pipeline is RELOCATED off the rail onto the Publish
-  // stage. It renders into #publish-io (built in the queue-pane head) as ONE "Import & export" menu
-  // holding every registered pipeline action -- including the accent SCORM export, which no longer
-  // needs its own glyph because the queue's Publish button is the primary export. Callers that used
-  // to keep the rail glyph in sync (registerPipelineButton) still re-render this menu.
+  // side-rail-cleanup slice 2: the Import/Export pipeline was RELOCATED off the rail onto the Publish
+  // stage, into #publish-io (built in the queue-pane head).
+  // uio-P-C05 (PUB-13): it is no longer an "Import & export" grab-bag. Import belongs to Source, so
+  // the pane's named control is now FORMAT — it states the format the queue will emit without
+  // opening anything, and its menu lists the other formats once with their "soon" state. The
+  // remaining outbound/workspace actions keep a home in a quiet ... overflow beside it.
+  // Callers that kept the old menu in sync (registerPipelineButton) still re-render this.
   function renderToolbarPipeline() {
     var host = document.getElementById("publish-io"); if (!host) return;
     host.innerHTML = "";
     var U = window.VersoUI;
-    function openMenu(anchor) {
-      var items = pipelineButtons.map(function (b) { return { label: b.label, onClick: b.onClick }; });
-      items.push({ sep: true });
-      items.push({ label: "Publish to Viewer…", onClick: function () { publishToViewer(); } }); // not a registered pipeline button
-      var r = anchor.getBoundingClientRect();
-      showContextMenu(r.right, r.bottom + 4, items);
-    }
+    var summary = publishQueueFormat();
+    var fmtLabel = "Format: " + summary.label;
+    var fmtTitle = summary.mixed
+      ? "The queued documents use presets that ask for different formats"
+      : "Output format, set by each document's output preset";
     var btn;
     if (U && U.Button) {
-      btn = U.Button({ variant: "secondary", size: "sm", icon: "upload", iconRight: "chevron-down", label: "Import & export", title: "Import / export course data", onClick: function () { openMenu(btn); } });
+      btn = U.Button({ variant: "secondary", size: "sm", icon: "file-text", iconRight: "chevron-down", label: fmtLabel, title: fmtTitle, onClick: function () { openPublishFormatMenu(btn); } });
     } else {
-      btn = h("button", "tool"); btn.type = "button"; btn.textContent = "Import & export"; btn.title = "Import / export course data";
-      btn.addEventListener("click", function () { openMenu(btn); });
+      btn = h("button", "tool"); btn.type = "button"; btn.textContent = fmtLabel; btn.title = fmtTitle;
+      btn.addEventListener("click", function () { openPublishFormatMenu(btn); });
     }
     host.appendChild(btn);
+    var outbound = pipelineByDirection(pipelineButtons, "export");
+    if (U && U.IconButton) {
+      var ov = U.IconButton({ icon: "more-horizontal", label: "Other export actions", onClick: function () {
+        var r = ov.getBoundingClientRect();
+        var items = outbound.map(function (b) { return { label: b.label, onClick: b.onClick }; });
+        items.push({ sep: true });
+        items.push({ label: "Publish to Viewer…", onClick: function () { publishToViewer(); } }); // not a registered pipeline button
+        showContextMenu(r.right, r.bottom + 4, items);
+      } });
+      host.appendChild(ov);
+    }
+  }
+  // The format the pending queue will emit, read from each row's resolved preset options.
+  function publishQueueFormat() {
+    var SX = window.SCORMExport, PQ = window.PublishQueue;
+    var fmts = (SX && SX.formats) ? SX.formats() : [];
+    var base = (SX && SX.defaultOptions) ? (SX.defaultOptions().format || "") : "";
+    var rows = (PQ && PQ.pendingRows) ? PQ.pendingRows(publishQueue()) : [];
+    var values = rows.map(function (r) { return publishOptionsForRow(r).format || base; });
+    return publishFormatSummary(fmts, values, base);
+  }
+  // Every format listed ONCE: the emitted one marked selected, the rest greyed with a "Soon" state
+  // (never re-labelled "(soon)" per entry). Nothing here sets the format — the menu ends by naming
+  // where it IS set, the row's output preset.
+  function openPublishFormatMenu(anchor) {
+    var SX = window.SCORMExport;
+    var fmts = (SX && SX.formats) ? SX.formats() : [];
+    var summary = publishQueueFormat();
+    var items = [{ head: "Output format" }];
+    publishFormatRows(fmts, summary.value).forEach(function (f) {
+      items.push({ label: f.label, active: f.selected, hint: f.hint, disabled: !f.available });
+    });
+    items.push({ sep: true });
+    items.push({ head: "Set by the output preset on each queued document." });
+    var r = anchor.getBoundingClientRect();
+    showContextMenu(r.right, r.bottom + 4, items);
   }
 
   // Issue #12 (parent #22) — re-skin the editor top bar to the DS. Hydrate the
@@ -11959,7 +12042,14 @@
     if (!sourceMasterFor(activeSourceProductId())) {
       row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
     }
-    row.appendChild(U.IconButton({ icon: "download", label: "Import from Markdown…", onClick: importMarkdownModal }));
+    // uio-P-C05 (PUB-13): import is a SOURCE action. This one button now opens the whole inbound
+    // set — Markdown plus every registered import pipeline that used to sit on the Publish pane —
+    // so nothing is duplicated and the Publish pane is left to what it sends out.
+    row.appendChild(U.IconButton({ icon: "download", label: "Import…", onClick: function (ev) {
+      var t = (ev && (ev.currentTarget || ev.target)) || null;
+      var r = t && t.getBoundingClientRect ? t.getBoundingClientRect() : { left: 0, bottom: 0 };
+      openSourceImportMenu(r.left, r.bottom + 4);
+    } }));
     host.appendChild(row);
     // uio-S-C05 (SRC-13): product-scope actions (incl. the destructive delete-document / delete-
     // product) live in the FOOTER strip, away from navigation, so they read as acting on the
@@ -11977,6 +12067,16 @@
         footer.appendChild(frow);
       }
     }
+  }
+  // uio-P-C05 (PUB-13): the Source stage's one inbound menu. Markdown first (the everyday path),
+  // then every action a module registered with an "Import" name — routed to the SAME handler the
+  // Publish pane used to call, so no importer is rebuilt or duplicated here.
+  function openSourceImportMenu(x, y) {
+    var items = [{ head: "Import" }, { label: "Markdown…", onClick: importMarkdownModal }];
+    var inbound = pipelineByDirection(pipelineButtons, "import");
+    if (inbound.length) items.push({ sep: true });
+    inbound.forEach(function (b) { items.push({ label: importMenuLabel(b.label), onClick: b.onClick }); });
+    showContextMenu(x, y, items);
   }
   // Product/source lifecycle menu (Source stage). Destructive items are confirm-gated; on delete we
   // reset the active Product + re-render so the stage never points at a document that no longer exists.
@@ -24182,11 +24282,17 @@
       try { return window.renderPage(rp, activeTheme(), window.resolveHeaderFooter(rdoc, rp)); }
       finally { if (__rm) __rm(); }
     },
-    registerPipelineButton: function (label, onClick, accent) {
-      pipelineButtons.push({ label: label, onClick: onClick, accent: accent });
+    // uio-P-C05: `opts.direction` ("import" | "export") declares which stage the action belongs to.
+    // Omit it and the direction is guessed from the label, so every existing caller keeps working;
+    // declare it and the guess is never consulted. Anything inbound should declare it.
+    registerPipelineButton: function (label, onClick, accent, opts) {
+      var declared = opts && opts.direction;
+      pipelineButtons.push({ label: label, onClick: onClick, accent: accent, direction: PIPELINE_DIRECTIONS.indexOf(declared) !== -1 ? declared : null });
       var mount = document.getElementById("sidebar-pipeline-mount");
       if (mount) renderPipelineButtons(mount);
       renderToolbarPipeline(); // D6: keep the primary top-bar Export + ⋯ overflow in sync
+      // uio-P-C05: an import registered after boot has to reach the Source stage's Import menu too.
+      if (__activeStage === "source") renderSourceToolbar();
     },
     // Interact-mode test/automation hooks (used by the headless function tests
     // and any harness that needs to drive Interact mode programmatically).
@@ -24359,6 +24465,9 @@
       ".ctx-item--danger:hover{background:rgba(255,107,107,.16);color:#ff6b6b;}" +
       ".ctx-item--active{color:#0d99ff;font-weight:600;}" +
       ".ctx-item--active:hover{color:#fff;}" +
+      ".ctx-item--disabled{color:#8a8a8a;cursor:default;}" +
+      ".ctx-item--disabled:hover{background:transparent;color:#8a8a8a;}" +
+      ".ctx-item__hint{margin-left:auto;padding-left:14px;font-size:11px;color:#8a8a8a;}" +
       ".ctx-sep{height:1px;background:#3a3a3a;margin:5px 8px;}" +
       ".ctx-head{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0;color:#8a8a8a;}" +
       ".canvas.is-variant-preview{outline:2px solid #8e44ad;outline-offset:-2px;}" +
@@ -24373,8 +24482,11 @@
     items.forEach(function (it) {
       if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
       if (it.head) { m.appendChild(h("div", "ctx-head", it.head)); return; }
-      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : ""), it.label);
-      el.addEventListener("click", function () { closeCtxMenu(); it.onClick(); });
+      // uio-P-C05: `disabled` + `hint` complete the DS ContextMenu contract — an entry can be listed
+      // as unavailable, with a trailing state word ("Soon"), instead of being hidden or renamed.
+      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""), it.label);
+      if (it.hint) el.appendChild(h("span", "ctx-item__hint", it.hint));
+      if (!it.disabled) el.addEventListener("click", function () { closeCtxMenu(); if (it.onClick) it.onClick(); });
       m.appendChild(el);
     });
     document.body.appendChild(m);
