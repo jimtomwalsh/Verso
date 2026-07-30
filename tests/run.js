@@ -8324,6 +8324,21 @@ section("uio-F01 shared settings row anatomy");
   ok("FieldRow.d.ts labelWidth default aligned to 76", /Default 76/.test(dts));
 })();
 
+// ---- uio-F02: density baseline — type on tokens (partial) ---------------
+// The density baseline (design-system/readme.md "Visual foundations") grounds chrome
+// type on the --text-* scale. The exact-match sizes (10/11/12px) are tokenized here as
+// a zero-visual-change swap; the drift values (10.5/11.5/12.5px) await a type-scale
+// decision and are NOT yet ratcheted. This guard freezes the tokenized set: no bare
+// 10/11/12px font-size may return to the chrome CSS.
+section("uio-F02 density baseline — type tokens (partial)");
+(function () {
+  var css = src("editor.css");
+  var bare = (css.match(/font-size:\s*1[012]px\b/g) || []);
+  ok("editor.css: no bare 10/11/12px font-size (use --text-2xs/--text-xs/--text-sm)", bare.length === 0);
+  if (bare.length) console.error("    bare font-size: " + bare.slice(0, 8).join(" · "));
+  ok("editor.css: the --text-* tokens are in use for chrome type", /font-size:\s*var\(--text-xs\)/.test(css));
+})();
+
 // ---- UI kit conformance gate (ticket 4 — WARN-ONLY phase) --
 // Warns (does not fail) on blocks that still hand-append container chrome instead
 // of calling renderContainerChrome. Blocks migrate in tickets 8-9; ticket 9 flips
