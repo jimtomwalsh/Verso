@@ -282,7 +282,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .subdisc.is-open > .subdisc__head .subdisc__twirl .disc__caret { transform: rotate(90deg); }
 .subdisc__title { font-size: var(--text-xs); font-weight: 550; color: var(--text-primary); }
 .subdisc.is-collapsed .subdisc__title { color: var(--text-secondary); }
-.subdisc__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+/* The section-granularity form of uio-F03's override dot — same one dot, same size token. */
+.subdisc__dot { width: var(--override-dot, 4px); height: var(--override-dot, 4px); border-radius: var(--radius-full, 50%); background: var(--accent); flex: 0 0 auto; }
 .subdisc__ctrls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .subdisc__reset {
   font: inherit; font-size: var(--text-2xs); color: var(--text-secondary); background: none; border: none;
@@ -1870,10 +1871,22 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 .insp-row--toggle .insp-row__label { flex: 1 1 auto; }
 .insp-row__control--end { margin-left: auto; }
 .insp-row--nolabel > *:first-child { flex: 1 1 auto; }
-/* Inheritance tail (slot only — uio-F03 fills the scope logic): inherited value reads in
-   tertiary ink, an override shows a 4px accent dot + inline Reset. Collapsed by default. */
+/* Inheritance tail (uio-F01 slot, filled by uio-F03): the source scope reads in tertiary
+   ink when the value is inherited; an override shows a 4px accent dot + an inline Reset.
+   One language for every rung of System -> Product -> Course -> Page -> Block. */
 .insp-row__tail { flex: 0 0 auto; margin-left: 8px; display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--text-tertiary); }
-.insp-row__override-dot { width: 4px; height: 4px; border-radius: var(--radius-full, 50%); background: var(--accent); flex: 0 0 auto; }
+.insp-row__override-dot { width: var(--override-dot, 4px); height: var(--override-dot, 4px); border-radius: var(--radius-full, 50%); background: var(--accent); flex: 0 0 auto; }
+.insp-inherit { display: inline-flex; align-items: center; gap: 4px; }
+/* Inherited: the scope it came from, quiet. Never "unset" — the control shows the value. */
+.insp-row__scope { color: var(--text-tertiary); font-size: var(--text-xs); white-space: nowrap; cursor: default; }
+/* Reset is a LIVE edit (the save contract has no commit controls) — a quiet inline verb. */
+.insp-row__reset {
+  padding: 0 4px; height: var(--control-sm, 20px); border: 0; background: transparent;
+  color: var(--text-secondary); font: inherit; font-size: var(--text-xs); line-height: 1;
+  border-radius: var(--radius-sm, 4px); cursor: pointer; white-space: nowrap;
+}
+.insp-row__reset:hover { background: var(--surface-hover); color: var(--text-primary); }
+.insp-row__reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* Hover-only overflow: always occupies its box (no reflow), fades in on row hover. */
 .insp-row__overflow { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-tertiary); border-radius: var(--radius-sm, 4px); opacity: 0; transition: opacity 120ms; cursor: pointer; }
 .insp-row:hover .insp-row__overflow, .insp-row__overflow:focus-visible { opacity: 1; }
@@ -2089,6 +2102,10 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 .insp-section__twirl::before { content: "\25B8"; font-size: var(--text-2xs); color: var(--text-secondary); display: inline-block; transition: transform 0.12s ease; }
 .insp-section__twirl.is-open::before { transform: rotate(90deg); }
 .insp-section__title { flex: 1 1 auto; font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+/* uio-F03 roll-up: how many of this section's values are set here rather than inherited.
+   Quiet by default so it never competes with the title; empty when nothing is overridden. */
+.insp-section__rollup { flex: 0 0 auto; font-size: var(--text-xs); color: var(--text-tertiary); }
+.insp-section.has-overrides .insp-section__rollup { color: var(--accent); }
 .insp-section__drag { display: none; color: var(--text-secondary); cursor: grab; font-size: 14px; line-height: 1; }
 .insp-section__body { padding: 0 2px 12px; }
 .insp-section.is-collapsed .insp-section__body { display: none; }

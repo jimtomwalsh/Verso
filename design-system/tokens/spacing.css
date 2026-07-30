@@ -37,6 +37,7 @@
   --tabbar-height:     36px;
   --row-height:        28px;   /* inspector row */
   --field-label-w:     76px;   /* the shared row's fixed label column (FieldRow labelWidth) */
+  --override-dot:      4px;    /* the ONE override marker (see "Scope and inheritance") */
   --section-pad:       8px;    /* panel section horizontal pad */
 
   /* Hit target minimum */

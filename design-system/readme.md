@@ -167,6 +167,17 @@ One visual language for the state of a value, at any rung, in any surface:
   restores and from which scope.
 - **Section roll-up** — the section header counts its overrides ("3 overridden").
 
+The ladder is a **primitive, not a settings feature**. Resolution takes the property being
+resolved as an argument and never inspects it; each rung supplies its own reader, so rungs may
+store the same idea under different keys. Nothing in the resolver may assume the value is a
+style or theme value. Any other axis that inherits — an export-control classification, an
+approval state — rides this same primitive by passing a different property key and a different
+scope chain. **A second, parallel inheritance path is a hard fail.**
+
+Concrete anatomy in the app: `--override-dot` sizes the one accent dot (rows and sections
+alike), the inherited scope name reads in `--text-tertiary` at `--text-xs`, and **Reset is a
+live edit, not a commit control** — it writes straight away and Undo takes it back.
+
 ### Cross-stage facts
 
 Some facts follow a document across Source, Edit and Publish — how much of it comes from approved
