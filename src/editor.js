@@ -17226,16 +17226,28 @@
     });
     endSections(inspector);
 
-    // Progressive disclosure (James 2026-07-08): the field/type inspector shows ONLY Type —
-    // block-level Layout / Spacing / Appearance belong to the BLOCK selection (one level out),
-    // so you never see controls that don't act on the text you're editing. A quiet affordance
-    // keeps those settings one click away (Esc also steps out to the block).
-    var backHint = h("button", "insp-hint insp-backlink", "Layout, spacing & appearance → block settings");
-    backHint.type = "button";
-    backHint.title = "These act on the whole block, not the text. Click to select the block (or press Esc).";
-    backHint.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    backHint.addEventListener("click", function () { blurActiveText(); resetDrill(); reselectBlockNode(selection.block, "block"); });
-    inspector.appendChild(backHint);
+    // uio-E-C02 (EDIT-02): one inspector scroll, no cross-panel jump link. This REVERSES the
+    // 2026-07-08 progressive-disclosure split (James's call 2026-07-30, option A): editing a
+    // top-level text block now shows the SAME full panel as block-select — the block's
+    // Position / Layout / Spacing / Appearance / Behaviour chrome sits right below Type, in one
+    // scroll, and the old "-> block settings" jump link is gone. Esc still steps out to the block.
+    var blk = node.__block;
+    var showBlockChrome = blk && blk.type && TEXT_CONTENT_TYPES[blk.type] && !versionEditable();
+    if (showBlockChrome) {
+      // Same builder + decl the block two-level inspector uses (renderBlockInspector -> text ->
+      // renderBlockTwoLevel with CONTENT_DECL), so the section set/wiring is identical.
+      renderContainerChrome(inspector, CONTENT_DECL, blockChromeIo(blk), blockChromeHandlers(blk));
+    } else {
+      // Quiz sub-fields (a rich field on a non-text block) still bridge to their block's own
+      // settings; and while editing a non-base software version the block chrome would be
+      // present-but-inert (per applyVersionEditGuard), so the focused text panel + link stay.
+      var backHint = h("button", "insp-hint insp-backlink", "Layout, spacing & appearance → block settings");
+      backHint.type = "button";
+      backHint.title = "These act on the whole block, not the text. Click to select the block (or press Esc).";
+      backHint.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      backHint.addEventListener("click", function () { blurActiveText(); resetDrill(); reselectBlockNode(selection.block, "block"); });
+      inspector.appendChild(backHint);
+    }
   }
 
   // a component instance selected -> sectioned, properties
