@@ -5505,7 +5505,9 @@ section("select-first / progressive drill");
   ok("extra block tier gated to plain text blocks (navButton keeps bespoke inspector)", /!n\.matches\("\[data-edit\]"\) \|\| getSelectionTypeForBlock\(n\.__block\) === "field"\) inner\.push\(\{ kind: "block"/.test(t));
   ok("edit drill step selects the field AND enters the caret", /l\.kind === "edit"\) \{ selectFieldNode\(l\.node\); enterTextEdit\(l\.node\)/.test(t));
   ok("block drill tier forces a block selection for a data-edit text node", /getAttribute\("data-edit"\) != null && l\.node\.__block\) \{ blurActiveText\(\); setSelection\("block", l\.node\)/.test(t));
-  ok("field/type inspector ends with a back-to-block affordance not the block footer", /insp-backlink[\s\S]*?reselectBlockNode\(selection\.block, "block"\)/.test(t) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(t));
+  // uio-E-C02: a top-level text field inspector now shows the block chrome in one scroll (no jump
+  // link); the back-to-block link survives only for the non-text / version-edit fallback branch.
+  ok("field/type inspector keeps the back-to-block link only for the non-text fallback", /insp-backlink[\s\S]*?reselectBlockNode\(selection\.block, "block"\)/.test(t) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(t));
   ok("capture handler bails out in click-to-edit mode", /if \(!twoStateText\(\)\) return;\s*\/\/ click-to-edit/.test(t));
   // LEAF-FIRST (James 2026-07-12): a plain click selects the INNERMOST non-edit level
   // (the element under the cursor), not the outermost container; Escape steps outward.
@@ -8134,7 +8136,9 @@ section("UI kit seam");
      /if \(window\.VersoUI && window\.VersoUI\.Breadcrumb\) \{[\s\S]{0,320}window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(e));
   ok("#14: DS PanelSection wrappers stay OUT of the PanelLayout drag set (no data-section-type)",
      /inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(e));
-  ok("chrome not yet wired into a real block inspector (no user-visible change)", !/render(Block|Field|Instance|Embed|NavButton|Page)Inspector[\s\S]{0,4000}renderContainerChrome\(/.test(e));
+  // (Retired) the old "chrome not yet wired" seam guard: renderContainerChrome is now fully
+  // wired via renderBlockTwoLevel (every block inspector) and, since uio-E-C02, the text field
+  // inspector too. See the "uio-E-C02" section for the field-inspector wiring assertions.
   // P0 code-review fixes.
   ok("plus/minus glyphs are canonical Lucide (icons.js, not inline one-offs)", /"plus":/.test(src("src/icons.js")) && /"minus":/.test(src("src/icons.js")));
   ok("propHeader/optionalRow reuse Icon(\"plus\") / Icon(\"minus\") (no inline glyph)", /add\.innerHTML = Icon\("plus"\)/.test(e) && /rm\.innerHTML = Icon\("minus"\)/.test(e));
@@ -9746,6 +9750,18 @@ section("uio-E-C01: recovered canvas — one 40px bar, single-row shell, token w
   ok("shell widths default to DSLMS structural tokens", /--left-w: var\(--panel-left-width/.test(css) && /--right-w: var\(--panel-right-width/.test(css));
   // DSLMS owns the rail token the spine names.
   ok("--rail-w is defined in DSLMS spacing tokens", /--rail-w:\s*44px/.test(spacing));
+})();
+
+// uio-E-C02 (EDIT-02): one inspector scroll, no cross-panel jump link. Editing a top-level text
+// block shows the SAME block chrome as block-select, right below Type (James's option A,
+// 2026-07-30) — reversing the 2026-07-08 Type-only drill split.
+section("uio-E-C02: text field inspector — one scroll, block chrome, no jump link");
+(function () {
+  var e = src("src/editor.js");
+  // The field inspector wires the SAME container chrome + decl the block two-level uses.
+  ok("field inspector renders block chrome for a top-level text block", /showBlockChrome = blk && blk\.type && TEXT_CONTENT_TYPES\[blk\.type\] && !versionEditable\(\)/.test(e) && /if \(showBlockChrome\) \{[\s\S]{0,240}renderContainerChrome\(inspector, CONTENT_DECL, blockChromeIo\(blk\), blockChromeHandlers\(blk\)\)/.test(e));
+  // The jump link is gone for text; it survives only in the non-text / version-edit fallback.
+  ok("no jump link when block chrome is shown (backHint is the else branch)", /if \(showBlockChrome\) \{[\s\S]{0,400}\} else \{[\s\S]{0,400}insp-backlink/.test(e));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE

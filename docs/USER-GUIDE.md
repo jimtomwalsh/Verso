@@ -156,7 +156,8 @@ Four ideas cover most of how Verso works.
 - **Some blocks are containers.** A **Card**, **Columns**, **Card Reveal**, or **Accordion**
   holds child blocks inside it.
 - **The Inspector mirrors your selection.** Select nothing for document-wide settings (theme,
-  fonts, header/footer); select a block for that block's settings.
+  fonts, header/footer); select a block for that block's settings. Editing a text block shows its
+  Type controls and its layout, spacing and appearance settings together in one scrolling panel.
 
 ---
 
