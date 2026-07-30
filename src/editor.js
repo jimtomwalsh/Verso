@@ -1432,6 +1432,51 @@
     out.sort(function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; });
     return out;
   }
+  // uio-P-C04 (PUB-12): the picker was alphabetical-only with no scope, count, search or sort, so the
+  // two orderings that actually decide publishing work -- most drifted first, least recently published
+  // first -- were unreachable. The whole view (search -> filter -> sort) is a pure function of the
+  // decorated rows, so it is fixture-testable and the header's count can never disagree with the list.
+  /* @publish-pick-start */
+  var PUBLISH_SORTS = [
+    { key: "title", label: "Title" },
+    { key: "drift", label: "Drift" },
+    { key: "last", label: "Last published" }
+  ];
+  // A row "needs attention" when approved source moved under it, or it has never gone out at all.
+  // Both mean the same thing to the person publishing: this one is not current.
+  function publishNeedsAttention(row) {
+    return !!(row && ((row.drift || 0) > 0 || !row.lastAt));
+  }
+  function publishPickView(rows, opts) {
+    opts = opts || {};
+    var q = String(opts.query == null ? "" : opts.query).trim().toLowerCase();
+    var out = (rows || []).filter(function (r) {
+      if (!r) return false;
+      if (q && String(r.title || "").toLowerCase().indexOf(q) === -1) return false;
+      if (opts.filter === "attention" && !publishNeedsAttention(r)) return false;
+      return true;
+    });
+    var byTitle = function (a, b) {
+      var x = String(a.title || "").toLowerCase(), y = String(b.title || "").toLowerCase();
+      return x < y ? -1 : x > y ? 1 : 0;
+    };
+    if (opts.sort === "drift") {
+      // most drifted first; ties fall back to title so the order is stable, never arbitrary
+      out.sort(function (a, b) { return (b.drift || 0) - (a.drift || 0) || byTitle(a, b); });
+    } else if (opts.sort === "last") {
+      // least recently published first, and NEVER-published ahead of everything -- those are the
+      // most overdue, not the most recent (a 0 timestamp would sort them last by accident).
+      out.sort(function (a, b) {
+        var ax = a.lastAt || 0, bx = b.lastAt || 0;
+        if (!ax !== !bx) return ax ? 1 : -1;
+        return ax - bx || byTitle(a, b);
+      });
+    } else {
+      out.sort(byTitle);
+    }
+    return out;
+  }
+  /* @publish-pick-end */
   // ---- Product Rail: Ground-Truth staleness (export-is-publish tracking) ----
   // A document links Ground Truth through block.sourceLink.masterId; each linked master carries a
   // version stamp (master.updatedAt via stampMasterVersion, bumped on every content edit). At export
@@ -1513,6 +1558,13 @@
     var when = last.at ? new Date(last.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
     return "Last published " + [when, last.version].filter(Boolean).join(" · ");
   }
+  // uio-P-C04: the picker's view state. Session-only on purpose — a search you left behind three
+  // days ago silently hiding documents is worse than retyping it.
+  var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title";
+  function publishSortLabel() {
+    for (var i = 0; i < PUBLISH_SORTS.length; i++) if (PUBLISH_SORTS[i].key === __publishPickSort) return PUBLISH_SORTS[i].label;
+    return PUBLISH_SORTS[0].label;
+  }
   function mountPublishStage() {
     if (typeof document === "undefined") return;
     renderPublishPick();
@@ -1532,23 +1584,82 @@
     var host = document.getElementById("publish-pick"); if (!host) return;
     var U = window.VersoUI;
     host.innerHTML = "";
-    host.appendChild(h("div", "publish-pane__title", "Documents"));
+    var vers = currentMasterVersions(), RH = window.ReleaseHistory;
+    // uio-P-C04 (PUB-12): decorate every candidate with the two facts the orderings need — how far
+    // it has drifted from approved source, and when it last actually went out — then let the pure
+    // view do search/filter/sort. The header counts what the list shows, from the same array.
+    var all = publishPickDocs().map(function (d) {
+      var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
+      return { id: d.id, title: d.title, drift: groundTruthStaleCount(registry[d.id], vers) || 0, lastAt: last ? last.at : 0 };
+    });
+    var docs = publishPickView(all, { query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort });
+    var attention = all.filter(publishNeedsAttention).length;
+
+    // Header strip: what this list IS (scope + count), and how it is ordered.
+    var head = h("div", "publish-pick__head");
+    head.appendChild(h("span", "publish-pick__title", "Documents"));
+    var prod = getActiveProduct(), pname = prod && window.ProductsStore && window.ProductsStore[prod] ? window.ProductsStore[prod].name : "";
+    head.appendChild(h("span", "publish-pick__scope", [pname, String(docs.length)].filter(Boolean).join(" · ")));
+    // Reuses `publish-chip` — this pane's established "compact value that opens a menu" control
+    // (the queue row's preset chip). Same job, same look; a second chrome for it would be exactly
+    // the piecemeal divergence this overhaul exists to undo.
+    var sortBtn = h("button", "publish-chip publish-pick__sort"); sortBtn.type = "button";
+    sortBtn.title = "Order this list";
+    sortBtn.innerHTML = (window.Icon ? window.Icon("list") : "") + "<span>" + publishSortLabel() + "</span>";
+    // A menu, not a cycling button: three orderings that a cycle would hide. Canonical context menu,
+    // current one ticked.
+    sortBtn.addEventListener("click", function (ev) {
+      var r = (ev.currentTarget || ev.target).getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [{ head: "Order by" }].concat(PUBLISH_SORTS.map(function (s) {
+        return { label: s.label, active: __publishPickSort === s.key, onClick: function () { __publishPickSort = s.key; renderPublishPick(); } };
+      })));
+    });
+    head.appendChild(sortBtn);
+    host.appendChild(head);
+
+    // Search — the same field the Source rail uses for the same job, one stage over.
+    var search = h("div", "vbrowser__search publish-pick__search");
+    search.innerHTML = window.Icon ? window.Icon("search") : "";
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "Search documents";
+    input.value = __publishPickQuery;
+    input.addEventListener("input", function () {
+      __publishPickQuery = input.value;
+      renderPublishPick();
+      var again = document.querySelector(".publish-pick__search .vbrowser__search-input");
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    });
+    search.appendChild(input);
+    host.appendChild(search);
+
+    // "Needs attention" is only offered when something actually needs it — a permanently-empty
+    // filter is noise.
+    if (attention && U && U.SegmentedControl) {
+      host.appendChild(U.SegmentedControl({
+        size: "sm",
+        options: [{ value: "all", label: "All " + all.length }, { value: "attention", label: "Needs attention " + attention }],
+        value: __publishPickFilter,
+        onChange: function (v) { __publishPickFilter = v; renderPublishPick(); }
+      }));
+    } else if (__publishPickFilter !== "all") { __publishPickFilter = "all"; }
+
     if (registry[activeDocId]) {
       var addCur = U ? U.Button({ variant: "secondary", full: true, icon: "plus", label: "Add current document", onClick: function () { addDocToPublishQueue(activeDocId); } }) : h("button", null, "Add current document");
       addCur.classList.add("publish-pane__addcur");
       host.appendChild(addCur);
     }
     var list = h("div", "publish-picklist");
-    var docs = publishPickDocs();
-    if (!docs.length) { list.appendChild(h("div", "publish-empty", "No documents" + (getActiveProduct() ? " in this Product" : "") + " yet.")); }
-    var vers = currentMasterVersions();
+    if (!docs.length) {
+      list.appendChild(h("div", "publish-empty", all.length
+        ? "No document matches that."
+        : ("No documents" + (getActiveProduct() ? " in this Product" : "") + " yet.")));
+    }
     docs.forEach(function (d) {
       var row = h("div", "publish-pickrow");
       row.appendChild(h("span", "publish-pickrow__title", d.title));
       // staleness-tracking: informational count of linked Ground Truth topics changed since this
       // document's last export. null (no linked content) shows nothing; 0 shows nothing (in sync);
       // >0 shows a small count chip. Never blocks or warns -- the author can still queue it freely.
-      var stale = groundTruthStaleCount(registry[d.id], vers);
+      var stale = d.drift;
       if (stale) {
         var badge = h("span", "publish-pickrow__stale", String(stale));
         badge.title = stale + " linked source topic" + (stale === 1 ? "" : "s") + " changed since this document was last published";
