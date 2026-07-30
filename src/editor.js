@@ -17,6 +17,12 @@
   "use strict";
 
   var SVGNS = "http://www.w3.org/2000/svg";
+  // uio-O-W1: one spelling of the modifier key, so every printed shortcut in the chrome
+  // (save-contract line, menu hints) reads the same on a Mac as on Windows/Linux.
+  var MOD_KEY = (function () {
+    try { return /Mac|iPhone|iPad/.test((navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+"; }
+    catch (e) { return "⌘"; }
+  })();
   var GAP_X = 300, GAP_Y = 110, LABEL_H = 30;
   // JJJJ: per-page canvas position { x, y, col } (chapters = columns, pages stack
   // vertically). Filled by buildWorld (x/col) + layoutColumns (y). frameX/frameY
@@ -4556,12 +4562,29 @@
       var cap = caption ? "<figcaption class=\"doc-figure__cap\">" + inline(caption) + "</figcaption>" : "";
       return "<figure class=\"doc-figure\">" + img + cap + "</figure>";
     }
+    // uio-O-W1 (OVL-23): a keyboard shortcut written in the guide renders as the SAME chip the
+    // menus use, instead of bare glyphs floating in a sentence. Pure text pass, run last: a
+    // <code> span always wins the alternation, so a shortcut quoted as code stays code.
+    function kbdify(html) {
+      return String(html).replace(/(<code\b[^>]*>[\s\S]*?<\/code>)|([⌘⌥⇧⌃]+[A-Za-z0-9=\\−-]?)/g,
+        function (_m, codeSpan, chip) { return codeSpan ? codeSpan : "<kbd class=\"help-kbd\">" + chip + "</kbd>"; });
+    }
     function inline(s) {
       s = esc(s);
       s = s.replace(/`([^`]+)`/g, function (_m, c) { return "<code>" + c + "</code>"; });
       s = s.replace(/\*\*([^*]+)\*\*/g, function (_m, b) { return "<strong>" + b + "</strong>"; });
       s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_m, t, u) { return "<a href=\"" + u + "\" target=\"_blank\" rel=\"noopener\">" + t + "</a>"; });
-      return s;
+      return kbdify(s);
+    }
+    // uio-O-W1 (OVL-23): ONE callout with three tones. A guide callout already leads with its
+    // own label ("**Note.**", "**Tip.**", "**Caution.**"), so the tone is read from that label:
+    // authors keep writing plain markdown and every callout in the app is drawn one way.
+    function calloutTone(text) {
+      var m = String(text).match(/^\s*\*\*\s*([^*]+?)\s*\.?\s*\*\*/);
+      var w = m ? m[1].trim().toLowerCase() : "";
+      if (w === "caution" || w === "warning" || w === "important") return "caution";
+      if (w === "tip" || w === "reassurance" || w === "remember" || w === "what you build") return "reassure";
+      return "note";
     }
     // #8 heading IDs: slugify heading text so the docs reader's TOC nav can deep-link to a
     // section (ADR 0004 — "guide headings are docs anchors"). Deterministic + unique per doc.
@@ -4600,10 +4623,11 @@
       if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
       var fig = line.match(FIG_RE);
       if (fig) { out.push(figHtml(fig)); i++; continue; }
-      if (/^\s*>\s?/.test(line)) { // blockquote (consecutive)
+      if (/^\s*>\s?/.test(line)) { // blockquote -> the one help callout, toned by its own label
         var qb = [];
         while (i < lines.length && /^\s*>\s?/.test(lines[i])) { qb.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
-        out.push("<blockquote>" + mdToHtml(qb.join("\n")) + "</blockquote>");
+        var qtext = qb.join("\n");
+        out.push("<blockquote class=\"help-callout help-callout--" + calloutTone(qtext) + "\">" + mdToHtml(qtext) + "</blockquote>");
         continue;
       }
       if (/^\s*[-*]\s+/.test(line)) { // unordered list (with lazy continuation of wrapped lines)
@@ -7882,12 +7906,28 @@
         trail.push({ label: last ? label : blockLabel(b), level: last ? null : { kind: "block", block: b } });
       });
     } else { trail.push({ label: label, level: null }); }
-    breadcrumb(inspector, trail, function (level) {
+    var bar = breadcrumb(inspector, trail, function (level) {
       if (!level) return;
       enteredBlock = null;
       if (level.kind === "page") { setActivePage(level.i); setSelection("page", level.i); }
       else if (level.kind === "block") { reselectBlockNode(level.block, "block"); }
     });
+    // uio-O-W1 (OVL-14): the second door onto the block's verbs. Right-click is the only way
+    // to reach Copy style / Save as component / Clear content, and nothing advertises it — so
+    // the inspector header carries a "..." overflow opening the IDENTICAL menu (one definition,
+    // blockMenuItems). Canonical ContextMenu surface, canonical more-horizontal glyph.
+    if (bar && block) {
+      var ov = h("button", "insp-crumbs__more"); ov.type = "button";
+      ov.innerHTML = Icon("more-horizontal");
+      ov.title = "Block actions";
+      ov.setAttribute("aria-label", "Block actions");
+      ov.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var r = ov.getBoundingClientRect();
+        showContextMenu(r.right, r.bottom + 4, blockMenuItems({ block: block }));
+      });
+      bar.appendChild(ov);
+    }
   }
   // SPEC-ui-kit (James, all-in-one): the universal chrome (Position/Layout/Appearance +
   // actions) is ALWAYS shown; double-clicking the block (or "Edit settings") reveals the
@@ -8335,7 +8375,15 @@
     var names = variantNames();
     if (!names.length) return;
     inspector.appendChild(sub("Variant versions"));
-    inspector.appendChild(h("div", "insp-hint", "Show a different image per product variant. The image above is the Flagship; a variant with its own version swaps to it at runtime and in the export (preview a variant from the top-bar switcher)."));
+    inspector.appendChild(h("div", "insp-hint", "Show a different image per product variant. The image above is the Flagship; a variant with its own version swaps to it at runtime and in the export."));
+    // uio-O-W1 (OVL-06): the hint used to end with an instruction ("preview a variant from the
+    // top-bar switcher"). Which variant is being previewed is owned by the top-bar switcher, so
+    // this row shows the live value and opens that switcher.
+    crossRefRow({
+      label: "Previewing", value: activeVariant || "Flagship", linkLabel: "Variant switcher",
+      title: "Open the top-bar variant switcher",
+      onNavigate: function () { if (variantSwitchEl) openVariantMenu(variantSwitchEl); }
+    });
     names.forEach(function (V) {
       var own = imgVariantSrc(block, V);
       var row = h("div", "insp-inline-row");
@@ -15630,7 +15678,16 @@
       { key: "docType", title: "Document type", build: buildDocTypeBody },
       { key: "backup", title: "Backup", build: buildBackupBody },
       { key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody },
-      { key: "nav", title: "Learner nav", build: function (host) { var n = footerCourseNav(); if (n) courseNavControls(n, host); else host.appendChild(h("div", "insp-hint", "Add a footer nav bar in Header & Footer first, then style it here.")); } }, // #168: canonical footer nav (was first-found, which could drift to a stray)
+      // #168: canonical footer nav (was first-found, which could drift to a stray).
+      // uio-O-W1 (OVL-06): with no nav bar yet, the pane used to instruct the author to walk to
+      // Header & Footer. It now states the fact and links there.
+      { key: "nav", title: "Learner nav", build: function (host) {
+        var n = footerCourseNav();
+        if (n) { courseNavControls(n, host); return; }
+        crossRefRow({ label: "Learner nav bar", value: "Not added", linkLabel: "Header & Footer", host: host,
+          title: "Open Header & Footer, where the nav bar is added",
+          onNavigate: function () { openSettingsSection("project", "headerFooter"); } });
+      } },
       { key: "layout", title: "Page layout", build: buildLayoutBody },
       { key: "endScreen", title: "Completion screen", build: buildEndScreenBody },
       { key: "theme", title: "Theme", build: renderThemeControls },
@@ -15687,9 +15744,13 @@
       });
       renderSettingsBody();
     }
-    // Footer: single primary action (canonical VersoUI.Button).
+    // uio-O-W1 (OVL-09): the footer used to carry one accent "Done", which implied a commit
+    // that never happens — settings apply live and save themselves. The surface now STATES its
+    // contract (the spine's save contract: autosave + live-apply + Undo) and offers a plain
+    // Close. The accent is spent on the app's real primary action, never on dismissing a panel.
     var foot = h("div", "settings-foot");
-    foot.appendChild(window.VersoUI.Button({ variant: "primary", label: "Done", onClick: closeSettingsModal })); // spine-todo(F05): settings-in-modal + fake Done; the non-modal sheet retires this
+    foot.appendChild(h("div", "settings-foot__contract", "Changes apply live, saved automatically. Undo with " + MOD_KEY + "Z."));
+    foot.appendChild(window.VersoUI.Button({ variant: "secondary", label: "Close", onClick: closeSettingsModal }));
     box.appendChild(foot);
     overlay.appendChild(box);
     overlay.addEventListener("mousedown", function (e) { if (e.target === overlay) closeSettingsModal(); });
@@ -15703,6 +15764,15 @@
     settingsModal.selectTab(tab || settingsModal.tab || "project");
     settingsModal.overlay.hidden = false;
     document.addEventListener("keydown", settingsEsc);
+  }
+  // uio-O-W1 (OVL-06): the navigation target behind every settings cross-reference — open
+  // Settings on a NAMED section, so a link lands the author on the row instead of at the top.
+  function openSettingsSection(tab, sectionKey) {
+    ensureSettingsModal();
+    if (sectionKey) settingsModal.sectionKey[tab] = sectionKey;
+    openSettingsModal(tab);
+    var act = settingsModal.nav.querySelector(".settings-nav__item.is-active");
+    if (act && act.scrollIntoView) act.scrollIntoView({ block: "nearest" });
   }
   function closeSettingsModal() {
     if (!settingsModal) return;
@@ -16098,7 +16168,20 @@
       // The nav bar is a full-width footer element; per-child alignment is a no-op
       // for it. Its controls live in the top-level "Learner nav" panel (keeping the nav
       // nests at level 2 rather than burying them 3 deep under Footer > Placed items).
-      if (child.type === "courseNav") { host.appendChild(h("div", "insp-hint", "Learner nav bar — edit it in the Learner nav panel.")); return; }
+      // uio-O-W1 (OVL-06): this used to be a line of prose telling the author to go and find
+      // another panel. The nav bar is owned by the Learner nav section, so the row states its
+      // live value and links straight there.
+      if (child.type === "courseNav") {
+        var navSecs = (child.sections || []).length;
+        crossRefRow({
+          label: "Nav bar",
+          value: navSecs ? (navSecs + (navSecs === 1 ? " section" : " sections")) : "No sections yet",
+          linkLabel: "Learner nav", host: host,
+          title: "Open Settings on Learner nav, where this bar is styled",
+          onNavigate: function () { openSettingsSection("project", "nav"); }
+        });
+        return;
+      }
       segmentedIconLive("Align", [[Icon("align-left"), "start", "Start"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "end", "End"]],
         function (v) { return (child.align || "start") === v; },
         function (v) { if (v === "start") delete child.align; else child.align = v; reapplyHeaderFooter(); }, host);
@@ -17478,6 +17561,26 @@
     return { row: row, label: label };
   }
   window.__settingsRow = settingsRow; // headless test hook
+
+  // uio-O-W1 (OVL-06): a setting that is READ-ONLY here because another surface owns it.
+  // The old shape was dead prose telling the author to walk somewhere ("edit it in the
+  // Learner nav panel"). This is the one replacement: the shared row (uio-F01) showing the
+  // LIVE value plus a link that navigates there — never an instruction. Every cross-reference
+  // in the chrome uses this, so one row anatomy covers them all.
+  // opts: { label, value, linkLabel, onNavigate, host, title }.
+  function crossRefRow(opts) {
+    opts = opts || {};
+    var wrap = h("div", "insp-xref");
+    if (opts.value != null && opts.value !== "") wrap.appendChild(h("span", "insp-xref__value", String(opts.value)));
+    var link = h("button", "insp-xref__link"); link.type = "button";
+    link.appendChild(h("span", "insp-xref__link-label", opts.linkLabel || "Open"));
+    var chev = h("span", "insp-xref__chev"); chev.innerHTML = Icon("chevron-right"); link.appendChild(chev);
+    link.title = opts.title || ("Go to " + (opts.linkLabel || "the panel that owns this"));
+    link.addEventListener("click", function () { if (opts.onNavigate) opts.onNavigate(); });
+    wrap.appendChild(link);
+    return settingsRow({ label: opts.label, host: opts.host || inspector, control: wrap, controlAlign: "end" });
+  }
+  window.__crossRefRow = crossRefRow; // headless test hook
 
   function fieldRow(label, value, onchange, placeholder, step, min, max, datalistId) {
     var i = h("input", "prop-text"); i.type = "text"; i.spellcheck = false; i.placeholder = placeholder || "auto"; i.value = value == null ? "" : value;
@@ -25819,6 +25922,86 @@
     }
     return null;
   }
+  // uio-O-W1 (OVL-14): ONE block verb list, two doors. Copy style, Save as component and
+  // Clear content used to be reachable only by right-clicking a canvas object — a gesture
+  // nothing in the UI advertises — so the inspector and the menu describing the same block
+  // shared almost no vocabulary. This is the single definition of that list. The canvas
+  // right-click and the inspector header's "..." overflow both render it, so the two doors
+  // cannot drift apart, and its foot names the way back into the inspector.
+  // target = { block, instance? } — the shape findTargetFromEvent returns.
+  function blockMenuItems(target) {
+    var items = [];
+    var block = target && target.block;
+    var host = (target && target.instance) || block;
+    var vs = variantNames();
+    if (block) {
+      items.push({ label: "Duplicate", onClick: function () { duplicateBlock(block); } });
+      items.push({ label: "Copy", onClick: function () { copySelection(); } });
+      if (clipboard.length) {
+        items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
+        items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
+      }
+      items.push({ label: "Copy style", onClick: function () { copyBlockStyle(block); } });
+      if (styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(block); } });
+      items.push({ label: "Move up", onClick: function () { moveBlock(block, -1); } });
+      items.push({ label: "Move down", onClick: function () { moveBlock(block, 1); } });
+      if (block.type === "group") items.push({ label: "Ungroup", onClick: function () { ungroupBlock(block); } });
+      items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(block); } });
+      // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
+      items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([block]); } });
+      if (canSplitAtBlock(block)) {
+        items.push({ sep: true });
+        items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(block); } });
+      }
+      items.push({ sep: true });
+      items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(block); } });
+    }
+    items.push({ sep: true });
+    items.push({ head: vs.length ? "Variants" : "Variants (none yet)" });
+    // Variant TEXT is edited in the Design panel (the block is selected, so the panel already
+    // shows its "Variant text" fields). The menu keeps only visibility + variant creation.
+    vs.forEach(function (v) {
+      items.push({ label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } });
+    });
+    // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
+    // Only when the course has versions; while editing a version the toggle for THAT version
+    // sits first for quick reach (hide this block from the release you're authoring).
+    var versAll = versionNames();
+    if (versAll.length) {
+      items.push({ head: "Software version" });
+      var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
+      ordered.forEach(function (v) {
+        items.push({ label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } });
+      });
+    }
+    // #148: image / hotspot base image — a direct "Upload image for <variant>" that
+    // opens the file picker straight away and writes that variant's version (overrides[v].src).
+    if (block && IMG_VERSION_TYPES[block.type] && vs.length) {
+      items.push({ head: "Variant image versions" });
+      vs.forEach(function (v) {
+        var own = imgVariantSrc(block, v);
+        items.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
+          uploadImageVariant(block, v, function () { reapplyBlock(block); reselectBlockNode(block, "block"); });
+        } });
+        if (own) items.push({ label: "   Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(block, v, null); reapplyBlock(block); reselectBlockNode(block, "block"); } });
+      });
+    }
+    items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
+    if (block) {
+      items.push({ sep: true });
+      items.push({ label: "Block settings", hint: "Inspector", onClick: function () { revealBlockSettings(block); } });
+    }
+    return items;
+  }
+  // The route the menu's foot names: select the block and open its own settings in the
+  // inspector, so the menu always hands off to the panel rather than dead-ending.
+  function revealBlockSettings(block) {
+    if (!block) return;
+    enteredBlock = block;
+    reselectBlockNode(block, "block");
+    renderInspector();
+    if (inspector && inspector.scrollTo) inspector.scrollTo({ top: 0 });
+  }
   function wireContextMenu() {
     canvas.addEventListener("contextmenu", function (e) {
       e.preventDefault(); // always replace the native menu on the canvas
@@ -25855,63 +26038,10 @@
       }
       if (target) {
         setSelection(target.type === "instance" ? "instance" : "block", target.node);
-        if (target.type === "block") {
-          items.push({ label: "Duplicate", onClick: function () { duplicateBlock(target.block); } });
-          items.push({ label: "Copy", onClick: function () { copySelection(); } });
-          if (clipboard.length) {
-            items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
-            items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
-          }
-          items.push({ label: "Copy style", onClick: function () { copyBlockStyle(target.block); } });
-          if (styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(target.block); } });
-          items.push({ label: "Move up", onClick: function () { moveBlock(target.block, -1); } });
-          items.push({ label: "Move down", onClick: function () { moveBlock(target.block, 1); } });
-          if (target.block.type === "group") {
-            items.push({ label: "Ungroup", onClick: function () { ungroupBlock(target.block); } });
-          }
-          items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(target.block); } });
-          // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
-          items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([target.block]); } });
-          if (canSplitAtBlock(target.block)) {
-            items.push({ sep: true });
-            items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(target.block); } });
-          }
-          items.push({ sep: true });
-          items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(target.block); } });
-        }
-        items.push({ sep: true });
-        items.push({ head: vs.length ? "Variants" : "Variants (none yet)" });
-        var host = target.instance || target.block;
-        // Variant TEXT is edited in the Design panel (this block is now selected,
-        // so the panel already shows its "Variant text" fields). The menu keeps
-        // only visibility + variant creation.
-        vs.forEach(function (v) {
-          items.push({ label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } });
-        });
-        // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
-        // Only when the course has versions; while editing a version the toggle for THAT version
-        // sits first for quick reach (hide this block from the release you're authoring).
-        var versAll = versionNames();
-        if (versAll.length) {
-          items.push({ head: "Software version" });
-          var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
-          ordered.forEach(function (v) {
-            items.push({ label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } });
-          });
-        }
-        // #148: image / hotspot base image — a direct "Upload image for <variant>" that
-        // opens the file picker straight away and writes that variant's version (overrides[v].src).
-        if (target.block && IMG_VERSION_TYPES[target.block.type] && vs.length) {
-          items.push({ head: "Variant image versions" });
-          vs.forEach(function (v) {
-            var own = imgVariantSrc(target.block, v);
-            items.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
-              uploadImageVariant(target.block, v, function () { reapplyBlock(target.block); reselectBlockNode(target.block, "block"); });
-            } });
-            if (own) items.push({ label: "   Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(target.block, v, null); reapplyBlock(target.block); reselectBlockNode(target.block, "block"); } });
-          });
-        }
-        items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
+        // uio-O-W1 (OVL-14): one shared definition, rendered identically by the inspector's
+        // "..." overflow. An instance target keeps its variant/version section but not the
+        // block verbs (matching the previous behaviour).
+        items = items.concat(blockMenuItems(target.type === "block" ? target : { instance: target.instance }));
       } else {
         if (clipboard.length) { items.push({ label: "Paste", onClick: function () { pasteClipboard(); } }); items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } }); items.push({ sep: true }); }
         items.push({ head: "Variants" });

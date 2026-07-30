@@ -47,4 +47,18 @@
   --type-modal-title:  var(--weight-semibold) var(--text-xl)/var(--leading-tight) var(--font-ui);
   --type-brand:        var(--weight-semibold) var(--text-2xl)/var(--leading-tight) var(--font-brand);
   --type-mono:         var(--weight-regular) var(--text-xs)/var(--leading-normal) var(--font-mono);
+
+  /* ---- Help prose (uio-O-W1 / OVL-23) ---------------------
+     Help is the only place in Verso that carries running prose. It used to sit at
+     13-14px inside 11px chrome, so it read as a different product. These four tokens
+     are the whole system, reused wherever help appears (the user guide, and any help
+     popover built later): one prose size, one reading rhythm, one measure of roughly
+     62 characters, one indent for a step list. Headings still come off the --text-*
+     ramp above — help introduces no size of its own. */
+  --help-text:    var(--text-sm);   /* 12px — one step above chrome, never more */
+  --help-leading: 1.6;              /* running prose needs more air than a control row */
+  --help-measure: 400px;            /* ~62 characters of Inter at --help-text (an absolute
+                                       width on purpose: an em/ch measure would give headings
+                                       a wider column than the prose beneath them) */
+  --help-step-indent: 26px;         /* numbered step chip + its gutter */
 }
