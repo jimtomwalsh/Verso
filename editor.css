@@ -1225,6 +1225,15 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 }
 .ptab-cog:hover { color: var(--text-primary); background: var(--surface-hover); }
 .ptab-cog svg { width: 16px; height: 16px; display: block; }
+/* uio-E-C05 (EDIT-09): the panel overflow (⋯) menu button, right-aligned like the old cog. */
+.panel-tabs__overflow {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: none; border-radius: var(--radius-md, 6px);
+  background: transparent; color: var(--icon-idle); cursor: pointer;
+}
+.panel-tabs__overflow[hidden] { display: none; }
+.panel-tabs__overflow:hover { color: var(--icon-strong); background: var(--surface-hover); }
+.panel-tabs__overflow svg { width: 16px; height: 16px; display: block; }
 
 .panel-scroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
 
@@ -1909,15 +1918,20 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 .cs-mark { display: inline-block; width: 1.7em; text-align: center; opacity: 0.75; }
 .custom-select .font-picker__btn { font-size: 14px; }
 
-/* Panel System v2 (D3) — reorderable/collapsible inspector sections + Edit-layout bar. */
-.insp-layout-bar { display: flex; justify-content: flex-end; gap: 6px; padding: 2px 0 8px; }
-.insp-layout-bar__btn {
-  border: 1px solid transparent; background: transparent; color: var(--text-secondary);
-  font-size: var(--text-xs); padding: 3px 8px; border-radius: 5px; cursor: pointer;
+/* Panel System v2 (D3) — reorderable/collapsible inspector sections. uio-E-C05 (EDIT-09): the bar
+   is now the MODE BANNER shown only while reordering — accent-tinted, with the scope stated. */
+.insp-layout-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;
+  padding: 6px 8px; border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--accent, var(--border-strong)); background: var(--accent-quiet, var(--surface-raised));
 }
-.insp-layout-bar__btn:hover { color: var(--text-primary); background: var(--surface-raised); }
-.insp-layout-bar.is-editing .insp-layout-bar__btn { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-.insp-layout-bar__btn--reset { color: var(--text-secondary); }
+.insp-layout-bar__scope { flex: 1 1 140px; min-width: 0; color: var(--text-secondary); font-size: var(--text-2xs); line-height: 1.35; }
+.insp-layout-bar__btn {
+  flex: 0 0 auto; border: 1px solid transparent; background: transparent; color: var(--accent);
+  font-size: var(--text-xs); font-weight: 600; padding: 3px 8px; border-radius: 5px; cursor: pointer;
+}
+.insp-layout-bar__btn:hover { background: var(--surface-hover); }
+.insp-layout-bar__btn--reset { color: var(--text-secondary); font-weight: 500; }
 .insp-section { border-top: 1px solid var(--border-strong); }
 .insp-section:first-child { border-top: none; }
 .insp-section__head {

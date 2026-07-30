@@ -142,7 +142,9 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   context — the document type (its geometry · interactivity) with that geometry's tools (paged →
   margins / running header-footer / page breaks / page numbers; frame → frame size / transitions /
   animation; reflow → breakpoint preview) — then the canvas backdrop. Select a block and it shows
-  that block's settings instead.
+  that block's settings instead. The panel's **⋯** menu (top-right) holds **Reorder inspector
+  sections…**, which turns on a drag mode to rearrange the section order across every block's
+  inspector — a preference saved for you, not the course; a banner names the scope while it's on.
 
 ---
 
