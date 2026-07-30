@@ -8889,7 +8889,8 @@ section("Product Rail: Publish presets (T2)");
   ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
 
   // T4: one shared addToQueue action + the Edit-stage top-bar entry point
-  ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
+  // uio-P-C06 added an options argument (quiet batching); the one shared action is unchanged.
+  ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId, opts\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
   ok("the shared action recalls the doc's last-used preset and toasts the pending count", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e) && /publishToast\("Added to the publish queue/.test(e));
   ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
   // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
@@ -9934,6 +9935,85 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
   // (Both overflows were found by MEASURING the live pane, not by reading the markup.)
   ok("the embedded search + full-width button are re-fitted to the inset column", /\.publish-pick__search\.vbrowser__search \{ width: auto;/.test(css) && /\.publish-stage__pick > \.publish-pane__addcur \{ width: auto; \}/.test(css));
   ok("an empty RESULT reads differently from an empty product", /all\.length\s*\n?\s*\? "No document matches that\."/.test(e));
+})();
+
+// uio-P-C06 (PUB-04): bulk publishing had no bulk controls — a dozen documents meant a dozen "+"
+// clicks. The picker rows now lead with a tick box and the pane ends with "Queue selected (N)".
+// The rule the whole feature rests on: filtering is a LENS, never an edit. Search, filter and sort
+// leave the selection alone, and the footer states how much of it the current lens is hiding.
+section("uio-P-C06: picker multi-select + queue selected");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  var m = e.match(/\/\* @publish-sel-start \*\/([\s\S]*?)\/\* @publish-sel-end \*\//);
+  if (!m) { ok("locate @publish-sel fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { ids: publishSelectedIds, hiddenBy: publishHiddenBy, summary: publishSelectionSummary };")();
+
+  var rows = [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }, { id: "c", title: "Cara" }];
+  var sel = { a: true, c: true };
+  var sum = function (visible, opts) { return g.summary(sel, visible, rows, opts); };
+
+  ok("selected ids come back in the order the list gives them", g.ids(sel, rows).join() === "a,c");
+  ok("an empty selection selects nothing", g.ids({}, rows).length === 0 && g.ids(null, rows).length === 0);
+  ok("an id with no document behind it can never be queued", g.ids({ zzz: true }, rows).length === 0);
+  ok("junk rows degrade to an empty list, not a throw", g.ids(sel, null).length === 0 && g.ids(sel, [null]).length === 0);
+
+  // THE decision this ticket makes, reversed from the first cut: a tick SURVIVES search and filter.
+  // One incidental keystroke must not destroy five deliberate choices that cannot be undone. The
+  // hazard of queueing something off screen is answered by SAYING SO, not by throwing ticks away.
+  var hid = sum([rows[0]], { query: "alp" });
+  ok("a ticked row that is filtered away stays selected", hid.selected === 2 && hid.ids.join() === "a,c");
+  ok("the footer states how many of the selection are off screen", hid.hidden === 1 && hid.hiddenLabel === "2 selected · 1 hidden by search");
+  ok("the button offers to queue the WHOLE selection, hidden rows included", hid.queueLabel === "Queue selected (2)");
+  ok("nothing in the summary mutates the selection it was handed", (function () { g.summary(sel, [], rows, {}); return Object.keys(sel).sort().join() === "a,c"; })());
+  ok("hiding every ticked row still reports a live selection", (function () { var s = sum([rows[1]], { query: "bet" }); return s.selected === 2 && s.hidden === 2 && s.visible === 0; })());
+  ok("an empty visible list still reports the selection, so its footer can't vanish", sum([], { query: "zzz" }).selected === 2);
+
+  // the hidden line names the lens the author is actually using
+  ok("the lens is named the way the author would name it", g.hiddenBy("alp", "all") === "search" && g.hiddenBy("", "attention") === "the filter" && g.hiddenBy("alp", "attention") === "search and filter");
+  ok("with no lens on, nothing can be hidden by one", g.hiddenBy("", "all") === "the current view" && g.hiddenBy("   ", null) === "the current view");
+  ok("no hidden rows means no hidden line at all", sum(rows, {}).hiddenLabel === "" && sum(rows, {}).hidden === 0);
+
+  // --- select-all is the ONE deliberate asymmetry: it counts the VISIBLE rows ---
+  ok("some visible rows ticked reads as mixed, not on", sum(rows, {}).mixed === true && sum(rows, {}).all === false);
+  ok("every visible row ticked reads as on", g.summary({ a: 1, b: 1, c: 1 }, rows, rows, {}).all === true && g.summary({ a: 1, b: 1, c: 1 }, rows, rows, {}).mixed === false);
+  ok("nothing ticked is neither on nor mixed", g.summary({}, rows, rows, {}).all === false && g.summary({}, rows, rows, {}).mixed === false);
+  ok("an empty list is not 'all selected'", g.summary({}, [], rows, {}).all === false && g.summary({}, [], rows, {}).visibleTotal === 0);
+  ok("select-all counts only what is shown, even while rows are hidden", hid.visible === 1 && hid.visibleTotal === 1 && hid.all === true);
+
+  // --- the labels state the size of the action, and the reason when it can't run ---
+  var l0 = g.summary({}, rows, rows, {}), l2 = sum(rows, {});
+  ok("the button carries the count once something is ticked", l2.queueLabel === "Queue selected (2)" && l0.queueLabel === "Queue selected");
+  ok("select-all names the total, then switches to a progress count", l0.allLabel === "Select all 3" && l2.allLabel === "2 of 3 selected");
+  ok("a dead button states its reason; a live one has none", /^Tick documents above/.test(l0.reason) && l2.reason === "");
+  ok("the summary survives junk arguments", g.summary(null, null, null, null).selected === 0 && g.summary(null, null, null, null).queueLabel === "Queue selected");
+
+  // --- wiring: the render READS the selection; nothing in it writes back ---
+  ok("the render only reads the selection", /var sel = publishSelectionSummary\(__publishPickSel, docs, all, \{ query: __publishPickQuery, filter: __publishPickFilter \}\);/.test(e));
+  ok("no render path prunes the selection to the visible rows", !/__publishPickSel = publishSelectionInView/.test(e) && !/publishSelectionInView/.test(e));
+  ok("the picker rows are built once and shared by the render and the batch", /function publishPickRows\(\)/.test(e) && /var all = publishPickRows\(\);/.test(e) && /var ids = publishSelectedIds\(__publishPickSel, publishPickRows\(\)\);/.test(e));
+  ok("selection is session-only view state, like the search it lives beside", /var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title", __publishPickSel = \{\};/.test(e));
+
+  // --- the control is the canonical DS Checkbox, not a hand-rolled box ---
+  ok("each row leads with the canonical DS Checkbox", /if \(U && U\.Checkbox\) \{\s*\n\s*var box = U\.Checkbox\(\{\s*\n\s*checked: !!__publishPickSel\[d\.id\]/.test(e) && /box\.classList\.add\("publish-pickrow__sel"\)/.test(e));
+  ok("select-all uses the same Checkbox's mixed state", /U\.Checkbox\(\{\s*\n\s*checked: sel\.all, mixed: sel\.mixed, label: sel\.allLabel/.test(e) && /mixed\?: boolean;/.test(src("design-system/components/controls/Checkbox.d.ts")));
+  ok("select-all touches only the rows it shows, leaving hidden ticks alone", /docs\.forEach\(function \(r\) \{ if \(v\) __publishPickSel\[r\.id\] = true; else delete __publishPickSel\[r\.id\]; \}\);/.test(e));
+  ok("the DS checkbox ships at 14px, so the row needs no size of its own", /\.vds-check__box \{[^}]*width: 14px; height: 14px;/.test(css) && /\.publish-pickrow__sel \{ flex: 0 0 auto; \}/.test(css));
+
+  // --- the batch action: disabled with a stated reason, exactly like the Publish button ---
+  // a live selection with every row filtered away KEEPS its footer, or the ticks are stranded
+  ok("the footer survives as long as there is anything to select or anything selected", /if \(docs\.length \|\| sel\.selected\) \{\s*\n\s*var foot = h\("div", "publish-pick__foot"\);/.test(e));
+  ok("Queue selected is disabled and states why when nothing is ticked", /if \(!sel\.selected\) \{ qs\.setAttribute\("disabled", "disabled"\); qs\.title = sel\.reason; \}/.test(e));
+  ok("the hidden line offers one Clear for the whole selection, hidden rows included", /if \(sel\.hidden\) \{[\s\S]{0,400}__publishPickSel = \{\}; renderPublishPick\(\);/.test(e) && /U\.Button\(\{ variant: "ghost", size: "sm", label: "Clear"/.test(e));
+  ok("the footer is pinned under the scrolling list, on the pane's own inset", /\.publish-pick__foot \{ flex: 0 0 auto;[^}]*padding: 8px 12px; border-top: 1px solid var\(--border-subtle\); \}/.test(css));
+
+  // --- queueing a batch reuses the single-document path, and clears the ticks afterwards ---
+  ok("every selected document goes through the same addToQueue as the '+'", /ids\.forEach\(function \(id\) \{ addToQueue\(id, \{ quiet: true \}\); \}\);/.test(e));
+  ok("quiet suppresses the toast only — the queue is still saved per document", /if \(!\(opts && opts\.quiet\)\) publishToast\("Added to the publish queue/.test(e) && /function addToQueue\(docId, opts\) \{[\s\S]{0,400}savePublishQueue\(\);/.test(e));
+  ok("a batch confirms once, naming how many went in", /publishToast\("Added " \+ ids\.length \+ " document" \+ \(ids\.length === 1 \? "" : "s"\)/.test(e));
+  ok("the ticks are cleared after the batch is handed over", /ids\.forEach[\s\S]{0,80}__publishPickSel = \{\};\s*\n\s*renderPublishPick\(\);/.test(e));
+  ok("an empty selection queues nothing at all", /if \(!ids\.length\) return;/.test(e));
+  // multi-select is ADDITIVE: the per-row "+" is still there
+  ok("the per-row '+' still queues one document on its own", /label: "Add “" \+ d\.title \+ "” to the publish queue", onClick: function \(\) \{ addDocToPublishQueue\(d\.id\); \}/.test(e));
 })();
 
 // uio-P-C03 (PUB-10): release history answers "what did we ship?", so it fills the pane's empty

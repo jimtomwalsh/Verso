@@ -621,6 +621,18 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .publish-pickrow__align { flex: 0 0 auto; font-size: var(--text-2xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; }
 /* uio-P-C03 (PUB-10): the provenance line under each picker row — "when did this last go out, and
    as what version". Sits at the chrome baseline, indented to the title column. */
+/* uio-P-C06 (PUB-04): the row's leading tick box. The canonical DS Checkbox at its own 14px size --
+   this rule only holds it out of the flex stretch and stops it eating the title's space. */
+.publish-pickrow__sel { flex: 0 0 auto; }
+/* The selection footer: pinned under the scrolling list, one hairline above it, holding the
+   select-all box and the batch action. Same 12px inset every other region of this pane carries. */
+.publish-pick__foot { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border-subtle); }
+.publish-pick__foot .publish-pick__all { align-self: flex-start; }
+/* uio-P-C06: the honest line when search or a filter is hiding part of the selection — how many are
+   ticked, how many are off screen, and one Clear for the whole lot (the canonical ghost Button). */
+.publish-pick__hidden { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.publish-pick__hidden-text { flex: 1 1 auto; min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.publish-pick__clear { flex: 0 0 auto; }
 .publish-pickitem { display: flex; flex-direction: column; }
 .publish-pickitem__last { padding: 0 4px 4px 8px; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .publish-empty { font-size: var(--text-sm, 12px); color: var(--text-secondary); padding: 8px 4px; }

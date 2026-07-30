@@ -987,6 +987,20 @@ a refresh and a stage-switch.
   from the release record, so it can never disagree with the history beside it — and a run that
   failed doesn't count as published.
 
+- **Queueing several at once.** Every row in the Documents list has a **tick box**. Tick the documents
+  you want and press **Queue selected (N)** at the bottom of the list — they all go into the queue in
+  one action, each with its own remembered preset, and you get one confirmation instead of one per
+  document. **Select all** ticks everything currently shown. The button stays greyed out until you
+  tick something, and says so if you hover it. The ticks clear once the batch is queued.
+  The per-row **+** still works exactly as before for adding a single document.
+- **Searching never loses your ticks.** Search, the **Needs attention** filter and the sort control
+  change what the list shows, never what you've ticked — so you can tick five documents, search for
+  a sixth, and still have all five. When the current search or filter is hiding part of your
+  selection, the bottom of the list says so ("3 selected · 2 hidden by search") and offers **Clear**
+  to drop the whole selection, hidden documents included. **Queue selected (3)** queues all three,
+  including the two you can't see: that's what you ticked, and the line above the button says it
+  will. Ticks are for the session only; they aren't saved with the document.
+
 This is an early view — a chosen save folder and staleness dots arrive in later updates.
 
 ---

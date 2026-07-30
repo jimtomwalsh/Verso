@@ -1477,6 +1477,55 @@
     return out;
   }
   /* @publish-pick-end */
+  // uio-P-C06 (PUB-04): bulk publishing had no bulk controls -- a dozen documents meant a dozen
+  // identical "+" clicks. Selection is VIEW state (session-only, never saved on the document), and
+  // searching, filtering or re-ordering the list NEVER changes it. Filtering is a lens, not an edit:
+  // one keystroke in the search field must not throw away five deliberate ticks that cannot be undone.
+  // The hazard -- queueing documents that are off screen -- is answered by stating it plainly in the
+  // footer instead ("5 selected · 2 hidden by search"), so nothing is silently lost and nothing is
+  // silently included.
+  /* @publish-sel-start */
+  // The selected ids among `rows`, in the order those rows are given. Pass the visible list to count
+  // what is on screen; pass the full candidate list to get everything the batch will queue. Ids for
+  // documents that no longer exist simply never match, so a stale tick can never queue anything.
+  function publishSelectedIds(sel, rows) {
+    var out = [];
+    (rows || []).forEach(function (r) { if (r && r.id && sel && sel[r.id]) out.push(r.id); });
+    return out;
+  }
+  // Which of the two lenses is doing the hiding, named the way the author would name it.
+  function publishHiddenBy(query, filter) {
+    var q = !!String(query == null ? "" : query).trim(), f = !!filter && filter !== "all";
+    if (q && f) return "search and filter";
+    if (q) return "search";
+    if (f) return "the filter";
+    return "the current view";
+  }
+  // Everything the selection footer needs, from the visible rows plus the full candidate list.
+  // The one deliberate asymmetry: "select all" and its mixed state count the VISIBLE rows only,
+  // because ticking a box that says "Select all 3" over a list of 3 can only sanely mean those 3 --
+  // while the queue button counts the WHOLE selection, hidden rows included, because that is what
+  // the author actually ticked. The hidden line exists so those two numbers are never a surprise.
+  function publishSelectionSummary(sel, visible, all, opts) {
+    opts = opts || {};
+    var vis = publishSelectedIds(sel, visible), tot = publishSelectedIds(sel, all);
+    var visTotal = (visible || []).filter(function (r) { return r && r.id; }).length;
+    var hidden = Math.max(0, tot.length - vis.length);
+    return {
+      ids: tot,
+      selected: tot.length,
+      visible: vis.length,
+      hidden: hidden,
+      visibleTotal: visTotal,
+      all: visTotal > 0 && vis.length === visTotal,
+      mixed: vis.length > 0 && vis.length < visTotal,
+      allLabel: vis.length ? (vis.length + " of " + visTotal + " selected") : ("Select all " + visTotal),
+      queueLabel: "Queue selected" + (tot.length ? " (" + tot.length + ")" : ""),
+      hiddenLabel: hidden ? (tot.length + " selected · " + hidden + " hidden by " + publishHiddenBy(opts.query, opts.filter)) : "",
+      reason: tot.length ? "" : "Tick documents above to queue them together."
+    };
+  }
+  /* @publish-sel-end */
   // ---- Product Rail: Ground-Truth staleness (export-is-publish tracking) ----
   // A document links Ground Truth through block.sourceLink.masterId; each linked master carries a
   // version stamp (master.updatedAt via stampMasterVersion, bumped on every content edit). At export
@@ -1560,7 +1609,8 @@
   }
   // uio-P-C04: the picker's view state. Session-only on purpose — a search you left behind three
   // days ago silently hiding documents is worse than retyping it.
-  var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title";
+  // uio-P-C06: the tick marks live here too — same session-only lifetime, for the same reason.
+  var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title", __publishPickSel = {};
   function publishSortLabel() {
     for (var i = 0; i < PUBLISH_SORTS.length; i++) if (PUBLISH_SORTS[i].key === __publishPickSort) return PUBLISH_SORTS[i].label;
     return PUBLISH_SORTS[0].label;
@@ -1578,22 +1628,31 @@
     lastLabel: publishLastLabel,
     render: mountPublishStage
   };
+  // uio-P-C04 (PUB-12): decorate every candidate with the two facts the orderings need -- how far it
+  // has drifted from approved source, and when it last actually went out -- then let the pure view do
+  // search/filter/sort. The header counts what the list shows, from the same array.
+  // uio-P-C06: the render AND "Queue selected" both read the list from here, so the batch can only
+  // ever contain rows the picker is showing.
+  function publishPickRows() {
+    var vers = currentMasterVersions(), RH = window.ReleaseHistory;
+    return publishPickDocs().map(function (d) {
+      var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
+      return { id: d.id, title: d.title, drift: groundTruthStaleCount(registry[d.id], vers) || 0, lastAt: last ? last.at : 0 };
+    });
+  }
   // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
   // shortcut to queue the currently-open document (the fast single-export path -- a queue-of-one).
   function renderPublishPick() {
     var host = document.getElementById("publish-pick"); if (!host) return;
     var U = window.VersoUI;
     host.innerHTML = "";
-    var vers = currentMasterVersions(), RH = window.ReleaseHistory;
-    // uio-P-C04 (PUB-12): decorate every candidate with the two facts the orderings need — how far
-    // it has drifted from approved source, and when it last actually went out — then let the pure
-    // view do search/filter/sort. The header counts what the list shows, from the same array.
-    var all = publishPickDocs().map(function (d) {
-      var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
-      return { id: d.id, title: d.title, drift: groundTruthStaleCount(registry[d.id], vers) || 0, lastAt: last ? last.at : 0 };
-    });
+    var all = publishPickRows();
     var docs = publishPickView(all, { query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort });
     var attention = all.filter(publishNeedsAttention).length;
+    // uio-P-C06 (PUB-04): this render READS the selection and never writes it. Search, filter and
+    // sort are a lens over the list, so a tick survives all three for the whole session; the footer
+    // states how much of the selection the current lens is hiding.
+    var sel = publishSelectionSummary(__publishPickSel, docs, all, { query: __publishPickQuery, filter: __publishPickFilter });
 
     // Header strip: what this list IS (scope + count), and how it is ordered.
     var head = h("div", "publish-pick__head");
@@ -1655,6 +1714,21 @@
     }
     docs.forEach(function (d) {
       var row = h("div", "publish-pickrow");
+      // uio-P-C06 (PUB-04): the row leads with the canonical DS Checkbox (14px, Checkbox.d.ts) so a
+      // dozen documents are picked as one set. The per-row "+" below is untouched: ticking is the
+      // additional path for a batch, not a replacement for queueing one document.
+      if (U && U.Checkbox) {
+        var box = U.Checkbox({
+          checked: !!__publishPickSel[d.id],
+          onChange: function (v) {
+            if (v) __publishPickSel[d.id] = true; else delete __publishPickSel[d.id];
+            renderPublishPick();
+          }
+        });
+        box.classList.add("publish-pickrow__sel");
+        box.title = "Select “" + d.title + "” for queueing";
+        row.appendChild(box);
+      }
       row.appendChild(h("span", "publish-pickrow__title", d.title));
       // staleness-tracking: informational count of linked Ground Truth topics changed since this
       // document's last export. null (no linked content) shows nothing; 0 shows nothing (in sync);
@@ -1683,6 +1757,48 @@
       list.appendChild(wrap);
     });
     host.appendChild(list);
+
+    // uio-P-C06 (PUB-04): the selection footer, pinned under the scrolling list. It stays as long as
+    // there is anything to select OR anything selected -- a live selection with every row filtered
+    // away must never lose its footer, or the author is left holding ticks they can neither see nor
+    // clear. The Publish button's rule applies here too: with nothing ticked the action is disabled
+    // and states its reason on hover instead of failing silently.
+    if (docs.length || sel.selected) {
+      var foot = h("div", "publish-pick__foot");
+      if (docs.length && U && U.Checkbox) {
+        // Ticks what is SHOWN. Untickng it clears the shown rows and leaves hidden ones alone; the
+        // hidden line below carries its own Clear for the whole selection.
+        var allBox = U.Checkbox({
+          checked: sel.all, mixed: sel.mixed, label: sel.allLabel,
+          onChange: function (v) {
+            docs.forEach(function (r) { if (v) __publishPickSel[r.id] = true; else delete __publishPickSel[r.id]; });
+            renderPublishPick();
+          }
+        });
+        allBox.classList.add("publish-pick__all");
+        allBox.title = "Select every document shown";
+        foot.appendChild(allBox);
+      }
+      // The whole truth when the current lens is hiding part of the selection: how many are ticked,
+      // how many of those are off screen, and one action to drop the lot.
+      if (sel.hidden) {
+        var hint = h("div", "publish-pick__hidden");
+        hint.appendChild(h("span", "publish-pick__hidden-text", sel.hiddenLabel));
+        var clearFn = function () { __publishPickSel = {}; renderPublishPick(); };
+        var clear = U ? U.Button({ variant: "ghost", size: "sm", label: "Clear", onClick: clearFn }) : h("button", null, "Clear");
+        clear.classList.add("publish-pick__clear");
+        clear.title = "Clear all " + sel.selected + " ticked documents, hidden ones included";
+        if (!U) clear.addEventListener("click", clearFn);
+        hint.appendChild(clear);
+        foot.appendChild(hint);
+      }
+      var qs = U ? U.Button({ variant: "secondary", full: true, icon: "plus", label: sel.queueLabel, onClick: queueSelectedDocs })
+        : h("button", null, sel.queueLabel);
+      qs.classList.add("publish-pick__queuesel");
+      if (!sel.selected) { qs.setAttribute("disabled", "disabled"); qs.title = sel.reason; }
+      foot.appendChild(qs);
+      host.appendChild(foot);
+    }
   }
   // A tiny transient confirmation toast (reuses the shared .collab-toast style), for actions taken
   // away from the Publish stage -- e.g. "Send to publish queue" from the Edit-stage top bar.
@@ -1694,7 +1810,9 @@
   // The ONE shared "queue this document" action (T4). Adds the doc with its remembered preset (T2),
   // no configure step, no duplicate row (re-arms an existing one). Used by every entry point: the
   // Publish-stage picker rows AND the Edit-stage top-bar "Send to publish queue". Toasts the count.
-  function addToQueue(docId) {
+  // uio-P-C06 (PUB-04): `quiet` suppresses only the confirmation, never the save. A batch adds every
+  // document through this exact path and then confirms once, so one toast per document never stacks.
+  function addToQueue(docId, opts) {
     var PQ = window.PublishQueue, PP = window.PublishPresets, d = registry[docId]; if (!PQ || !d) return;
     var preset = PP ? PP.lastForDoc(publishPresets(), docId) : "master"; // zero-config recall
     PQ.addDoc(publishQueue(), docId, { title: (d.meta && d.meta.title) || docId, preset: preset });
@@ -1702,7 +1820,22 @@
     renderPublishQueue();
     var n = PQ.pendingRows(publishQueue()).length;
     syncSendToPublishCount();
-    publishToast("Added to the publish queue — " + n + " pending.");
+    if (!(opts && opts.quiet)) publishToast("Added to the publish queue — " + n + " pending.");
+  }
+  // uio-P-C06 (PUB-04): queue the whole selection in one action -- every ticked document, including
+  // any the current search or filter is hiding, because that is what the author ticked and the
+  // footer said so before they pressed it. Identical to pressing "+" on each row (same preset
+  // recall, same de-duplication); the ticks clear afterwards, since the batch has been handed over
+  // and a stale selection would invite queueing it twice.
+  function queueSelectedDocs() {
+    var PQ = window.PublishQueue; if (!PQ) return;
+    var ids = publishSelectedIds(__publishPickSel, publishPickRows());
+    if (!ids.length) return;
+    ids.forEach(function (id) { addToQueue(id, { quiet: true }); });
+    __publishPickSel = {};
+    renderPublishPick();
+    var n = PQ.pendingRows(publishQueue()).length;
+    publishToast("Added " + ids.length + " document" + (ids.length === 1 ? "" : "s") + " to the publish queue — " + n + " pending.");
   }
   // uio-E-C08 (EDIT-15): reflect the pending queue count on the Edit header's "Send to publish"
   // button, so the destination + its backlog are legible without opening the Publish stage.
