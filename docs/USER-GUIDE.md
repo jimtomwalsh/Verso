@@ -856,8 +856,9 @@ In this mode:
   reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
   Ctrl/Cmd+Z brings the text and the mark back.
 - **See where a span is used, and push a wording out.** When documents link a piece of this source,
-  selecting the linked span opens a **"Linked in N"** panel in the right margin — one row per place
-  it's used, each tagged **base** or **alternate**, and clicking a row opens that document in Edit
+  selecting the linked span opens a **"Linked in N"** panel in the right margin (it never covers the
+  text you're reading; if the passage isn't used anywhere yet the panel invites you to place it) —
+  one row per place it's used, each tagged **base** or **alternate**, and clicking a row opens that document in Edit
   with the exact block selected. If the passage has alternates, **Push an alternate…** sends a
   forked wording to those documents — all of them, or a chosen subset — so you can roll out a better
   wording deliberately. A placement keeps showing **base** until an alternate is chosen for it or

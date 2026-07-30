@@ -12894,14 +12894,16 @@
     var head = h("div", "source-altpanel__head");
     var glyph = h("span", "source-wherepanel__glyph"); glyph.innerHTML = window.Icon ? window.Icon("link") : "";
     head.appendChild(glyph);
-    head.appendChild(h("div", "source-altpanel__title", "Linked in " + used.length));
+    head.appendChild(h("div", "source-altpanel__title", used.length ? ("Linked in " + used.length) : "Where used"));
     var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
     close.innerHTML = window.Icon ? window.Icon("x") : "close";
     close.addEventListener("click", function () { closeSourceWherePanel(); });
     head.appendChild(close);
     panel.appendChild(head);
     if (!used.length) {
-      panel.appendChild(h("div", "source-altpanel__field insp-hint", "Not linked in any document yet."));
+      // uio-S-C03 (SRC-02): the zero state reads as an INVITATION, not a contradiction of the
+      // LINKED mark. A link mark makes the passage linkable; 0 just means it isn't placed yet.
+      panel.appendChild(h("div", "source-altpanel__field insp-hint", "Not used in a course yet — place this passage from the Edit stage to reuse it here."));
     } else {
       used.forEach(function (loc) {
         var row = h("button", "source-wherepanel__row"); row.type = "button";
