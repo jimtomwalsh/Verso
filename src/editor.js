@@ -1580,10 +1580,17 @@
     host.innerHTML = "";
     var head = h("div", "publish-pane__head");
     head.appendChild(h("div", "publish-pane__title", "Publish queue"));
+    // uio-P-C02 (PUB-03): the accent belongs to a button that has something to do. The Publish
+    // button is the accent primary ONLY when there are rows to run; otherwise it's a quiet disabled
+    // secondary that states the reason on hover, so a dead button never hogs the pane's one accent.
     var pending = PQ.pendingRows(q).length;
+    var canRun = !!pending && !__publishRunning;
     var pubLabel = __publishRunning ? "Publishing…" : ("Publish" + (pending ? " (" + pending + ")" : ""));
-    var pub = U ? U.Button({ variant: "primary", icon: "upload", label: pubLabel, onClick: runPublishQueue }) : h("button", null, pubLabel);
-    if (!pending || __publishRunning) pub.setAttribute("disabled", "disabled");
+    var pub = U ? U.Button({ variant: canRun ? "primary" : "secondary", icon: "upload", label: pubLabel, onClick: runPublishQueue }) : h("button", null, pubLabel);
+    if (!canRun) {
+      pub.setAttribute("disabled", "disabled");
+      pub.title = __publishRunning ? "Publishing…" : "Nothing queued to publish — add documents from the left.";
+    }
     // side-rail-cleanup slice 2: the relocated Import/Export menu sits with the Publish button (the
     // stage's export/publish surface). #publish-io is filled by renderToolbarPipeline below.
     var actions = h("div", "publish-pane__head-actions");
