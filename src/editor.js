@@ -4200,6 +4200,10 @@
     canvas.classList.toggle("is-version-preview", !!activeVersion);
     updateVariantBadge();
     updateVersionBadge();
+    // uio-E-C04: keep the top-bar axis switches + the off-base return chip in sync (menu pick,
+    // undo/redo, doc swap) -- onVariantPick only mounts, so the label/chip refresh here.
+    syncVariantSwitch();
+    syncVersionSwitch();
     if (canvasEditable()) enableEditing(world); // #207 + ticket 15: variant preview read-only; software version editable UNLESS collaborating
     fitEmbeds();
     refreshCanvasSelection();
@@ -20537,6 +20541,10 @@
     canvas.classList.toggle("is-version-preview", !!activeVersion);
     updateVariantBadge();
     updateVersionBadge();
+    // uio-E-C04: keep the top-bar axis switches + the off-base return chip in sync (menu pick,
+    // undo/redo, doc swap) -- onVariantPick only mounts, so the label/chip refresh here.
+    syncVariantSwitch();
+    syncVersionSwitch();
     if (canvasEditable()) enableEditing(world); // #207 + ticket 15: version = editable flagship UNLESS collaborating (base-only)
     fitEmbeds();
     // fitEmbeds() resizes HTML/web-embed iframes to fit, changing their frames'
@@ -24403,8 +24411,10 @@
     var Ic = window.Icon;
     if (!variantWrapEl) {
       variantWrapEl = h("button", "tool editor-window__axis-btn variant-glyph"); variantWrapEl.type = "button";
-      // edit-header-ia-v2 (feedback): words only -- no leading glyph. Just the name + a caret.
+      // uio-E-C04 (EDIT-08): the axis is NAMED in the bar (a muted "Variant" caption) so the two
+      // dropdowns aren't unlabelled twins; the value + caret follow.
       variantWrapEl.innerHTML =
+        '<span class="axis-btn__axis">Variant</span>' +
         '<span class="axis-btn__label"></span>' +
         '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       variantWrapEl.addEventListener("click", function () { openVariantMenu(variantWrapEl); });
@@ -24423,6 +24433,37 @@
     variantWrapEl.title = cur
       ? ("Variant: " + cur + " (previewing) — switch or return to Flagship")
       : "Variant: Flagship — preview a variant";
+    syncAxisReturnChip();
+  }
+  // uio-E-C04 (EDIT-08): surface the off-base state in the BAR (not only a canvas badge). A chip
+  // appears the moment either axis leaves base; its wording tracks the real mode -- "Read-only"
+  // when the canvas is locked (variant preview, or a version preview while collaborating), or
+  // "Editing <version>" for the editable dynamic-flagship case (#207). One click returns to base.
+  var axisReturnChipEl = null;
+  function returnToBase() {
+    flushSave(); // commit any in-flight edit before dropping the active version/variant
+    activeVariant = null; activeVersion = null;
+    syncVariantSwitch(); syncVersionSwitch();
+    mount();
+  }
+  function syncAxisReturnChip() {
+    var host = axisSwitchHost();
+    if (!host) return;
+    var off = isPreview();
+    if (!off) { if (axisReturnChipEl) { axisReturnChipEl.remove(); axisReturnChipEl = null; } return; }
+    if (!axisReturnChipEl) {
+      axisReturnChipEl = h("span", "axis-return-chip");
+      var txt = h("span", "axis-return-chip__label");
+      var btn = h("button", "axis-return-chip__btn", "Return to base"); btn.type = "button";
+      btn.addEventListener("click", returnToBase);
+      axisReturnChipEl.appendChild(txt); axisReturnChipEl.appendChild(btn);
+      host.appendChild(axisReturnChipEl); // after the two axis buttons
+    }
+    var locked = !canvasEditable();
+    axisReturnChipEl.classList.toggle("axis-return-chip--locked", locked);
+    var label = axisReturnChipEl.querySelector(".axis-return-chip__label");
+    if (locked) { label.textContent = "Read-only"; axisReturnChipEl.title = "Previewing off base — the canvas is read-only. Return to base to edit."; }
+    else { label.textContent = "Editing " + (activeVersion || "version"); axisReturnChipEl.title = "Editing a software version off base. Return to base to edit the base document."; }
   }
   function previewVariant(v) { activeVariant = v; syncVariantSwitch(); mount(); }
   // Floating "Previewing variant · X" badge on the canvas — makes it obvious you're
@@ -24557,8 +24598,9 @@
     var Ic = window.Icon;
     if (!versionWrapEl) {
       versionWrapEl = h("button", "tool editor-window__axis-btn version-glyph"); versionWrapEl.type = "button";
-      // edit-header-ia-v2 (feedback): words only -- no leading glyph. Just the name + a caret.
+      // uio-E-C04 (EDIT-08): named axis caption ("Version") + value + caret, twin of the variant switch.
       versionWrapEl.innerHTML =
+        '<span class="axis-btn__axis">Version</span>' +
         '<span class="axis-btn__label"></span>' +
         '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       versionWrapEl.addEventListener("click", function () { openVersionMenu(versionWrapEl); });
@@ -24580,6 +24622,7 @@
     versionWrapEl.title = cur
       ? ("Software version: " + cur + " (previewing, read-only) — switch or return to Base to edit")
       : "Software version: Base — preview a version";
+    syncAxisReturnChip();
   }
   function previewVersion(v) { flushSave(); activeVersion = v; syncVersionSwitch(); mount(); } // #207 FIX 3: flush an in-flight edit before switching so nothing is lost mid-caret
   // Floating teal version badge. #207 (FIX 1): the wording signals the MODE, not just the axis —
