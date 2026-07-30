@@ -671,14 +671,16 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   expands them again). Drag a chapter to move that whole chapter (and everything under it) within
   the document — the dragged row dims and a line shows exactly where it will land.
 - **Find in the document.** The search field above the outline finds your text anywhere in the
-  document — headings and body copy — as you type. It shows a match count ("3 / 12"); press Enter
-  (or the up/down arrows next to the count) to jump between hits, each scrolled to and highlighted.
-  The outline narrows to the sections that contain a match, so it doubles as a filter, and it
-  scrolls to and highlights the entry that owns the hit you're on so you never lose your place.
-- **Replace.** Under the find field is a **replace** box with **Replace** (the current match) and
-  **Replace all**. Since replacing edits the base prose, it's available only when the source is
-  **unlocked** — locked, it shows a reminder instead. Replace is case-insensitive (it matches the
-  find) and undoable as a single step; range marks (comments, alternates) ride the edit.
+  document — headings and body copy — as you type. The **match count ("3 / 12") and the up/down
+  jump arrows sit in the field itself**; press Enter (or the arrows) to jump between hits, each
+  scrolled to and highlighted. The outline narrows to the sections that contain a match, so it
+  doubles as a filter, and it scrolls to and highlights the entry that owns the hit you're on so
+  you never lose your place.
+- **Replace.** A **replace glyph** in the search field reveals a **replace** row on demand, with
+  **Replace** (the current match) and **Replace all** — so it's out of the way until you need it.
+  Since replacing edits the base prose, it's available only when the source is **unlocked**; locked,
+  the row is disabled and states the reason. Replace is case-insensitive (it matches the find) and
+  undoable as a single step; range marks (comments, alternates) ride the edit.
 - **The one action left in the rail is Import from Markdown.** Because there's one document, the old
   per-topic tools — new topic, select, delete, move, reorder topics — are gone. Import is now
   **additive**: pick a Markdown file (it can be a segment — just one chapter), and Verso shows a

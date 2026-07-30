@@ -636,14 +636,22 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .source-stage__search { padding: 10px 10px 6px; flex: 0 0 auto; }
 /* .vbrowser__search is a fixed 260px in its own toolbar home; fill the nav instead. */
 .source-stage__search .vbrowser__search { width: 100%; }
-/* Source v2 (find-word-cycling): the match navigator under the search field -- "3 / 12" + prev/
-   next, only while a query is active. */
-.source-find-nav { display: flex; align-items: center; gap: 2px; padding: 4px 2px 0; }
-/* source find-and-replace: the replacement field + Replace / Replace all, under the find field. */
-.source-replace { display: flex; align-items: center; gap: 6px; padding: 6px 2px 0; }
+/* uio-S-C02 (SRC-05): the match navigator + replace glyph live IN the field, as a trailing
+   adornment, so one field carries find + counter + reveal-replace. */
+.source-search__adorn { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.source-search__adorn .vds-iconbtn { width: 20px; height: 20px; }
+.source-search__adorn .vds-iconbtn svg { width: 14px; height: 14px; }
+.source-search__replace-toggle.is-active { color: var(--accent); background: var(--accent-quiet); }
+/* Source v2 (find-word-cycling): the match navigator "3 / 12" + prev/next, in-field, only while a
+   query is active (renderSourceFindNav hides it otherwise). */
+.source-find-nav { display: flex; align-items: center; gap: 0; }
+/* source find-and-replace: the replacement field + Replace / Replace all, revealed under the find
+   field on demand (uio-S-C02). */
+.source-replace { display: flex; align-items: center; gap: 6px; padding: 6px 2px 0; flex-wrap: wrap; }
 .source-replace__field { flex: 1 1 auto; min-width: 0; }
 .source-replace__btns { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-.source-find-nav__count { flex: 1 1 auto; font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
+.source-replace__lockhint { flex: 1 1 100%; margin-top: 2px; }
+.source-find-nav__count { flex: 0 0 auto; white-space: nowrap; font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); }
 .source-stage__topics { flex: 1 1 auto; overflow-y: auto; padding: 0 4px 10px; }
 /* Matches the Structure outliner's chapter-grouping tier (.tree-chapter__name) --
    same uppercase-eyebrow token treatment, not hand-set numbers. */

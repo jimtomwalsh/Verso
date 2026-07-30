@@ -8749,7 +8749,7 @@ section("Product Rail: Source stage nav + article");
   ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
   ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(e));
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(e));
-  ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("label", "vbrowser__search source-stage__search-field"\)/.test(e));
+  ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("div", "vbrowser__search source-stage__search-field"\)/.test(e));
   // (facet SegmentedControl + per-section MarkdownLite column rendering retired with the section-cells path)
 
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
@@ -9854,6 +9854,19 @@ section("uio-S-C03: source mark cards clamp to a reserved right lane");
   var e = src("src/editor.js");
   ok("where-used zero state is an invitation (not 'not linked')", /Not used in a course yet — place this passage from the Edit stage/.test(e));
   ok("where-used title avoids 'Linked in 0' (neutral when count is 0)", /used\.length \? \("Linked in " \+ used\.length\) : "Where used"/.test(e));
+})();
+
+// uio-S-C02 (SRC-05): one search field carrying the in-field match navigator + a replace glyph that
+// reveals the replace row on demand (disabled with a reason when the source is locked).
+section("uio-S-C02: one Source search field + in-field match nav + reveal-on-demand replace");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  // in-field adornment holds the match nav + a replace-toggle glyph
+  ok("the match nav + replace glyph sit IN the field (source-search__adorn)", /var adorn = h\("div", "source-search__adorn"\);[\s\S]{0,200}findNav\.id = "source-find-nav";[\s\S]{0,300}icon: "replace"[\s\S]{0,600}search\.appendChild\(adorn\)/.test(e) && /\.source-search__adorn \{/.test(css));
+  // replace row is revealed on demand (gated on __sourceReplaceOpen), not always shown
+  ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(e) && /if \(unified && __sourceReplaceOpen\) \{/.test(e));
+  // when locked, the row disables the inputs/buttons + states the reason
+  ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
