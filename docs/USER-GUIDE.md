@@ -146,9 +146,15 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   context — the document type (its geometry · interactivity) with that geometry's tools (paged →
   margins / running header-footer / page breaks / page numbers; frame → frame size / transitions /
   animation; reflow → breakpoint preview) — then the canvas backdrop. Select a block and it shows
-  that block's settings instead. The panel's **⋯** menu (top-right) holds **Reorder inspector
+  that block's settings instead. With a block selected, the **⋯** beside the breadcrumb (**Page 1 ›
+  Heading**) opens that block's actions — the same list you get by right-clicking it on the canvas.
+  Higher up, the panel's own **⋯** (in the **Design / Interact** tab strip) holds **Reorder inspector
   sections…**, which turns on a drag mode to rearrange the section order across every block's
   inspector — a preference saved for you, not the course; a banner names the scope while it's on.
+- **Settings.** The Settings panel has no Save or Done button. Every change applies to the course
+  as you make it and is saved for you; **⌘Z** undoes the last one. **Close** (or **Esc**, or a click
+  outside) puts the panel away. Where a setting is really owned by another panel, its row shows the
+  live value and a link straight to that panel rather than telling you to go and find it.
 
 ---
 
@@ -207,6 +213,12 @@ into text editing. **Esc** steps back out one level.
 
 **Move, duplicate, delete.** Drag to move; **⌘D** duplicates; **Delete** removes the selection;
 arrow keys nudge. Group blocks with **⌘G** (ungroup **⌘⇧G**).
+
+**A block's full list of actions — two ways in.** Right-click the block on the canvas, or click the
+**⋯** beside the breadcrumb at the top of the Inspector. Both open the same list: Duplicate, Copy,
+Copy style, Move up / down, Save as component, Clear content, Delete, plus the variant and software
+version show/hide toggles. The list ends with **Block settings**, which takes you back into the
+Inspector on that block.
 
 > **Tip.** An unfilled image or interaction placeholder glows neon-pink on the canvas so you
 > never miss a slot. It's an authoring cue only — it never shows in preview or the export.

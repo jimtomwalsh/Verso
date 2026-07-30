@@ -1651,7 +1651,7 @@ section("#81 Help markdown renderer");
   ok("#8 continuation stops at next bullet", md("- one\n  wrapped\n- two") === "<ul><li>one wrapped</li><li>two</li></ul>");
   ok("#8 continuation stops at a blank line", md("- one\n\npara").indexOf("<li>one</li></ul>") !== -1 && md("- one\n\npara").indexOf("<p>para</p>") !== -1);
   ok("horizontal rule", md("---") === "<hr>");
-  ok("blockquote wraps", md("> hi").indexOf("<blockquote>") === 0);
+  ok("blockquote wraps", md("> hi").indexOf("<blockquote") === 0);
   // HTML in the source is escaped (defensive — trusted content, still no injection)
   ok("escapes angle brackets", md("a <script> b").indexOf("&lt;script&gt;") !== -1);
   ok("no live tag leaks", md("<img onerror=x>").indexOf("<img") === -1);
@@ -5420,7 +5420,7 @@ section("#168 learner-nav single source");
   // The Settings 'Learner nav' tab must resolve the CANONICAL footer nav (footerCourseNav),
   // not the FIRST courseNav eachCourseNav yields (header -> footer -> pages), which drifts to
   // a legacy/header stray away from the footer nav the author edits on the canvas.
-  ok("Settings 'Learner nav' tab uses footerCourseNav (not first-found)", /key: "nav", title: "Learner nav", build: function \(host\) \{ var n = footerCourseNav\(\);/.test(e));
+  ok("Settings 'Learner nav' tab uses footerCourseNav (not first-found)", /key: "nav", title: "Learner nav", build: function \(host\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(e));
   ok("old first-found pattern is gone from the nav tab", !/title: "Learner nav"[\s\S]{0,120}eachCourseNav\(function \(x\) \{ if \(!n\) n = x; \}\)/.test(e));
   // footerCourseNav resolves ONLY the footer region's courseNav (the single creatable instance).
   var fn = slice(e, "function footerCourseNav()", "\n  }");
@@ -5710,7 +5710,7 @@ section("copy/paste style");
   ok("copyBlockStyle lifts only presentation keys from STYLE_KEYS", /"box"/.test(_sk) && /"styleRef"/.test(_sk) && /"colorMap"/.test(_sk) && /function copyBlockStyle\(block\)[\s\S]*?STYLE_KEYS\.forEach\(function \(k\) \{ if \(block\[k\] !== undefined\) out\[k\] = clone\(block\[k\]\)/.test(e));
   ok("STYLE_KEYS excludes content/identity", !/STYLE_KEYS = \[[^\]]*"(text|html|src|children|items|type|id|questions)"/.test(e));
   ok("pasteBlockStyle writes the clipboard keys onto the target + mounts", /function pasteBlockStyle\(block\)[\s\S]*?Object\.keys\(styleClipboard\)\.forEach\(function \(k\) \{ block\[k\] = clone\(styleClipboard\[k\]\); \}\);[\s\S]*?mount\(\)/.test(e));
-  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(target\.block\); \}/.test(e) && /if \(styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(target\.block\); \}/.test(e));
+  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(e) && /if \(styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(e));
 })();
 
 section("ctx copy/paste");
@@ -6207,7 +6207,7 @@ section("clear content #174");
 
   // wiring guards: exposed on both surfaces + gated
   ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? multiSel\.slice\(\) : block\); \}/.test(e));
-  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[target\.block\]\); \}/.test(e));
+  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(e));
   ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
@@ -6285,7 +6285,7 @@ section("richer bullet lists");
   ok("open modal stays in sync via refreshSettingsPanes in renderInspector", /function renderInspector\(\)[\s\S]*?refreshSettingsPanes\(\)/.test(e) && /function refreshSettingsPanes\(\) \{ if \(settingsModal && settingsModal\.active\) renderSettingsBody/.test(e));
   ok("settings dialog is fixed-size (no resize on tab switch)", /\.modal-box\.modal-box--settings \{[\s\S]*?height: min\(88vh, 800px\)/.test(ecss) && /\.settings-content \{ flex: 1 1 auto; overflow-y: auto/.test(ecss));
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
-  ok("settings surface re-skinned to the DS (VersoUI tabs+button, surface-selected rail)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "primary", label: "Done"/.test(e) && /\.settings-nav__item\.is-active \{ background: var\(--surface-selected\)/.test(ecss));
+  ok("settings surface re-skinned to the DS (VersoUI tabs+button, surface-selected rail)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(e) && /\.settings-nav__item\.is-active \{ background: var\(--surface-selected\)/.test(ecss));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
@@ -6636,7 +6636,7 @@ section("#148 per-variant image versions (authoring)");
   ok("upload writes via the pure asset ref channel (hoist-safe)", /setImgVariantSrc\(block, variant, assetRef\(r\.result, f\)\)/.test(e));
   // slice 2: right-click "Upload image for <variant>" (direct file picker) + on-canvas
   // version-cycle badge (author-only transient <img>.src swap, WeakMap, never doc state).
-  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[target\.block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(target\.block, v/.test(e));
+  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(block, v/.test(e));
   ok("on-canvas version-cycle badge decorates image blocks with versions", /function decorateVariantVersionBadges\(scope\)[\s\S]*?hasImageVersions\(block\)[\s\S]*?"variant-cycle"/.test(e));
   ok("cycle preview is author-only + never mutates the doc (WeakMap base-el swap)", /var imgVersionPreview = new WeakMap\(\);/.test(e) && /function applyImageVersionPreview\(node, block\)[\s\S]*?imgVariantSrc\(block, v\) \|\| baseImgSrc\(block\)[\s\S]*?replaceChild\(next, cur\)/.test(e)); // #215: hotspot base = entry.visual via baseImgSrc
   // #148 cleanup: an inline-SVG base (image OR hotspot) must swap too, not just a raster
@@ -10084,6 +10084,102 @@ section("uio-P-C06: picker multi-select + queue selected");
   ok("an empty selection queues nothing at all", /if \(!ids\.length\) return;/.test(e));
   // multi-select is ADDITIVE: the per-row "+" is still there
   ok("the per-row '+' still queues one document on its own", /label: "Add “" \+ d\.title \+ "” to the publish queue", onClick: function \(\) \{ addDocToPublishQueue\(d\.id\); \}/.test(e));
+})();
+
+// uio-O-W1 (OVL-06/09/14/23): the overlay VOCABULARY pass. Four separate dialects replaced by
+// one: the settings surface stops faking a commit and states its real save contract; a
+// cross-reference to a setting another surface owns becomes a live value plus a link, never an
+// instruction to go and look; the block's verbs get a second, advertised door built from ONE
+// menu definition; and help prose gets one small typographic system instead of inventing sizes.
+section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu, help type)");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), typo = src("design-system/tokens/typography.css");
+
+  // --- OVL-09: the fake Done is gone; the surface states its contract ------------------
+  ok("the settings footer no longer offers a commit button", !/label: "Done"/.test(e));
+  ok("it states the real contract instead (live apply + autosave + Undo)",
+    /settings-foot__contract", "Changes apply live, saved automatically\. Undo with " \+ MOD_KEY \+ "Z\."/.test(e));
+  ok("the only footer control is a plain Close, not the accent",
+    /VersoUI\.Button\(\{ variant: "secondary", label: "Close", onClick: closeSettingsModal \}\)/.test(e));
+  ok("the surface can still be dismissed three ways (Close, Esc, click-out)",
+    /function settingsEsc\(e\) \{ if \(e\.key === "Escape"\) closeSettingsModal\(\); \}/.test(e)
+    && /overlay\.addEventListener\("mousedown", function \(e\) \{ if \(e\.target === overlay\) closeSettingsModal\(\); \}\)/.test(e));
+  ok("the contract line and the Close button share the footer", /\.settings-foot \{[^}]*justify-content: space-between;/.test(css) && /\.settings-foot__contract \{/.test(css));
+  // the pre-F05 spine debt this ticket was allowed to carry is now spent
+  ok("the pre-F05 save-contract debt marker went with the button it excused", e.indexOf("spine-todo") === -1);
+  ok("one spelling of the modifier key, so printed shortcuts never disagree", /var MOD_KEY = \(function \(\) \{/.test(e));
+
+  // --- OVL-06: cross-references are links, not instructions ---------------------------
+  ok("there is ONE cross-reference row, built on the shared settings row", /function crossRefRow\(opts\)[\s\S]{0,900}return settingsRow\(\{ label: opts\.label/.test(e));
+  ok("it always carries a live value slot and a navigating link", /insp-xref__value/.test(e) && /insp-xref__link/.test(e) && /link\.addEventListener\("click", function \(\) \{ if \(opts\.onNavigate\) opts\.onNavigate\(\); \}\)/.test(e));
+  ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}settingsModal\.sectionKey\[tab\] = sectionKey;[\s\S]{0,200}scrollIntoView/.test(e));
+  // the three dead-prose references named by the audit are gone, each replaced by a row
+  ok("'edit it in the Learner nav panel' is gone", e.indexOf("edit it in the Learner nav panel") === -1);
+  ok("the nav row states its live section count and links to Learner nav",
+    /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(e));
+  ok("'Add a footer nav bar in Header & Footer first' is gone", e.indexOf("Add a footer nav bar in Header & Footer first") === -1);
+  ok("with no nav bar the row still shows a value plus the link that adds one",
+    /value: "Not added", linkLabel: "Header & Footer"[\s\S]{0,220}openSettingsSection\("project", "headerFooter"\)/.test(e));
+  ok("'preview a variant from the top-bar switcher' is gone", e.indexOf("preview a variant from the top-bar switcher)") === -1);
+  ok("the image panel shows which variant is live and opens the switcher",
+    /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenu\(variantSwitchEl\)/.test(e));
+  ok("the cross-reference row is styled once, not per site", /\.insp-xref \{/.test(css) && /\.insp-xref__link \{/.test(css));
+
+  // --- OVL-14: one verb list, two doors ----------------------------------------------
+  ok("the block verbs have ONE definition", /function blockMenuItems\(target\) \{/.test(e));
+  // the block-menu verbs are written exactly once in the whole file (the outliner's own
+  // tree menu is a different surface with different verbs, so it is not counted here)
+  var verbs = ["Copy style", "Move up", "Move down"];
+  var once = verbs.filter(function (v) { return (e.split('label: "' + v + '"').length - 1) === 1; });
+  ok("no block verb is written twice (the two doors cannot drift): " + once.length + "/" + verbs.length, once.length === verbs.length);
+  ok("exactly two doors call the one definition", (e.split("blockMenuItems(").length - 1) === 3); // 1 definition + 2 call sites
+  // the canvas handler's block branch builds nothing of its own any more
+  var canvasBranch = (e.match(/setSelection\(target\.type === "instance" \? "instance" : "block", target\.node\);([\s\S]*?)\} else \{/) || [])[1] || "";
+  ok("the right-click handler no longer keeps a private copy of the verbs", canvasBranch.indexOf("label:") === -1);
+  ok("door 1 - the canvas right-click renders that list", /items = items\.concat\(blockMenuItems\(target\.type === "block" \? target : \{ instance: target\.instance \}\)\)/.test(e));
+  ok("door 2 - the inspector header's overflow renders the SAME list", /showContextMenu\(r\.right, r\.bottom \+ 4, blockMenuItems\(\{ block: block \}\)\)/.test(e));
+  ok("the overflow is the canonical menu glyph and says what it opens", /insp-crumbs__more"\);[\s\S]{0,200}Icon\("more-horizontal"\)[\s\S]{0,120}"Block actions"/.test(e));
+  ok("the menu's foot names its way back into the inspector", /label: "Block settings", hint: "Inspector", onClick: function \(\) \{ revealBlockSettings\(block\); \}/.test(e));
+  ok("that route really opens the block's own settings", /function revealBlockSettings\(block\)[\s\S]{0,220}enteredBlock = block;[\s\S]{0,120}reselectBlockNode\(block, "block"\)/.test(e));
+  ok("the overflow is styled once, beside the breadcrumb", /\.insp-crumbs__more \{/.test(css));
+
+  // --- OVL-23: one help typographic system -------------------------------------------
+  ok("the help type system is four DS tokens, not ad-hoc CSS",
+    /--help-text:\s*var\(--text-sm\)/.test(typo) && /--help-leading:\s*1\.6/.test(typo)
+    && /--help-measure:\s*400px/.test(typo) && /--help-step-indent:/.test(typo));
+  ok("help prose reads at the token size and rhythm", /\.help-doc \{[^}]*font-size: var\(--help-text\); line-height: var\(--help-leading\);/.test(css));
+  ok("the measure is capped at ~62 characters", /\.help-doc > \* \{ max-width: var\(--help-measure\); \}/.test(css));
+  ok("wide content scrolls instead of squeezing the measure", /\.help-doc > table, \.help-doc > pre \{ max-width: 100%; \}/.test(css));
+  ok("headings come off the shared --text-* ramp, inventing no size",
+    /\.help-doc h1 \{ font-size: var\(--text-lg\)/.test(css) && /\.help-doc h2 \{ font-size: var\(--text-md\); \}/.test(css)
+    && /\.help-doc h3 \{ font-size: var\(--help-text\); \}/.test(css) && !/\.help-doc h[1-4] \{ font-size: 1[0-9](\.[0-9])?px/.test(css));
+  ok("there is ONE callout box, with three tones drawn off it",
+    /\.help-doc \.help-callout \{/.test(css) && /\.help-callout--reassure \{ border-left-color: var\(--success/.test(css)
+    && /\.help-callout--caution \{ border-left-color: var\(--warning/.test(css));
+  ok("numbered steps get one chip treatment", /\.help-doc ol \{[^}]*counter-reset: help-step;/.test(css) && /\.help-doc ol > li::before \{/.test(css));
+  ok("monospace is reserved for code and paths", /\.help-doc code \{\s*\n\s*font-family: var\(--font-mono\)/.test(css));
+  // the divergence that made help read as a different product: generic modal prose was silently
+  // re-setting the guide's size and rhythm. It now stops at the docs modal.
+  ok("generic modal prose no longer overrides the help system", /\.modal-box:not\(\.modal-box--docs\) p \{/.test(css) && !/^\.modal-box p \{/m.test(css));
+
+  // --- pure: the renderer's share of the help system ----------------------------------
+  var t = e.match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
+  if (!t) { ok("locate @md fence", false); return; }
+  var md = new Function(t[1] + "\nreturn mdToHtml;")();
+  ok("a callout is toned by the label the author already writes",
+    md("> **Note.** a").indexOf("help-callout help-callout--note") !== -1
+    && md("> **Tip.** a").indexOf("help-callout--reassure") !== -1
+    && md("> **Reassurance.** a").indexOf("help-callout--reassure") !== -1
+    && md("> **Caution.** a").indexOf("help-callout--caution") !== -1);
+  ok("an unlabelled quote falls back to the neutral tone, never to no style",
+    md("> plain").indexOf("help-callout help-callout--note") !== -1);
+  ok("a printed shortcut renders as the menu's chip", md("press ⌘P now").indexOf("<kbd class=\"help-kbd\">⌘P</kbd>") !== -1);
+  ok("modifier runs stay one chip", md("⌘⇧G").indexOf("<kbd class=\"help-kbd\">⌘⇧G</kbd>") !== -1);
+  ok("a shortcut quoted as code stays code", md("`⌘` = Cmd").indexOf("<code>⌘</code>") !== -1 && md("`⌘` = Cmd").indexOf("<code><kbd") === -1);
+  ok("chips survive inside bold and table cells",
+    md("**⌘D** dupes").indexOf("<strong><kbd class=\"help-kbd\">⌘D</kbd></strong>") !== -1
+    && md("| Do | Key |\n|---|---|\n| Undo | ⌘Z |").indexOf("<kbd class=\"help-kbd\">⌘Z</kbd>") !== -1);
+  ok("prose with no shortcut is untouched", md("plain words") === "<p>plain words</p>");
 })();
 
 // uio-P-C03 (PUB-10): release history answers "what did we ship?", so it fills the pane's empty
