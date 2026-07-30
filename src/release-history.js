@@ -50,6 +50,52 @@
     });
   }
 
+  // uio-P-C03 (PUB-10): the one-line summary a release row states -- how many documents went out,
+  // under which preset(s), to where, and whether any of it failed. Entries carry a status only from
+  // this ticket onward; an older record has none, so an entry with no status counts as published.
+  function releaseSummary(rel) {
+    var entries = (rel && rel.entries) || [];
+    var docs = {}, presets = [], dests = [], failed = 0;
+    entries.forEach(function (e) {
+      if (!e) return;
+      docs[e.docId || e.title || ""] = 1;
+      if (e.status === "error") failed++;
+      if (e.preset && presets.indexOf(e.preset) === -1) presets.push(e.preset);
+      if (e.destination && dests.indexOf(e.destination) === -1) dests.push(e.destination);
+    });
+    var n = Object.keys(docs).length;
+    function oneOrCount(arr, plural) {
+      return !arr.length ? "" : arr.length === 1 ? arr[0] : (arr.length + " " + plural);
+    }
+    return {
+      docCount: n,
+      docLabel: n + " document" + (n === 1 ? "" : "s"),
+      presets: presets,
+      presetLabel: oneOrCount(presets, "presets"),
+      destinations: dests,
+      destinationLabel: oneOrCount(dests, "destinations"),
+      failed: failed,
+      published: entries.length - failed,
+      outcome: failed ? (failed + " failed") : "Published",
+      ok: !failed
+    };
+  }
+  // uio-P-C03 (PUB-10): "when did this document last actually go out, and as what version" -- the
+  // question that decides whether a re-publish is needed at all. Newest successful entry wins; a
+  // failed entry is not a publication. Returns null when the document has never been published.
+  function lastPublishedFor(store, docId) {
+    var rels = list(store);
+    for (var i = 0; i < rels.length; i++) {
+      var es = rels[i].entries || [];
+      for (var j = 0; j < es.length; j++) {
+        if (es[j] && es[j].docId === docId && es[j].status !== "error") {
+          return { at: rels[i].createdAt || 0, version: es[j].version || "", releaseId: rels[i].releaseId };
+        }
+      }
+    }
+    return null;
+  }
+
   function toJSON(store) {
     return { version: (store && store.version) || 1, _seq: (store && store._seq) || 0, releases: clone((store && store.releases) || []) };
   }
@@ -66,7 +112,8 @@
 
   function clone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
 
-  var ReleaseHistory = { create: create, append: append, list: list, toJSON: toJSON, fromJSON: fromJSON, SCHEMA: SCHEMA };
+  var ReleaseHistory = { create: create, append: append, list: list, releaseSummary: releaseSummary,
+    lastPublishedFor: lastPublishedFor, toJSON: toJSON, fromJSON: fromJSON, SCHEMA: SCHEMA };
   ReleaseHistory._pure = ReleaseHistory;
   if (typeof module !== "undefined" && module.exports) module.exports = ReleaseHistory;
   if (typeof window !== "undefined") window.ReleaseHistory = ReleaseHistory;

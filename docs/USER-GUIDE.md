@@ -966,10 +966,19 @@ a refresh and a stage-switch.
 - **Publish.** One **Publish** button runs every pending row in turn: each is packaged as a SCORM
   `.zip` (using that row's preset) and downloaded. Done rows stay in the queue, greyed, with their
   result — the queue isn't cleared, so you can see what shipped.
-- **Release history.** Each Publish run records **one** timestamped release entry under the queue —
-  a light provenance log of what went out together. Expand a release to see every document in it with
-  its format, variant and version. It's a read-only audit trail (it never re-exports anything); to
-  publish a whole product family as one release, queue its documents and run them together.
+- **Release history.** Each Publish run records **one** timestamped release entry, and history takes
+  whatever room the queue isn't using — it answers "what did we ship?", so it sits open in the pane
+  rather than folded away. Each release states how many documents went out, the preset (or a count
+  when a run mixed several), where they were delivered, and the outcome: **Published**, or **N failed**
+  when part of the run didn't make it. Expand a release to see every document in it with its format,
+  variant, version and preset; a document that failed is marked in the list. It's a read-only audit
+  trail — it never re-exports anything. To publish a whole product family as one release, queue its
+  documents and run them together.
+- **Last published, per document.** Every row in the Documents list states when that document last
+  actually went out and as what version ("Last published 12 Jun · v1.4"), or **Never published**.
+  That's usually the fastest way to tell whether a re-publish is needed at all. The line is read
+  from the release record, so it can never disagree with the history beside it — and a run that
+  failed doesn't count as published.
 
 This is an early view — a chosen save folder and staleness dots arrive in later updates.
 

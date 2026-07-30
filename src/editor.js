@@ -1373,10 +1373,15 @@
   }
   // One release entry for a document published in a run: its identity + the export options it went out
   // with + the source-version stamps it was built against (auditable against later Ground-Truth drift).
-  function releaseEntryForRow(row) {
+  // uio-P-C03 (PUB-10): the record also captures the PRESET it went out under, WHERE it was
+  // delivered, and whether it succeeded -- the three things a history row has to state and which
+  // nothing else stores. `result` is the delivery outcome (null on a row that never delivered).
+  function releaseEntryForRow(row, result) {
     var d = registry[row.docId] || {}, meta = d.meta || {};
     var opts = publishOptionsForRow(row);
+    var PP = window.PublishPresets;
     var gtv = {}; docLinkedMasterIds(d).forEach(function (id) { gtv[id] = currentMasterVersions()[id]; });
+    var failed = !result || result.to === "error";
     return {
       docId: row.docId,
       code: meta.code || "",
@@ -1385,6 +1390,9 @@
       exportFormat: opts.format || "",
       variant: opts.variant || "",
       version: opts.version || "",
+      preset: PP ? PP.presetName(publishPresets(), row.preset || "master") : "",
+      destination: failed ? "" : (result.to === "download" ? "Downloads" : (result.path || result.to || "")),
+      status: failed ? "error" : "done",
       groundTruthVersions: gtv
     };
   }
@@ -1495,11 +1503,29 @@
     return Math.round(a.ratio * 100);
   }
   /* @src-align-end */
+  // uio-P-C03 (PUB-10): the picker row's provenance line. States the fact plainly when a document
+  // has gone out, and states the absence just as plainly when it hasn't -- "never published" is
+  // information, not an error, so it reads as a fact rather than a warning.
+  function publishLastLabel(docId) {
+    var RH = window.ReleaseHistory; if (!RH || !RH.lastPublishedFor) return "";
+    var last = RH.lastPublishedFor(releaseHistory(), docId);
+    if (!last) return "Never published";
+    var when = last.at ? new Date(last.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+    return "Last published " + [when, last.version].filter(Boolean).join(" · ");
+  }
   function mountPublishStage() {
     if (typeof document === "undefined") return;
     renderPublishPick();
     renderPublishQueue();
   }
+  // browser-verify hook (mirrors window.__sourceRw): lets the Puppeteer harness seed release records
+  // and re-render the stage without driving a real export. Read/render only -- no publish path here.
+  window.__publishRw = {
+    releaseHistory: releaseHistory,
+    saveReleaseHistory: saveReleaseHistory,
+    lastLabel: publishLastLabel,
+    render: mountPublishStage
+  };
   // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
   // shortcut to queue the currently-open document (the fast single-export path -- a queue-of-one).
   function renderPublishPick() {
@@ -1537,7 +1563,13 @@
       }
       var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
       row.appendChild(add);
-      list.appendChild(row);
+      // uio-P-C03 (PUB-10): "when did this last actually go out, and as what" — the line that
+      // decides whether a re-publish is needed at all. Read from the release record, so it can
+      // never disagree with the history below.
+      var wrap = h("div", "publish-pickitem");
+      wrap.appendChild(row);
+      wrap.appendChild(h("div", "publish-pickitem__last", publishLastLabel(d.id)));
+      list.appendChild(wrap);
     });
     host.appendChild(list);
   }
@@ -1600,8 +1632,12 @@
     host.appendChild(head);
     syncSendToPublishCount(); // uio-E-C08: keep the Edit header's count in step with every queue change
     renderToolbarPipeline(); // fill #publish-io with the "Import & export" menu
+    // uio-P-C03 (PUB-10): the queue scrolls in its own region so Release history can take the space
+    // the queue isn't using — the pane no longer scrolls as one long strip with history off-screen.
+    var scroller = h("div", "publish-queue__body");
+    host.appendChild(scroller);
     var rows = (q.rows || []);
-    if (!rows.length) { host.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); renderPublishHistory(host); return; }
+    if (!rows.length) { scroller.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); renderPublishHistory(host); return; }
     var list = h("div", "publish-queuelist");
     rows.forEach(function (r) {
       var row = h("div", "publish-queuerow is-" + r.status);
@@ -1627,36 +1663,53 @@
       }
       list.appendChild(row);
     });
-    host.appendChild(list);
+    scroller.appendChild(list);
     renderPublishHistory(host);
   }
   // Release history (Epic 6): the append-only whole-family export log, newest first, each release
   // expandable to its per-document entries (format / variant / version). Provenance only -- it never
-  // re-exports or mutates a package; a collapsed, secondary section under the live queue.
+  // re-exports or mutates a package.
+  // uio-P-C03 (PUB-10): it answers "what did we ship?", so it OWNS the empty half of the pane
+  // instead of hiding collapsed beneath the queue. Open by default (the mirror image of the Source
+  // stage's History, which is demoted for the opposite reason), one row per release stating count /
+  // preset / destination / outcome, and it states its own empty state rather than vanishing.
   function renderPublishHistory(host) {
-    var RH = window.ReleaseHistory; if (!RH) return;
+    var RH = window.ReleaseHistory, U = window.VersoUI; if (!RH) return;
     var releases = RH.list(releaseHistory());
-    if (!releases.length) return; // nothing published yet -> no empty section noise
-    var wrap = h("div", "publish-history");
-    wrap.appendChild(h("div", "publish-history__title", "Release history"));
+    var body = panelSection(host, "Release history", { collapsible: true, defaultOpen: true, divider: true });
+    body.parentNode && body.parentNode.classList && body.parentNode.classList.add("publish-history");
+    body.appendChild(h("div", "publish-history__note", "Append-only. Every completed run is recorded here; nothing here re-exports."));
+    if (!releases.length) {
+      body.appendChild(h("div", "publish-empty", "Nothing published yet — queue a document above and press Publish to start the record."));
+      return;
+    }
     releases.forEach(function (rel) {
+      var s = RH.releaseSummary(rel);
       var det = h("details", "publish-release");
       var sum = h("summary", "publish-release__sum");
       sum.appendChild(h("span", "publish-release__when", formatRelativeTime(rel.createdAt, Date.now())));
-      sum.appendChild(h("span", "publish-release__count", rel.entries.length + " doc" + (rel.entries.length === 1 ? "" : "s")));
+      sum.appendChild(h("span", "publish-release__count", s.docLabel));
+      if (s.presetLabel) sum.appendChild(h("span", "publish-release__preset", s.presetLabel));
+      if (s.destinationLabel) sum.appendChild(h("span", "publish-release__dest", s.destinationLabel));
+      // canonical DS Badge, quiet tone — one per row, so a column of solid fills would shout.
+      var pill = U && U.Badge ? U.Badge({ tone: s.ok ? "success" : "danger", quiet: true, children: s.outcome })
+        : h("span", null, s.outcome);
+      pill.classList.add("publish-release__outcome");
+      sum.appendChild(pill);
       det.appendChild(sum);
-      var body = h("div", "publish-release__body");
+      var relBody = h("div", "publish-release__body");
       (rel.entries || []).forEach(function (en) {
-        var row = h("div", "publish-release__entry");
+        var row = h("div", "publish-release__entry" + (en.status === "error" ? " is-failed" : ""));
         row.appendChild(h("span", "publish-release__entry-title", en.title));
-        var tags = [en.exportFormat, en.variant, en.version].filter(Boolean).join(" · ");
+        var tags = [en.exportFormat, en.variant, en.version, en.preset].filter(Boolean).join(" · ");
         if (tags) row.appendChild(h("span", "publish-release__entry-tags", tags));
-        body.appendChild(row);
+        if (en.status === "error") row.appendChild(h("span", "publish-release__entry-tags", "failed"));
+        else if (en.destination) row.appendChild(h("span", "publish-release__entry-tags", en.destination));
+        relBody.appendChild(row);
       });
-      det.appendChild(body);
-      wrap.appendChild(det);
+      det.appendChild(relBody);
+      body.appendChild(det);
     });
-    host.appendChild(wrap);
   }
   function publishStatusLabel(r) {
     if (r.status === "running") return "Publishing…";
@@ -1754,7 +1807,11 @@
     function step() {
       if (i >= pend.length) { finish(); return; }
       var row = pend[i++];
-      if (!registry[row.docId]) { PQ.setStatus(q, row.id, "error", { to: "error", path: "document not found" }); savePublishQueue(); renderPublishQueue(); step(); return; }
+      if (!registry[row.docId]) {
+        var gone = { to: "error", path: "document not found" };
+        runEntries.push(releaseEntryForRow(row, gone));
+        PQ.setStatus(q, row.id, "error", gone); savePublishQueue(); renderPublishQueue(); step(); return;
+      }
       PQ.setStatus(q, row.id, "running"); renderPublishQueue();
       var run = function () {
         Promise.resolve()
@@ -1763,12 +1820,18 @@
           .then(function (res) {
             // Capture the release entry BEFORE the baseline snapshot, so groundTruthVersions reflects
             // the source versions this package was actually built against.
-            runEntries.push(releaseEntryForRow(row));
+            runEntries.push(releaseEntryForRow(row, res));
             PQ.setStatus(q, row.id, "done", res);
             // staleness-tracking: a finished export IS this document's new "last published" baseline.
             snapshotGroundTruthBaseline(registry[row.docId]); saveRegistry(registry);
           })
-          .catch(function (e) { PQ.setStatus(q, row.id, "error", { to: "error", path: String((e && e.message) || e) }); })
+          .catch(function (e) {
+            // uio-P-C03: a failed row is part of the release record too — a history row that omits
+            // its failures would report a clean "Published" for a run that partly didn't.
+            var err = { to: "error", path: String((e && e.message) || e) };
+            runEntries.push(releaseEntryForRow(row, err));
+            PQ.setStatus(q, row.id, "error", err);
+          })
           .then(function () { savePublishQueue(); renderPublishQueue(); step(); });
       };
       if (activeDocId !== row.docId) { switchDoc(row.docId); requestAnimationFrame(run); } else run();

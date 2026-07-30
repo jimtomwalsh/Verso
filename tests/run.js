@@ -8827,10 +8827,12 @@ section("Product Rail: Release history store (whole-family export)");
 
   // Editor wiring: the store loads/saves through the durable seam, and a run writes exactly one record.
   ok("release history loads + persists through the durable key/value seam", /RELEASE_HISTORY_KEY = "authoring.releaseHistory"/.test(e) && /writeStore\(localStorage, RELEASE_HISTORY_KEY, JSON\.stringify\(RH\.toJSON\(__releaseHistory\)\)\)/.test(e));
-  ok("runPublishQueue accumulates a release entry per DONE row and appends ONE record on finish", /runEntries\.push\(releaseEntryForRow\(row\)\);/.test(e) && /if \(runEntries\.length && window\.ReleaseHistory\) \{[\s\S]{0,220}ReleaseHistory\.append\(releaseHistory\(\), \{ productId: getActiveProduct\(\), createdAt: Date\.now\(\), entries: runEntries \}\);/.test(e));
-  ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row\)[\s\S]{0,400}exportFormat: opts\.format[\s\S]{0,120}groundTruthVersions: gtv/.test(e));
-  ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row\)\);[\s\S]{0,200}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
-  ok("the Publish stage renders a collapsed reverse-chron Release history (details/summary), entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,400}RH\.list\(releaseHistory\(\)\)[\s\S]{0,1200}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
+  ok("runPublishQueue accumulates a release entry per row and appends ONE record on finish", /runEntries\.push\(releaseEntryForRow\(row, res\)\);/.test(e) && /if \(runEntries\.length && window\.ReleaseHistory\) \{[\s\S]{0,220}ReleaseHistory\.append\(releaseHistory\(\), \{ productId: getActiveProduct\(\), createdAt: Date\.now\(\), entries: runEntries \}\);/.test(e));
+  ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row, result\)[\s\S]{0,700}exportFormat: opts\.format[\s\S]{0,400}groundTruthVersions: gtv/.test(e));
+  ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row, res\)\);[\s\S]{0,200}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
+  // uio-P-C03 flipped the DEFAULT: reverse-chron and per-release expansion are unchanged, but the
+  // section is now open and fills the pane's empty half instead of hiding collapsed below the queue.
+  ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
   // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover
   ok("the Publish pick rows show a '% source' alignment chip (sourceAlignmentPct)", /var apct = sourceAlignmentPct\(registry\[d\.id\]\);[\s\S]{0,160}apct \+ "% source"/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
   ok("the Edit-stage storage popover shows a live 'Source alignment' readout (sourceAlignmentPct of the open doc)", /var apct = sourceAlignmentPct\(doc\);[\s\S]{0,120}row\("Source alignment", apct \+ "% linked"\)/.test(e));
@@ -9867,6 +9869,62 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
   ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(e) && /if \(unified && __sourceReplaceOpen\) \{/.test(e));
   // when locked, the row disables the inputs/buttons + states the reason
   ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
+})();
+
+// uio-P-C03 (PUB-10): release history answers "what did we ship?", so it fills the pane's empty
+// half instead of hiding collapsed below the queue — and every picker row states when that document
+// last actually went out.
+section("uio-P-C03: release history fills the empty half + last-published per row");
+(function () {
+  var RH = require(path.join(ROOT, "src/release-history.js"));
+  var e = src("src/editor.js"), css = src("editor.css");
+
+  // --- pure: releaseSummary states count / preset / destination / outcome ---
+  var store = RH.create();
+  RH.append(store, { createdAt: 1000, entries: [
+    { docId: "a", title: "A", version: "v1.4", preset: "LMS · production", destination: "Downloads", status: "done" },
+    { docId: "b", title: "B", version: "v0.9", preset: "LMS · production", destination: "Downloads", status: "done" }
+  ] });
+  RH.append(store, { createdAt: 2000, entries: [
+    { docId: "a", title: "A", version: "v1.5", preset: "Master", destination: "Downloads", status: "done" },
+    { docId: "c", title: "C", version: "v0.1", preset: "Review copy", destination: "", status: "error" }
+  ] });
+  var newest = RH.list(store)[0], oldest = RH.list(store)[1];
+  var sNew = RH.releaseSummary(newest), sOld = RH.releaseSummary(oldest);
+  ok("a clean release reports Published", sOld.outcome === "Published" && sOld.ok === true && sOld.failed === 0);
+  ok("a partly-failed release reports its failures, not a clean pass", sNew.outcome === "1 failed" && sNew.ok === false && sNew.published === 1);
+  ok("the doc count is per DOCUMENT and pluralises", sOld.docLabel === "2 documents" && RH.releaseSummary({ entries: [{ docId: "z" }] }).docLabel === "1 document");
+  ok("one preset names itself; several collapse to a count", sOld.presetLabel === "LMS · production" && sNew.presetLabel === "2 presets");
+  ok("a destination the run never reached is not listed", sNew.destinations.join() === "Downloads");
+  ok("releaseSummary survives a malformed record", RH.releaseSummary(null).docCount === 0 && RH.releaseSummary({}).outcome === "Published");
+
+  // --- pure: lastPublishedFor is the per-row provenance line ---
+  var lastA = RH.lastPublishedFor(store, "a");
+  ok("last published reads the NEWEST release carrying that document", lastA && lastA.at === 2000 && lastA.version === "v1.5");
+  ok("a document that only ever FAILED counts as never published", RH.lastPublishedFor(store, "c") === null);
+  ok("an unknown document is never published", RH.lastPublishedFor(store, "nope") === null);
+  ok("an older record with no status still counts as published (forward-compatible)",
+    RH.lastPublishedFor((function () { var s2 = RH.create(); RH.append(s2, { createdAt: 5, entries: [{ docId: "old", version: "v1" }] }); return s2; })(), "old").version === "v1");
+
+  // --- the record now captures what a history row has to state ---
+  ok("the entry captures preset, destination and status", /preset: PP \? PP\.presetName\(publishPresets\(\), row\.preset \|\| "master"\) : ""/.test(e) && /destination: failed \? "" : \(result\.to === "download" \? "Downloads"/.test(e) && /status: failed \? "error" : "done"/.test(e));
+  ok("a FAILED row is recorded too (a run that partly failed can't report a clean Published)", /var err = \{ to: "error", path: String\(\(e && e\.message\) \|\| e\) \};\s*\n\s*runEntries\.push\(releaseEntryForRow\(row, err\)\);/.test(e) && /runEntries\.push\(releaseEntryForRow\(row, gone\)\)/.test(e));
+
+  // --- it OWNS the empty half: open by default, canonical section, states its empty state ---
+  ok("history is a canonical PanelSection, open by default", /panelSection\(host, "Release history", \{ collapsible: true, defaultOpen: true, divider: true \}\)/.test(e));
+  ok("history no longer vanishes when empty — it states the empty state", /if \(!releases\.length\) \{[\s\S]{0,200}Nothing published yet — queue a document above/.test(e) && !/if \(!releases\.length\) return;/.test(e));
+  ok("the queue scrolls in its own region so history can take the remaining space", /var scroller = h\("div", "publish-queue__body"\);/.test(e) && /\.publish-queue__body \{ flex: 0 1 auto; min-height: 0; overflow-y: auto; \}/.test(css) && /\.publish-history \{ flex: 1 1 auto; min-height: 0;/.test(css));
+  ok("the pane itself stopped scrolling as one strip", /\.publish-stage__queue \{[^}]*overflow: hidden;/.test(css));
+  ok("a release row states count, preset, destination and outcome", /publish-release__count", s\.docLabel/.test(e) && /publish-release__preset", s\.presetLabel/.test(e) && /publish-release__dest", s\.destinationLabel/.test(e) && /U\.Badge\(\{ tone: s\.ok \? "success" : "danger", quiet: true, children: s\.outcome \}\)/.test(e));
+  // the outcome pill is the CANONICAL DS Badge, not a one-off — and the quiet variant it needs was
+  // added to the DS (contract + kit + css) rather than improvised at the call site.
+  ok("the outcome pill is the canonical Badge, and its quiet variant lives in the DS", /quiet\?: boolean;/.test(src("design-system/components/structure/Badge.d.ts")) && /badgeClass: function \(tone, size, quiet\)/.test(src("src/ui-kit.js")) && /\.vds-badge--success\.vds-badge--quiet \{ background: var\(--green-tint\); color: var\(--success\); \}/.test(css));
+  ok("the publish rule contributes layout only, never the pill's look", /\.publish-release__outcome \{ flex: 0 0 auto; margin-left: auto; \}/.test(css));
+
+  // --- last published per picker row ---
+  ok("each picker row carries its last-published line", /wrap\.appendChild\(h\("div", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
+  ok("never-published reads as a plain fact, not a warning", /if \(!last\) return "Never published";/.test(e));
+  ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));
 })();
 
 // uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
