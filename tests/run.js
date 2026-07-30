@@ -9841,6 +9841,19 @@ section("uio-S-C05: Source product actions moved to a rail footer strip");
   ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,160}"Import from Markdown…"[\s\S]{0,80}host\.appendChild\(row\)/.test(e));
 })();
 
+// uio-S-C03 (SRC-03): mark cards never overlap the prose — while any card is open the article
+// reserves a right-margin lane (padding-right) so the measure shifts clear of the card zone.
+section("uio-S-C03: source mark cards clamp to a reserved right lane");
+(function () {
+  var css = src("editor.css");
+  ok("the article reserves a right lane when a where/alt/comment card is open (:has)", /\.source-stage__article:has\(\[data-source-wherepanel\]\)[\s\S]{0,220}data-source-commentthread\]\) \{ padding-right: 312px; \}/.test(css));
+  ok("the lane is desktop-scoped (min-width) so narrow screens aren't over-squeezed", /@media \(min-width: 1181px\) \{[\s\S]{0,260}padding-right: 312px/.test(css));
+  // SRC-02: the where-used zero state reads as an invitation, and the title isn't the contradictory "Linked in 0".
+  var e = src("src/editor.js");
+  ok("where-used zero state is an invitation (not 'not linked')", /Not used in a course yet — place this passage from the Edit stage/.test(e));
+  ok("where-used title avoids 'Linked in 0' (neutral when count is 0)", /used\.length \? \("Linked in " \+ used\.length\) : "Where used"/.test(e));
+})();
+
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
 // flagship — inline canvas edits capture into base.versionOverrides[version] (diffed against
 // base), base stays untouched, render/resolveVersion stay pure so editor==export holds.
@@ -11400,7 +11413,7 @@ section("SPEC 8: source-link 10 — where-used + push");
 (function () {
   var e = src("src/editor.js"), css = src("editor.css");
   ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(e));
-  ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1500}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
+  ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1900}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
   ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(e));
   ok("the push dialog picks an alternate + a subset of locations (Checkbox per location)", /function openSourceAltPushDialog\(link, alts, used\)[\s\S]{0,1700}window\.VersoUI\.Checkbox\(\{ label: loc\.docTitle[\s\S]{0,120}chosen\[i\] = v/.test(e));
   ok("push sets altId on each chosen location across documents + persists (saveRegistry); base stays base until pushed", /function pushSourceAlternate\(markId, altId, locations\)[\s\S]{0,200}applyAltToLocation\(reg, loc, altId\)[\s\S]{0,60}saveRegistry\(reg\)/.test(e));
@@ -12587,7 +12600,7 @@ section("Source rewrite: where-used panel (Epic 2b)");
   // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
   var e = src("src/editor.js");
   ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(e) && /function renderSourceWherePanel\(topic\)/.test(e));
-  ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10)", /source-altpanel__title", "Linked in " \+ used\.length/.test(e) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(e));
+  ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10; neutral at 0 — uio-S-C03)", /source-altpanel__title", used\.length \? \("Linked in " \+ used\.length\)/.test(e) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(e));
   ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
   ok("a link with no live uses shows the empty state", /if \(!used\.length\) \{[\s\S]{0,160}Not linked in any document yet\./.test(e));
   ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(e) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(e));

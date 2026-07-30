@@ -1055,6 +1055,15 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 
 /* Contextual alternate panel (alternates-staleness): a margin card pinned in the right gutter,
    tracking its span (absolutely positioned within the scrolling article, so scroll tracks free). */
+/* uio-S-C03 (SRC-03): mark cards (where-used / alternate / comment) must never sit ON TOP of the
+   passage they annotate. While any card is open, reserve a right-margin LANE on the article so the
+   prose measure shifts clear of the card zone instead of being covered. The cards themselves stay
+   absolutely pinned to the right (right:20/42px); this just guarantees the text ends before them. */
+@media (min-width: 1181px) {
+  .source-stage__article:has([data-source-wherepanel]),
+  .source-stage__article:has([data-source-altpanel]),
+  .source-stage__article:has([data-source-commentthread]) { padding-right: 312px; }
+}
 .source-altpanel { position: absolute; right: 20px; width: 244px; z-index: 25; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.12); padding: 12px 14px; }
 .source-altpanel__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .source-altpanel__title { flex: 1 1 auto; font-weight: 650; font-size: 13px; }
