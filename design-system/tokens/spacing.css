@@ -35,6 +35,7 @@
   --toolbar-height:    40px;
   --tabbar-height:     36px;
   --row-height:        28px;   /* inspector row */
+  --field-label-w:     76px;   /* the shared row's fixed label column (FieldRow labelWidth) */
   --section-pad:       8px;    /* panel section horizontal pad */
 
   /* Hit target minimum */

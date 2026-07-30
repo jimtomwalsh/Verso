@@ -8287,6 +8287,43 @@ section("uio-SK06 UI-spine save-contract ratchet (HARD FAIL)");
   ok("spine debt frozen: pre-F05 settings-in-modal commit buttons <= 1 (uio-F05 removes them)", debt.length <= 1);
 })();
 
+// ---- uio-F01: shared settings/overlay row anatomy ----------------------
+// The UI spine's "shared row" (design-system/readme.md): ONE row reused across
+// sheet / popover / inspector — fixed label column · control · optional inheritance
+// tail · hover overflow. fieldRow / switchRow / eyeRow all build via one settingsRow
+// primitive; the label width is one DS token; switch rows fold into the row (no
+// divergent switch-row anatomy). The tail/overflow are slots only (uio-F03 fills them).
+section("uio-F01 shared settings row anatomy");
+(function () {
+  var e = src("src/editor.js");
+  var css = src("editor.css");
+  var tokens = src("design-system/tokens/spacing.css");
+  var dts = src("design-system/components/controls/FieldRow.d.ts");
+  // The one shared-row primitive exists and is test-exposed.
+  ok("settingsRow primitive defined", /function settingsRow\(opts\)/.test(e));
+  ok("settingsRow exposed for tests (window.__settingsRow)", /window\.__settingsRow\s*=\s*settingsRow/.test(e));
+  // fieldRow / switchRow / eyeRow route through it — no hand-rolled row wrapper.
+  ok("fieldRow routes through settingsRow", /function fieldRow\([\s\S]{0,900}?settingsRow\(/.test(e));
+  ok("switchRow uses the shared row (toggle variant)", /function switchRow\([\s\S]{0,400}?insp-row--toggle/.test(e));
+  ok("eyeRow uses the shared row (toggle variant)", /function eyeRow\([\s\S]{0,900}?insp-row--toggle/.test(e));
+  ok("no editor.js helper builds the divergent switch-row wrapper", e.indexOf('h("div", "switch-row")') === -1);
+  // One tokenized fixed label column, shared with the DS FieldRow contract.
+  ok("DS defines the shared label-width token (--field-label-w: 76px)", /--field-label-w:\s*76px/.test(tokens));
+  ok("insp-row label column uses the token", /\.insp-row__label\s*\{[^}]*--field-label-w/.test(css));
+  // Row metrics ride density tokens, not ad-hoc px.
+  ok("insp-row rides --row-height", /\.insp-row\s*\{[^}]*min-height:\s*var\(--row-height\)/.test(css));
+  ok("insp-row label rides --text-xs", /\.insp-row__label\s*\{[^}]*font-size:\s*var\(--text-xs\)/.test(css));
+  // The divergent switch-row metrics are gone (converged onto the shared anatomy).
+  ok("switch-row converged (no space-between / 9px)", !/\.switch-row\s*\{[^}]*justify-content:\s*space-between/.test(css) && !/\.switch-row\s*\{[^}]*margin-top:\s*9px/.test(css));
+  // The tail + overflow slots exist (uio-F03 fills the scope logic).
+  ok("inheritance-tail slot styled (accent override dot)", /\.insp-row__tail\s*\{/.test(css) && /\.insp-row__override-dot\s*\{[^}]*var\(--accent\)/.test(css));
+  ok("hover overflow slot styled (opacity 0, revealed on row hover — no reflow)", /\.insp-row__overflow\s*\{[^}]*opacity:\s*0/.test(css) && /\.insp-row:hover \.insp-row__overflow/.test(css));
+  // The DS FieldRow contract carries the two new optional slots + aligned default.
+  ok("FieldRow.d.ts declares inheritanceTail slot", /inheritanceTail\?:/.test(dts));
+  ok("FieldRow.d.ts declares overflow slot", /overflow\?:/.test(dts));
+  ok("FieldRow.d.ts labelWidth default aligned to 76", /Default 76/.test(dts));
+})();
+
 // ---- UI kit conformance gate (ticket 4 — WARN-ONLY phase) --
 // Warns (does not fail) on blocks that still hand-append container chrome instead
 // of calling renderContainerChrome. Blocks migrate in tickets 8-9; ticket 9 flips

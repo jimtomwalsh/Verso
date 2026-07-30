@@ -10575,25 +10575,24 @@
     return b;
   }
   // Labelled standalone switch row (for a boolean that is NOT a nest-enable).
+  // A toggle sits in the shared settings row (uio-F01): label grows, the switch is the
+  // control, right-aligned. Not a separate row anatomy.
   function switchRow(labelText, get, set, target, noHistory) {
-    var host = target || inspector;
-    var row = h("div", "switch-row");
-    row.appendChild(h("span", "switch-row__label", labelText));
-    row.appendChild(switchEl(!!get(), function (v) { if (!noHistory) pushHistory(); set(v); }));
-    host.appendChild(row);
+    settingsRow({
+      label: labelText, variant: "insp-row--toggle", controlAlign: "end",
+      host: target || inspector,
+      control: switchEl(!!get(), function (v) { if (!noHistory) pushHistory(); set(v); })
+    });
   }
   // Visibility control = an EYE glyph (open / slashed). `visibleGet/Set` in terms of
   // VISIBLE (true = shown); the caller maps to whatever underlying flag it uses.
   function eyeRow(labelText, visibleGet, visibleSet, target) {
-    var host = target || inspector;
     var vis = !!visibleGet();
-    var row = h("div", "switch-row");
-    row.appendChild(h("span", "switch-row__label", labelText));
     var b = h("button", "eye-btn" + (vis ? "" : " is-off")); b.type = "button";
     b.title = vis ? "Visible — click to hide" : "Hidden — click to show";
     b.innerHTML = vis ? Icon("eye") : Icon("eye-off");
     b.addEventListener("click", function () { pushHistory(); visibleSet(!vis); });
-    row.appendChild(b); host.appendChild(row);
+    settingsRow({ label: labelText, variant: "insp-row--toggle", controlAlign: "end", host: target || inspector, control: b });
   }
   // Icon-segmented single-choice (mode-choice, e.g. alignment). options =
   // [[iconSvg, value, title], ...]. Word segments are only for choices with no clear icon.
@@ -16298,19 +16297,59 @@
     sync();
     return note;
   }
+  // ---- The shared settings/overlay row (uio-F01 — the UI spine's row anatomy) ------
+  // ONE row reused identically across sheet / popover / inspector: a fixed label column,
+  // the control beside it, an optional inheritance tail, and a hover-only overflow. It is
+  // width-independent by construction (label fixed in px, control flexes, tail/overflow
+  // fixed), so it renders identically at any panel width. A Switch is a control in this
+  // row, not a different row (the toggle variant grows the label and right-aligns the
+  // control). The tail/overflow are the SLOTS only — the scope + inheritance model
+  // (uio-F03) fills the inherited / overridden / reset logic; here they are collapsed by
+  // default and unused. See design-system/readme.md "The UI spine" and
+  // design-system/components/controls/FieldRow.*.
+  //   opts: { label, control, tail (node), overflow ({title,onClick}), host, variant,
+  //           controlAlign ("end") }
+  function settingsRow(opts) {
+    opts = opts || {};
+    var row = h("div", "insp-row" + (opts.variant ? " " + opts.variant : ""));
+    var label = null;
+    if (opts.label != null && opts.label !== "") {
+      label = h("span", "insp-row__label", opts.label);
+      row.appendChild(label);
+    } else {
+      row.classList.add("insp-row--nolabel");
+    }
+    if (opts.control) {
+      if (opts.controlAlign === "end" && opts.control.classList) opts.control.classList.add("insp-row__control--end");
+      row.appendChild(opts.control);
+    }
+    if (opts.tail) {
+      var tail = h("div", "insp-row__tail");
+      tail.appendChild(opts.tail);
+      row.appendChild(tail);
+    }
+    if (opts.overflow) {
+      var ov = h("button", "insp-row__overflow"); ov.type = "button";
+      ov.innerHTML = Icon("more-horizontal");
+      ov.title = opts.overflow.title || "More actions";
+      ov.addEventListener("click", function (ev) { ev.stopPropagation(); opts.overflow.onClick(ev, ov); });
+      row.appendChild(ov);
+    }
+    (opts.host || inspector).appendChild(row);
+    return { row: row, label: label };
+  }
+  window.__settingsRow = settingsRow; // headless test hook
+
   function fieldRow(label, value, onchange, placeholder, step, min, max, datalistId) {
-    var row = h("div", "insp-row"); 
-    var lbl = h("span", "insp-row__label", label);
-    row.appendChild(lbl);
     var i = h("input", "prop-text"); i.type = "text"; i.spellcheck = false; i.placeholder = placeholder || "auto"; i.value = value == null ? "" : value;
     if (datalistId) {
       ensureDatalists();
       i.setAttribute("list", datalistId);
     }
     i.addEventListener("change", function () { pushHistory(); onchange(i.value); });
-    row.appendChild(i); inspector.appendChild(row);
+    var r = settingsRow({ label: label, control: i });
     if (step) {
-      makeScrubbable(lbl, i, function (v) { onchange(v); }, step, min, max);
+      makeScrubbable(r.label, i, function (v) { onchange(v); }, step, min, max);
     }
     return i;
   }

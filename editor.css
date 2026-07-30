@@ -301,8 +301,11 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .uiswitch.is-on { background: var(--accent); border-color: var(--accent); }
 .uiswitch.is-on .uiswitch__knob { transform: translateX(13px); background: #fff; }
-.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; }
-.switch-row__label { font-size: 11.5px; color: var(--text-secondary); }
+/* Converged onto the shared row anatomy (uio-F01). The label side grows, the switch
+   right-aligns — same as .insp-row--toggle. (The live switch path is editor.js switchRow,
+   which emits .insp-row--toggle; this rule keeps the DS control library's SwitchRow aligned.) */
+.switch-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; min-height: var(--row-height); }
+.switch-row__label { font-size: var(--text-xs); color: var(--text-secondary); }
 .eye-btn {
   display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
   width: 28px; height: 22px; padding: 0; color: var(--text-primary); cursor: pointer;
@@ -1688,8 +1691,25 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 }
 .insp-sub--first { border-top: none; padding-top: 2px; }
 .insp-sub__actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
-.insp-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.insp-row__label { flex: 0 0 76px; font-size: 11.5px; color: var(--text-secondary); }
+/* The shared settings/overlay row (uio-F01 — the UI spine's row anatomy). One row reused
+   identically across sheet / popover / inspector: fixed label column, control, optional
+   inheritance tail, hover-only overflow. Width-independent by construction. */
+.insp-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; min-height: var(--row-height); }
+.insp-row__label { flex: 0 0 var(--field-label-w, 76px); font-size: var(--text-xs); color: var(--text-secondary); }
+/* Toggle variant: the label grows and the control (switch / eye) right-aligns — a switch is
+   a control in the shared row, not a separate anatomy. */
+.insp-row--toggle .insp-row__label { flex: 1 1 auto; }
+.insp-row__control--end { margin-left: auto; }
+.insp-row--nolabel > *:first-child { flex: 1 1 auto; }
+/* Inheritance tail (slot only — uio-F03 fills the scope logic): inherited value reads in
+   tertiary ink, an override shows a 4px accent dot + inline Reset. Collapsed by default. */
+.insp-row__tail { flex: 0 0 auto; margin-left: 8px; display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--text-tertiary); }
+.insp-row__override-dot { width: 4px; height: 4px; border-radius: var(--radius-full, 50%); background: var(--accent); flex: 0 0 auto; }
+/* Hover-only overflow: always occupies its box (no reflow), fades in on row hover. */
+.insp-row__overflow { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-tertiary); border-radius: var(--radius-sm, 4px); opacity: 0; transition: opacity 120ms; cursor: pointer; }
+.insp-row:hover .insp-row__overflow, .insp-row__overflow:focus-visible { opacity: 1; }
+.insp-row__overflow:hover { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+.insp-row__overflow svg { width: 15px; height: 15px; display: block; }
 /* SPEC 7: a geometry-tool entry row in the Document-context inspector. */
 .insp-doc-tool { display: flex; align-items: center; height: 26px; padding: 0 2px; color: var(--text-secondary); }
 .insp-doc-tool .insp-row__label { flex: 1 1 auto; font-size: 12px; color: var(--text-primary); }
@@ -3485,7 +3505,7 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .vds-color__eyedrop:hover { background: var(--surface-hover, rgba(255,255,255,.06)); color: var(--icon-strong, #e6e6e6); }
 
 /* --- SwitchRow (labels + description) ----------------------------------- */
-.switch-row__labels { display: flex; flex-direction: column; gap: 1px; }
+.switch-row__labels { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; }
 .switch-row__desc { font-size: var(--text-xs, 10px); color: var(--text-tertiary); }
 
 /* --- FieldRow / PanelSection modifiers ---------------------------------- */
