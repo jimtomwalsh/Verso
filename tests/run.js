@@ -9992,6 +9992,56 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
   ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));
 })();
 
+// uio-P-C07 (PUB-05): a queue row said nothing about where its package goes or what it is called
+// until "Done · <name>" appeared after the run. Every row now states its destination and, before
+// the run, the exact filename it will write — taken from the exporter's own naming function so the
+// promise and the written file cannot disagree.
+section("uio-P-C07: destination chip + resolved filename on every queue row");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), ex = src("src/export.js");
+  var m = e.match(/\/\* @publish-dest-start \*\/([\s\S]*?)\/\* @publish-dest-end \*\//);
+  if (!m) { ok("locate @publish-dest fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { PUBLISH_DESTINATIONS: PUBLISH_DESTINATIONS, publishDestinationFor: publishDestinationFor, publishDestinationPickable: publishDestinationPickable, publishRowFilename: publishRowFilename, publishShowsFilename: publishShowsFilename };")();
+
+  // --- the one destination (Conservative tier) ---
+  ok("Downloads is the only destination there is", g.PUBLISH_DESTINATIONS.length === 1 && g.PUBLISH_DESTINATIONS[0].id === "download" && g.PUBLISH_DESTINATIONS[0].label === "Downloads");
+  ok("it carries a reason an author can read, not just a label", /downloads/i.test(g.PUBLISH_DESTINATIONS[0].why) && g.PUBLISH_DESTINATIONS[0].why.length > 20);
+  ok("every row resolves to it, with or without a stored choice", g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { id: "r1" }).id === "download" && g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { destination: "download" }).id === "download");
+  ok("an unknown stored destination falls back rather than leaving the row blank", g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { destination: "lms-drop" }).id === "download");
+  ok("a junk lookup degrades to null, not a throw", g.publishDestinationFor(null, null) === null && g.publishDestinationFor([], {}) === null);
+  // the design call this ticket rests on: one destination means there is nothing to pick, so the
+  // chip must NOT be a control. It becomes one the moment a second destination is added.
+  ok("with one destination the chip is not pickable", g.publishDestinationPickable(g.PUBLISH_DESTINATIONS) === false);
+  ok("with two it becomes pickable, so the rule is the count and not a hardcoded 'off'", g.publishDestinationPickable([{ id: "a" }, { id: "b" }]) === true);
+
+  // --- the filename comes from the exporter, never rebuilt here ---
+  var seen = null, namer = function (o) { seen = o; return "ACME_V003_coastal_SCORM.zip"; };
+  ok("the row asks the exporter to name the package", g.publishRowFilename(namer, { code: "ACME", version: "V003" }) === "ACME_V003_coastal_SCORM.zip" && seen.code === "ACME");
+  ok("no exporter means the row states nothing rather than inventing a name", g.publishRowFilename(null, { code: "ACME" }) === "" && g.publishRowFilename(undefined, {}) === "");
+  ok("a namer that throws is swallowed into silence, not a broken pane", g.publishRowFilename(function () { throw new Error("boom"); }, {}) === "");
+  ok("no options means no name", g.publishRowFilename(namer, null) === "");
+
+  // --- the promise is only shown while it is still a promise ---
+  ok("the filename shows before the run (pending and running)", g.publishShowsFilename({ status: "pending" }) === true && g.publishShowsFilename({ status: "running" }) === true);
+  ok("and not after it, where the status carries the real outcome", g.publishShowsFilename({ status: "done" }) === false && g.publishShowsFilename({ status: "error" }) === false && g.publishShowsFilename(null) === false);
+
+  // --- wiring: one naming function, one options object ---
+  // The whole point of the ticket. If the preview called its own string-builder, the row could
+  // promise one name and the run write another; both go through SCORMExport.packageName here.
+  ok("the row previews with the exporter's own packageName", /publishRowFilename\(window\.SCORMExport && window\.SCORMExport\.packageName, publishOptionsForRow\(r\)\)/.test(e));
+  ok("the run builds with the SAME options the preview was named from", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e));
+  ok("those options name the ROW's document, not whichever one is open", /var d = registry\[row\.docId\], code = d && d\.meta && d\.meta\.code;\s*\n\s*if \(code\) out\.code = code;/.test(e));
+  ok("packageName honours that code and still falls back to the open document", /var parts = \[fileSafe\(\(opts && opts\.code\) \|\| docCode\(\)\)\];/.test(ex));
+  ok("packageName is exported, so nothing has to reimplement it", /packageName: packageName/.test(ex));
+
+  // --- chrome: the pane's existing chip, minus the affordances it hasn't earned ---
+  ok("the destination reuses publish-chip rather than a second chrome", /"publish-chip" \+ \(publishDestinationPickable\(PUBLISH_DESTINATIONS\) \? "" : " publish-chip--static"\)/.test(e));
+  ok("with one destination it renders as a span, so there is no dead button to click", /h\(publishDestinationPickable\(PUBLISH_DESTINATIONS\) \? "button" : "span",/.test(e));
+  ok("it says why it can't be changed", /dchip\.title = "Destination · " \+ dest\.why;/.test(e));
+  ok("the static chip drops the hover affordance and sits back one ink step", /\.publish-chip--static \{ cursor: default; color: var\(--text-tertiary, var\(--text-secondary\)\); \}/.test(css) && /\.publish-chip--static:hover \{ color: var\(--text-tertiary, var\(--text-secondary\)\); border-color: var\(--border-subtle\); \}/.test(css));
+  ok("the filename takes the slack and the status pins right, like the history rows", /\.publish-queuerow__file \{ flex: 1 1 auto; min-width: 0;[^}]*text-overflow: ellipsis; \}/.test(css) && /\.publish-queuerow__status \{[^}]*margin-left: auto;/.test(css));
+})();
+
 // uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
 // one row per mark carrying a count + its own heading path, one labelled filter carrying live
 // counts, and a fixed type palette that never collides with the accent (= selection/focus).

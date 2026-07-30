@@ -1418,8 +1418,52 @@
     var SX = window.SCORMExport, PP = window.PublishPresets;
     var base = (SX && SX.defaultOptions) ? SX.defaultOptions() : {};
     if (!PP || !row) return base;
-    return Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
+    var out = Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
+    // uio-P-C07 (PUB-05): name the package for THIS row's document, not for whichever document
+    // happens to be open. The publish run hands these same options to buildPackage, so the
+    // filename shown on the row is the filename that lands.
+    var d = registry[row.docId], code = d && d.meta && d.meta.code;
+    if (code) out.code = code;
+    return out;
   }
+  // uio-P-C07 (PUB-05): a queue row used to say nothing about where its package goes or what it is
+  // called — the first mention of either was "Done · <name>" after the run, which is too late to be
+  // a decision. Every row now states its destination and, before you press Publish, the exact
+  // filename it will write. Downloads is the only destination there is today, so the chip STATES it
+  // rather than opening a menu of one; it becomes a real picker the moment a second destination
+  // exists. Named product-level destinations and per-variant folders are the Moderate tier of the
+  // audit finding and are deliberately not built here.
+  /* @publish-dest-start */
+  var PUBLISH_DESTINATIONS = [
+    { id: "download", label: "Downloads", why: "Every run downloads the package to your browser's downloads folder. Saving straight to a chosen folder isn't available yet." }
+  ];
+  // Which destination a row delivers to. One entry today, so every row resolves to the same one;
+  // the lookup exists so that adding a second destination is a data change, not a rewrite.
+  function publishDestinationFor(dests, row) {
+    var list = dests || [];
+    var id = (row && row.destination) || "download";
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
+    return list[0] || null;
+  }
+  // The destination is the author's to pick only once there is more than one to pick between. With
+  // one, a menu would open on a single already-chosen item — a control that does nothing.
+  function publishDestinationPickable(dests) { return (dests || []).length > 1; }
+  // What the row promises to write. The name is asked of the exporter's OWN naming function (passed
+  // in) instead of being rebuilt here, so the promise on the row and the file that lands can never
+  // drift apart. No exporter, or a namer that throws, yields "" — the row states nothing rather
+  // than guessing at a filename.
+  function publishRowFilename(nameFn, opts) {
+    if (typeof nameFn !== "function" || !opts) return "";
+    try { return String(nameFn(opts) || ""); } catch (e) { return ""; }
+  }
+  // The filename is a promise about a run that hasn't happened, so it is shown only while the run is
+  // still ahead. Once a row is done or failed its status carries the real outcome, and repeating the
+  // prediction beside it would be noise at best and a contradiction at worst.
+  function publishShowsFilename(row) {
+    var s = row && row.status;
+    return s === "pending" || s === "running";
+  }
+  /* @publish-dest-end */
   // The documents the picker offers: every registry doc, scoped to the active Product when one is
   // set (untagged docs drop out of a Product-scoped view), sorted by title. docId = the registry key.
   function publishPickDocs() {
@@ -1765,6 +1809,21 @@
         openPublishPresetMenu(r.id, rr.left, rr.bottom + 4);
       });
       meta.appendChild(chip);
+      // uio-P-C07 (PUB-05): destination + resolved filename, in the same chip family as the preset
+      // beside them. The destination chip is a plain span, not a button — with Downloads the only
+      // place a run can write, a menu would open on one already-chosen item. Its tooltip says so,
+      // so nothing here is a click that quietly does nothing.
+      var dest = publishDestinationFor(PUBLISH_DESTINATIONS, r);
+      if (dest) {
+        var dchip = h(publishDestinationPickable(PUBLISH_DESTINATIONS) ? "button" : "span",
+          "publish-chip" + (publishDestinationPickable(PUBLISH_DESTINATIONS) ? "" : " publish-chip--static"), dest.label);
+        dchip.title = "Destination · " + dest.why;
+        meta.appendChild(dchip);
+      }
+      if (publishShowsFilename(r)) {
+        var fname = publishRowFilename(window.SCORMExport && window.SCORMExport.packageName, publishOptionsForRow(r));
+        if (fname) { var fEl = h("span", "publish-queuerow__file", fname); fEl.title = "Writes " + fname; meta.appendChild(fEl); }
+      }
       meta.appendChild(h("span", "publish-queuerow__status", publishStatusLabel(r)));
       main.appendChild(meta);
       row.appendChild(main);

@@ -761,8 +761,12 @@
   }
   function saveVersion(v) { try { localStorage.setItem(verKey(), v); } catch (e) {} }
   function fileSafe(s) { return String(s).replace(/[^A-Za-z0-9_.-]/g, "_"); }
+  // uio-P-C07 (PUB-05): `opts.code` lets a caller name the package for a document OTHER than the
+  // one currently open — the publish queue shows each row its filename before it switches to that
+  // document to build it. buildPackage is handed the SAME options object, so the name a row
+  // promises and the name that gets written come from one call and cannot disagree.
   function packageName(opts) {
-    var parts = [fileSafe(docCode())];
+    var parts = [fileSafe((opts && opts.code) || docCode())];
     if (opts.version) parts.push(fileSafe(opts.version));
     if (opts.variant) parts.push(fileSafe(opts.variant)); // flagship omits the tag
     parts.push("SCORM");
