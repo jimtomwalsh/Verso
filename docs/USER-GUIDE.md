@@ -948,6 +948,14 @@ a refresh and a stage-switch.
 - **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
   **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
   that's already queued re-arms it rather than duplicating it.
+- **Where it goes, and what it will be called.** Every queue row states its destination on a
+  **Downloads** chip, and next to it the exact file name that row will write, before you press
+  Publish — for example `SAFE-101_V001_SCORM.zip`. Change the row's preset and the name changes with
+  it, so you can see what you're about to get. The name comes from the exporter itself, so what the
+  row promises is what lands. Once a row has run, its status carries the real result and the
+  prediction steps aside. **Downloads** is the only destination for now: the chip states it rather
+  than opening a menu, and hovering it says why. Choosing a save folder, and naming your own
+  destinations to reuse, are still to come.
 - **Out-of-date badge.** A document row in the left list shows a small count chip when linked source
   topics have changed since that document was last published — e.g. a **2** means two of its linked
   source topics were edited since its last export. It's informational only: it never blocks or warns,

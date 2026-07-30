@@ -665,12 +665,25 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .publish-queuerow__main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .publish-queuerow__title { font-size: var(--text-sm, 12px); font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .publish-queuerow__meta { display: flex; align-items: center; gap: 8px; }
-.publish-queuerow__status { font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+/* uio-P-C07 (PUB-05): the status sits at the right edge so the filename between it and the chips
+   takes the slack and truncates — the same layout contract the history rows above already use
+   (.publish-release__dest takes the slack, .publish-release__outcome pins right). */
+.publish-queuerow__status { flex: 0 1 auto; min-width: 0; margin-left: auto; font-size: var(--text-xs, 11px); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the exact filename this row will write, stated before the run. Chrome baseline ink — it is a
+   fact about the row, not something to act on. */
+.publish-queuerow__file { flex: 1 1 auto; min-width: 0; font-size: var(--text-2xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .publish-chip {
   font-size: var(--text-xs, 11px); color: var(--text-secondary); background: var(--surface-hover, rgba(0,0,0,0.05));
   border: 1px solid var(--border-subtle); border-radius: 999px; padding: 1px 8px; cursor: pointer; line-height: 1.6;
 }
 .publish-chip:hover { color: var(--text-primary); border-color: var(--border-strong); }
+/* uio-P-C07 (PUB-05): a chip that states a permanent baseline instead of opening a menu. Same chip
+   chrome as the preset chip beside it, so the row reads as one family, minus every interactive
+   affordance — this follows the DS ToggleChip `disabled` contract, where a permanent baseline is
+   non-interactive with no hover change rather than a greyed-out control. It also sits back one ink
+   step, the spine's own language for a resolved value you did not set. */
+.publish-chip--static { cursor: default; color: var(--text-tertiary, var(--text-secondary)); }
+.publish-chip--static:hover { color: var(--text-tertiary, var(--text-secondary)); border-color: var(--border-subtle); }
 .publish-queuerow.is-running .publish-chip { cursor: default; opacity: 0.7; }
 .publish-queuerow.is-running { border-color: var(--accent); }
 .publish-queuerow.is-running .publish-queuerow__status { color: var(--accent); }
