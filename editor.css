@@ -2316,6 +2316,14 @@ details[open] .disc__caret {
 }
 .tree-page__icon { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--icon-idle); }
 .tree-page__icon svg { width: 14px; height: 14px; }
+/* uio-E-C07 (EDIT-12): the derived chapter.page number in its own fixed, right-aligned column so
+   names align and identify themselves; empty (unplaced page) collapses to nothing. */
+.tree-page__num {
+  flex: 0 0 auto; min-width: 24px; text-align: right;
+  font: var(--type-label); font-variant-numeric: tabular-nums; color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.tree-page__num:empty { display: none; }
 .tree-page__name {
   flex: 1 1 auto; font: var(--type-label); color: var(--text-secondary); cursor: pointer;
   border-radius: var(--radius-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

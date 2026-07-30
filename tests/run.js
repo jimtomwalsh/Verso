@@ -4287,9 +4287,30 @@ section("P2 auto page-naming");
   setTitle(pS, "");        ok("setTitle: empty clears override", pS.title === undefined);
   setTitle(pS, "New one"); ok("setTitle: sets override", pS.title === "New one");
   setTitle(pS, "Auto");    ok("setTitle: value == first copy clears override (stays auto)", pS.title === undefined);
+  // uio-E-C07 (EDIT-12): split naming — clean base + "· K of M", never accumulating "(cont.)".
+  var strip = win.__stripSplitSuffix, renumber = win.__renumberSplitFamily;
+  ok("stripSplitSuffix drops a trailing (cont.)", strip("Getting Connected (cont.)") === "Getting Connected");
+  ok("stripSplitSuffix drops REPEATED (cont.)", strip("Getting Connected (cont.) (cont.)") === "Getting Connected");
+  ok("stripSplitSuffix drops a trailing '· N of M'", strip("Getting Connected · 2 of 3") === "Getting Connected");
+  ok("stripSplitSuffix of empty -> 'Page'", strip("") === "Page");
+  var sd = { pages: [
+    { id: "p1", chapterId: "c1", name: "Intro" },
+    { id: "p2", chapterId: "c1", name: "Base (cont.)" },
+    { id: "p3", chapterId: "c1", name: "Base" },
+    { id: "p4", chapterId: "c1", name: "Base · 9 of 9" },
+    { id: "p5", chapterId: "c2", name: "Base" }
+  ] };
+  renumber(sd, "p2");
+  ok("renumberSplitFamily numbers the contiguous same-base run 'Base · K of M'", sd.pages[1].name === "Base · 1 of 3" && sd.pages[2].name === "Base · 2 of 3" && sd.pages[3].name === "Base · 3 of 3");
+  ok("renumberSplitFamily leaves other-base + other-chapter pages alone", sd.pages[0].name === "Intro" && sd.pages[4].name === "Base");
+  var solo = { pages: [{ id: "s1", chapterId: "c1", name: "Base · 1 of 1 (cont.)" }] };
+  renumber(solo, "s1");
+  ok("renumberSplitFamily collapses a lone page back to the clean base", solo.pages[0].name === "Base");
   // wiring guards: display routes through the helper; rename writes page.title, not page.name
   ok("frame-label uses pageDisplayName", /frame-label__name", pageDisplayName\(page, doc\)/.test(etxt));
-  ok("outliner tree name uses pageDisplayName", /tree-page__name"[\s\S]{0,120}pageDisplayName\(page, doc\)/.test(etxt));
+  // uio-E-C07 (EDIT-12): the outliner row splits the derived number into its own column; the name
+  // shows only the title part (frame-label on the canvas keeps the combined pageDisplayName).
+  ok("outliner tree row has a number column + title-only name", /tree-page__num", pageNumberOf\(page, doc\)/.test(etxt) && /tree-page__name"[\s\S]{0,140}pageTitlePart\(page\)/.test(etxt));
   ok("inline rename writes via setPageTitle", /setPageTitle\(page, v\)/.test(etxt));
 })();
 
