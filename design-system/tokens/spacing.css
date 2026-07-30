@@ -30,6 +30,7 @@
   --icon-xl: 24px;
 
   /* Structural dimensions */
+  --rail-w:            44px;   /* the standard Source/Edit/Publish icon rail */
   --panel-left-width:  248px;
   --panel-right-width: 264px;
   --toolbar-height:    40px;

@@ -9705,7 +9705,9 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
 (function () {
   var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
   // MARKUP: one bar, three zones, two hairline seps, no leftover two-row structure.
-  ok("header is a single bar (no two-row tabrow/toolrow)", /editor-window__bar/.test(html) && html.indexOf("editor-window__tabrow") === -1 && html.indexOf("editor-window__toolrow") === -1);
+  // uio-E-C01 (EDIT-07): the doc header was merged UP into the single global .toolbar. The
+  // separate editor-window bar/wrapper is gone; the three zones are now direct children of .toolbar.
+  ok("doc zones merged into the single .toolbar (no separate editor-window bar)", html.indexOf("editor-window__bar") === -1 && html.indexOf('id="editor-window-header"') === -1 && html.indexOf("editor-window__tabrow") === -1 && html.indexOf("editor-window__toolrow") === -1);
   ok("three zones: tabs | doc | output", /editor-window__zone--tabs/.test(html) && /editor-window__zone--doc/.test(html) && /editor-window__zone--output/.test(html));
   ok("two hairline dividers between the zones", (html.match(/editor-window__sep/g) || []).length >= 2);
   ok("Document-settings button lives in the header", /id="doc-settings-btn"/.test(html));
@@ -9721,14 +9723,29 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   ok("mountDocSettingsBtn opens the settings modal on the Project tab", /function mountDocSettingsBtn\(\)[\s\S]{0,240}openSettingsModal\("project"\)/.test(e));
   ok("mountDocSettingsBtn is wired at boot", /mountDocSettingsBtn\(\); \/\/ edit-header-ia-v2/.test(e));
   // CSS: single-row bar + zones + face-up axis button + hairline sep.
-  ok("editor.css defines the single-row bar + zones", /\.editor-window__bar \{/.test(css) && /\.editor-window__zone \{/.test(css));
+  ok("editor.css shows the doc zones only in Edit (.toolbar--edit)", /\.editor-window__zone \{/.test(css) && /\.toolbar\.toolbar--edit \.editor-window__zone \{ display: flex; \}/.test(css));
   ok("editor.css defines the face-up axis button with ellipsis label", /\.editor-window__axis-btn \{/.test(css) && /\.axis-btn__label \{[^}]*text-overflow: ellipsis/.test(css));
   ok("editor.css defines the low-contrast hairline sep (border-subtle)", /\.editor-window__sep \{[^}]*background: var\(--border-subtle\)/.test(css));
   // TAB OVERFLOW (feedback): a long tab list scrolls INSIDE the tabs zone; the doc + output zones
   // stay put. The bar never scrolls; the tabs zone shrinks (min-width:0) + its strip scrolls.
-  ok("the bar never scrolls (overflow hidden), absorbing overflow in the tab strip", /\.editor-window__bar \{[^}]*overflow: hidden/.test(css));
+  ok("setStage toggles toolbar--edit so doc zones show in Edit only", /classList\.toggle\("toolbar--edit", stage === "edit"\)/.test(e) && /\.toolbar \{[\s\S]{0,200}var\(--toolbar-height/.test(css));
   ok("the tabs zone shrinks + its strip scrolls internally", /\.editor-window__zone--tabs \{[^}]*min-width: 0/.test(css) && /\.editor-window__zone--tabs \.toolbar-tabs \{[^}]*min-width: 0; overflow-x: auto/.test(css));
   ok("doc + output zones are fixed-size (never pushed by tabs)", /\.editor-window__zone--doc, \.editor-window__zone--output \{ flex: 0 0 auto; \}/.test(css));
+})();
+
+// uio-E-C01 (EDIT-07): recover the Edit canvas. Two stacked bars -> one 40px .toolbar; the
+// workspace grid loses the second row; all shell widths resolve to DSLMS structural tokens.
+section("uio-E-C01: recovered canvas — one 40px bar, single-row shell, token widths");
+(function () {
+  var css = src("editor.css"), spacing = src("design-system/tokens/spacing.css");
+  // ONE bar at the DS toolbar height (no 44px literal on the bar).
+  ok(".toolbar height resolves to --toolbar-height (40px), not a literal", /\.toolbar \{[\s\S]*?height: var\(--toolbar-height/.test(css));
+  // SINGLE-ROW workspace: the old `grid-template-rows: auto 1fr` (bar row + body row) is gone.
+  ok("workspace is a single grid row (second bar-row removed)", /\.workspace \{[\s\S]*?grid-template-rows: 1fr;/.test(css) && !/\.workspace \{[\s\S]*?grid-template-rows: auto 1fr;/.test(css));
+  // SHELL WIDTHS bound to DSLMS tokens (kills the 240-vs-280 fallback drift).
+  ok("shell widths default to DSLMS structural tokens", /--left-w: var\(--panel-left-width/.test(css) && /--right-w: var\(--panel-right-width/.test(css));
+  // DSLMS owns the rail token the spine names.
+  ok("--rail-w is defined in DSLMS spacing tokens", /--rail-w:\s*44px/.test(spacing));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
@@ -10327,8 +10344,9 @@ section("chrome invariant: file picker + Read view are contained, not full-scree
   var css = src("editor.css");
   function block(sel){ var m = css.match(new RegExp("\\" + sel + " \\{[^}]*\\}")); return m ? m[0] : ""; }
   var copyedit = block(".copyedit"), vbrowser = block(".vbrowser");
-  ok(".copyedit is contained (top 44 + left --rail-w), not inset:0", /position: fixed; top: 44px; left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(copyedit) && copyedit.indexOf("inset: 0") === -1);
-  ok(".vbrowser is contained (top 44 + left --rail-w), not inset:0", /position: fixed; top: 44px; left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(vbrowser) && vbrowser.indexOf("inset: 0") === -1);
+  // uio-E-C01: the overlays sit below the single 40px bar -> top resolves to --toolbar-height.
+  ok(".copyedit is contained (top --toolbar-height + left --rail-w), not inset:0", /position: fixed; top: var\(--toolbar-height, 40px\); left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(copyedit) && copyedit.indexOf("inset: 0") === -1);
+  ok(".vbrowser is contained (top --toolbar-height + left --rail-w), not inset:0", /position: fixed; top: var\(--toolbar-height, 40px\); left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(vbrowser) && vbrowser.indexOf("inset: 0") === -1);
   // Demo/Preview is the sanctioned full-screen exception -- must stay inset:0.
   ok(".demo (Preview) stays full-screen (inset:0)", /\.demo \{[^}]*position: fixed; inset: 0/.test(css));
 })();

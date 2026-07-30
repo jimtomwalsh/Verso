@@ -11043,7 +11043,7 @@
   function mountTopBar() {
     if (typeof document === "undefined") return;
     var Ic = window.Icon; if (!Ic) return;
-    var hosts = document.querySelectorAll(".toolbar [data-lucide], .editor-window [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
+    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide]");
     Array.prototype.forEach.call(hosts, function (el) {
       var name = el.getAttribute("data-lucide");
       if (!name) return;
@@ -11112,8 +11112,9 @@
     }
     var srcEl = document.getElementById("stage-source"); if (srcEl) srcEl.hidden = stage !== "source";
     var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
-    // SPEC 7: the editor-window header (tabs + doc controls) belongs to Edit only.
-    var edHdr = document.getElementById("editor-window-header"); if (edHdr) edHdr.hidden = stage !== "edit";
+    // uio-E-C01 (EDIT-07): the doc zones (tabs / doc controls / output) were merged into the
+    // single .toolbar and show only in Edit; Source/Publish show the identity zone only.
+    var tb = document.querySelector(".toolbar"); if (tb) tb.classList.toggle("toolbar--edit", stage === "edit");
     STAGE_IDS.forEach(function (s) {
       var btn = document.getElementById("rail-tab-" + s);
       if (btn) btn.classList.toggle("is-active", s === stage);
