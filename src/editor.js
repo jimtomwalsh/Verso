@@ -11525,6 +11525,7 @@
   var __sourceActiveFacet = "technical";
   var __sourceSearchQuery = "";
   var __sourceReplaceQuery = ""; // source find-and-replace: the replacement text
+  var __sourceReplaceOpen = false; // uio-S-C02 (SRC-05): the replace row is revealed on demand, not always shown
   var __sourceActiveVariants = []; // reset whenever a different topic is selected
   // Source rewrite (Epic 2b, lock-toolbars): a topic renders the new continuous-document article
   // (node model + range marks + two-layer lock + canvas-idiom toolbars) once it carries a `doc`
@@ -13714,7 +13715,12 @@
     if (typeof document === "undefined") return;
     var host = document.getElementById("source-stage-search"); if (!host) return;
     host.innerHTML = "";
-    var search = h("label", "vbrowser__search source-stage__search-field");
+    var U = window.VersoUI;
+    // uio-S-C02 (SRC-05): ONE search field. It carries the search icon + input, and (unified doc)
+    // an in-field trailing adornment: the match navigator ("3 / 12" + prev/next) and a replace glyph
+    // that reveals the replace row on demand. A div (not a label) so the trailing controls click
+    // cleanly without stealing input focus; the input fills the field so click-to-type still works.
+    var search = h("div", "vbrowser__search source-stage__search-field");
     search.innerHTML = window.Icon ? window.Icon("search") : "";
     var unified = !!sourceMasterFor(activeSourceProductId());
     var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = unified ? "find in document" : "search topics + text";
@@ -13730,20 +13736,34 @@
     // Enter cycles to the next match, Shift+Enter to the previous (find-word-cycling).
     if (unified) input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); cycleSourceFind(e.shiftKey ? -1 : 1); } });
     search.appendChild(input);
-    host.appendChild(search);
-    // The contextual match navigator ("3 / 12" + prev/next) lives just under the field; it is
-    // populated by renderSourceFindNav (looked up by id) and stays put across cycling so the field
-    // keeps focus.
-    if (unified) { var findNav = h("div", "source-find-nav"); findNav.id = "source-find-nav"; host.appendChild(findNav); }
-    // Source find-AND-replace (unified doc only): a replacement field + Replace (current match) /
-    // Replace all. Replacing edits the base prose, so it is gated behind the unlock -- a locked doc
-    // shows a reminder instead. Both paths ride owned undo (replaceRange / replaceAll shift marks).
     if (unified) {
-      var U = window.VersoUI;
+      // In-field adornment: the match navigator ("3 / 12" + prev/next, populated by
+      // renderSourceFindNav) + a replace-toggle glyph. Kept in the field so the frequent half of
+      // search (the counter) is always where you look, and the rare half (replace) is one glyph away.
+      var adorn = h("div", "source-search__adorn");
+      var findNav = h("div", "source-find-nav"); findNav.id = "source-find-nav";
+      adorn.appendChild(findNav);
+      if (U && U.IconButton) {
+        var repToggle = U.IconButton({ icon: "replace", label: "Find and replace", onClick: function () {
+          __sourceReplaceOpen = !__sourceReplaceOpen; mountSourceStageSearch();
+          if (__sourceReplaceOpen) { var ri = host.querySelector(".source-replace__field input"); if (ri) ri.focus(); }
+        } });
+        repToggle.classList.add("source-search__replace-toggle");
+        repToggle.classList.toggle("is-active", __sourceReplaceOpen);
+        adorn.appendChild(repToggle);
+      }
+      search.appendChild(adorn);
+    }
+    host.appendChild(search);
+    // Source find-AND-replace (unified doc only): revealed on demand by the replace glyph. Replacing
+    // edits the base prose, so it is gated behind the unlock -- a LOCKED doc shows the reason + keeps
+    // the buttons disabled instead of hiding it. Both paths ride owned undo (replaceRange/replaceAll).
+    if (unified && __sourceReplaceOpen) {
       var repRow = h("div", "source-replace");
-      var repWrap = h("label", "vbrowser__search source-stage__search-field source-replace__field");
+      var locked = !__sourceUnlocked;
+      var repWrap = h("div", "vbrowser__search source-stage__search-field source-replace__field");
       repWrap.innerHTML = window.Icon ? window.Icon("replace") : "";
-      var repInput = h("input", "vbrowser__search-input"); repInput.type = "text"; repInput.placeholder = "replace with"; repInput.value = __sourceReplaceQuery;
+      var repInput = h("input", "vbrowser__search-input"); repInput.type = "text"; repInput.placeholder = "replace with"; repInput.value = __sourceReplaceQuery; repInput.disabled = locked;
       repInput.addEventListener("input", function () { __sourceReplaceQuery = repInput.value; });
       repWrap.appendChild(repInput);
       repRow.appendChild(repWrap);
@@ -13751,11 +13771,14 @@
       if (U && U.Button) {
         var repOne = U.Button({ variant: "secondary", size: "sm", label: "Replace", title: "Replace the current match", onClick: function () { replaceCurrentSourceMatch(); } });
         var repAll = U.Button({ variant: "secondary", size: "sm", label: "Replace all", title: "Replace every match", onClick: function () { replaceAllSourceMatches(); } });
+        if (locked) { [repOne, repAll].forEach(function (b) { b.setAttribute("disabled", "disabled"); b.title = "Unlock the source (toolbar) to replace text"; }); }
         repBtns.appendChild(repOne); repBtns.appendChild(repAll);
       }
       repRow.appendChild(repBtns);
+      if (locked) repRow.appendChild(h("div", "source-replace__lockhint insp-hint", "The source is locked — unlock in the toolbar to replace text."));
       host.appendChild(repRow);
     }
+    renderSourceFindNav(); // populate the in-field match navigator
   }
   // Replace the current find match (find-word-cycling's highlighted hit) with the replace text. Gated
   // behind the unlock; rides replaceRange -> owned undo + mark-shift. Re-runs the find so the count +
