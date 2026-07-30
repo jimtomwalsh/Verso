@@ -83,10 +83,12 @@
       var s = (size === "sm" || size === "lg") ? size : "md";
       return "vds-iconbtn vds-iconbtn--" + s + (active ? " is-active" : "") + (danger ? " is-danger" : "");
     },
-    badgeClass: function (tone, size) {
+    badgeClass: function (tone, size, quiet) {
       var t = (tone === "accent" || tone === "success" || tone === "danger" || tone === "warning" || tone === "component") ? tone : "neutral";
       var s = size === "sm" ? "sm" : "md";
-      return "vds-badge vds-badge--" + t + " vds-badge--" + s;
+      // quiet = tinted background + the tone as ink, for a badge that repeats down a list where a
+      // column of solid fills would shout louder than the rows (DS Badge contract).
+      return "vds-badge vds-badge--" + t + " vds-badge--" + s + (quiet ? " vds-badge--quiet" : "");
     },
     // Tri-state checkbox aria-checked value.
     checkAria: function (checked, mixed) { return mixed ? "mixed" : (checked ? "true" : "false"); },
@@ -483,7 +485,7 @@
   }
   function Badge(props) {
     props = props || {};
-    var b = h("span", _pure.badgeClass(props.tone, props.size));
+    var b = h("span", _pure.badgeClass(props.tone, props.size, props.quiet));
     appendChildren(b, props.children);
     return b;
   }
