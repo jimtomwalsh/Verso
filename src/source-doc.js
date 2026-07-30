@@ -954,7 +954,11 @@
       case "comment-added": return { kind: "structural", label: "Comment opened", detail: null };
       case "comment-resolved": return { kind: "structural", label: "Comment resolved", detail: null };
       case "comment-reopened": return { kind: "structural", label: "Comment reopened", detail: null };
-      default: return { kind: "structural", label: entry.type || "Change", detail: null };
+      // uio-S-C04 (SRC-11): raw edit-op types read as author words, not model vocabulary.
+      case "range-replaced": return { kind: "structural", label: "Edited text", detail: null };
+      case "node-split": return { kind: "structural", label: "Paragraph split", detail: null };
+      case "node-reformat": return { kind: "structural", label: "Reformatted", detail: null };
+      default: return { kind: "structural", label: "Edited source", detail: null };
     }
   }
 

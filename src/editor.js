@@ -13652,7 +13652,9 @@
   // A hand-created "New topic" with neither stream shows a single synthetic "Created" node. The
   // synthetic "Last edited" node only fills in for legacy topics that have no doc-commit history.
   function renderHistoryTimeline(host, topic) {
-    var body = panelSection(host, "History");
+    // uio-S-C04 (SRC-11): History is a collapsed FOOTER section (opens on demand) so it stops
+    // competing with the marks above it at equal weight.
+    var body = panelSection(host, "History", { collapsible: true, defaultOpen: false });
     if (!window.VersoUI || !window.VersoUI.Timeline) return;
     var SD = window.SourceDoc;
 
@@ -13688,9 +13690,14 @@
 
     // Newest first; stable order preserves each stream's own sequence when times tie.
     rows.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    // uio-S-C04 (SRC-11): GROUP BY DAY — the date is stated ONCE at the top of each day's run
+    // (rows are newest-first, so same-day rows cluster), instead of repeating on every row.
+    var lastDate = null;
     var entries = rows.map(function (r) {
+      var d = r.importedAt ? new Date(r.importedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+      var showDate = d !== lastDate; lastDate = d;
       return {
-        date: r.importedAt ? new Date(r.importedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—",
+        date: showDate ? d : null,
         label: r.label,
         detail: r.detail
       };

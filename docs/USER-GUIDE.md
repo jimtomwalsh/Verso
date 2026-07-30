@@ -886,7 +886,9 @@ In this mode:
   optional note — *why* you made the change — which you can type or **Skip**. Structural events
   each get their own entry: an alternate added, a mark going stale, broken, or restored, a comment
   opened or resolved. Import events (from the section view) and these doc events share one timeline,
-  newest first.
+  newest first, **grouped by day** (the date is shown once per day). History sits in a **collapsed
+  footer section** — expand it when you want the provenance, so it doesn't compete with the marks
+  above.
 - **The document reads as formatted text.** Bold and `inline code` show as themselves in the
   continuous view — not as literal `**` or `` ` `` marks — so the source reads like a finished
   document, and range marks (comments, alternates, linked spans) stay anchored to exactly the same

@@ -9173,7 +9173,7 @@ section("Product Rail: Source stage info panel");
   // block) for both "Linked in" and "History" -- the same section chrome every other
   // side panel in the app uses.
   ok("'Linked in (N)' is a sub-head folded into the Source section (both are document-origin facts)", /source-info__subhead", "Linked in \(" \+ used\.length \+ "\)"/.test(e));
-  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History"\)/.test(e));
+  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\)/.test(e));
   // #163: the standalone Comments accordion is retired. Comments live ONLY in the Marks section's
   // Comments filter tab, so the info panel never double-renders them. The legacy !hasDoc branch ends
   // at its Linked-in loop (no renderSourceCommentsPanel call), and the function itself is gone.
@@ -9186,7 +9186,9 @@ section("Product Rail: Source stage info panel");
   // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
   // not a flat Created/Updated pair -- traces every import (and any edit since) back to
   // how the topic entered the platform, newest first.
-  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic\) \{\s*var body = panelSection\(host, "History"\);/.test(e));
+  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic\) \{[\s\S]{0,220}var body = panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\);/.test(e));
+  // uio-S-C04 (SRC-11): the timeline states each day's date ONCE (grouped), not on every row.
+  ok("History groups by day — the date is stated once per day run", /var lastDate = null;[\s\S]{0,260}var showDate = d !== lastDate; lastDate = d;[\s\S]{0,120}date: showDate \? d : null/.test(e));
   // Timeline promoted to a real DSLMS component (design-system/components/structure/
   // Timeline) rather than left as ad-hoc dot/line DOM in editor.js -- /verso-frontend
   // ruled this converge-now given it's built entirely from already-anchored tokens
@@ -12270,6 +12272,8 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
   ok("historyEntryView: a commit carries its optional why-note in the detail", /clarity/.test(commitView.detail));
   ok("historyEntryView: a note-less commit still summarises without a dangling quote", (function () { var v = SD.historyEntryView({ type: "commit", charsAdded: 5, charsRemoved: 0, editCount: 1 }); return v.detail.indexOf("“") === -1; })());
   ok("historyEntryView: structural events map to discrete labels", SD.historyEntryView({ type: "mark-broken", markType: "link" }).label === "Link broke" && SD.historyEntryView({ type: "mark-stale", markType: "alternate" }).label === "Alternate went stale" && SD.historyEntryView({ type: "alternate-created" }).label === "Alternate added" && SD.historyEntryView({ type: "comment-resolved" }).label === "Comment resolved");
+  // uio-S-C04 (SRC-11): raw edit-op types read as plain author words, not model vocabulary.
+  ok("historyEntryView: raw edit ops read as author words (no 'node-split'/'range-replaced')", SD.historyEntryView({ type: "range-replaced" }).label === "Edited text" && SD.historyEntryView({ type: "node-split" }).label === "Paragraph split" && SD.historyEntryView({ type: "node-reformat" }).label === "Reformatted" && SD.historyEntryView({ type: "whatever-unknown" }).label === "Edited source");
 
   // --- logHistory stamps a time so both provenance streams interleave ---
   var m = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
