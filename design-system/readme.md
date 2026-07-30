@@ -114,6 +114,85 @@ How Verso writes UI copy:
 
 ---
 
+## The UI spine
+
+Every settings and overlay surface in Verso is one system shown a few ways. The rule the whole
+editor obeys: **one spine, six presentations.** A control's look, the row it sits in, how it
+saves, and how you dismiss it never change with which corner of the app you opened it from. This
+section is the single source for that spine. Skills and build tickets reference it; they never
+restate it. When a UI change is judged, it is judged against this spine and the surface around it,
+never in isolation.
+
+### Six presentations, one tree
+
+Settings are one tree. The presentation is chosen by the job, never by where the click came from:
+
+| Surface | Attachment | Holds | For |
+|---------|-----------|-------|-----|
+| **Sheet** | right-docked, full-height, no scrim | unbounded rows | anything, browsed or searched |
+| **Popover** | anchored to its trigger | up to ~6 rows + one escalation link | the few settings for the thing you clicked |
+| **Inspector** | docked right, persistent | rows sized to the selection | the current selection (the same rows as the sheet's Block scope) |
+| **Menu** | at the pointer | verbs only | actions, each ending in a route into a surface above |
+| **Help** | right-docked sheet or popover | prose | teaching beside the work: "show me", not a description |
+| **Modal** | centred on a scrim | one decision | destructive confirms and blocking runs only |
+
+Non-modal surfaces keep the canvas live: the canvas is *squeezed*, never covered. The Modal is
+the only surface that takes a scrim, and only for a destructive confirm or a blocking run. Every
+narrow surface (popover, menu) carries a visible route to escalate into the sheet.
+
+### The shared row
+
+One row anatomy, reused identically in sheet, popover and inspector:
+
+- a **fixed-width label column** so values align in a clean column (see Visual foundations: density);
+- the **canonical control** at 24px (`--control-md`), from the set above, never a hand-rolled row;
+- an **inheritance tail** that names where an inherited value comes from and offers Reset (below);
+- a hover-only **`...` overflow** for the row's rare extra actions.
+
+A section is an 11px semibold header (`--text-xs`) with a chevron, an optional switch, and a
+one-line summary when collapsed. This is the `PanelSection` / `sectionGroup` contract: a panel is
+never a stack of raw sub-headers.
+
+### Scope and inheritance
+
+Every setting resolves up one five-rung ladder:
+
+**System -> Product -> Course -> Page -> Block.**
+
+One visual language for the state of a value, at any rung, in any surface:
+
+- **Inherited** — the resolved value in tertiary ink, with its source scope named. Never "unset":
+  always show what will actually apply.
+- **Overridden** — a 4px accent dot plus an inline **Reset**, whose tooltip states what Reset
+  restores and from which scope.
+- **Section roll-up** — the section header counts its overrides ("3 overridden").
+
+### Save contract
+
+**Autosave + live-apply + Undo.** There is no Save, Apply, Cancel or Done anywhere in a settings
+surface. Edits apply live as you make them; **Close** and Undo (⌘Z) are the only commit-adjacent
+controls. Dirty state is per-field (the override dot + Reset), never a panel-level banner. The
+one exception is a destructive or irreversible action, which belongs in a **Modal** with an
+explicit confirm.
+
+### Keyboard contract
+
+- **Esc** closes the topmost layer only, LIFO.
+- **⌘,** opens Settings; **⌥⌘,** opens settings for the current selection.
+- **⌘K** is find-anything: one index over settings, actions and help sections. No surface owns its
+  own separate search box.
+
+### Density baseline
+
+The spine reuses the tokens Visual foundations already defines: 11px chrome (`--text-xs`), 24px
+controls (`--control-md`), 28px rows (`--row-height`), 40px toolbar (`--toolbar-height`), the
+`--panel-left-width` / `--panel-right-width` panel widths, the 2/4/6/8 radii, borders over
+shadows, one accent, sentence case. The named Source / Edit / Publish icon rail (`--rail-w`) is
+standard across stages. There is no new density design here: this is adoption of the existing
+token set.
+
+---
+
 ## Scope — Verso UI only
 
 This system governs the **Verso UI** (`editor.css`, the inspector/render code in
