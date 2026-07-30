@@ -8324,19 +8324,21 @@ section("uio-F01 shared settings row anatomy");
   ok("FieldRow.d.ts labelWidth default aligned to 76", /Default 76/.test(dts));
 })();
 
-// ---- uio-F02: density baseline — type on tokens (partial) ---------------
+// ---- uio-F02: density baseline — type on tokens + focus ring -------------
 // The density baseline (design-system/readme.md "Visual foundations") grounds chrome
-// type on the --text-* scale. The exact-match sizes (10/11/12px) are tokenized here as
-// a zero-visual-change swap; the drift values (10.5/11.5/12.5px) await a type-scale
-// decision and are NOT yet ratcheted. This guard freezes the tokenized set: no bare
-// 10/11/12px font-size may return to the chrome CSS.
-section("uio-F02 density baseline — type tokens (partial)");
+// type on the --text-* scale. All exact-match sizes (10/11/12px) AND the half-step drift
+// (10.5/11.5/12.5px, snapped down per James's type-scale decision) are tokenized. This
+// guard freezes it: no bare integer- or half-step font-size may return to the chrome CSS.
+section("uio-F02 density baseline — type tokens + focus ring");
 (function () {
   var css = src("editor.css");
-  var bare = (css.match(/font-size:\s*1[012]px\b/g) || []);
-  ok("editor.css: no bare 10/11/12px font-size (use --text-2xs/--text-xs/--text-sm)", bare.length === 0);
+  var bare = (css.match(/font-size:\s*1[012](\.5)?px\b/g) || []);
+  ok("editor.css: no bare 10/10.5/11/11.5/12/12.5px font-size (use the --text-* scale)", bare.length === 0);
   if (bare.length) console.error("    bare font-size: " + bare.slice(0, 8).join(" · "));
   ok("editor.css: the --text-* tokens are in use for chrome type", /font-size:\s*var\(--text-xs\)/.test(css));
+  // Canonical keyboard focus ring on interactive chrome (SRC-15) — accent outline on
+  // :focus-visible, scoped to chrome control classes.
+  ok("editor.css: canonical focus ring on interactive chrome", /\.vds-btn:focus-visible[\s\S]{0,260}outline:\s*2px solid var\(--accent\)/.test(css));
 })();
 
 // ---- UI kit conformance gate (ticket 4 — WARN-ONLY phase) --
