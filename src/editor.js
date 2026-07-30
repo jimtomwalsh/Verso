@@ -1669,8 +1669,8 @@
       onOk(val);
     }
     var footer = h("div");
-    footer.appendChild(UI.Button({ variant: "secondary", label: "Cancel", onClick: function () { if (modal && modal.close) modal.close(); } }));
-    footer.appendChild(UI.Button({ variant: "primary", label: "Save", onClick: commit }));
+    footer.appendChild(UI.Button({ variant: "secondary", label: "Cancel", onClick: function () { if (modal && modal.close) modal.close(); } })); // spine-ok: one-decision prompt modal (single field)
+    footer.appendChild(UI.Button({ variant: "primary", label: "Save", onClick: commit })); // spine-ok: one-decision prompt modal (single field)
     modal = UI.Modal({ title: title, children: body, footer: footer });
     document.body.appendChild(modal);
     if (inputEl) { setTimeout(function () { inputEl.focus(); inputEl.select && inputEl.select(); }, 0); inputEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); commit(); } }); }
@@ -14742,7 +14742,7 @@
     }
     // Footer: single primary action (canonical VersoUI.Button).
     var foot = h("div", "settings-foot");
-    foot.appendChild(window.VersoUI.Button({ variant: "primary", label: "Done", onClick: closeSettingsModal }));
+    foot.appendChild(window.VersoUI.Button({ variant: "primary", label: "Done", onClick: closeSettingsModal })); // spine-todo(F05): settings-in-modal + fake Done; the non-modal sheet retires this
     box.appendChild(foot);
     overlay.appendChild(box);
     overlay.addEventListener("mousedown", function (e) { if (e.target === overlay) closeSettingsModal(); });
@@ -16989,7 +16989,7 @@
     var body = h("div");
     var footer = [];
     (opts.extras || []).forEach(function (b) { footer.push(b); });
-    var cancel = window.VersoUI.Button({ variant: "ghost", label: opts.cancelLabel || "Cancel", onClick: function () { modal.close(); } });
+    var cancel = window.VersoUI.Button({ variant: "ghost", label: opts.cancelLabel || "Cancel", onClick: function () { modal.close(); } }); // spine-ok: confirm/decision modal primitive (destructive confirm + blocking run)
     footer.push(cancel);
     var primary = window.VersoUI.Button({ variant: opts.danger ? "danger" : "primary", label: opts.primaryLabel || "OK", onClick: function () { if (opts.onPrimary) opts.onPrimary(); } });
     footer.push(primary);

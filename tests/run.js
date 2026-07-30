@@ -8258,6 +8258,35 @@ section("Icon accessor (Lucide offline)");
   ok("every registered Icon renders valid non-empty svg (" + (Icon.names().length - bad.length) + "/" + Icon.names().length + ")", bad.length === 0);
 })();
 
+// ---- uio-SK06: UI-spine negative-space ratchet (HARD FAIL) --------------
+// Front-loaded adherence gate for the UI Overhaul epic. The spine's save contract
+// (design-system/readme.md, section "The UI spine") is: settings/overlay surfaces are
+// autosave + live-apply + Undo — there is NO Save/Apply/Cancel/Done anywhere in a
+// settings surface; Close + Undo (⌘Z) are the only commit-adjacent controls, and a
+// Modal exists only for a destructive confirm or a blocking run.
+//
+// This ratchet forbids the RETIRED pattern immediately (a reintroduced commit button
+// in a settings surface), mirroring the gate-ok allowlist the UI-kit gate uses:
+//   `spine-ok`   — a sanctioned decision surface (the confirm/prompt modal primitive).
+//   `spine-todo` — known pre-F05 debt (the settings-in-modal + fake Done), which the
+//                  non-modal overlay sheet (uio-F05) removes. Frozen: it may go down,
+//                  never up.
+// A NEW, unmarked Save/Apply/Cancel/Done button fails the suite — that is exactly a
+// commit button reintroduced into a settings surface.
+section("uio-SK06 UI-spine save-contract ratchet (HARD FAIL)");
+(function () {
+  var e = src("src/editor.js");
+  var lines = e.split("\n");
+  var COMMIT = /label:\s*(?:opts\.[a-zA-Z]+Label\s*\|\|\s*)?["'](?:Save|Apply|Cancel|Done)["']/;
+  var offenders = lines.filter(function (l) { return COMMIT.test(l) && !/spine-ok|spine-todo/.test(l); });
+  ok("spine save contract: no unmarked Save/Apply/Cancel/Done commit button in the chrome", offenders.length === 0);
+  offenders.forEach(function (l) { console.error("    commit-btn (needs spine-ok, or remove per the save contract): " + l.trim()); });
+  // Debt freeze: the pre-F05 settings-in-modal commit button(s) are a known, finite set
+  // that uio-F05 removes. This count must not grow.
+  var debt = lines.filter(function (l) { return COMMIT.test(l) && /spine-todo/.test(l); });
+  ok("spine debt frozen: pre-F05 settings-in-modal commit buttons <= 1 (uio-F05 removes them)", debt.length <= 1);
+})();
+
 // ---- UI kit conformance gate (ticket 4 — WARN-ONLY phase) --
 // Warns (does not fail) on blocks that still hand-append container chrome instead
 // of calling renderContainerChrome. Blocks migrate in tickets 8-9; ticket 9 flips
