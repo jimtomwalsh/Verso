@@ -1212,6 +1212,32 @@
   window.__pageDisplayName = pageDisplayName; // headless test hooks
   window.__firstCopyOf = firstCopyOf;
   window.__setPageTitle = setPageTitle;
+  // uio-E-C07 (EDIT-12): split naming. The old behaviour appended " (cont.)" on every split, so a
+  // twice-split page read "Base (cont.) (cont.)" and clipped its tail. Instead a split family reads
+  // "Base · K of M". stripSplitSuffix reduces any name to its clean base (removing a trailing
+  // " · N of M" or one-or-more " (cont.)"), and renumberSplitFamily renumbers the contiguous
+  // same-chapter run that shares a base. Both are PURE (mutate only the passed doc) -> regression-guarded.
+  function stripSplitSuffix(name) {
+    var s = String(name == null ? "" : name).trim(), prev;
+    // Peel any trailing " · N of M" or " (cont.)" — repeatedly, in any order — until stable.
+    do { prev = s; s = s.replace(/\s*·\s*\d+\s+of\s+\d+\s*$/i, "").replace(/\s*\(cont\.?\)\s*$/i, "").trim(); } while (s !== prev);
+    return s || "Page";
+  }
+  function renumberSplitFamily(doc, pageId) {
+    var pages = (doc && doc.pages) || [];
+    var idx = -1;
+    for (var i = 0; i < pages.length; i++) { if (pages[i] && pages[i].id === pageId) { idx = i; break; } }
+    if (idx < 0) return;
+    var base = stripSplitSuffix(pages[idx].name), ch = pages[idx].chapterId;
+    var lo = idx, hi = idx;
+    while (lo - 1 >= 0 && pages[lo - 1] && pages[lo - 1].chapterId === ch && stripSplitSuffix(pages[lo - 1].name) === base) lo--;
+    while (hi + 1 < pages.length && pages[hi + 1] && pages[hi + 1].chapterId === ch && stripSplitSuffix(pages[hi + 1].name) === base) hi++;
+    var M = hi - lo + 1;
+    if (M < 2) { pages[idx].name = base; return; } // a lone page just gets the clean base back
+    for (var k = lo; k <= hi; k++) pages[k].name = base + " · " + (k - lo + 1) + " of " + M;
+  }
+  window.__stripSplitSuffix = stripSplitSuffix;
+  window.__renumberSplitFamily = renumberSplitFamily;
   // <<< P2 auto page-naming helpers
 
   var registry = getRegistry();
@@ -6139,7 +6165,9 @@
     var tail = P.blocks.splice(idx); // blocks[idx..] move to the new page
     var newPage = {
       id: "page-" + Date.now(),
-      name: (P.name || "Page") + " (cont.)",
+      // uio-E-C07 (EDIT-12): seed with the clean base; renumberSplitFamily rewrites the whole run
+      // to "Base · K of M" below, so splits never accumulate " (cont.)".
+      name: stripSplitSuffix(P.name || "Page"),
       blocks: tail
     };
     // inherit page-level props so the cont. page renders identically
@@ -6151,6 +6179,7 @@
     if (P.hideHeader) newPage.hideHeader = P.hideHeader;
     if (P.hideFooter) newPage.hideFooter = P.hideFooter;
     doc.pages.splice(pi + 1, 0, newPage);
+    renumberSplitFamily(doc, P.id); // uio-E-C07: rename the run to "Base · K of M" (no accumulating "(cont.)")
     // sync section membership: wherever P.id sits, drop newPage.id right after it
     eachCourseNav(function (nav) {
       (nav.sections || []).forEach(function (sec) {
@@ -19519,7 +19548,10 @@
       var caret = outlineCaret(open, false);
       caret.addEventListener("click", function (e) { e.stopPropagation(); openPages[page.id] = !open; renderStructure(); });
       var picon = outlineIcon("tree-page__icon", "file-text");
-      var name = h("span", "tree-page__name" + (pi === currentPage ? " is-active" : "") + (inMultiPage(pi) ? " is-multi" : ""), pageDisplayName(page, doc));
+      // uio-E-C07 (EDIT-12): the derived chapter.page number lives in its OWN fixed column so the
+      // name row identifies itself cleanly -- no baked-in / doubled numbers, no truncated tail.
+      var num = h("span", "tree-page__num", pageNumberOf(page, doc));
+      var name = h("span", "tree-page__name" + (pi === currentPage ? " is-active" : "") + (inMultiPage(pi) ? " is-multi" : ""), pageTitlePart(page));
       name.addEventListener("click", function (e) {
         if (e.metaKey || e.ctrlKey) { clearMulti(); toggleMultiPage(pi); outlineAnchor = { kind: "page", pi: pi }; return; }
         if (e.shiftKey && outlineAnchor && outlineAnchor.kind === "page") {
@@ -19545,7 +19577,7 @@
         inp.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); inp.blur(); } else if (ev.key === "Escape") { ev.preventDefault(); inp.value = seedTitle; inp.blur(); } });
         inp.addEventListener("blur", commit);
       });
-      prow.appendChild(caret); prow.appendChild(picon); prow.appendChild(name);
+      prow.appendChild(caret); prow.appendChild(picon); prow.appendChild(num); prow.appendChild(name);
       makeDropTarget(prow, function () { return { page: pi, index: doc.pages[pi].blocks.length }; }, "drop-into");
       wireTreePageDrag(prow, page); // reorder pages / move between chapters (isolated from block DnD)
       wireOutlinePageMenu(prow, page, pi, name);
