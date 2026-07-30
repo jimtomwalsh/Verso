@@ -1418,8 +1418,99 @@
     var SX = window.SCORMExport, PP = window.PublishPresets;
     var base = (SX && SX.defaultOptions) ? SX.defaultOptions() : {};
     if (!PP || !row) return base;
-    return Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
+    var out = Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
+    // uio-P-C07 (PUB-05): name the package for THIS row's document, not for whichever document
+    // happens to be open. The publish run hands these same options to buildPackage, so the
+    // filename shown on the row is the filename that lands.
+    var d = registry[row.docId], code = d && d.meta && d.meta.code;
+    if (code) out.code = code;
+    return out;
   }
+  // uio-P-C07 (PUB-05): a queue row used to say nothing about where its package goes or what it is
+  // called — the first mention of either was "Done · <name>" after the run, which is too late to be
+  // a decision. Every row now states its destination and, before you press Publish, the exact
+  // filename it will write. Downloads is the only destination there is today, so the chip STATES it
+  // rather than opening a menu of one; it becomes a real picker the moment a second destination
+  // exists. Named product-level destinations and per-variant folders are the Moderate tier of the
+  // audit finding and are deliberately not built here.
+  /* @publish-dest-start */
+  var PUBLISH_DESTINATIONS = [
+    { id: "download", label: "Downloads", why: "Every run downloads the package to your browser's downloads folder. Saving straight to a chosen folder isn't available yet." }
+  ];
+  // Which destination a row delivers to. One entry today, so every row resolves to the same one;
+  // the lookup exists so that adding a second destination is a data change, not a rewrite.
+  function publishDestinationFor(dests, row) {
+    var list = dests || [];
+    var id = (row && row.destination) || "download";
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
+    return list[0] || null;
+  }
+  // The destination is the author's to pick only once there is more than one to pick between. With
+  // one, a menu would open on a single already-chosen item — a control that does nothing.
+  function publishDestinationPickable(dests) { return (dests || []).length > 1; }
+  // What the row promises to write. The name is asked of the exporter's OWN naming function (passed
+  // in) instead of being rebuilt here, so the promise on the row and the file that lands can never
+  // drift apart. No exporter, or a namer that throws, yields "" — the row states nothing rather
+  // than guessing at a filename.
+  function publishRowFilename(nameFn, opts) {
+    if (typeof nameFn !== "function" || !opts) return "";
+    try { return String(nameFn(opts) || ""); } catch (e) { return ""; }
+  }
+  // The filename is a promise about a run that hasn't happened, so it is shown only while the run is
+  // still ahead. Once a row is done or failed its status carries the real outcome, and repeating the
+  // prediction beside it would be noise at best and a contradiction at worst.
+  function publishShowsFilename(row) {
+    var s = row && row.status;
+    return s === "pending" || s === "running";
+  }
+  /* @publish-dest-end */
+  // uio-P-C05 (PUB-13): the Publish pane's one menu mixed INBOUND pipelines (Import CSV, Import
+  // Schema) with outbound ones, under a label that was half irrelevant. Direction is now data: the
+  // Source stage lists the imports (where import already lives), the Publish pane states only what
+  // it emits. Both stages read the SAME registered list, so a module that registers a new action
+  // lands on the right stage without either stage keeping its own copy.
+  //
+  // Direction is DECLARED at registration (registerPipelineButton's `opts.direction`). The label
+  // regex below is only the fallback for an action that never declared one: registerPipelineButton
+  // is public API, and a third-party caller naming something "Ingest CSV" must not silently land on
+  // the Publish pane. Declaring it is how you get it right; the guess is how old callers keep working.
+  /* @publish-format-start */
+  var PIPELINE_DIRECTIONS = ["import", "export"];
+  function pipelineDirection(label) { return /^\s*import\b/i.test(String(label == null ? "" : label)) ? "import" : "export"; }
+  function pipelineDirectionOf(btn) {
+    var declared = btn && btn.direction;
+    if (PIPELINE_DIRECTIONS.indexOf(declared) !== -1) return declared; // an explicit declaration always wins
+    return pipelineDirection(btn && btn.label);
+  }
+  function pipelineByDirection(btns, dir) {
+    return (btns || []).filter(function (b) { return b && pipelineDirectionOf(b) === dir; });
+  }
+  // Under an "Import" menu head the repeated prefix is noise ("Import CSV" -> "CSV…"). Every import
+  // opens a file picker, so the entry always ends in an ellipsis.
+  function importMenuLabel(label) {
+    var raw = String(label == null ? "" : label).trim();
+    var s = raw.replace(/^import\s+/i, "").trim() || raw;
+    return /(…|\.\.\.)$/.test(s) ? s : s + "…";
+  }
+  // The output formats, stated ONCE: the emitted one is marked selected, the rest carry a plain
+  // "Soon" state instead of smuggling "(soon)" into their names.
+  function publishFormatRows(formats, selected) {
+    return (formats || []).map(function (f) {
+      return { value: f.value, label: f.label, available: !!f.enabled, selected: f.value === selected, hint: f.enabled ? "" : "Soon" };
+    });
+  }
+  // What the queue will actually emit. Format is a PRESET option, so it is READ from the rows'
+  // resolved options — the Publish pane never becomes a second place that sets it. Presets that
+  // disagree read "Mixed" rather than picking a winner; an empty queue states the default.
+  function publishFormatSummary(formats, values, fallback) {
+    var uniq = [];
+    (values || []).forEach(function (v) { if (v && uniq.indexOf(v) === -1) uniq.push(v); });
+    if (uniq.length > 1) return { value: null, label: "Mixed", mixed: true };
+    var value = uniq[0] || fallback || "";
+    var match = (formats || []).filter(function (f) { return f.value === value; })[0];
+    return { value: value, label: (match && match.label) || value, mixed: false };
+  }
+  /* @publish-format-end */
   // The documents the picker offers: every registry doc, scoped to the active Product when one is
   // set (untagged docs drop out of a Product-scoped view), sorted by title. docId = the registry key.
   function publishPickDocs() {
@@ -1477,6 +1568,55 @@
     return out;
   }
   /* @publish-pick-end */
+  // uio-P-C06 (PUB-04): bulk publishing had no bulk controls -- a dozen documents meant a dozen
+  // identical "+" clicks. Selection is VIEW state (session-only, never saved on the document), and
+  // searching, filtering or re-ordering the list NEVER changes it. Filtering is a lens, not an edit:
+  // one keystroke in the search field must not throw away five deliberate ticks that cannot be undone.
+  // The hazard -- queueing documents that are off screen -- is answered by stating it plainly in the
+  // footer instead ("5 selected · 2 hidden by search"), so nothing is silently lost and nothing is
+  // silently included.
+  /* @publish-sel-start */
+  // The selected ids among `rows`, in the order those rows are given. Pass the visible list to count
+  // what is on screen; pass the full candidate list to get everything the batch will queue. Ids for
+  // documents that no longer exist simply never match, so a stale tick can never queue anything.
+  function publishSelectedIds(sel, rows) {
+    var out = [];
+    (rows || []).forEach(function (r) { if (r && r.id && sel && sel[r.id]) out.push(r.id); });
+    return out;
+  }
+  // Which of the two lenses is doing the hiding, named the way the author would name it.
+  function publishHiddenBy(query, filter) {
+    var q = !!String(query == null ? "" : query).trim(), f = !!filter && filter !== "all";
+    if (q && f) return "search and filter";
+    if (q) return "search";
+    if (f) return "the filter";
+    return "the current view";
+  }
+  // Everything the selection footer needs, from the visible rows plus the full candidate list.
+  // The one deliberate asymmetry: "select all" and its mixed state count the VISIBLE rows only,
+  // because ticking a box that says "Select all 3" over a list of 3 can only sanely mean those 3 --
+  // while the queue button counts the WHOLE selection, hidden rows included, because that is what
+  // the author actually ticked. The hidden line exists so those two numbers are never a surprise.
+  function publishSelectionSummary(sel, visible, all, opts) {
+    opts = opts || {};
+    var vis = publishSelectedIds(sel, visible), tot = publishSelectedIds(sel, all);
+    var visTotal = (visible || []).filter(function (r) { return r && r.id; }).length;
+    var hidden = Math.max(0, tot.length - vis.length);
+    return {
+      ids: tot,
+      selected: tot.length,
+      visible: vis.length,
+      hidden: hidden,
+      visibleTotal: visTotal,
+      all: visTotal > 0 && vis.length === visTotal,
+      mixed: vis.length > 0 && vis.length < visTotal,
+      allLabel: vis.length ? (vis.length + " of " + visTotal + " selected") : ("Select all " + visTotal),
+      queueLabel: "Queue selected" + (tot.length ? " (" + tot.length + ")" : ""),
+      hiddenLabel: hidden ? (tot.length + " selected · " + hidden + " hidden by " + publishHiddenBy(opts.query, opts.filter)) : "",
+      reason: tot.length ? "" : "Tick documents above to queue them together."
+    };
+  }
+  /* @publish-sel-end */
   // ---- Product Rail: Ground-Truth staleness (export-is-publish tracking) ----
   // A document links Ground Truth through block.sourceLink.masterId; each linked master carries a
   // version stamp (master.updatedAt via stampMasterVersion, bumped on every content edit). At export
@@ -1560,7 +1700,8 @@
   }
   // uio-P-C04: the picker's view state. Session-only on purpose — a search you left behind three
   // days ago silently hiding documents is worse than retyping it.
-  var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title";
+  // uio-P-C06: the tick marks live here too — same session-only lifetime, for the same reason.
+  var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title", __publishPickSel = {};
   function publishSortLabel() {
     for (var i = 0; i < PUBLISH_SORTS.length; i++) if (PUBLISH_SORTS[i].key === __publishPickSort) return PUBLISH_SORTS[i].label;
     return PUBLISH_SORTS[0].label;
@@ -1578,22 +1719,31 @@
     lastLabel: publishLastLabel,
     render: mountPublishStage
   };
+  // uio-P-C04 (PUB-12): decorate every candidate with the two facts the orderings need -- how far it
+  // has drifted from approved source, and when it last actually went out -- then let the pure view do
+  // search/filter/sort. The header counts what the list shows, from the same array.
+  // uio-P-C06: the render AND "Queue selected" both read the list from here, so the batch can only
+  // ever contain rows the picker is showing.
+  function publishPickRows() {
+    var vers = currentMasterVersions(), RH = window.ReleaseHistory;
+    return publishPickDocs().map(function (d) {
+      var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
+      return { id: d.id, title: d.title, drift: groundTruthStaleCount(registry[d.id], vers) || 0, lastAt: last ? last.at : 0 };
+    });
+  }
   // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
   // shortcut to queue the currently-open document (the fast single-export path -- a queue-of-one).
   function renderPublishPick() {
     var host = document.getElementById("publish-pick"); if (!host) return;
     var U = window.VersoUI;
     host.innerHTML = "";
-    var vers = currentMasterVersions(), RH = window.ReleaseHistory;
-    // uio-P-C04 (PUB-12): decorate every candidate with the two facts the orderings need — how far
-    // it has drifted from approved source, and when it last actually went out — then let the pure
-    // view do search/filter/sort. The header counts what the list shows, from the same array.
-    var all = publishPickDocs().map(function (d) {
-      var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
-      return { id: d.id, title: d.title, drift: groundTruthStaleCount(registry[d.id], vers) || 0, lastAt: last ? last.at : 0 };
-    });
+    var all = publishPickRows();
     var docs = publishPickView(all, { query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort });
     var attention = all.filter(publishNeedsAttention).length;
+    // uio-P-C06 (PUB-04): this render READS the selection and never writes it. Search, filter and
+    // sort are a lens over the list, so a tick survives all three for the whole session; the footer
+    // states how much of the selection the current lens is hiding.
+    var sel = publishSelectionSummary(__publishPickSel, docs, all, { query: __publishPickQuery, filter: __publishPickFilter });
 
     // Header strip: what this list IS (scope + count), and how it is ordered.
     var head = h("div", "publish-pick__head");
@@ -1655,6 +1805,21 @@
     }
     docs.forEach(function (d) {
       var row = h("div", "publish-pickrow");
+      // uio-P-C06 (PUB-04): the row leads with the canonical DS Checkbox (14px, Checkbox.d.ts) so a
+      // dozen documents are picked as one set. The per-row "+" below is untouched: ticking is the
+      // additional path for a batch, not a replacement for queueing one document.
+      if (U && U.Checkbox) {
+        var box = U.Checkbox({
+          checked: !!__publishPickSel[d.id],
+          onChange: function (v) {
+            if (v) __publishPickSel[d.id] = true; else delete __publishPickSel[d.id];
+            renderPublishPick();
+          }
+        });
+        box.classList.add("publish-pickrow__sel");
+        box.title = "Select “" + d.title + "” for queueing";
+        row.appendChild(box);
+      }
       row.appendChild(h("span", "publish-pickrow__title", d.title));
       // staleness-tracking: informational count of linked Ground Truth topics changed since this
       // document's last export. null (no linked content) shows nothing; 0 shows nothing (in sync);
@@ -1683,6 +1848,48 @@
       list.appendChild(wrap);
     });
     host.appendChild(list);
+
+    // uio-P-C06 (PUB-04): the selection footer, pinned under the scrolling list. It stays as long as
+    // there is anything to select OR anything selected -- a live selection with every row filtered
+    // away must never lose its footer, or the author is left holding ticks they can neither see nor
+    // clear. The Publish button's rule applies here too: with nothing ticked the action is disabled
+    // and states its reason on hover instead of failing silently.
+    if (docs.length || sel.selected) {
+      var foot = h("div", "publish-pick__foot");
+      if (docs.length && U && U.Checkbox) {
+        // Ticks what is SHOWN. Untickng it clears the shown rows and leaves hidden ones alone; the
+        // hidden line below carries its own Clear for the whole selection.
+        var allBox = U.Checkbox({
+          checked: sel.all, mixed: sel.mixed, label: sel.allLabel,
+          onChange: function (v) {
+            docs.forEach(function (r) { if (v) __publishPickSel[r.id] = true; else delete __publishPickSel[r.id]; });
+            renderPublishPick();
+          }
+        });
+        allBox.classList.add("publish-pick__all");
+        allBox.title = "Select every document shown";
+        foot.appendChild(allBox);
+      }
+      // The whole truth when the current lens is hiding part of the selection: how many are ticked,
+      // how many of those are off screen, and one action to drop the lot.
+      if (sel.hidden) {
+        var hint = h("div", "publish-pick__hidden");
+        hint.appendChild(h("span", "publish-pick__hidden-text", sel.hiddenLabel));
+        var clearFn = function () { __publishPickSel = {}; renderPublishPick(); };
+        var clear = U ? U.Button({ variant: "ghost", size: "sm", label: "Clear", onClick: clearFn }) : h("button", null, "Clear");
+        clear.classList.add("publish-pick__clear");
+        clear.title = "Clear all " + sel.selected + " ticked documents, hidden ones included";
+        if (!U) clear.addEventListener("click", clearFn);
+        hint.appendChild(clear);
+        foot.appendChild(hint);
+      }
+      var qs = U ? U.Button({ variant: "secondary", full: true, icon: "plus", label: sel.queueLabel, onClick: queueSelectedDocs })
+        : h("button", null, sel.queueLabel);
+      qs.classList.add("publish-pick__queuesel");
+      if (!sel.selected) { qs.setAttribute("disabled", "disabled"); qs.title = sel.reason; }
+      foot.appendChild(qs);
+      host.appendChild(foot);
+    }
   }
   // A tiny transient confirmation toast (reuses the shared .collab-toast style), for actions taken
   // away from the Publish stage -- e.g. "Send to publish queue" from the Edit-stage top bar.
@@ -1694,7 +1901,9 @@
   // The ONE shared "queue this document" action (T4). Adds the doc with its remembered preset (T2),
   // no configure step, no duplicate row (re-arms an existing one). Used by every entry point: the
   // Publish-stage picker rows AND the Edit-stage top-bar "Send to publish queue". Toasts the count.
-  function addToQueue(docId) {
+  // uio-P-C06 (PUB-04): `quiet` suppresses only the confirmation, never the save. A batch adds every
+  // document through this exact path and then confirms once, so one toast per document never stacks.
+  function addToQueue(docId, opts) {
     var PQ = window.PublishQueue, PP = window.PublishPresets, d = registry[docId]; if (!PQ || !d) return;
     var preset = PP ? PP.lastForDoc(publishPresets(), docId) : "master"; // zero-config recall
     PQ.addDoc(publishQueue(), docId, { title: (d.meta && d.meta.title) || docId, preset: preset });
@@ -1702,7 +1911,22 @@
     renderPublishQueue();
     var n = PQ.pendingRows(publishQueue()).length;
     syncSendToPublishCount();
-    publishToast("Added to the publish queue — " + n + " pending.");
+    if (!(opts && opts.quiet)) publishToast("Added to the publish queue — " + n + " pending.");
+  }
+  // uio-P-C06 (PUB-04): queue the whole selection in one action -- every ticked document, including
+  // any the current search or filter is hiding, because that is what the author ticked and the
+  // footer said so before they pressed it. Identical to pressing "+" on each row (same preset
+  // recall, same de-duplication); the ticks clear afterwards, since the batch has been handed over
+  // and a stale selection would invite queueing it twice.
+  function queueSelectedDocs() {
+    var PQ = window.PublishQueue; if (!PQ) return;
+    var ids = publishSelectedIds(__publishPickSel, publishPickRows());
+    if (!ids.length) return;
+    ids.forEach(function (id) { addToQueue(id, { quiet: true }); });
+    __publishPickSel = {};
+    renderPublishPick();
+    var n = PQ.pendingRows(publishQueue()).length;
+    publishToast("Added " + ids.length + " document" + (ids.length === 1 ? "" : "s") + " to the publish queue — " + n + " pending.");
   }
   // uio-E-C08 (EDIT-15): reflect the pending queue count on the Edit header's "Send to publish"
   // button, so the destination + its backlog are legible without opening the Publish stage.
@@ -1742,7 +1966,7 @@
     head.appendChild(actions);
     host.appendChild(head);
     syncSendToPublishCount(); // uio-E-C08: keep the Edit header's count in step with every queue change
-    renderToolbarPipeline(); // fill #publish-io with the "Import & export" menu
+    renderToolbarPipeline(); // fill #publish-io with the Format control + its export overflow
     // uio-P-C03 (PUB-10): the queue scrolls in its own region so Release history can take the space
     // the queue isn't using — the pane no longer scrolls as one long strip with history off-screen.
     var scroller = h("div", "publish-queue__body");
@@ -1765,6 +1989,21 @@
         openPublishPresetMenu(r.id, rr.left, rr.bottom + 4);
       });
       meta.appendChild(chip);
+      // uio-P-C07 (PUB-05): destination + resolved filename, in the same chip family as the preset
+      // beside them. The destination chip is a plain span, not a button — with Downloads the only
+      // place a run can write, a menu would open on one already-chosen item. Its tooltip says so,
+      // so nothing here is a click that quietly does nothing.
+      var dest = publishDestinationFor(PUBLISH_DESTINATIONS, r);
+      if (dest) {
+        var dchip = h(publishDestinationPickable(PUBLISH_DESTINATIONS) ? "button" : "span",
+          "publish-chip" + (publishDestinationPickable(PUBLISH_DESTINATIONS) ? "" : " publish-chip--static"), dest.label);
+        dchip.title = "Destination · " + dest.why;
+        meta.appendChild(dchip);
+      }
+      if (publishShowsFilename(r)) {
+        var fname = publishRowFilename(window.SCORMExport && window.SCORMExport.packageName, publishOptionsForRow(r));
+        if (fname) { var fEl = h("span", "publish-queuerow__file", fname); fEl.title = "Writes " + fname; meta.appendChild(fEl); }
+      }
       meta.appendChild(h("span", "publish-queuerow__status", publishStatusLabel(r)));
       main.appendChild(meta);
       row.appendChild(main);
@@ -11276,30 +11515,66 @@
   // in mountTopBar). The secondary IO (Import CSV, Publish to Viewer, JSON backup)
   // stays in the ⋯ overflow, now the DS IconButton. Re-skin only — Export fires
   // the same registered accent pipeline handler; the overflow menu is unchanged.
-  // side-rail-cleanup slice 2: the Import/Export pipeline is RELOCATED off the rail onto the Publish
-  // stage. It renders into #publish-io (built in the queue-pane head) as ONE "Import & export" menu
-  // holding every registered pipeline action -- including the accent SCORM export, which no longer
-  // needs its own glyph because the queue's Publish button is the primary export. Callers that used
-  // to keep the rail glyph in sync (registerPipelineButton) still re-render this menu.
+  // side-rail-cleanup slice 2: the Import/Export pipeline was RELOCATED off the rail onto the Publish
+  // stage, into #publish-io (built in the queue-pane head).
+  // uio-P-C05 (PUB-13): it is no longer an "Import & export" grab-bag. Import belongs to Source, so
+  // the pane's named control is now FORMAT — it states the format the queue will emit without
+  // opening anything, and its menu lists the other formats once with their "soon" state. The
+  // remaining outbound/workspace actions keep a home in a quiet ... overflow beside it.
+  // Callers that kept the old menu in sync (registerPipelineButton) still re-render this.
   function renderToolbarPipeline() {
     var host = document.getElementById("publish-io"); if (!host) return;
     host.innerHTML = "";
     var U = window.VersoUI;
-    function openMenu(anchor) {
-      var items = pipelineButtons.map(function (b) { return { label: b.label, onClick: b.onClick }; });
-      items.push({ sep: true });
-      items.push({ label: "Publish to Viewer…", onClick: function () { publishToViewer(); } }); // not a registered pipeline button
-      var r = anchor.getBoundingClientRect();
-      showContextMenu(r.right, r.bottom + 4, items);
-    }
+    var summary = publishQueueFormat();
+    var fmtLabel = "Format: " + summary.label;
+    var fmtTitle = summary.mixed
+      ? "The queued documents use presets that ask for different formats"
+      : "Output format, set by each document's output preset";
     var btn;
     if (U && U.Button) {
-      btn = U.Button({ variant: "secondary", size: "sm", icon: "upload", iconRight: "chevron-down", label: "Import & export", title: "Import / export course data", onClick: function () { openMenu(btn); } });
+      btn = U.Button({ variant: "secondary", size: "sm", icon: "file-text", iconRight: "chevron-down", label: fmtLabel, title: fmtTitle, onClick: function () { openPublishFormatMenu(btn); } });
     } else {
-      btn = h("button", "tool"); btn.type = "button"; btn.textContent = "Import & export"; btn.title = "Import / export course data";
-      btn.addEventListener("click", function () { openMenu(btn); });
+      btn = h("button", "tool"); btn.type = "button"; btn.textContent = fmtLabel; btn.title = fmtTitle;
+      btn.addEventListener("click", function () { openPublishFormatMenu(btn); });
     }
     host.appendChild(btn);
+    var outbound = pipelineByDirection(pipelineButtons, "export");
+    if (U && U.IconButton) {
+      var ov = U.IconButton({ icon: "more-horizontal", label: "Other export actions", onClick: function () {
+        var r = ov.getBoundingClientRect();
+        var items = outbound.map(function (b) { return { label: b.label, onClick: b.onClick }; });
+        items.push({ sep: true });
+        items.push({ label: "Publish to Viewer…", onClick: function () { publishToViewer(); } }); // not a registered pipeline button
+        showContextMenu(r.right, r.bottom + 4, items);
+      } });
+      host.appendChild(ov);
+    }
+  }
+  // The format the pending queue will emit, read from each row's resolved preset options.
+  function publishQueueFormat() {
+    var SX = window.SCORMExport, PQ = window.PublishQueue;
+    var fmts = (SX && SX.formats) ? SX.formats() : [];
+    var base = (SX && SX.defaultOptions) ? (SX.defaultOptions().format || "") : "";
+    var rows = (PQ && PQ.pendingRows) ? PQ.pendingRows(publishQueue()) : [];
+    var values = rows.map(function (r) { return publishOptionsForRow(r).format || base; });
+    return publishFormatSummary(fmts, values, base);
+  }
+  // Every format listed ONCE: the emitted one marked selected, the rest greyed with a "Soon" state
+  // (never re-labelled "(soon)" per entry). Nothing here sets the format — the menu ends by naming
+  // where it IS set, the row's output preset.
+  function openPublishFormatMenu(anchor) {
+    var SX = window.SCORMExport;
+    var fmts = (SX && SX.formats) ? SX.formats() : [];
+    var summary = publishQueueFormat();
+    var items = [{ head: "Output format" }];
+    publishFormatRows(fmts, summary.value).forEach(function (f) {
+      items.push({ label: f.label, active: f.selected, hint: f.hint, disabled: !f.available });
+    });
+    items.push({ sep: true });
+    items.push({ head: "Set by the output preset on each queued document." });
+    var r = anchor.getBoundingClientRect();
+    showContextMenu(r.right, r.bottom + 4, items);
   }
 
   // Issue #12 (parent #22) — re-skin the editor top bar to the DS. Hydrate the
@@ -11767,7 +12042,14 @@
     if (!sourceMasterFor(activeSourceProductId())) {
       row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
     }
-    row.appendChild(U.IconButton({ icon: "download", label: "Import from Markdown…", onClick: importMarkdownModal }));
+    // uio-P-C05 (PUB-13): import is a SOURCE action. This one button now opens the whole inbound
+    // set — Markdown plus every registered import pipeline that used to sit on the Publish pane —
+    // so nothing is duplicated and the Publish pane is left to what it sends out.
+    row.appendChild(U.IconButton({ icon: "download", label: "Import…", onClick: function (ev) {
+      var t = (ev && (ev.currentTarget || ev.target)) || null;
+      var r = t && t.getBoundingClientRect ? t.getBoundingClientRect() : { left: 0, bottom: 0 };
+      openSourceImportMenu(r.left, r.bottom + 4);
+    } }));
     host.appendChild(row);
     // uio-S-C05 (SRC-13): product-scope actions (incl. the destructive delete-document / delete-
     // product) live in the FOOTER strip, away from navigation, so they read as acting on the
@@ -11785,6 +12067,16 @@
         footer.appendChild(frow);
       }
     }
+  }
+  // uio-P-C05 (PUB-13): the Source stage's one inbound menu. Markdown first (the everyday path),
+  // then every action a module registered with an "Import" name — routed to the SAME handler the
+  // Publish pane used to call, so no importer is rebuilt or duplicated here.
+  function openSourceImportMenu(x, y) {
+    var items = [{ head: "Import" }, { label: "Markdown…", onClick: importMarkdownModal }];
+    var inbound = pipelineByDirection(pipelineButtons, "import");
+    if (inbound.length) items.push({ sep: true });
+    inbound.forEach(function (b) { items.push({ label: importMenuLabel(b.label), onClick: b.onClick }); });
+    showContextMenu(x, y, items);
   }
   // Product/source lifecycle menu (Source stage). Destructive items are confirm-gated; on delete we
   // reset the active Product + re-render so the stage never points at a document that no longer exists.
@@ -23990,11 +24282,17 @@
       try { return window.renderPage(rp, activeTheme(), window.resolveHeaderFooter(rdoc, rp)); }
       finally { if (__rm) __rm(); }
     },
-    registerPipelineButton: function (label, onClick, accent) {
-      pipelineButtons.push({ label: label, onClick: onClick, accent: accent });
+    // uio-P-C05: `opts.direction` ("import" | "export") declares which stage the action belongs to.
+    // Omit it and the direction is guessed from the label, so every existing caller keeps working;
+    // declare it and the guess is never consulted. Anything inbound should declare it.
+    registerPipelineButton: function (label, onClick, accent, opts) {
+      var declared = opts && opts.direction;
+      pipelineButtons.push({ label: label, onClick: onClick, accent: accent, direction: PIPELINE_DIRECTIONS.indexOf(declared) !== -1 ? declared : null });
       var mount = document.getElementById("sidebar-pipeline-mount");
       if (mount) renderPipelineButtons(mount);
       renderToolbarPipeline(); // D6: keep the primary top-bar Export + ⋯ overflow in sync
+      // uio-P-C05: an import registered after boot has to reach the Source stage's Import menu too.
+      if (__activeStage === "source") renderSourceToolbar();
     },
     // Interact-mode test/automation hooks (used by the headless function tests
     // and any harness that needs to drive Interact mode programmatically).
@@ -24167,6 +24465,9 @@
       ".ctx-item--danger:hover{background:rgba(255,107,107,.16);color:#ff6b6b;}" +
       ".ctx-item--active{color:#0d99ff;font-weight:600;}" +
       ".ctx-item--active:hover{color:#fff;}" +
+      ".ctx-item--disabled{color:#8a8a8a;cursor:default;}" +
+      ".ctx-item--disabled:hover{background:transparent;color:#8a8a8a;}" +
+      ".ctx-item__hint{margin-left:auto;padding-left:14px;font-size:11px;color:#8a8a8a;}" +
       ".ctx-sep{height:1px;background:#3a3a3a;margin:5px 8px;}" +
       ".ctx-head{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0;color:#8a8a8a;}" +
       ".canvas.is-variant-preview{outline:2px solid #8e44ad;outline-offset:-2px;}" +
@@ -24181,8 +24482,11 @@
     items.forEach(function (it) {
       if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
       if (it.head) { m.appendChild(h("div", "ctx-head", it.head)); return; }
-      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : ""), it.label);
-      el.addEventListener("click", function () { closeCtxMenu(); it.onClick(); });
+      // uio-P-C05: `disabled` + `hint` complete the DS ContextMenu contract — an entry can be listed
+      // as unavailable, with a trailing state word ("Soon"), instead of being hidden or renamed.
+      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""), it.label);
+      if (it.hint) el.appendChild(h("span", "ctx-item__hint", it.hint));
+      if (!it.disabled) el.addEventListener("click", function () { closeCtxMenu(); if (it.onClick) it.onClick(); });
       m.appendChild(el);
     });
     document.body.appendChild(m);

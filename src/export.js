@@ -735,12 +735,16 @@
   // ---- export options + versioning -----------------------------------------
   // Only SCORM 1.2 is emitted today; `format` is a seam for future targets
   // (SCORM 2004, xAPI, plain web) selectable in the modal.
+  // uio-P-C05 (PUB-13): the "soon" state is DATA (`enabled: false`), not glued into the label, so
+  // every surface that lists the formats states availability the same way. formats() is the one
+  // published list -- the Publish stage's Format control reads it instead of keeping its own copy.
   var FORMATS = [
     { value: "scorm12", label: "SCORM 1.2", enabled: true },
-    { value: "scorm2004", label: "SCORM 2004 (soon)", enabled: false },
-    { value: "xapi", label: "xAPI / Tin Can (soon)", enabled: false },
-    { value: "web", label: "Standalone web (soon)", enabled: false }
+    { value: "scorm2004", label: "SCORM 2004", enabled: false },
+    { value: "xapi", label: "xAPI / Tin Can", enabled: false },
+    { value: "web", label: "Standalone web", enabled: false }
   ];
+  function formats() { return FORMATS.map(function (f) { return { value: f.value, label: f.label, enabled: f.enabled }; }); }
   function defaultOptions() {
     return { format: "scorm12", version: "V001", embedFonts: true, scrollbar: true, learnerTheme: false, webVideo: "link", variant: null, reviewFile: false, optimiseMedia: true, maxImageDim: 2000, imageQuality: 0.85, externalizeMedia: true };
   }
@@ -761,8 +765,12 @@
   }
   function saveVersion(v) { try { localStorage.setItem(verKey(), v); } catch (e) {} }
   function fileSafe(s) { return String(s).replace(/[^A-Za-z0-9_.-]/g, "_"); }
+  // uio-P-C07 (PUB-05): `opts.code` lets a caller name the package for a document OTHER than the
+  // one currently open — the publish queue shows each row its filename before it switches to that
+  // document to build it. buildPackage is handed the SAME options object, so the name a row
+  // promises and the name that gets written come from one call and cannot disagree.
   function packageName(opts) {
-    var parts = [fileSafe(docCode())];
+    var parts = [fileSafe((opts && opts.code) || docCode())];
     if (opts.version) parts.push(fileSafe(opts.version));
     if (opts.variant) parts.push(fileSafe(opts.variant)); // flagship omits the tag
     parts.push("SCORM");
@@ -1200,7 +1208,7 @@
     section("Format");
     var fmtRow = row("Package type");
     var sel = elh("select", "prop-select modal-field__control");
-    FORMATS.forEach(function (f) { var o = elh("option", null, f.label); o.value = f.value; if (!f.enabled) o.disabled = true; if (f.value === opts.format) o.selected = true; sel.appendChild(o); });
+    FORMATS.forEach(function (f) { var o = elh("option", null, f.label + (f.enabled ? "" : " (soon)")); o.value = f.value; if (!f.enabled) o.disabled = true; if (f.value === opts.format) o.selected = true; sel.appendChild(o); });
     sel.addEventListener("change", function () { opts.format = sel.value; });
     fmtRow.appendChild(sel);
 
@@ -1341,7 +1349,7 @@
   }
 
   // expose builders + the whole assemble path for headless testing / driving
-  window.SCORMExport = { makeZip: makeZip, crc32: crc32, themeCss: themeCss, manifest: manifest, tokenBody: tokenBody, buildPackage: buildPackage, defaultOptions: defaultOptions, suggestVersion: suggestVersion, packageName: packageName, variantList: variantList };
+  window.SCORMExport = { makeZip: makeZip, crc32: crc32, themeCss: themeCss, manifest: manifest, tokenBody: tokenBody, buildPackage: buildPackage, defaultOptions: defaultOptions, formats: formats, suggestVersion: suggestVersion, packageName: packageName, variantList: variantList };
 
   window.Editor.registerPipelineButton("Export SCORM", showExportModal, true);
 })();

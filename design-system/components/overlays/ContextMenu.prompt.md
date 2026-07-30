@@ -10,3 +10,7 @@
 ```
 
 - Use `"-"` for a divider; `danger` for destructive items.
+- `disabled` + `hint` list an entry that exists but cannot be chosen yet — the entry stays in
+  place, greyed, with a trailing state word in tertiary ink (`{ label: "SCORM 2004", disabled:
+  true, hint: "Soon" }`). Never fold the state into the label ("SCORM 2004 (soon)") and never drop
+  the entry: the point is that the whole set is stated once, in one place.

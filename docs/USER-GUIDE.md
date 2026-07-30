@@ -24,8 +24,8 @@ Build and export your first course in a few minutes.
    **Paragraph**. Click the text on the canvas and type.
 4. **Preview it.** Click **▶ Demo** (or press ⌘P) to see the page exactly as a learner will.
    Press **Esc** to return.
-5. **Export it.** On the **Publish** stage, open the **Import & export** menu (beside the Publish
-   button) → **Export SCORM**. Upload the `.zip` to Moodle as a SCORM activity.
+5. **Export it.** On the **Publish** stage, add the document to the queue and press **Publish**.
+   Upload the `.zip` to Moodle as a SCORM activity.
 
 > **Reassurance.** You can't lose work by exploring — every edit autosaves, and ⌘Z undoes.
 > There's no "save" button for normal editing.
@@ -532,7 +532,7 @@ whatever you were previewing at the moment you detached, not the master's flagsh
 
 ## 11. Importing from a spreadsheet (CSV)
 
-For bulk content, use the **Publish** stage's **Import & export** menu → **Import CSV**. Verso reads a
+For bulk content, use the **Source** stage's **Import** button → **CSV**. Verso reads a
 flat schema (`Page, Location, Path, Field, Type, Value`) and builds pages, blocks, and native quizzes.
 
 - See `SCHEMA-TEMPLATE-GUIDE.md` and `course_schema_template.csv` in the app folder for the
@@ -601,10 +601,10 @@ or dismiss it.
 
 ## 15. Publishing to SCORM
 
-On the **Publish** stage, the **Import & export** menu → **Export SCORM** builds a SCORM 1.2 `.zip`.
+On the **Publish** stage, queue the document and press **Publish** to build a SCORM 1.2 `.zip`.
 All fonts, images, and HTML interactions are embedded, so the package is self-contained and runs
-offline. Upload the `.zip` to Moodle as a SCORM activity. (The queue's **Publish** button does the same
-SCORM packaging for one or many queued documents at once.)
+offline. Upload the `.zip` to Moodle as a SCORM activity. (The older one-off **Export SCORM** dialog,
+with its full option list, is still there under the **⋯** button beside **Format**.)
 
 **For air-gapped Moodle,** run the **`/publish`** prep on the exported package before uploading —
 it embeds the Exo 2 fonts and forces an always-visible scrollbar (`scripts/scorm-publish.sh`).
@@ -681,8 +681,10 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   Since replacing edits the base prose, it's available only when the source is **unlocked**; locked,
   the row is disabled and states the reason. Replace is case-insensitive (it matches the find) and
   undoable as a single step; range marks (comments, alternates) ride the edit.
-- **The one action left in the rail is Import from Markdown.** Because there's one document, the old
-  per-topic tools — new topic, select, delete, move, reorder topics — are gone. Import is now
+- **The one action left in the rail is Import.** Because there's one document, the old
+  per-topic tools — new topic, select, delete, move, reorder topics — are gone. The **Import** button
+  is where everything comes into Verso: **Markdown** (below), plus **CSV** (§11) and **Schema**, which
+  used to sit on the Publish stage. Markdown import is now
   **additive**: pick a Markdown file (it can be a segment — just one chapter), and Verso shows a
   **preview** first — which chapters it will **add** and which existing chapters it will **update**
   (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
@@ -941,13 +943,21 @@ a refresh and a stage-switch.
   **Add current document** at the top to queue the document you have open. A solo export is just a
   queue of one.
 - **Send straight from the editor.** You don't have to switch stages first: the **send** glyph in the
-  editor header (also on the top-bar **Import & export** ⋯ menu as **Send to publish queue**) drops the
+  editor header (also in the Publish head's **⋯** menu as **Send to publish queue**) drops the
   document you're editing into the queue with its remembered preset — no configuration — and confirms
   with a small toast showing how many are now pending. Sending a document that's already queued re-arms
   its row rather than adding a second. Queue a few in a row, then switch to Publish and run them.
 - **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
   **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
   that's already queued re-arms it rather than duplicating it.
+- **Where it goes, and what it will be called.** Every queue row states its destination on a
+  **Downloads** chip, and next to it the exact file name that row will write, before you press
+  Publish — for example `SAFE-101_V001_SCORM.zip`. Change the row's preset and the name changes with
+  it, so you can see what you're about to get. The name comes from the exporter itself, so what the
+  row promises is what lands. Once a row has run, its status carries the real result and the
+  prediction steps aside. **Downloads** is the only destination for now: the chip states it rather
+  than opening a menu, and hovering it says why. Choosing a save folder, and naming your own
+  destinations to reuse, are still to come.
 - **Out-of-date badge.** A document row in the left list shows a small count chip when linked source
   topics have changed since that document was last published — e.g. a **2** means two of its linked
   source topics were edited since its last export. It's informational only: it never blocks or warns,
@@ -963,6 +973,14 @@ a refresh and a stage-switch.
   in: **Master** (full quality), **Review copy** (adds the reviewer file, learner theme off), and
   **Lightweight** (optimises media hard for a smaller package). Presets are shared across the app, and
   each document remembers the preset it last used, so re-queuing it is one click.
+- **Format.** Beside the Publish button, a **Format** control states the format the queue will emit —
+  today that is **SCORM 1.2**. Open it to see the whole list once: the formats Verso can't emit yet
+  (SCORM 2004, xAPI / Tin Can, standalone web) are greyed and marked **Soon**. Format is part of a
+  row's output preset, so this control states it rather than setting it; if you queue documents whose
+  presets ask for different formats, it reads **Mixed**. The **⋯** button beside it holds the
+  occasional export jobs that aren't the queue: the one-off **Export SCORM** dialog, **Export .verso**,
+  **Export JSON**, **Export Schema**, **Publish to Viewer** and **Reset Workspace**.
+  **Importing has moved to the Source stage** — the Publish stage only sends work out.
 - **Publish.** One **Publish** button runs every pending row in turn: each is packaged as a SCORM
   `.zip` (using that row's preset) and downloaded. Done rows stay in the queue, greyed, with their
   result — the queue isn't cleared, so you can see what shipped.
@@ -986,6 +1004,20 @@ a refresh and a stage-switch.
   That's usually the fastest way to tell whether a re-publish is needed at all. The line is read
   from the release record, so it can never disagree with the history beside it — and a run that
   failed doesn't count as published.
+
+- **Queueing several at once.** Every row in the Documents list has a **tick box**. Tick the documents
+  you want and press **Queue selected (N)** at the bottom of the list — they all go into the queue in
+  one action, each with its own remembered preset, and you get one confirmation instead of one per
+  document. **Select all** ticks everything currently shown. The button stays greyed out until you
+  tick something, and says so if you hover it. The ticks clear once the batch is queued.
+  The per-row **+** still works exactly as before for adding a single document.
+- **Searching never loses your ticks.** Search, the **Needs attention** filter and the sort control
+  change what the list shows, never what you've ticked — so you can tick five documents, search for
+  a sixth, and still have all five. When the current search or filter is hiding part of your
+  selection, the bottom of the list says so ("3 selected · 2 hidden by search") and offers **Clear**
+  to drop the whole selection, hidden documents included. **Queue selected (3)** queues all three,
+  including the two you can't see: that's what you ticked, and the line above the button says it
+  will. Ticks are for the session only; they aren't saved with the document.
 
 This is an early view — a chosen save folder and staleness dots arrive in later updates.
 

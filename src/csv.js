@@ -453,5 +453,5 @@
   // expose the pure pieces + the end-to-end import for headless testing
   window.CSVBind = { parseCSV: parseCSV, buildRecords: buildRecords, recordToSlots: recordToSlots, findTargetGrid: findTargetGrid, fieldMatchesSlot: fieldMatchesSlot, importText: showMappingDialog };
 
-  window.Editor.registerPipelineButton("Import CSV", pick);
+  window.Editor.registerPipelineButton("Import CSV", pick, false, { direction: "import" }); // uio-P-C05: inbound -> the Source stage's Import menu
 })();

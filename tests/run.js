@@ -7833,10 +7833,10 @@ section("panel system v2 — layout engine");
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
   // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
-  // stage as ONE "Import & export" menu into #publish-io, listing EVERY pipeline action (the SCORM
-  // export included -- the queue's Publish button is the primary export, so no separate Export glyph).
-  ok("renderToolbarPipeline renders one 'Import & export' menu into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)[\s\S]*?label: "Import & export"/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
-  ok("the menu lists every registered pipeline action + Publish to Viewer", /var items = pipelineButtons\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
+  // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
+  // control plus an overflow of the outbound actions, and Source took the imports.
+  ok("renderToolbarPipeline renders into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
+  ok("the overflow lists every OUTBOUND pipeline action + Publish to Viewer", /var items = outbound\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
   ok("#pipeline-actions is gone from the rail (relocated to the Publish stage)", !/id="pipeline-actions"/.test(src("index.html")) && !/left-rail__pipeline/.test(src("index.html")));
   ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,260}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
@@ -8889,7 +8889,8 @@ section("Product Rail: Publish presets (T2)");
   ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
 
   // T4: one shared addToQueue action + the Edit-stage top-bar entry point
-  ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
+  // uio-P-C06 added an options argument (quiet batching); the one shared action is unchanged.
+  ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId, opts\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
   ok("the shared action recalls the doc's last-used preset and toasts the pending count", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e) && /publishToast\("Added to the publish queue/.test(e));
   ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
   // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
@@ -9040,8 +9041,10 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(e) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(e));
+  // uio-P-C05: the Import button now opens the whole inbound menu (Markdown + the registered
+  // import pipelines that used to sit on the Publish pane); Markdown is still its first entry.
   ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
-    /row\.appendChild\(U\.IconButton\(\{ icon: "download", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
+    /icon: "download", label: "Import…"/.test(e) && /label: "Markdown…", onClick: importMarkdownModal/.test(e));
   ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
 
   // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
@@ -9105,7 +9108,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
       && !/function deleteSelectedTopics/.test(e) && !/function moveSelectedTopicsModal/.test(e)
       && !/function topicNeedsReview/.test(e) && !/function structMoveTopic/.test(e) && !/function exitSelectMode/.test(e);
   })());
-  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,700}icon: "download", label: "Import from Markdown/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
+  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
 
   // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
   // confirms with the author first, and covers both "no ambiguity" fast-paths.
@@ -9842,7 +9845,7 @@ section("uio-S-C05: Source product actions moved to a rail footer strip");
   var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
   ok("the Source nav has a footer strip element", /id="source-stage-nav-footer"/.test(html) && /\.source-stage__nav-footer \{[^}]*border-top: 1px solid/.test(css));
   ok("Product actions render into the footer (not the top toolbar row)", /source-stage-nav-footer"\);[\s\S]{0,320}label: "Product actions"[\s\S]{0,400}footer\.appendChild/.test(e));
-  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,160}"Import from Markdown…"[\s\S]{0,80}host\.appendChild\(row\)/.test(e));
+  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,400}label: "Import…"[\s\S]{0,300}host\.appendChild\(row\)/.test(e));
 })();
 
 // uio-S-C03 (SRC-03): mark cards never overlap the prose — while any card is open the article
@@ -9869,6 +9872,74 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
   ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(e) && /if \(unified && __sourceReplaceOpen\) \{/.test(e));
   // when locked, the row disables the inputs/buttons + states the reason
   ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
+})();
+
+// uio-P-C05 (PUB-13): "Import & export" put an INBOUND pipeline on the publish screen, beside the
+// Publish button, and buried the output formats in a menu whose label was half irrelevant. Import
+// moves to Source; the pane's named control becomes Format, which states what will be emitted and
+// lists the unavailable formats once with a "soon" state.
+section("uio-P-C05: format control on Publish, import on Source");
+(function () {
+  var e = src("src/editor.js"), x = src("src/export.js"), css = src("editor.css"), ds = src("design-system/components/overlays/ContextMenu.d.ts");
+  var m = e.match(/\/\* @publish-format-start \*\/([\s\S]*?)\/\* @publish-format-end \*\//);
+  if (!m) { ok("locate @publish-format fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { pipelineDirection: pipelineDirection, pipelineDirectionOf: pipelineDirectionOf, pipelineByDirection: pipelineByDirection, importMenuLabel: importMenuLabel, publishFormatRows: publishFormatRows, publishFormatSummary: publishFormatSummary };")();
+
+  // --- direction is DECLARED at registration; the label is only the fallback ---
+  ok("a declared direction wins over the label", g.pipelineDirectionOf({ label: "Import CSV", direction: "export" }) === "export" && g.pipelineDirectionOf({ label: "Ingest CSV", direction: "import" }) === "import");
+  ok("an undeclared action still falls back to its label", g.pipelineDirectionOf({ label: "Import CSV" }) === "import" && g.pipelineDirectionOf({ label: "Export JSON" }) === "export");
+  ok("a junk direction is ignored rather than trusted", g.pipelineDirectionOf({ label: "Import CSV", direction: "sideways" }) === "import" && g.pipelineDirectionOf({ label: "Export JSON", direction: null }) === "export");
+  ok("the seam accepts a direction and only stores a valid one", /registerPipelineButton: function \(label, onClick, accent, opts\)/.test(e) && /direction: PIPELINE_DIRECTIONS\.indexOf\(declared\) !== -1 \? declared : null/.test(e));
+  ok("the inbound registrations declare themselves (they don't rely on the guess)", /registerPipelineButton\("Import CSV", pick, false, \{ direction: "import" \}\)/.test(src("src/csv.js")) && /registerPipelineButton\("Import Schema", importSchema, false, \{ direction: "import" \}\)/.test(src("src/schema.js")));
+
+  // --- the label fallback itself, for callers that never declare ---
+  ok("an Import-named action is inbound, everything else outbound", g.pipelineDirection("Import CSV") === "import" && g.pipelineDirection("Import Schema") === "import" && g.pipelineDirection("Export SCORM") === "export" && g.pipelineDirection("Reset Workspace") === "export");
+  ok("'Important' is not an import (the word boundary is real)", g.pipelineDirection("Important notes") === "export");
+  ok("a missing label degrades to outbound, so nothing silently lands on Source", g.pipelineDirection(null) === "export" && g.pipelineDirection("") === "export");
+  var btns = [{ label: "Import CSV", direction: "import" }, { label: "Export SCORM" }, { label: "Import Schema" }, { label: "Export JSON" }];
+  ok("declared and guessed entries split into the same two halves, losing nothing", g.pipelineByDirection(btns, "import").length === 2 && g.pipelineByDirection(btns, "export").length === 2);
+  ok("junk entries never crash the split", g.pipelineByDirection([null, undefined], "export").length === 0 && g.pipelineByDirection(null, "import").length === 0);
+
+  // --- menu copy: under an "Import" head the prefix is noise; every import opens a picker ---
+  ok("the prefix is dropped and an ellipsis added", g.importMenuLabel("Import CSV") === "CSV…" && g.importMenuLabel("Import Schema") === "Schema…");
+  ok("an entry that already ends in an ellipsis is left alone", g.importMenuLabel("Import from Markdown…") === "from Markdown…");
+  ok("a label that is only the word Import survives as itself", g.importMenuLabel("Import") === "Import…");
+
+  // --- formats stated ONCE, with availability as a state rather than a renamed label ---
+  var fmts = [{ value: "scorm12", label: "SCORM 1.2", enabled: true }, { value: "scorm2004", label: "SCORM 2004", enabled: false }, { value: "xapi", label: "xAPI / Tin Can", enabled: false }];
+  var rowsF = g.publishFormatRows(fmts, "scorm12");
+  ok("every format is listed, none hidden", rowsF.length === 3);
+  ok("the emitted format is marked selected and available", rowsF[0].selected === true && rowsF[0].available === true && rowsF[0].hint === "");
+  ok("unavailable formats carry a plain 'Soon' state, not a renamed label", rowsF[1].hint === "Soon" && rowsF[1].label === "SCORM 2004" && rowsF[1].available === false);
+  ok("the exporter's own list stopped gluing '(soon)' into the names", /\{ value: "scorm2004", label: "SCORM 2004", enabled: false \}/.test(x) && !/label: "[^"]*\(soon\)"/.test(x));
+  ok("the export modal still says 'soon' where it renders the option", /f\.label \+ \(f\.enabled \? "" : " \(soon\)"\)/.test(x));
+  ok("the format list is published once, for every surface to read", /function formats\(\)/.test(x) && /formats: formats,/.test(x) && /SX\.formats\(\)/.test(e));
+
+  // --- the stated format is READ from the presets; it is never a second setting ---
+  ok("an empty queue states the default format", g.publishFormatSummary(fmts, [], "scorm12").label === "SCORM 1.2");
+  ok("rows that agree state that one format", g.publishFormatSummary(fmts, ["scorm12", "scorm12"], "scorm12").label === "SCORM 1.2");
+  ok("rows whose presets disagree read Mixed, rather than picking a winner", g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").mixed === true && g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").label === "Mixed");
+  ok("an unknown format id still states something, not a blank", g.publishFormatSummary(fmts, ["mystery"], "scorm12").label === "mystery");
+  ok("the summary is derived from each row's resolved preset options", /var values = rows\.map\(function \(r\) \{ return publishOptionsForRow\(r\)\.format \|\| base; \}\);/.test(e));
+  ok("the Publish pane sets no format of its own (the menu only states where it is set)", /items\.push\(\{ head: "Set by the output preset on each queued document\." \}\);/.test(e) && !/opts\.format =/.test(e));
+
+  // --- the pane's control ---
+  ok("#publish-io holds a Format control stating the selected format", /var fmtLabel = "Format: " \+ summary\.label;/.test(e) && /label: fmtLabel, title: fmtTitle, onClick: function \(\) \{ openPublishFormatMenu\(btn\); \}/.test(e));
+  ok("the 'Import & export' button is gone from the Publish pane", !/label: "Import & export"/.test(e));
+  ok("the outbound leftovers keep a home in a quiet overflow, not the named control", /var outbound = pipelineByDirection\(pipelineButtons, "export"\);/.test(e) && /label: "Other export actions"/.test(e));
+  ok("the head lays the Format control out beside its overflow", /\.publish-io \{ display: inline-flex; align-items: center; gap: 4px; \}/.test(css));
+
+  // --- import now lives on Source, routed to the SAME handlers (no second importer) ---
+  ok("the Source rail's one Import button opens the inbound menu", /label: "Import…", onClick: function \(ev\)[\s\S]{0,220}openSourceImportMenu\(r\.left, r\.bottom \+ 4\)/.test(e));
+  ok("the menu leads with Markdown, then every registered import", /function openSourceImportMenu\(x, y\) \{[\s\S]{0,120}label: "Markdown…", onClick: importMarkdownModal[\s\S]{0,220}pipelineByDirection\(pipelineButtons, "import"\)/.test(e));
+  ok("it reuses each registered handler rather than rebuilding an importer", /items\.push\(\{ label: importMenuLabel\(b\.label\), onClick: b\.onClick \}\)/.test(e));
+  ok("an import registered after boot still reaches the Source menu", /if \(__activeStage === "source"\) renderSourceToolbar\(\);/.test(e));
+
+  // --- the menu primitive grew the states this needs, per the DS contract ---
+  ok("showContextMenu supports disabled + a trailing hint", /\(it\.disabled \? " ctx-item--disabled" : ""\)/.test(e) && /if \(it\.hint\) el\.appendChild\(h\("span", "ctx-item__hint", it\.hint\)\);/.test(e));
+  ok("a disabled entry is not clickable and a missing handler cannot throw", /if \(!it\.disabled\) el\.addEventListener\("click", function \(\) \{ closeCtxMenu\(\); if \(it\.onClick\) it\.onClick\(\); \}\);/.test(e));
+  ok("the disabled + hint states are styled", /\.ctx-item--disabled\{/.test(e) && /\.ctx-item__hint\{/.test(e));
+  ok("the DS ContextMenu contract documents the hint", /hint\?: string;/.test(ds));
 })();
 
 // uio-P-C04 (PUB-12): the picker had no scope, count, search or sort — only alphabetical — so the
@@ -9936,6 +10007,85 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
   ok("an empty RESULT reads differently from an empty product", /all\.length\s*\n?\s*\? "No document matches that\."/.test(e));
 })();
 
+// uio-P-C06 (PUB-04): bulk publishing had no bulk controls — a dozen documents meant a dozen "+"
+// clicks. The picker rows now lead with a tick box and the pane ends with "Queue selected (N)".
+// The rule the whole feature rests on: filtering is a LENS, never an edit. Search, filter and sort
+// leave the selection alone, and the footer states how much of it the current lens is hiding.
+section("uio-P-C06: picker multi-select + queue selected");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  var m = e.match(/\/\* @publish-sel-start \*\/([\s\S]*?)\/\* @publish-sel-end \*\//);
+  if (!m) { ok("locate @publish-sel fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { ids: publishSelectedIds, hiddenBy: publishHiddenBy, summary: publishSelectionSummary };")();
+
+  var rows = [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }, { id: "c", title: "Cara" }];
+  var sel = { a: true, c: true };
+  var sum = function (visible, opts) { return g.summary(sel, visible, rows, opts); };
+
+  ok("selected ids come back in the order the list gives them", g.ids(sel, rows).join() === "a,c");
+  ok("an empty selection selects nothing", g.ids({}, rows).length === 0 && g.ids(null, rows).length === 0);
+  ok("an id with no document behind it can never be queued", g.ids({ zzz: true }, rows).length === 0);
+  ok("junk rows degrade to an empty list, not a throw", g.ids(sel, null).length === 0 && g.ids(sel, [null]).length === 0);
+
+  // THE decision this ticket makes, reversed from the first cut: a tick SURVIVES search and filter.
+  // One incidental keystroke must not destroy five deliberate choices that cannot be undone. The
+  // hazard of queueing something off screen is answered by SAYING SO, not by throwing ticks away.
+  var hid = sum([rows[0]], { query: "alp" });
+  ok("a ticked row that is filtered away stays selected", hid.selected === 2 && hid.ids.join() === "a,c");
+  ok("the footer states how many of the selection are off screen", hid.hidden === 1 && hid.hiddenLabel === "2 selected · 1 hidden by search");
+  ok("the button offers to queue the WHOLE selection, hidden rows included", hid.queueLabel === "Queue selected (2)");
+  ok("nothing in the summary mutates the selection it was handed", (function () { g.summary(sel, [], rows, {}); return Object.keys(sel).sort().join() === "a,c"; })());
+  ok("hiding every ticked row still reports a live selection", (function () { var s = sum([rows[1]], { query: "bet" }); return s.selected === 2 && s.hidden === 2 && s.visible === 0; })());
+  ok("an empty visible list still reports the selection, so its footer can't vanish", sum([], { query: "zzz" }).selected === 2);
+
+  // the hidden line names the lens the author is actually using
+  ok("the lens is named the way the author would name it", g.hiddenBy("alp", "all") === "search" && g.hiddenBy("", "attention") === "the filter" && g.hiddenBy("alp", "attention") === "search and filter");
+  ok("with no lens on, nothing can be hidden by one", g.hiddenBy("", "all") === "the current view" && g.hiddenBy("   ", null) === "the current view");
+  ok("no hidden rows means no hidden line at all", sum(rows, {}).hiddenLabel === "" && sum(rows, {}).hidden === 0);
+
+  // --- select-all is the ONE deliberate asymmetry: it counts the VISIBLE rows ---
+  ok("some visible rows ticked reads as mixed, not on", sum(rows, {}).mixed === true && sum(rows, {}).all === false);
+  ok("every visible row ticked reads as on", g.summary({ a: 1, b: 1, c: 1 }, rows, rows, {}).all === true && g.summary({ a: 1, b: 1, c: 1 }, rows, rows, {}).mixed === false);
+  ok("nothing ticked is neither on nor mixed", g.summary({}, rows, rows, {}).all === false && g.summary({}, rows, rows, {}).mixed === false);
+  ok("an empty list is not 'all selected'", g.summary({}, [], rows, {}).all === false && g.summary({}, [], rows, {}).visibleTotal === 0);
+  ok("select-all counts only what is shown, even while rows are hidden", hid.visible === 1 && hid.visibleTotal === 1 && hid.all === true);
+
+  // --- the labels state the size of the action, and the reason when it can't run ---
+  var l0 = g.summary({}, rows, rows, {}), l2 = sum(rows, {});
+  ok("the button carries the count once something is ticked", l2.queueLabel === "Queue selected (2)" && l0.queueLabel === "Queue selected");
+  ok("select-all names the total, then switches to a progress count", l0.allLabel === "Select all 3" && l2.allLabel === "2 of 3 selected");
+  ok("a dead button states its reason; a live one has none", /^Tick documents above/.test(l0.reason) && l2.reason === "");
+  ok("the summary survives junk arguments", g.summary(null, null, null, null).selected === 0 && g.summary(null, null, null, null).queueLabel === "Queue selected");
+
+  // --- wiring: the render READS the selection; nothing in it writes back ---
+  ok("the render only reads the selection", /var sel = publishSelectionSummary\(__publishPickSel, docs, all, \{ query: __publishPickQuery, filter: __publishPickFilter \}\);/.test(e));
+  ok("no render path prunes the selection to the visible rows", !/__publishPickSel = publishSelectionInView/.test(e) && !/publishSelectionInView/.test(e));
+  ok("the picker rows are built once and shared by the render and the batch", /function publishPickRows\(\)/.test(e) && /var all = publishPickRows\(\);/.test(e) && /var ids = publishSelectedIds\(__publishPickSel, publishPickRows\(\)\);/.test(e));
+  ok("selection is session-only view state, like the search it lives beside", /var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title", __publishPickSel = \{\};/.test(e));
+
+  // --- the control is the canonical DS Checkbox, not a hand-rolled box ---
+  ok("each row leads with the canonical DS Checkbox", /if \(U && U\.Checkbox\) \{\s*\n\s*var box = U\.Checkbox\(\{\s*\n\s*checked: !!__publishPickSel\[d\.id\]/.test(e) && /box\.classList\.add\("publish-pickrow__sel"\)/.test(e));
+  ok("select-all uses the same Checkbox's mixed state", /U\.Checkbox\(\{\s*\n\s*checked: sel\.all, mixed: sel\.mixed, label: sel\.allLabel/.test(e) && /mixed\?: boolean;/.test(src("design-system/components/controls/Checkbox.d.ts")));
+  ok("select-all touches only the rows it shows, leaving hidden ticks alone", /docs\.forEach\(function \(r\) \{ if \(v\) __publishPickSel\[r\.id\] = true; else delete __publishPickSel\[r\.id\]; \}\);/.test(e));
+  ok("the DS checkbox ships at 14px, so the row needs no size of its own", /\.vds-check__box \{[^}]*width: 14px; height: 14px;/.test(css) && /\.publish-pickrow__sel \{ flex: 0 0 auto; \}/.test(css));
+
+  // --- the batch action: disabled with a stated reason, exactly like the Publish button ---
+  // a live selection with every row filtered away KEEPS its footer, or the ticks are stranded
+  ok("the footer survives as long as there is anything to select or anything selected", /if \(docs\.length \|\| sel\.selected\) \{\s*\n\s*var foot = h\("div", "publish-pick__foot"\);/.test(e));
+  ok("Queue selected is disabled and states why when nothing is ticked", /if \(!sel\.selected\) \{ qs\.setAttribute\("disabled", "disabled"\); qs\.title = sel\.reason; \}/.test(e));
+  ok("the hidden line offers one Clear for the whole selection, hidden rows included", /if \(sel\.hidden\) \{[\s\S]{0,400}__publishPickSel = \{\}; renderPublishPick\(\);/.test(e) && /U\.Button\(\{ variant: "ghost", size: "sm", label: "Clear"/.test(e));
+  ok("the footer is pinned under the scrolling list, on the pane's own inset", /\.publish-pick__foot \{ flex: 0 0 auto;[^}]*padding: 8px 12px; border-top: 1px solid var\(--border-subtle\); \}/.test(css));
+
+  // --- queueing a batch reuses the single-document path, and clears the ticks afterwards ---
+  ok("every selected document goes through the same addToQueue as the '+'", /ids\.forEach\(function \(id\) \{ addToQueue\(id, \{ quiet: true \}\); \}\);/.test(e));
+  ok("quiet suppresses the toast only — the queue is still saved per document", /if \(!\(opts && opts\.quiet\)\) publishToast\("Added to the publish queue/.test(e) && /function addToQueue\(docId, opts\) \{[\s\S]{0,400}savePublishQueue\(\);/.test(e));
+  ok("a batch confirms once, naming how many went in", /publishToast\("Added " \+ ids\.length \+ " document" \+ \(ids\.length === 1 \? "" : "s"\)/.test(e));
+  ok("the ticks are cleared after the batch is handed over", /ids\.forEach[\s\S]{0,80}__publishPickSel = \{\};\s*\n\s*renderPublishPick\(\);/.test(e));
+  ok("an empty selection queues nothing at all", /if \(!ids\.length\) return;/.test(e));
+  // multi-select is ADDITIVE: the per-row "+" is still there
+  ok("the per-row '+' still queues one document on its own", /label: "Add “" \+ d\.title \+ "” to the publish queue", onClick: function \(\) \{ addDocToPublishQueue\(d\.id\); \}/.test(e));
+})();
+
 // uio-P-C03 (PUB-10): release history answers "what did we ship?", so it fills the pane's empty
 // half instead of hiding collapsed below the queue — and every picker row states when that document
 // last actually went out.
@@ -9990,6 +10140,56 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
   ok("each picker row carries its last-published line", /wrap\.appendChild\(h\("div", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
   ok("never-published reads as a plain fact, not a warning", /if \(!last\) return "Never published";/.test(e));
   ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));
+})();
+
+// uio-P-C07 (PUB-05): a queue row said nothing about where its package goes or what it is called
+// until "Done · <name>" appeared after the run. Every row now states its destination and, before
+// the run, the exact filename it will write — taken from the exporter's own naming function so the
+// promise and the written file cannot disagree.
+section("uio-P-C07: destination chip + resolved filename on every queue row");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), ex = src("src/export.js");
+  var m = e.match(/\/\* @publish-dest-start \*\/([\s\S]*?)\/\* @publish-dest-end \*\//);
+  if (!m) { ok("locate @publish-dest fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { PUBLISH_DESTINATIONS: PUBLISH_DESTINATIONS, publishDestinationFor: publishDestinationFor, publishDestinationPickable: publishDestinationPickable, publishRowFilename: publishRowFilename, publishShowsFilename: publishShowsFilename };")();
+
+  // --- the one destination (Conservative tier) ---
+  ok("Downloads is the only destination there is", g.PUBLISH_DESTINATIONS.length === 1 && g.PUBLISH_DESTINATIONS[0].id === "download" && g.PUBLISH_DESTINATIONS[0].label === "Downloads");
+  ok("it carries a reason an author can read, not just a label", /downloads/i.test(g.PUBLISH_DESTINATIONS[0].why) && g.PUBLISH_DESTINATIONS[0].why.length > 20);
+  ok("every row resolves to it, with or without a stored choice", g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { id: "r1" }).id === "download" && g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { destination: "download" }).id === "download");
+  ok("an unknown stored destination falls back rather than leaving the row blank", g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { destination: "lms-drop" }).id === "download");
+  ok("a junk lookup degrades to null, not a throw", g.publishDestinationFor(null, null) === null && g.publishDestinationFor([], {}) === null);
+  // the design call this ticket rests on: one destination means there is nothing to pick, so the
+  // chip must NOT be a control. It becomes one the moment a second destination is added.
+  ok("with one destination the chip is not pickable", g.publishDestinationPickable(g.PUBLISH_DESTINATIONS) === false);
+  ok("with two it becomes pickable, so the rule is the count and not a hardcoded 'off'", g.publishDestinationPickable([{ id: "a" }, { id: "b" }]) === true);
+
+  // --- the filename comes from the exporter, never rebuilt here ---
+  var seen = null, namer = function (o) { seen = o; return "ACME_V003_coastal_SCORM.zip"; };
+  ok("the row asks the exporter to name the package", g.publishRowFilename(namer, { code: "ACME", version: "V003" }) === "ACME_V003_coastal_SCORM.zip" && seen.code === "ACME");
+  ok("no exporter means the row states nothing rather than inventing a name", g.publishRowFilename(null, { code: "ACME" }) === "" && g.publishRowFilename(undefined, {}) === "");
+  ok("a namer that throws is swallowed into silence, not a broken pane", g.publishRowFilename(function () { throw new Error("boom"); }, {}) === "");
+  ok("no options means no name", g.publishRowFilename(namer, null) === "");
+
+  // --- the promise is only shown while it is still a promise ---
+  ok("the filename shows before the run (pending and running)", g.publishShowsFilename({ status: "pending" }) === true && g.publishShowsFilename({ status: "running" }) === true);
+  ok("and not after it, where the status carries the real outcome", g.publishShowsFilename({ status: "done" }) === false && g.publishShowsFilename({ status: "error" }) === false && g.publishShowsFilename(null) === false);
+
+  // --- wiring: one naming function, one options object ---
+  // The whole point of the ticket. If the preview called its own string-builder, the row could
+  // promise one name and the run write another; both go through SCORMExport.packageName here.
+  ok("the row previews with the exporter's own packageName", /publishRowFilename\(window\.SCORMExport && window\.SCORMExport\.packageName, publishOptionsForRow\(r\)\)/.test(e));
+  ok("the run builds with the SAME options the preview was named from", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e));
+  ok("those options name the ROW's document, not whichever one is open", /var d = registry\[row\.docId\], code = d && d\.meta && d\.meta\.code;\s*\n\s*if \(code\) out\.code = code;/.test(e));
+  ok("packageName honours that code and still falls back to the open document", /var parts = \[fileSafe\(\(opts && opts\.code\) \|\| docCode\(\)\)\];/.test(ex));
+  ok("packageName is exported, so nothing has to reimplement it", /packageName: packageName/.test(ex));
+
+  // --- chrome: the pane's existing chip, minus the affordances it hasn't earned ---
+  ok("the destination reuses publish-chip rather than a second chrome", /"publish-chip" \+ \(publishDestinationPickable\(PUBLISH_DESTINATIONS\) \? "" : " publish-chip--static"\)/.test(e));
+  ok("with one destination it renders as a span, so there is no dead button to click", /h\(publishDestinationPickable\(PUBLISH_DESTINATIONS\) \? "button" : "span",/.test(e));
+  ok("it says why it can't be changed", /dchip\.title = "Destination · " \+ dest\.why;/.test(e));
+  ok("the static chip drops the hover affordance and sits back one ink step", /\.publish-chip--static \{ cursor: default; color: var\(--text-tertiary, var\(--text-secondary\)\); \}/.test(css) && /\.publish-chip--static:hover \{ color: var\(--text-tertiary, var\(--text-secondary\)\); border-color: var\(--border-subtle\); \}/.test(css));
+  ok("the filename takes the slack and the status pins right, like the history rows", /\.publish-queuerow__file \{ flex: 1 1 auto; min-width: 0;[^}]*text-overflow: ellipsis; \}/.test(css) && /\.publish-queuerow__status \{[^}]*margin-left: auto;/.test(css));
 })();
 
 // uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
@@ -13219,7 +13419,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(e));
   ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(e));
   ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(e) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(e));
-  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,200}icon: "download", label: "Import from Markdown/.test(e));
+  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(e));
   ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(e));
   ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(e) && /it\.classList\.toggle\("is-selected", on\)/.test(e));
   ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(e));
