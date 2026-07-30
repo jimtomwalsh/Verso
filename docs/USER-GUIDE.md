@@ -722,14 +722,14 @@ is never touched. The top-bar Product dropdown then lets you switch between ever
 Source wiki, for that Product.
 
 **Exporting the source to Markdown.** On the **Source** stage, the **Product actions** menu (the ⋯
-button by the toolbar) has **Export to Markdown** — it downloads the Product's whole continuous
+button in the **footer strip at the bottom of the topic rail**) has **Export to Markdown** — it downloads the Product's whole continuous
 document as a portable `.md` file (named after the Product). Headings, paragraphs, bold/`inline code`,
 bullet and numbered lists, tables, images, and callouts all come across, so it round-trips with the
 Markdown import. Nothing is changed in the app; it's a save-a-copy.
 
 **Unlinking and deleting.** To detach a course from its Product, open its card's **⋯** menu in the file
 picker and choose **Remove from Product** (the course and its content stay; only the tag is removed). On the **Source**
-stage, the **Product actions** menu (the ⋯ button by the toolbar) lets you **Unlink all courses** from
+stage, the **Product actions** menu (the ⋯ button in the **footer at the bottom of the topic rail**, kept clear of the New-topic / Import navigation) lets you **Unlink all courses** from
 a Product, **Delete source document** (clears the whole continuous document but keeps the Product), or
 **Delete Product** (removes the Product entirely, including its source and the tag on any linked
 course). The deletes ask for confirmation and can't be undone.

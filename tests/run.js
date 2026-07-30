@@ -9831,6 +9831,16 @@ section("uio-E-C08: named stage rail + labelled Send-to-publish w/ count");
   ok("syncSendToPublishCount reflects pendingRows on the badge", /function syncSendToPublishCount\(\)[\s\S]{0,200}PQ\.pendingRows\(publishQueue\(\)\)\.length[\s\S]{0,120}el\.hidden = !n/.test(e) && /renderPublishQueue[\s\S]{0,400}syncSendToPublishCount\(\);/.test(e));
 })();
 
+// uio-S-C05 (SRC-13): product-scope actions (incl. destructive delete) move OUT of the top nav
+// toolbar into a footer strip pinned to the bottom of the Source rail; New topic + Import stay on top.
+section("uio-S-C05: Source product actions moved to a rail footer strip");
+(function () {
+  var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
+  ok("the Source nav has a footer strip element", /id="source-stage-nav-footer"/.test(html) && /\.source-stage__nav-footer \{[^}]*border-top: 1px solid/.test(css));
+  ok("Product actions render into the footer (not the top toolbar row)", /source-stage-nav-footer"\);[\s\S]{0,320}label: "Product actions"[\s\S]{0,400}footer\.appendChild/.test(e));
+  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,160}"Import from Markdown…"[\s\S]{0,80}host\.appendChild\(row\)/.test(e));
+})();
+
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
 // flagship — inline canvas edits capture into base.versionOverrides[version] (diffed against
 // base), base stays untouched, render/resolveVersion stay pure so editor==export holds.

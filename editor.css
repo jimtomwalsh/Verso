@@ -782,6 +782,10 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
    `label`) that swaps contents by mode instead of appending a new row per feature --
    see renderSourceToolbar. Sits between the search field and the list. */
 .source-stage__nav-actions { padding: 0 6px 6px; flex: 0 0 auto; }
+/* uio-S-C05 (SRC-13): product-scope actions pinned to the bottom of the rail, a hairline apart
+   from the outline navigation above it (empty -> collapses, no stray border). */
+.source-stage__nav-footer { flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--border-subtle); }
+.source-stage__nav-footer:empty { display: none; }
 /* icon-button-sizing + glyph pass: keep every Source toolbar glyph (New topic / Import / Product
    actions / collapse-all) on ONE row (nowrap) at a comfortable, consistent hit target -- the
    collapse-all glyph used to sit apart and read too small. */
