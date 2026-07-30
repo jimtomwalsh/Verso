@@ -104,6 +104,7 @@
   --success:         var(--green-500);
   --danger:          var(--red-500);
   --danger-hover:    var(--red-600);
+  --danger-quiet:    var(--red-tint);
   --warning:         var(--yellow-500);
   --component:       var(--purple-500);
 }
@@ -142,4 +143,5 @@
   --accent-hover:   #007be5;
   --accent-pressed: #005bb5;
   --accent-quiet:   rgba(13, 153, 255, 0.12);
+  --danger-quiet:   rgba(242, 72, 34, 0.12);
 }

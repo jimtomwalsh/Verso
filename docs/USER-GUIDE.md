@@ -93,8 +93,11 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   **Document:** a **Document-settings** button (⚙, opens this document's settings —
   **Document type** (geometry + interactivity, set once), Header & Footer, Learner nav, Theme and the
   rest; app-wide settings live under the left-rail cog), the **Build / Read** toggle (glyphs), and the
-  **variant** and **software-version** selectors as **named dropdowns** (they show the current value —
-  "Flagship", the version name — at a glance). **Output:** the **▶ Demo** preview and **Send
+  **Variant** and **Version** selectors as **named dropdowns**, each captioned with its axis and
+  showing the current value ("Flagship", the version name) at a glance. The moment either leaves
+  base, a chip appears in the bar — **Read-only** when you're previewing (a variant preview locks
+  the canvas) or **Editing <version>** when a software version is the editable flagship — with a
+  one-click **Return to base**. **Output:** the **▶ Demo** preview and **Send
   to publish**. **Light / dark** lives in the Demo button's **▾** menu, under the size presets. When
   many courses are open the tabs scroll within their own strip so the Document and Output clusters
   never move. In Source and Publish the bar shows the Identity zone only.

@@ -9678,7 +9678,7 @@ section("line diff (LineDiff)");
   ok("setDoc drops a stale activeVersion the new doc lacks", /if \(activeVersion && \(doc\.versions \|\| \[\]\)\.indexOf\(activeVersion\) === -1\) activeVersion = null;/.test(e));
   // SWITCHER: face-up named dropdown (edit-header-ia-v2), menu, newest = default, Base entry,
   // order after the variant control.
-  ok("version switch is a face-up axis button, words only (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,200}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/versionWrapEl\.innerHTML =[\s\S]{0,120}axis-btn__icon/.test(e));
+  ok("version switch is a face-up axis button, named axis + words (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,400}axis-btn__axis">Version<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/versionWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
   ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(e));
   ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(e));
   ok("menu offers Base as the editable anchor (null activeVersion)", /active: !activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(e));
@@ -9718,7 +9718,7 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   ok("standalone #mode-toggle is retired from the header", html.indexOf('id="mode-toggle"') === -1);
   ok("Build/Read toggle + axes host present in the doc zone (cell chip retired)", html.indexOf('id="editor-cell-chip"') === -1 && /id="editor-view-toggle"/.test(html) && /id="editor-doc-axes"/.test(html));
   // FACE-UP DROPDOWNS: variant is a WORDS-ONLY named axis button (no leading glyph; caret only).
-  ok("variant switch is a face-up axis button, words only (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,200}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/variantWrapEl\.innerHTML =[\s\S]{0,120}axis-btn__icon/.test(e));
+  ok("variant switch is a face-up axis button, named axis + words (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,400}axis-btn__axis">Variant<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/variantWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
   ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(e));
   ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(e));
   // LIGHT/DARK now lives in the Preview chevron menu (size presets + palette, divider between).
@@ -9762,6 +9762,19 @@ section("uio-E-C02: text field inspector — one scroll, block chrome, no jump l
   ok("field inspector renders block chrome for a top-level text block", /showBlockChrome = blk && blk\.type && TEXT_CONTENT_TYPES\[blk\.type\] && !versionEditable\(\)/.test(e) && /if \(showBlockChrome\) \{[\s\S]{0,240}renderContainerChrome\(inspector, CONTENT_DECL, blockChromeIo\(blk\), blockChromeHandlers\(blk\)\)/.test(e));
   // The jump link is gone for text; it survives only in the non-text / version-edit fallback.
   ok("no jump link when block chrome is shown (backHint is the else branch)", /if \(showBlockChrome\) \{[\s\S]{0,400}\} else \{[\s\S]{0,400}insp-backlink/.test(e));
+})();
+
+// uio-E-C04 (EDIT-08): the two axis dropdowns are NAMED (muted Variant/Version caption), and the
+// moment either leaves base a chip appears in the bar with a one-click Return to base; its wording
+// tracks the real mode (read-only vs editing the dynamic-flagship version).
+section("uio-E-C04: labelled variant/version axes + off-base return chip");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("both axis buttons carry a muted axis-name caption", /axis-btn__axis">Variant</.test(e) && /axis-btn__axis">Version</.test(e) && /\.axis-btn__axis \{[^}]*color: var\(--text-tertiary\)/.test(css));
+  ok("an off-base chip appears when previewing (isPreview) with Return to base", /function syncAxisReturnChip\(\)[\s\S]{0,200}var off = isPreview\(\)/.test(e) && /axis-return-chip__btn", "Return to base"/.test(e));
+  ok("chip wording tracks the real edit mode (read-only vs editing)", /var locked = !canvasEditable\(\)[\s\S]{0,240}"Read-only"[\s\S]{0,240}"Editing "/.test(e));
+  ok("Return to base clears BOTH axes and flushes", /function returnToBase\(\) \{[\s\S]{0,160}activeVariant = null; activeVersion = null;[\s\S]{0,80}mount\(\)/.test(e));
+  ok(".axis-return-chip has a locked (danger) variant + a button", /\.axis-return-chip \{/.test(css) && /\.axis-return-chip--locked \{/.test(css) && /\.axis-return-chip__btn \{/.test(css));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE

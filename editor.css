@@ -466,9 +466,31 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .editor-window__axis-btn .axis-btn__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-window__axis-btn .axis-btn__caret { flex: 0 0 auto; display: inline-flex; color: var(--text-secondary); }
 .editor-window__axis-btn .axis-btn__caret svg { width: 12px; height: 12px; }
+/* uio-E-C04 (EDIT-08): the muted axis NAME caption, so Variant/Version aren't unlabelled twins. */
+.editor-window__axis-btn .axis-btn__axis { flex: 0 0 auto; color: var(--text-tertiary); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em; }
 /* active (previewing a non-default axis value): accent the border + icon */
 .editor-window__axis-btn.is-active { border-color: var(--accent, var(--border-strong)); }
 .editor-window__axis-btn.is-active .axis-btn__icon { color: var(--accent, var(--text-primary)); }
+
+/* uio-E-C04 (EDIT-08): off-base state chip in the bar. Appears the moment either axis leaves base;
+   "Read-only" (danger tint) when the canvas is locked, "Editing <version>" (accent) when the
+   dynamic-flagship version is editable. Carries a one-click Return to base. */
+.axis-return-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  height: 26px; padding: 0 4px 0 8px; border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--accent, var(--border-strong));
+  background: var(--accent-quiet, var(--surface-input));
+  font: var(--type-label); white-space: nowrap;
+}
+.axis-return-chip--locked { border-color: var(--danger, var(--border-strong)); background: var(--danger-quiet, var(--surface-input)); }
+.axis-return-chip__label { color: var(--text-primary); font-weight: 500; }
+.axis-return-chip__btn {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+  border: none; border-radius: var(--radius-sm, 4px); cursor: pointer;
+  background: transparent; color: var(--accent); font: inherit; font-weight: 600;
+}
+.axis-return-chip--locked .axis-return-chip__btn { color: var(--danger); }
+.axis-return-chip__btn:hover { background: var(--surface-hover); }
 
 .panel {
   position: relative;
