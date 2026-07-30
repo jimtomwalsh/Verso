@@ -7833,10 +7833,10 @@ section("panel system v2 — layout engine");
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
   // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
-  // stage as ONE "Import & export" menu into #publish-io, listing EVERY pipeline action (the SCORM
-  // export included -- the queue's Publish button is the primary export, so no separate Export glyph).
-  ok("renderToolbarPipeline renders one 'Import & export' menu into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)[\s\S]*?label: "Import & export"/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
-  ok("the menu lists every registered pipeline action + Publish to Viewer", /var items = pipelineButtons\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
+  // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
+  // control plus an overflow of the outbound actions, and Source took the imports.
+  ok("renderToolbarPipeline renders into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
+  ok("the overflow lists every OUTBOUND pipeline action + Publish to Viewer", /var items = outbound\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
   ok("#pipeline-actions is gone from the rail (relocated to the Publish stage)", !/id="pipeline-actions"/.test(src("index.html")) && !/left-rail__pipeline/.test(src("index.html")));
   ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,260}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
@@ -9040,8 +9040,10 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(e) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(e));
+  // uio-P-C05: the Import button now opens the whole inbound menu (Markdown + the registered
+  // import pipelines that used to sit on the Publish pane); Markdown is still its first entry.
   ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
-    /row\.appendChild\(U\.IconButton\(\{ icon: "download", label: "Import from Markdown…", onClick: importMarkdownModal \}\)\);/.test(e));
+    /icon: "download", label: "Import…"/.test(e) && /label: "Markdown…", onClick: importMarkdownModal/.test(e));
   ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
 
   // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
@@ -9105,7 +9107,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
       && !/function deleteSelectedTopics/.test(e) && !/function moveSelectedTopicsModal/.test(e)
       && !/function topicNeedsReview/.test(e) && !/function structMoveTopic/.test(e) && !/function exitSelectMode/.test(e);
   })());
-  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,700}icon: "download", label: "Import from Markdown/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
+  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
 
   // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
   // confirms with the author first, and covers both "no ambiguity" fast-paths.
@@ -9842,7 +9844,7 @@ section("uio-S-C05: Source product actions moved to a rail footer strip");
   var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
   ok("the Source nav has a footer strip element", /id="source-stage-nav-footer"/.test(html) && /\.source-stage__nav-footer \{[^}]*border-top: 1px solid/.test(css));
   ok("Product actions render into the footer (not the top toolbar row)", /source-stage-nav-footer"\);[\s\S]{0,320}label: "Product actions"[\s\S]{0,400}footer\.appendChild/.test(e));
-  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,160}"Import from Markdown…"[\s\S]{0,80}host\.appendChild\(row\)/.test(e));
+  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,400}label: "Import…"[\s\S]{0,300}host\.appendChild\(row\)/.test(e));
 })();
 
 // uio-S-C03 (SRC-03): mark cards never overlap the prose — while any card is open the article
@@ -9869,6 +9871,74 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
   ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(e) && /if \(unified && __sourceReplaceOpen\) \{/.test(e));
   // when locked, the row disables the inputs/buttons + states the reason
   ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
+})();
+
+// uio-P-C05 (PUB-13): "Import & export" put an INBOUND pipeline on the publish screen, beside the
+// Publish button, and buried the output formats in a menu whose label was half irrelevant. Import
+// moves to Source; the pane's named control becomes Format, which states what will be emitted and
+// lists the unavailable formats once with a "soon" state.
+section("uio-P-C05: format control on Publish, import on Source");
+(function () {
+  var e = src("src/editor.js"), x = src("src/export.js"), css = src("editor.css"), ds = src("design-system/components/overlays/ContextMenu.d.ts");
+  var m = e.match(/\/\* @publish-format-start \*\/([\s\S]*?)\/\* @publish-format-end \*\//);
+  if (!m) { ok("locate @publish-format fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { pipelineDirection: pipelineDirection, pipelineDirectionOf: pipelineDirectionOf, pipelineByDirection: pipelineByDirection, importMenuLabel: importMenuLabel, publishFormatRows: publishFormatRows, publishFormatSummary: publishFormatSummary };")();
+
+  // --- direction is DECLARED at registration; the label is only the fallback ---
+  ok("a declared direction wins over the label", g.pipelineDirectionOf({ label: "Import CSV", direction: "export" }) === "export" && g.pipelineDirectionOf({ label: "Ingest CSV", direction: "import" }) === "import");
+  ok("an undeclared action still falls back to its label", g.pipelineDirectionOf({ label: "Import CSV" }) === "import" && g.pipelineDirectionOf({ label: "Export JSON" }) === "export");
+  ok("a junk direction is ignored rather than trusted", g.pipelineDirectionOf({ label: "Import CSV", direction: "sideways" }) === "import" && g.pipelineDirectionOf({ label: "Export JSON", direction: null }) === "export");
+  ok("the seam accepts a direction and only stores a valid one", /registerPipelineButton: function \(label, onClick, accent, opts\)/.test(e) && /direction: PIPELINE_DIRECTIONS\.indexOf\(declared\) !== -1 \? declared : null/.test(e));
+  ok("the inbound registrations declare themselves (they don't rely on the guess)", /registerPipelineButton\("Import CSV", pick, false, \{ direction: "import" \}\)/.test(src("src/csv.js")) && /registerPipelineButton\("Import Schema", importSchema, false, \{ direction: "import" \}\)/.test(src("src/schema.js")));
+
+  // --- the label fallback itself, for callers that never declare ---
+  ok("an Import-named action is inbound, everything else outbound", g.pipelineDirection("Import CSV") === "import" && g.pipelineDirection("Import Schema") === "import" && g.pipelineDirection("Export SCORM") === "export" && g.pipelineDirection("Reset Workspace") === "export");
+  ok("'Important' is not an import (the word boundary is real)", g.pipelineDirection("Important notes") === "export");
+  ok("a missing label degrades to outbound, so nothing silently lands on Source", g.pipelineDirection(null) === "export" && g.pipelineDirection("") === "export");
+  var btns = [{ label: "Import CSV", direction: "import" }, { label: "Export SCORM" }, { label: "Import Schema" }, { label: "Export JSON" }];
+  ok("declared and guessed entries split into the same two halves, losing nothing", g.pipelineByDirection(btns, "import").length === 2 && g.pipelineByDirection(btns, "export").length === 2);
+  ok("junk entries never crash the split", g.pipelineByDirection([null, undefined], "export").length === 0 && g.pipelineByDirection(null, "import").length === 0);
+
+  // --- menu copy: under an "Import" head the prefix is noise; every import opens a picker ---
+  ok("the prefix is dropped and an ellipsis added", g.importMenuLabel("Import CSV") === "CSV…" && g.importMenuLabel("Import Schema") === "Schema…");
+  ok("an entry that already ends in an ellipsis is left alone", g.importMenuLabel("Import from Markdown…") === "from Markdown…");
+  ok("a label that is only the word Import survives as itself", g.importMenuLabel("Import") === "Import…");
+
+  // --- formats stated ONCE, with availability as a state rather than a renamed label ---
+  var fmts = [{ value: "scorm12", label: "SCORM 1.2", enabled: true }, { value: "scorm2004", label: "SCORM 2004", enabled: false }, { value: "xapi", label: "xAPI / Tin Can", enabled: false }];
+  var rowsF = g.publishFormatRows(fmts, "scorm12");
+  ok("every format is listed, none hidden", rowsF.length === 3);
+  ok("the emitted format is marked selected and available", rowsF[0].selected === true && rowsF[0].available === true && rowsF[0].hint === "");
+  ok("unavailable formats carry a plain 'Soon' state, not a renamed label", rowsF[1].hint === "Soon" && rowsF[1].label === "SCORM 2004" && rowsF[1].available === false);
+  ok("the exporter's own list stopped gluing '(soon)' into the names", /\{ value: "scorm2004", label: "SCORM 2004", enabled: false \}/.test(x) && !/label: "[^"]*\(soon\)"/.test(x));
+  ok("the export modal still says 'soon' where it renders the option", /f\.label \+ \(f\.enabled \? "" : " \(soon\)"\)/.test(x));
+  ok("the format list is published once, for every surface to read", /function formats\(\)/.test(x) && /formats: formats,/.test(x) && /SX\.formats\(\)/.test(e));
+
+  // --- the stated format is READ from the presets; it is never a second setting ---
+  ok("an empty queue states the default format", g.publishFormatSummary(fmts, [], "scorm12").label === "SCORM 1.2");
+  ok("rows that agree state that one format", g.publishFormatSummary(fmts, ["scorm12", "scorm12"], "scorm12").label === "SCORM 1.2");
+  ok("rows whose presets disagree read Mixed, rather than picking a winner", g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").mixed === true && g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").label === "Mixed");
+  ok("an unknown format id still states something, not a blank", g.publishFormatSummary(fmts, ["mystery"], "scorm12").label === "mystery");
+  ok("the summary is derived from each row's resolved preset options", /var values = rows\.map\(function \(r\) \{ return publishOptionsForRow\(r\)\.format \|\| base; \}\);/.test(e));
+  ok("the Publish pane sets no format of its own (the menu only states where it is set)", /items\.push\(\{ head: "Set by the output preset on each queued document\." \}\);/.test(e) && !/opts\.format =/.test(e));
+
+  // --- the pane's control ---
+  ok("#publish-io holds a Format control stating the selected format", /var fmtLabel = "Format: " \+ summary\.label;/.test(e) && /label: fmtLabel, title: fmtTitle, onClick: function \(\) \{ openPublishFormatMenu\(btn\); \}/.test(e));
+  ok("the 'Import & export' button is gone from the Publish pane", !/label: "Import & export"/.test(e));
+  ok("the outbound leftovers keep a home in a quiet overflow, not the named control", /var outbound = pipelineByDirection\(pipelineButtons, "export"\);/.test(e) && /label: "Other export actions"/.test(e));
+  ok("the head lays the Format control out beside its overflow", /\.publish-io \{ display: inline-flex; align-items: center; gap: 4px; \}/.test(css));
+
+  // --- import now lives on Source, routed to the SAME handlers (no second importer) ---
+  ok("the Source rail's one Import button opens the inbound menu", /label: "Import…", onClick: function \(ev\)[\s\S]{0,220}openSourceImportMenu\(r\.left, r\.bottom \+ 4\)/.test(e));
+  ok("the menu leads with Markdown, then every registered import", /function openSourceImportMenu\(x, y\) \{[\s\S]{0,120}label: "Markdown…", onClick: importMarkdownModal[\s\S]{0,220}pipelineByDirection\(pipelineButtons, "import"\)/.test(e));
+  ok("it reuses each registered handler rather than rebuilding an importer", /items\.push\(\{ label: importMenuLabel\(b\.label\), onClick: b\.onClick \}\)/.test(e));
+  ok("an import registered after boot still reaches the Source menu", /if \(__activeStage === "source"\) renderSourceToolbar\(\);/.test(e));
+
+  // --- the menu primitive grew the states this needs, per the DS contract ---
+  ok("showContextMenu supports disabled + a trailing hint", /\(it\.disabled \? " ctx-item--disabled" : ""\)/.test(e) && /if \(it\.hint\) el\.appendChild\(h\("span", "ctx-item__hint", it\.hint\)\);/.test(e));
+  ok("a disabled entry is not clickable and a missing handler cannot throw", /if \(!it\.disabled\) el\.addEventListener\("click", function \(\) \{ closeCtxMenu\(\); if \(it\.onClick\) it\.onClick\(\); \}\);/.test(e));
+  ok("the disabled + hint states are styled", /\.ctx-item--disabled\{/.test(e) && /\.ctx-item__hint\{/.test(e));
+  ok("the DS ContextMenu contract documents the hint", /hint\?: string;/.test(ds));
 })();
 
 // uio-P-C04 (PUB-12): the picker had no scope, count, search or sort — only alphabetical — so the
@@ -13219,7 +13289,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(e));
   ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(e));
   ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(e) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(e));
-  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,200}icon: "download", label: "Import from Markdown/.test(e));
+  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(e));
   ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(e));
   ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(e) && /it\.classList\.toggle\("is-selected", on\)/.test(e));
   ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(e));

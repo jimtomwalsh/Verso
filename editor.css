@@ -608,7 +608,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 .publish-pane__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 /* side-rail-cleanup slice 2: the relocated Import/Export menu sits beside the Publish button. */
 .publish-pane__head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.publish-io { display: inline-flex; }
+/* uio-P-C05: the head's output zone — the Format control plus its quiet overflow. */
+.publish-io { display: inline-flex; align-items: center; gap: 4px; }
 .publish-pane__addcur { margin: 10px 0 6px; }
 .publish-picklist { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .publish-pickrow { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 8px; border-radius: 6px; }

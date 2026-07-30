@@ -8,6 +8,12 @@ export type MenuEntry =
       icon?: string;
       /** Keyboard shortcut hint (e.g. "⌘D"). */
       shortcut?: string;
+      /**
+       * Trailing state word in tertiary ink (e.g. "Soon" on a format that cannot be
+       * emitted yet). Use with `disabled` to list something once, as unavailable,
+       * rather than hiding it or renaming the entry.
+       */
+      hint?: string;
       danger?: boolean;
       disabled?: boolean;
       divider?: boolean;
