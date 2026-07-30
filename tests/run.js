@@ -9178,7 +9178,7 @@ section("Product Rail: Source stage info panel");
   // Comments filter tab, so the info panel never double-renders them. The legacy !hasDoc branch ends
   // at its Linked-in loop (no renderSourceCommentsPanel call), and the function itself is gone.
   ok("the standalone renderSourceCommentsPanel accordion is retired (#163)", !/function renderSourceCommentsPanel\(/.test(e) && !/renderSourceCommentsPanel\(host, topic\)/.test(e));
-  ok("the Marks section carries a Comments filter tab -- comments' single home", /SOURCE_MARK_FILTERS = \[[\s\S]{0,220}\{ key: "comment", label: "Comments"/.test(e));
+  ok("the Marks section carries a Comments filter tab -- comments' single home", /SOURCE_MARK_FILTERS = \[[\s\S]{0,320}\{ key: "comment", label: "Notes", title: "Comments"/.test(e));
   ok("the legacy !hasDoc branch renders only the Linked-in list, then closes (no comments accordion)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);\s*\n\s*\}\);\s*\n\s*\}\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
@@ -9867,6 +9867,57 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
   ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(e) && /if \(unified && __sourceReplaceOpen\) \{/.test(e));
   // when locked, the row disables the inputs/buttons + states the reason
   ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
+})();
+
+// uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
+// one row per mark carrying a count + its own heading path, one labelled filter carrying live
+// counts, and a fixed type palette that never collides with the accent (= selection/focus).
+section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var e = src("src/editor.js"), css = src("editor.css"), sm = src("src/source-marks.js"), tok = src("design-system/tokens/colors.css");
+
+  // --- pure: markPath states where a mark sits, as a heading path ---
+  var m = SD.create([
+    { type: "heading", level: 1, key: "h1", text: "Operation" },
+    { type: "paragraph", key: "pa", text: "Intro prose." },
+    { type: "heading", level: 2, key: "h2", text: "Detection overview" },
+    { type: "paragraph", key: "pb", text: "Detection range depends on emitter power." },
+    { type: "heading", level: 1, key: "h3", text: "Hardware" },
+    { type: "paragraph", key: "pc", text: "Pairing an RF sensor." }
+  ]);
+  var deep = SD.addMark(m, { type: "comment", anchor: { nodeKey: "pb", start: 0, len: 9 } });
+  var shallow = SD.addMark(m, { type: "link", anchor: { nodeKey: "pa", start: 0, len: 5 } });
+  var later = SD.addMark(m, { type: "alternate", anchor: { nodeKey: "pc", start: 0, len: 7 } });
+  ok("markPath walks up to BOTH ancestor headings", SD.markPath(m, deep) === "Operation · Detection overview");
+  ok("markPath under a chapter with no section names just the chapter", SD.markPath(m, shallow) === "Operation");
+  ok("markPath does not leak a PREVIOUS chapter's section", SD.markPath(m, later) === "Hardware");
+  ok("markPath is empty (not a crash) for an unanchored mark", SD.markPath(m, { anchor: { nodeKey: "gone" } }) === "" && SD.markPath(m, null) === "");
+
+  // --- pure: markCounts feeds the filter segments, so they can't disagree with the list ---
+  var c = SD.markCounts(m);
+  ok("markCounts totals every mark and each type", c.all === 3 && c.comment === 1 && c.link === 1 && c.alternate === 1);
+  ok("markCounts on an empty model is all zeroes", SD.markCounts(SD.create([])).all === 0);
+
+  // --- the filter is LABELLED and carries the live count (SRC-06: no unlabelled glyph tabs) ---
+  ok("filter options are labelled, not icons", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"[\s\S]{0,320}\{ key: "comment", label: "Notes"/.test(e) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
+  ok("each segment appends its live count from markCounts", /var counts = SD\.markCounts\(model\);[\s\S]{0,520}label: f\.label \+ " " \+ n/.test(e));
+
+  // --- SRC-01: one row per mark with a count; instances are NOT enumerated ---
+  ok("a linked row states its doc count instead of one row per instance", /out\.meta = n \? \("in " \+ n \+ " doc" \+ \(n === 1 \? "" : "s"\)\) : "not placed yet"/.test(e));
+  ok("a fully-resolved comment thread greys its dot", /if \(!open && thread\.length && !m\.broken\) \{ out\.dot = "grey"; out\.dotTitle = "Resolved"; \}/.test(e));
+  ok("every row carries its heading path", /var path = SD\.markPath\(model, m\);[\s\S]{0,120}source-drawer__row-where/.test(e) && /\.source-drawer__row-where \{/.test(css));
+  ok("clicking a linked row opens the card holding its destination list", /if \(m\.type === "link" && topic\) syncSourceWherePanel\(topic, m\.id\)/.test(e));
+  ok("whole-topic component placements roll up to ONE footnote, not a fake mark row", /h\("button", "source-marks__rollup", "Also placed whole, as a component, in " \+ ni/.test(e) && !/source-marks__rollup[\s\S]{0,80}sd-mark-/.test(e));
+  ok("the count + path ride the 11px chrome baseline, not the 10px badge size", /\.source-drawer__row-count \{[^}]*font-size: var\(--text-xs\)/.test(css) && /\.source-drawer__row-where \{[^}]*font-size: var\(--text-xs\)/.test(css));
+
+  // --- SRC-07: a fixed palette, defined in the DS, with no hue doing two jobs ---
+  ok("the mark palette lives in the DS tokens", /--mark-link:\s*var\(--accent\);[\s\S]{0,420}--mark-focus-wash:/.test(tok));
+  ok("alternate is the components purple, note is warning yellow", /--mark-alt:\s*var\(--component\);/.test(tok) && /--mark-note:\s*var\(--yellow-500\);/.test(tok));
+  ok("highlights read the palette tokens (no hardcoded mark hues)", /::highlight\(sd-link\) \{ background-color: var\(--mark-link-wash\)/.test(css) && /::highlight\(sd-alt\) \{ background-color: var\(--mark-alt-wash\)/.test(css) && /::highlight\(sd-comment\) \{ background-color: var\(--mark-note-wash\)/.test(css));
+  ok("the focus wash is hueless so it can't read as a fourth mark type", /::highlight\(sd-active\) \{ background-color: var\(--mark-focus-wash\); \}/.test(css));
+  ok("row type ink comes from the same palette", /\.sd-mark-link \{ color: var\(--mark-link\); \}/.test(css) && /\.sd-mark-alt \{ color: var\(--mark-alt\); \}/.test(css) && /\.sd-mark-comment \{ color: var\(--mark-note\); \}/.test(css));
+  ok("active/stale LAYER over the type tint instead of replacing it", /reg\[m\.type === "link" \? "link" : m\.type === "comment" \? "comment" : "alt"\]\.add\(r\);\s*\n\s*if \(m\.stale\) reg\.stale\.add\(r\);\s*\n\s*if \(m\.id === activeId\) reg\.active\.add\(r\);/.test(sm));
 })();
 
 // uio-P-C02 (PUB-03): the Publish button is the accent primary only when it has rows to run;
@@ -12524,9 +12575,10 @@ section("Source import: robust markdown -> rich nodes (tables, comments, inline)
 section("Source/Editor feedback batch (UI wiring guards)");
 (function () {
   var e = src("src/editor.js");
-  // Issue 1: the mark-filter tabs carry glyphs, and the SegmentedControl passes the icon through.
-  ok("mark-filter tabs carry Lucide icons (glyphs, not words)", /key: "all", label: "All", icon: "list"[\s\S]{0,220}key: "comment", label: "Comments", icon: "message-square"/.test(e));
-  ok("the filter SegmentedControl forwards each option's icon", /SOURCE_MARK_FILTERS\.map\(function \(f\) \{ return \{ value: f\.key, label: f\.label, icon: f\.icon/.test(e));
+  // Issue 1 SUPERSEDED by uio-S-C01 (SRC-06): the glyph tabs were unlabelled AND duplicated the
+  // filter below them. There is now ONE filter, labelled, carrying live counts — see the
+  // "uio-S-C01" section for its guards. What survives here is the no-going-back assertion.
+  ok("mark-filter tabs are words + counts, never bare glyphs", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"/.test(e) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
   // Issue 2: the collapse-all button is placed on the shared toolbar row, not its own strip.
   ok("collapse-all is appended to the shared source toolbar row", /querySelector\("#source-stage-nav-actions \.source-stage__toolbar"\)[\s\S]{0,120}toolbarRow\.appendChild\(collapseBtn\)/.test(e));
   // Issue 3: an empty source text block gets a <br> so an Enter-split new line is visible.
@@ -12628,7 +12680,7 @@ section("Source rewrite: where-used panel (Epic 2b)");
   ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(e) && /function renderSourceWherePanel\(topic\)/.test(e));
   ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10; neutral at 0 — uio-S-C03)", /source-altpanel__title", used\.length \? \("Linked in " \+ used\.length\)/.test(e) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(e));
   ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
-  ok("a link with no live uses shows the empty state", /if \(!used\.length\) \{[\s\S]{0,160}Not linked in any document yet\./.test(e));
+  ok("a link with no live uses shows the invitation zero state (uio-S-C03)", /if \(!used\.length\) \{[\s\S]{0,320}Not used in a course yet — place this passage from the Edit stage/.test(e));
   ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(e) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(e));
   ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(e) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(e));
   ok("it is READ-ONLY: no addMark/link creation inside the where-used panel", !/function renderSourceWherePanel\(topic\)[\s\S]{0,1400}SD\.addMark/.test(e));

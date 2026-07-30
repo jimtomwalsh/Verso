@@ -186,9 +186,13 @@
         var r = rangeForMark(m);
         if (!r) { m.broken = true; return; }
         if (m.broken) { reg.broken.add(r); return; }
-        if (m.id === activeId) { reg.active.add(r); return; }
-        if (m.stale) { reg.stale.add(r); return; }
+        // uio-S-C01 (SRC-07): the type tint ALWAYS paints. Stale and active layer on top of it
+        // (the registry is ordered so they win per-property, and their washes composite over the
+        // type colour) instead of replacing it -- so clicking a mark, or a mark going stale, never
+        // costs you the colour that says what kind of mark it is.
         reg[m.type === "link" ? "link" : m.type === "comment" ? "comment" : "alt"].add(r);
+        if (m.stale) reg.stale.add(r);
+        if (m.id === activeId) reg.active.add(r);
       });
     }
     // Object marks can't be Range-highlighted, so they tint the node element itself with a status

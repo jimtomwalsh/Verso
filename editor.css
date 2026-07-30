@@ -1002,13 +1002,18 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .source-doc--unlocked [data-editable], .source-doc--unlocked [data-node-body] { box-shadow: inset 0 0 0 9999px transparent; }
 .source-doc--unlocked { }
 
-/* The three visually-distinct mark types (CSS Custom Highlight -- no wrapper spans). */
-::highlight(sd-link) { background-color: rgba(59, 108, 246, 0.16); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; }
-::highlight(sd-alt) { background-color: rgba(234, 179, 8, 0.20); }
-::highlight(sd-comment) { background-color: rgba(20, 184, 166, 0.16); text-decoration: underline dotted; text-decoration-color: rgb(20, 184, 166); text-decoration-thickness: 2px; }
-::highlight(sd-active) { background-color: rgba(234, 179, 8, 0.34); }
+/* The three visually-distinct mark types (CSS Custom Highlight -- no wrapper spans), painted from
+   the DS mark palette (uio-S-C01 / SRC-07): link = accent, alternate = the components purple,
+   comment = warning yellow. Each type also carries its own underline treatment, so the three stay
+   apart for a reader who can't separate the hues. The focus wash layers OVER the type tint (the
+   engine paints an active mark into both sets), so "the one I clicked" never costs you "what it
+   is" -- and it is hueless, so it can't be read as a fourth type. */
+::highlight(sd-link) { background-color: var(--mark-link-wash); text-decoration: underline; text-decoration-color: var(--mark-link); text-decoration-thickness: 2px; }
+::highlight(sd-alt) { background-color: var(--mark-alt-wash); text-decoration: underline; text-decoration-color: var(--mark-alt); text-decoration-thickness: 2px; }
+::highlight(sd-comment) { background-color: var(--mark-note-wash); text-decoration: underline dotted; text-decoration-color: var(--warning); text-decoration-thickness: 2px; }
+::highlight(sd-active) { background-color: var(--mark-focus-wash); }
 ::highlight(sd-stale) { background-color: rgba(249, 115, 22, 0.18); }
-::highlight(sd-broken) { background-color: rgba(239, 68, 68, 0.20); text-decoration: line-through; text-decoration-color: rgb(220, 38, 38); }
+::highlight(sd-broken) { background-color: var(--danger-quiet); text-decoration: line-through; text-decoration-color: var(--danger); }
 /* Source v2 (find-word-cycling): the current find hit -- a distinct, strong tint so the cycled-to
    match reads apart from the alternate/link/comment mark sets. */
 ::highlight(sd-find) { background-color: rgba(250, 204, 21, 0.45); color: inherit; }
@@ -1051,15 +1056,28 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .source-import__op.is-update .source-import__op-dot { background: #eab308; }
 .source-import__op-text { flex: 1 1 auto; }
 .source-drawer__dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; }
-.source-drawer__dot--green { background: #22c55e; }
-.source-drawer__dot--yellow { background: #eab308; }
-.source-drawer__dot--red { background: #ef4444; }
-.source-drawer__row-body { min-width: 0; }
-.source-drawer__row-type { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; margin-bottom: 2px; }
-.source-drawer__row-type.sd-mark-link { color: var(--accent); }
-.source-drawer__row-type.sd-mark-alt { color: #b45309; }
-.source-drawer__row-type.sd-mark-comment { color: #0d9488; }
+.source-drawer__dot--green { background: var(--success); }
+.source-drawer__dot--yellow { background: var(--warning); }
+.source-drawer__dot--red { background: var(--danger); }
+/* uio-S-C01: a comment mark whose whole thread is resolved -- present, but not live work. */
+.source-drawer__dot--grey { background: var(--mark-resolved); }
+.source-drawer__row-body { min-width: 0; flex: 1 1 auto; }
+/* uio-S-C01 (SRC-01) row anatomy: type + count on one line, then the passage, then where the
+   passage sits. The path is what lets a row identify itself when the snippet is truncated. */
+.source-drawer__row-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+.source-drawer__row-type { flex: 0 0 auto; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+.source-drawer__row-type.sd-mark-link { color: var(--mark-link); }
+.source-drawer__row-type.sd-mark-alt { color: var(--mark-alt); }
+.source-drawer__row-type.sd-mark-comment { color: var(--mark-note); }
+/* Count + path ride the 11px chrome baseline (--text-xs), not the 10px badge size: they are
+   metadata you read, not a badge. The count truncates before the type eyebrow does. */
+.source-drawer__row-count { min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .source-drawer__row-snip { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.source-drawer__row-where { margin-top: 2px; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A whole-topic component placement is NOT a mark, so it doesn't wear a mark row (or a mark
+   colour). It closes the list as one plain footnote you can still click through. */
+.source-marks__rollup { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 6px 10px 2px; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); cursor: pointer; }
+.source-marks__rollup:hover { color: var(--text-secondary); text-decoration: underline; }
 
 /* Contextual alternate panel (alternates-staleness): a margin card pinned in the right gutter,
    tracking its span (absolutely positioned within the scrolling article, so scroll tracks free). */

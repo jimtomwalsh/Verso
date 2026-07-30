@@ -244,6 +244,42 @@
     return (model.nodes || []).filter(function (n) { return n.type === "heading"; })
       .map(function (n) { return { key: n.key, level: n.level || 2, text: nodeText(n) }; });
   }
+  // uio-S-C01 (SRC-01): where a mark SITS in the document, as a heading path ("Operation - Detection
+  // overview"). A mark row that carries its own location identifies itself without relying on a
+  // truncated snippet. Walk backwards from the marked node collecting the nearest heading of each
+  // ascending level, so a level-3 mark reports its h2 and h1 ancestors too. Pure -> testable.
+  function markPath(model, mark) {
+    if (!model || !mark || !mark.anchor) return "";
+    var nodes = model.nodes || [], key = mark.anchor.nodeKey, at = -1;
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].key === key) { at = i; break; }
+      // a row wraps child nodes (A3 image rows) -- a mark inside one reports the row's position
+      if (nodes[i].type === "row" && (nodes[i].children || []).some(function (c) { return c.key === key; })) { at = i; break; }
+    }
+    if (at === -1) return "";
+    var seen = [], best = 99;
+    for (var j = at; j >= 0; j--) {
+      var n = nodes[j];
+      if (n.type !== "heading") continue;
+      var lvl = n.level || 2;
+      if (lvl >= best) continue;          // already have a heading at or above this depth
+      best = lvl;
+      var t = String(nodeText(n) || "").trim();
+      if (t) seen.unshift(t);
+      if (lvl <= 1) break;                // reached the chapter -- nothing above it
+    }
+    return seen.join(" · ");
+  }
+  // uio-S-C01 (SRC-06): the live per-type counts the labelled mark filter carries ("All 6 / Alt 1 /
+  // Linked 2 / Notes 2"). One pass over the marks, so the segments can never disagree with the list.
+  function markCounts(model) {
+    var out = { all: 0, alternate: 0, link: 0, comment: 0 };
+    (model && model.marks || []).forEach(function (m) {
+      out.all++;
+      if (out[m.type] != null) out[m.type]++;
+    });
+    return out;
+  }
   // Insert a node immediately AFTER the node keyed blockKey (or at the end when blockKey is null /
   // not found -- the toolbar-insert decision: drop the new block after the selected one). The new
   // node gets a fresh unique key; existing keys, marks (anchored by key) and variants ride along
@@ -1550,7 +1586,7 @@
     nodeToMarkdown: nodeToMarkdown, toMarkdown: toMarkdown,
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     diffText: diffText, mapPos: mapPos, shiftAnchor: shiftAnchor,
-    create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, insertNodeAfter: insertNodeAfter, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,
     applyTextEdit: applyTextEdit, replaceRange: replaceRange, replaceAll: replaceAll,
@@ -1570,7 +1606,7 @@
   };
 
   var SourceDoc = {
-    create: create, ensureKeys: ensureKeys, headings: headings, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
+    create: create, ensureKeys: ensureKeys, headings: headings, markPath: markPath, markCounts: markCounts, insertNodeAfter: insertNodeAfter, fromSections: fromSections, concatChapters: concatChapters, chapters: chapters, chapterBlocks: chapterBlocks, moveChapter: moveChapter, outline: outline, importPlan: importPlan, applyImportPlan: applyImportPlan, variantAlign: variantAlign, variantImportPlan: variantImportPlan, applyVariantImportPlan: applyVariantImportPlan,
     nodeText: nodeText, nodeByKey: nodeByKey, markById: markById, inlineRuns: inlineRuns, planLinkedBlocks: planLinkedBlocks,
     addMark: addMark, anchorText: anchorText, refreshMark: refreshMark, isObjectMark: isObjectMark,
     isMultiBlock: isMultiBlock, markSpans: markSpans, markText: markText,

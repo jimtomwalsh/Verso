@@ -896,7 +896,7 @@ In this mode:
   document, and range marks (comments, alternates, linked spans) stay anchored to exactly the same
   words underneath.
 - **Show/hide marks** with the eye button in the bottom bar. Marked spans are tinted by type
-  (linked / alternate / comment), so annotation never clutters plain reading. Jumping to a mark —
+  (linked blue / alternate purple / comment yellow), so annotation never clutters plain reading. Jumping to a mark —
   clicking a row in the panel, or an alternate — turns marks back on for you if they were hidden,
   so the highlight you jumped to is always visible.
 - **Jump around with the outline.** A **table of contents** down the left side lists the document's
@@ -905,15 +905,25 @@ In this mode:
 - **Find a topic by anything in it.** The topic search at the top of the left nav now matches the
   full text of every topic — a heading or a phrase inside the document, not just the title.
 - **One details panel on the right.** Everything about the document lives in a single right panel.
-  At the top is **Marks** — every alternate, link, and comment with a status dot (green in sync /
-  amber stale / red broken). A row of four **glyph filters** narrows the list: **All**, **Alternates**,
-  **Linked**, and **Comments** (hover any for its name); click a row to jump to that mark. The
-  **Linked** filter lists where this document is used downstream — one row per course block that
-  pulls it in — so it reflects real usage instead of reading as empty. Comments appear here under
-  the **Comments** filter, in one place (the old duplicate comments list below the panel is gone).
-  Below Marks sit **History** (the provenance timeline) and, for legacy per-topic sources, a
-  **Source** section. The bottom-bar panel button shows or hides the whole panel; selecting a mark
-  opens it to that mark.
+  At the top is **Marks** — every alternate, link and comment with a status dot (green in sync /
+  amber stale / red broken / grey once a comment thread is resolved). Four **labelled filters**
+  narrow the list — **All**, **Alt**, **Linked** and **Notes** — and each one carries a live count,
+  so the filter row doubles as the document's mark summary. Click a row to jump to that mark.
+  Comments appear here under **Notes**, in one place (the old duplicate comments list below the
+  panel is gone). Below Marks sit **History** (the provenance timeline) and, for legacy per-topic
+  sources, a **Source** section. The bottom-bar panel button shows or hides the whole panel;
+  selecting a mark opens it to that mark.
+- **One row per mark, and each row says where it is.** A linked passage used by four documents is a
+  single row saying "in 4 docs", not four rows repeating the same passage. Under the passage each
+  row states its place in the document ("Operation · Detection overview"), so you can tell two
+  rows apart even when their text is truncated. Click a linked row to open its card and see the
+  individual destinations. If the whole topic is also placed as a component, that is one line at
+  the end of the list rather than a row per placement.
+- **Every mark type has a fixed colour.** Linked is blue (the accent), an alternate is purple —
+  the same purple Verso uses for components everywhere else — and a comment is yellow. The mark
+  you last clicked gets a colourless brightening on top of its own colour, so highlighting it
+  never hides what kind of mark it is. The type is always spelled out in the list too; the colour
+  is a reminder, never the only clue.
 
 This is an early view — the variant columns arrive in a later update; the section editor above
 remains the full-featured path.
