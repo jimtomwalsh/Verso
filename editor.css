@@ -3891,6 +3891,25 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .vds-badge--warning.vds-badge--quiet { background: var(--yellow-tint); color: var(--warning); }
 .vds-badge--component.vds-badge--quiet { background: var(--purple-tint, rgba(151,71,255,0.16)); color: var(--component); }
 
+/* --- Meter (vds-meter; structure/Meter, uio-P-C01 / PUB-01) -------------- */
+/* Labelled banded percentage: label · 4px track · value. The band tone is the FILL and the
+   value's INK (the quiet Badge's tone-as-ink move); the track stays surface-raised. Not-indexed
+   is a dashed empty track with the words in tertiary ink -- a measurement that could not be
+   taken, never a 0% score. */
+.vds-meter { display: inline-flex; align-items: center; gap: var(--space-4, 4px); font-family: var(--font-ui, Inter, sans-serif); line-height: 1; }
+.vds-meter__label { font-size: var(--text-2xs, 9px); color: var(--text-secondary); }
+.vds-meter__track { width: 56px; height: 4px; border-radius: var(--radius-full, 999px); background: var(--surface-raised); overflow: hidden; }
+.vds-meter__fill { height: 100%; border-radius: var(--radius-full, 999px); }
+.vds-meter__value { font-size: var(--text-2xs, 9px); font-weight: var(--weight-semibold, 600); }
+.vds-meter--success .vds-meter__fill { background: var(--success); }
+.vds-meter--success .vds-meter__value { color: var(--success); }
+.vds-meter--warning .vds-meter__fill { background: var(--warning); }
+.vds-meter--warning .vds-meter__value { color: var(--warning); }
+.vds-meter--neutral .vds-meter__fill { background: var(--text-tertiary); }
+.vds-meter--neutral .vds-meter__value { color: var(--text-secondary); }
+.vds-meter--notindexed .vds-meter__track { background: none; border: 1px dashed var(--border-strong); }
+.vds-meter--notindexed .vds-meter__value { color: var(--text-tertiary); font-weight: var(--weight-medium, 500); }
+
 /* --- Modal (vds-modal head/body/footer) --------------------------------- */
 .vds-modal { position: relative; }
 .vds-modal .modal-head { flex-direction: row; align-items: center; justify-content: space-between; }
