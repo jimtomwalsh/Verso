@@ -15701,7 +15701,7 @@
       try {
         inspector.appendChild(h("div", "insp-hint",
           (CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " · " + (_cell.interactive ? "Interactive" : "Static") +
-          " — change it in Document settings (the ⚙ in the editor header)."));
+          " — change it in Document settings (the sliders button in the editor header)."));
         var tools = (window.__docType && window.__docType.condToolsFor) ? window.__docType.condToolsFor(_cell.geo) : [];
         if (tools.length) {
           inspector.appendChild(sub((CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " tools"));
@@ -15719,9 +15719,11 @@
       // Canvas background lives in localStorage (not doc), so it is off the undo stack
       // (noHistory) and applies live via applyCanvasBg. Clearing reverts to the default backdrop.
       colourControl("Background", canvasBg, function (val) { applyCanvasBg(val == null ? BG_DEFAULT : val); }, inspector, true);
-      var openBtn = h("button", "insp-hint insp-backlink", "Project & system settings → open ⚙ (top right)");
+      // The button IS the route, so it states its destination rather than pointing at a
+      // corner of the window (it used to say "top right", which no cog has ever been in).
+      var openBtn = h("button", "insp-hint insp-backlink", "Open project & system settings");
       openBtn.type = "button";
-      openBtn.title = "Header & Footer, Glossary, Theme, fonts and more now live in the settings modal.";
+      openBtn.title = "Header & Footer, Glossary, Theme, fonts and more live in the settings sheet.";
       openBtn.addEventListener("click", function () { openSettingsModal("project"); });
       inspector.appendChild(openBtn);
       } finally { inspector = _i; }
@@ -15946,6 +15948,13 @@
     foot.appendChild(window.VersoUI.Button({ variant: "secondary", label: "Close", onClick: closeSettingsModal }));
     box.appendChild(foot);
     host.appendChild(box);
+    // uio-F05-fb1: the sheet is resizable like every other dock, and keeps its own persisted
+    // width (--sheet-w) rather than borrowing the inspector's. 340px minimum because below that
+    // the shared row's 76px label column plus a 24px control stops being legible; 720px maximum
+    // so the sheet can never take more room than the canvas it is meant to sit beside.
+    var grip = h("div", "panel-resizer"); grip.id = "resizer-sheet";
+    host.appendChild(grip);
+    wirePanelResizer(grip, "sheet-w", "right", 340, 720);
     // uio-F05: NO scrim click-out. There is no scrim, and dismissing on a canvas click would
     // make the canvas unusable while the sheet is open — which is the one thing the sheet exists
     // to allow. Close and Esc are the only dismissals.
@@ -22124,6 +22133,11 @@
   function togglePanels() {
     var ws = document.querySelector(".workspace"); if (!ws) return;
     var hidden = !ws.classList.contains("is-panels-hidden");
+    // uio-F05-fb1: hiding the panels collapses every dock track to 0, and the settings sheet
+    // sits in one of them. Left alone it became a 0px-wide surface that was still "open" and
+    // still on the Escape layer stack -- invisible, but the next Escape went to it. Zen mode
+    // CLOSES the sheet instead, so what is on screen matches what is open.
+    if (hidden) closeSettingsModal();
     applyPanelsHidden(hidden);
     try { localStorage.setItem(PANELS_HIDDEN_KEY, hidden ? "1" : "0"); } catch (_) {}
     if (typeof positionBlockToolbar === "function") positionBlockToolbar(); // re-centre the static toolbar over the resized canvas
@@ -23851,26 +23865,33 @@
   }
 
   // ---- resizable side panels (persisted) -----------------------------------
-  function wireResizers() {
+  // uio-F05-fb1: every dock width restores + clamps through these two helpers, so a surface
+  // built later (the settings sheet) resizes exactly like the panels that ship in the HTML.
+  function restoreDockWidth(varName) {
+    var workspace = document.querySelector(".workspace"); if (!workspace) return;
+    try { var v = localStorage.getItem("authoring." + varName); if (v) workspace.style.setProperty("--" + varName, v); } catch (e) {}
+  }
+  // handle: the .panel-resizer element. side: which edge of the workspace the width is measured
+  // from. min/max: the clamp, so a dock can't be dragged past legibility or off the canvas.
+  function wirePanelResizer(handle, varName, side, min, max) {
+    if (!handle || handle.__resizeWired) return; handle.__resizeWired = true;
     var workspace = document.querySelector(".workspace");
-    function restore(varName) { try { var v = localStorage.getItem("authoring." + varName); if (v) workspace.style.setProperty("--" + varName, v); } catch (e) {} }
-    restore("left-w"); restore("right-w");
-    function wire(id, varName, side) {
-      var handle = document.getElementById(id);
-      var dragging = false;
-      handle.addEventListener("mousedown", function (e) { dragging = true; handle.classList.add("is-dragging"); document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; e.preventDefault(); });
-      window.addEventListener("mousemove", function (e) {
-        if (!dragging) return;
-        var rect = workspace.getBoundingClientRect();
-        var w = side === "left" ? (e.clientX - rect.left) : (rect.right - e.clientX);
-        w = Math.max(180, Math.min(560, w));
-        workspace.style.setProperty("--" + varName, w + "px");
-        try { localStorage.setItem("authoring." + varName, w + "px"); } catch (_) {}
-      });
-      window.addEventListener("mouseup", function () { if (dragging) { dragging = false; handle.classList.remove("is-dragging"); document.body.style.cursor = ""; document.body.style.userSelect = ""; } });
-    }
-    wire("resizer-left", "left-w", "left");
-    wire("resizer-right", "right-w", "right");
+    var dragging = false;
+    handle.addEventListener("mousedown", function (e) { dragging = true; handle.classList.add("is-dragging"); document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; e.preventDefault(); });
+    window.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      var rect = workspace.getBoundingClientRect();
+      var w = side === "left" ? (e.clientX - rect.left) : (rect.right - e.clientX);
+      w = Math.max(min || 180, Math.min(max || 560, w));
+      workspace.style.setProperty("--" + varName, w + "px");
+      try { localStorage.setItem("authoring." + varName, w + "px"); } catch (_) {}
+    });
+    window.addEventListener("mouseup", function () { if (dragging) { dragging = false; handle.classList.remove("is-dragging"); document.body.style.cursor = ""; document.body.style.userSelect = ""; } });
+  }
+  function wireResizers() {
+    restoreDockWidth("left-w"); restoreDockWidth("right-w"); restoreDockWidth("sheet-w");
+    wirePanelResizer(document.getElementById("resizer-left"), "left-w", "left", 180, 560);
+    wirePanelResizer(document.getElementById("resizer-right"), "right-w", "right", 180, 560);
   }
 
   // ---- breakpoint switch (M6) ---------------------------------------------

@@ -400,8 +400,13 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   display: grid;
   /* #89: leftmost fixed icon rail, then the (resizable) left panel, canvas, right panel.
      uio-E-C01: all shell widths resolve to DSLMS tokens (rail / panel-left / panel-right);
-     the resizers override --left-w / --right-w inline when dragged. */
-  grid-template-columns: var(--rail-w, 44px) var(--left-w) 1fr var(--right-w);
+     the resizers override --left-w / --right-w inline when dragged.
+     uio-F05-fb1: the last column is --dock-w, NOT --right-w directly. The inspector and the
+     settings sheet share that dock at different widths, and each keeps its OWN resizable,
+     persisted width; --dock-w just names whichever is currently docked there. Reading
+     --right-w here made the sheet inherit the inspector's dragged width (an inline
+     --right-w beats the .has-sheet class rule), which is why the sheet opened cramped. */
+  grid-template-columns: var(--rail-w, 44px) var(--left-w) 1fr var(--dock-w);
   /* uio-E-C01: the Edit-stage doc header was merged up into the single .toolbar (EDIT-07), so
      the workspace is now ONE row -- rail | left panel | canvas | inspector -- reclaiming the
      ~44px the second bar used to take. */
@@ -410,6 +415,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
      drift). The resizers set --left-w / --right-w inline, overriding these. */
   --left-w: var(--panel-left-width, 248px);
   --right-w: var(--panel-right-width, 264px);
+  --sheet-w: var(--panel-sheet-width, 400px);
+  --dock-w: var(--right-w);
   min-height: 0;
   background: var(--surface-canvas);
   position: relative; /* #86: anchor for the floating canvas overlay bar */
@@ -1296,7 +1303,7 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
   position: absolute; z-index: 40;
   bottom: 20px;
   left: calc(var(--rail-w, 44px) + var(--left-w, 240px));
-  right: var(--right-w, 248px);
+  right: var(--dock-w, 248px); /* follows whichever surface holds the right dock */
   display: flex; justify-content: center;
   pointer-events: none; /* only the bar itself is interactive */
 }
@@ -2697,7 +2704,9 @@ details[open] .disc__caret {
    so the canvas stays live and editable beside it: the canvas is squeezed, never covered.
    It is a grid child of .workspace in the SAME column as the inspector, which it supersedes —
    two right-docked surfaces would state the same tree twice and squeeze the canvas twice. */
-.settings-sheet { grid-row: 1; min-height: 0; min-width: 0; display: flex; }
+/* position: relative anchors the sheet's own drag handle, exactly like .panel--right. */
+.settings-sheet { grid-row: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
+.settings-sheet .panel-resizer { left: -3px; }
 .settings-sheet[hidden] { display: none; }
 .settings-sheet__box {
   flex: 1 1 auto; min-width: 0;
@@ -2706,9 +2715,9 @@ details[open] .disc__caret {
   border-left: 1px solid var(--border-strong);
   overflow: hidden;           /* the content pane scrolls, not the whole box */
 }
-/* the sheet owns the right dock while it is open */
+/* the sheet owns the right dock while it is open, at its OWN persisted width */
 .workspace > .settings-sheet { grid-column: 4; }
-.workspace.has-sheet { --right-w: var(--panel-sheet-width, 400px); }
+.workspace.has-sheet { --dock-w: var(--sheet-w, var(--panel-sheet-width, 400px)); }
 .workspace.has-sheet > .panel--right { display: none; }
 /* Source/Publish span panel..inspector; hand the last column back so the sheet has somewhere
    to sit and those stages are squeezed exactly like the Edit canvas. */
@@ -2723,9 +2732,12 @@ details[open] .disc__caret {
 /* uio-F05: the 220px nav rail is GONE — a nav rail inside a dock is a second navigation system
    competing with the section headers and with the one ⌘K index. The body is now ONE scroll of
    canonical collapsible sections, so it reads exactly like the inspector beside it. */
+/* uio-F05-fb1: 12px on all four sides, matching the inspector's own .panel-section host, so a
+   section reads with the same gutter in the sheet as it does in the inspector beside it. It
+   used to have NO horizontal padding, which pinned every label and control to the two edges. */
 .settings-content {
   flex: 1 1 auto; overflow-y: auto; min-height: 0; min-width: 0;
-  padding: var(--section-pad, 8px) 0;
+  padding: 12px;
 }
 /* footer = single primary action, hairline-topped */
 /* uio-O-W1 (OVL-09): the footer states the save contract on the left and closes on the right.

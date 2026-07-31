@@ -2284,7 +2284,7 @@ section("editor-rework capability inspector");
   ok("the Document inspector leads with a Document type section", /renderDocumentInspector\(\)[\s\S]{0,700}sectionGroup\("Layout", "Document type"/.test(e));
   ok("it reads the cell from the pure doc-type model", /window\.__docType\.docCell\(doc\)[\s\S]{0,500}CELL_GEO_LABEL\[_cell\.geo\]/.test(e));
   ok("it renders the geometry-specific tools from condToolsFor", /window\.__docType\.condToolsFor\(_cell\.geo\)[\s\S]{0,220}tools\.forEach/.test(e));
-  ok("the cell summary points at Document settings (cell chip retired)", /change it in Document settings \(the ⚙ in the editor header\)/.test(e));
+  ok("the cell summary points at Document settings (cell chip retired)", /change it in Document settings \(the sliders button in the editor header\)/.test(e));
   ok("the Document type section comes before the Canvas/Appearance section", e.indexOf('sectionGroup("Layout", "Document type"') < e.indexOf('sectionGroup("Appearance", "Canvas"'));
 })();
 
@@ -6294,8 +6294,30 @@ section("richer bullet lists");
   // uio-F05: right-docked sheet, not a centred dialog. It takes the inspector's own column and
   // widens it, so the canvas is squeezed exactly once and never covered.
   ok("the sheet is right-docked in the inspector's column, no scrim", /\.workspace > \.settings-sheet \{ grid-column: 4; \}/.test(ecss)
-    && /\.workspace\.has-sheet \{ --right-w: var\(--panel-sheet-width, 400px\); \}/.test(ecss)
+    && /\.workspace\.has-sheet \{ --dock-w: var\(--sheet-w, var\(--panel-sheet-width, 400px\)\); \}/.test(ecss)
     && !/\.modal-box\.modal-box--settings/.test(ecss));
+  // uio-F05-fb1: the dock column reads --dock-w, so the inspector and the sheet each keep their
+  // OWN persisted width. Reading --right-w directly let a dragged inspector width (set INLINE on
+  // .workspace, which outranks the .has-sheet class rule) force the sheet open at 264px or less.
+  ok("the dock column is --dock-w, so the sheet never inherits the inspector's dragged width",
+    /grid-template-columns: var\(--rail-w, 44px\) var\(--left-w\) 1fr var\(--dock-w\);/.test(ecss)
+    && /--sheet-w: var\(--panel-sheet-width, 400px\);/.test(ecss)
+    && /--dock-w: var\(--right-w\);/.test(ecss));
+  ok("the canvas overlay bar follows the dock, not the inspector specifically", /right: var\(--dock-w, 248px\);/.test(ecss));
+  ok("the sheet carries its own drag handle, persisted as sheet-w", /var grip = h\("div", "panel-resizer"\); grip\.id = "resizer-sheet";[\s\S]{0,120}wirePanelResizer\(grip, "sheet-w", "right", 340, 720\)/.test(e)
+    && /restoreDockWidth\("left-w"\); restoreDockWidth\("right-w"\); restoreDockWidth\("sheet-w"\);/.test(e)
+    && /\.settings-sheet \.panel-resizer \{ left: -3px; \}/.test(ecss));
+  // The sheet's rows used to sit flush against both edges (padding was `<pad> 0`). It now takes
+  // the same 12px gutter as the inspector's own .panel-section host, so the two read alike.
+  ok("the sheet body has the inspector's 12px gutter, not a flush edge", /\.settings-content \{[\s\S]{0,160}padding: 12px;/.test(ecss));
+  // Cmd+\ collapses every dock track to 0. The sheet lives in one, so hiding the panels used to
+  // leave it 0px wide but still open and still on the Escape layer stack.
+  ok("hiding the panels closes the sheet rather than leaving a 0px ghost layer",
+    /var hidden = !ws\.classList\.contains\("is-panels-hidden"\);[\s\S]{0,420}if \(hidden\) closeSettingsModal\(\);\s*\n\s*applyPanelsHidden\(hidden\);/.test(e));
+  // The two settings triggers are different SCOPES, so they must not wear the same glyph.
+  ok("document settings and app settings use different glyphs", /id="doc-settings-btn" data-lucide="sliders-horizontal"/.test(src("index.html"))
+    && /id="rail-settings-btn" data-lucide="settings"/.test(src("index.html"))
+    && /"sliders-horizontal":/.test(src("src/icons.js")));
   ok("opening the sheet supersedes the inspector rather than stacking beside it", /\.workspace\.has-sheet > \.panel--right \{ display: none; \}/.test(ecss));
   ok("Source and Publish hand back the last column so they are squeezed too", /\.workspace\.has-sheet > \.source-stage,\s*\n\.workspace\.has-sheet > \.publish-stage \{ grid-column: 2 \/ 4; \}/.test(ecss));
   ok("the sheet width is a DS structural token, beside the other dock widths", /--panel-sheet-width: 400px;/.test(src("design-system/tokens/spacing.css")));
