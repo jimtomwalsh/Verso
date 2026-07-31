@@ -213,6 +213,9 @@
         <button class="tool panel-tabs__overflow" id="panel-overflow-btn" data-lucide="more-horizontal" title="Panel options" hidden></button>
       </div>
       <div class="panel-resizer" id="resizer-right"></div>
+      <!-- uio-O-W1 (OVL-10): the frame is the positioned host for the scroll-edge hairline+fade;
+           the scroller inside it is unchanged. -->
+      <div class="scroll-frame" id="inspector-scroll-frame">
       <div class="panel-scroll">
         <div class="panel-section" id="inspector"></div>
         <details class="panel-section" id="model-details">
@@ -222,6 +225,7 @@
           </summary>
           <pre id="model-json" style="margin-top: 8px;"></pre>
         </details>
+      </div>
       </div>
     </aside>
   </main>

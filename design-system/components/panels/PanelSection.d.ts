@@ -15,6 +15,19 @@ export interface PanelSectionProps {
    * undefined renders nothing. See readme "The UI spine" -> "Scope and inheritance".
    */
   overrideCount?: number;
+  /**
+   * Optional on/off switch in the header. It governs whether the section's setting APPLIES.
+   * It must never move the disclosure: the chevron owns open/closed, the switch owns on/off,
+   * and turning a section on does not open it. See readme "The UI spine" -> "The shared row".
+   */
+  enabled?: boolean;
+  onEnabledChange?: (next: boolean) => void;
+  /**
+   * One-line value summary, shown only while COLLAPSED — "centred, top rule". With a switch it
+   * is prefixed On/Off, so a folded section never reads as "unknown". A section with nothing
+   * to say renders no summary rather than padding the header with "Default".
+   */
+  summary?: React.ReactNode;
   /** Top hairline divider. Default true (turn off for the first section). */
   divider?: boolean;
   style?: React.CSSProperties;

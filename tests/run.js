@@ -10653,6 +10653,128 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
   ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
 })();
 
+// ---- uio-O-W2 (OVL-13): menus never render an empty section ----------------------
+// "Variants (none yet)" was a greyed heading followed by a "+ New variant…" row in a fourth
+// create-affordance style, spending a third of the menu on a feature the block does not use.
+section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/(function pruneEmptyMenuSections\(items\)[\s\S]*?\n  \})/);
+  if (!m) { ok("locate pruneEmptyMenuSections", false); return; }
+  var prune = new Function(m[1] + "; return pruneEmptyMenuSections;")();
+  function labels(list) { return prune(list).map(function (x) { return x.head ? "#" + x.head : (x.sep ? "-" : x.label); }).join("|"); }
+
+  ok("a heading with nothing under it is dropped", labels([{ head: "Variants" }]) === "");
+  ok("a heading with an entry survives", labels([{ head: "Variants" }, { label: "Hide in A" }]) === "#Variants|Hide in A");
+  ok("an empty section between two full ones goes, and the rest keep their order",
+    labels([{ label: "Copy" }, { head: "Variants" }, { head: "Versions" }, { label: "Hide in v1" }]) === "Copy|#Versions|Hide in v1");
+  ok("a separator is furniture, not an entry, so a heading with only a rule still goes",
+    labels([{ head: "Variants" }, { sep: true }, { head: "Versions" }, { label: "Hide in v1" }]) === "#Versions|Hide in v1");
+  // A separator does NOT end a section — in a flat menu list the entries after a heading belong
+  // to it until the next heading. So "empty" means genuinely nothing actionable before the next
+  // heading or the end, and the rules that framed the dropped heading go with it.
+  ok("the rules that framed a dropped section go with it, leaving no double or trailing rule",
+    labels([{ label: "Copy" }, { sep: true }, { head: "Variants" }, { sep: true }]) === "Copy");
+  ok("no leading rule", labels([{ sep: true }, { label: "Copy" }]) === "Copy");
+  ok("no trailing rule", labels([{ label: "Copy" }, { sep: true }]) === "Copy");
+  ok("no rule directly under a heading", labels([{ head: "Variants" }, { sep: true }, { label: "Hide in A" }]) === "#Variants|Hide in A");
+  ok("an untouched menu comes back untouched", labels([{ label: "Copy" }, { sep: true }, { label: "Delete" }]) === "Copy|-|Delete");
+  ok("it survives an empty list", prune([]).length === 0 && prune(null).length === 0);
+
+  // Wiring.
+  ok("every menu is pruned on the way to the DOM", /var m = buildCtxMenuEl\(pruneEmptyMenuSections\(items\)\);/.test(e));
+  ok("a submenu renders a nested panel with a chevron, pruned the same way",
+    /if \(it\.submenu && it\.submenu\.length\) \{[\s\S]{0,400}buildCtxMenuEl\(pruneEmptyMenuSections\(it\.submenu\), true\)/.test(e));
+  ok("a submenu flips left when it would run off the window, measured not guessed",
+    /var r = sub\.getBoundingClientRect\(\);\s*\n\s*if \(r\.right > window\.innerWidth - 8\) sub\.classList\.add\("is-flipped"\);/.test(e));
+  ok("the variant family is ONE row with a submenu, and New variant sits at its foot",
+    /items\.push\(\{ label: "Variants", submenu: variantSub \}\);/.test(e)
+    && /variantSub\.push\(\{ label: "New variant…"/.test(e));
+  ok("with no variants the whole family is one ordinary row, not a heading saying it is empty",
+    /\} else \{\s*\n\s*items\.push\(\{ label: "Add variant…", onClick: function \(\) \{ newVariantPrompt\(\); \} \}\);/.test(e)
+    && !/head: vs\.length \? "Variants"/.test(e));
+  ok("software versions and variant images collapse the same way",
+    /items\.push\(\{ label: "Software versions", submenu:/.test(e) && /items\.push\(\{ label: "Variant images", submenu: imgSub \}\);/.test(e));
+  ok("the '+' create prefix is gone everywhere — menu verbs are plain", !/\+ New variant/.test(e));
+  ok("the DS carries the submenu entry and the never-empty rule",
+    /submenu\?: MenuEntry\[\];/.test(src("design-system/components/overlays/ContextMenu.d.ts"))
+    && /NEVER renders an empty section/.test(src("design-system/components/overlays/ContextMenu.d.ts")));
+})();
+
+// ---- uio-O-W2 (OVL-08): the switch and the disclosure stop fighting ---------------
+// Being OFF used to force `is-collapsed` whatever the author had twirled open, turning it ON
+// auto-opened the section, and an off section never built its body at all -- so it showed
+// nothing of the configuration it still held.
+section("uio-O-W2 section switch vs disclosure (OVL-08)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css");
+  ok("the chevron alone decides collapsed, so the switch no longer folds the section",
+    /var sec = h\("div", "subdisc" \+ \(open \? " is-open" : " is-collapsed"\) \+ \(enabled \? "" : " is-inactive"\)\);/.test(e));
+  ok("turning a section ON no longer opens it", !/if \(v\) openSections\[key\] = true;/.test(e)
+    && /opts\.toggle\.set\(v\);\s+\/\/ the switch NEVER moves the disclosure/.test(e));
+  ok("an OFF section still builds its rows, so they stay reachable", /if \(open\) \{ var body = h\("div", "subdisc__body"\); buildBody\(body\); sec\.appendChild\(body\); \}/.test(e));
+  ok("off dims but never disables — no pointer-events trap on an inactive section",
+    /\.subdisc\.is-inactive > \.subdisc__body \{ opacity: 0\.6; \}/.test(ecss)
+    && !/\.subdisc\.is-inactive[^{]*\{[^}]*pointer-events: none/.test(ecss));
+  ok("the summary shows only while collapsed", /\.subdisc\.is-open > \.subdisc__head \.subdisc__summary \{ display: none; \}/.test(ecss));
+  ok("the summary truncates rather than wrapping the header", /\.subdisc__summary \{[\s\S]{0,220}text-overflow: ellipsis;/.test(ecss));
+  ok("the DS carries the switch/summary contract and the independence rule",
+    /enabled\?: boolean;/.test(src("design-system/components/panels/PanelSection.d.ts"))
+    && /summary\?: React\.ReactNode;/.test(src("design-system/components/panels/PanelSection.d.ts"))
+    && /The switch and the chevron are independent/.test(src("design-system/readme.md")));
+
+  // The summary itself is pure, so it runs here as real source.
+  var m = e.match(/(function headerFooterSummary\(cfg, isHeader\)[\s\S]*?\n  \})/);
+  if (!m) { ok("locate headerFooterSummary", false); return; }
+  var summary = new Function(m[1] + "; return headerFooterSummary;")();
+  var withSwitch = e.match(/(function sectionSummary\(opts, enabled\)[\s\S]*?\n  \})/);
+  var sectionSummary = withSwitch ? new Function(withSwitch[1] + "; return sectionSummary;")() : null;
+
+  ok("an untouched section says nothing rather than reciting defaults", summary({}, true) === "");
+  ok("a header names what is actually set", summary({ align: "center", border: true, logo: "asset:1" }, true) === "centred, bottom rule, logo");
+  ok("the same rule reads correctly for a footer", summary({ align: "left", border: true, hideText: true }, false) === "left, top rule, text hidden");
+  ok("header-only facts never leak into a footer summary", summary({ logo: "asset:1", pinned: true }, false) === "");
+  ok("it survives a missing config rather than throwing", summary(null, true) === "");
+  ok("with a switch the line ALWAYS leads with On/Off, so folded never reads as unknown",
+    sectionSummary({ toggle: {}, summary: function () { return "centred"; } }, false) === "Off · centred"
+    && sectionSummary({ toggle: {} }, true) === "On");
+  ok("without a switch there is no On/Off prefix", sectionSummary({ summary: function () { return "centred"; } }, true) === "centred");
+  ok("a summary that throws costs the header nothing", sectionSummary({ summary: function () { throw new Error("x"); } }, true) === "");
+})();
+
+// ---- uio-O-W1 (OVL-10): a scrolling body states where there is more ---------------
+// Content used to be sliced flat by the footer edge with nothing to distinguish "the end" from
+// "keep going". The classes go on a positioned WRAPPER, because a pseudo-element inside an
+// overflow box scrolls away with the content.
+section("uio-O-W1 scroll-edge affordance (OVL-10)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css"), html = src("index.html");
+  ok("the frame is the positioned host, not the scroller itself",
+    /\.scroll-frame \{ position: relative;/.test(ecss)
+    && /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,220}opacity: 0;/.test(ecss));
+  ok("each edge is a hairline plus a short fade, shown only when that edge has more behind it",
+    /\.scroll-frame::before \{[\s\S]{0,160}border-top: 1px solid var\(--border-subtle\);/.test(ecss)
+    && /\.scroll-frame::after \{[\s\S]{0,160}border-bottom: 1px solid var\(--border-subtle\);/.test(ecss)
+    && /\.scroll-frame\.has-edge-top::before, \.scroll-frame\.has-edge-bottom::after \{ opacity: 1; \}/.test(ecss));
+  ok("the edge never eats a click", /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,200}pointer-events: none;/.test(ecss));
+  ok("both edges are measured from the scroll position, so neither shows at rest",
+    /frame\.classList\.toggle\("has-edge-top", scroller\.scrollTop > 1\);/.test(e)
+    && /frame\.classList\.toggle\("has-edge-bottom", slack - scroller\.scrollTop > 1\);/.test(e));
+  ok("wiring is idempotent, so a re-render re-measures without stacking listeners",
+    /if \(!scroller\.__scrollEdges\) \{\s*\n\s*scroller\.__scrollEdges = true;/.test(e));
+  // Folding a section open changes the CONTENT height without moving the scroller's own box,
+  // so a ResizeObserver alone never fires -- which is the one case the affordance exists for.
+  ok("folding a section open re-measures, coalesced to one layout read per frame",
+    /new MutationObserver\(function \(\) \{[\s\S]{0,320}requestAnimationFrame\(run\)[\s\S]{0,200}attributeFilter: \["class", "style", "hidden"\]/.test(e));
+  ok("it refuses to run without its frame rather than drawing edges on the scroller",
+    /if \(!frame \|\| !frame\.classList \|\| !frame\.classList\.contains\("scroll-frame"\)\) return null;/.test(e));
+  ok("the settings sheet body sits in a frame", /var frame = h\("div", "scroll-frame"\); frame\.appendChild\(content\);/.test(e));
+  ok("the inspector's scroller sits in a frame too", /<div class="scroll-frame" id="inspector-scroll-frame">/.test(html));
+  ok("both re-measure after their own re-render",
+    /wireScrollEdges\(settingsModal\.content\)/.test(e)
+    && /wireScrollEdges\(document\.querySelector\("\.panel--right \.panel-scroll"\)\)/.test(e));
+})();
+
 // ---- uio-F06: one index, one palette (Cmd-K) -------------------------------------
 // The ranking + the guide parser are pure, so they run here as REAL fenced source. The point of
 // the index is that a setting is findable by what you WANT ("confetti") rather than by Verso's

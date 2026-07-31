@@ -173,6 +173,14 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   puts the panel away and brings the inspector back. Clicking the canvas does not close it, so a
   stray click can't lose your place. Where a setting is really owned by another panel, its row
   shows the live value and a link straight to that panel rather than telling you to go and find it.
+  When a panel has more than fits, a **hairline and a soft fade** appear at the edge you can keep
+  scrolling towards, and go once you reach the end, so a cut-off line is never mistaken for the
+  last one. Settings and the inspector both do this.
+  A section that has an **on/off switch** keeps that switch and its fold-out arrow separate: the
+  arrow opens and closes it, the switch decides whether it applies, and neither moves the other.
+  Folded, it shows a one-line summary of what it will do ("On · centred, bottom rule"). Switched
+  **off**, its rows dim but stay there and stay usable, so you can set a header up the way you
+  want it and then turn it on, rather than turning it on to find out what it does.
   **Drag its left edge** to make it wider or narrower, exactly like the side panels. Settings keeps
   its own width, so widening it does not change how wide the inspector is when it comes back.
   **⌘\\** (hide the side panels) closes Settings, since there would be nowhere left to show it.
@@ -577,6 +585,11 @@ top, so unchanged copy stays shared and you maintain one source.
   a variant shows a read-only preview. Edit a variant's wording where variant edits are allowed,
   and the change lands only on that variant's override.
 - A block with no override for the current variant simply **inherits** the flagship copy.
+- **Hide a block in one variant** from its right-click menu: **Variants ›** opens a short list with
+  a *Hide in <name>* switch per variant, and **New variant…** at its foot. Software versions and
+  per-variant images fold the same way. Before you have any variants there is no Variants list at
+  all — just a single **Add variant…** entry, so the menu never shows you a heading with nothing
+  under it.
 
 **Compare side by side.** Switch the editor header's **Build / Read** toggle to **Read** for a
 plain-text view of all course copy; **Build** returns you to the canvas. With variants, a **Single | Side by side**
