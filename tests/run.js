@@ -10653,6 +10653,39 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
   ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
 })();
 
+// ---- uio-O-W1 (OVL-10): a scrolling body states where there is more ---------------
+// Content used to be sliced flat by the footer edge with nothing to distinguish "the end" from
+// "keep going". The classes go on a positioned WRAPPER, because a pseudo-element inside an
+// overflow box scrolls away with the content.
+section("uio-O-W1 scroll-edge affordance (OVL-10)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css"), html = src("index.html");
+  ok("the frame is the positioned host, not the scroller itself",
+    /\.scroll-frame \{ position: relative;/.test(ecss)
+    && /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,220}opacity: 0;/.test(ecss));
+  ok("each edge is a hairline plus a short fade, shown only when that edge has more behind it",
+    /\.scroll-frame::before \{[\s\S]{0,160}border-top: 1px solid var\(--border-subtle\);/.test(ecss)
+    && /\.scroll-frame::after \{[\s\S]{0,160}border-bottom: 1px solid var\(--border-subtle\);/.test(ecss)
+    && /\.scroll-frame\.has-edge-top::before, \.scroll-frame\.has-edge-bottom::after \{ opacity: 1; \}/.test(ecss));
+  ok("the edge never eats a click", /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,200}pointer-events: none;/.test(ecss));
+  ok("both edges are measured from the scroll position, so neither shows at rest",
+    /frame\.classList\.toggle\("has-edge-top", scroller\.scrollTop > 1\);/.test(e)
+    && /frame\.classList\.toggle\("has-edge-bottom", slack - scroller\.scrollTop > 1\);/.test(e));
+  ok("wiring is idempotent, so a re-render re-measures without stacking listeners",
+    /if \(!scroller\.__scrollEdges\) \{\s*\n\s*scroller\.__scrollEdges = true;/.test(e));
+  // Folding a section open changes the CONTENT height without moving the scroller's own box,
+  // so a ResizeObserver alone never fires -- which is the one case the affordance exists for.
+  ok("folding a section open re-measures, coalesced to one layout read per frame",
+    /new MutationObserver\(function \(\) \{[\s\S]{0,320}requestAnimationFrame\(run\)[\s\S]{0,200}attributeFilter: \["class", "style", "hidden"\]/.test(e));
+  ok("it refuses to run without its frame rather than drawing edges on the scroller",
+    /if \(!frame \|\| !frame\.classList \|\| !frame\.classList\.contains\("scroll-frame"\)\) return null;/.test(e));
+  ok("the settings sheet body sits in a frame", /var frame = h\("div", "scroll-frame"\); frame\.appendChild\(content\);/.test(e));
+  ok("the inspector's scroller sits in a frame too", /<div class="scroll-frame" id="inspector-scroll-frame">/.test(html));
+  ok("both re-measure after their own re-render",
+    /wireScrollEdges\(settingsModal\.content\)/.test(e)
+    && /wireScrollEdges\(document\.querySelector\("\.panel--right \.panel-scroll"\)\)/.test(e));
+})();
+
 // ---- uio-F06: one index, one palette (Cmd-K) -------------------------------------
 // The ranking + the guide parser are pure, so they run here as REAL fenced source. The point of
 // the index is that a setting is findable by what you WANT ("confetti") rather than by Verso's

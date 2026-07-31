@@ -1396,6 +1396,28 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .panel-tabs__overflow svg { width: 16px; height: 16px; display: block; }
 
 .panel-scroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
+/* uio-O-W1 (OVL-10): a scrolling panel body has to SAY there is more, at the edge where there
+   is more. Content used to be sliced flat by the footer edge with nothing to distinguish "the
+   end" from "keep going". The frame is the positioned host, so the hairline + fade sit exactly
+   on the scroller's own edges rather than the panel's; the classes are toggled from JS
+   (wireScrollEdges) because only the scroll position knows which edge has more behind it. */
+.scroll-frame { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; }
+.scroll-frame > * { flex: 1 1 auto; min-width: 0; }
+.scroll-frame::before, .scroll-frame::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 20px;
+  pointer-events: none; opacity: 0; transition: opacity 0.12s ease; z-index: 2;
+}
+.scroll-frame::before {
+  top: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: linear-gradient(to bottom, var(--surface-panel), transparent);
+}
+.scroll-frame::after {
+  bottom: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(to top, var(--surface-panel), transparent);
+}
+.scroll-frame.has-edge-top::before, .scroll-frame.has-edge-bottom::after { opacity: 1; }
 
 /* SS: stacked, collapsible, split-adjustable left panes (Structure + Blocks + Components) */
 .lpane { display: flex; flex-direction: column; min-height: 34px; overflow: hidden; flex: 6 1 0; }

@@ -173,6 +173,9 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   puts the panel away and brings the inspector back. Clicking the canvas does not close it, so a
   stray click can't lose your place. Where a setting is really owned by another panel, its row
   shows the live value and a link straight to that panel rather than telling you to go and find it.
+  When a panel has more than fits, a **hairline and a soft fade** appear at the edge you can keep
+  scrolling towards, and go once you reach the end, so a cut-off line is never mistaken for the
+  last one. Settings and the inspector both do this.
   **Drag its left edge** to make it wider or narrower, exactly like the side panels. Settings keeps
   its own width, so widening it does not change how wide the inspector is when it comes back.
   **⌘\\** (hide the side panels) closes Settings, since there would be nowhere left to show it.

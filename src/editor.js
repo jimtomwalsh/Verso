@@ -6137,6 +6137,7 @@
     // #221 tour builder: when the spatial board overlay is open, mirror every edit
     // (canvas drag, inspector change, undo) back onto the board + its re-hosted inspector.
     if (typeof tourBoardIsOpen === "function" && tourBoardIsOpen()) syncTourBoard();
+    wireScrollEdges(document.querySelector(".panel--right .panel-scroll")); // uio-O-W1 (OVL-10)
   }
   // #207 FIX 2 (interaction-feel §3 "no dead controls"): while editing a NON-BASE software version,
   // per-version appearance/structure overrides are not captured yet, so an element inspector's block
@@ -15879,6 +15880,7 @@
         settingsModal.content.appendChild(sec);
       });
     } finally { inspector = _ins; }
+    wireScrollEdges(settingsModal.content); // uio-O-W1: idempotent — wires once, re-measures every time
   }
   // Open one section and bring it into view — the landing move for every cross-reference link
   // (uio-O-W1/OVL-06) now that there is no nav rail to highlight.
@@ -15911,8 +15913,11 @@
     });
     head.appendChild(tabs); box.appendChild(head);
     // Body: ONE scroll of collapsible sections (the nav rail is gone — see renderSettingsBody).
+    // uio-O-W1 (OVL-10): the body sits in a scroll-frame so its top/bottom edges can say when
+    // there is more. The sheet is exactly where the audit found content sliced by the footer.
     var content = h("div", "settings-content");
-    box.appendChild(content);
+    var frame = h("div", "scroll-frame"); frame.appendChild(content);
+    box.appendChild(frame);
     function selectTab(name) {
       settingsModal.tab = name;
       // Keep the canonical Tabs strip in sync on programmatic opens (open("system")/open("project")).
@@ -15970,6 +15975,44 @@
     var ws = document.querySelector(".workspace");
     if (ws) ws.classList.remove("has-sheet"); // restores the inspector at --panel-right-width
     popLayer("settings"); // returns focus to whatever opened the sheet
+  }
+  // uio-O-W1 (OVL-10): tell a scrolling body to state where there is more. The classes go on the
+  // `.scroll-frame` WRAPPER, not the scroller -- pseudo-elements inside an overflow box scroll
+  // away with the content, so the edges have to be drawn by a positioned host around it. Safe to
+  // call repeatedly; `sync` is kept on the element so a re-render can re-measure.
+  function wireScrollEdges(scroller) {
+    if (!scroller) return null;
+    var frame = scroller.parentNode;
+    if (!frame || !frame.classList || !frame.classList.contains("scroll-frame")) return null;
+    function sync() {
+      var slack = scroller.scrollHeight - scroller.clientHeight;
+      frame.classList.toggle("has-edge-top", scroller.scrollTop > 1);
+      frame.classList.toggle("has-edge-bottom", slack - scroller.scrollTop > 1);
+    }
+    if (!scroller.__scrollEdges) {
+      scroller.__scrollEdges = true;
+      scroller.addEventListener("scroll", sync);
+      // ResizeObserver catches the panel being dragged wider/narrower and the window resizing.
+      if (typeof ResizeObserver === "function") {
+        try { new ResizeObserver(sync).observe(scroller); } catch (e) {}
+      }
+      // It does NOT catch the CONTENT changing height -- the scroller's own box never moves for
+      // that -- and folding a section open is exactly the case the affordance exists for. So
+      // watch the subtree too, coalesced to one measure per frame so a burst of class toggles
+      // during a re-render costs one layout read, not one per mutation.
+      if (typeof MutationObserver === "function") {
+        var queued = false;
+        try {
+          new MutationObserver(function () {
+            if (queued) return; queued = true;
+            var run = function () { queued = false; sync(); };
+            if (typeof requestAnimationFrame === "function") requestAnimationFrame(run); else run();
+          }).observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+        } catch (e) {}
+      }
+    }
+    sync();
+    return sync;
   }
   // uio-F06 (Alt+Cmd-,): the settings for the CURRENT SELECTION. Those are the inspector's rows --
   // the spine has the inspector holding the sheet's Block scope -- so this is not a second
