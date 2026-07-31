@@ -3,10 +3,65 @@
    Inter  → editor UI chrome (workhorse)
    Exo 2  → Verso's bundled brand/display + course content face
    JetBrains Mono → code / HTML-interaction fields
-   Loaded from Google Fonts CDN for the design-system preview.
-   NOTE: the shipped Verso app EMBEDS these binaries (air-gap
-   requirement) — swap these @imports for local @font-face when
-   integrating into the offline build.
+   Vendored locally (air-gap requirement) — the binaries are the
+   same committed files the editor and exporter ship. NO external
+   CDN call: the app makes no network request to load these faces.
+   Paths resolve relative to this file (design-system/tokens/).
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Exo+2:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@font-face {
+  font-family: "Inter";
+  src: url("../../fonts/Inter-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../../fonts/Inter-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../../fonts/Inter-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../fonts/JetBrainsMono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}

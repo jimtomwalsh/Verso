@@ -18,8 +18,10 @@
    in src/course.css and never read by render().
    NOTE: @import must precede all other rules (incl. @font-face) per
    the CSS spec, so these stay at the very top of the file.
+   Fonts are NOT imported from the DS token file: the editor vendors
+   its faces locally via the @font-face rules below, so the chrome
+   never reaches the Google Fonts CDN (air-gap requirement).
    ============================================================ */
-@import "design-system/tokens/fonts.css";
 @import "design-system/tokens/colors.css";
 @import "design-system/tokens/typography.css";
 @import "design-system/tokens/spacing.css";

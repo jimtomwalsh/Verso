@@ -8416,12 +8416,32 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   var uiKit = src("src/ui-kit.js");
 
   // (item 4) DS token files present + imported by the editor entry CSS.
+  // fonts.css is the exception: the editor vendors its faces via local
+  // @font-face rules (offline / air-gap) and does NOT @import the DS font
+  // token file, so it is checked for presence only, not for import.
   var TOKEN_FILES = ["colors.css", "typography.css", "spacing.css", "effects.css", "fonts.css"];
+  var IMPORTED_TOKEN_FILES = ["colors.css", "typography.css", "spacing.css", "effects.css"];
   TOKEN_FILES.forEach(function (f) {
     ok("DS token file present: design-system/tokens/" + f,
        fs.existsSync(path.join(ROOT, "design-system/tokens", f)));
+  });
+  IMPORTED_TOKEN_FILES.forEach(function (f) {
     ok("editor.css imports design-system/tokens/" + f,
        new RegExp('@import\\s+"design-system/tokens/' + f.replace(".", "\\.") + '"').test(css));
+  });
+  ok("editor.css does NOT import the DS font token file (fonts vendored locally, no CDN)",
+     !/@import\s+"design-system\/tokens\/fonts\.css"/.test(css));
+
+  // (air-gap invariant) NO shipping CSS may reach an external font CDN. The
+  // editor claims "no external network calls at all" / "no phone-home"; a
+  // Google Fonts @import in any editor-loaded stylesheet silently breaks that
+  // and any IT/security air-gap review. Guard every CSS the editor pulls in.
+  var CDN_FONT_CSS = ["editor.css", "src/course.css",
+                      "design-system/tokens/fonts.css", "design-system/styles.css"];
+  CDN_FONT_CSS.forEach(function (f) {
+    var body = src(f);
+    ok("no external font-CDN reference in " + f + " (fonts.googleapis/gstatic)",
+       !/fonts\.googleapis\.com|fonts\.gstatic\.com/.test(body));
   });
   // #21 teardown: the legacy ui-alias layer is DELETED. No alias definitions
   // (`--ui-x: ...`) may remain in the editor entry CSS — the chrome references
