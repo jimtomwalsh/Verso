@@ -1704,14 +1704,20 @@ section("#8 docs reader (TOC + search)");
 (function () {
   var ed = src("src/editor.js");
   ok("#8 reader builds the two-pane split (nav + reading pane)", /modal-box--docs/.test(ed) && /docs-split/.test(ed) && /docs-nav/.test(ed));
-  ok("#8 sidebar has a search input", /docs-search__input/.test(ed) && /Search the guide/.test(ed));
+  // uio-F06 (OVL-21) RETARGETED: the guide's own search box is retired. It was a third search
+  // field over a third index; guide sections now live in the one Cmd-K index. The TOC stays,
+  // because a contents list is navigation, not search.
+  ok("#8 sidebar has NO search input of its own (one index, Cmd-K)", !/docs-search__input/.test(ed) && !/placeholder = "Search the guide"/.test(ed));
   ok("#8 TOC built from the guide's h2/h3 heading ids", /function buildDocsNav[\s\S]{0,400}querySelectorAll\("h2\[id\], h3\[id\]"\)/.test(ed));
   ok("#8 TOC item scrolls the reading pane to its heading", /docs-toc__item[\s\S]{0,400}addEventListener\("click"[\s\S]{0,80}scrollToHead/.test(ed));
   ok("#8 scroll-spy highlights the active section", /body\.addEventListener\("scroll"[\s\S]{0,600}is-active/.test(ed));
-  ok("#8 search filters the TOC + shows a no-match state", /function runSearch[\s\S]{0,400}is-hidden[\s\S]{0,200}docs-toc__empty|noHits\.style\.display/.test(ed));
-  ok("#8 Escape clears a live search before closing", /activeElement === search && search\.value[\s\S]{0,80}runSearch\(""\)/.test(ed));
+  ok("#8 the guide's TOC filter went with the search box (no orphan runSearch)", !/function runSearch/.test(ed) && !/docs-toc__empty/.test(ed));
+  // uio-F06 RETARGETED: Escape used to be the guide's own capture handler, clearing its search
+  // first. The guide now joins the F05 layer stack, so Escape closes the topmost layer only.
+  ok("#8 the guide is a layer, so Escape closes the topmost surface only", /pushLayer\("help", close\)/.test(ed) && /popLayer\("help"\)/.test(ed));
+  ok("#8 a guide result lands on its section, not the top of the guide", /function openHelpModal\(focusId\)/.test(ed) && /if \(focusId\)[\s\S]{0,220}scrollToHead\(body, target\)/.test(ed));
   ok("#8 CSS: TOC active item reuses the accent-quiet/accent token pair", /\.docs-toc__item\.is-active\s*\{[^}]*var\(--accent-quiet\)[^}]*var\(--accent\)/.test(src("editor.css")));
-  ok("#8 CSS: search converges to the ring-wrapper focus-within pattern", /\.docs-search:focus-within\s*\{[^}]*var\(--accent\)/.test(src("editor.css")));
+  ok("#8 CSS: the retired search box left no dead rules behind", !/\.docs-search/.test(src("editor.css")) && !/\.docs-toc__empty/.test(src("editor.css")));
 })();
 
 // ---- #8 docs auto-maintenance — the drift checker tool (code is truth) -----------------
@@ -10645,6 +10651,113 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
     && /pushLayer\("ctx-menu", closeCtxMenu\)/.test(e) && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(e));
   ok("no migrated surface keeps a private Escape handler", !/function _chromePopEsc/.test(e) && !/function settingsEsc/.test(e));
   ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
+})();
+
+// ---- uio-F06: one index, one palette (Cmd-K) -------------------------------------
+// The ranking + the guide parser are pure, so they run here as REAL fenced source. The point of
+// the index is that a setting is findable by what you WANT ("confetti") rather than by Verso's
+// filing system ("Motion") -- so the alias path is tested as hard as the label path.
+section("uio-F06 command index (Cmd-K)");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @f06-start \*\/([\s\S]*?)\/\* @f06-end \*\//);
+  if (!m) { ok("locate @f06 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { entries: commandEntries, score: scoreCommand, rank: rankCommands," +
+    " guide: parseGuideHeadings, aliases: SETTINGS_ALIASES, kinds: COMMAND_KINDS };")();
+
+  var SOURCES = {
+    settings: [
+      { tab: "project", key: "motion", title: "Motion" },
+      { tab: "project", key: "headerFooter", title: "Header & Footer" },
+      { tab: "project", key: "theme", title: "Theme" },
+      { tab: "system", key: "canvas", title: "Canvas" }
+    ],
+    actions: [{ id: "demo", label: "Preview in Demo mode", sub: "Output", keywords: ["play"] }],
+    guide: [{ id: "9-theming-design", title: "Theming & design", level: 2 }],
+    pages: [{ name: "Getting started", pi: 0 }],
+    blocks: [{ label: "Heading", sub: "Getting started", pi: 0, bi: 2 }]
+  };
+  var entries = g.entries(SOURCES);
+
+  ok("the index is ONE flat list over all five sources", entries.length === 8);
+  ok("a settings entry names the scope it lives in, not just its title",
+    entries[0].sub === "Project settings" && entries[3].sub === "System settings");
+  ok("a settings entry carries its intent words", entries[0].keywords.indexOf("confetti") !== -1);
+
+  // The audit's own examples: names that are not guessable from intent.
+  function firstLabel(q) { var r = g.rank(entries, q, 5); return r.length ? r[0].label : null; }
+  ok("'confetti' finds Motion", firstLabel("confetti") === "Motion");
+  ok("'disclaimer' finds Header & Footer", firstLabel("disclaimer") === "Header & Footer");
+  ok("'spellcheck' finds the Canvas section on the System scope", firstLabel("spellcheck") === "Canvas");
+
+  ok("an exact label still beats an alias for the same word", firstLabel("theme") === "Theme");
+  ok("the guide is in the same index as the settings", firstLabel("theming") === "Theming & design");
+  ok("a page is findable by name", firstLabel("getting") === "Getting started");
+  ok("an action is findable by a word that is not in its label", firstLabel("play") === "Preview in Demo mode");
+
+  // Ranking rules.
+  ok("a label PREFIX outranks a mid-label match",
+    g.score({ kind: "setting", label: "Motion", sub: "", keywords: [] }, "mo") >
+    g.score({ kind: "setting", label: "Reduced motion", sub: "", keywords: [] }, "mo"));
+  ok("every token must match, so one stray word drops the entry",
+    g.score({ kind: "setting", label: "Motion", sub: "Project settings", keywords: ["confetti"] }, "confetti nonsense") === -1);
+  ok("a two-word query still matches when both words are present",
+    g.score({ kind: "setting", label: "Custom fonts", sub: "Project settings", keywords: ["upload font"] }, "custom font") > 0);
+  ok("no match at all returns -1, so it is dropped rather than ranked last",
+    g.score({ kind: "page", label: "Getting started", sub: "Page", keywords: [] }, "zzz") === -1);
+  ok("an empty query returns everything in kind order, so the palette opens useful",
+    g.rank(entries, "", 0).length === entries.length && g.rank(entries, "")[0].kind === "action");
+  ok("kind is a TIE-BREAK only and never beats a better text match",
+    g.rank(entries, "motion")[0].kind === "setting");
+  ok("the limit is a shortlist, not a truncation of the ranking",
+    g.rank(entries, "", 2).length === 2 && g.rank(entries, "", 2)[0].kind === "action");
+
+  // The guide parser must agree with mdToHtml's slugs or a guide result scrolls nowhere.
+  var md = [
+    "# Verso", "", "## 1. Quick start", "text", "", "### Open a course", "more",
+    "", "```", "## not a heading, this is a code sample", "```", "", "## 1. Quick start", "dup"
+  ].join("\n");
+  var heads = g.guide(md);
+  ok("only h2/h3 are indexed (the h1 title is the document, not a section)", heads.length === 3);
+  ok("a heading inside a fenced code block is not indexed", heads.map(function (x) { return x.title; }).indexOf("not a heading, this is a code sample") === -1);
+  ok("the leading section number is filing, not meaning, so the result reads clean", heads[0].title === "Quick start");
+  ok("the slug KEEPS the number, because that is what mdToHtml emits", heads[0].id === "1-quick-start");
+  ok("a repeated heading gets the same -2 suffix mdToHtml would give it", heads[2].id === "1-quick-start-2");
+  ok("the level is carried so the palette could group by depth later", heads[1].level === 3);
+})();
+
+// ---- uio-F06: the palette + the keyboard contract --------------------------------
+section("uio-F06 palette wiring + keyboard contract");
+(function () {
+  var e = src("src/editor.js");
+  ok("Cmd-K opens the one palette", /meta && \(e\.key === "k" \|\| e\.key === "K"\)[\s\S]{0,120}openQuickJump\(\)/.test(e));
+  ok("Cmd-, opens Settings and Alt+Cmd-, opens the selection's settings",
+    /meta && e\.key === ","[\s\S]{0,600}if \(e\.altKey\) openSelectionSettings\(\); else openSettingsModal\(\);/.test(e));
+  ok("the selection's settings ARE the inspector, not a second surface",
+    /function openSelectionSettings\(\)[\s\S]{0,500}closeSettingsModal\(\)[\s\S]{0,400}getElementById\("inspector"\)/.test(e));
+  ok("and it lands on the inspector's first control, not its tab strip",
+    /var body = document\.getElementById\("inspector"\);[\s\S]{0,200}body\.querySelector\('input:not\(\[type="hidden"\]\), select, button, \[tabindex="0"\]'\)/.test(e));
+  ok("the palette draws from the one index, not its own page list",
+    /var entries = commandEntries\(commandSources\(__guideIndexCache\)\);/.test(e)
+    && /filtered = rankCommands\(entries, "", PALETTE_LIMIT\)/.test(e));
+  ok("the palette joins the layer stack instead of owning Escape",
+    /pushLayer\("palette", close\)/.test(e) && /popLayer\("palette"\)/.test(e)
+    && !/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); close\(\); \}\s*\n\s*else if \(e\.key === "ArrowDown"\)/.test(e));
+  ok("a result routes by kind, and a settings result opens its named section",
+    /function runCommandEntry\(entry\)[\s\S]{0,200}openSettingsSection\(entry\.ref\.tab, entry\.ref\.key\)/.test(e));
+  ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(e));
+  ok("the guide index is fetched once and cached, and degrades to no guide results",
+    /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(e));
+  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(e));
+  ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(e));
+  // DS first, per the gate: the canonical set had no palette, so it was added there before it
+  // was built here — and the spine settles that it is navigation, not a seventh presentation.
+  var ds = src("design-system/components/overlays/CommandPalette.d.ts");
+  ok("the palette has a DS contract", /export function CommandPalette/.test(ds) && /kind: "setting" \| "action" \| "guide" \| "page" \| "block"/.test(ds));
+  ok("the DS states it is navigation, not a seventh presentation", /NOT a seventh presentation/.test(ds));
+  ok("the spine names the palette and its index", /not a seventh presentation/.test(src("design-system/readme.md"))
+    && /components\/overlays\/CommandPalette/.test(src("design-system/readme.md")));
 })();
 
 // ---- uio-F05: the escalation route out of the narrow surfaces --------------------
