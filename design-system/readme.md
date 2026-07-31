@@ -16,14 +16,15 @@ This system encodes the editor's full set of controls, grouped by concern:
 **panels/** · `Panel` · `PanelSection` · `Breadcrumb` · `LeftRail`
 **navigation/** · `Tabs` · `DocumentTab`
 **structure/** · `TreeItem` · `BlockPaletteItem` · `BlockTile` + `BlockGrid` · `Badge` · `Meter` · `Timeline`
-**overlays/** · `Modal` · `ContextMenu` · `Tooltip` · `CanvasOverlayBar`
+**overlays/** · `Sheet` · `Modal` · `ContextMenu` · `Tooltip` · `CanvasOverlayBar`
 **browser/** · `CourseCard` · `CardGrid` + `BrowserEmptyState` · `ThumbnailFrame` · `SearchField` · `RecentsMenuRow`
 **board/** · `GraphBoard` · `ScreenNode` · `Edge` · `ConnectionPort`
 
 Direct mapping to the editor's canonical helpers: `IconField`←`iconField` (55 sites),
 `SwitchRow`←`switchRow` (27), `SegmentedControl`←`segmentedLive`/`segmentedIconLive` (20),
 `FieldRow`+`TwoUp`←`fieldRow`/`twoUp` (20), `ColorField`←the unified `colorField`,
-`PanelSection`←`sectionGroup`, `Modal`←`promptModal`/`confirmModal`, `ContextMenu`←`showContextMenu`.
+`PanelSection`←`sectionGroup`, `Modal`←`promptModal`/`confirmModal`, `ContextMenu`←`showContextMenu`,
+`Sheet`←`openSheet` (the right-docked non-modal settings surface).
 
 ### Surfaces
 - `Icon` — a glyph wrapper giving components a consistent icon API (line icons, kebab-case names).
@@ -139,6 +140,14 @@ Settings are one tree. The presentation is chosen by the job, never by where the
 Non-modal surfaces keep the canvas live: the canvas is *squeezed*, never covered. The Modal is
 the only surface that takes a scrim, and only for a destructive confirm or a blocking run. Every
 narrow surface (popover, menu) carries a visible route to escalate into the sheet.
+
+**The sheet and the inspector share one right dock.** They are the same tree at two sizes — the
+inspector holds the sheet's Block scope — so they are never both on screen. Opening the sheet
+widens the dock to `--panel-sheet-width` and supersedes the inspector; closing it restores the
+inspector at `--panel-right-width`. Two right-docked surfaces at once state the same thing twice
+and squeeze the canvas twice. The sheet carries no internal navigation rail either: its body is
+one scroll of sections, because a rail inside a dock is a second navigation system competing with
+the section headers and with the one ⌘K index.
 
 ### The shared row
 

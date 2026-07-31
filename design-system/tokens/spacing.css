@@ -33,6 +33,10 @@
   --rail-w:            44px;   /* the standard Source/Edit/Publish icon rail */
   --panel-left-width:  248px;
   --panel-right-width: 264px;
+  /* uio-F05: the sheet shares the right dock with the inspector and widens it while open.
+     Wider than the inspector because the sheet carries the shared row PLUS an inheritance
+     tail naming the scope a value came from, which 264px cannot hold legibly. */
+  --panel-sheet-width: 400px;
   --toolbar-height:    40px;
   --tabbar-height:     36px;
   --row-height:        28px;   /* inspector row */
