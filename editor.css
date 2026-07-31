@@ -293,6 +293,19 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .subdisc__reset:hover { color: var(--text-primary); background: var(--surface-raised); }
 .subdisc__body { padding: 2px 0 6px 14px; border-left: 1px solid var(--border-subtle); margin-left: 4px; }
+/* uio-O-W2 (OVL-08): the collapsed section's one-line value summary. It sits between the title
+   and the controls, takes the leftover width, and truncates rather than wrapping the header. */
+.subdisc__summary {
+  flex: 1 1 auto; min-width: 0; text-align: right;
+  font-size: var(--text-xs); color: var(--text-tertiary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.subdisc.is-open > .subdisc__head .subdisc__summary { display: none; } /* open, the rows say it */
+/* An OFF section dims but stays reachable -- its rows are built and usable, so you can set up
+   what it will do before you turn it on. Never `pointer-events: none`, never disabled. */
+.subdisc.is-inactive > .subdisc__head .subdisc__title,
+.subdisc.is-inactive > .subdisc__head .subdisc__summary { color: var(--text-tertiary); }
+.subdisc.is-inactive > .subdisc__body { opacity: 0.6; }
 
 /* SPEC-panel-cleanup: the canonical boolean SWITCH (retires [Off|On] word toggles). */
 .uiswitch {

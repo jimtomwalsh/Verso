@@ -10653,6 +10653,47 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
   ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
 })();
 
+// ---- uio-O-W2 (OVL-08): the switch and the disclosure stop fighting ---------------
+// Being OFF used to force `is-collapsed` whatever the author had twirled open, turning it ON
+// auto-opened the section, and an off section never built its body at all -- so it showed
+// nothing of the configuration it still held.
+section("uio-O-W2 section switch vs disclosure (OVL-08)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css");
+  ok("the chevron alone decides collapsed, so the switch no longer folds the section",
+    /var sec = h\("div", "subdisc" \+ \(open \? " is-open" : " is-collapsed"\) \+ \(enabled \? "" : " is-inactive"\)\);/.test(e));
+  ok("turning a section ON no longer opens it", !/if \(v\) openSections\[key\] = true;/.test(e)
+    && /opts\.toggle\.set\(v\);\s+\/\/ the switch NEVER moves the disclosure/.test(e));
+  ok("an OFF section still builds its rows, so they stay reachable", /if \(open\) \{ var body = h\("div", "subdisc__body"\); buildBody\(body\); sec\.appendChild\(body\); \}/.test(e));
+  ok("off dims but never disables — no pointer-events trap on an inactive section",
+    /\.subdisc\.is-inactive > \.subdisc__body \{ opacity: 0\.6; \}/.test(ecss)
+    && !/\.subdisc\.is-inactive[^{]*\{[^}]*pointer-events: none/.test(ecss));
+  ok("the summary shows only while collapsed", /\.subdisc\.is-open > \.subdisc__head \.subdisc__summary \{ display: none; \}/.test(ecss));
+  ok("the summary truncates rather than wrapping the header", /\.subdisc__summary \{[\s\S]{0,220}text-overflow: ellipsis;/.test(ecss));
+  ok("the DS carries the switch/summary contract and the independence rule",
+    /enabled\?: boolean;/.test(src("design-system/components/panels/PanelSection.d.ts"))
+    && /summary\?: React\.ReactNode;/.test(src("design-system/components/panels/PanelSection.d.ts"))
+    && /The switch and the chevron are independent/.test(src("design-system/readme.md")));
+
+  // The summary itself is pure, so it runs here as real source.
+  var m = e.match(/(function headerFooterSummary\(cfg, isHeader\)[\s\S]*?\n  \})/);
+  if (!m) { ok("locate headerFooterSummary", false); return; }
+  var summary = new Function(m[1] + "; return headerFooterSummary;")();
+  var withSwitch = e.match(/(function sectionSummary\(opts, enabled\)[\s\S]*?\n  \})/);
+  var sectionSummary = withSwitch ? new Function(withSwitch[1] + "; return sectionSummary;")() : null;
+
+  ok("an untouched section says nothing rather than reciting defaults", summary({}, true) === "");
+  ok("a header names what is actually set", summary({ align: "center", border: true, logo: "asset:1" }, true) === "centred, bottom rule, logo");
+  ok("the same rule reads correctly for a footer", summary({ align: "left", border: true, hideText: true }, false) === "left, top rule, text hidden");
+  ok("header-only facts never leak into a footer summary", summary({ logo: "asset:1", pinned: true }, false) === "");
+  ok("it survives a missing config rather than throwing", summary(null, true) === "");
+  ok("with a switch the line ALWAYS leads with On/Off, so folded never reads as unknown",
+    sectionSummary({ toggle: {}, summary: function () { return "centred"; } }, false) === "Off · centred"
+    && sectionSummary({ toggle: {} }, true) === "On");
+  ok("without a switch there is no On/Off prefix", sectionSummary({ summary: function () { return "centred"; } }, true) === "centred");
+  ok("a summary that throws costs the header nothing", sectionSummary({ summary: function () { throw new Error("x"); } }, true) === "");
+})();
+
 // ---- uio-O-W1 (OVL-10): a scrolling body states where there is more ---------------
 // Content used to be sliced flat by the footer edge with nothing to distinguish "the end" from
 // "keep going". The classes go on a positioned WRAPPER, because a pseudo-element inside an

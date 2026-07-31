@@ -176,6 +176,11 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   When a panel has more than fits, a **hairline and a soft fade** appear at the edge you can keep
   scrolling towards, and go once you reach the end, so a cut-off line is never mistaken for the
   last one. Settings and the inspector both do this.
+  A section that has an **on/off switch** keeps that switch and its fold-out arrow separate: the
+  arrow opens and closes it, the switch decides whether it applies, and neither moves the other.
+  Folded, it shows a one-line summary of what it will do ("On · centred, bottom rule"). Switched
+  **off**, its rows dim but stay there and stay usable, so you can set a header up the way you
+  want it and then turn it on, rather than turning it on to find out what it does.
   **Drag its left edge** to make it wider or narrower, exactly like the side panels. Settings keeps
   its own width, so widening it does not change how wide the inspector is when it comes back.
   **⌘\\** (hide the side panels) closes Settings, since there would be nowhere left to show it.

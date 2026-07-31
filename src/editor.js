@@ -11551,12 +11551,22 @@
   // Nested (level-2) twirl. opts: { toggle:{get,set} (switch in header, feature-enable),
   // overridden:fn->bool (active-override dot + enables Reset), onReset:fn (revert styling) }.
   // Auto-opens the nest when its switch is turned ON (decision 3).
+  // uio-O-W2 (OVL-08): the switch and the disclosure used to fight each other. Being OFF forced
+  // `is-collapsed` whatever the author had twirled open, turning it ON auto-opened the section,
+  // and an off section never built its body at all -- so it showed nothing of the configuration
+  // it still held, and turning the header back on was a leap of faith.
+  //
+  // They are independent now, per the spine ("a chevron, an optional switch, and a one-line
+  // summary when collapsed"): the chevron owns open/closed, the switch owns on/off. A collapsed
+  // section states its value in one line. An OFF section dims, but its rows stay built and
+  // reachable -- marked inactive, not removed -- so you can see and set what it will do before
+  // you turn it on.
   function subDisclosure(key, title, buildBody, opts) {
     opts = opts || {};
     var enabled = opts.toggle ? !!opts.toggle.get() : true;
     var open = !!openSections[key];
     var over = !!(opts.overridden && opts.overridden());
-    var sec = h("div", "subdisc" + (open ? " is-open" : "") + (enabled ? "" : " is-collapsed"));
+    var sec = h("div", "subdisc" + (open ? " is-open" : " is-collapsed") + (enabled ? "" : " is-inactive"));
     var head = h("div", "subdisc__head");
     var twirl = h("button", "subdisc__twirl"); twirl.type = "button";
     twirl.appendChild(h("span", "disc__caret"));
@@ -11564,6 +11574,14 @@
     if (over) { var dot = h("span", "subdisc__dot"); dot.title = "Customized from theme default"; twirl.appendChild(dot); }
     twirl.addEventListener("click", function () { toggleSection(key); });
     head.appendChild(twirl);
+    // The one-line summary, shown only while collapsed: what this section will actually do.
+    // With a switch it always leads with On/Off, so "collapsed" never has to mean "unknown".
+    var summaryText = sectionSummary(opts, enabled);
+    if (summaryText) {
+      var sum = h("span", "subdisc__summary", summaryText);
+      sum.title = summaryText;
+      head.appendChild(sum);
+    }
     var ctrls = h("div", "subdisc__ctrls");
     if (over && opts.onReset) {
       var rb = h("button", "subdisc__reset", "Reset"); rb.type = "button"; rb.title = "Reset this section to the theme default";
@@ -11573,19 +11591,43 @@
     if (opts.toggle) {
       ctrls.appendChild(switchEl(enabled, function (v) {
         pushHistory();
-        if (v) openSections[key] = true;   // auto-open on enable
-        saveOpenSections();
-        opts.toggle.set(v);
+        opts.toggle.set(v);   // the switch NEVER moves the disclosure (OVL-08)
         renderInspector();
       }));
     }
     head.appendChild(ctrls);
     sec.appendChild(head);
-    if (open && enabled) { var body = h("div", "subdisc__body"); buildBody(body); sec.appendChild(body); }
+    // Built whenever it is OPEN, on or off. An off section's rows are dimmed by .is-inactive and
+    // stay usable, so configuring it before enabling it is an ordinary thing to do.
+    if (open) { var body = h("div", "subdisc__body"); buildBody(body); sec.appendChild(body); }
     return sec;
+  }
+  // "Off · centred, top rule" — the collapsed section's one line. Pure string assembly over
+  // whatever the caller reports, so a section with nothing to say adds nothing rather than
+  // padding the header with "Default".
+  function sectionSummary(opts, enabled) {
+    var parts = [];
+    if (opts.toggle) parts.push(enabled ? "On" : "Off");
+    var detail = "";
+    try { detail = opts.summary ? String(opts.summary() || "") : ""; } catch (e) {}
+    if (detail) parts.push(detail);
+    return parts.join(" · ");
   }
   // Override registry (SPEC decision 5): each appearance nest declares the block-prop
   // keys it owns. Present key = overridden; reset = delete them (revert to theme default).
+  // uio-O-W2 (OVL-08): what the collapsed Header/Footer section will actually do. PURE over the
+  // config object, so it is regression-guarded in tests/run.js. Names only what is SET -- an
+  // untouched section reads as its alignment alone rather than a recital of every default.
+  function headerFooterSummary(cfg, isHeader) {
+    cfg = cfg || {};
+    var bits = [];
+    if (cfg.align) bits.push(cfg.align === "center" ? "centred" : cfg.align);
+    if (cfg.border) bits.push(isHeader ? "bottom rule" : "top rule");
+    if (isHeader && cfg.logo) bits.push("logo");
+    if (isHeader && cfg.pinned) bits.push("pinned");
+    if (!isHeader && cfg.hideText) bits.push("text hidden");
+    return bits.join(", ");
+  }
   function nestOverridden(cfg, keyList) { return !!cfg && keyList.some(function (k) { return cfg[k] !== undefined && cfg[k] !== null && cfg[k] !== ""; }); }
   function nestReset(cfg, keyList) { if (cfg) keyList.forEach(function (k) { delete cfg[k]; }); }
   var HEADER_STYLE_KEYS = ["align", "border", "borderColor", "padX", "padY", "logoTint", "logoSize", "pinned"];
@@ -16686,11 +16728,13 @@
     var ch = doc.headerFooter || (doc.headerFooter = { header: { on: false }, footer: { on: false } });
     c.appendChild(subDisclosure("hf.header", "Header", function (host) { buildHeaderNest(ch.header, host); }, {
       toggle: { get: function () { return ch.header.on === true; }, set: function (v) { ch.header.on = v; reapplyHeaderFooter(); } },
+      summary: function () { return headerFooterSummary(ch.header, true); },
       overridden: function () { return nestOverridden(ch.header, HEADER_STYLE_KEYS); },
       onReset: function () { nestReset(ch.header, HEADER_STYLE_KEYS); reapplyHeaderFooter(); }
     }));
     c.appendChild(subDisclosure("hf.footer", "Footer", function (host) { buildFooterNest(ch.footer, host); }, {
       toggle: { get: function () { return ch.footer.on === true; }, set: function (v) { ch.footer.on = v; reapplyHeaderFooter(); } },
+      summary: function () { return headerFooterSummary(ch.footer, false); },
       overridden: function () { return nestOverridden(ch.footer, FOOTER_STYLE_KEYS); },
       onReset: function () { nestReset(ch.footer, FOOTER_STYLE_KEYS); reapplyHeaderFooter(); }
     }));
