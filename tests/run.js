@@ -10391,6 +10391,42 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
   ok("the filename takes the slack and the status pins right, like the history rows", /\.publish-queuerow__file \{ flex: 1 1 auto; min-width: 0;[^}]*text-overflow: ellipsis; \}/.test(css) && /\.publish-queuerow__status \{[^}]*margin-left: auto;/.test(css));
 })();
 
+// uio-P-C08 (PUB-15, Conservative): variants as outputs, surfaced on the Publish rows. The static
+// outputs badge becomes the variant roll-up chip -- same F04 fact, now openable to a popover
+// listing every output. The roll-up is a pure derivation over f04OutputsFact; it never expands
+// variants itself, so the chip and the queue's publish run read the same expansion.
+section("uio-P-C08: variant roll-up chip + variant popover on Publish");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  var fm = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
+  var vm = e.match(/\/\* @publish-varpop-start \*\/([\s\S]*?)\/\* @publish-varpop-end \*\//);
+  if (!fm || !vm) { ok("locate @f04 + @publish-varpop fences", false); return; }
+  var f04 = new Function(fm[1] + "\nreturn { outputsFact: f04OutputsFact };")();
+  var g = new Function(vm[1] + "\nreturn { rollup: publishVariantRollup };")();
+
+  // --- count derivation: straight from the F04 fact, never a second expansion ---
+  var fact = f04.outputsFact(["Compact", "Onshore"]);
+  var roll = g.rollup(fact);
+  ok("a doc with 2 variants rolls up to 3 outputs", roll && roll.count === 3);
+  ok("the chip label is the F04 phrasing verbatim, not a reworded copy", roll.label === fact.label && roll.title === fact.title);
+  ok("the popover rows are the fact's names, flagship first", roll.rows.length === 3 && roll.rows[0].name === "Flagship" && roll.rows[0].flagship === true && roll.rows[1].name === "Compact" && roll.rows[1].flagship === false && roll.rows[2].name === "Onshore");
+
+  // --- the zero-variant case: no chip at all ---
+  ok("a doc without variants rolls up to null (no chip)", g.rollup(f04.outputsFact([])) === null && g.rollup(f04.outputsFact(null)) === null);
+  ok("blank variant entries do not conjure outputs", g.rollup(f04.outputsFact(["", null])) === null);
+  ok("junk degrades to null, not a throw", g.rollup(null) === null && g.rollup({}) === null);
+  ok("one real variant is enough to earn the chip", g.rollup(f04.outputsFact(["Compact"])).count === 2);
+
+  // --- wiring: one chip builder, both Publish rows, the one popover machinery ---
+  ok("both Publish rows build the chip through the one builder", /publishVariantChip\(facts, "publish-pickrow__outputs"\)/.test(e) && /publishVariantChip\(qf, "publish-queuerow__outputs"\)/.test(e));
+  ok("the retired static outputs badge is gone from both rows (the Source strip's roll-up badge stays)", !/f04Badge\(facts\.outputs, "publish-pickrow__outputs"\)/.test(e) && !/f04Badge\(qf\.outputs/.test(e));
+  ok("the chip is the pane's publish-chip family, a real button", /var chip = h\("button", "publish-chip" \+ \(cls \? " " \+ cls : ""\), roll\.label\)/.test(e));
+  ok("the popover opens through openChromePop, the canonical anchored popover", /function publishVariantChip\(facts, cls\)[\s\S]{0,900}openChromePop\(chip,/.test(e));
+  ok("the storage dot opens through the SAME machinery, so there is one popover, not two", /function openStoragePopover\(anchor\) \{\s*\n\s*openChromePop\(anchor,/.test(e) && !/\.storage-pop \{/.test(css));
+  ok("the popover surface carries the DS elevation token", /\.chrome-pop \{[^}]*box-shadow: var\(--shadow-popover/.test(css));
+  ok("Esc closes the popover as the topmost layer", /function _chromePopEsc\(e\) \{ if \(e\.key === "Escape"\) \{ e\.stopPropagation\(\); closeChromePop\(\); \} \}/.test(e));
+})();
+
 // ---- uio-F03: scope + inheritance model (the five-rung ladder) -------------------
 // The UI spine's ladder System -> Product -> Course -> Page -> Block as ONE primitive with
 // one visual language. The resolver is pure and PROPERTY-AGNOSTIC by contract: it takes the
