@@ -25587,6 +25587,14 @@
       ".ctx-item__hint{margin-left:auto;padding-left:14px;font-size:11px;color:#8a8a8a;}" +
       ".ctx-sep{height:1px;background:#3a3a3a;margin:5px 8px;}" +
       ".ctx-head{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0;color:#8a8a8a;}" +
+      // uio-O-W2 (OVL-13): submenus. The parent row keeps a trailing chevron; the panel sits to
+      // its right, overlapping by the menu's own padding so the pointer never crosses a gap.
+      ".ctx-item--parent{position:relative;}" +
+      ".ctx-item__chev{margin-left:auto;padding-left:14px;color:#8a8a8a;}" +
+      ".ctx-item--parent:hover .ctx-item__chev{color:#fff;}" +
+      ".ctx-menu--sub{position:absolute;left:100%;top:-5px;margin-left:-2px;display:none;}" +
+      ".ctx-menu--sub.is-flipped{left:auto;right:100%;margin-left:0;margin-right:-2px;}" +
+      ".ctx-item--parent:hover > .ctx-menu--sub{display:block;}" +
       ".canvas.is-variant-preview{outline:2px solid #8e44ad;outline-offset:-2px;}" +
       ".canvas.is-version-preview{outline:2px solid #0e9384;outline-offset:-2px;}";
     document.head.appendChild(s);
@@ -25600,6 +25608,76 @@
   function onCtxOutside(e) { if (ctxMenuEl && !ctxMenuEl.contains(e.target)) closeCtxMenu(); }
   // uio-F05: opts.escalate = { label, tab, section } appends the spine's required route from
   // this menu of verbs into the settings sheet, after a separator.
+  // uio-O-W2 (OVL-13): a menu never renders a section that has nothing in it. A heading whose
+  // group holds no actionable entry is dropped, and the separators that framed it go with it, so
+  // a menu can offer a section unconditionally and simply not show it when it is empty. PURE, so
+  // it is regression-guarded in tests/run.js.
+  function pruneEmptyMenuSections(items) {
+    var kept = [], i;
+    for (i = 0; i < (items || []).length; i++) {
+      var it = items[i];
+      if (it && it.head) {
+        var hasEntry = false;
+        for (var j = i + 1; j < items.length; j++) {
+          var nx = items[j];
+          if (!nx || nx.head) break;          // the next section starts: this one was empty
+          if (nx.sep) continue;               // a rule is furniture, not an entry
+          hasEntry = true; break;
+        }
+        if (!hasEntry) continue;              // drop the heading itself
+      }
+      kept.push(it);
+    }
+    // Collapse the separators left stranded by a dropped section: no leading rule, no trailing
+    // rule, never two in a row, and never a rule sitting directly under a heading.
+    var out = [];
+    for (i = 0; i < kept.length; i++) {
+      var k = kept[i];
+      if (k && k.sep) {
+        var prev = out[out.length - 1];
+        if (!prev || prev.sep || prev.head) continue;
+        var nextReal = null;
+        for (var n = i + 1; n < kept.length; n++) { if (kept[n] && !kept[n].sep) { nextReal = kept[n]; break; } }
+        if (!nextReal) continue;
+      }
+      out.push(k);
+    }
+    return out;
+  }
+  // Render one menu level. A `submenu` entry opens its own panel to the side on hover, so a
+  // section that would otherwise spend a third of the menu on rows you rarely want collapses to
+  // one row you can ignore. Submenus are display-only nesting -- they never introduce a second
+  // dismissal or a second Escape owner; the whole tree closes with its root.
+  function buildCtxMenuEl(items, isSub) {
+    var m = h("div", "ctx-menu" + (isSub ? " ctx-menu--sub" : ""));
+    items.forEach(function (it) {
+      if (!it) return;
+      if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
+      if (it.head) { m.appendChild(h("div", "ctx-head", it.head)); return; }
+      // uio-P-C05: `disabled` + `hint` complete the DS ContextMenu contract — an entry can be listed
+      // as unavailable, with a trailing state word ("Soon"), instead of being hidden or renamed.
+      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""), it.label);
+      if (it.hint) el.appendChild(h("span", "ctx-item__hint", it.hint));
+      if (it.submenu && it.submenu.length) {
+        el.classList.add("ctx-item--parent");
+        el.appendChild(h("span", "ctx-item__chev", "›"));
+        var sub = buildCtxMenuEl(pruneEmptyMenuSections(it.submenu), true);
+        el.appendChild(sub);
+        // Flip to the left when the panel would run off the window, measured on open rather
+        // than guessed, because a menu near the right edge is the normal case on a wide canvas.
+        el.addEventListener("mouseenter", function () {
+          sub.classList.remove("is-flipped");
+          var r = sub.getBoundingClientRect();
+          if (r.right > window.innerWidth - 8) sub.classList.add("is-flipped");
+        });
+        m.appendChild(el);
+        return;
+      }
+      if (!it.disabled) el.addEventListener("click", function () { closeCtxMenu(); if (it.onClick) it.onClick(); });
+      m.appendChild(el);
+    });
+    return m;
+  }
   function showContextMenu(x, y, items, opts) {
     ensureCtxStyle(); closeCtxMenu();
     if (opts && opts.escalate) {
@@ -25608,17 +25686,7 @@
         onClick: function () { openSettingsSection(opts.escalate.tab || "project", opts.escalate.section || null); }
       }]);
     }
-    var m = h("div", "ctx-menu");
-    items.forEach(function (it) {
-      if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
-      if (it.head) { m.appendChild(h("div", "ctx-head", it.head)); return; }
-      // uio-P-C05: `disabled` + `hint` complete the DS ContextMenu contract — an entry can be listed
-      // as unavailable, with a trailing state word ("Soon"), instead of being hidden or renamed.
-      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""), it.label);
-      if (it.hint) el.appendChild(h("span", "ctx-item__hint", it.hint));
-      if (!it.disabled) el.addEventListener("click", function () { closeCtxMenu(); if (it.onClick) it.onClick(); });
-      m.appendChild(el);
-    });
+    var m = buildCtxMenuEl(pruneEmptyMenuSections(items));
     document.body.appendChild(m);
     var r = m.getBoundingClientRect();
     m.style.left = Math.min(x, window.innerWidth - r.width - 8) + "px";
@@ -26177,7 +26245,7 @@
     items.push({ label: "Flagship", active: !activeVariant, onClick: function () { onVariantPick(""); } });
     variantNames().forEach(function (v) { items.push({ label: v, active: activeVariant === v, onClick: function () { onVariantPick(v); } }); });
     items.push({ sep: true });
-    items.push({ label: "+ New variant…", onClick: function () { onVariantPick("__new__"); } });
+    items.push({ label: "New variant…", onClick: function () { onVariantPick("__new__"); } });
     var r = anchor.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 6, items);
   }
@@ -26484,36 +26552,47 @@
       items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(block); } });
     }
     items.push({ sep: true });
-    items.push({ head: vs.length ? "Variants" : "Variants (none yet)" });
-    // Variant TEXT is edited in the Design panel (the block is selected, so the panel already
-    // shows its "Variant text" fields). The menu keeps only visibility + variant creation.
-    vs.forEach(function (v) {
-      items.push({ label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } });
-    });
+    // uio-O-W2 (OVL-13): these three groups used to be headings with a row per variant, and the
+    // variant heading rendered even with nothing under it ("Variants (none yet)") — a third of
+    // the menu spent on a feature the block does not use. Each is ONE row with a submenu now,
+    // and with no variants at all the whole family collapses to a single ordinary "Add
+    // variant…" entry. The "+" prefix is gone: it was a fourth style for "create" in a product
+    // that already has filled buttons, ghost add-rows and plain menu verbs.
+    if (vs.length) {
+      // Variant TEXT is edited in the Design panel (the block is selected, so the panel already
+      // shows its "Variant text" fields). The menu keeps only visibility + variant creation.
+      var variantSub = vs.map(function (v) {
+        return { label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } };
+      });
+      variantSub.push({ sep: true });
+      variantSub.push({ label: "New variant…", onClick: function () { newVariantPrompt(); } });
+      items.push({ label: "Variants", submenu: variantSub });
+    } else {
+      items.push({ label: "Add variant…", onClick: function () { newVariantPrompt(); } });
+    }
     // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
     // Only when the course has versions; while editing a version the toggle for THAT version
     // sits first for quick reach (hide this block from the release you're authoring).
     var versAll = versionNames();
     if (versAll.length) {
-      items.push({ head: "Software version" });
       var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
-      ordered.forEach(function (v) {
-        items.push({ label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } });
-      });
+      items.push({ label: "Software versions", submenu: ordered.map(function (v) {
+        return { label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } };
+      }) });
     }
     // #148: image / hotspot base image — a direct "Upload image for <variant>" that
     // opens the file picker straight away and writes that variant's version (overrides[v].src).
     if (block && IMG_VERSION_TYPES[block.type] && vs.length) {
-      items.push({ head: "Variant image versions" });
+      var imgSub = [];
       vs.forEach(function (v) {
         var own = imgVariantSrc(block, v);
-        items.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
+        imgSub.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
           uploadImageVariant(block, v, function () { reapplyBlock(block); reselectBlockNode(block, "block"); });
         } });
-        if (own) items.push({ label: "   Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(block, v, null); reapplyBlock(block); reselectBlockNode(block, "block"); } });
+        if (own) imgSub.push({ label: "Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(block, v, null); reapplyBlock(block); reselectBlockNode(block, "block"); } });
       });
+      items.push({ label: "Variant images", submenu: imgSub });
     }
-    items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
     if (block) {
       items.push({ sep: true });
       items.push({ label: "Block settings", hint: "Inspector", onClick: function () { revealBlockSettings(block); } });
@@ -26575,7 +26654,7 @@
         items.push({ label: "✓ Flagship", onClick: function () { previewVariant(null); } });
         vs.forEach(function (v) { items.push({ label: "Preview: " + v, onClick: function () { previewVariant(v); } }); });
         items.push({ sep: true });
-        items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
+        items.push({ label: "New variant…", onClick: function () { newVariantPrompt(); } });
       }
       showContextMenu(e.clientX, e.clientY, items);
     });

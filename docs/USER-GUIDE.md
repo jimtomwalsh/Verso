@@ -585,6 +585,11 @@ top, so unchanged copy stays shared and you maintain one source.
   a variant shows a read-only preview. Edit a variant's wording where variant edits are allowed,
   and the change lands only on that variant's override.
 - A block with no override for the current variant simply **inherits** the flagship copy.
+- **Hide a block in one variant** from its right-click menu: **Variants ›** opens a short list with
+  a *Hide in <name>* switch per variant, and **New variant…** at its foot. Software versions and
+  per-variant images fold the same way. Before you have any variants there is no Variants list at
+  all — just a single **Add variant…** entry, so the menu never shows you a heading with nothing
+  under it.
 
 **Compare side by side.** Switch the editor header's **Build / Read** toggle to **Read** for a
 plain-text view of all course copy; **Build** returns you to the canvas. With variants, a **Single | Side by side**

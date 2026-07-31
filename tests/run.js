@@ -10653,6 +10653,54 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
   ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
 })();
 
+// ---- uio-O-W2 (OVL-13): menus never render an empty section ----------------------
+// "Variants (none yet)" was a greyed heading followed by a "+ New variant…" row in a fourth
+// create-affordance style, spending a third of the menu on a feature the block does not use.
+section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/(function pruneEmptyMenuSections\(items\)[\s\S]*?\n  \})/);
+  if (!m) { ok("locate pruneEmptyMenuSections", false); return; }
+  var prune = new Function(m[1] + "; return pruneEmptyMenuSections;")();
+  function labels(list) { return prune(list).map(function (x) { return x.head ? "#" + x.head : (x.sep ? "-" : x.label); }).join("|"); }
+
+  ok("a heading with nothing under it is dropped", labels([{ head: "Variants" }]) === "");
+  ok("a heading with an entry survives", labels([{ head: "Variants" }, { label: "Hide in A" }]) === "#Variants|Hide in A");
+  ok("an empty section between two full ones goes, and the rest keep their order",
+    labels([{ label: "Copy" }, { head: "Variants" }, { head: "Versions" }, { label: "Hide in v1" }]) === "Copy|#Versions|Hide in v1");
+  ok("a separator is furniture, not an entry, so a heading with only a rule still goes",
+    labels([{ head: "Variants" }, { sep: true }, { head: "Versions" }, { label: "Hide in v1" }]) === "#Versions|Hide in v1");
+  // A separator does NOT end a section — in a flat menu list the entries after a heading belong
+  // to it until the next heading. So "empty" means genuinely nothing actionable before the next
+  // heading or the end, and the rules that framed the dropped heading go with it.
+  ok("the rules that framed a dropped section go with it, leaving no double or trailing rule",
+    labels([{ label: "Copy" }, { sep: true }, { head: "Variants" }, { sep: true }]) === "Copy");
+  ok("no leading rule", labels([{ sep: true }, { label: "Copy" }]) === "Copy");
+  ok("no trailing rule", labels([{ label: "Copy" }, { sep: true }]) === "Copy");
+  ok("no rule directly under a heading", labels([{ head: "Variants" }, { sep: true }, { label: "Hide in A" }]) === "#Variants|Hide in A");
+  ok("an untouched menu comes back untouched", labels([{ label: "Copy" }, { sep: true }, { label: "Delete" }]) === "Copy|-|Delete");
+  ok("it survives an empty list", prune([]).length === 0 && prune(null).length === 0);
+
+  // Wiring.
+  ok("every menu is pruned on the way to the DOM", /var m = buildCtxMenuEl\(pruneEmptyMenuSections\(items\)\);/.test(e));
+  ok("a submenu renders a nested panel with a chevron, pruned the same way",
+    /if \(it\.submenu && it\.submenu\.length\) \{[\s\S]{0,400}buildCtxMenuEl\(pruneEmptyMenuSections\(it\.submenu\), true\)/.test(e));
+  ok("a submenu flips left when it would run off the window, measured not guessed",
+    /var r = sub\.getBoundingClientRect\(\);\s*\n\s*if \(r\.right > window\.innerWidth - 8\) sub\.classList\.add\("is-flipped"\);/.test(e));
+  ok("the variant family is ONE row with a submenu, and New variant sits at its foot",
+    /items\.push\(\{ label: "Variants", submenu: variantSub \}\);/.test(e)
+    && /variantSub\.push\(\{ label: "New variant…"/.test(e));
+  ok("with no variants the whole family is one ordinary row, not a heading saying it is empty",
+    /\} else \{\s*\n\s*items\.push\(\{ label: "Add variant…", onClick: function \(\) \{ newVariantPrompt\(\); \} \}\);/.test(e)
+    && !/head: vs\.length \? "Variants"/.test(e));
+  ok("software versions and variant images collapse the same way",
+    /items\.push\(\{ label: "Software versions", submenu:/.test(e) && /items\.push\(\{ label: "Variant images", submenu: imgSub \}\);/.test(e));
+  ok("the '+' create prefix is gone everywhere — menu verbs are plain", !/\+ New variant/.test(e));
+  ok("the DS carries the submenu entry and the never-empty rule",
+    /submenu\?: MenuEntry\[\];/.test(src("design-system/components/overlays/ContextMenu.d.ts"))
+    && /NEVER renders an empty section/.test(src("design-system/components/overlays/ContextMenu.d.ts")));
+})();
+
 // ---- uio-O-W2 (OVL-08): the switch and the disclosure stop fighting ---------------
 // Being OFF used to force `is-collapsed` whatever the author had twirled open, turning it ON
 // auto-opened the section, and an off section never built its body at all -- so it showed
