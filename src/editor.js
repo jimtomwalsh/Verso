@@ -696,36 +696,63 @@
     _storageDotEl.title = (state === "fail" ? "Storage nearly full or a save failed"
       : state === "warn" ? "Storage getting full" : "Storage healthy") + " — click for details";
   }
-  function openStoragePopover(anchor) {
-    var open = document.getElementById("storage-pop");
-    if (open) { open.remove(); return; } // toggle off
-    var pop = h("div", "storage-pop"); pop.id = "storage-pop";
-    pop.appendChild(h("div", "storage-pop__title", "Storage"));
-    function row(label, val, cls) {
-      var r = h("div", "storage-pop__row");
-      r.appendChild(h("span", "storage-pop__label", label));
-      r.appendChild(h("span", "storage-pop__val" + (cls ? " " + cls : ""), val));
-      pop.appendChild(r);
-    }
-    var backend = storageBackend();
-    row("Location", backend === "file" ? "Local file" : "This browser");
-    row("Used", _storageRatio != null ? Math.round(_storageRatio * 100) + "%" : "n/a");
-    var weight = (typeof window.estimateCourseBytes === "function") ? _fmtBytes(window.estimateCourseBytes(doc)) : "-";
-    row("Course weight", weight);
-    // uio-F04: share of this document's prose linked to approved source, phrased by the shared
-    // resolver so it matches the Publish row and the Source top bar word for word.
-    var stFacts = f04DocFacts(activeDocId);
-    if (stFacts) row("Source alignment", stFacts.alignment.label);
-    if (saveFailed) pop.appendChild(h("div", "storage-pop__note storage-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
-    else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "storage-pop__note", adv.msg)); }
+  // The ONE anchored chrome popover -- the UI spine's Popover surface (anchored to its trigger, a
+  // few rows of fact, light-dismiss). The storage dot's details and the Publish variant roll-up
+  // (uio-P-C08) both open THROUGH this; a second floating-div implementation anywhere in the chrome
+  // is exactly the per-corner divergence this helper exists to prevent. Opening from the anchor
+  // that already owns the open popover closes it (toggle); Esc closes it as the topmost layer.
+  var _chromePopEl = null, _chromePopAnchor = null;
+  function closeChromePop() {
+    if (_chromePopEl && _chromePopEl.parentNode) _chromePopEl.parentNode.removeChild(_chromePopEl);
+    _chromePopEl = null; _chromePopAnchor = null;
+    document.removeEventListener("mousedown", _chromePopOutside, true);
+    document.removeEventListener("keydown", _chromePopEsc, true);
+  }
+  function _chromePopOutside(e) {
+    if (_chromePopEl && !_chromePopEl.contains(e.target) && !(_chromePopAnchor && _chromePopAnchor.contains(e.target)) && e.target !== _chromePopAnchor) closeChromePop();
+  }
+  function _chromePopEsc(e) { if (e.key === "Escape") { e.stopPropagation(); closeChromePop(); } }
+  function openChromePop(anchor, build, opts) {
+    if (_chromePopAnchor === anchor) { closeChromePop(); return null; } // toggle off
+    closeChromePop();
+    var pop = h("div", "chrome-pop" + (opts && opts.cls ? " " + opts.cls : ""));
+    build(pop);
+    document.body.appendChild(pop);
     var r = anchor.getBoundingClientRect();
     pop.style.top = (r.bottom + 6) + "px";
-    pop.style.right = Math.max(8, window.innerWidth - r.right) + "px";
-    document.body.appendChild(pop);
+    if (opts && opts.align === "right") pop.style.right = Math.max(8, window.innerWidth - r.right) + "px";
+    else pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - (pop.offsetWidth || 220) - 8)) + "px";
+    // no room below the anchor: open above it instead of running off screen
+    var ph = pop.offsetHeight || 0;
+    if (r.bottom + 6 + ph > window.innerHeight - 8) pop.style.top = Math.max(8, r.top - 6 - ph) + "px";
+    _chromePopEl = pop; _chromePopAnchor = anchor;
     setTimeout(function () {
-      function onDoc(e) { if (!pop.contains(e.target) && e.target !== anchor) { pop.remove(); document.removeEventListener("mousedown", onDoc); } }
-      document.addEventListener("mousedown", onDoc);
+      document.addEventListener("mousedown", _chromePopOutside, true);
+      document.addEventListener("keydown", _chromePopEsc, true);
     }, 0);
+    return pop;
+  }
+  function openStoragePopover(anchor) {
+    openChromePop(anchor, function (pop) {
+      pop.appendChild(h("div", "chrome-pop__title", "Storage"));
+      function row(label, val, cls) {
+        var r = h("div", "chrome-pop__row");
+        r.appendChild(h("span", "chrome-pop__label", label));
+        r.appendChild(h("span", "chrome-pop__val" + (cls ? " " + cls : ""), val));
+        pop.appendChild(r);
+      }
+      var backend = storageBackend();
+      row("Location", backend === "file" ? "Local file" : "This browser");
+      row("Used", _storageRatio != null ? Math.round(_storageRatio * 100) + "%" : "n/a");
+      var weight = (typeof window.estimateCourseBytes === "function") ? _fmtBytes(window.estimateCourseBytes(doc)) : "-";
+      row("Course weight", weight);
+      // uio-F04: share of this document's prose linked to approved source, phrased by the shared
+      // resolver so it matches the Publish row and the Source top bar word for word.
+      var stFacts = f04DocFacts(activeDocId);
+      if (stFacts) row("Source alignment", stFacts.alignment.label);
+      if (saveFailed) pop.appendChild(h("div", "chrome-pop__note chrome-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
+      else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "chrome-pop__note", adv.msg)); }
+    }, { align: "right" });
   }
   function mountStorageDot() {
     var dot = document.getElementById("storage-dot"); if (!dot) return;
@@ -1470,6 +1497,48 @@
     return s === "pending" || s === "running";
   }
   /* @publish-dest-end */
+  // uio-P-C08 (PUB-15, Conservative): one Edit document with variants is several packages -- "the
+  // real unit of publishing" -- and a Publish row said so only in a static badge. The roll-up below
+  // turns the F04 outputs fact into the chip + popover model. It INVENTS no expansion of its own:
+  // count, names and phrasing come from f04OutputsFact verbatim, the same fact the publish run's
+  // variant expansion reads, so the chip and the packages that land can never disagree. A document
+  // without variants rolls up to null -- a flagship-only row carries no chip at all rather than a
+  // chip that says "1 output" about nothing.
+  /* @publish-varpop-start */
+  function publishVariantRollup(outputsFact) {
+    if (!outputsFact || !(outputsFact.count > 1)) return null;
+    return {
+      count: outputsFact.count,
+      label: outputsFact.label,   // the F04 phrasing, verbatim -- never re-worded here
+      title: outputsFact.title,
+      rows: (outputsFact.names || []).map(function (name, i) { return { name: name, flagship: i === 0 }; })
+    };
+  }
+  /* @publish-varpop-end */
+  // The chip itself: the same publish-chip family as the preset + destination chips beside it, and
+  // -- unlike P-C07's destination -- a real button, because it has somewhere to go: the canonical
+  // anchored popover (openChromePop, the storage dot's own machinery) listing every output. Both
+  // Publish rows (picker + queue) build it through here, so there is one chip, not two.
+  function publishVariantChip(facts, cls) {
+    var roll = publishVariantRollup(facts && facts.outputs);
+    if (!roll) return null;
+    var chip = h("button", "publish-chip" + (cls ? " " + cls : ""), roll.label);
+    chip.type = "button";
+    chip.title = roll.title + " Click to list them.";
+    chip.addEventListener("click", function () {
+      openChromePop(chip, function (pop) {
+        pop.appendChild(h("div", "chrome-pop__title", "Outputs"));
+        roll.rows.forEach(function (o) {
+          var row = h("div", "chrome-pop__row");
+          row.appendChild(h("span", "chrome-pop__val", o.name));
+          if (o.flagship) row.appendChild(h("span", "chrome-pop__label", "Base"));
+          pop.appendChild(row);
+        });
+        pop.appendChild(h("div", "chrome-pop__note", "Each output publishes as its own package. Variants are defined in the Edit stage."));
+      }, { cls: "publish-varpop" });
+    });
+    return chip;
+  }
   // uio-P-C05 (PUB-13): the Publish pane's one menu mixed INBOUND pipelines (Import CSV, Import
   // Schema) with outbound ones, under a label that was half irrelevant. Direction is now data: the
   // Source stage lists the imports (where import already lives), the Publish pane states only what
@@ -1814,6 +1883,18 @@
         : "Publishing this document produces " + names.length + " packages: " + names.join(", ") + "."
     };
   }
+  // uio-P-C01 (PUB-01): the meter's pure model. The meter EXPLAINS the alignment number, so every
+  // part of it -- fill, tone, value text, band name -- comes from the fact object, never a second
+  // computation. A not-indexed fact yields a meter with no fill and the words instead of a 0%.
+  function f04AlignmentMeterModel(fact) {
+    if (!fact || fact.indexed === false || fact.pct == null) {
+      return { indexed: false, pct: null, tone: "neutral", value: "Not indexed",
+        bandLabel: "Not indexed", title: (fact && fact.title) || "Not indexed." };
+    }
+    var band = f04Band(fact.pct);
+    return { indexed: true, pct: fact.pct, tone: F04_BAND_TONE[band.key], value: fact.pct + "%",
+      bandLabel: band.label, title: fact.title };
+  }
   /* @f04-end */
 
   // ---- uio-F04 adapters: bind the pure resolver above to the live Product Rail stores --------------
@@ -1892,6 +1973,21 @@
     if (fact.title) el.title = fact.title;
     return el;
   }
+  // uio-P-C01 (PUB-01): the ONE way alignment is drawn on Publish -- the canonical DS Meter,
+  // labelled and banded, fed by the same fact object every other surface reads. The picker row and
+  // the queue row both call this, so the number and its band can never read differently a pane
+  // apart -- and both stay equal to the Source top bar, which reads the same resolver.
+  function f04AlignmentMeter(fact, cls) {
+    if (!fact) return null;
+    var m = f04AlignmentMeterModel(fact);
+    var U = window.VersoUI;
+    var el = U && U.Meter
+      ? U.Meter({ label: "Alignment", pct: m.pct, tone: m.tone, value: m.value, bandLabel: m.bandLabel })
+      : h("span", "vds-meter", "Alignment " + m.value);
+    if (cls) el.classList.add(cls);
+    if (m.title) el.title = m.title;
+    return el;
+  }
   // Read API for the tickets that CONSUME this layer (uio-P-C01's alignment meter, uio-P-C08's variant
   // roll-up chip, uio-S-M05, uio-E-M03) and for the browser-verify harness. Read-only: it renders
   // nothing and mutates nothing.
@@ -1903,7 +1999,7 @@
     bands: F04_BANDS,
     band: f04Band,
     _pure: { alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment, driftFact: f04DriftFact,
-      whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact }
+      whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact, alignmentMeterModel: f04AlignmentMeterModel }
   };
 
   // uio-P-C03 (PUB-10): the picker row's provenance line. States the fact plainly when a document
@@ -2059,9 +2155,12 @@
       var meta = h("div", "publish-pickitem__meta");
       var facts = d.facts || f04DocFacts(d.id);
       if (facts) {
+        // uio-P-C01 (PUB-01): alignment is the one fact drawn as the labelled Meter.
+        // uio-P-C08 (PUB-15): outputs graduate to the variant roll-up chip.
+        // Drift stays a quiet badge.
         [f04Badge(facts.drift, "publish-pickrow__drift"),
-         f04Badge(facts.alignment, "publish-pickrow__align"),
-         facts.outputs.count > 1 ? f04Badge(facts.outputs, "publish-pickrow__outputs") : null
+         f04AlignmentMeter(facts.alignment, "publish-pickrow__align"),
+         publishVariantChip(facts, "publish-pickrow__outputs")
         ].forEach(function (b) { if (b) meta.appendChild(b); });
       }
       meta.appendChild(h("span", "publish-pickitem__last", publishLastLabel(d.id)));
@@ -2231,9 +2330,11 @@
       // publishing. Identical call, identical phrasing, identical badge.
       var qf = f04DocFacts(r.docId);
       if (qf) {
+        // uio-P-C01 (PUB-01): the same labelled Meter as the picker row.
+        // uio-P-C08 (PUB-15): outputs graduate to the variant roll-up chip.
         [f04Badge(qf.drift, "publish-queuerow__drift"),
-         f04Badge(qf.alignment, "publish-queuerow__align"),
-         qf.outputs.count > 1 ? f04Badge(qf.outputs, "publish-queuerow__outputs") : null
+         f04AlignmentMeter(qf.alignment, "publish-queuerow__align"),
+         publishVariantChip(qf, "publish-queuerow__outputs")
         ].forEach(function (b) { if (b) meta.appendChild(b); });
       }
       main.appendChild(meta);

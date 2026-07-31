@@ -15,7 +15,7 @@ This system encodes the editor's full set of controls, grouped by concern:
 **controls/** · `IconField` · `TextField` · `FieldRow` + `TwoUp` · `SegmentedControl` · `Switch` + `SwitchRow` · `Select` · `Checkbox` · `ColorField` · `ToggleChip`
 **panels/** · `Panel` · `PanelSection` · `Breadcrumb` · `LeftRail`
 **navigation/** · `Tabs` · `DocumentTab`
-**structure/** · `TreeItem` · `BlockPaletteItem` · `BlockTile` + `BlockGrid` · `Badge` · `Timeline`
+**structure/** · `TreeItem` · `BlockPaletteItem` · `BlockTile` + `BlockGrid` · `Badge` · `Meter` · `Timeline`
 **overlays/** · `Modal` · `ContextMenu` · `Tooltip` · `CanvasOverlayBar`
 **browser/** · `CourseCard` · `CardGrid` + `BrowserEmptyState` · `ThumbnailFrame` · `SearchField` · `RecentsMenuRow`
 **board/** · `GraphBoard` · `ScreenNode` · `Edge` · `ConnectionPort`
@@ -189,7 +189,8 @@ produces. These are read-only status, never controls, and they obey three rules:
   own way is a divergence, not a variation.
 - **Drawn as the canonical `Badge`, `quiet`, `sm`.** They repeat down lists, which is exactly what
   `quiet` is for. Never a bespoke chip, and never the accent (the accent belongs to the one primary
-  action on the surface).
+  action on the surface). One sanctioned exception, below: alignment on Publish rows is the
+  canonical `Meter`.
 - **Silence over noise, honesty over a number.** A fact with nothing to say renders nothing — no
   chip that only means "nothing here". A fact that cannot be computed says so in words ("Not
   indexed"), never as a `0%` that reads as a failing score.
@@ -197,6 +198,12 @@ produces. These are read-only status, never controls, and they obey three rules:
 Banded percentages use one scale, and the tone states the band without scolding: **success** at the
 top band, **warning** in the middle, **neutral** at the bottom. Red is reserved for something that
 is actually wrong.
+
+On Publish rows — the place the alignment number decides an action — alignment is drawn as the
+canonical labelled `Meter` (`structure/Meter`: label · banded track · value), because there the
+number must be *explained*, not merely stated. Everywhere else the fact stays a quiet `Badge`.
+The Meter keeps the honesty rule: not-indexed is a dashed empty track with the words, never a
+`0%` fill, and the band is spoken in text, never colour alone.
 
 A fact badge sits on the row's own meta line, below the title, not beside it — a row must never
 trade its name for its numbers.
