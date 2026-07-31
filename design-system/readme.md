@@ -167,6 +167,40 @@ One visual language for the state of a value, at any rung, in any surface:
   restores and from which scope.
 - **Section roll-up** — the section header counts its overrides ("3 overridden").
 
+The ladder is a **primitive, not a settings feature**. Resolution takes the property being
+resolved as an argument and never inspects it; each rung supplies its own reader, so rungs may
+store the same idea under different keys. Nothing in the resolver may assume the value is a
+style or theme value. Any other axis that inherits — an export-control classification, an
+approval state — rides this same primitive by passing a different property key and a different
+scope chain. **A second, parallel inheritance path is a hard fail.**
+
+Concrete anatomy in the app: `--override-dot` sizes the one accent dot (rows and sections
+alike), the inherited scope name reads in `--text-tertiary` at `--text-xs`, and **Reset is a
+live edit, not a commit control** — it writes straight away and Undo takes it back.
+
+### Cross-stage facts
+
+Some facts follow a document across Source, Edit and Publish — how much of it comes from approved
+source, what has drifted since it last went out, where a passage is used, how many packages it
+produces. These are read-only status, never controls, and they obey three rules:
+
+- **One resolver, one phrasing.** A fact is computed once and phrased once. If two stages state the
+  same fact, they call the same function and print the same words. A stage that phrases a fact its
+  own way is a divergence, not a variation.
+- **Drawn as the canonical `Badge`, `quiet`, `sm`.** They repeat down lists, which is exactly what
+  `quiet` is for. Never a bespoke chip, and never the accent (the accent belongs to the one primary
+  action on the surface).
+- **Silence over noise, honesty over a number.** A fact with nothing to say renders nothing — no
+  chip that only means "nothing here". A fact that cannot be computed says so in words ("Not
+  indexed"), never as a `0%` that reads as a failing score.
+
+Banded percentages use one scale, and the tone states the band without scolding: **success** at the
+top band, **warning** in the middle, **neutral** at the bottom. Red is reserved for something that
+is actually wrong.
+
+A fact badge sits on the row's own meta line, below the title, not beside it — a row must never
+trade its name for its numbers.
+
 ### Save contract
 
 **Autosave + live-apply + Undo.** There is no Save, Apply, Cancel or Done anywhere in a settings

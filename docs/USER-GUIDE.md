@@ -131,7 +131,10 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   drops as a linked **image** block. Linked copy is **locked** — you can't edit it directly, so it
   can't drift from the source — and it updates automatically whenever the source wording changes. A
   linked block (or span) shows a **link badge**; click it for a menu that jumps back to the exact
-  source passage, or lets you say it differently here. **Alternates** are the sanctioned way to
+  source passage, or lets you say it differently here. Select a linked block and the inspector opens
+  with a **From source** line naming the source document it came from, how many documents use that
+  passage, and a **Source changed** flag if the source has moved since this document was last
+  published. **Alternates** are the sanctioned way to
   diverge without breaking the link: pick **Create an alternate…** to fork a named wording that
   applies to *this block only* (and registers on the source, so you can reuse or push it later), or
   pick an existing alternate — or **Base wording** to reset. Passages you've already linked into the
@@ -142,13 +145,28 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   fluid page (eLearning / web); **fixed frame** shows each page as one fixed screen and clips
   anything past it with an amber *overflows* warning (decks); **paged** shows page-break guide
   lines, so content reads across pages (print / guides). The same blocks render in every geometry.
+- **The four cross-stage facts.** Four things follow a document wherever you are, always worded and
+  coloured the same way. **Alignment** — what share of the document is linked to approved source,
+  banded green at 85% or more, amber from 60 to 84, plain below that; **Not indexed** means there is
+  nothing to measure yet (no prose, or no approved source document), not a score of zero.
+  **Drift** — how many linked source documents have changed since this one was last published; a
+  document that has never published shows nothing, because there is nothing for it to have drifted
+  from. **Linked in N** — how many documents use a source passage. **Outputs** — how many packages
+  a document actually produces (its flagship plus each variant). A fact with nothing to say shows
+  nothing at all, so a quiet row means "no news", never "unknown".
 - **Inspector (right).** Context-sensitive: with nothing selected it shows the **Document**
   context — the document type (its geometry · interactivity) with that geometry's tools (paged →
   margins / running header-footer / page breaks / page numbers; frame → frame size / transitions /
   animation; reflow → breakpoint preview) — then the canvas backdrop. Select a block and it shows
-  that block's settings instead. The panel's **⋯** menu (top-right) holds **Reorder inspector
+  that block's settings instead. With a block selected, the **⋯** beside the breadcrumb (**Page 1 ›
+  Heading**) opens that block's actions — the same list you get by right-clicking it on the canvas.
+  Higher up, the panel's own **⋯** (in the **Design / Interact** tab strip) holds **Reorder inspector
   sections…**, which turns on a drag mode to rearrange the section order across every block's
   inspector — a preference saved for you, not the course; a banner names the scope while it's on.
+- **Settings.** The Settings panel has no Save or Done button. Every change applies to the course
+  as you make it and is saved for you; **⌘Z** undoes the last one. **Close** (or **Esc**, or a click
+  outside) puts the panel away. Where a setting is really owned by another panel, its row shows the
+  live value and a link straight to that panel rather than telling you to go and find it.
 
 ---
 
@@ -167,6 +185,23 @@ Four ideas cover most of how Verso works.
 - **The Inspector mirrors your selection.** Select nothing for document-wide settings (theme,
   fonts, header/footer); select a block for that block's settings. Editing a text block shows its
   Type controls and its layout, spacing and appearance settings together in one scrolling panel.
+
+### Inherited and overridden settings
+
+Many settings are set once high up and followed everywhere below. Verso reads them down five
+levels: **System → Product → Course → Page → Block.** The nearest level that sets a value wins.
+
+A setting never shows as blank or "unset". It always shows the value that will actually apply,
+plus a small note at the end of the row telling you where that value came from:
+
+- **A grey scope name — "Course", "System".** The value is inherited. Change it at that level and
+  every page or block following it changes with it.
+- **A blue dot and a Reset link.** This one is set here, so it no longer follows its parent. Hover
+  **Reset** to see exactly what it would go back to and from which level. Clicking Reset applies
+  straight away — there is nothing to save, and ⌘Z undoes it like any other edit.
+- **A count in the section header — "3 overridden".** That section has three values set here
+  rather than inherited. It is the quick way to spot a block or page that has drifted from the
+  course.
 
 ---
 
@@ -207,6 +242,12 @@ into text editing. **Esc** steps back out one level.
 
 **Move, duplicate, delete.** Drag to move; **⌘D** duplicates; **Delete** removes the selection;
 arrow keys nudge. Group blocks with **⌘G** (ungroup **⌘⇧G**).
+
+**A block's full list of actions — two ways in.** Right-click the block on the canvas, or click the
+**⋯** beside the breadcrumb at the top of the Inspector. Both open the same list: Duplicate, Copy,
+Copy style, Move up / down, Save as component, Clear content, Delete, plus the variant and software
+version show/hide toggles. The list ends with **Block settings**, which takes you back into the
+Inspector on that block.
 
 > **Tip.** An unfilled image or interaction placeholder glows neon-pink on the canvas so you
 > never miss a slot. It's an authoring cue only — it never shows in preview or the export.
@@ -670,6 +711,13 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   highlights as you scroll. The button above the outline collapses every chapter at once (and
   expands them again). Drag a chapter to move that whole chapter (and everything under it) within
   the document — the dragged row dims and a line shows exactly where it will land.
+- **What depends on this document.** Under the document title sits a quiet strip of facts about the
+  Product you're reading, so you can see the downstream cost of a change before you make it: how
+  much of the Product's documents is **aligned** to this approved source, how many documents this
+  topic is **linked in**, how many published documents are now **behind** it, and how many
+  **outputs** (packages) the Product ships. These are the same numbers, in the same words, that the
+  Publish stage shows per document — see §3 for what each one means. With a single document in the
+  Product, the alignment figure here and the one on its Publish row are the same number.
 - **Find in the document.** The search field above the outline finds your text anywhere in the
   document — headings and body copy — as you type. The **match count ("3 / 12") and the up/down
   jump arrows sit in the field itself**; press Enter (or the arrows) to jump between hits, each
@@ -958,16 +1006,21 @@ a refresh and a stage-switch.
   prediction steps aside. **Downloads** is the only destination for now: the chip states it rather
   than opening a menu, and hovering it says why. Choosing a save folder, and naming your own
   destinations to reuse, are still to come.
-- **Out-of-date badge.** A document row in the left list shows a small count chip when linked source
-  topics have changed since that document was last published — e.g. a **2** means two of its linked
-  source topics were edited since its last export. It's informational only: it never blocks or warns,
-  and it clears the moment you publish that document again (publishing sets the new baseline). A
-  document with no linked source content shows no chip.
-- **Source-alignment score.** Each document row also shows a **"% source"** chip — the share of its
-  words that are linked to approved source material versus novel copy authored in the document. The
-  same score is available while editing (the storage-dot popover in the editor header shows a **Source
-  alignment** readout), so you can see at a glance how much of a document is signed-off source versus
-  original writing. Informational only; a document with no prose to measure shows no score.
+- **The facts on each row.** Under every document's name, in both the left list and the queue, sits a
+  line of small badges — the same four facts described in §3, in the same words they use everywhere
+  else in the app:
+  - **N changed** (amber) — that many linked source documents have moved since this one was last
+    published. Informational only: it never blocks or warns, and it clears the moment you publish
+    the document again. A document that has **never published** shows no drift badge, because there
+    is nothing for it to have drifted from — the line beside it already says "Never published".
+  - **N% aligned** — the share of the document's words linked to approved source rather than novel
+    copy written here. Green at 85% or more, amber from 60 to 84, plain below. **Not indexed** means
+    there is nothing to measure yet.
+  - **N outputs** — how many packages this document actually produces (its flagship plus each
+    variant). Shown only when there is more than one.
+  The same alignment figure is available while editing (the storage-dot popover in the editor header
+  shows a **Source alignment** readout) and in the Source stage top bar, all read from one place, so
+  they can never disagree.
 - **Presets.** Each queue row shows an **output preset** chip — click it to switch the row's preset,
   save the current settings as a new named preset, or rename/delete one of your own. Three come built
   in: **Master** (full quality), **Review copy** (adds the reviewer file, learner theme off), and

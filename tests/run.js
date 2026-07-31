@@ -1651,7 +1651,7 @@ section("#81 Help markdown renderer");
   ok("#8 continuation stops at next bullet", md("- one\n  wrapped\n- two") === "<ul><li>one wrapped</li><li>two</li></ul>");
   ok("#8 continuation stops at a blank line", md("- one\n\npara").indexOf("<li>one</li></ul>") !== -1 && md("- one\n\npara").indexOf("<p>para</p>") !== -1);
   ok("horizontal rule", md("---") === "<hr>");
-  ok("blockquote wraps", md("> hi").indexOf("<blockquote>") === 0);
+  ok("blockquote wraps", md("> hi").indexOf("<blockquote") === 0);
   // HTML in the source is escaped (defensive — trusted content, still no injection)
   ok("escapes angle brackets", md("a <script> b").indexOf("&lt;script&gt;") !== -1);
   ok("no live tag leaks", md("<img onerror=x>").indexOf("<img") === -1);
@@ -5246,7 +5246,9 @@ section("auto-gate all interactions");
   ok("editor sets __gateAllInteractions on export", /window\.__gateAllInteractions = renderDoc\.gateAllInteractions \|\| null/.test(ed));
   ok("editor sets __gateAllInteractions on preview", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ed));
   ok("render stamps data-gate-all from the hook", /if \(window\.__gateAllInteractions\) root\.setAttribute\("data-gate-all", "1"\)/.test(rn));
-  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!doc\.gateAllInteractions;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
+  // uio-F03: the switch now reads the RESOLVED value down the scope ladder (System -> Course)
+  // and clears the course flag on Reset; the stored data is unchanged.
+  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
   // state buckets for the new signals
   ok("runtime adds viewed/revealed/quizDone/sequenceDone/accordionDone buckets", /var state = \{ visited: \{\}, watched: \{\}, checked: \{\}, viewed: \{\}, revealed: \{\}, quizDone: \{\}, sequenceDone: \{\}, accordionDone: \{\} \}/.test(rt));
   // completion emitters (decoupled, bubbling)
@@ -5310,7 +5312,9 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   ok("export sets __gateAllInteractions (no longer stale-global)", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ex));
   ok("export sets __gateMessage", /window\.__gateMessage = doc\.gateMessage \|\| null/.test(ex));
   // authoring: per-page override in the page inspector + course-level message field
-  ok("page inspector writes tri-state page.gateInteractions", /if \(v === "on"\) page\.gateInteractions = true;\s*else if \(v === "off"\) page\.gateInteractions = false;\s*else delete page\.gateInteractions;/.test(ed));
+  // uio-F03: still tri-state DATA (true / false / absent = inherit), but the picker's explicit
+  // "inherit" option is gone — the switch shows the resolved value and Reset clears the page flag.
+  ok("page inspector writes tri-state page.gateInteractions", /page\.gateInteractions = !!v;/.test(ed) && /delete page\.gateInteractions;/.test(ed));
   ok("progression panel exposes the reminder-message field", /gmIn\.value = doc\.gateMessage \|\| "";[\s\S]*?if \(v\) doc\.gateMessage = v; else delete doc\.gateMessage/.test(ed));
 })();
 
@@ -5420,7 +5424,7 @@ section("#168 learner-nav single source");
   // The Settings 'Learner nav' tab must resolve the CANONICAL footer nav (footerCourseNav),
   // not the FIRST courseNav eachCourseNav yields (header -> footer -> pages), which drifts to
   // a legacy/header stray away from the footer nav the author edits on the canvas.
-  ok("Settings 'Learner nav' tab uses footerCourseNav (not first-found)", /key: "nav", title: "Learner nav", build: function \(host\) \{ var n = footerCourseNav\(\);/.test(e));
+  ok("Settings 'Learner nav' tab uses footerCourseNav (not first-found)", /key: "nav", title: "Learner nav", build: function \(host\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(e));
   ok("old first-found pattern is gone from the nav tab", !/title: "Learner nav"[\s\S]{0,120}eachCourseNav\(function \(x\) \{ if \(!n\) n = x; \}\)/.test(e));
   // footerCourseNav resolves ONLY the footer region's courseNav (the single creatable instance).
   var fn = slice(e, "function footerCourseNav()", "\n  }");
@@ -5710,7 +5714,7 @@ section("copy/paste style");
   ok("copyBlockStyle lifts only presentation keys from STYLE_KEYS", /"box"/.test(_sk) && /"styleRef"/.test(_sk) && /"colorMap"/.test(_sk) && /function copyBlockStyle\(block\)[\s\S]*?STYLE_KEYS\.forEach\(function \(k\) \{ if \(block\[k\] !== undefined\) out\[k\] = clone\(block\[k\]\)/.test(e));
   ok("STYLE_KEYS excludes content/identity", !/STYLE_KEYS = \[[^\]]*"(text|html|src|children|items|type|id|questions)"/.test(e));
   ok("pasteBlockStyle writes the clipboard keys onto the target + mounts", /function pasteBlockStyle\(block\)[\s\S]*?Object\.keys\(styleClipboard\)\.forEach\(function \(k\) \{ block\[k\] = clone\(styleClipboard\[k\]\); \}\);[\s\S]*?mount\(\)/.test(e));
-  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(target\.block\); \}/.test(e) && /if \(styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(target\.block\); \}/.test(e));
+  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(e) && /if \(styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(e));
 })();
 
 section("ctx copy/paste");
@@ -6207,7 +6211,7 @@ section("clear content #174");
 
   // wiring guards: exposed on both surfaces + gated
   ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? multiSel\.slice\(\) : block\); \}/.test(e));
-  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[target\.block\]\); \}/.test(e));
+  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(e));
   ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
@@ -6285,7 +6289,7 @@ section("richer bullet lists");
   ok("open modal stays in sync via refreshSettingsPanes in renderInspector", /function renderInspector\(\)[\s\S]*?refreshSettingsPanes\(\)/.test(e) && /function refreshSettingsPanes\(\) \{ if \(settingsModal && settingsModal\.active\) renderSettingsBody/.test(e));
   ok("settings dialog is fixed-size (no resize on tab switch)", /\.modal-box\.modal-box--settings \{[\s\S]*?height: min\(88vh, 800px\)/.test(ecss) && /\.settings-content \{ flex: 1 1 auto; overflow-y: auto/.test(ecss));
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
-  ok("settings surface re-skinned to the DS (VersoUI tabs+button, surface-selected rail)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "primary", label: "Done"/.test(e) && /\.settings-nav__item\.is-active \{ background: var\(--surface-selected\)/.test(ecss));
+  ok("settings surface re-skinned to the DS (VersoUI tabs+button, surface-selected rail)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(e) && /\.settings-nav__item\.is-active \{ background: var\(--surface-selected\)/.test(ecss));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
@@ -6636,7 +6640,7 @@ section("#148 per-variant image versions (authoring)");
   ok("upload writes via the pure asset ref channel (hoist-safe)", /setImgVariantSrc\(block, variant, assetRef\(r\.result, f\)\)/.test(e));
   // slice 2: right-click "Upload image for <variant>" (direct file picker) + on-canvas
   // version-cycle badge (author-only transient <img>.src swap, WeakMap, never doc state).
-  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[target\.block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(target\.block, v/.test(e));
+  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(block, v/.test(e));
   ok("on-canvas version-cycle badge decorates image blocks with versions", /function decorateVariantVersionBadges\(scope\)[\s\S]*?hasImageVersions\(block\)[\s\S]*?"variant-cycle"/.test(e));
   ok("cycle preview is author-only + never mutates the doc (WeakMap base-el swap)", /var imgVersionPreview = new WeakMap\(\);/.test(e) && /function applyImageVersionPreview\(node, block\)[\s\S]*?imgVariantSrc\(block, v\) \|\| baseImgSrc\(block\)[\s\S]*?replaceChild\(next, cur\)/.test(e)); // #215: hotspot base = entry.visual via baseImgSrc
   // #148 cleanup: an inline-SVG base (image OR hotspot) must swap too, not just a raster
@@ -8180,7 +8184,9 @@ section("UI kit seam");
   ok("generic two-level shell defined (renderBlockTwoLevel)", /function renderBlockTwoLevel\(node, label, decl, renderContent, io, handlers\) \{/.test(e));
   ok("hotspot + sequence dispatched to the two-level shell (#160: hotspot depth-pure)", /renderBlockTwoLevel\(node, "Image hotspots", CONTENT_PURE_DECL/.test(e) && /renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\)/.test(e));
   ok("shell: crumbs, container chrome (actions-only at content level for a pureContent block), then specific content when entered (#160 depth-pure)",
-    /renderLayerCrumbs\(block, label\);[\s\S]{0,400}var chromeDecl = \(atContent && decl && decl\.pureContent\) \? ACTIONS_ONLY_DECL : decl;\s*renderContainerChrome\(inspector, chromeDecl[\s\S]{0,200}if \(atContent\) \{\s*renderContent\(node\);[\s\S]{0,200}Edit " \+ \(label/.test(e));
+    // uio-F04 (EDIT-06): a source-linked block's provenance line is appended between the crumb and the
+    // container chrome, so the window here allows for it.
+    /renderLayerCrumbs\(block, label\);\s*var prov = renderSourceLinkProvenance\(block\);\s*if \(prov\) inspector\.appendChild\(prov\);[\s\S]{0,400}var chromeDecl = \(atContent && decl && decl\.pureContent\) \? ACTIONS_ONLY_DECL : decl;\s*renderContainerChrome\(inspector, chromeDecl[\s\S]{0,200}if \(atContent\) \{\s*renderContent\(node\);[\s\S]{0,200}Edit " \+ \(label/.test(e));
   // #160: the depth-pure decls + actions-only swap exist.
   ok("#160 depth-pure decls (CONTENT_PURE_DECL / IMAGE_PURE_DECL / ACTIONS_ONLY_DECL)", /var CONTENT_PURE_DECL = \{ fill: false, stroke: false, radius: false, pureContent: true \};/.test(e) && /var IMAGE_PURE_DECL = \{ fill: false, stroke: true, radius: false, pureContent: true \};/.test(e) && /var ACTIONS_ONLY_DECL = \{ align: false, valign: false, width: false, padding: false, gap: false, spacing: false, fill: false, stroke: false, radius: false, actions: true \};/.test(e));
   ok("layer breadcrumb: page + container ancestry, each crumb selects that layer", /function blockAncestry\(block\)/.test(e) && /function renderLayerCrumbs\(block, label\)/.test(e) && /kind: "page"/.test(e));
@@ -8833,9 +8839,10 @@ section("Product Rail: Release history store (whole-family export)");
   // uio-P-C03 flipped the DEFAULT: reverse-chron and per-release expansion are unchanged, but the
   // section is now open and fills the pane's empty half instead of hiding collapsed below the queue.
   ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
-  // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover
-  ok("the Publish pick rows show a '% source' alignment chip (sourceAlignmentPct)", /var apct = sourceAlignmentPct\(registry\[d\.id\]\);[\s\S]{0,160}apct \+ "% source"/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
-  ok("the Edit-stage storage popover shows a live 'Source alignment' readout (sourceAlignmentPct of the open doc)", /var apct = sourceAlignmentPct\(doc\);[\s\S]{0,120}row\("Source alignment", apct \+ "% linked"\)/.test(e));
+  // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover.
+  // uio-F04 moved BOTH onto the shared resolver (f04DocFacts), so neither phrases the number itself.
+  ok("the Publish pick rows show the alignment badge from the shared resolver", /var facts = d\.facts \|\| f04DocFacts\(d\.id\);[\s\S]{0,300}f04Badge\(facts\.alignment, "publish-pickrow__align"\)/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
+  ok("the Edit-stage storage popover shows a live 'Source alignment' readout (from f04DocFacts)", /var stFacts = f04DocFacts\(activeDocId\);[\s\S]{0,120}row\("Source alignment", stFacts\.alignment\.label\)/.test(e));
   ok("index.html loads release-history.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/release-history.js") > -1 && idx.indexOf("src/release-history.js") < idx.indexOf("src/editor.js");
   })());
@@ -8909,7 +8916,7 @@ section("Product Rail: Ground-Truth staleness");
   var pre = "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b);" +
             " ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.blocks); }\n" +
             "function libComponents(){ return LIB; }\n";
-  var g = new Function("LIB", pre + m[1] + "\nreturn { docLinkedMasterIds: docLinkedMasterIds, groundTruthStaleCount: groundTruthStaleCount, currentMasterVersions: currentMasterVersions, snapshotGroundTruthBaseline: snapshotGroundTruthBaseline };")(LIB);
+  var g = new Function("LIB", pre + m[1] + "\nreturn { docLinkedMasterIds: docLinkedMasterIds, driftedMasterIds: driftedMasterIds, groundTruthStaleCount: groundTruthStaleCount, currentMasterVersions: currentMasterVersions, snapshotGroundTruthBaseline: snapshotGroundTruthBaseline };")(LIB);
 
   // A doc linking two distinct masters (one nested inside a column), plus a non-linked block.
   var doc = { meta: {}, blocks: [
@@ -8940,6 +8947,15 @@ section("Product Rail: Ground-Truth staleness");
   g.snapshotGroundTruthBaseline(fresh);
   ok("snapshot writes doc.meta.lastPublishedGroundTruthVersions from live stamps", fresh.meta.lastPublishedGroundTruthVersions.mA === 30 && fresh.meta.lastPublishedGroundTruthVersions.mB === 40);
   ok("after snapshot the staleness count is 0 (freshly published baseline)", g.groundTruthStaleCount(fresh, g.currentMasterVersions()) === 0);
+
+  // uio-F04: the count is DERIVED from the id list -- one computation, so a drift badge and a drift
+  // list can never disagree about what changed.
+  ok("driftedMasterIds names WHICH masters changed", g.driftedMasterIds(docPub, { mA: 11, mB: 20 }).join(",") === "mA");
+  ok("driftedMasterIds keeps the same null contract (no linked content)", g.driftedMasterIds({ meta: {}, blocks: [ { type: "paragraph", id: "x" } ] }, { mA: 5 }) === null);
+  ok("the count is exactly the length of that list, always", (function () {
+    var cases = [[docPub, { mA: 11, mB: 21 }], [docPub, { mA: 10, mB: 20 }], [doc, { mA: 1, mB: 2 }]];
+    return cases.every(function (c) { return g.groundTruthStaleCount(c[0], c[1]) === g.driftedMasterIds(c[0], c[1]).length; });
+  })());
 })();
 
 // ---- product-rail-source-alignment-metric: % linked-to-approved-source vs novel ----
@@ -9942,6 +9958,91 @@ section("uio-P-C05: format control on Publish, import on Source");
   ok("the DS ContextMenu contract documents the hint", /hint\?: string;/.test(ds));
 })();
 
+// uio-F04 (SRC-12 / EDIT-06 / PUB-01/02/14/15): four facts — alignment, drift, where-used and
+// variants-as-outputs — used to be phrased (and sometimes computed) separately in each stage. This
+// section pins the ONE resolver they now all read: its bands, its honest not-indexed and
+// never-published states, and the roll-up that makes the Source top bar and a Publish row agree.
+section("uio-F04: cross-stage data surfacing");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
+  if (!m) { ok("locate @f04 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { band: f04Band, alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment," +
+    " driftFact: f04DriftFact, whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact, BANDS: F04_BANDS };")();
+
+  // --- bands: >=85 verified / 60-84 mixed / <60 mostly novel, boundaries included ---
+  ok("band >=85 is verified (boundary included)", g.band(85).key === "verified" && g.band(100).key === "verified");
+  ok("band 60-84 is mixed (both boundaries)", g.band(60).key === "mixed" && g.band(84).key === "mixed");
+  ok("band <60 is mostly novel, 0 included", g.band(59).key === "novel" && g.band(0).key === "novel");
+  ok("no percent -> no band", g.band(null) === null);
+
+  // --- alignment: the number, the band, the tone, the sentence ---
+  var a = g.alignmentFact({ linkedWords: 78, totalWords: 100 }, true);
+  ok("alignment states the rounded percent and its band", a.pct === 78 && a.band === "mixed" && a.label === "78% aligned");
+  ok("alignment tone follows the band (mixed -> warning)", a.tone === "warning" && g.alignmentFact({ linkedWords: 9, totalWords: 10 }, true).tone === "success");
+  ok("the bottom band reads as a fact, not an alarm (neutral, not danger)", g.alignmentFact({ linkedWords: 1, totalWords: 10 }, true).tone === "neutral");
+  ok("a fully-linked document is 100% verified", g.alignmentFact({ linkedWords: 40, totalWords: 40 }, true).pct === 100);
+
+  // --- not indexed: a document with no prose, and a Product with no approved source ---
+  var noProse = g.alignmentFact({ linkedWords: 0, totalWords: 0 }, true);
+  ok("a document with no prose is 'Not indexed', never 0%", noProse.indexed === false && noProse.pct === null && noProse.label === "Not indexed");
+  ok("the no-prose reason names the missing prose", /no prose here to measure/.test(noProse.title));
+  var noSource = g.alignmentFact({ linkedWords: 0, totalWords: 500 }, false);
+  ok("prose but no approved source to measure against is also 'Not indexed', not 0%", noSource.indexed === false && noSource.pct === null);
+  ok("the no-source reason names the missing source document", /no approved source document/.test(noSource.title));
+  ok("a fully-novel INDEXED document is a real 0%, not 'Not indexed'", g.alignmentFact({ linkedWords: 0, totalWords: 500 }, true).pct === 0);
+
+  // --- roll-up: several documents as one number, by summing the SAME word counts ---
+  var d1 = g.alignmentFact({ linkedWords: 80, totalWords: 100 }, true);
+  var d2 = g.alignmentFact({ linkedWords: 20, totalWords: 100 }, true);
+  ok("the roll-up is word-weighted across documents (100/200 -> 50%)", g.rollUp([d1, d2]).pct === 50);
+  ok("ONE document's roll-up IS that document's number (this is what makes Source and Publish agree)", g.rollUp([d1]).pct === d1.pct);
+  ok("a roll-up over nothing is 'Not indexed'", g.rollUp([]).indexed === false && g.rollUp([noProse]).indexed === false);
+  ok("a not-indexed document contributes no words to a roll-up", g.rollUp([d1, noProse]).pct === d1.pct);
+
+  // --- drift: the four states, including the never-published document ---
+  var unlinked = g.driftFact(null, false);
+  ok("a document linking no source says nothing (no drift badge at all)", unlinked.state === "unlinked" && unlinked.label === "");
+  var never = g.driftFact(["mA", "mB"], false);
+  ok("a NEVER-published document reports 'unpublished', not '2 changed'", never.state === "unpublished" && never.count === 0 && never.label === "");
+  ok("the never-published reason says there is nothing to have drifted from", /Never published/.test(never.title));
+  var current = g.driftFact([], true);
+  ok("a published document with nothing changed stays quiet", current.state === "current" && current.label === "");
+  var drifted = g.driftFact(["mA", "mB"], true);
+  ok("a published document with changed source counts them and warns", drifted.state === "drifted" && drifted.count === 2 && drifted.label === "2 changed" && drifted.tone === "warning");
+  ok("drift carries the ids so a caller can list WHICH source changed", drifted.ids.join(",") === "mA,mB");
+  ok("drift singular/plural reads correctly", /1 linked source document changed/.test(g.driftFact(["mA"], true).title) && /2 linked source documents changed/.test(drifted.title));
+
+  // --- where-used: distinct DOCUMENTS, not raw placements ---
+  var used = g.whereUsedFact([{ docCode: "c1" }, { docCode: "c1" }, { docCode: "c2" }]);
+  ok("where-used counts distinct documents, not placements", used.docs === 2 && used.places === 3 && used.label === "Linked in 2");
+  ok("where-used states both numbers in its tooltip", /2 documents across 3 places/.test(used.title));
+  ok("an unused passage says so plainly", g.whereUsedFact([]).docs === 0 && g.whereUsedFact([]).label === "Not linked");
+
+  // --- variants as outputs: one document = flagship + N variants = N+1 packages ---
+  var out = g.outputsFact(["Coastal", "Desert"]);
+  ok("a document with 2 variants is 3 outputs, flagship first", out.count === 3 && out.names.join(",") === "Flagship,Coastal,Desert");
+  ok("the outputs tooltip names every package", /3 packages: Flagship, Coastal, Desert/.test(out.title));
+  ok("a document with no variants is one output (Flagship)", g.outputsFact([]).count === 1 && g.outputsFact(null).count === 1);
+  ok("empty variant names are ignored, never shipped as a blank package", g.outputsFact(["", null, "Pro"]).count === 2);
+
+  // --- the wiring: every surface reads the SAME resolver, none re-computes ---
+  ok("the adapter binds the resolver to the EXISTING Product Rail helpers, not new ones",
+    /alignment: f04AlignmentFact\(sourceAlignment\(d\), f04SourceIndexed\(d\)\)/.test(e) &&
+    /drift: f04DriftFact\(driftedMasterIds\(d, vers\), f04Published\(docId\)\)/.test(e) &&
+    /outputs: f04OutputsFact\(d\.variants\)/.test(e));
+  ok("'has this ever published' comes from the release log, not a second record", /function f04Published\(docId\)[\s\S]{0,220}RH\.lastPublishedFor\(releaseHistory\(\), docId\)/.test(e));
+  ok("where-used comes from sourceLinkWhereUsed, not a stored list", /f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, null\)\)/.test(e));
+  ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(e));
+  ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(e) && /\.source-stage__facts/.test(src("editor.css")));
+  ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,300}f04Badge\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
+  ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(src("editor.css")));
+  ok("every fact is drawn as the canonical DS Badge, quiet, never a bespoke chip", /function f04Badge\(fact, cls\)[\s\S]{0,320}U\.Badge\(\{ tone: fact\.tone \|\| "neutral", quiet: true, size: "sm"/.test(e));
+  ok("the retired one-off alignment + staleness chips are gone from the picker", !/publish-pickrow__stale/.test(e) && !/apct \+ "% source"/.test(e));
+  ok("a read API is exposed for the tickets that consume this layer (P-C01 / P-C08)", /window\.__f04 = \{[\s\S]{0,400}docFacts: f04DocFacts[\s\S]{0,400}productFacts: f04ProductFacts/.test(e));
+})();
+
 // uio-P-C04 (PUB-12): the picker had no scope, count, search or sort — only alphabetical — so the
 // two orderings that decide publishing work (most drifted first, least recently published first)
 // were unreachable. The whole view is a pure function of the decorated rows.
@@ -9978,7 +10079,8 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
 
   // --- the header states scope + the count of what is SHOWN, from the same array ---
   ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", \[pname, String\(docs\.length\)\]\.filter\(Boolean\)\.join\(" · "\)\)\)/.test(e));
-  ok("rows are decorated with drift + lastAt, then run through the pure view", /drift: groundTruthStaleCount\(registry\[d\.id\], vers\) \|\| 0, lastAt: last \? last\.at : 0/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
+  // uio-F04: the drift number now comes from the shared resolver's fact, not a second staleness call.
+  ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);\s*return \{ id: d\.id, title: d\.title, drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
 
   // --- sort is a MENU, not a cycling button: three orderings a cycle would hide ---
   ok("sort opens the canonical menu with the current ordering ticked", /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Order by" \}\]\.concat\(PUBLISH_SORTS\.map/.test(e) && /active: __publishPickSort === s\.key/.test(e));
@@ -10086,6 +10188,102 @@ section("uio-P-C06: picker multi-select + queue selected");
   ok("the per-row '+' still queues one document on its own", /label: "Add “" \+ d\.title \+ "” to the publish queue", onClick: function \(\) \{ addDocToPublishQueue\(d\.id\); \}/.test(e));
 })();
 
+// uio-O-W1 (OVL-06/09/14/23): the overlay VOCABULARY pass. Four separate dialects replaced by
+// one: the settings surface stops faking a commit and states its real save contract; a
+// cross-reference to a setting another surface owns becomes a live value plus a link, never an
+// instruction to go and look; the block's verbs get a second, advertised door built from ONE
+// menu definition; and help prose gets one small typographic system instead of inventing sizes.
+section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu, help type)");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), typo = src("design-system/tokens/typography.css");
+
+  // --- OVL-09: the fake Done is gone; the surface states its contract ------------------
+  ok("the settings footer no longer offers a commit button", !/label: "Done"/.test(e));
+  ok("it states the real contract instead (live apply + autosave + Undo)",
+    /settings-foot__contract", "Changes apply live, saved automatically\. Undo with " \+ MOD_KEY \+ "Z\."/.test(e));
+  ok("the only footer control is a plain Close, not the accent",
+    /VersoUI\.Button\(\{ variant: "secondary", label: "Close", onClick: closeSettingsModal \}\)/.test(e));
+  ok("the surface can still be dismissed three ways (Close, Esc, click-out)",
+    /function settingsEsc\(e\) \{ if \(e\.key === "Escape"\) closeSettingsModal\(\); \}/.test(e)
+    && /overlay\.addEventListener\("mousedown", function \(e\) \{ if \(e\.target === overlay\) closeSettingsModal\(\); \}\)/.test(e));
+  ok("the contract line and the Close button share the footer", /\.settings-foot \{[^}]*justify-content: space-between;/.test(css) && /\.settings-foot__contract \{/.test(css));
+  // the pre-F05 spine debt this ticket was allowed to carry is now spent
+  ok("the pre-F05 save-contract debt marker went with the button it excused", e.indexOf("spine-todo") === -1);
+  ok("one spelling of the modifier key, so printed shortcuts never disagree", /var MOD_KEY = \(function \(\) \{/.test(e));
+
+  // --- OVL-06: cross-references are links, not instructions ---------------------------
+  ok("there is ONE cross-reference row, built on the shared settings row", /function crossRefRow\(opts\)[\s\S]{0,900}return settingsRow\(\{ label: opts\.label/.test(e));
+  ok("it always carries a live value slot and a navigating link", /insp-xref__value/.test(e) && /insp-xref__link/.test(e) && /link\.addEventListener\("click", function \(\) \{ if \(opts\.onNavigate\) opts\.onNavigate\(\); \}\)/.test(e));
+  ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}settingsModal\.sectionKey\[tab\] = sectionKey;[\s\S]{0,200}scrollIntoView/.test(e));
+  // the three dead-prose references named by the audit are gone, each replaced by a row
+  ok("'edit it in the Learner nav panel' is gone", e.indexOf("edit it in the Learner nav panel") === -1);
+  ok("the nav row states its live section count and links to Learner nav",
+    /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(e));
+  ok("'Add a footer nav bar in Header & Footer first' is gone", e.indexOf("Add a footer nav bar in Header & Footer first") === -1);
+  ok("with no nav bar the row still shows a value plus the link that adds one",
+    /value: "Not added", linkLabel: "Header & Footer"[\s\S]{0,220}openSettingsSection\("project", "headerFooter"\)/.test(e));
+  ok("'preview a variant from the top-bar switcher' is gone", e.indexOf("preview a variant from the top-bar switcher)") === -1);
+  ok("the image panel shows which variant is live and opens the switcher",
+    /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenu\(variantSwitchEl\)/.test(e));
+  ok("the cross-reference row is styled once, not per site", /\.insp-xref \{/.test(css) && /\.insp-xref__link \{/.test(css));
+
+  // --- OVL-14: one verb list, two doors ----------------------------------------------
+  ok("the block verbs have ONE definition", /function blockMenuItems\(target\) \{/.test(e));
+  // the block-menu verbs are written exactly once in the whole file (the outliner's own
+  // tree menu is a different surface with different verbs, so it is not counted here)
+  var verbs = ["Copy style", "Move up", "Move down"];
+  var once = verbs.filter(function (v) { return (e.split('label: "' + v + '"').length - 1) === 1; });
+  ok("no block verb is written twice (the two doors cannot drift): " + once.length + "/" + verbs.length, once.length === verbs.length);
+  ok("exactly two doors call the one definition", (e.split("blockMenuItems(").length - 1) === 3); // 1 definition + 2 call sites
+  // the canvas handler's block branch builds nothing of its own any more
+  var canvasBranch = (e.match(/setSelection\(target\.type === "instance" \? "instance" : "block", target\.node\);([\s\S]*?)\} else \{/) || [])[1] || "";
+  ok("the right-click handler no longer keeps a private copy of the verbs", canvasBranch.indexOf("label:") === -1);
+  ok("door 1 - the canvas right-click renders that list", /items = items\.concat\(blockMenuItems\(target\.type === "block" \? target : \{ instance: target\.instance \}\)\)/.test(e));
+  ok("door 2 - the inspector header's overflow renders the SAME list", /showContextMenu\(r\.right, r\.bottom \+ 4, blockMenuItems\(\{ block: block \}\)\)/.test(e));
+  ok("the overflow is the canonical menu glyph and says what it opens", /insp-crumbs__more"\);[\s\S]{0,200}Icon\("more-horizontal"\)[\s\S]{0,120}"Block actions"/.test(e));
+  ok("the menu's foot names its way back into the inspector", /label: "Block settings", hint: "Inspector", onClick: function \(\) \{ revealBlockSettings\(block\); \}/.test(e));
+  ok("that route really opens the block's own settings", /function revealBlockSettings\(block\)[\s\S]{0,220}enteredBlock = block;[\s\S]{0,120}reselectBlockNode\(block, "block"\)/.test(e));
+  ok("the overflow is styled once, beside the breadcrumb", /\.insp-crumbs__more \{/.test(css));
+
+  // --- OVL-23: one help typographic system -------------------------------------------
+  ok("the help type system is four DS tokens, not ad-hoc CSS",
+    /--help-text:\s*var\(--text-sm\)/.test(typo) && /--help-leading:\s*1\.6/.test(typo)
+    && /--help-measure:\s*400px/.test(typo) && /--help-step-indent:/.test(typo));
+  ok("help prose reads at the token size and rhythm", /\.help-doc \{[^}]*font-size: var\(--help-text\); line-height: var\(--help-leading\);/.test(css));
+  ok("the measure is capped at ~62 characters", /\.help-doc > \* \{ max-width: var\(--help-measure\); \}/.test(css));
+  ok("wide content scrolls instead of squeezing the measure", /\.help-doc > table, \.help-doc > pre \{ max-width: 100%; \}/.test(css));
+  ok("headings come off the shared --text-* ramp, inventing no size",
+    /\.help-doc h1 \{ font-size: var\(--text-lg\)/.test(css) && /\.help-doc h2 \{ font-size: var\(--text-md\); \}/.test(css)
+    && /\.help-doc h3 \{ font-size: var\(--help-text\); \}/.test(css) && !/\.help-doc h[1-4] \{ font-size: 1[0-9](\.[0-9])?px/.test(css));
+  ok("there is ONE callout box, with three tones drawn off it",
+    /\.help-doc \.help-callout \{/.test(css) && /\.help-callout--reassure \{ border-left-color: var\(--success/.test(css)
+    && /\.help-callout--caution \{ border-left-color: var\(--warning/.test(css));
+  ok("numbered steps get one chip treatment", /\.help-doc ol \{[^}]*counter-reset: help-step;/.test(css) && /\.help-doc ol > li::before \{/.test(css));
+  ok("monospace is reserved for code and paths", /\.help-doc code \{\s*\n\s*font-family: var\(--font-mono\)/.test(css));
+  // the divergence that made help read as a different product: generic modal prose was silently
+  // re-setting the guide's size and rhythm. It now stops at the docs modal.
+  ok("generic modal prose no longer overrides the help system", /\.modal-box:not\(\.modal-box--docs\) p \{/.test(css) && !/^\.modal-box p \{/m.test(css));
+
+  // --- pure: the renderer's share of the help system ----------------------------------
+  var t = e.match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
+  if (!t) { ok("locate @md fence", false); return; }
+  var md = new Function(t[1] + "\nreturn mdToHtml;")();
+  ok("a callout is toned by the label the author already writes",
+    md("> **Note.** a").indexOf("help-callout help-callout--note") !== -1
+    && md("> **Tip.** a").indexOf("help-callout--reassure") !== -1
+    && md("> **Reassurance.** a").indexOf("help-callout--reassure") !== -1
+    && md("> **Caution.** a").indexOf("help-callout--caution") !== -1);
+  ok("an unlabelled quote falls back to the neutral tone, never to no style",
+    md("> plain").indexOf("help-callout help-callout--note") !== -1);
+  ok("a printed shortcut renders as the menu's chip", md("press ⌘P now").indexOf("<kbd class=\"help-kbd\">⌘P</kbd>") !== -1);
+  ok("modifier runs stay one chip", md("⌘⇧G").indexOf("<kbd class=\"help-kbd\">⌘⇧G</kbd>") !== -1);
+  ok("a shortcut quoted as code stays code", md("`⌘` = Cmd").indexOf("<code>⌘</code>") !== -1 && md("`⌘` = Cmd").indexOf("<code><kbd") === -1);
+  ok("chips survive inside bold and table cells",
+    md("**⌘D** dupes").indexOf("<strong><kbd class=\"help-kbd\">⌘D</kbd></strong>") !== -1
+    && md("| Do | Key |\n|---|---|\n| Undo | ⌘Z |").indexOf("<kbd class=\"help-kbd\">⌘Z</kbd>") !== -1);
+  ok("prose with no shortcut is untouched", md("plain words") === "<p>plain words</p>");
+})();
+
 // uio-P-C03 (PUB-10): release history answers "what did we ship?", so it fills the pane's empty
 // half instead of hiding collapsed below the queue — and every picker row states when that document
 // last actually went out.
@@ -10137,7 +10335,8 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
   ok("the publish rule contributes layout only, never the pill's look", /\.publish-release__outcome \{ flex: 0 0 auto; margin-left: auto; \}/.test(css));
 
   // --- last published per picker row ---
-  ok("each picker row carries its last-published line", /wrap\.appendChild\(h\("div", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
+  // uio-F04 moved this onto the row's shared meta line, beside the fact badges.
+  ok("each picker row carries its last-published line", /meta\.appendChild\(h\("span", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
   ok("never-published reads as a plain fact, not a warning", /if \(!last\) return "Never published";/.test(e));
   ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));
 })();
@@ -10190,6 +10389,155 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
   ok("it says why it can't be changed", /dchip\.title = "Destination · " \+ dest\.why;/.test(e));
   ok("the static chip drops the hover affordance and sits back one ink step", /\.publish-chip--static \{ cursor: default; color: var\(--text-tertiary, var\(--text-secondary\)\); \}/.test(css) && /\.publish-chip--static:hover \{ color: var\(--text-tertiary, var\(--text-secondary\)\); border-color: var\(--border-subtle\); \}/.test(css));
   ok("the filename takes the slack and the status pins right, like the history rows", /\.publish-queuerow__file \{ flex: 1 1 auto; min-width: 0;[^}]*text-overflow: ellipsis; \}/.test(css) && /\.publish-queuerow__status \{[^}]*margin-left: auto;/.test(css));
+})();
+
+// ---- uio-F03: scope + inheritance model (the five-rung ladder) -------------------
+// The UI spine's ladder System -> Product -> Course -> Page -> Block as ONE primitive with
+// one visual language. The resolver is pure and PROPERTY-AGNOSTIC by contract: it takes the
+// property as an argument, never inspects it, and never assumes the value is a style value.
+// The last block below proves that by resolving a NON-setting axis (a neutral three-level
+// classification with a "most restrictive wins" chooser) through the very same resolver —
+// which is how uio-F07's export-control classification becomes an ADDITION, not a second
+// inheritance path.
+section("uio-F03 scope + inheritance model");
+(function () {
+  var e = src("src/editor.js");
+  var css = src("editor.css");
+  var tokens = src("design-system/tokens/spacing.css");
+  var ds = src("design-system/readme.md");
+  var dts = src("design-system/components/panels/PanelSection.d.ts");
+  var m = e.match(/\/\* @f03-start \*\/([\s\S]*?)\/\* @f03-end \*\//);
+  if (!m) { ok("locate @f03 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { SCOPE_LADDER: SCOPE_LADDER, NOT_SET: NOT_SET, scopeRung: scopeRung, scopeChain: scopeChain," +
+    " resolveScoped: resolveScoped, resetPlan: resetPlan, resetTooltip: resetTooltip," +
+    " inheritedTooltip: inheritedTooltip, overrideCount: overrideCount, rollupLabel: rollupLabel };")();
+  var NOT_SET = g.NOT_SET;
+
+  ok("the ladder is the spine's five rungs, in order", g.SCOPE_LADDER.join(">") === "system>product>course>page>block");
+
+  // --- a fixture ladder: every rung is a plain bag, so one property can be set anywhere ---
+  function ladder(system, product, course, page, block) {
+    return g.scopeChain([
+      g.scopeRung("system", system || {}), g.scopeRung("product", product || {}),
+      g.scopeRung("course", course || {}), g.scopeRung("page", page || {}),
+      g.scopeRung("block", block || {})
+    ]);
+  }
+  // Resolution at each rung: the deepest rung that sets it wins, and names itself.
+  ok("system rung resolves when nothing below sets it", (function () {
+    var r = g.resolveScoped(ladder({ gap: 8 }), "gap");
+    return r.value === 8 && r.scope === "system" && r.inherited === true && r.overridden === false;
+  })());
+  ok("product beats system", g.resolveScoped(ladder({ gap: 8 }, { gap: 12 }), "gap").scope === "product");
+  ok("course beats product", g.resolveScoped(ladder({ gap: 8 }, { gap: 12 }, { gap: 16 }), "gap").scope === "course");
+  ok("page beats course", g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, { gap: 20 }), "gap").scope === "page");
+  ok("block beats page (and is its OWN value, so the row is overridden)", (function () {
+    var r = g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, { gap: 20 }, { gap: 24 }), "gap");
+    return r.value === 24 && r.scope === "block" && r.overridden === true && r.inherited === false;
+  })());
+  // The chain may be given in any order; it is sorted onto the ladder.
+  ok("rungs given out of order still resolve down the ladder", (function () {
+    var chain = g.scopeChain([g.scopeRung("block", {}), g.scopeRung("system", { gap: 8 }), g.scopeRung("course", { gap: 16 })]);
+    return g.resolveScoped(chain, "gap").scope === "course";
+  })());
+
+  // --- a value overridden at a MIDDLE rung, read from a deeper rung ---
+  var mid = ladder({ gap: 8 }, null, { gap: 16 }, {}, {});
+  var midRes = g.resolveScoped(mid, "gap", { at: "block" });
+  ok("a middle-rung override is INHERITED (not overridden) when read from the block", midRes.inherited === true && midRes.overridden === false);
+  ok("the inherited value names the scope it came from", midRes.value === 16 && midRes.scopeLabel === "Course");
+  ok("inherited copy states what will actually apply, never 'unset'", g.inheritedTooltip(midRes) === "Inherited from Course: 16");
+  ok("a page row cannot see a block's override (rungs below `at` are out of play)",
+    g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, {}, { gap: 99 }), "gap", { at: "page" }).value === 16);
+  // Falsy values are REAL values, not absence — the classic inheritance bug.
+  ok("false / 0 / \"\" are real values, only NOT_SET means unset", (function () {
+    var r = g.resolveScoped(ladder({ on: true }, null, { on: false }), "on", { at: "course" });
+    return r.value === false && r.overridden === true;
+  })());
+  ok("a rung that reads NOT_SET contributes nothing", (function () {
+    var chain = g.scopeChain([
+      { scope: "system", label: "System", read: function () { return 8; } },
+      { scope: "course", label: "Course", read: function () { return NOT_SET; } }
+    ]);
+    return g.resolveScoped(chain, "gap", { at: "course" }).scope === "system";
+  })());
+
+  // --- Reset restores the named PARENT value ---
+  var own = ladder({ gap: 8 }, null, { gap: 16 }, {}, { gap: 24 });
+  var ownRes = g.resolveScoped(own, "gap", { at: "block" });
+  var plan = g.resetPlan(own, "gap", "block");
+  ok("Reset targets the row's own rung and names what it restores", plan.clearAt === "block" && plan.restores.scope === "course" && plan.restores.value === 16);
+  ok("the Reset tooltip states the value AND the scope", g.resetTooltip(ownRes) === "Reset to the Course value: 16");
+  ok("clearing the own value really does return the named parent value", (function () {
+    var block = { gap: 24 };
+    var chain = ladder({ gap: 8 }, null, { gap: 16 }, {}, block);
+    delete block.gap;                                  // what the row's onReset does
+    var after = g.resolveScoped(chain, "gap", { at: "block" });
+    return after.value === 16 && after.scope === "course" && after.overridden === false;
+  })());
+  ok("an inherited row has nothing to reset", g.resetPlan(mid, "gap", "block") === null);
+  ok("with no rung above, Reset says it clears instead of naming a scope",
+    /^Reset — nothing is set above Block/.test(g.resetTooltip(g.resolveScoped(ladder(null, null, null, null, { gap: 24 }), "gap"))));
+
+  // --- the section roll-up count ---
+  ok("the roll-up counts only rows overridden at their own rung", g.overrideCount([ownRes, midRes, ownRes]) === 2);
+  ok("the roll-up reads '3 overridden'", g.rollupLabel(3) === "3 overridden");
+  ok("no overrides means no roll-up text at all", g.rollupLabel(0) === "" && g.overrideCount([]) === 0);
+
+  // --- PROOF: a NON-setting property rides the same resolver (the uio-F07 contract) ---
+  // A neutral, invented three-level classification. Nothing about it is a style or a theme
+  // value, its rungs store it under DIFFERENT keys, and it wants "most restrictive wins"
+  // rather than "deepest rung wins" — all of which the shared primitive absorbs.
+  var LEVELS = ["open", "limited", "closed"];
+  function mostRestrictive(a, b) { return LEVELS.indexOf(b) > LEVELS.indexOf(a) ? b : a; }
+  var product = { releaseLevel: "limited" };          // note: a different key per rung
+  var blockBag = { audienceLevel: "closed" };
+  var classChain = g.scopeChain([
+    { scope: "system", label: "System", read: function () { return "open"; } },
+    { scope: "product", label: "Product", read: function () { return product.releaseLevel; } },
+    { scope: "block", label: "Block", read: function (prop) { return Object.prototype.hasOwnProperty.call(blockBag, prop) ? blockBag[prop] : NOT_SET; } }
+  ]);
+  var cr = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+  ok("a non-setting axis resolves through the SAME resolver", cr.value === "closed" && cr.scope === "block" && cr.overridden === true);
+  ok("its Reset names the Product value it would restore", g.resetTooltip(cr) === "Reset to the Product value: limited");
+  ok("a block resolves the inherited classification when it sets none", (function () {
+    delete blockBag.audienceLevel;
+    var r = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+    return r.value === "limited" && r.scopeLabel === "Product" && r.inherited === true;
+  })());
+  ok("choose() lets a LESS restrictive block value lose to its parent (F07's rule)", (function () {
+    blockBag.audienceLevel = "open";                   // tries to loosen
+    var r = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+    delete blockBag.audienceLevel;
+    return r.value === "limited" && r.scope === "product";
+  })());
+  ok("the resolver never inspects the property key (no settings list in the pure core)",
+    !/gap|border|gateInteractions|theme|blockStyles/.test(m[1]));
+
+  // --- the wiring: the tail fills uio-F01's slot, no second row anatomy ---
+  ok("settingsRow fills its tail slot from `inherit` (no second row builder)", /var tailNode = opts\.tail \|\| \(opts\.inherit \? inheritanceTail\(opts\.inherit\) : null\)/.test(e));
+  ok("the tail renders inherited scope OR dot + Reset, nothing else", /function inheritanceTail\([\s\S]{0,900}?insp-row__override-dot[\s\S]{0,400}?insp-row__reset[\s\S]{0,400}?insp-row__scope/.test(e));
+  ok("switchRow can carry the tail without a divergent row", /function switchRow\(labelText, get, set, target, noHistory, rowOpts\)/.test(e));
+  ok("the section header counts its own overrides", /rollup\.textContent = rollupLabel\(overrides\)/.test(e));
+  ok("real rows carry the tail at three different rungs", (function () {
+    var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
+    var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
+    var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(e);
+    return atBlock && atPage && atCourse;
+  })());
+  ok("the retired inherit-as-an-option picker is gone (never show 'unset')", !/\["Inherit course default", "inherit"\]/.test(e));
+  // Reset is a live edit, not a commit control — the save contract stays intact.
+  ok("no Save/Apply/Cancel/Done arrived with the inheritance affordances", !/insp-row__(save|apply|cancel|done)/.test(e) && !/"insp-row__reset", "(Save|Apply|Cancel|Done)"/.test(e));
+
+  // --- the DS carries the tokens + the contract this is built to ---
+  ok("DS defines the one override-dot token", /--override-dot:\s*4px/.test(tokens));
+  ok("both the row dot and the section dot ride that one token",
+    /\.insp-row__override-dot \{[^}]*var\(--override-dot/.test(css) && /\.subdisc__dot \{[^}]*var\(--override-dot/.test(css));
+  ok("inherited scope reads in tertiary ink", /\.insp-row__scope \{[^}]*color: var\(--text-tertiary\)/.test(css));
+  ok("the section roll-up is styled and goes accent when non-empty", /\.insp-section__rollup \{/.test(css) && /\.insp-section\.has-overrides \.insp-section__rollup \{[^}]*var\(--accent\)/.test(css));
+  ok("the spine states the resolver is property-agnostic and forbids a parallel path", /property being\s*\n?resolved as an argument/.test(ds) && /parallel inheritance path is a hard fail/.test(ds));
+  ok("PanelSection declares the roll-up count", /overrideCount\?:\s*number/.test(dts));
 })();
 
 // uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
@@ -10871,7 +11219,7 @@ section("#170/#158 shared formatting toggle-bar");
 
   // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
   var insStart = e.indexOf("function renderFieldInspector(node)");
-  var insBody = e.slice(insStart, insStart + 7000);
+  var insBody = e.slice(insStart, insStart + 7400); // uio-F04 added the source-provenance line above these
   ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
   ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);

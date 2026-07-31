@@ -17,6 +17,12 @@
   "use strict";
 
   var SVGNS = "http://www.w3.org/2000/svg";
+  // uio-O-W1: one spelling of the modifier key, so every printed shortcut in the chrome
+  // (save-contract line, menu hints) reads the same on a Mac as on Windows/Linux.
+  var MOD_KEY = (function () {
+    try { return /Mac|iPhone|iPad/.test((navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+"; }
+    catch (e) { return "⌘"; }
+  })();
   var GAP_X = 300, GAP_Y = 110, LABEL_H = 30;
   // JJJJ: per-page canvas position { x, y, col } (chapters = columns, pages stack
   // vertically). Filled by buildWorld (x/col) + layoutColumns (y). frameX/frameY
@@ -706,10 +712,10 @@
     row("Used", _storageRatio != null ? Math.round(_storageRatio * 100) + "%" : "n/a");
     var weight = (typeof window.estimateCourseBytes === "function") ? _fmtBytes(window.estimateCourseBytes(doc)) : "-";
     row("Course weight", weight);
-    // source-alignment: share of this document's prose linked to approved source vs novel (live while
-    // editing). null (no prose) omits the row rather than showing a misleading 0%.
-    var apct = sourceAlignmentPct(doc);
-    if (apct != null) row("Source alignment", apct + "% linked");
+    // uio-F04: share of this document's prose linked to approved source, phrased by the shared
+    // resolver so it matches the Publish row and the Source top bar word for word.
+    var stFacts = f04DocFacts(activeDocId);
+    if (stFacts) row("Source alignment", stFacts.alignment.label);
     if (saveFailed) pop.appendChild(h("div", "storage-pop__note storage-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
     else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "storage-pop__note", adv.msg)); }
     var r = anchor.getBoundingClientRect();
@@ -1629,17 +1635,22 @@
     walkBlocks(doc, function (b) { if (b && b.sourceLink && b.sourceLink.masterId) ids[b.sourceLink.masterId] = 1; });
     return Object.keys(ids);
   }
-  // Count distinct linked masters whose current stamp differs from the doc's last-published baseline.
-  // Returns null when the doc links NO Ground Truth content -> no badge (not a misleading "0 changed").
-  // A master absent from the baseline (newly linked, or a doc never yet exported) counts as changed.
-  function groundTruthStaleCount(doc, currentVersions) {
+  // WHICH linked masters have changed since the doc's last-published baseline. Returns null when the
+  // doc links NO Ground Truth content -> no badge (not a misleading "0 changed"). A master absent from
+  // the baseline (newly linked, or a doc never yet exported) counts as changed.
+  // uio-F04: this is the ONE staleness computation. The count below and every F04 surface derive from
+  // it, so a drift badge and a drift list can never disagree.
+  function driftedMasterIds(doc, currentVersions) {
     if (!doc) return null;
     var ids = docLinkedMasterIds(doc);
     if (!ids.length) return null;
     var baseline = (doc.meta && doc.meta.lastPublishedGroundTruthVersions) || {};
-    var n = 0;
-    ids.forEach(function (id) { if (baseline[id] !== currentVersions[id]) n++; });
-    return n;
+    return ids.filter(function (id) { return baseline[id] !== (currentVersions || {})[id]; });
+  }
+  // Count of the above. Same null contract.
+  function groundTruthStaleCount(doc, currentVersions) {
+    var drifted = driftedMasterIds(doc, currentVersions);
+    return drifted === null ? null : drifted.length;
   }
   // Current stamp map from the live LibraryStore (masterId -> updatedAt).
   function currentMasterVersions() {
@@ -1688,6 +1699,213 @@
     return Math.round(a.ratio * 100);
   }
   /* @src-align-end */
+
+  // ---- uio-F04: cross-stage data surfacing (the READ layer over the Product Rail) ----------------
+  // Four facts follow a document (and a source topic) across Source, Edit and Publish: how much of it
+  // comes from approved source, what has drifted since it last went out, where a passage is used, and
+  // how many packages it actually produces. Every stage used to phrase these itself, so the same fact
+  // read differently in three places -- or, worse, was computed twice.
+  //
+  // THE RULE: this layer INVENTS NOTHING. Its inputs are the Product Rail helpers that already exist
+  // -- sourceAlignment (@src-align), driftedMasterIds + currentMasterVersions (@gt-staleness),
+  // sourceLinkWhereUsed, ReleaseHistory.lastPublishedFor, and doc.variants. It turns those into one
+  // phrasing + one tone that every surface renders identically. A second staleness or alignment
+  // computation anywhere else is a hard fail.
+  //
+  // The fenced part is pure (plain values in, plain fact objects out) so tests/run.js can fixture it
+  // directly; the adapters below the fence do the binding to the live stores.
+  /* @f04-start */
+  // One band scale, everywhere. >=85 verified · 60-84 mixed · <60 mostly novel.
+  var F04_BANDS = [
+    { key: "verified", min: 85, label: "Verified" },
+    { key: "mixed", min: 60, label: "Mixed" },
+    { key: "novel", min: 0, label: "Mostly novel" }
+  ];
+  // Tones read as fact, not as scolding: novel copy is a legitimate authoring choice, so the bottom
+  // band is neutral rather than red. Red is reserved for something actually wrong.
+  var F04_BAND_TONE = { verified: "success", mixed: "warning", novel: "neutral" };
+  function f04Band(pct) {
+    if (pct == null) return null;
+    for (var i = 0; i < F04_BANDS.length; i++) if (pct >= F04_BANDS[i].min) return F04_BANDS[i];
+    return F04_BANDS[F04_BANDS.length - 1];
+  }
+  // ALIGNMENT. `alignment` is whatever sourceAlignment() returned ({linkedWords,totalWords}); pass
+  // `indexed:false` when there is no approved source to measure against at all. Both no-source and
+  // no-prose resolve to the SAME honest "Not indexed" state rather than a 0% that blames the author.
+  function f04AlignmentFact(alignment, indexed) {
+    var total = (alignment && alignment.totalWords) || 0;
+    var linked = (alignment && alignment.linkedWords) || 0;
+    if (indexed === false || !total) {
+      return {
+        indexed: false, pct: null, band: null, bandLabel: "Not indexed", tone: "neutral",
+        label: "Not indexed",
+        title: indexed === false
+          ? "Not indexed - there is no approved source document to measure this against yet."
+          : "Not indexed - there is no prose here to measure."
+      };
+    }
+    var pct = Math.round(linked / total * 100), band = f04Band(pct);
+    return {
+      indexed: true, pct: pct, band: band.key, bandLabel: band.label, tone: F04_BAND_TONE[band.key],
+      linkedWords: linked, totalWords: total,
+      label: pct + "% aligned",
+      title: pct + "% of these " + total + " words are linked to approved source (" + band.label.toLowerCase() +
+        "). The rest is novel copy authored here."
+    };
+  }
+  // Roll-up: several documents as ONE alignment number, by summing the same word counts the per-document
+  // fact uses. With a single document the roll-up IS that document's number, which is exactly why the
+  // Source top bar and a Publish row can never disagree.
+  function f04RollUpAlignment(alignments) {
+    var linked = 0, total = 0, indexed = false;
+    (alignments || []).forEach(function (a) {
+      if (!a) return;
+      linked += a.linkedWords || 0; total += a.totalWords || 0;
+      if (a.indexed !== false) indexed = true;
+    });
+    return f04AlignmentFact({ linkedWords: linked, totalWords: total }, indexed && total > 0);
+  }
+  // DRIFT. `driftedIds` is driftedMasterIds()'s answer (null = links no source at all); `published` is
+  // whether ReleaseHistory has ever recorded this document going out. A never-published document has
+  // nothing to have drifted FROM, so it reports "unpublished" instead of counting every linked topic as
+  // changed -- the misreading the raw count invited.
+  function f04DriftFact(driftedIds, published) {
+    if (driftedIds == null) {
+      return { state: "unlinked", count: 0, ids: [], tone: "neutral", label: "",
+        title: "This document links no approved source." };
+    }
+    if (!published) {
+      return { state: "unpublished", count: 0, ids: [], tone: "neutral", label: "",
+        title: "Never published, so there is no earlier version to have drifted from." };
+    }
+    if (!driftedIds.length) {
+      return { state: "current", count: 0, ids: [], tone: "neutral", label: "",
+        title: "Every linked source passage is as it was when this document was last published." };
+    }
+    var n = driftedIds.length;
+    return { state: "drifted", count: n, ids: driftedIds.slice(), tone: "warning",
+      label: n + " changed",
+      title: n + " linked source document" + (n === 1 ? "" : "s") + " changed since this document was last published." };
+  }
+  // WHERE-USED. `places` is sourceLinkWhereUsed()'s list of placements ({docCode,...}); this counts the
+  // distinct documents behind them, because "linked in 3 documents" is the fact an author acts on.
+  function f04WhereUsedFact(places) {
+    var docs = {}, n = 0;
+    (places || []).forEach(function (p) { if (p && p.docCode != null) docs[p.docCode] = 1; });
+    var codes = Object.keys(docs); n = codes.length;
+    return {
+      docs: n, docCodes: codes, places: (places || []).length, tone: "neutral",
+      label: n ? ("Linked in " + n) : "Not linked",
+      title: n
+        ? ("Used in " + n + " document" + (n === 1 ? "" : "s") + " across " + (places || []).length + " place" + ((places || []).length === 1 ? "" : "s") + ".")
+        : "Not currently linked in any document."
+    };
+  }
+  // VARIANTS AS OUTPUTS. One document with N variants is N+1 packages; the queue treats it as one row,
+  // which is why the real output count is invisible today. Flagship always leads the list.
+  function f04OutputsFact(variants) {
+    var vs = (variants || []).filter(function (v) { return v != null && String(v) !== ""; });
+    var names = ["Flagship"].concat(vs.map(String));
+    return {
+      count: names.length, names: names, variants: vs.map(String), tone: "neutral",
+      label: names.length + " outputs",
+      title: names.length === 1
+        ? "Publishing this document produces one package (Flagship)."
+        : "Publishing this document produces " + names.length + " packages: " + names.join(", ") + "."
+    };
+  }
+  /* @f04-end */
+
+  // ---- uio-F04 adapters: bind the pure resolver above to the live Product Rail stores --------------
+  // Nothing here computes a fact; each one only fetches an existing input and hands it over.
+  // Is there approved source to align this document against at all? A document tagged to a Product with
+  // no source document can never score, so it reads "Not indexed" rather than 0%.
+  function f04SourceIndexed(d) {
+    var pid = d && d.meta && d.meta.productId;
+    if (!pid) return true;                                    // untagged: fall back to "has prose" alone
+    if (typeof sourceMasterFor !== "function") return true;
+    return !!sourceMasterFor(pid) || (typeof unifiableTopicsFor === "function" && unifiableTopicsFor(pid).length > 0);
+  }
+  // Has this document ever actually gone out? Straight from the release log, the same record the
+  // picker's "Last published" line reads.
+  function f04Published(docId) {
+    var RH = window.ReleaseHistory;
+    return !!(RH && RH.lastPublishedFor && RH.lastPublishedFor(releaseHistory(), docId));
+  }
+  // The three document-scoped facts, for any surface, from one call.
+  function f04DocFacts(docId, versions) {
+    var d = registry[docId]; if (!d) return null;
+    var vers = versions || currentMasterVersions();
+    return {
+      docId: docId,
+      title: (d.meta && d.meta.title) || docId,
+      alignment: f04AlignmentFact(sourceAlignment(d), f04SourceIndexed(d)),
+      drift: f04DriftFact(driftedMasterIds(d, vers), f04Published(docId)),
+      outputs: f04OutputsFact(d.variants)
+    };
+  }
+  // Documents belonging to a Product (the same meta.productId tag the browser + picker scope by).
+  function f04ProductDocIds(pid) {
+    if (!pid) return [];
+    return Object.keys(registry).filter(function (code) {
+      var d = registry[code];
+      return !!(d && d.meta && d.meta.productId === pid);
+    });
+  }
+  // Product-scoped roll-up, plus (when a source topic is given) that topic's where-used and how many
+  // of the Product's published documents are behind it.
+  function f04ProductFacts(pid, masterId) {
+    var vers = currentMasterVersions();
+    var ids = f04ProductDocIds(pid);
+    var each = ids.map(function (id) { return f04DocFacts(id, vers); }).filter(Boolean);
+    var outputs = 0;
+    each.forEach(function (f) { outputs += f.outputs.count; });
+    var behind = masterId ? each.filter(function (f) {
+      return f.drift.state === "drifted" && f.drift.ids.indexOf(masterId) !== -1;
+    }) : [];
+    return {
+      productId: pid,
+      docIds: ids,
+      docs: each,
+      alignment: f04RollUpAlignment(each.map(function (f) { return f.alignment; })),
+      outputs: { count: outputs, tone: "neutral", label: outputs + " outputs",
+        title: outputs + " package" + (outputs === 1 ? "" : "s") + " across " + ids.length + " document" + (ids.length === 1 ? "" : "s") + "." },
+      whereUsed: masterId && typeof sourceLinkWhereUsed === "function"
+        ? f04WhereUsedFact(sourceLinkWhereUsed(masterId, null)) : null,
+      behind: { count: behind.length, tone: behind.length ? "warning" : "neutral",
+        label: behind.length ? (behind.length + " behind") : "",
+        title: behind.length
+          ? (behind.length + " published document" + (behind.length === 1 ? " is" : "s are") + " older than this source.")
+          : "Every published document here is up to date with this source." }
+    };
+  }
+  // The ONE way an F04 fact is drawn: the canonical DS Badge, quiet (these repeat down lists), small,
+  // carrying the fact's own tone + tooltip. Returns null for a fact with nothing to say, so a surface
+  // never has to decide when to hide one.
+  function f04Badge(fact, cls) {
+    if (!fact || !fact.label) return null;
+    var U = window.VersoUI;
+    var el = U && U.Badge
+      ? U.Badge({ tone: fact.tone || "neutral", quiet: true, size: "sm", children: [fact.label] })
+      : h("span", "vds-badge vds-badge--neutral vds-badge--sm vds-badge--quiet", fact.label);
+    if (cls) el.classList.add(cls);
+    if (fact.title) el.title = fact.title;
+    return el;
+  }
+  // Read API for the tickets that CONSUME this layer (uio-P-C01's alignment meter, uio-P-C08's variant
+  // roll-up chip, uio-S-M05, uio-E-M03) and for the browser-verify harness. Read-only: it renders
+  // nothing and mutates nothing.
+  window.__f04 = {
+    docFacts: f04DocFacts,
+    productFacts: f04ProductFacts,
+    productDocIds: f04ProductDocIds,
+    whereUsed: function (masterId) { return f04WhereUsedFact(sourceLinkWhereUsed(masterId, null)); },
+    bands: F04_BANDS,
+    band: f04Band,
+    _pure: { alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment, driftFact: f04DriftFact,
+      whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact }
+  };
+
   // uio-P-C03 (PUB-10): the picker row's provenance line. States the fact plainly when a document
   // has gone out, and states the absence just as plainly when it hasn't -- "never published" is
   // information, not an error, so it reads as a fact rather than a warning.
@@ -1724,11 +1942,14 @@
   // search/filter/sort. The header counts what the list shows, from the same array.
   // uio-P-C06: the render AND "Queue selected" both read the list from here, so the batch can only
   // ever contain rows the picker is showing.
+  // uio-F04: the row's facts come from f04DocFacts -- the same call the Source top bar and the Edit
+  // provenance line make -- so a number here can never disagree with the same number a stage away.
   function publishPickRows() {
     var vers = currentMasterVersions(), RH = window.ReleaseHistory;
     return publishPickDocs().map(function (d) {
       var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
-      return { id: d.id, title: d.title, drift: groundTruthStaleCount(registry[d.id], vers) || 0, lastAt: last ? last.at : 0 };
+      var facts = f04DocFacts(d.id, vers);
+      return { id: d.id, title: d.title, drift: facts ? facts.drift.count : 0, lastAt: last ? last.at : 0, facts: facts };
     });
   }
   // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
@@ -1821,22 +2042,6 @@
         row.appendChild(box);
       }
       row.appendChild(h("span", "publish-pickrow__title", d.title));
-      // staleness-tracking: informational count of linked Ground Truth topics changed since this
-      // document's last export. null (no linked content) shows nothing; 0 shows nothing (in sync);
-      // >0 shows a small count chip. Never blocks or warns -- the author can still queue it freely.
-      var stale = d.drift;
-      if (stale) {
-        var badge = h("span", "publish-pickrow__stale", String(stale));
-        badge.title = stale + " linked source topic" + (stale === 1 ? "" : "s") + " changed since this document was last published";
-        row.appendChild(badge);
-      }
-      // source-alignment: what share of this document is linked to approved source vs authored novel.
-      var apct = sourceAlignmentPct(registry[d.id]);
-      if (apct != null) {
-        var align = h("span", "publish-pickrow__align", apct + "% source");
-        align.title = apct + "% of this document's words are linked to approved source; the rest is novel copy authored here.";
-        row.appendChild(align);
-      }
       var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
       row.appendChild(add);
       // uio-P-C03 (PUB-10): "when did this last actually go out, and as what" — the line that
@@ -1844,7 +2049,23 @@
       // never disagree with the history below.
       var wrap = h("div", "publish-pickitem");
       wrap.appendChild(row);
-      wrap.appendChild(h("div", "publish-pickitem__last", publishLastLabel(d.id)));
+      // uio-F04 (PUB-01/02/15): drift, alignment and real output count, all from f04DocFacts and all
+      // drawn as the canonical DS Badge. They sit on the row's meta line, BELOW the title, for the
+      // same reason the queue row does it: three badges beside a title eat the title, and a document
+      // you cannot read the name of is worse than one whose numbers take a second line. A fact with
+      // nothing to say returns no badge, so an in-sync or never-published document stays quiet
+      // instead of carrying a chip that only means "nothing here". Never blocks or warns -- the
+      // author can still queue any of these freely.
+      var meta = h("div", "publish-pickitem__meta");
+      var facts = d.facts || f04DocFacts(d.id);
+      if (facts) {
+        [f04Badge(facts.drift, "publish-pickrow__drift"),
+         f04Badge(facts.alignment, "publish-pickrow__align"),
+         facts.outputs.count > 1 ? f04Badge(facts.outputs, "publish-pickrow__outputs") : null
+        ].forEach(function (b) { if (b) meta.appendChild(b); });
+      }
+      meta.appendChild(h("span", "publish-pickitem__last", publishLastLabel(d.id)));
+      wrap.appendChild(meta);
       list.appendChild(wrap);
     });
     host.appendChild(list);
@@ -2005,6 +2226,16 @@
         if (fname) { var fEl = h("span", "publish-queuerow__file", fname); fEl.title = "Writes " + fname; meta.appendChild(fEl); }
       }
       meta.appendChild(h("span", "publish-queuerow__status", publishStatusLabel(r)));
+      // uio-F04 (PUB-01/02/15): the same three facts the picker row states, on the row that is actually
+      // about to run -- so what you confirmed before queueing is still in front of you at the moment of
+      // publishing. Identical call, identical phrasing, identical badge.
+      var qf = f04DocFacts(r.docId);
+      if (qf) {
+        [f04Badge(qf.drift, "publish-queuerow__drift"),
+         f04Badge(qf.alignment, "publish-queuerow__align"),
+         qf.outputs.count > 1 ? f04Badge(qf.outputs, "publish-queuerow__outputs") : null
+        ].forEach(function (b) { if (b) meta.appendChild(b); });
+      }
       main.appendChild(meta);
       row.appendChild(main);
       if (r.status !== "running") {
@@ -4331,12 +4562,29 @@
       var cap = caption ? "<figcaption class=\"doc-figure__cap\">" + inline(caption) + "</figcaption>" : "";
       return "<figure class=\"doc-figure\">" + img + cap + "</figure>";
     }
+    // uio-O-W1 (OVL-23): a keyboard shortcut written in the guide renders as the SAME chip the
+    // menus use, instead of bare glyphs floating in a sentence. Pure text pass, run last: a
+    // <code> span always wins the alternation, so a shortcut quoted as code stays code.
+    function kbdify(html) {
+      return String(html).replace(/(<code\b[^>]*>[\s\S]*?<\/code>)|([⌘⌥⇧⌃]+[A-Za-z0-9=\\−-]?)/g,
+        function (_m, codeSpan, chip) { return codeSpan ? codeSpan : "<kbd class=\"help-kbd\">" + chip + "</kbd>"; });
+    }
     function inline(s) {
       s = esc(s);
       s = s.replace(/`([^`]+)`/g, function (_m, c) { return "<code>" + c + "</code>"; });
       s = s.replace(/\*\*([^*]+)\*\*/g, function (_m, b) { return "<strong>" + b + "</strong>"; });
       s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_m, t, u) { return "<a href=\"" + u + "\" target=\"_blank\" rel=\"noopener\">" + t + "</a>"; });
-      return s;
+      return kbdify(s);
+    }
+    // uio-O-W1 (OVL-23): ONE callout with three tones. A guide callout already leads with its
+    // own label ("**Note.**", "**Tip.**", "**Caution.**"), so the tone is read from that label:
+    // authors keep writing plain markdown and every callout in the app is drawn one way.
+    function calloutTone(text) {
+      var m = String(text).match(/^\s*\*\*\s*([^*]+?)\s*\.?\s*\*\*/);
+      var w = m ? m[1].trim().toLowerCase() : "";
+      if (w === "caution" || w === "warning" || w === "important") return "caution";
+      if (w === "tip" || w === "reassurance" || w === "remember" || w === "what you build") return "reassure";
+      return "note";
     }
     // #8 heading IDs: slugify heading text so the docs reader's TOC nav can deep-link to a
     // section (ADR 0004 — "guide headings are docs anchors"). Deterministic + unique per doc.
@@ -4375,10 +4623,11 @@
       if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
       var fig = line.match(FIG_RE);
       if (fig) { out.push(figHtml(fig)); i++; continue; }
-      if (/^\s*>\s?/.test(line)) { // blockquote (consecutive)
+      if (/^\s*>\s?/.test(line)) { // blockquote -> the one help callout, toned by its own label
         var qb = [];
         while (i < lines.length && /^\s*>\s?/.test(lines[i])) { qb.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
-        out.push("<blockquote>" + mdToHtml(qb.join("\n")) + "</blockquote>");
+        var qtext = qb.join("\n");
+        out.push("<blockquote class=\"help-callout help-callout--" + calloutTone(qtext) + "\">" + mdToHtml(qtext) + "</blockquote>");
         continue;
       }
       if (/^\s*[-*]\s+/.test(line)) { // unordered list (with lazy continuation of wrapped lines)
@@ -5660,7 +5909,11 @@
     var twirl = h("span", "insp-section__twirl" + (collapsed ? "" : " is-open"));
     var titleEl = h("span", "insp-section__title", title);
     var handle = h("span", "insp-section__drag"); handle.textContent = "∷"; handle.title = "Drag to reorder";
-    head.appendChild(twirl); head.appendChild(titleEl); head.appendChild(handle);
+    // uio-F03 roll-up: the header counts the rows in this section that carry their own value
+    // instead of inheriting one ("3 overridden"). Filled after buildFn, from the tally the
+    // inheritance tails push into. Empty (and invisible) when nothing is overridden.
+    var rollup = h("span", "insp-section__rollup");
+    head.appendChild(twirl); head.appendChild(titleEl); head.appendChild(rollup); head.appendChild(handle);
     var body = h("div", "insp-section__body");
     head.addEventListener("click", function () {
       if (panelEditMode) return; // in edit mode the header is a drag grip, not a collapse toggle
@@ -5668,7 +5921,15 @@
       sec.classList.toggle("is-collapsed", nowCollapsed); twirl.classList.toggle("is-open", !nowCollapsed);
       window.PanelLayout.setCollapsed(type, nowCollapsed);
     });
+    var prevTally = _scopeTally; _scopeTally = [];
     try { buildFn(body); } catch (e) {}
+    var overrides = overrideCount(_scopeTally); _scopeTally = prevTally;
+    rollup.textContent = rollupLabel(overrides);
+    if (overrides) {
+      sec.classList.add("has-overrides");
+      rollup.title = overrides + (overrides === 1 ? " value in this section is" : " values in this section are") +
+        " set here instead of inherited";
+    }
     sec.appendChild(head); sec.appendChild(body);
     if (_sectionBuf) _sectionBuf.push({ type: type, el: sec });
     return sec;
@@ -5841,15 +6102,16 @@
     sectionGroup("Behaviour", "Interaction gate", function (secBody) {
       var _i = inspector; inspector = secBody;
       try {
-      var gateVal = page.gateInteractions === true ? "on" : page.gateInteractions === false ? "off" : "inherit";
-      selectRow("Require interactions before Next", [["Inherit course default", "inherit"], ["Require on this page", "on"], ["Don't require", "off"]], gateVal, function (v) {
-        pushHistory();
-        if (v === "on") page.gateInteractions = true;
-        else if (v === "off") page.gateInteractions = false;
-        else delete page.gateInteractions;
-        mount(); setSelection("page", pi);
-      });
-      inspector.appendChild(h("div", "insp-hint", "Hold this page's Next until its interactions are done (hotspots, cards, sequences, accordions, quizzes, videos, checkboxes). 'Inherit' follows the course switch in Header & Footer → Progression."));
+      // uio-F03: was a tri-state picker with an explicit "Inherit course default" option —
+      // the exact "unset" the spine forbids. Now the switch always shows what will ACTUALLY
+      // apply on this page, and the tail says where that came from (or offers Reset).
+      var gateRes = resolveScoped(gateScopeChain(page), "gateInteractions", { at: "page" });
+      switchRow("Require interactions before Next", function () { return !!gateRes.value; },
+        function (v) { page.gateInteractions = !!v; mount(); setSelection("page", pi); }, inspector, false,
+        { inherit: { res: gateRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete page.gateInteractions; mount(); setSelection("page", pi);
+          } } });
+      inspector.appendChild(h("div", "insp-hint", "Hold this page's Next until its interactions are done (hotspots, cards, sequences, accordions, quizzes, videos, checkboxes). With nothing set here the page follows the course switch in Header & Footer → Progression."));
       } finally { inspector = _i; }
     });
 
@@ -6671,13 +6933,24 @@
       block.box = block.box || {};
       var box = block.box;
       function nodeOf() { return canvasNodeForBlock(block); }
-      function setBorder() { var n = nodeOf(); if (n) n.style.border = box.border ? ((box.borderWidth || 1) + "px solid " + (box.borderColor || "var(--color-hair)")) : ""; }
+      // uio-F03: the live preview follows the RESOLVED value (this block's own, else the
+      // course's captured type default, else the system default) — the same ladder the row
+      // shows and the same one render.js applies, so Reset previews correctly too.
+      function effBox(prop) { return resolveScoped(blockBoxChain(block), prop, { at: "block" }).value; }
+      function setBorder() { var n = nodeOf(); if (n) n.style.border = effBox("border") ? ((effBox("borderWidth") || 1) + "px solid " + (box.borderColor || "var(--color-hair)")) : ""; }
       // Condensed (James 2026-07-08): colours stacked, the two dimensional fields (border weight
       // + corner radius) paired two-up with glyphs — matching the case/align/spacing language.
       colorFieldFlat("Fill", box.fill, function (v) { var n = nodeOf(); if (v == null) { delete box.fill; if (n) n.style.background = ""; } else { box.fill = v; if (n) n.style.background = v; } renderModelView(); }, body);
       colorFieldFlat("Text", box.textColor, function (v) { var n = nodeOf(); if (v == null) { delete box.textColor; if (n) n.style.color = ""; } else { box.textColor = v; if (n) n.style.color = v; } renderModelView(); }, body);
-      switchRow("Stroke", function () { return !!box.border; }, function (v) { box.border = v; setBorder(); renderModelView(); renderInspector(); }, body);
-      if (box.border) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; setBorder(); renderModelView(); }, body);
+      // uio-F03: Stroke resolves down System -> Course type default -> Block, and the row
+      // carries the shared inheritance tail (named scope, or dot + Reset when set here).
+      var strokeRes = resolveScoped(blockBoxChain(block), "border", { at: "block" });
+      switchRow("Stroke", function () { return !!strokeRes.value; },
+        function (v) { box.border = v; setBorder(); renderModelView(); renderInspector(); }, body, false,
+        { inherit: { res: strokeRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete box.border; setBorder(); renderModelView(); renderInspector();
+          } } });
+      if (strokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; setBorder(); renderModelView(); }, body);
       // Stroke width + corner radius: canonical iconFields, live-applied, paired two-up.
       var weightField = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", title: "Stroke width",
         onchange: function (v) { pushHistory(); var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; setBorder(); renderModelView(); } }).wrap;
@@ -7633,20 +7906,61 @@
         trail.push({ label: last ? label : blockLabel(b), level: last ? null : { kind: "block", block: b } });
       });
     } else { trail.push({ label: label, level: null }); }
-    breadcrumb(inspector, trail, function (level) {
+    var bar = breadcrumb(inspector, trail, function (level) {
       if (!level) return;
       enteredBlock = null;
       if (level.kind === "page") { setActivePage(level.i); setSelection("page", level.i); }
       else if (level.kind === "block") { reselectBlockNode(level.block, "block"); }
     });
+    // uio-O-W1 (OVL-14): the second door onto the block's verbs. Right-click is the only way
+    // to reach Copy style / Save as component / Clear content, and nothing advertises it — so
+    // the inspector header carries a "..." overflow opening the IDENTICAL menu (one definition,
+    // blockMenuItems). Canonical ContextMenu surface, canonical more-horizontal glyph.
+    if (bar && block) {
+      var ov = h("button", "insp-crumbs__more"); ov.type = "button";
+      ov.innerHTML = Icon("more-horizontal");
+      ov.title = "Block actions";
+      ov.setAttribute("aria-label", "Block actions");
+      ov.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var r = ov.getBoundingClientRect();
+        showContextMenu(r.right, r.bottom + 4, blockMenuItems({ block: block }));
+      });
+      bar.appendChild(ov);
+    }
   }
   // SPEC-ui-kit (James, all-in-one): the universal chrome (Position/Layout/Appearance +
   // actions) is ALWAYS shown; double-clicking the block (or "Edit settings") reveals the
   // block-specific params BELOW it — one panel, not two views that replace.
+  // uio-F04 (EDIT-06): a source-linked block used to say only "linked" (a badge on the canvas). It now
+  // states the same facts every other stage states -- which source it came from, how many other
+  // documents use that passage, and whether the source has moved since this document last went out.
+  // Same resolver, same phrasing, same badge as the Publish row. uio-E-M03 adds the lock chip and the
+  // Edit-in-Source jump on top of this line.
+  function renderSourceLinkProvenance(block) {
+    if (!block || !block.sourceLink || !block.sourceLink.masterId) return null;
+    var masterId = block.sourceLink.masterId, markId = block.sourceLink.markId || null;
+    var comps = (typeof libComponents === "function" && libComponents()) || {};
+    var master = comps[masterId];
+    var line = h("div", "insp-provenance");
+    line.appendChild(h("span", "insp-provenance__label", "From source"));
+    line.appendChild(h("span", "insp-provenance__name", (master && master.name) || "an unknown source document"));
+    var used = f04WhereUsedFact(sourceLinkWhereUsed(masterId, markId));
+    var ub = f04Badge(used, "insp-provenance__fact"); if (ub) line.appendChild(ub);
+    var docFacts = f04DocFacts(activeDocId);
+    if (docFacts && docFacts.drift.state === "drifted" && docFacts.drift.ids.indexOf(masterId) !== -1) {
+      var db = f04Badge({ tone: "warning", label: "Source changed",
+        title: "This source document has changed since “" + docFacts.title + "” was last published." }, "insp-provenance__fact");
+      if (db) line.appendChild(db);
+    }
+    return line;
+  }
   function renderBlockTwoLevel(node, label, decl, renderContent, io, handlers) {
     var block = node.__block;
     var atContent = (enteredBlock === block);
     renderLayerCrumbs(block, label);
+    var prov = renderSourceLinkProvenance(block);
+    if (prov) inspector.appendChild(prov);
     // #160: depth-pure content level (panel-ia §1). A block opts in via decl.pureContent —
     // at CONTENT level the visible container chrome (Position / Layout / Appearance) is
     // suppressed so the panel shows ONLY the content's own canonical sections; the Actions
@@ -8061,7 +8375,15 @@
     var names = variantNames();
     if (!names.length) return;
     inspector.appendChild(sub("Variant versions"));
-    inspector.appendChild(h("div", "insp-hint", "Show a different image per product variant. The image above is the Flagship; a variant with its own version swaps to it at runtime and in the export (preview a variant from the top-bar switcher)."));
+    inspector.appendChild(h("div", "insp-hint", "Show a different image per product variant. The image above is the Flagship; a variant with its own version swaps to it at runtime and in the export."));
+    // uio-O-W1 (OVL-06): the hint used to end with an instruction ("preview a variant from the
+    // top-bar switcher"). Which variant is being previewed is owned by the top-bar switcher, so
+    // this row shows the live value and opens that switcher.
+    crossRefRow({
+      label: "Previewing", value: activeVariant || "Flagship", linkLabel: "Variant switcher",
+      title: "Open the top-bar variant switcher",
+      onNavigate: function () { if (variantSwitchEl) openVariantMenu(variantSwitchEl); }
+    });
     names.forEach(function (V) {
       var own = imgVariantSrc(block, V);
       var row = h("div", "insp-inline-row");
@@ -11083,12 +11405,16 @@
   // Labelled standalone switch row (for a boolean that is NOT a nest-enable).
   // A toggle sits in the shared settings row (uio-F01): label grows, the switch is the
   // control, right-aligned. Not a separate row anatomy.
-  function switchRow(labelText, get, set, target, noHistory) {
-    settingsRow({
+  // rowOpts (optional) forwards the shared row's slots — today `inherit` (uio-F03's scope
+  // tail) and `overflow` — so a toggle can carry them without a second row anatomy.
+  function switchRow(labelText, get, set, target, noHistory, rowOpts) {
+    var o = {
       label: labelText, variant: "insp-row--toggle", controlAlign: "end",
       host: target || inspector,
       control: switchEl(!!get(), function (v) { if (!noHistory) pushHistory(); set(v); })
-    });
+    };
+    if (rowOpts) { if (rowOpts.inherit) o.inherit = rowOpts.inherit; if (rowOpts.overflow) o.overflow = rowOpts.overflow; }
+    settingsRow(o);
   }
   // Visibility control = an EYE glyph (open / slashed). `visibleGet/Set` in terms of
   // VISIBLE (true = shown); the caller maps to whatever underlying flag it uses.
@@ -12613,6 +12939,7 @@
     });
     headEl.appendChild(titleInput);
     headEl.appendChild(renderSourceProvenanceLine(topic)); // provenance pinned under the header
+    headEl.appendChild(renderSourceFactsStrip(topic));     // uio-F04 (SRC-12): downstream consequence
 
     // Section-cells RETIRED (superseded by the continuous document): every topic now uses the
     // continuous node-model article (lock + toolbars + marks). A legacy section topic auto-converts
@@ -12667,6 +12994,32 @@
       el.classList.add("is-authored");
     }
     return el;
+  }
+  // uio-F04 (SRC-12): the Source stage never said what depends on the document being edited. This
+  // quiet strip sits under the title and states it: how far the Product's documents run on approved
+  // source, how many of them are behind THIS topic, where this topic is used, and how many packages
+  // the Product actually ships. Every number comes from f04ProductFacts -- the same resolver the
+  // Publish rows read -- so with one document in the Product the alignment badge here and the
+  // alignment badge on that document's Publish row are literally the same number.
+  function renderSourceFactsStrip(topic) {
+    var strip = h("div", "source-stage__facts");
+    var pid = activeSourceProductId();
+    var facts = f04ProductFacts(pid, topic && topic.id);
+    var docCount = facts.docIds.length;
+    var align = facts.alignment;
+    var alignEl = f04Badge(align, "source-stage__fact");
+    if (alignEl) {
+      // Scope stated in the tooltip AND beside the badge: this is a Product roll-up, not one
+      // document's score, and nobody should have to guess which.
+      alignEl.title = align.title + " Across " + docCount + " document" + (docCount === 1 ? "" : "s") + " in this Product.";
+      strip.appendChild(alignEl);
+      strip.appendChild(h("span", "source-stage__fact-scope", docCount + " document" + (docCount === 1 ? "" : "s")));
+    }
+    [facts.whereUsed ? f04Badge(facts.whereUsed, "source-stage__fact") : null,
+     f04Badge(facts.behind, "source-stage__fact"),
+     facts.outputs.count > docCount ? f04Badge(facts.outputs, "source-stage__fact") : null
+    ].forEach(function (b) { if (b) strip.appendChild(b); });
+    return strip;
   }
   function renderSourceInfoPanel(topic) {
     if (typeof document === "undefined") return;
@@ -15325,7 +15678,16 @@
       { key: "docType", title: "Document type", build: buildDocTypeBody },
       { key: "backup", title: "Backup", build: buildBackupBody },
       { key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody },
-      { key: "nav", title: "Learner nav", build: function (host) { var n = footerCourseNav(); if (n) courseNavControls(n, host); else host.appendChild(h("div", "insp-hint", "Add a footer nav bar in Header & Footer first, then style it here.")); } }, // #168: canonical footer nav (was first-found, which could drift to a stray)
+      // #168: canonical footer nav (was first-found, which could drift to a stray).
+      // uio-O-W1 (OVL-06): with no nav bar yet, the pane used to instruct the author to walk to
+      // Header & Footer. It now states the fact and links there.
+      { key: "nav", title: "Learner nav", build: function (host) {
+        var n = footerCourseNav();
+        if (n) { courseNavControls(n, host); return; }
+        crossRefRow({ label: "Learner nav bar", value: "Not added", linkLabel: "Header & Footer", host: host,
+          title: "Open Header & Footer, where the nav bar is added",
+          onNavigate: function () { openSettingsSection("project", "headerFooter"); } });
+      } },
       { key: "layout", title: "Page layout", build: buildLayoutBody },
       { key: "endScreen", title: "Completion screen", build: buildEndScreenBody },
       { key: "theme", title: "Theme", build: renderThemeControls },
@@ -15382,9 +15744,13 @@
       });
       renderSettingsBody();
     }
-    // Footer: single primary action (canonical VersoUI.Button).
+    // uio-O-W1 (OVL-09): the footer used to carry one accent "Done", which implied a commit
+    // that never happens — settings apply live and save themselves. The surface now STATES its
+    // contract (the spine's save contract: autosave + live-apply + Undo) and offers a plain
+    // Close. The accent is spent on the app's real primary action, never on dismissing a panel.
     var foot = h("div", "settings-foot");
-    foot.appendChild(window.VersoUI.Button({ variant: "primary", label: "Done", onClick: closeSettingsModal })); // spine-todo(F05): settings-in-modal + fake Done; the non-modal sheet retires this
+    foot.appendChild(h("div", "settings-foot__contract", "Changes apply live, saved automatically. Undo with " + MOD_KEY + "Z."));
+    foot.appendChild(window.VersoUI.Button({ variant: "secondary", label: "Close", onClick: closeSettingsModal }));
     box.appendChild(foot);
     overlay.appendChild(box);
     overlay.addEventListener("mousedown", function (e) { if (e.target === overlay) closeSettingsModal(); });
@@ -15398,6 +15764,15 @@
     settingsModal.selectTab(tab || settingsModal.tab || "project");
     settingsModal.overlay.hidden = false;
     document.addEventListener("keydown", settingsEsc);
+  }
+  // uio-O-W1 (OVL-06): the navigation target behind every settings cross-reference — open
+  // Settings on a NAMED section, so a link lands the author on the row instead of at the top.
+  function openSettingsSection(tab, sectionKey) {
+    ensureSettingsModal();
+    if (sectionKey) settingsModal.sectionKey[tab] = sectionKey;
+    openSettingsModal(tab);
+    var act = settingsModal.nav.querySelector(".settings-nav__item.is-active");
+    if (act && act.scrollIntoView) act.scrollIntoView({ block: "nearest" });
   }
   function closeSettingsModal() {
     if (!settingsModal) return;
@@ -15793,7 +16168,20 @@
       // The nav bar is a full-width footer element; per-child alignment is a no-op
       // for it. Its controls live in the top-level "Learner nav" panel (keeping the nav
       // nests at level 2 rather than burying them 3 deep under Footer > Placed items).
-      if (child.type === "courseNav") { host.appendChild(h("div", "insp-hint", "Learner nav bar — edit it in the Learner nav panel.")); return; }
+      // uio-O-W1 (OVL-06): this used to be a line of prose telling the author to go and find
+      // another panel. The nav bar is owned by the Learner nav section, so the row states its
+      // live value and links straight there.
+      if (child.type === "courseNav") {
+        var navSecs = (child.sections || []).length;
+        crossRefRow({
+          label: "Nav bar",
+          value: navSecs ? (navSecs + (navSecs === 1 ? " section" : " sections")) : "No sections yet",
+          linkLabel: "Learner nav", host: host,
+          title: "Open Settings on Learner nav, where this bar is styled",
+          onNavigate: function () { openSettingsSection("project", "nav"); }
+        });
+        return;
+      }
       segmentedIconLive("Align", [[Icon("align-left"), "start", "Start"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "end", "End"]],
         function (v) { return (child.align || "start") === v; },
         function (v) { if (v === "start") delete child.align; else child.align = v; reapplyHeaderFooter(); }, host);
@@ -15856,7 +16244,13 @@
       b.appendChild(h("div", "insp-hint", "On: each chapter must pass its knowledge check (native quiz) before the learner can advance to the next; play it in demo mode to test. Add the chapter's dot-point summary to the quiz's \"Chapter summary\" list (on the quiz completion panel) — it shows once the learner passes."));
       // §5: auto-gate ALL interactions — one course-level DEFAULT switch (per-page override
       // lives in the page inspector). Default off.
-      switchRow("Require all interactions before Next", function () { return !!doc.gateAllInteractions; }, function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); }, b);
+      // uio-F03: the SAME ladder, seen from the Course rung — one primitive, two surfaces.
+      var courseGateRes = resolveScoped(gateScopeChain(null), "gateInteractions", { at: "course" });
+      switchRow("Require all interactions before Next", function () { return !!courseGateRes.value; },
+        function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector(); }, b, false,
+        { inherit: { res: courseGateRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector();
+          } } });
       b.appendChild(h("div", "insp-hint", "Course default: on every page the learner must finish its interactions — pass quizzes, view all hotspots, watch videos, tick checkboxes, reveal all cards, step through sequences, open every accordion section — before Next enables. The gated Next greys out and shows a reminder. Override per page in the page's settings. Interactions we can't detect (embedded HTML interactions) are skipped, so a page can never trap the learner."));
       // Author-overridable reminder copy (optional; blank -> the default sentence).
       var gmRow = h("div", "insp-row");
@@ -16420,8 +16814,15 @@
         c.appendChild(sub(type));
         colorFieldFlat("Fill", box.fill, function (v) { if (v == null) delete box.fill; else box.fill = v; commit(); }, c, { noHistory: true });
         colorFieldFlat("Text", box.textColor, function (v) { if (v == null) delete box.textColor; else box.textColor = v; commit(); }, c, { noHistory: true });
-        switchRow("Stroke", function () { return !!box.border; }, function (v) { if (v) box.border = true; else delete box.border; commit(); refreshSettingsPanes(); }, c);
-        if (box.border) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; commit(); }, c, { noHistory: true });
+        // uio-F03: the SAME row, at the COURSE rung — the type default overriding the system
+        // default. Proves one primitive reads correctly at any rung, in any surface.
+        var typeStrokeRes = resolveScoped(scopeChain([scopeRung("system", BOX_SYSTEM_DEFAULTS), scopeRung("course", box)]), "border", { at: "course" });
+        switchRow("Stroke", function () { return !!typeStrokeRes.value; },
+          function (v) { if (v) box.border = true; else delete box.border; commit(); refreshSettingsPanes(); }, c, false,
+          { inherit: { res: typeStrokeRes, format: onOffLabel, onReset: function () {
+              pushHistory(); delete box.border; commit(); refreshSettingsPanes();
+            } } });
+        if (typeStrokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; commit(); }, c, { noHistory: true });
         var wf = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", noHistory: true, title: "Stroke width",
           onchange: function (v) { var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; commit(); } }).wrap;
         var rf = iconField(Icon("radius"), { value: box.radius, unit: "px", placeholder: "0", step: 1, min: 0, max: 80, datalist: "dl-gap", noHistory: true, title: "Corner radius",
@@ -16940,18 +17341,193 @@
     sync();
     return note;
   }
+  // ---- Scope + inheritance (uio-F03 — the UI spine's five-rung ladder) -------------
+  // System -> Product -> Course -> Page -> Block. One ladder, one primitive, one visual
+  // language (design-system/readme.md, "The UI spine" -> "Scope and inheritance").
+  //
+  // DELIBERATELY PROPERTY-AGNOSTIC — read this before extending it.
+  // resolveScoped() takes the property being resolved as an ARGUMENT and never inspects it.
+  // It only hands the key to each rung's own reader. There is NO list of known settings in
+  // here, and nothing assumes the resolved value is a style or theme value: it can be a
+  // boolean, a number, a colour string, a classification code, an approval state — the
+  // resolver does not care and must never learn to care.
+  //
+  // A SECOND AXIS rides this same primitive by supplying two things and nothing else:
+  //   1. a different property key, and
+  //   2. a scope chain whose rungs read that axis's own storage (the rung's `read` is where
+  //      per-rung name mapping lives, so rungs may store the same idea under different keys).
+  // That is how uio-F07's export-control classification inherits down this ladder without a
+  // second, parallel inheritance path. A parallel path is the failure this shape prevents.
+  //
+  // Two seams keep it general:
+  //   rung.read(prop) -> NOT_SET, or the value this rung sets. null / false / 0 / "" are
+  //      REAL values; only NOT_SET means "this rung says nothing about that property".
+  //   opts.choose(a, b) -> optional winner-picker for axes where the deepest rung does not
+  //      simply win. Default is last-wins (the deepest rung that sets it). F07's "a block may
+  //      only override to something MORE restrictive" is exactly a choose().
+  //
+  // PURE: no DOM, no closures over editor state. Fenced for the headless regression guard.
+  /* @f03-start */
+  var SCOPE_LADDER = ["system", "product", "course", "page", "block"];
+  var SCOPE_LABELS = { system: "System", product: "Product", course: "Course", page: "Page", block: "Block" };
+  var NOT_SET = { __f03NotSet: true };   // sentinel: this rung sets nothing for this property
+
+  function scopeLabel(scope) { return SCOPE_LABELS[scope] || String(scope == null ? "" : scope); }
+  function scopeDepth(scope) { var i = SCOPE_LADDER.indexOf(scope); return i === -1 ? SCOPE_LADDER.length : i; }
+
+  // A rung backed by a plain object bag: own-property presence means "this rung sets it".
+  // Any axis that does not store its value in a bag supplies its own read() instead.
+  function scopeRung(scope, bag, label) {
+    return {
+      scope: scope, label: label || scopeLabel(scope),
+      read: function (prop) {
+        return (bag && Object.prototype.hasOwnProperty.call(bag, prop)) ? bag[prop] : NOT_SET;
+      }
+    };
+  }
+  // Order any set of rungs System -> Block; absent rungs are simply left out.
+  function scopeChain(rungs) {
+    return (rungs || []).filter(Boolean).slice().sort(function (a, b) { return scopeDepth(a.scope) - scopeDepth(b.scope); });
+  }
+
+  // Resolve one property down a chain, as seen from one rung (opts.at, default the deepest).
+  // Rungs deeper than `at` are not in play — a page row must not read a block's override.
+  function resolveScoped(chain, prop, opts) {
+    opts = opts || {};
+    chain = chain || [];
+    var at = opts.at || (chain.length ? chain[chain.length - 1].scope : null);
+    var atDepth = scopeDepth(at);
+    var trace = [], winner = NOT_SET, winScope = null, ownValue = NOT_SET, parent = null;
+    for (var i = 0; i < chain.length; i++) {
+      var r = chain[i];
+      if (scopeDepth(r.scope) > atDepth) continue;
+      var lab = r.label || scopeLabel(r.scope);
+      var v = r.read(prop);
+      trace.push({ scope: r.scope, label: lab, set: v !== NOT_SET, value: v === NOT_SET ? undefined : v });
+      if (v === NOT_SET) continue;
+      if (r.scope === at) ownValue = v;
+      else parent = { scope: r.scope, label: lab, value: v };   // nearest ancestor that sets it
+      if (winner === NOT_SET || !opts.choose) { winner = v; winScope = r.scope; }
+      else { var w = opts.choose(winner, v); if (w === v) { winner = v; winScope = r.scope; } else winner = w; }
+    }
+    var found = winner !== NOT_SET;
+    var overridden = ownValue !== NOT_SET;
+    return {
+      prop: prop,
+      at: at, atLabel: scopeLabel(at),
+      found: found,
+      value: found ? winner : undefined,          // what will ACTUALLY apply — never "unset"
+      scope: winScope,                            // the rung the applied value came from
+      scopeLabel: winScope ? scopeLabel(winScope) : null,
+      overridden: overridden,                     // this rung sets its own value
+      inherited: found && !overridden,
+      from: parent,                               // what Reset restores, and from where
+      trace: trace
+    };
+  }
+
+  // What a Reset does, expressed as data (the mutation stays at the call site).
+  // null = nothing to reset. restores = null means no rung above sets it, so the value clears.
+  function resetPlan(chain, prop, at) {
+    var res = resolveScoped(chain, prop, { at: at });
+    if (!res.overridden) return null;
+    return { prop: prop, clearAt: res.at, restores: res.from || null };
+  }
+  // Reset's tooltip must state WHAT it restores and FROM WHICH scope (spine requirement).
+  function resetTooltip(res, format) {
+    if (!res || !res.overridden) return "";
+    var f = format || String;
+    return res.from
+      ? "Reset to the " + res.from.label + " value: " + f(res.from.value)
+      : "Reset — nothing is set above " + res.atLabel + ", so this clears";
+  }
+  // Inherited copy: never "unset" — always what will apply, and where it comes from.
+  function inheritedTooltip(res, format) {
+    if (!res || !res.found) return "";
+    var f = format || String;
+    return "Inherited from " + (res.scopeLabel || "") + ": " + f(res.value);
+  }
+  // Section roll-up: how many of a section's rows carry their own value at this rung.
+  function overrideCount(resolutions) {
+    var n = 0;
+    (resolutions || []).forEach(function (r) { if (r && r.overridden) n++; });
+    return n;
+  }
+  function rollupLabel(n) { return n > 0 ? n + " overridden" : ""; }
+  /* @f03-end */
+
+  // The active sectionGroup's tally of resolutions, so a section header can count its own
+  // overrides without every call site plumbing a count back up. A stack, so nesting is safe.
+  var _scopeTally = null;
+  function tallyResolution(res) { if (_scopeTally && res) _scopeTally.push(res); }
+
+  // Builds the shared row's inheritance TAIL (uio-F01 left this slot empty for F03).
+  // Two states, one language, every surface:
+  //   inherited  -> the source scope named in tertiary ink (the control shows the value)
+  //   overridden -> a 4px accent dot + an inline Reset naming what it restores
+  // Reset is a LIVE edit, not a commit control: it writes immediately and Undo takes it back
+  // (the spine's save contract — no Save/Apply/Cancel/Done).
+  //   spec: { res (a resolveScoped result), format (value -> string), onReset () }
+  function inheritanceTail(spec) {
+    var res = spec && spec.res;
+    if (!res || !res.found) return null;
+    tallyResolution(res);
+    var wrap = h("span", "insp-inherit");
+    if (res.overridden) {
+      wrap.appendChild(h("span", "insp-row__override-dot"));
+      var btn = h("button", "insp-row__reset", "Reset"); btn.type = "button";
+      btn.title = resetTooltip(res, spec.format);
+      btn.addEventListener("click", function (ev) { ev.stopPropagation(); if (spec.onReset) spec.onReset(res); });
+      wrap.appendChild(btn);
+    } else {
+      var s = h("span", "insp-row__scope", res.scopeLabel);
+      s.title = inheritedTooltip(res, spec.format);
+      wrap.appendChild(s);
+    }
+    return wrap;
+  }
+  function onOffLabel(v) { return v ? "on" : "off"; }
+
+  // ---- The two ladders wired today (uio-F03) --------------------------------------
+  // Each is only a CHAIN — a list of rungs and how each rung reads the property. The
+  // resolver above is shared and knows nothing about either of them. Adding an axis means
+  // adding a chain builder here, never touching resolveScoped.
+
+  // Block appearance: System defaults -> the course's captured per-type default
+  // (doc.theme.blockStyles[type]) -> this block's own box. This RECONCILES with the cascade
+  // render.js already applies (resolveBlockBox: type default is the baseline, block.box
+  // wins); the ladder surfaces that existing model rather than adding a second one.
+  var BOX_SYSTEM_DEFAULTS = { border: false, borderWidth: 1, radius: 0 };
+  function blockBoxChain(block) {
+    var bs = getBlockStyles();
+    return scopeChain([
+      scopeRung("system", BOX_SYSTEM_DEFAULTS),
+      scopeRung("course", (bs && block && bs[block.type]) || {}),
+      scopeRung("block", (block && block.box) || {})
+    ]);
+  }
+  // Interaction gate: System (off) -> Course (doc.gateAllInteractions) -> Page
+  // (page.gateInteractions). The two upper rungs store the same idea under different keys,
+  // which is why per-rung name mapping lives in read() — the same seam a second axis uses.
+  function gateScopeChain(page) {
+    return scopeChain([
+      { scope: "system", label: "System", read: function () { return false; } },
+      { scope: "course", label: "Course", read: function () { return doc.gateAllInteractions ? true : NOT_SET; } },
+      page ? scopeRung("page", page) : null
+    ]);
+  }
+
   // ---- The shared settings/overlay row (uio-F01 — the UI spine's row anatomy) ------
   // ONE row reused identically across sheet / popover / inspector: a fixed label column,
   // the control beside it, an optional inheritance tail, and a hover-only overflow. It is
   // width-independent by construction (label fixed in px, control flexes, tail/overflow
   // fixed), so it renders identically at any panel width. A Switch is a control in this
   // row, not a different row (the toggle variant grows the label and right-aligns the
-  // control). The tail/overflow are the SLOTS only — the scope + inheritance model
-  // (uio-F03) fills the inherited / overridden / reset logic; here they are collapsed by
-  // default and unused. See design-system/readme.md "The UI spine" and
-  // design-system/components/controls/FieldRow.*.
-  //   opts: { label, control, tail (node), overflow ({title,onClick}), host, variant,
-  //           controlAlign ("end") }
+  // control). uio-F03 fills the inheritance tail: pass `inherit` and the row renders the
+  // inherited / overridden / Reset language from a resolveScoped result. See
+  // design-system/readme.md "The UI spine" and design-system/components/controls/FieldRow.*.
+  //   opts: { label, control, tail (node), inherit ({res,format,onReset}),
+  //           overflow ({title,onClick}), host, variant, controlAlign ("end") }
   function settingsRow(opts) {
     opts = opts || {};
     var row = h("div", "insp-row" + (opts.variant ? " " + opts.variant : ""));
@@ -16966,9 +17542,12 @@
       if (opts.controlAlign === "end" && opts.control.classList) opts.control.classList.add("insp-row__control--end");
       row.appendChild(opts.control);
     }
-    if (opts.tail) {
+    // uio-F03 fills the tail slot: pass `inherit` ({res, format, onReset}) and the row shows
+    // the scope/inheritance language; `tail` still takes a ready-made node.
+    var tailNode = opts.tail || (opts.inherit ? inheritanceTail(opts.inherit) : null);
+    if (tailNode) {
       var tail = h("div", "insp-row__tail");
-      tail.appendChild(opts.tail);
+      tail.appendChild(tailNode);
       row.appendChild(tail);
     }
     if (opts.overflow) {
@@ -16982,6 +17561,26 @@
     return { row: row, label: label };
   }
   window.__settingsRow = settingsRow; // headless test hook
+
+  // uio-O-W1 (OVL-06): a setting that is READ-ONLY here because another surface owns it.
+  // The old shape was dead prose telling the author to walk somewhere ("edit it in the
+  // Learner nav panel"). This is the one replacement: the shared row (uio-F01) showing the
+  // LIVE value plus a link that navigates there — never an instruction. Every cross-reference
+  // in the chrome uses this, so one row anatomy covers them all.
+  // opts: { label, value, linkLabel, onNavigate, host, title }.
+  function crossRefRow(opts) {
+    opts = opts || {};
+    var wrap = h("div", "insp-xref");
+    if (opts.value != null && opts.value !== "") wrap.appendChild(h("span", "insp-xref__value", String(opts.value)));
+    var link = h("button", "insp-xref__link"); link.type = "button";
+    link.appendChild(h("span", "insp-xref__link-label", opts.linkLabel || "Open"));
+    var chev = h("span", "insp-xref__chev"); chev.innerHTML = Icon("chevron-right"); link.appendChild(chev);
+    link.title = opts.title || ("Go to " + (opts.linkLabel || "the panel that owns this"));
+    link.addEventListener("click", function () { if (opts.onNavigate) opts.onNavigate(); });
+    wrap.appendChild(link);
+    return settingsRow({ label: opts.label, host: opts.host || inspector, control: wrap, controlAlign: "end" });
+  }
+  window.__crossRefRow = crossRefRow; // headless test hook
 
   function fieldRow(label, value, onchange, placeholder, step, min, max, datalistId) {
     var i = h("input", "prop-text"); i.type = "text"; i.spellcheck = false; i.placeholder = placeholder || "auto"; i.value = value == null ? "" : value;
@@ -17738,6 +18337,11 @@
     function apply() { window.applyTextStyle(node, s); renderModelView(); }
 
     var head = h("div", "prop-component"); head.appendChild(h("span", null, "Text")); inspector.appendChild(head);
+    // uio-F04 (EDIT-06): editing the text of a source-linked block is exactly when its provenance
+    // matters, so the same line the block inspector carries appears here too. Same call, so the two
+    // panels can never say different things about the same block.
+    var fieldProv = renderSourceLinkProvenance(obj);
+    if (fieldProv) inspector.appendChild(fieldProv);
 
     // Panel System v2 (D3): the flagship reference panel adopts the sectionGroup taxonomy —
     // a "Type" section (style picker + typeCluster + inline B/I/U/link) and a "Content"
@@ -25318,6 +25922,86 @@
     }
     return null;
   }
+  // uio-O-W1 (OVL-14): ONE block verb list, two doors. Copy style, Save as component and
+  // Clear content used to be reachable only by right-clicking a canvas object — a gesture
+  // nothing in the UI advertises — so the inspector and the menu describing the same block
+  // shared almost no vocabulary. This is the single definition of that list. The canvas
+  // right-click and the inspector header's "..." overflow both render it, so the two doors
+  // cannot drift apart, and its foot names the way back into the inspector.
+  // target = { block, instance? } — the shape findTargetFromEvent returns.
+  function blockMenuItems(target) {
+    var items = [];
+    var block = target && target.block;
+    var host = (target && target.instance) || block;
+    var vs = variantNames();
+    if (block) {
+      items.push({ label: "Duplicate", onClick: function () { duplicateBlock(block); } });
+      items.push({ label: "Copy", onClick: function () { copySelection(); } });
+      if (clipboard.length) {
+        items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
+        items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
+      }
+      items.push({ label: "Copy style", onClick: function () { copyBlockStyle(block); } });
+      if (styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(block); } });
+      items.push({ label: "Move up", onClick: function () { moveBlock(block, -1); } });
+      items.push({ label: "Move down", onClick: function () { moveBlock(block, 1); } });
+      if (block.type === "group") items.push({ label: "Ungroup", onClick: function () { ungroupBlock(block); } });
+      items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(block); } });
+      // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
+      items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([block]); } });
+      if (canSplitAtBlock(block)) {
+        items.push({ sep: true });
+        items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(block); } });
+      }
+      items.push({ sep: true });
+      items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(block); } });
+    }
+    items.push({ sep: true });
+    items.push({ head: vs.length ? "Variants" : "Variants (none yet)" });
+    // Variant TEXT is edited in the Design panel (the block is selected, so the panel already
+    // shows its "Variant text" fields). The menu keeps only visibility + variant creation.
+    vs.forEach(function (v) {
+      items.push({ label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } });
+    });
+    // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
+    // Only when the course has versions; while editing a version the toggle for THAT version
+    // sits first for quick reach (hide this block from the release you're authoring).
+    var versAll = versionNames();
+    if (versAll.length) {
+      items.push({ head: "Software version" });
+      var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
+      ordered.forEach(function (v) {
+        items.push({ label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } });
+      });
+    }
+    // #148: image / hotspot base image — a direct "Upload image for <variant>" that
+    // opens the file picker straight away and writes that variant's version (overrides[v].src).
+    if (block && IMG_VERSION_TYPES[block.type] && vs.length) {
+      items.push({ head: "Variant image versions" });
+      vs.forEach(function (v) {
+        var own = imgVariantSrc(block, v);
+        items.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
+          uploadImageVariant(block, v, function () { reapplyBlock(block); reselectBlockNode(block, "block"); });
+        } });
+        if (own) items.push({ label: "   Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(block, v, null); reapplyBlock(block); reselectBlockNode(block, "block"); } });
+      });
+    }
+    items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
+    if (block) {
+      items.push({ sep: true });
+      items.push({ label: "Block settings", hint: "Inspector", onClick: function () { revealBlockSettings(block); } });
+    }
+    return items;
+  }
+  // The route the menu's foot names: select the block and open its own settings in the
+  // inspector, so the menu always hands off to the panel rather than dead-ending.
+  function revealBlockSettings(block) {
+    if (!block) return;
+    enteredBlock = block;
+    reselectBlockNode(block, "block");
+    renderInspector();
+    if (inspector && inspector.scrollTo) inspector.scrollTo({ top: 0 });
+  }
   function wireContextMenu() {
     canvas.addEventListener("contextmenu", function (e) {
       e.preventDefault(); // always replace the native menu on the canvas
@@ -25354,63 +26038,10 @@
       }
       if (target) {
         setSelection(target.type === "instance" ? "instance" : "block", target.node);
-        if (target.type === "block") {
-          items.push({ label: "Duplicate", onClick: function () { duplicateBlock(target.block); } });
-          items.push({ label: "Copy", onClick: function () { copySelection(); } });
-          if (clipboard.length) {
-            items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
-            items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
-          }
-          items.push({ label: "Copy style", onClick: function () { copyBlockStyle(target.block); } });
-          if (styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(target.block); } });
-          items.push({ label: "Move up", onClick: function () { moveBlock(target.block, -1); } });
-          items.push({ label: "Move down", onClick: function () { moveBlock(target.block, 1); } });
-          if (target.block.type === "group") {
-            items.push({ label: "Ungroup", onClick: function () { ungroupBlock(target.block); } });
-          }
-          items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(target.block); } });
-          // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
-          items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([target.block]); } });
-          if (canSplitAtBlock(target.block)) {
-            items.push({ sep: true });
-            items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(target.block); } });
-          }
-          items.push({ sep: true });
-          items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(target.block); } });
-        }
-        items.push({ sep: true });
-        items.push({ head: vs.length ? "Variants" : "Variants (none yet)" });
-        var host = target.instance || target.block;
-        // Variant TEXT is edited in the Design panel (this block is now selected,
-        // so the panel already shows its "Variant text" fields). The menu keeps
-        // only visibility + variant creation.
-        vs.forEach(function (v) {
-          items.push({ label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } });
-        });
-        // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
-        // Only when the course has versions; while editing a version the toggle for THAT version
-        // sits first for quick reach (hide this block from the release you're authoring).
-        var versAll = versionNames();
-        if (versAll.length) {
-          items.push({ head: "Software version" });
-          var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
-          ordered.forEach(function (v) {
-            items.push({ label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } });
-          });
-        }
-        // #148: image / hotspot base image — a direct "Upload image for <variant>" that
-        // opens the file picker straight away and writes that variant's version (overrides[v].src).
-        if (target.block && IMG_VERSION_TYPES[target.block.type] && vs.length) {
-          items.push({ head: "Variant image versions" });
-          vs.forEach(function (v) {
-            var own = imgVariantSrc(target.block, v);
-            items.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
-              uploadImageVariant(target.block, v, function () { reapplyBlock(target.block); reselectBlockNode(target.block, "block"); });
-            } });
-            if (own) items.push({ label: "   Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(target.block, v, null); reapplyBlock(target.block); reselectBlockNode(target.block, "block"); } });
-          });
-        }
-        items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
+        // uio-O-W1 (OVL-14): one shared definition, rendered identically by the inspector's
+        // "..." overflow. An instance target keeps its variant/version section but not the
+        // block verbs (matching the previous behaviour).
+        items = items.concat(blockMenuItems(target.type === "block" ? target : { instance: target.instance }));
       } else {
         if (clipboard.length) { items.push({ label: "Paste", onClick: function () { pasteClipboard(); } }); items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } }); items.push({ sep: true }); }
         items.push({ head: "Variants" });
