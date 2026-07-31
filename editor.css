@@ -2692,44 +2692,55 @@ details[open] .disc__caret {
 }
 /* the settings modal toggles via [hidden]; .modal-overlay forces display:flex, so override */
 .modal-overlay[hidden] { display: none; }
-/* ⚙ settings modal: a fixed-size dialog (never resizes on tab/section switch) with a
-   System/Project tab bar, a left section rail, and a scrolling content pane.
-   Higher specificity (.modal-box.modal-box--settings) so it beats the base .modal-box width. */
-.modal-box.modal-box--settings {
-  width: 940px; max-width: calc(100vw - 64px);
-  height: min(88vh, 800px);   /* fixed height -> switching tabs/sections never resizes */
-  padding: 0;                 /* header / body / footer own their padding (per DS settings spec) */
-  background: var(--surface-raised);
-  border: none;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-modal);
+/* ⚙ uio-F05 — the settings SHEET (design-system/components/overlays/Sheet).
+   Was a 940px centred dialog on a scrim. It is now right-docked and full-height with NO scrim,
+   so the canvas stays live and editable beside it: the canvas is squeezed, never covered.
+   It is a grid child of .workspace in the SAME column as the inspector, which it supersedes —
+   two right-docked surfaces would state the same tree twice and squeeze the canvas twice. */
+.settings-sheet { grid-row: 1; min-height: 0; min-width: 0; display: flex; }
+.settings-sheet[hidden] { display: none; }
+.settings-sheet__box {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column;
+  background: var(--surface-panel);
+  border-left: 1px solid var(--border-strong);
   overflow: hidden;           /* the content pane scrolls, not the whole box */
 }
-/* header = title + subtitle + System/Project tabs */
-.settings-head { flex: 0 0 auto; padding: 20px 24px 0; }
-.settings-title { font: var(--type-modal-title); color: var(--text-primary); }
+/* the sheet owns the right dock while it is open */
+.workspace > .settings-sheet { grid-column: 4; }
+.workspace.has-sheet { --right-w: var(--panel-sheet-width, 400px); }
+.workspace.has-sheet > .panel--right { display: none; }
+/* Source/Publish span panel..inspector; hand the last column back so the sheet has somewhere
+   to sit and those stages are squeezed exactly like the Edit canvas. */
+.workspace.has-sheet > .source-stage,
+.workspace.has-sheet > .publish-stage { grid-column: 2 / 4; }
+/* header = title + subtitle + System/Project tabs. Density is the dock's, not a dialog's. */
+.settings-head { flex: 0 0 auto; padding: 12px 12px 0; }
+/* uio-F05: a docked surface takes the PANEL title token, not the modal one it used as a dialog. */
+.settings-title { font: var(--type-panel-title); color: var(--text-primary); }
 .settings-sub { font: var(--type-label); color: var(--text-secondary); margin-top: 4px; }
-.settings-head .vds-tabs { margin-top: 12px; }
-/* body = left rail + content, filling the fixed height */
-.settings-body { display: flex; flex: 1 1 auto; min-height: 0; }
-.settings-nav {
-  flex: 0 0 220px; display: flex; flex-direction: column; gap: 2px;
-  overflow-y: auto; min-height: 0; padding: 16px 12px; border-right: 1px solid var(--border-subtle);
+.settings-head .vds-tabs { margin-top: 10px; }
+/* uio-F05: the 220px nav rail is GONE — a nav rail inside a dock is a second navigation system
+   competing with the section headers and with the one ⌘K index. The body is now ONE scroll of
+   canonical collapsible sections, so it reads exactly like the inspector beside it. */
+.settings-content {
+  flex: 1 1 auto; overflow-y: auto; min-height: 0; min-width: 0;
+  padding: var(--section-pad, 8px) 0;
 }
-.settings-nav__item {
-  text-align: left; font: var(--type-label); font-size: 13px; color: var(--text-secondary);
-  background: transparent; border: none; border-radius: var(--radius-sm); padding: 8px 12px; cursor: pointer;
-}
-.settings-nav__item:hover { background: var(--surface-hover); color: var(--text-primary); }
-.settings-nav__item.is-active { background: var(--surface-selected); color: var(--text-primary); font: var(--type-label-strong); font-size: 13px; }
-.settings-content { flex: 1 1 auto; overflow-y: auto; min-height: 0; min-width: 0; padding: 18px 28px; }
-/* the content pane shows ONE section at a time, so its inner disclosure is always open */
-.settings-content .insp-disclosure { border: none; }
 /* footer = single primary action, hairline-topped */
 /* uio-O-W1 (OVL-09): the footer states the save contract on the left and closes on the right.
    No commit button — settings apply live (design-system/readme.md, "Save contract"). */
-.settings-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; border-top: 1px solid var(--border-subtle); }
+.settings-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--border-subtle); }
 .settings-foot__contract { font-size: var(--text-xs); line-height: 1.4; color: var(--text-tertiary); }
+/* uio-F05: the escalation route out of a narrow surface into the sheet. A quiet link, never a
+   button — it navigates, it does not commit anything. */
+.chrome-pop__escalate {
+  display: block; width: 100%; margin-top: 6px; padding: 6px 8px;
+  text-align: left; font-size: var(--text-xs); color: var(--accent);
+  background: transparent; border: none; border-top: 1px solid var(--border-subtle);
+  border-radius: 0; cursor: pointer;
+}
+.chrome-pop__escalate:hover { background: var(--surface-hover); }
 .modal-box {
   background: var(--surface-panel);
   border: 1px solid var(--border-strong);

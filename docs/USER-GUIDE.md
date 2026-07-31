@@ -163,10 +163,19 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   Higher up, the panel's own **⋯** (in the **Design / Interact** tab strip) holds **Reorder inspector
   sections…**, which turns on a drag mode to rearrange the section order across every block's
   inspector — a preference saved for you, not the course; a banner names the scope while it's on.
-- **Settings.** The Settings panel has no Save or Done button. Every change applies to the course
-  as you make it and is saved for you; **⌘Z** undoes the last one. **Close** (or **Esc**, or a click
-  outside) puts the panel away. Where a setting is really owned by another panel, its row shows the
-  live value and a link straight to that panel rather than telling you to go and find it.
+- **Settings.** Settings opens as a panel down the right-hand side, in the place the inspector
+  normally sits. It does not cover the course: the canvas simply narrows, and you can keep clicking,
+  scrolling and editing while Settings is open — useful when you want to watch a change land. The
+  settings are one scrolling list of sections, each folded shut; open the ones you need and Verso
+  remembers which you left open. There is no Save or Done button. Every change applies to the
+  course as you make it and is saved for you; **⌘Z** undoes the last one. **Close** or **Esc**
+  puts the panel away and brings the inspector back. Clicking the canvas does not close it, so a
+  stray click can't lose your place. Where a setting is really owned by another panel, its row
+  shows the live value and a link straight to that panel rather than telling you to go and find it.
+- **Esc closes one thing at a time.** If you open a menu or a small pop-up on top of Settings,
+  **Esc** closes just that, and Settings stays where it was. Press it again to close Settings.
+  Small pop-ups that only hold a setting or two carry a link through to the full Settings panel,
+  so you are never left guessing where the rest of them live.
 
 ---
 

@@ -703,20 +703,39 @@
   // that already owns the open popover closes it (toggle); Esc closes it as the topmost layer.
   var _chromePopEl = null, _chromePopAnchor = null;
   function closeChromePop() {
-    if (_chromePopEl && _chromePopEl.parentNode) _chromePopEl.parentNode.removeChild(_chromePopEl);
+    if (!_chromePopEl) return;
+    if (_chromePopEl.parentNode) _chromePopEl.parentNode.removeChild(_chromePopEl);
     _chromePopEl = null; _chromePopAnchor = null;
     document.removeEventListener("mousedown", _chromePopOutside, true);
-    document.removeEventListener("keydown", _chromePopEsc, true);
+    // uio-F05: Escape is the layer stack's, not this popover's. Popping restores focus to the
+    // anchor, so dismissing a popover leaves the keyboard where it started.
+    popLayer("chrome-pop");
   }
   function _chromePopOutside(e) {
     if (_chromePopEl && !_chromePopEl.contains(e.target) && !(_chromePopAnchor && _chromePopAnchor.contains(e.target)) && e.target !== _chromePopAnchor) closeChromePop();
   }
-  function _chromePopEsc(e) { if (e.key === "Escape") { e.stopPropagation(); closeChromePop(); } }
+  // uio-F05: the ONE escalation control. A narrow surface (popover, menu) states the few things
+  // it can hold, then routes into the sheet on a named section — never "go and look in Settings".
+  // { label, tab, section }. Used by openChromePop(opts.escalate) and by the context menu.
+  function escalateLink(spec) {
+    var a = h("button", "chrome-pop__escalate", spec.label || "All settings");
+    a.type = "button";
+    a.title = "Open the settings sheet" + (spec.label ? "" : "") ;
+    a.addEventListener("click", function () {
+      closeChromePop();
+      openSettingsSection(spec.tab || "project", spec.section || null);
+    });
+    return a;
+  }
   function openChromePop(anchor, build, opts) {
     if (_chromePopAnchor === anchor) { closeChromePop(); return null; } // toggle off
     closeChromePop();
     var pop = h("div", "chrome-pop" + (opts && opts.cls ? " " + opts.cls : ""));
     build(pop);
+    // uio-F05: a popover holds a few rows and then has to hand over. The spine requires every
+    // narrow surface to carry a VISIBLE route into the sheet, so the author is never stuck in a
+    // dead end guessing where the rest of the settings live.
+    if (opts && opts.escalate) pop.appendChild(escalateLink(opts.escalate));
     document.body.appendChild(pop);
     var r = anchor.getBoundingClientRect();
     pop.style.top = (r.bottom + 6) + "px";
@@ -726,9 +745,9 @@
     var ph = pop.offsetHeight || 0;
     if (r.bottom + 6 + ph > window.innerHeight - 8) pop.style.top = Math.max(8, r.top - 6 - ph) + "px";
     _chromePopEl = pop; _chromePopAnchor = anchor;
+    pushLayer("chrome-pop", closeChromePop);
     setTimeout(function () {
       document.addEventListener("mousedown", _chromePopOutside, true);
-      document.addEventListener("keydown", _chromePopEsc, true);
     }, 0);
     return pop;
   }
@@ -752,7 +771,7 @@
       if (stFacts) row("Source alignment", stFacts.alignment.label);
       if (saveFailed) pop.appendChild(h("div", "chrome-pop__note chrome-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
       else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "chrome-pop__note", adv.msg)); }
-    }, { align: "right" });
+    }, { align: "right", escalate: { label: "Backup settings", tab: "project", section: "backup" } });
   }
   function mountStorageDot() {
     var dot = document.getElementById("storage-dot"); if (!dot) return;
@@ -5944,6 +5963,11 @@
     // types open COLLAPSED on first paint, revealed on intent. Core types (Type…Behaviour) stay
     // open. The author's explicit open/close still wins (recorded for these types, see setCollapsed).
     var DEFAULT_COLLAPSED = { "Light/Dark": true, "Advanced": true };
+    // uio-F05: the settings sheet is ONE scroll of sections (it lost its nav rail), so its
+    // sections open COLLAPSED — a 15-section wall is the "pre-expanded wall" the spine forbids.
+    // Collapsed headers ARE the browse affordance; openSettingsSection expands the one you asked
+    // for. Prefix rule rather than 15 map entries, so a new settings section inherits it.
+    function defaultCollapsed(type) { return !!DEFAULT_COLLAPSED[type] || /^settings:/.test(type); }
     function load() {
       var st = { order: TAXONOMY.slice(), collapsed: {} };
       try {
@@ -5972,13 +5996,13 @@
     function isCollapsed(type) {
       var c = load().collapsed;
       if (Object.prototype.hasOwnProperty.call(c, type)) return !!c[type];
-      return !!DEFAULT_COLLAPSED[type];
+      return defaultCollapsed(type);
     }
     // For a default-collapsed type, record BOTH open + closed explicitly so an author's "open"
     // sticks (deleting would fall back to the collapsed default). Others: store true, clear on open.
     function setCollapsed(type, v) {
       var st = load();
-      if (DEFAULT_COLLAPSED[type]) st.collapsed[type] = !!v;
+      if (defaultCollapsed(type)) st.collapsed[type] = !!v;
       else if (v) st.collapsed[type] = true; else delete st.collapsed[type];
       save(st);
     }
@@ -15705,12 +15729,58 @@
     endSections(inspector);
   }
 
-  // ---- ⚙ Settings modal (System / Project tabs) ----------------------------
-  // The doc-settings panels are mounted here by redirecting `inspector` at a tab pane (the
-  // same trick the sectioned inspectors use). SYSTEM = global / cross-document (canvas +
-  // shared component library); PROJECT = this document (header/footer, nav, layout, theme,
-  // fonts, glossary, motion, components, review).
-  var settingsModal = null; // { overlay, sysPane, projPane, active, tab }
+  // ---- uio-F05: the overlay LAYER STACK (the spine's Esc contract) ----------
+  // Every dismissible surface pushes itself here as it opens and pops as it closes. ONE global
+  // keydown owns Escape, and it closes the TOPMOST layer only, last-in-first-out — so a confirm
+  // raised over the settings sheet closes the confirm and leaves the sheet standing. Before
+  // this, each surface listened for Escape on its own, so one keypress could close two things
+  // (or the wrong one). Focus returns to whatever opened the layer, per the spine's keyboard
+  // contract. `window.__overlayLayers` is the test hook.
+  /* @f05-start */
+  var overlayLayers = []; // [{ name, close, returnFocus }] — topmost is last
+  function pushLayer(name, close) {
+    var active = document.activeElement;
+    var layer = { name: name, close: close, returnFocus: active && active.focus ? active : null };
+    overlayLayers.push(layer);
+    if (overlayLayers.length === 1) document.addEventListener("keydown", overlayEsc, true);
+    return layer;
+  }
+  function popLayer(name) {
+    // Remove the TOPMOST layer with this name (a surface may legitimately be stacked twice).
+    for (var i = overlayLayers.length - 1; i >= 0; i--) {
+      if (overlayLayers[i].name !== name) continue;
+      var layer = overlayLayers.splice(i, 1)[0];
+      if (!overlayLayers.length) document.removeEventListener("keydown", overlayEsc, true);
+      if (layer.returnFocus && document.contains(layer.returnFocus)) {
+        try { layer.returnFocus.focus(); } catch (e) {}
+      }
+      return layer;
+    }
+    return null;
+  }
+  function topLayer() { return overlayLayers.length ? overlayLayers[overlayLayers.length - 1] : null; }
+  function overlayEsc(e) {
+    if (e.key !== "Escape") return;
+    var top = topLayer();
+    if (!top) return;
+    e.preventDefault();
+    e.stopPropagation(); // the topmost layer answers this keypress, and only it
+    try { top.close(); } catch (err) {}
+  }
+  /* @f05-end */
+  window.__overlayLayers = {
+    push: pushLayer, pop: popLayer, top: topLayer,
+    names: function () { return overlayLayers.map(function (l) { return l.name; }); }
+  };
+
+  // ---- ⚙ Settings sheet (System / Project tabs) ----------------------------
+  // uio-F05: this was a centred modal on a scrim. It is now the spine's SHEET — right-docked,
+  // full-height, NO scrim — so the canvas stays live and editable beside it (squeezed, never
+  // covered). The doc-settings panels are mounted by redirecting `inspector` at the content
+  // pane (the same trick the sectioned inspectors use). SYSTEM = global / cross-document
+  // (canvas + shared component library); PROJECT = this document (header/footer, nav, layout,
+  // theme, fonts, glossary, motion, components, review).
+  var settingsModal = null; // { host, box, content, active, tab }
   // Section registry per tab. Each section's `build(host)` fills the CONTENT pane — the same
   // body-builders the old sidebar used, so no logic is duplicated; they just render into the
   // dialog's right pane one-at-a-time instead of a stacked wall of disclosures.
@@ -15799,29 +15869,53 @@
       { key: "pipeline", title: "Review (Viewer)", build: buildPipelineBody }
     ];
   }
-  // Render the left rail (section list for the active tab) + the active section's body into the
-  // content pane. Called on open, tab switch, section click, and after in-modal re-renders.
+  // uio-F05: render EVERY section of the active tab into the content pane as one scroll.
+  // This used to be a 220px nav rail plus one section at a time. Both are gone: a nav rail
+  // inside a dock is a second navigation system competing with the section headers and with
+  // the one ⌘K index, and one-section-at-a-time is the same divergence uio-E-C02 removes from
+  // the inspector. Sections are the canonical sectionGroup -- collapsible, with the F03
+  // "N overridden" roll-up -- and open collapsed, so the sheet reads as a browsable list.
+  // The section builders are untouched: `inspector` is still rebound at the host they append
+  // into, exactly as before, so all 15 keep working.
   function renderSettingsBody() {
     if (!settingsModal) return;
     var tab = settingsModal.tab, sections = getSettingsSections(tab);
     var activeKey = settingsModal.sectionKey[tab];
     if (!sections.some(function (s) { return s.key === activeKey; })) activeKey = sections[0].key;
     settingsModal.sectionKey[tab] = activeKey;
-    settingsModal.nav.innerHTML = "";
-    sections.forEach(function (s) {
-      var b = h("button", "settings-nav__item" + (s.key === activeKey ? " is-active" : ""), s.title); b.type = "button";
-      b.addEventListener("click", function () { settingsModal.sectionKey[tab] = s.key; renderSettingsBody(); });
-      settingsModal.nav.appendChild(b);
-    });
-    var section = sections.filter(function (s) { return s.key === activeKey; })[0];
     settingsModal.content.innerHTML = "";
-    var _ins = inspector; inspector = settingsModal.content;
-    try { section.build(settingsModal.content); } finally { inspector = _ins; }
+    var _ins = inspector;
+    try {
+      sections.forEach(function (s) {
+        var sec = sectionGroup("settings:" + s.key, s.title, function (body) {
+          inspector = body;
+          try { s.build(body); } finally { inspector = _ins; }
+        });
+        sec.setAttribute("data-settings-section", s.key);
+        settingsModal.content.appendChild(sec);
+      });
+    } finally { inspector = _ins; }
+  }
+  // Open one section and bring it into view — the landing move for every cross-reference link
+  // (uio-O-W1/OVL-06) now that there is no nav rail to highlight.
+  function revealSettingsSection(key) {
+    if (!settingsModal) return;
+    var sec = settingsModal.content.querySelector('[data-settings-section="' + key + '"]');
+    if (!sec) return;
+    if (sec.classList.contains("is-collapsed")) {
+      var head = sec.querySelector(".insp-section__head");
+      if (head) head.click(); // reuse the header's own toggle, so the stored state follows
+    }
+    if (sec.scrollIntoView) sec.scrollIntoView({ block: "start" });
   }
   function ensureSettingsModal() {
     if (settingsModal) return settingsModal;
-    var overlay = h("div", "modal-overlay"); overlay.id = "settings-modal"; overlay.hidden = true;
-    var box = h("div", "modal-box modal-box--settings");
+    // uio-F05: the sheet is a grid child of .workspace pinned to the SAME column the inspector
+    // uses. Opening it widens that column to --panel-sheet-width and hides the inspector, so the
+    // canvas is squeezed exactly ONCE and stays live. No overlay element, because there is no
+    // scrim: the whole point of the sheet is that the author can keep editing beside it.
+    var host = h("div", "settings-sheet"); host.id = "settings-modal"; host.hidden = true;
+    var box = h("div", "settings-sheet__box");
     // Header: title + subtitle + System/Project tabs (canonical VersoUI.Tabs).
     var head = h("div", "settings-head");
     head.appendChild(h("div", "settings-title", "Settings"));
@@ -15832,11 +15926,9 @@
       onChange: function (v) { selectTab(v); }
     });
     head.appendChild(tabs); box.appendChild(head);
-    // Body: left section rail + one-section-at-a-time content pane.
-    var bodyRow = h("div", "settings-body");
-    var nav = h("div", "settings-nav");
+    // Body: ONE scroll of collapsible sections (the nav rail is gone — see renderSettingsBody).
     var content = h("div", "settings-content");
-    bodyRow.appendChild(nav); bodyRow.appendChild(content); box.appendChild(bodyRow);
+    box.appendChild(content);
     function selectTab(name) {
       settingsModal.tab = name;
       // Keep the canonical Tabs strip in sync on programmatic opens (open("system")/open("project")).
@@ -15853,18 +15945,24 @@
     foot.appendChild(h("div", "settings-foot__contract", "Changes apply live, saved automatically. Undo with " + MOD_KEY + "Z."));
     foot.appendChild(window.VersoUI.Button({ variant: "secondary", label: "Close", onClick: closeSettingsModal }));
     box.appendChild(foot);
-    overlay.appendChild(box);
-    overlay.addEventListener("mousedown", function (e) { if (e.target === overlay) closeSettingsModal(); });
-    document.body.appendChild(overlay);
-    settingsModal = { overlay: overlay, box: box, nav: nav, content: content, selectTab: selectTab, active: false, tab: "project", sectionKey: { system: "canvas", project: "headerFooter" } };
+    host.appendChild(box);
+    // uio-F05: NO scrim click-out. There is no scrim, and dismissing on a canvas click would
+    // make the canvas unusable while the sheet is open — which is the one thing the sheet exists
+    // to allow. Close and Esc are the only dismissals.
+    var ws = document.querySelector(".workspace");
+    (ws || document.body).appendChild(host);
+    settingsModal = { host: host, overlay: host, box: box, content: content, selectTab: selectTab, active: false, tab: "project", sectionKey: { system: "canvas", project: "headerFooter" } };
     return settingsModal;
   }
   function openSettingsModal(tab) {
     ensureSettingsModal();
+    if (settingsModal.active) { settingsModal.selectTab(tab || settingsModal.tab || "project"); return; }
     settingsModal.active = true;
     settingsModal.selectTab(tab || settingsModal.tab || "project");
-    settingsModal.overlay.hidden = false;
-    document.addEventListener("keydown", settingsEsc);
+    settingsModal.host.hidden = false;
+    var ws = document.querySelector(".workspace");
+    if (ws) ws.classList.add("has-sheet"); // widens the right dock; hides the inspector
+    pushLayer("settings", closeSettingsModal);
   }
   // uio-O-W1 (OVL-06): the navigation target behind every settings cross-reference — open
   // Settings on a NAMED section, so a link lands the author on the row instead of at the top.
@@ -15872,16 +15970,16 @@
     ensureSettingsModal();
     if (sectionKey) settingsModal.sectionKey[tab] = sectionKey;
     openSettingsModal(tab);
-    var act = settingsModal.nav.querySelector(".settings-nav__item.is-active");
-    if (act && act.scrollIntoView) act.scrollIntoView({ block: "nearest" });
+    if (sectionKey) revealSettingsSection(sectionKey);
   }
   function closeSettingsModal() {
-    if (!settingsModal) return;
+    if (!settingsModal || !settingsModal.active) return;
     settingsModal.active = false;
-    settingsModal.overlay.hidden = true;
-    document.removeEventListener("keydown", settingsEsc);
+    settingsModal.host.hidden = true;
+    var ws = document.querySelector(".workspace");
+    if (ws) ws.classList.remove("has-sheet"); // restores the inspector at --panel-right-width
+    popLayer("settings"); // returns focus to whatever opened the sheet
   }
-  function settingsEsc(e) { if (e.key === "Escape") closeSettingsModal(); }
   // #111 course-completion / exit splash. Course-level config on doc.endScreen; ON for
   // every course unless the author turns it off here. Copy is optional -> empty falls back
   // to the render defaults (shown as placeholders, read from window.VERSO_ENDSCREEN_DEFAULTS
@@ -18378,10 +18476,16 @@
     var modal = window.VersoUI.Modal({ title: opts.title, description: opts.subtitle || null, width: opts.width || null, children: body, footer: footer, onClose: opts.onClose || null });
     if (opts.id) modal.id = opts.id;
     document.body.appendChild(modal);
+    // uio-F05: the modal joins the ONE layer stack, so a confirm raised over the settings sheet
+    // takes the next Escape and leaves the sheet standing. Enter stays on the element (it is the
+    // modal's own submit, not a layer concern). `close` is wrapped once so every dismissal path
+    // — Cancel, the x, the scrim, Escape — pops the layer exactly once.
+    var _close = modal.close;
+    modal.close = function () { popLayer("modal"); modal.close = _close; if (_close) _close.call(modal); };
+    pushLayer("modal", function () { modal.close(); });
     if (opts.keys !== false) {
       modal.addEventListener("keydown", function (e) {
         if (e.key === "Enter") { e.preventDefault(); primary.click(); }
-        else if (e.key === "Escape") { e.preventDefault(); modal.close(); }
       });
     }
     return { modal: modal, body: body, primary: primary };
@@ -25179,10 +25283,23 @@
       ".canvas.is-version-preview{outline:2px solid #0e9384;outline-offset:-2px;}";
     document.head.appendChild(s);
   }
-  function closeCtxMenu() { if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; document.removeEventListener("mousedown", onCtxOutside, true); } }
+  function closeCtxMenu() {
+    if (!ctxMenuEl) return;
+    ctxMenuEl.remove(); ctxMenuEl = null;
+    document.removeEventListener("mousedown", onCtxOutside, true);
+    popLayer("ctx-menu"); // uio-F05: Escape is the layer stack's; focus returns to the trigger
+  }
   function onCtxOutside(e) { if (ctxMenuEl && !ctxMenuEl.contains(e.target)) closeCtxMenu(); }
-  function showContextMenu(x, y, items) {
+  // uio-F05: opts.escalate = { label, tab, section } appends the spine's required route from
+  // this menu of verbs into the settings sheet, after a separator.
+  function showContextMenu(x, y, items, opts) {
     ensureCtxStyle(); closeCtxMenu();
+    if (opts && opts.escalate) {
+      items = items.concat([{ sep: true }, {
+        label: opts.escalate.label || "All settings…",
+        onClick: function () { openSettingsSection(opts.escalate.tab || "project", opts.escalate.section || null); }
+      }]);
+    }
     var m = h("div", "ctx-menu");
     items.forEach(function (it) {
       if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
@@ -25199,6 +25316,7 @@
     m.style.left = Math.min(x, window.innerWidth - r.width - 8) + "px";
     m.style.top = Math.min(y, window.innerHeight - r.height - 8) + "px";
     ctxMenuEl = m;
+    pushLayer("ctx-menu", closeCtxMenu);
     setTimeout(function () { document.addEventListener("mousedown", onCtxOutside, true); }, 0);
   }
 

@@ -3991,7 +3991,7 @@ section("#159/#163 frontend conformance gate");
     // (panel-ia §3: sub() is allowed as an in-section label, never as a section header) — that
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
-    sectionGroup: { base: 43, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section)" },
+    sectionGroup: { base: 44, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section, +1 = uio-F05 settings sheet sections)" },
     subHeader:    { base: 28, dir: "down", enforce: true,  ticket: "#163 (residual = legit in-section sub-labels)" },
     disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "#163 (ad-hoc collapsibles capped)" },
     rawDialog:    { base: 0,  dir: "down", enforce: true,  ticket: "#163 (#156 landed — no native dialogs)" },
@@ -6285,11 +6285,25 @@ section("richer bullet lists");
   ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
   ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(e));
   ok("settings PROJECT tab = the document sections (rail order)", /key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(e));
-  ok("settings dialog = left rail + content pane (one section at a time)", /function renderSettingsBody\(\)[\s\S]*?settingsModal\.nav\.innerHTML = ""[\s\S]*?settings-nav__item[\s\S]*?section\.build\(settingsModal\.content\)/.test(e));
+  // uio-F05: the 220px nav rail + one-section-at-a-time are GONE. The sheet body is one scroll
+  // of canonical sectionGroups, so it reads like the inspector docked beside it.
+  ok("settings sheet = ONE scroll of canonical sections, no nav rail", /function renderSettingsBody\(\)[\s\S]*?sections\.forEach\(function \(s\) \{\s*\n\s*var sec = sectionGroup\("settings:" \+ s\.key, s\.title/.test(e)
+    && !/settings-nav__item/.test(e) && !/settingsModal\.nav/.test(e));
+  ok("every section still builds into the rebound `inspector`, so all 15 builders keep working", /inspector = body;\s*\n\s*try \{ s\.build\(body\); \} finally \{ inspector = _ins; \}/.test(e));
   ok("open modal stays in sync via refreshSettingsPanes in renderInspector", /function renderInspector\(\)[\s\S]*?refreshSettingsPanes\(\)/.test(e) && /function refreshSettingsPanes\(\) \{ if \(settingsModal && settingsModal\.active\) renderSettingsBody/.test(e));
-  ok("settings dialog is fixed-size (no resize on tab switch)", /\.modal-box\.modal-box--settings \{[\s\S]*?height: min\(88vh, 800px\)/.test(ecss) && /\.settings-content \{ flex: 1 1 auto; overflow-y: auto/.test(ecss));
+  // uio-F05: right-docked sheet, not a centred dialog. It takes the inspector's own column and
+  // widens it, so the canvas is squeezed exactly once and never covered.
+  ok("the sheet is right-docked in the inspector's column, no scrim", /\.workspace > \.settings-sheet \{ grid-column: 4; \}/.test(ecss)
+    && /\.workspace\.has-sheet \{ --right-w: var\(--panel-sheet-width, 400px\); \}/.test(ecss)
+    && !/\.modal-box\.modal-box--settings/.test(ecss));
+  ok("opening the sheet supersedes the inspector rather than stacking beside it", /\.workspace\.has-sheet > \.panel--right \{ display: none; \}/.test(ecss));
+  ok("Source and Publish hand back the last column so they are squeezed too", /\.workspace\.has-sheet > \.source-stage,\s*\n\.workspace\.has-sheet > \.publish-stage \{ grid-column: 2 \/ 4; \}/.test(ecss));
+  ok("the sheet width is a DS structural token, beside the other dock widths", /--panel-sheet-width: 400px;/.test(src("design-system/tokens/spacing.css")));
+  ok("a docked surface takes the panel title token, not the modal one", /\.settings-title \{ font: var\(--type-panel-title\)/.test(ecss));
+  ok("the content pane still scrolls, and sections are collapsed by default", /\.settings-content \{[\s\S]{0,120}overflow-y: auto/.test(ecss)
+    && /function defaultCollapsed\(type\) \{ return !!DEFAULT_COLLAPSED\[type\] \|\| \/\^settings:\/\.test\(type\); \}/.test(e));
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
-  ok("settings surface re-skinned to the DS (VersoUI tabs+button, surface-selected rail)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(e) && /\.settings-nav__item\.is-active \{ background: var\(--surface-selected\)/.test(ecss));
+  ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(e));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
@@ -7846,7 +7860,11 @@ section("panel system v2 — layout engine");
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
   // Phase 6 (D7): raw window.prompt/confirm replaced by shared in-app modals
   ok("promptModal + confirmModal route through the DS modal shell (VersoUI.Modal via dsModalShell)", /function dsModalShell\(opts\)[\s\S]*?window\.VersoUI\.Modal\([\s\S]*?function promptModal\(title, label, initial, onOk, subtitle\)[\s\S]*?dsModalShell\(\{[\s\S]*?function confirmModal\(title, message, onOk, opts\)[\s\S]*?dsModalShell\(\{/.test(e));
-  ok("modals: Enter submits, Escape closes", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}[\s\S]*?else if \(e\.key === "Escape"\)/.test(e));
+  // uio-F05: Enter is still the modal's own submit. Escape moved to the ONE layer stack, so a
+  // confirm raised over the settings sheet takes the next Escape and leaves the sheet standing.
+  ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(e)
+    && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(e));
+  ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(e));
   ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(e) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(e));
   ok("only the 2-mode import-merge stays raw confirm (semantics don't map to OK/Cancel)", (e.match(/window\.(prompt|confirm)\(/g) || []).length === 1);
   // Phase 7 (D3): the flagship field inspector adopts the sectionGroup taxonomy (Type + Content)
@@ -10284,9 +10302,13 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
     /settings-foot__contract", "Changes apply live, saved automatically\. Undo with " \+ MOD_KEY \+ "Z\."/.test(e));
   ok("the only footer control is a plain Close, not the accent",
     /VersoUI\.Button\(\{ variant: "secondary", label: "Close", onClick: closeSettingsModal \}\)/.test(e));
-  ok("the surface can still be dismissed three ways (Close, Esc, click-out)",
-    /function settingsEsc\(e\) \{ if \(e\.key === "Escape"\) closeSettingsModal\(\); \}/.test(e)
-    && /overlay\.addEventListener\("mousedown", function \(e\) \{ if \(e\.target === overlay\) closeSettingsModal\(\); \}\)/.test(e));
+  // uio-F05 SUPERSEDES the third dismissal. There is no scrim to click, and dismissing on a
+  // canvas click would make the canvas unusable while the sheet is open — the one thing the
+  // sheet exists to allow. Close and Esc (via the layer stack) are the two remaining ways.
+  ok("the surface is dismissed two ways (Close, Esc) and never by clicking the canvas",
+    /pushLayer\("settings", closeSettingsModal\)/.test(e)
+    && /popLayer\("settings"\)/.test(e)
+    && !/if \(e\.target === overlay\) closeSettingsModal/.test(e));
   ok("the contract line and the Close button share the footer", /\.settings-foot \{[^}]*justify-content: space-between;/.test(css) && /\.settings-foot__contract \{/.test(css));
   // the pre-F05 spine debt this ticket was allowed to carry is now spent
   ok("the pre-F05 save-contract debt marker went with the button it excused", e.indexOf("spine-todo") === -1);
@@ -10295,7 +10317,10 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   // --- OVL-06: cross-references are links, not instructions ---------------------------
   ok("there is ONE cross-reference row, built on the shared settings row", /function crossRefRow\(opts\)[\s\S]{0,900}return settingsRow\(\{ label: opts\.label/.test(e));
   ok("it always carries a live value slot and a navigating link", /insp-xref__value/.test(e) && /insp-xref__link/.test(e) && /link\.addEventListener\("click", function \(\) \{ if \(opts\.onNavigate\) opts\.onNavigate\(\); \}\)/.test(e));
-  ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}settingsModal\.sectionKey\[tab\] = sectionKey;[\s\S]{0,200}scrollIntoView/.test(e));
+  // uio-F05: with no nav rail to highlight, landing means EXPANDING the named section and
+  // scrolling it into view inside the one scroll.
+  ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}revealSettingsSection\(sectionKey\)/.test(e)
+    && /function revealSettingsSection\(key\)[\s\S]{0,600}scrollIntoView/.test(e));
   // the three dead-prose references named by the audit are gone, each replaced by a row
   ok("'edit it in the Learner nav panel' is gone", e.indexOf("edit it in the Learner nav panel") === -1);
   ok("the nav row states its live section count and links to Learner nav",
@@ -10505,7 +10530,113 @@ section("uio-P-C08: variant roll-up chip + variant popover on Publish");
   ok("the popover opens through openChromePop, the canonical anchored popover", /function publishVariantChip\(facts, cls\)[\s\S]{0,900}openChromePop\(chip,/.test(e));
   ok("the storage dot opens through the SAME machinery, so there is one popover, not two", /function openStoragePopover\(anchor\) \{\s*\n\s*openChromePop\(anchor,/.test(e) && !/\.storage-pop \{/.test(css));
   ok("the popover surface carries the DS elevation token", /\.chrome-pop \{[^}]*box-shadow: var\(--shadow-popover/.test(css));
-  ok("Esc closes the popover as the topmost layer", /function _chromePopEsc\(e\) \{ if \(e\.key === "Escape"\) \{ e\.stopPropagation\(\); closeChromePop\(\); \} \}/.test(e));
+  // uio-F05: the popover no longer owns an Escape handler — it registers on the ONE layer stack,
+  // which closes the topmost layer only. Same behaviour, one implementation for all six surfaces.
+  ok("Esc closes the popover as the topmost layer", /pushLayer\("chrome-pop", closeChromePop\)/.test(e)
+    && /popLayer\("chrome-pop"\)/.test(e) && !/function _chromePopEsc/.test(e));
+})();
+
+// ---- uio-F05: the overlay layer stack (the spine's Esc contract) -----------------
+// Before this there were 25+ independent Escape handlers, ordered only by capture-phase and
+// stopPropagation. One keypress could close two surfaces, or the wrong one. The stack below is
+// the single owner: Escape closes the TOPMOST layer, last-in-first-out, and focus returns to
+// whatever opened it. Exercised against the REAL fenced source, with a stub document.
+section("uio-F05 overlay layer stack (Esc-LIFO)");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @f05-start \*\/([\s\S]*?)\/\* @f05-end \*\//);
+  if (!m) { ok("locate @f05 fence", false); return; }
+  // a document stub: records listener add/remove and carries a focusable activeElement
+  function makeDoc() {
+    return {
+      listeners: 0, activeElement: null, _nodes: [],
+      addEventListener: function () { this.listeners++; },
+      removeEventListener: function () { this.listeners--; },
+      contains: function (n) { return this._nodes.indexOf(n) !== -1; }
+    };
+  }
+  function boot(docStub) {
+    return new Function("document", m[1] +
+      "\nreturn { push: pushLayer, pop: popLayer, top: topLayer, esc: overlayEsc," +
+      " names: function () { return overlayLayers.map(function (l) { return l.name; }); } };")(docStub);
+  }
+  var d = makeDoc(), g = boot(d);
+  var closed = [];
+  function ev() { return { key: "Escape", _p: 0, _s: 0, preventDefault: function () { this._p++; }, stopPropagation: function () { this._s++; } }; }
+
+  ok("an empty stack has no top and listens for nothing", g.top() === null && d.listeners === 0);
+
+  g.push("settings", function () { closed.push("settings"); });
+  ok("the first push starts listening for Escape exactly once", d.listeners === 1);
+  g.push("modal", function () { closed.push("modal"); });
+  ok("a second push does NOT add a second listener (one owner, always)", d.listeners === 1);
+  ok("the topmost layer is the last pushed", g.top().name === "modal");
+
+  // the core contract: one Escape closes ONE layer, the topmost
+  var e1 = ev(); g.esc(e1);
+  ok("Escape closes the topmost layer only", closed.length === 1 && closed[0] === "modal");
+  ok("and it swallows the keypress so no other handler double-acts", e1._p === 1 && e1._s === 1);
+  // the real close callback pops; simulate what closeSettingsModal/modal.close do
+  g.pop("modal");
+  ok("the sheet underneath is still standing after the confirm above it closed", g.names().join() === "settings");
+
+  var e2 = ev(); g.esc(e2); g.pop("settings");
+  ok("the next Escape then closes the sheet", closed.join() === "modal,settings");
+  ok("the last pop stops listening again, leaving no global handler behind", d.listeners === 0);
+  ok("Escape on an empty stack is inert (no throw, nothing swallowed)", (function () {
+    var e3 = ev(); g.esc(e3); return e3._p === 0 && e3._s === 0;
+  })());
+
+  // a non-Escape key is never the stack's business
+  var d2 = makeDoc(), g2 = boot(d2);
+  g2.push("menu", function () { closed.push("menu"); });
+  var enter = { key: "Enter", _p: 0, _s: 0, preventDefault: function () { this._p++; }, stopPropagation: function () { this._s++; } };
+  g2.esc(enter);
+  ok("Enter passes straight through — the modal's own submit still works", enter._p === 0 && g2.top().name === "menu");
+
+  // popping by name removes the TOPMOST of that name, so a surface may legitimately stack twice
+  var d3 = makeDoc(), g3 = boot(d3);
+  g3.push("chrome-pop", function () {}); g3.push("modal", function () {}); g3.push("chrome-pop", function () {});
+  g3.pop("chrome-pop");
+  ok("popping by name takes the topmost of that name, not the oldest", g3.names().join() === "chrome-pop,modal");
+  ok("popping a name that is not on the stack is a no-op, not a corruption", g3.pop("nope") === null && g3.names().length === 2);
+
+  // focus return: the element that opened the layer gets focus back on pop
+  var d4 = makeDoc(), g4 = boot(d4);
+  var trigger = { focused: 0, focus: function () { this.focused++; } };
+  d4._nodes.push(trigger); d4.activeElement = trigger;
+  g4.push("settings", function () {});
+  d4.activeElement = null;            // focus moved into the sheet
+  g4.pop("settings");
+  ok("focus returns to whatever opened the layer", trigger.focused === 1);
+  // a trigger removed from the DOM while the layer was open must not be focused
+  var d5 = makeDoc(), g5 = boot(d5);
+  var gone = { focused: 0, focus: function () { this.focused++; } };
+  d5.activeElement = gone;            // never added to _nodes -> document.contains() is false
+  g5.push("settings", function () {});
+  g5.pop("settings");
+  ok("a trigger that left the DOM meanwhile is not focused", gone.focused === 0);
+
+  // --- the surfaces that were migrated onto the stack -------------------------------
+  ok("the settings sheet, the popover, the menu and the modal all register on the stack",
+    /pushLayer\("settings", closeSettingsModal\)/.test(e) && /pushLayer\("chrome-pop", closeChromePop\)/.test(e)
+    && /pushLayer\("ctx-menu", closeCtxMenu\)/.test(e) && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(e));
+  ok("no migrated surface keeps a private Escape handler", !/function _chromePopEsc/.test(e) && !/function settingsEsc/.test(e));
+  ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
+})();
+
+// ---- uio-F05: the escalation route out of the narrow surfaces --------------------
+section("uio-F05 escalation links (popover/menu -> sheet)");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("there is ONE escalation control, not one per surface", /function escalateLink\(spec\)/.test(e)
+    && (e.match(/function escalateLink/g) || []).length === 1);
+  ok("the popover takes it as an option and appends it after its own rows", /if \(opts && opts\.escalate\) pop\.appendChild\(escalateLink\(opts\.escalate\)\);/.test(e));
+  ok("the menu takes it too, after a separator, so verbs and the route never blur together", /if \(opts && opts\.escalate\) \{[\s\S]{0,300}items = items\.concat\(\[\{ sep: true \}/.test(e));
+  ok("it routes to a NAMED section of the sheet, never just 'open Settings'", /openSettingsSection\(spec\.tab \|\| "project", spec\.section \|\| null\)/.test(e));
+  ok("the storage popover uses it for real (a route, not a dead end)", /escalate: \{ label: "Backup settings", tab: "project", section: "backup" \}/.test(e));
+  ok("it reads as a quiet link, never a commit button", /\.chrome-pop__escalate \{[\s\S]{0,240}color: var\(--accent\)/.test(css)
+    && /\.chrome-pop__escalate \{[\s\S]{0,240}background: transparent/.test(css));
 })();
 
 // ---- uio-F03: scope + inheritance model (the five-rung ladder) -------------------
