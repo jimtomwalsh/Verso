@@ -1814,6 +1814,18 @@
         : "Publishing this document produces " + names.length + " packages: " + names.join(", ") + "."
     };
   }
+  // uio-P-C01 (PUB-01): the meter's pure model. The meter EXPLAINS the alignment number, so every
+  // part of it -- fill, tone, value text, band name -- comes from the fact object, never a second
+  // computation. A not-indexed fact yields a meter with no fill and the words instead of a 0%.
+  function f04AlignmentMeterModel(fact) {
+    if (!fact || fact.indexed === false || fact.pct == null) {
+      return { indexed: false, pct: null, tone: "neutral", value: "Not indexed",
+        bandLabel: "Not indexed", title: (fact && fact.title) || "Not indexed." };
+    }
+    var band = f04Band(fact.pct);
+    return { indexed: true, pct: fact.pct, tone: F04_BAND_TONE[band.key], value: fact.pct + "%",
+      bandLabel: band.label, title: fact.title };
+  }
   /* @f04-end */
 
   // ---- uio-F04 adapters: bind the pure resolver above to the live Product Rail stores --------------
@@ -1892,6 +1904,21 @@
     if (fact.title) el.title = fact.title;
     return el;
   }
+  // uio-P-C01 (PUB-01): the ONE way alignment is drawn on Publish -- the canonical DS Meter,
+  // labelled and banded, fed by the same fact object every other surface reads. The picker row and
+  // the queue row both call this, so the number and its band can never read differently a pane
+  // apart -- and both stay equal to the Source top bar, which reads the same resolver.
+  function f04AlignmentMeter(fact, cls) {
+    if (!fact) return null;
+    var m = f04AlignmentMeterModel(fact);
+    var U = window.VersoUI;
+    var el = U && U.Meter
+      ? U.Meter({ label: "Alignment", pct: m.pct, tone: m.tone, value: m.value, bandLabel: m.bandLabel })
+      : h("span", "vds-meter", "Alignment " + m.value);
+    if (cls) el.classList.add(cls);
+    if (m.title) el.title = m.title;
+    return el;
+  }
   // Read API for the tickets that CONSUME this layer (uio-P-C01's alignment meter, uio-P-C08's variant
   // roll-up chip, uio-S-M05, uio-E-M03) and for the browser-verify harness. Read-only: it renders
   // nothing and mutates nothing.
@@ -1903,7 +1930,7 @@
     bands: F04_BANDS,
     band: f04Band,
     _pure: { alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment, driftFact: f04DriftFact,
-      whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact }
+      whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact, alignmentMeterModel: f04AlignmentMeterModel }
   };
 
   // uio-P-C03 (PUB-10): the picker row's provenance line. States the fact plainly when a document
@@ -2059,8 +2086,11 @@
       var meta = h("div", "publish-pickitem__meta");
       var facts = d.facts || f04DocFacts(d.id);
       if (facts) {
+        // uio-P-C01 (PUB-01): alignment is the one fact drawn as the labelled Meter -- the number
+        // decides whether this document is ready to go out, so it gets explained, not just stated.
+        // Drift and outputs stay quiet badges.
         [f04Badge(facts.drift, "publish-pickrow__drift"),
-         f04Badge(facts.alignment, "publish-pickrow__align"),
+         f04AlignmentMeter(facts.alignment, "publish-pickrow__align"),
          facts.outputs.count > 1 ? f04Badge(facts.outputs, "publish-pickrow__outputs") : null
         ].forEach(function (b) { if (b) meta.appendChild(b); });
       }
@@ -2231,8 +2261,9 @@
       // publishing. Identical call, identical phrasing, identical badge.
       var qf = f04DocFacts(r.docId);
       if (qf) {
+        // uio-P-C01 (PUB-01): the same labelled Meter as the picker row, from the same fact.
         [f04Badge(qf.drift, "publish-queuerow__drift"),
-         f04Badge(qf.alignment, "publish-queuerow__align"),
+         f04AlignmentMeter(qf.alignment, "publish-queuerow__align"),
          qf.outputs.count > 1 ? f04Badge(qf.outputs, "publish-queuerow__outputs") : null
         ].forEach(function (b) { if (b) meta.appendChild(b); });
       }

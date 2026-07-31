@@ -90,6 +90,16 @@
       // column of solid fills would shout louder than the rows (DS Badge contract).
       return "vds-badge vds-badge--" + t + " vds-badge--" + s + (quiet ? " vds-badge--quiet" : "");
     },
+    // Meter (uio-P-C01 / PUB-01): class per band tone; a null pct is the not-indexed state.
+    meterClass: function (tone, notIndexed) {
+      var t = (tone === "success" || tone === "warning") ? tone : "neutral";
+      return "vds-meter vds-meter--" + t + (notIndexed ? " vds-meter--notindexed" : "");
+    },
+    // Meter fill width: clamp to 0-100, and null stays null (no fill at all, not a 0% fill).
+    meterPct: function (pct) {
+      if (pct == null || isNaN(pct)) return null;
+      return Math.max(0, Math.min(100, pct));
+    },
     // Tri-state checkbox aria-checked value.
     checkAria: function (checked, mixed) { return mixed ? "mixed" : (checked ? "true" : "false"); },
     // TreeItem indent (px) by depth — 8px base + 12px per level.
@@ -489,6 +499,34 @@
     appendChildren(b, props.children);
     return b;
   }
+  // Meter — labelled, banded percentage (structure/Meter contract; uio-P-C01 / PUB-01).
+  // Label names the fact, the fill carries the band tone, and the value repeats the number in the
+  // tone as ink (the quiet Badge's move, so the meter reads as kin to the badges beside it).
+  // A null pct is the honest not-indexed state: dashed empty track + words, never a 0% score.
+  // The band is never colour alone -- the aria-label speaks the value and the band's name.
+  function Meter(props) {
+    props = props || {};
+    var pct = _pure.meterPct(props.pct);
+    var notIndexed = pct == null;
+    var el = h("div", _pure.meterClass(props.tone, notIndexed));
+    var value = props.value != null ? props.value : (notIndexed ? "Not indexed" : pct + "%");
+    el.setAttribute("role", "meter");
+    el.setAttribute("aria-valuemin", "0");
+    el.setAttribute("aria-valuemax", "100");
+    if (!notIndexed) el.setAttribute("aria-valuenow", String(pct));
+    el.setAttribute("aria-label",
+      (props.label ? props.label + ": " : "") + value + (props.bandLabel && props.bandLabel !== value ? " (" + props.bandLabel + ")" : ""));
+    if (props.label) el.appendChild(h("span", "vds-meter__label", props.label));
+    var track = h("div", "vds-meter__track");
+    if (!notIndexed) {
+      var fill = h("div", "vds-meter__fill");
+      fill.style.width = pct + "%";
+      track.appendChild(fill);
+    }
+    el.appendChild(track);
+    el.appendChild(h("span", "vds-meter__value", value));
+    return el;
+  }
   // ToggleChip — a row of these is a MULTI-select toggle (several active at once);
   // for a single-select "pick exactly one" row, use SegmentedControl instead.
   function ToggleChip(props) {
@@ -595,7 +633,7 @@
     Select: Select, Checkbox: Checkbox, ColorField: ColorField,
     Panel: Panel, PanelSection: PanelSection, Breadcrumb: Breadcrumb,
     Tabs: Tabs, DocumentTab: DocumentTab,
-    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, ToggleChip: ToggleChip, Timeline: Timeline,
+    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, Meter: Meter, ToggleChip: ToggleChip, Timeline: Timeline,
     Modal: Modal, ContextMenu: ContextMenu, Tooltip: Tooltip,
     _pure: _pure
   };

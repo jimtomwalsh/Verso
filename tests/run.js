@@ -8841,7 +8841,9 @@ section("Product Rail: Release history store (whole-family export)");
   ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
   // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover.
   // uio-F04 moved BOTH onto the shared resolver (f04DocFacts), so neither phrases the number itself.
-  ok("the Publish pick rows show the alignment badge from the shared resolver", /var facts = d\.facts \|\| f04DocFacts\(d\.id\);[\s\S]{0,300}f04Badge\(facts\.alignment, "publish-pickrow__align"\)/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
+  // uio-P-C01 (PUB-01): on Publish the alignment fact is drawn as the labelled Meter, still fed by
+  // the same shared resolver.
+  ok("the Publish pick rows show the alignment meter from the shared resolver", /var facts = d\.facts \|\| f04DocFacts\(d\.id\);[\s\S]{0,600}f04AlignmentMeter\(facts\.alignment, "publish-pickrow__align"\)/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
   ok("the Edit-stage storage popover shows a live 'Source alignment' readout (from f04DocFacts)", /var stFacts = f04DocFacts\(activeDocId\);[\s\S]{0,120}row\("Source alignment", stFacts\.alignment\.label\)/.test(e));
   ok("index.html loads release-history.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/release-history.js") > -1 && idx.indexOf("src/release-history.js") < idx.indexOf("src/editor.js");
@@ -9220,7 +9222,7 @@ section("Product Rail: Source stage info panel");
     /h\("div", "vds-timeline__dot"\)/.test(uk) && /if \(entry\.date\) content\.appendChild\(h\("div", "vds-timeline__date", entry\.date\)\);/.test(uk));
   var dsTimelineDts = src("design-system/components/structure/Timeline.d.ts");
   ok("Timeline's DSLMS contract (.d.ts) exists with the entries prop", /interface TimelineProps/.test(dsTimelineDts) && /entries: TimelineEntry\[\];/.test(dsTimelineDts));
-  ok("readme.md's canonical control list includes Timeline under structure/", /\*\*structure\/\*\* · `TreeItem` · `BlockPaletteItem` · `BlockTile` \+ `BlockGrid` · `Badge` · `Timeline`/.test(src("design-system/readme.md")));
+  ok("readme.md's canonical control list includes Timeline under structure/", /\*\*structure\/\*\* · `TreeItem` · `BlockPaletteItem` · `BlockTile` \+ `BlockGrid` · `Badge` · `Meter` · `Timeline`/.test(src("design-system/readme.md")));
   ok("editor.css styles the canonical .vds-timeline* classes, not the old source-stage__timeline ad-hoc names", /\.vds-timeline \{/.test(src("editor.css")) && src("editor.css").indexOf(".source-stage__timeline") === -1);
   ok("timeline rows sort newest-first across both provenance streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
   ok("a hand-created topic with neither stream still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rows\.length\) rows = \[\{ ts: topic\.createdAt \|\| 0, importedAt: topic\.createdAt, label: "Created", detail: null \}\];/.test(e));
@@ -10036,11 +10038,70 @@ section("uio-F04: cross-stage data surfacing");
   ok("where-used comes from sourceLinkWhereUsed, not a stored list", /f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, null\)\)/.test(e));
   ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(e));
   ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(e) && /\.source-stage__facts/.test(src("editor.css")));
-  ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,300}f04Badge\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
+  ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,400}f04AlignmentMeter\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
   ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(src("editor.css")));
   ok("every fact is drawn as the canonical DS Badge, quiet, never a bespoke chip", /function f04Badge\(fact, cls\)[\s\S]{0,320}U\.Badge\(\{ tone: fact\.tone \|\| "neutral", quiet: true, size: "sm"/.test(e));
   ok("the retired one-off alignment + staleness chips are gone from the picker", !/publish-pickrow__stale/.test(e) && !/apct \+ "% source"/.test(e));
   ok("a read API is exposed for the tickets that consume this layer (P-C01 / P-C08)", /window\.__f04 = \{[\s\S]{0,400}docFacts: f04DocFacts[\s\S]{0,400}productFacts: f04ProductFacts/.test(e));
+})();
+
+// uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
+// label, track whose fill carries the band tone, value in the same tone -- with a distinct
+// "Not indexed" state. The meter EXPLAINS the number; it never computes one. Its model is pure
+// (fed only by the F04 alignment fact) and the DS gained the Meter component BEFORE its first use.
+section("uio-P-C01: alignment meter on Publish");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), kit = src("src/ui-kit.js");
+  var m = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
+  if (!m) { ok("locate @f04 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { meterModel: f04AlignmentMeterModel, alignmentFact: f04AlignmentFact };")();
+  var fact = function (pct, indexed) { return g.alignmentFact({ linkedWords: pct, totalWords: 100 }, indexed !== false); };
+
+  // --- band boundaries drive the meter's tone + band name (>=85 / 60-84 / <60) ---
+  ok("85% meters as the top band (success, 'Verified') -- boundary included",
+    g.meterModel(fact(85)).tone === "success" && g.meterModel(fact(85)).bandLabel === "Verified" && g.meterModel(fact(100)).tone === "success");
+  ok("60-84% meters as the middle band (warning, 'Mixed') -- both boundaries",
+    g.meterModel(fact(60)).tone === "warning" && g.meterModel(fact(84)).bandLabel === "Mixed");
+  ok("<60% meters as the bottom band (neutral, 'Mostly novel'), 0 included",
+    g.meterModel(fact(59)).tone === "neutral" && g.meterModel(fact(0)).bandLabel === "Mostly novel");
+  ok("the meter's value text is the fact's own percent, verbatim", g.meterModel(fact(78)).value === "78%" && g.meterModel(fact(78)).pct === 78);
+  ok("the meter's tooltip is the fact's own sentence, not a rephrasing", g.meterModel(fact(78)).title === fact(78).title);
+
+  // --- not indexed: its own state, never a 0% fill ---
+  var ni = g.meterModel(fact(0, false));
+  ok("a not-indexed fact meters as 'Not indexed' with NO percent", ni.indexed === false && ni.pct === null && ni.value === "Not indexed");
+  ok("not-indexed keeps the fact's reason as its tooltip", /no approved source document/.test(ni.title));
+  ok("a missing fact also reads 'Not indexed', never a crash or a 0%", g.meterModel(null).pct === null && g.meterModel(null).value === "Not indexed");
+  ok("a genuinely 0%-aligned INDEXED document is a real 0% meter, not 'Not indexed'",
+    g.meterModel(fact(0)).indexed === true && g.meterModel(fact(0)).value === "0%");
+
+  // --- the DS gained the Meter BEFORE its first use (contract + kit + css) ---
+  ok("the DS Meter contract exists (structure/Meter.d.ts + .prompt.md)",
+    /export function Meter\(props: MeterProps\)/.test(src("design-system/components/structure/Meter.d.ts")) &&
+    /Not indexed/.test(src("design-system/components/structure/Meter.prompt.md")));
+  ok("VersoUI.Meter renders label + track + value with role=meter",
+    /function Meter\(props\)[\s\S]{0,900}setAttribute\("role", "meter"\)[\s\S]{0,900}vds-meter__track/.test(kit) && /Meter: Meter/.test(kit));
+  ok("the meter's fill width is clamped and null stays null (no 0% fill for not-indexed)", (function () {
+    var mm = kit.match(/meterPct: function \(pct\) \{([\s\S]*?)\},/);
+    if (!mm) return false;
+    var f = new Function("pct", mm[1]);
+    return f(140) === 100 && f(-5) === 0 && f(null) === null && f(72) === 72;
+  })());
+  ok("the meter's band classes are styled from DS tokens, tone as fill + ink",
+    /\.vds-meter--success \.vds-meter__fill \{ background: var\(--success\)/.test(css) &&
+    /\.vds-meter--warning \.vds-meter__value \{ color: var\(--warning\)/.test(css) &&
+    /\.vds-meter--notindexed \.vds-meter__track \{ background: none; border: 1px dashed var\(--border-strong\)/.test(css));
+  ok("the spine names the Meter as the one sanctioned non-Badge fact drawing",
+    /canonical labelled `Meter`/.test(src("design-system/readme.md")));
+
+  // --- wiring: ONE renderer, both Publish rows, same fact object ---
+  ok("f04AlignmentMeter draws the canonical DS Meter from the pure model",
+    /function f04AlignmentMeter\(fact, cls\)[\s\S]{0,300}f04AlignmentMeterModel\(fact\)[\s\S]{0,300}U\.Meter\(\{ label: "Alignment", pct: m\.pct, tone: m\.tone, value: m\.value, bandLabel: m\.bandLabel \}\)/.test(e));
+  ok("the picker row and the queue row call the SAME meter renderer",
+    /f04AlignmentMeter\(facts\.alignment, "publish-pickrow__align"\)/.test(e) &&
+    /f04AlignmentMeter\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
+  ok("the meter model is exposed on the F04 read API for the harness", /alignmentMeterModel: f04AlignmentMeterModel/.test(e));
 })();
 
 // uio-P-C04 (PUB-12): the picker had no scope, count, search or sort — only alphabetical — so the
