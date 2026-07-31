@@ -232,6 +232,19 @@ explicit confirm.
 - **⌘K** is find-anything: one index over settings, actions and help sections. No surface owns its
   own separate search box.
 
+The palette that ⌘K opens is **not a seventh presentation**. It holds no rows, sets no values and
+saves nothing: it is navigation, and every result routes into one of the six. That is also why it
+may take a scrim when the settings surfaces may not — it captures typing for the moment it is
+open, then hands the author to the real surface. Contract:
+`components/overlays/CommandPalette.{d.ts,prompt.md}`.
+
+Its index covers settings sections, actions, guide sections, and the open document's pages and
+blocks. Sections carry **intent words** as well as their titles, because the names are not
+guessable from what an author wants: a disclaimer lives under Header & Footer, confetti under
+Motion, the nav pill under Learner nav. A result always names the category it lives in, and
+choosing one opens its section already expanded. A contents list (a TOC, the outliner) is
+navigation and stays; a second *search field* over a second index does not.
+
 ### Density baseline
 
 The spine reuses the tokens Visual foundations already defines: 11px chrome (`--text-xs`), 24px

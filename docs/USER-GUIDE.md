@@ -180,6 +180,17 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   **Esc** closes just that, and Settings stays where it was. Press it again to close Settings.
   Small pop-ups that only hold a setting or two carry a link through to the full Settings panel,
   so you are never left guessing where the rest of them live.
+- **⌘K finds anything.** One box over everything Verso can take you to: a **setting**, an
+  **action** ("Send to publish", "Add a page", "Go to Publish"), a **page or block** in the open
+  document, and a **section of this guide**. Every result says which category it comes from, so
+  you know where you are about to land. Settings are indexed by what you actually want, not only
+  by what Verso calls them: type *confetti* and you get Motion, *disclaimer* and you get Header &
+  Footer. Choosing a setting opens it in the Settings panel with its section already unfolded;
+  choosing a guide section opens the guide at that heading. Arrow keys move, Enter runs, Esc
+  closes. Because ⌘K covers the guide, the guide no longer has its own search box; its contents
+  list on the left is still there.
+- **⌘,** opens Settings where you left it. **⌥⌘,** gives you the settings for whatever you have
+  selected, which is the inspector: it puts the Settings panel away and hands the space back.
 
 ---
 
@@ -683,7 +694,9 @@ restores it.
 | Copy / Paste / Paste without formatting | ⌘C / ⌘V / ⌘⇧V |
 | Group / Ungroup | ⌘G / ⌘⇧G |
 | Preview (Demo) | ⌘P |
-| Quick-jump to a page | ⌘K |
+| Find anything (settings, actions, pages, guide) | ⌘K |
+| Open Settings | ⌘, |
+| Settings for what's selected (the inspector) | ⌥⌘, |
 | Hide / show side panels | ⌘\ |
 | Comment mode | C |
 | Edit text (on a selected field) | Double-click, or Enter |
