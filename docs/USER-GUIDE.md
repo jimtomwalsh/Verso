@@ -90,7 +90,8 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   when no course is open) and the **open-course tabs**. Each tab carries a **doc-type glyph** (course,
   presentation, or paged/print document) so a Product's course, one-pager and deck stay
   distinguishable at a glance, plus a **per-product colour dot** (hover it to see which Product).
-  **Document:** a **Document-settings** button (⚙, opens this document's settings —
+  **Document:** a **Document-settings** button (a sliders glyph, deliberately not the same cog as
+  the app-wide one on the left rail; opens this document's settings —
   **Document type** (geometry + interactivity, set once), Header & Footer, Learner nav, Theme and the
   rest; app-wide settings live under the left-rail cog), the **Build / Read** toggle (glyphs), and the
   **Variant** and **Version** selectors as **named dropdowns**, each captioned with its axis and
@@ -172,6 +173,9 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   puts the panel away and brings the inspector back. Clicking the canvas does not close it, so a
   stray click can't lose your place. Where a setting is really owned by another panel, its row
   shows the live value and a link straight to that panel rather than telling you to go and find it.
+  **Drag its left edge** to make it wider or narrower, exactly like the side panels. Settings keeps
+  its own width, so widening it does not change how wide the inspector is when it comes back.
+  **⌘\\** (hide the side panels) closes Settings, since there would be nowhere left to show it.
 - **Esc closes one thing at a time.** If you open a menu or a small pop-up on top of Settings,
   **Esc** closes just that, and Settings stays where it was. Press it again to close Settings.
   Small pop-ups that only hold a setting or two carry a link through to the full Settings panel,
