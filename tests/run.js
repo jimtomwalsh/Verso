@@ -14516,6 +14516,10 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("spec 2d: the variant bar always offers Manage variants (declare the first variant on a Product with none)", /function buildSourceVariantBar\(topic\)[\s\S]{0,400}label: "Manage variants", onClick: function \(\) \{ openVariantEditor\(topic\)/.test(e));
   ok("spec 2d: the variant editor declares via setProductVariants; a rename migrates overrides via SourceDoc.renameVariant", (function () { var m = e.slice(e.indexOf("function openVariantEditor(topic)"), e.indexOf("function openVariantEditor(topic)") + 1900); return /setProductVariants\(pid, list\)/.test(m) && /SD\.renameVariant\(model, v, nn\)/.test(m); })());
   ok("spec 2d: clicking Done commits a name still typed in the add field (no silent discard)", /onPrimary: function \(\) \{ if \(addInput && addInput\.value\.trim\(\)\) doAdd\(\); shell\.modal\.close\(\); \}/.test(e));
+  // Found by browser-verify: dsModalShell binds Enter to the primary button, so an add-field
+  // Enter that only preventDefault()s adds the variant AND closes the dialog -- you could never
+  // declare two variants in one visit. Enter here means "add"; Done means "finish".
+  ok("spec 2d: Enter in the add field adds without also firing the modal's Done", /addInput\.addEventListener\("keydown", function \(e\) \{ if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); doAdd\(\); \} \}\);/.test(e));
   ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
   ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
   ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));

@@ -13325,7 +13325,10 @@
       var list = current(); if (list.indexOf(nn) !== -1) { addInput.value = ""; return; }
       list.push(nn); setProductVariants(pid, list); addInput.value = ""; rerender(); renderSourceArticle();
     }
-    addInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); doAdd(); } });
+    // stopPropagation, not just preventDefault: dsModalShell binds Enter to the primary button,
+    // so without it one Enter both adds the variant AND closes the dialog, and you cannot declare
+    // two variants without reopening. Enter in this field means "add"; Done means "finish".
+    addInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); doAdd(); } });
     var addBtn = (U && U.IconButton) ? U.IconButton({ icon: "plus", label: "Add variant", onClick: doAdd }) : h("button", null, "Add");
     addRow.appendChild(addInput); addRow.appendChild(addBtn);
     box.appendChild(addRow);
