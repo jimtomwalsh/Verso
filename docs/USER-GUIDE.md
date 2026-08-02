@@ -1037,14 +1037,28 @@ a refresh and a stage-switch.
 - **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
   **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
   that's already queued re-arms it rather than duplicating it.
-- **Where it goes, and what it will be called.** Every queue row states its destination on a
-  **Downloads** chip, and next to it the exact file name that row will write, before you press
-  Publish — for example `SAFE-101_V001_SCORM.zip`. Change the row's preset and the name changes with
-  it, so you can see what you're about to get. The name comes from the exporter itself, so what the
-  row promises is what lands. Once a row has run, its status carries the real result and the
-  prediction steps aside. **Downloads** is the only destination for now: the chip states it rather
-  than opening a menu, and hovering it says why. Choosing a save folder, and naming your own
-  destinations to reuse, are still to come.
+- **Where it goes, and what it will be called.** Every queue row states its destination on a chip,
+  and next to it the exact file name that row will write, before you press Publish — for example
+  `SAFE-101_V001_SCORM.zip`. Change the row's preset and the name changes with it, so you can see
+  what you're about to get. The name comes from the exporter itself, so what the row promises is what
+  lands. Once a row has run, its status carries the real result and the prediction steps aside.
+- **Set one folder for the whole Product.** In the Publish head, **Set publish folder** picks one
+  folder for the Product you have selected. Every queued row then inherits it and nests itself into
+  `Product / document-variant`, so a whole-family publish costs one folder pick rather than one per
+  row. Until you set it, rows say **Downloads** and packages go to your browser's downloads folder —
+  nothing is written anywhere you didn't choose. The folder is remembered between visits.
+- **Overriding one output.** Click a row's destination chip to open its **Publish destination**
+  popover. It lists one path row per output the document produces — Flagship plus each variant — each
+  showing where it lands and the exact file it will write. **Choose folder** on any of them overrides
+  the inherited Product folder for that one output; **Reset** puts it back, and says what it is
+  putting it back to. A row whose outputs all sit under the Product folder shows the part they share,
+  ending in `…`; if you have sent them to genuinely different folders it reads **Mixed** and defers to
+  this popover rather than naming one and implying the rest.
+- **Versions never overwrite by accident.** Each output keeps its own version number — a variant
+  steps independently of its flagship — and every run writes the next one up (`V001`, `V002`, …), so
+  the package you shipped last week is still there. When you deliberately want to re-cut the same
+  version, turn on **Replace current version** in that row's destination popover; it is off by
+  default, and it is the only way a package gets written over.
 - **The facts on each row.** Under every document's name, in both the left list and the queue, sits a
   line of small badges — the same four facts described in §3, in the same words they use everywhere
   else in the app:
@@ -1073,9 +1087,12 @@ a refresh and a stage-switch.
   occasional export jobs that aren't the queue: the one-off **Export SCORM** dialog, **Export .verso**,
   **Export JSON**, **Export Schema**, **Publish to Viewer** and **Reset Workspace**.
   **Importing has moved to the Source stage** — the Publish stage only sends work out.
-- **Publish.** One **Publish** button runs every pending row in turn: each is packaged as a SCORM
-  `.zip` (using that row's preset) and downloaded. Done rows stay in the queue, greyed, with their
-  result — the queue isn't cleared, so you can see what shipped.
+- **Publish.** One **Publish** button runs every pending row in turn. A row is packaged once per
+  output — its flagship and each variant — so the **N outputs** badge and the packages that appear are
+  the same number. Each is built with that row's preset, written to that output's folder (or
+  downloaded when none is set), and its version recorded only once it has landed, so a failed write
+  never burns a version number. Done rows stay in the queue, greyed, with their result — the queue
+  isn't cleared, so you can see what shipped.
 - **Release history.** Each Publish run records **one** timestamped release entry, and history takes
   whatever room the queue isn't using — it answers "what did we ship?", so it sits open in the pane
   rather than folded away. Each release states how many documents went out, the preset (or a count

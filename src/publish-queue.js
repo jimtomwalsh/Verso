@@ -56,6 +56,9 @@
       docId: docId,
       title: meta.title != null ? String(meta.title) : String(docId),
       preset: meta.preset != null ? meta.preset : "master", // T2 turns this into real named presets
+      // T3: the deliberate re-cut. Off means every run writes a new auto-incremented version, which
+      // is the default precisely because a silent overwrite is the one outcome nobody asks for.
+      replaceVersion: false,
       status: "pending",
       result: null
     };
@@ -98,6 +101,7 @@
         docId: r.docId != null ? r.docId : null,
         title: r.title != null ? String(r.title) : String(r.docId != null ? r.docId : "Document"),
         preset: r.preset != null ? r.preset : "master",
+        replaceVersion: r.replaceVersion === true, // T3: an absent/garbled flag is the safe default (off)
         status: STATUSES.indexOf(r.status) === -1 ? "pending" : r.status,
         result: r.result || null
       };
