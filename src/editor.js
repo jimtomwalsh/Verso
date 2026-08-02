@@ -2936,6 +2936,16 @@
         }
         pushHistory();
         tagDocProductStage(td, pid, stage);
+        // spec 2d bridge: carry the course's declared variants onto the Product (union) so the
+        // Product's variant workflow (import-as-variant, columns) is reachable -- both sides store
+        // variants as the same array of name strings, so this is a straight merge. Reads the CARD's
+        // doc (td), not the open one, since Promote is a per-card menu action.
+        if (td.variants && td.variants.length) {
+          var pv = (window.ProductsStore[pid] && window.ProductsStore[pid].variants) || [];
+          var merged = pv.slice();
+          td.variants.forEach(function (v) { if (merged.indexOf(v) === -1) merged.push(v); });
+          setProductVariants(pid, merged);
+        }
         saveRegistry(registry);
         shell.modal.close();
         mountProductPicker(); // refresh the top-bar product context so the new/changed Product shows
@@ -13248,6 +13258,78 @@
     });
     return row;
   }
+  // spec 2d: the Source-stage variant bar on a Product's unified document -- the column-toggle chips
+  // (when variants are declared) plus a "Manage variants" entry that is ALWAYS shown, so you can
+  // declare the FIRST variant on a Product that has none yet (the piece that was missing: nothing
+  // let you tell a Product its variants, so the whole variant workflow was unreachable).
+  function buildSourceVariantBar(topic) {
+    if (!topic || !topic.sourceMaster) return null;
+    var U = window.VersoUI;
+    var bar = h("div", "source-stage__variant-bar");
+    var pills = buildVariantPillsRow(topic);
+    if (pills) bar.appendChild(pills); else bar.appendChild(h("span", "source-stage__variant-empty", "No variants declared."));
+    var manage = (U && U.IconButton) ? U.IconButton({ icon: "layers", label: "Manage variants", onClick: function () { openVariantEditor(topic); } }) : h("button", null, "Variants");
+    manage.classList.add("source-stage__variant-manage");
+    bar.appendChild(manage);
+    return bar;
+  }
+  // spec 2d: declare/rename/remove the variants a Product's source can carry. Writes the Product's
+  // variant list (setProductVariants); a rename also migrates the master document's per-node
+  // overrides to the new name (SourceDoc.renameVariant), so a variant's divergences travel with it.
+  function openVariantEditor(topic) {
+    var U = window.VersoUI, SD = window.SourceDoc;
+    var pid = topic.productId || activeSourceProductId();
+    var product = pid && window.ProductsStore[pid]; if (!product) return;
+    var shell = dsModalShell({
+      title: "Variants",
+      subtitle: "The variants this Product's source can carry. Each is a column you can compare and a target you can import a variant manual into. Flagship is the base and is always present.",
+      primaryLabel: "Done",
+      // Commit any name still typed in the add field before closing -- otherwise clicking Done
+      // after typing a name (without Enter / the + button) would silently discard it.
+      onPrimary: function () { if (addInput && addInput.value.trim()) doAdd(); shell.modal.close(); }
+    });
+    var box = shell.body;
+    function current() { return declaredVariantsForProduct(window.ProductsStore || {}, pid); }
+    var listWrap = h("div", "variant-editor__list"); box.appendChild(listWrap);
+    function rerender() {
+      listWrap.innerHTML = "";
+      var vs = current();
+      if (!vs.length) { listWrap.appendChild(h("div", "variant-editor__empty", "No variants yet. Add one below.")); return; }
+      vs.forEach(function (v) {
+        var row = h("div", "variant-editor__row");
+        var input = h("input", "prop-text variant-editor__name"); input.type = "text"; input.value = v;
+        input.addEventListener("change", function () {
+          var nn = input.value.trim(); var list = current();
+          if (!nn || nn === v || list.indexOf(nn) !== -1) { input.value = v; return; }
+          list[list.indexOf(v)] = nn; setProductVariants(pid, list);
+          var model = ensureSourceDocModel(topic); SD.renameVariant(model, v, nn); persistSourceDocModel(topic, model);
+          var si = __sourceActiveVariants.indexOf(v); if (si !== -1) __sourceActiveVariants[si] = nn;
+          rerender(); renderSourceArticle();
+        });
+        row.appendChild(input);
+        var rm = (U && U.IconButton) ? U.IconButton({ icon: "x", label: "Remove variant", onClick: function () {
+          setProductVariants(pid, current().filter(function (x) { return x !== v; }));
+          var si = __sourceActiveVariants.indexOf(v); if (si !== -1) __sourceActiveVariants.splice(si, 1);
+          rerender(); renderSourceArticle();
+        } }) : h("button", null, "Remove");
+        rm.classList.add("variant-editor__remove");
+        row.appendChild(rm);
+        listWrap.appendChild(row);
+      });
+    }
+    rerender();
+    var addRow = h("div", "variant-editor__add");
+    var addInput = h("input", "prop-text variant-editor__name"); addInput.type = "text"; addInput.placeholder = "New variant name";
+    function doAdd() {
+      var nn = addInput.value.trim(); if (!nn) return;
+      var list = current(); if (list.indexOf(nn) !== -1) { addInput.value = ""; return; }
+      list.push(nn); setProductVariants(pid, list); addInput.value = ""; rerender(); renderSourceArticle();
+    }
+    addInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); doAdd(); } });
+    var addBtn = (U && U.IconButton) ? U.IconButton({ icon: "plus", label: "Add variant", onClick: doAdd }) : h("button", null, "Add");
+    addRow.appendChild(addInput); addRow.appendChild(addBtn);
+    box.appendChild(addRow);
+  }
 
   // Product Rail (source-topic-content-authoring): the facets object to read/write for
   // a given column -- Flagship writes straight onto the section; a variant column
@@ -13790,7 +13872,7 @@
     // spec 2d: on a variant-bearing Product, a chip row picks which variants are shown as columns.
     // Flagship-only (no chips active) reads exactly as before; turning a variant on splits the
     // diverged nodes into columns. The column view is a read-oriented comparison (no inline edit yet).
-    if (topic.sourceMaster) { var vpills = buildVariantPillsRow(topic); if (vpills) col.appendChild(vpills); }
+    if (topic.sourceMaster) { var vbar = buildSourceVariantBar(topic); if (vbar) col.appendChild(vbar); }
     var showCols = topic.sourceMaster && __sourceActiveVariants.length > 0;
     // /verso-frontend fix: make the editable->read-only mode switch legible when comparing variants.
     if (showCols) col.appendChild(h("div", "source-doc__cols-hint", "Comparing variants — read-only. Turn variants off to edit."));

@@ -801,6 +801,12 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   `code` markup is formatted rather than shown as raw asterisks/backticks, including inside list items
   and table cells. HTML page markers like `<!-- Page 43 -->` (common in PDF-to-Markdown conversions)
   are stripped on the way in.
+- **Declaring a Product's variants.** Above the document, **Manage variants** opens a small editor to
+  add, rename, or remove the variants this Product's source carries (Flagship is always the base). It's
+  shown even when a Product has none yet, so you can declare the first one. Renaming a variant carries
+  its divergences with it; removing one just hides its column (re-add the name to bring it back). If you
+  attach a course that already has variants (Save/Recents → Promote to Product), those variant names are
+  copied onto the Product automatically.
 - **Bringing in a variant's manual.** If your Product has variants declared, importing asks first
   whether the file updates the **Flagship** (the base) or a **variant**. Choosing a variant runs a
   **combine**: it reconciles that manual against the Flagship per paragraph and previews exactly what
