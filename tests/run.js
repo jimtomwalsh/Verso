@@ -3914,7 +3914,7 @@ section("#127 blockStyles (per-type default appearance cascade)");
   // the theme panel edits captured defaults.
   ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?doc\.theme\.blockStyles = \{\};[\s\S]*?return doc\.theme\.blockStyles;/.test(e));
   ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(e) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(e));
-  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(e) && /function blockStylesEditor\(c\)/.test(e));
+  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(e) && /function blockStylesEditor\(intro, listHost\)/.test(e));
 })();
 
 // ---- #128: document + version the doc.theme design-spec contract (ADR 0002) --
@@ -3967,6 +3967,10 @@ section("#159/#163 frontend conformance gate");
       sectionGroup: n(/sectionGroup\("/g, c),          // canonical taxonomy sections (want UP)
       subHeader: n(/[^_.]sub\("/g, c),                 // raw sub("...") headers (want DOWN)
       disclosure: n(/disclosure\("/g, c),              // ad-hoc collapsibles (want DOWN)
+      // uio-O-W2 (OVL-07): the retired section chromes. One notation means these class names
+      // never come back — a second header style is how the same glyph ended up meaning
+      // "section" in one panel and "sub-section" in another.
+      retiredSection: n(/"insp-sub/g, c) + n(/"subdisc/g, c) + n(/disc__(?:head|title|body|caret)/g, c),
       // interaction-feel §2,§4: no native dialogs.
       rawDialog: n(/(?:^|[^\w.])(?:prompt|confirm)\s*\(/g, c), // raw prompt()/confirm() (want DOWN)
       // panel-ia §4: canonical controls, not hand-rolled.
@@ -3998,8 +4002,14 @@ section("#159/#163 frontend conformance gate");
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
     sectionGroup: { base: 44, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section, +1 = uio-F05 settings sheet sections)" },
-    subHeader:    { base: 28, dir: "down", enforce: true,  ticket: "#163 (residual = legit in-section sub-labels)" },
-    disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "#163 (ad-hoc collapsibles capped)" },
+    // uio-O-W2 (OVL-07) re-anchored subHeader 28 -> 0. The old floor sanctioned sub() as an
+    // "in-section label"; the overlay audit found that is exactly the third header style, so a
+    // group of rows is a section now and there is no bold heading without a chevron left.
+    subHeader:    { base: 0,  dir: "down", enforce: true,  ticket: "OVL-07 (one notation — a group of rows is a section)" },
+    // The 5 remaining disclosure() calls are ADAPTERS over that one section, not a rival
+    // chrome; the floor caps them so no sixth way to open a group appears.
+    disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "OVL-07 (named adapters over the one section)" },
+    retiredSection: { base: 0, dir: "down", enforce: true, ticket: "OVL-07 (retired chromes stay retired)" },
     rawDialog:    { base: 0,  dir: "down", enforce: true,  ticket: "#163 (#156 landed — no native dialogs)" },
     // rawSelect review landed: every editor dropdown routes through VersoUI.Select (the dsSelect
     // helper). VersoUI.Select's own h("select") lives in ui-kit.js, which this gate does not
@@ -4048,6 +4058,8 @@ section("#159/#163 frontend conformance gate");
   ok("gate trips (ENFORCED): adding a raw confirm() hard-fails the rawDialog check", !passes("rawDialog", addDialog.rawDialog) && addDialog.rawDialog === m.rawDialog + 1);
   var addSub = measure(e + '\nbody.appendChild(sub("New section"));');
   ok("gate trips (ENFORCED): adding a raw sub() header hard-fails the subHeader check", !passes("subHeader", addSub.subHeader) && addSub.subHeader === m.subHeader + 1);
+  var addRetired = measure(e + '\nbody.appendChild(h("div", "insp-sub", title));');
+  ok("gate trips (ENFORCED): reviving a retired section chrome hard-fails", !passes("retiredSection", addRetired.retiredSection) && addRetired.retiredSection === m.retiredSection + 1);
   var addSelect = measure(e + '\nvar x = h("select", "prop-select");');
   ok("gate trips (ENFORCED): adding a raw <select> hard-fails the rawSelect check", !passes("rawSelect", addSelect.rawSelect) && addSelect.rawSelect === m.rawSelect + 1);
   var addBg = measure(e + '\ncolourControl("Background", v, fn, host);');
@@ -5430,7 +5442,7 @@ section("#168 learner-nav single source");
   // The Settings 'Learner nav' tab must resolve the CANONICAL footer nav (footerCourseNav),
   // not the FIRST courseNav eachCourseNav yields (header -> footer -> pages), which drifts to
   // a legacy/header stray away from the footer nav the author edits on the canvas.
-  ok("Settings 'Learner nav' tab uses footerCourseNav (not first-found)", /key: "nav", title: "Learner nav", build: function \(host\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(e));
+  ok("Settings 'Learner nav' sections use footerCourseNav (not first-found)", /function navSettingsSections\(\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(e));
   ok("old first-found pattern is gone from the nav tab", !/title: "Learner nav"[\s\S]{0,120}eachCourseNav\(function \(x\) \{ if \(!n\) n = x; \}\)/.test(e));
   // footerCourseNav resolves ONLY the footer region's courseNav (the single creatable instance).
   var fn = slice(e, "function footerCourseNav()", "\n  }");
@@ -6270,7 +6282,7 @@ section("richer bullet lists");
   // block to/from the dedicated "list" type (was a switchEl, then an inline execCommand).
   ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
   ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
-  ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*inspector\.appendChild\(sub\("List"\)\);[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);[\s\S]*?customSelectRow\("Bullet style"/.test(e));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
   // marker settings always show for it; the TYPE-conversion toggle only shows for a
   // genuine top-level list block (gated separately, in the shared bar, on obj.type).
@@ -6290,7 +6302,7 @@ section("richer bullet lists");
   var ecss = src("editor.css");
   ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
   ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(e));
-  ok("settings PROJECT tab = the document sections (rail order)", /key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(e));
+  ok("settings PROJECT tab = the document sections (rail order)", /key: "header", title: "Header", build: buildHeaderBody[\s\S]*?key: "footer", title: "Footer"[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(e));
   // uio-F05: the 220px nav rail + one-section-at-a-time are GONE. The sheet body is one scroll
   // of canonical sectionGroups, so it reads like the inspector docked beside it.
   ok("settings sheet = ONE scroll of canonical sections, no nav rail", /function renderSettingsBody\(\)[\s\S]*?sections\.forEach\(function \(s\) \{\s*\n\s*var sec = sectionGroup\("settings:" \+ s\.key, s\.title/.test(e)
@@ -6368,7 +6380,7 @@ section("list discoverability + spacing");
   // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
   // heads only the marker-settings section, shown when the field root is a list.
   ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(e));
-  ok("List marker section is gated on rootIsList and headed by sub(List)", /if \(rootIsList\) \{\s*\n\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
+  ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);/.test(e));
   ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(e) && /block\.__priorTextType/.test(e));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();
@@ -7589,10 +7601,15 @@ section("panel-standards");
   ].forEach(function (sig) { ok("primitive present: " + sig, t.indexOf(sig) !== -1); });
   // open-state persisted (decision 2)
   ok("openSections persisted to localStorage", /authoring\.panels-open/.test(t) && /function saveOpenSections/.test(t));
-  // Header & Footer is converted: nests + switch + icon-align + eye, NO word-boolean segments
-  var region = slice(t, "function buildHeaderFooterBody", "// Page layout = per-breakpoint");
-  ok("HF: header nest", /subDisclosure\("hf\.header"/.test(region));
-  ok("HF: footer nest", /subDisclosure\("hf\.footer"/.test(region));
+  // Header & Footer is converted: switch + icon-align + eye, NO word-boolean segments.
+  // OVL-07 promoted the two nests to sheet SECTIONS of their own, so the switch/summary/Reset
+  // they carried now ride the section header (hfSectionOpts) instead of a nested twirl.
+  var region = slice(t, "function headerFooterConfig", "// Page layout = per-breakpoint");
+  ok("HF: header + footer are their own sections, switch and all",
+    /key: "header", title: "Header", build: buildHeaderBody, opts: function \(\) \{ return hfSectionOpts\(true\); \}/.test(t)
+    && /key: "footer", title: "Footer", build: buildFooterBody, opts: function \(\) \{ return hfSectionOpts\(false\); \}/.test(t));
+  ok("HF: the section header keeps the switch, the summary and Reset",
+    /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(t));
   ok("HF: switch rows (Underline/Top rule/Pin)", /switchRow\("Underline"/.test(region) && /switchRow\("Top rule"/.test(region) && /switchRow\("Pin to top"/.test(region));
   ok("HF: alignment as icon segments", /segmentedIconLive\("Align"/.test(region));
   ok("HF: disclaimer as eye", /eyeRow\("Disclaimer"/.test(region));
@@ -7607,10 +7624,11 @@ section("panel-standards");
   if (residuals.length) console.error("    offenders: " + residuals.join(" · "));
   // nav (slice 2) converted to nests
   var navRegion = slice(t, "function courseNavControls", "function navButtonsNest");
-  ok("Nav: nested (Buttons/Pill/Progression/Sections)", /subDisclosure\("nav\.buttons"/.test(t) && /subDisclosure\("nav\.pill"/.test(t) && /subDisclosure\("nav\.sections"/.test(t));
+  ok("Nav: five groups, described once (Buttons/Pill/Progression/Sections/Tour)", /key: "nav\.buttons", title: "Buttons"/.test(t) && /key: "nav\.pill", title: "Progress pill"/.test(t) && /key: "nav\.sections", title: "Sections"/.test(t));
   ok("Nav: no word booleans in courseNavControls", !/\["(off|on|show|hide)",\s*(true|false)\]/i.test(navRegion));
   // nav promoted to a TOP-LEVEL disclosure (keeps its nests at level 2, not 3-deep under Footer)
-  ok("Nav: 'Learner nav' is a settings section", /key: "nav", title: "Learner nav"/.test(t));
+  ok("Nav: with a bar its groups ARE the settings sections; with none, one that says so",
+    /key: "nav", title: "Learner nav"/.test(t) && /courseNavNests\(n\)\.map/.test(t));
   var hfChildren = slice(t, "function headerFooterChildrenEditor", "function makeCourseNav");
   ok("Nav: not rendered inline in header/footer children editor", hfChildren.indexOf("courseNavControls(") === -1);
   // issue #11 DS-conformance (panel scope): the converted Header & Footer body
@@ -7789,7 +7807,11 @@ section("onboarding tour retired");
   ok("runtime bindTour removed", rt.indexOf("function bindTour") === -1 && rt.indexOf("bindTour(root)") === -1 && rt.indexOf("bindTour: bindTour") === -1);
   ok("export no longer stamps __tour", ex.indexOf("__tour") === -1);
   ok("editor __tour hooks + buildTourBody removed", e.indexOf("__tour") === -1 && e.indexOf("buildTourBody") === -1);
-  ok("no Guided tour settings tab", e.indexOf('key: "tour"') === -1 && e.indexOf('title: "Guided tour"') === -1);
+  // The retired ONBOARDING overlay tour had its own settings tab. The learner coach-mark tour
+  // (block.tour) is a nav group, and OVL-07 made that group a section descriptor of its own.
+  ok("no Guided tour settings tab", e.indexOf('key: "tour"') === -1
+    && e.indexOf('key: "nav.tour", title: "Guided tour"') !== -1
+    && !/key: "tour", title: "Guided tour"/.test(e));
   ok("course.css tour styles removed", css.indexOf(".tour-ring") === -1 && css.indexOf(".tour-bubble") === -1 && css.indexOf(".tour-layer") === -1);
   ok("normalizeDoc strips a stale doc.tour blob", /if \(d\.tour != null\) delete d\.tour;/.test(e));
 })();
@@ -7857,7 +7879,7 @@ section("panel system v2 — layout engine");
     ok("#164: reset restores the collapsed defaults", PL.isCollapsed("Light/Dark") === true && PL.isCollapsed("Appearance") === false);
   })();
   // Phase 1b: sectionGroup wrapper + buffer emit in ranked order; edit-mode drag; layout bar
-  ok("sectionGroup tags section type + collapse from PanelLayout", /function sectionGroup\(type, title, buildFn\)[\s\S]*?setAttribute\("data-section-type", type\)[\s\S]*?window\.PanelLayout\.isCollapsed\(type\)/.test(e));
+  ok("sectionGroup tags section type + collapse from PanelLayout", /function sectionGroup\(type, title, buildFn, opts\)[\s\S]*?window\.PanelLayout\.isCollapsed\(type\)[\s\S]*?setAttribute\("data-section-type", type\)/.test(e));
   ok("endSections emits in PanelLayout order", /function endSections\(container\)[\s\S]*?window\.PanelLayout\.orderSections\(_sectionBuf\)\.forEach/.test(e));
   ok("collapse toggle persists via setCollapsed", /window\.PanelLayout\.setCollapsed\(type, nowCollapsed\)/.test(e));
   ok("edit-mode wires section drag → PanelLayout.move + re-render", /function wireSectionDrag\(container\)[\s\S]*?window\.PanelLayout\.move\(dragged, order\.indexOf\(target\)\);\s*renderInspector\(\)/.test(e));
@@ -8135,6 +8157,36 @@ section("UI kit seam");
   });
   // The boot is gated so kit mode defines primitives without booting the editor.
   ok("editor boot gated by !__KIT_MODE", /if \(!window\.__KIT_MODE\) \{[\s\S]{0,80}loadTheme\(\);/.test(e));
+  // Regression (the __kit export is boot-critical): the literal is evaluated INLINE at boot,
+  // before init, so ONE name in it that no longer exists throws a ReferenceError and kills the
+  // whole editor boot -- no top bar, no stage switch, no course switcher. That is exactly what
+  // happened when the flat sub() header was retired and `sub: sub` was left behind. Every value
+  // in the literal must still resolve, either as a local in editor.js or as a window global put
+  // there by a sibling src file (Icon comes from src/icons.js).
+  (function () {
+    var lit = /window\.__kit\s*=\s*\{([\s\S]*?)\n\s*\};/.exec(e);
+    ok("__kit export literal is parseable", !!lit);
+    if (!lit) return;
+    var globals = "";
+    ["src/icons.js", "src/render.js", "src/persist.js"].forEach(function (f) {
+      try { globals += src(f); } catch (_) {}
+    });
+    var names = [];
+    lit[1].replace(/(\w+)\s*:\s*([A-Za-z_$][\w$]*)/g, function (_, key, val) { names.push(val); return _; });
+    ok("__kit export literal has entries", names.length > 10);
+    // Match declarations at the editor IIFE's own top level only (two-space indent, the file's
+    // convention). A deeper-indented `var sub = ...` inside some unrelated function is NOT in
+    // scope at the export site, and counting it would let the exact bug through.
+    var missing = names.filter(function (n) {
+      if (new RegExp("^  (?:function|var|const|let) " + n + "\\b", "m").test(e)) return false;
+      if (new RegExp("window\\." + n + "\\s*=").test(e + globals)) return false;
+      return true;
+    });
+    ok("every __kit export resolves to a definition" + (missing.length ? " (undefined: " + missing.join(", ") + ")" : ""), missing.length === 0);
+  })();
+  // The retired flat section header must not come back: sectionGroup (via panelSection) is the
+  // ONE section implementation, so a second one can't reintroduce the mixed-chrome panels.
+  ok("flat sub() section header stays retired", !/function sub\(title\)/.test(e));
   // Regression (HTML-embed colours reverting on hard reload): boot MUST push the theme
   // into embed iframes after the initial mount — reapplyTheme is the only boot-reachable
   // caller of pushEmbedTheme (+ binds the theme-shim-ready re-push for late iframes).
@@ -8188,8 +8240,10 @@ section("UI kit seam");
   // canonical VersoUI controls (PanelSection / FieldRow / SegmentedControl /
   // Breadcrumb), matching design-system/ui_kits/editor/Inspector.jsx. Re-skin
   // only — the io.get/set + pushHistory + optionalRow wiring is unchanged.
-  ok("#14: panelSection helper delegates to VersoUI.PanelSection (returns the section body)",
-     /function panelSection\(host, title, opts\)[\s\S]{0,400}window\.VersoUI\.PanelSection\(\{ title: title[\s\S]{0,220}sec\.querySelector\("\.insp-section__body"\)/.test(e));
+  // OVL-07: panelSection is now an adapter over the ONE sectionGroup (it used to build
+  // VersoUI.PanelSection and fall back to a flat sub() header — two section chromes in a panel).
+  ok("#14: panelSection helper builds the canonical section (returns the section body)",
+     /function panelSection\(host, title, opts\)[\s\S]{0,400}sectionGroup\(null, title[\s\S]{0,300}sec\.querySelector\("\.insp-section__body"\)/.test(e));
   ok("#14: alignSeg builds a DS FieldRow + VersoUI.SegmentedControl (inline-labelled align)",
      /function alignSeg\(label, current, options, onPick\)[\s\S]{0,260}window\.VersoUI\.SegmentedControl\(\{[\s\S]{0,180}window\.VersoUI\.FieldRow\(\{ label: label/.test(e));
   ok("#14: container chrome emits sections via panelSection (not the flat sub/insp-sub header)",
@@ -8249,7 +8303,7 @@ section("UI kit seam");
   ok("frame Block level = container decl (padding/gap/radius/fill/stroke-switch)", /renderBlockTwoLevel\(node, "Card", \{ padding: true, gap: true, radius: true, fill: true, stroke: "switch" \}/.test(e));
   ok("group Block level = CONTENT_DECL (invisible, spacing+actions)", /renderBlockTwoLevel\(node, "Group", CONTENT_DECL, renderFrameContent\)/.test(e));
   ok("frame io maps padding/background/border to the real fields", /if \(k === "padX"\)[\s\S]{0,80}block\.padding[\s\S]{0,400}block\.background[\s\S]{0,200}block\.border = true/.test(e));
-  ok("frame Content = children (Inside) + actions (renderFrameContent)", /function renderFrameContent\(node\) \{[\s\S]{0,400}sub\("Inside"\)[\s\S]{0,2200}Convert to group/.test(e));
+  ok("frame Content = children (Inside) + actions (renderFrameContent)", /function renderFrameContent\(node\) \{[\s\S]{0,400}panelSection\(_frameRoot, "Inside"\)[\s\S]{0,2200}Convert to group/.test(e));
   // Ticket 7 (1/n) — image two-level (image params = content). #88: the box STROKE is
   // exposed (IMAGE_DECL) with an io mapping it to block.box so a border can be removed.
   ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(e));
@@ -8258,7 +8312,7 @@ section("UI kit seam");
   ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,1100}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
   // Ticket 7 (2/n) — text blocks (heading/paragraph/note) two-level.
   ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(e));
-  ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,200}sub\("Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
+  ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,250}panelSection\(inspector, "Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
   // Ticket 7 (3/n) — content-less blocks (spacer, divider).
   ok("renderContentlessBlock delegates to the all-in-one shell (body = specific)", /function renderContentlessBlock\(node, label, renderBody\) \{[\s\S]{0,200}renderBlockTwoLevel\(node, label, BOX_ONLY_DECL, function \(n\) \{ if \(renderBody\) renderBody\(n\); \}\)/.test(e));
   ok("spacer + divider dispatched as content-less", /if \(block\.type === "spacer"\) \{ renderContentlessBlock\(node, "Spacer", renderSpacerBody\); return; \}/.test(e) && /if \(block\.type === "divider"\) \{ renderContentlessBlock\(node, "Divider"/.test(e));
@@ -8271,10 +8325,10 @@ section("UI kit seam");
   ok("specialized inspectors omit their own head + footer (shell provides them)", (e.match(/head omitted \(two-level breadcrumb/g) || []).length >= 1 && (e.match(/footer omitted \(spacing \+ actions at Block level\)/g) || []).length >= 2);
   // Ticket 8 (4/n) — componentGrid single-level.
   ok("componentGrid dispatched single-level (renderComponentGridBody)", /if \(block\.type === "componentGrid"\) \{ renderContentlessBlock\(node, "Component grid", renderComponentGridBody\); return; \}/.test(e));
-  ok("renderComponentGridBody = grid layout (template/instances)", /function renderComponentGridBody\(node\)/.test(e) && /sub\("Grid Layout"\)/.test(e) && /Component Template/.test(e));
+  ok("renderComponentGridBody = grid layout (template/instances)", /function renderComponentGridBody\(node\)/.test(e) && /panelSection\(inspector, "Grid Layout"\)/.test(e) && /Component Template/.test(e));
   // Ticket 8 (5/n) — checkbox single-level.
   ok("checkbox dispatched single-level (renderCheckboxBody)", /if \(block\.type === "checkbox"\) \{ renderContentlessBlock\(node, "Checkbox", renderCheckboxBody\); return; \}/.test(e));
-  ok("renderCheckboxBody = acknowledgement + require-to-continue gate", /function renderCheckboxBody\(node\)/.test(e) && /sub\("Acknowledgement"\)/.test(e) && /Require to continue/.test(e));
+  ok("renderCheckboxBody = acknowledgement + require-to-continue gate", /function renderCheckboxBody\(node\)/.test(e) && /panelSection\(inspector, "Acknowledgement"\)/.test(e) && /Require to continue/.test(e));
   // Ticket 8 (6/n) — cardReveal wrapped in two-level.
   ok("cardReveal wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "cardReveal"\) \{ renderBlockTwoLevel\(node, "Card reveal", CONTENT_PURE_DECL, renderCardRevealInspector\); return; \}/.test(e));
   // Ticket 8 (7/n) — embed (htmlEmbed/webEmbed) wrapped in two-level.
@@ -10460,7 +10514,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
     /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(e));
   ok("'Add a footer nav bar in Header & Footer first' is gone", e.indexOf("Add a footer nav bar in Header & Footer first") === -1);
   ok("with no nav bar the row still shows a value plus the link that adds one",
-    /value: "Not added", linkLabel: "Header & Footer"[\s\S]{0,220}openSettingsSection\("project", "headerFooter"\)/.test(e));
+    /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(e));
   ok("'preview a variant from the top-bar switcher' is gone", e.indexOf("preview a variant from the top-bar switcher)") === -1);
   ok("the image panel shows which variant is live and opens the switcher",
     /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenu\(variantSwitchEl\)/.test(e));
@@ -10827,16 +10881,21 @@ section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
 section("uio-O-W2 section switch vs disclosure (OVL-08)");
 (function () {
   var e = src("src/editor.js"), ecss = src("editor.css");
+  // Retargeted by OVL-07: these behaviours now live on the ONE section (`.insp-section`),
+  // not on the second twirl chrome they were first built in — the claims are unchanged.
   ok("the chevron alone decides collapsed, so the switch no longer folds the section",
-    /var sec = h\("div", "subdisc" \+ \(open \? " is-open" : " is-collapsed"\) \+ \(enabled \? "" : " is-inactive"\)\);/.test(e));
+    /var collapsed = keyed[\s\S]{0,400}var enabled = opts\.toggle \? !!opts\.toggle\.get\(\) : true;/.test(e)
+    && /"insp-section"[\s\S]{0,200}\(collapsed \? " is-collapsed" : ""\)[\s\S]{0,80}\(enabled \? "" : " is-inactive"\)/.test(e));
   ok("turning a section ON no longer opens it", !/if \(v\) openSections\[key\] = true;/.test(e)
     && /opts\.toggle\.set\(v\);\s+\/\/ the switch NEVER moves the disclosure/.test(e));
-  ok("an OFF section still builds its rows, so they stay reachable", /if \(open\) \{ var body = h\("div", "subdisc__body"\); buildBody\(body\); sec\.appendChild\(body\); \}/.test(e));
+  ok("an OFF section still builds its rows, so they stay reachable",
+    /_sectionDepth\+\+;\s*\n\s*try \{ buildFn\(body\); \} catch \(e\) \{\}/.test(e)
+    && !/if \(open\) \{ var body/.test(e));
   ok("off dims but never disables — no pointer-events trap on an inactive section",
-    /\.subdisc\.is-inactive > \.subdisc__body \{ opacity: 0\.6; \}/.test(ecss)
-    && !/\.subdisc\.is-inactive[^{]*\{[^}]*pointer-events: none/.test(ecss));
-  ok("the summary shows only while collapsed", /\.subdisc\.is-open > \.subdisc__head \.subdisc__summary \{ display: none; \}/.test(ecss));
-  ok("the summary truncates rather than wrapping the header", /\.subdisc__summary \{[\s\S]{0,220}text-overflow: ellipsis;/.test(ecss));
+    /\.insp-section\.is-inactive > \.insp-section__body \{ opacity: 0\.6; \}/.test(ecss)
+    && !/\.insp-section\.is-inactive[^{]*\{[^}]*pointer-events: none/.test(ecss));
+  ok("the summary shows only while collapsed", /\.insp-section:not\(\.is-collapsed\) > \.insp-section__head \.insp-section__summary \{ display: none; \}/.test(ecss));
+  ok("the summary truncates rather than wrapping the header", /\.insp-section__summary \{[\s\S]{0,220}text-overflow: ellipsis;/.test(ecss));
   ok("the DS carries the switch/summary contract and the independence rule",
     /enabled\?: boolean;/.test(src("design-system/components/panels/PanelSection.d.ts"))
     && /summary\?: React\.ReactNode;/.test(src("design-system/components/panels/PanelSection.d.ts"))
@@ -10859,6 +10918,69 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
     && sectionSummary({ toggle: {} }, true) === "On");
   ok("without a switch there is no On/Off prefix", sectionSummary({ summary: function () { return "centred"; } }, true) === "centred");
   ok("a summary that throws costs the header nothing", sectionSummary({ summary: function () { throw new Error("x"); } }, true) === "");
+})();
+
+// ---- uio-O-W2 (OVL-07): one notation, two levels ----------------------------------
+// Header & Footer carried three header styles at once -- a triangle disclosure, a second
+// nested twirl, and a plain bold heading with no affordance -- and the same glyph meant
+// "section" in one panel and "sub-section" in another. Every group of rows is now the ONE
+// section, and sections nest one deep: a group that wants a third level is promoted.
+section("uio-O-W2 one section notation, two levels (OVL-07)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css"), ex = src("src/export.js");
+
+  // --- one notation: the rivals are gone, and the survivors are adapters, not chromes ---
+  ok("the plain bold heading is gone from the source", !/function sub\(title\)/.test(e) && !/[^_.]sub\("/.test(e));
+  ok("its class is gone from the stylesheet too, so it cannot come back by hand",
+    ecss.indexOf(".insp-sub") === -1 && ecss.indexOf(".subdisc") === -1 && ecss.indexOf(".disc__head") === -1);
+  ok("panelSection is an adapter over the one section", /function panelSection\(host, title, opts\)[\s\S]{0,400}sectionGroup\(null, title/.test(e));
+  ok("subDisclosure is an adapter that only adds a switch + summary",
+    /function subDisclosure\(key, title, buildBody, opts\)[\s\S]{0,400}return sectionGroup\(null, title, buildBody, \{[\s\S]{0,220}toggle: opts\.toggle/.test(e));
+  ok("disclosure is an adapter that only names its open-state key",
+    /function disclosure\(key, title, buildBody\) \{\s*\n\s*return sectionGroup\(null, title, buildBody, \{ key: key, defaultOpen: false \}\);/.test(e));
+  ok("the export dialog groups its rows the same way, not with its own header",
+    /function section\(title\) \{\s*\n\s*var sec = UI\.PanelSection\(\{ title: title \}\);/.test(ex) && ex.indexOf('"insp-sub"') === -1);
+  ok("one caret glyph, so 'this opens' looks the same everywhere",
+    /\.caret \{/.test(ecss) && ecss.indexOf(".disc__caret") === -1 && /details\[open\] \.caret/.test(ecss));
+
+  // --- two levels: the rule is computed, and the too-deep case is reported not dropped ---
+  var m = e.match(/\/\* @ovl07-start \*\/([\s\S]*?)\/\* @ovl07-end \*\//);
+  if (!m) { ok("locate the @ovl07 depth fence", false); return; }
+  var depthOf = new Function(m[1] + "; return sectionDepthOf;")();
+  ok("a section at the panel root is level 1", depthOf(0, 0).level === 1 && depthOf(0, 0).tooDeep === false);
+  ok("a section built inside another section's buildFn is level 2", depthOf(1, 0).level === 2 && depthOf(1, 0).tooDeep === false);
+  ok("appending into a body that is already nested is level 2 as well", depthOf(0, 1).level === 2 && depthOf(0, 1).tooDeep === false);
+  ok("the two signals overlap by one and are not double-counted", depthOf(1, 1).level === 2 && depthOf(1, 1).tooDeep === false);
+  ok("a third level is flagged, never a third style",
+    depthOf(2, 0).tooDeep === true && depthOf(0, 2).tooDeep === true && depthOf(1, 2).tooDeep === true);
+  ok("a flagged section is still drawn at level 2, so no rows are lost", depthOf(3, 2).level === 2);
+  ok("the offenders are published, so a probe can name them", /window\.__sectionDepth3 = \[\]/.test(e));
+  ok("level 2 is the same header, quieter and indented", /\.insp-section--l2 > \.insp-section__body \{[^}]*padding: 2px 0 6px 14px/.test(ecss)
+    && /\.insp-section--l2 > \.insp-section__head \.insp-section__title \{[^}]*font-size: var\(--text-xs\)/.test(ecss));
+
+  // --- promotion: the panes that used to go three deep now go two ---
+  ok("Header and Footer are sheet sections, not nests inside one",
+    /key: "header", title: "Header"/.test(e) && /key: "footer", title: "Footer"/.test(e)
+    && !/subDisclosure\("hf\.header"/.test(e));
+  ok("the nav's five groups are described once and drawn in both surfaces",
+    /function courseNavNests\(child\)/.test(e)
+    && /function courseNavControls\(child, host\) \{\s*\n\s*courseNavNests\(child\)\.forEach/.test(e)
+    && /function navSettingsSections\(\)[\s\S]{0,700}courseNavNests\(n\)\.map/.test(e));
+  ok("standing alone in the sheet a group says what it belongs to",
+    /sheetTitle: "Nav buttons"/.test(e) && /sheetTitle: "Nav sections"/.test(e));
+  ok("with no nav bar there is still one section that says so and links onward",
+    /key: "nav", title: "Learner nav"[\s\S]{0,300}value: "Not added"/.test(e));
+
+  // --- the mechanics a nested section needs ---
+  ok("a nested section stays in its parent's body, out of the panel's ordering buffer",
+    /var prevBuf = _sectionBuf; _sectionBuf = null;[\s\S]{0,200}_sectionBuf = prevBuf;/.test(e));
+  ok("a parent's roll-up counts what its nested sections resolved",
+    /if \(_scopeTally\) \[\]\.push\.apply\(_scopeTally, childTally\);/.test(e));
+  ok("the body is attached before it is built, so a nested section can see the chain",
+    /sec\.appendChild\(head\); sec\.appendChild\(body\);[\s\S]{0,420}try \{ buildFn\(body\); \}/.test(e));
+  ok("the DS states the rule the code is built to",
+    /One notation, two levels, never three/.test(src("design-system/readme.md"))
+    && /level\?: 1 \| 2;/.test(src("design-system/components/panels/PanelSection.d.ts")));
 })();
 
 // ---- uio-O-W1 (OVL-10): a scrolling body states where there is more ---------------
@@ -10910,7 +11032,7 @@ section("uio-F06 command index (Cmd-K)");
   var SOURCES = {
     settings: [
       { tab: "project", key: "motion", title: "Motion" },
-      { tab: "project", key: "headerFooter", title: "Header & Footer" },
+      { tab: "project", key: "footer", title: "Footer" },
       { tab: "project", key: "theme", title: "Theme" },
       { tab: "system", key: "canvas", title: "Canvas" }
     ],
@@ -10929,7 +11051,7 @@ section("uio-F06 command index (Cmd-K)");
   // The audit's own examples: names that are not guessable from intent.
   function firstLabel(q) { var r = g.rank(entries, q, 5); return r.length ? r[0].label : null; }
   ok("'confetti' finds Motion", firstLabel("confetti") === "Motion");
-  ok("'disclaimer' finds Header & Footer", firstLabel("disclaimer") === "Header & Footer");
+  ok("'disclaimer' finds Footer", firstLabel("disclaimer") === "Footer");
   ok("'spellcheck' finds the Canvas section on the System scope", firstLabel("spellcheck") === "Canvas");
 
   ok("an exact label still beats an alias for the same word", firstLabel("theme") === "Theme");
@@ -11157,7 +11279,7 @@ section("uio-F03 scope + inheritance model");
   // --- the DS carries the tokens + the contract this is built to ---
   ok("DS defines the one override-dot token", /--override-dot:\s*4px/.test(tokens));
   ok("both the row dot and the section dot ride that one token",
-    /\.insp-row__override-dot \{[^}]*var\(--override-dot/.test(css) && /\.subdisc__dot \{[^}]*var\(--override-dot/.test(css));
+    /\.insp-row__override-dot \{[^}]*var\(--override-dot/.test(css) && /\.insp-section__dot \{[^}]*var\(--override-dot/.test(css));
   ok("inherited scope reads in tertiary ink", /\.insp-row__scope \{[^}]*color: var\(--text-tertiary\)/.test(css));
   ok("the section roll-up is styled and goes accent when non-empty", /\.insp-section__rollup \{/.test(css) && /\.insp-section\.has-overrides \.insp-section__rollup \{[^}]*var\(--accent\)/.test(css));
   ok("the spine states the resolver is property-agnostic and forbids a parallel path", /property being\s*\n?resolved as an argument/.test(ds) && /parallel inheritance path is a hard fail/.test(ds));
@@ -11645,7 +11767,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("runtime re-clamps open labels on resize", /addEventListener\("resize", function \(\) \{ qsAll\(bar, "\.course-tour__label\.is-open"\)\.forEach\(clampTourLabel\)/.test(run));
   // editor wiring: the Guided tour nest (enable toggle + page picker + per-marker copy)
   var ed = src("src/editor.js");
-  ok("editor adds the Guided tour sub-disclosure", /subDisclosure\("nav\.tour", "Guided tour"/.test(ed));
+  ok("editor adds the Guided tour section", /key: "nav\.tour", title: "Guided tour"/.test(ed));
   ok("editor tour toggle seeds child.tour on enable", /child\.tour\.on = true;[\s\S]{0,160}child\.tour\.page = /.test(ed));
   ok("editor tour nest has a page picker + per-marker copy", /function navTourNest\(child, host\)/.test(ed) && /Show on page/.test(ed) && /headerFooterTextRow\("Title", it, "title"/.test(ed));
 })();

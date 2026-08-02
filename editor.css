@@ -257,55 +257,15 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 }
 .toolbar__doc--static { cursor: default; }
 
-/* collapsible section (twirl) */
-.disc { margin-top: 16px; border-top: 1px solid var(--border-strong); padding-top: 10px; }
-.disc__head {
-  display: flex; align-items: center; gap: 7px; width: 100%; padding: 2px 0;
-  background: none; border: none; cursor: pointer; color: var(--text-primary);
-}
-.disc__caret {
+/* uio-O-W2 (OVL-07): the one caret glyph. It marks "this opens" wherever a twirl appears --
+   the left-pane <details> groups and the model drawer -- so open/closed reads the same way
+   everywhere. The settings surfaces' own sections draw their chevron on .insp-section__twirl. */
+.caret {
   width: 0; height: 0;
   border-left: 5px solid var(--text-secondary);
   border-top: 4px solid transparent; border-bottom: 4px solid transparent;
   transition: transform 0.12s ease;
 }
-.disc.is-open .disc__caret { transform: rotate(90deg); }
-.disc__title { font-size: var(--text-sm); font-weight: 550; letter-spacing: 0; color: var(--text-primary); }
-.disc__body { padding-top: 4px; }
-
-/* SPEC-panel-cleanup: nested (level-2) twirl. A section header with an optional
-   feature switch + active-override dot + Reset on the right; body indented. */
-.subdisc { margin-top: 8px; }
-.subdisc__head { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
-.subdisc__twirl {
-  display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 0;
-  background: none; border: none; cursor: pointer; color: var(--text-primary); padding: 2px 0; text-align: left;
-}
-.subdisc.is-open > .subdisc__head .subdisc__twirl .disc__caret { transform: rotate(90deg); }
-.subdisc__title { font-size: var(--text-xs); font-weight: 550; color: var(--text-primary); }
-.subdisc.is-collapsed .subdisc__title { color: var(--text-secondary); }
-/* The section-granularity form of uio-F03's override dot — same one dot, same size token. */
-.subdisc__dot { width: var(--override-dot, 4px); height: var(--override-dot, 4px); border-radius: var(--radius-full, 50%); background: var(--accent); flex: 0 0 auto; }
-.subdisc__ctrls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.subdisc__reset {
-  font: inherit; font-size: var(--text-2xs); color: var(--text-secondary); background: none; border: none;
-  padding: 2px 4px; cursor: pointer; border-radius: 4px;
-}
-.subdisc__reset:hover { color: var(--text-primary); background: var(--surface-raised); }
-.subdisc__body { padding: 2px 0 6px 14px; border-left: 1px solid var(--border-subtle); margin-left: 4px; }
-/* uio-O-W2 (OVL-08): the collapsed section's one-line value summary. It sits between the title
-   and the controls, takes the leftover width, and truncates rather than wrapping the header. */
-.subdisc__summary {
-  flex: 1 1 auto; min-width: 0; text-align: right;
-  font-size: var(--text-xs); color: var(--text-tertiary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.subdisc.is-open > .subdisc__head .subdisc__summary { display: none; } /* open, the rows say it */
-/* An OFF section dims but stays reachable -- its rows are built and usable, so you can set up
-   what it will do before you turn it on. Never `pointer-events: none`, never disabled. */
-.subdisc.is-inactive > .subdisc__head .subdisc__title,
-.subdisc.is-inactive > .subdisc__head .subdisc__summary { color: var(--text-tertiary); }
-.subdisc.is-inactive > .subdisc__body { opacity: 0.6; }
 
 /* SPEC-panel-cleanup: the canonical boolean SWITCH (retires [Off|On] word toggles). */
 .uiswitch {
@@ -1923,20 +1883,6 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
   border: 1px solid var(--border-subtle); border-radius: 4px; padding: 1px 6px;
 }
 
-/* contextual sections. Each section header carries a full-bleed hairline
-   above it (negative margin cancels the panel's 12px pad) so the panel reads as a stack
-   of encapsulated sections — the divider sits above every section title, and the panel's
-   own border-bottom closes the last one. `.insp-sub--first` drops the rule (the crumbs
-   already cap the top). A `.insp-sub__actions` right-slot holds section-level glyphs. */
-.insp-sub {
-  display: flex; align-items: center; gap: 8px;
-  font-size: var(--text-xs); font-weight: 550; letter-spacing: 0;
-  color: var(--text-secondary);
-  margin: 0 -12px 8px; padding: 13px 12px 0;
-  border-top: 1px solid var(--border-subtle);
-}
-.insp-sub--first { border-top: none; padding-top: 2px; }
-.insp-sub__actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 /* The shared settings/overlay row (uio-F01 — the UI spine's row anatomy). One row reused
    identically across sheet / popover / inspector: fixed label column, control, optional
    inheritance tail, hover-only overflow. Width-independent by construction. */
@@ -2198,6 +2144,38 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
 .insp-section__drag { display: none; color: var(--text-secondary); cursor: grab; font-size: 14px; line-height: 1; }
 .insp-section__body { padding: 0 2px 12px; }
 .insp-section.is-collapsed .insp-section__body { display: none; }
+/* uio-O-W2 (OVL-07) — the header's remaining parts, moved here from the retired second twirl
+   so there is one section chrome rather than two that drift apart. */
+/* The section-granularity form of uio-F03's override dot — same one dot, same size token. */
+.insp-section__dot { width: var(--override-dot, 4px); height: var(--override-dot, 4px); border-radius: var(--radius-full, 50%); background: var(--accent); flex: 0 0 auto; }
+.insp-section__ctrls { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.insp-section__reset {
+  font: inherit; font-size: var(--text-2xs); color: var(--text-secondary); background: none; border: none;
+  padding: 2px 4px; cursor: pointer; border-radius: 4px;
+}
+.insp-section__reset:hover { color: var(--text-primary); background: var(--surface-raised); }
+/* uio-O-W2 (OVL-08): the collapsed section's one-line value summary. It takes the leftover
+   width to the right of the title and truncates rather than wrapping the header. */
+.insp-section__summary {
+  flex: 1 1 auto; min-width: 0; text-align: right;
+  font-size: var(--text-xs); color: var(--text-tertiary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.insp-section:not(.is-collapsed) > .insp-section__head .insp-section__summary { display: none; } /* open, the rows say it */
+/* An OFF section dims but stays reachable -- its rows are built and usable, so you can set up
+   what it will do before you turn it on. Never `pointer-events: none`, never disabled. */
+.insp-section.is-inactive > .insp-section__head .insp-section__title,
+.insp-section.is-inactive > .insp-section__head .insp-section__summary { color: var(--text-tertiary); }
+.insp-section.is-inactive > .insp-section__body { opacity: 0.6; }
+/* LEVEL 2 — a section inside a section. Same header, one step quieter and indented under its
+   parent, so nesting reads as depth rather than as a different kind of thing. There is no
+   level 3: a group that wants one is promoted to its own section (see design-system/readme.md,
+   "The UI spine" -> "One notation, two levels, never three"). */
+.insp-section--l2 { border-top: none; margin-top: 8px; }
+.insp-section--l2 > .insp-section__head { padding: 3px 0; }
+.insp-section--l2 > .insp-section__head .insp-section__title { font-size: var(--text-xs); font-weight: 550; }
+.insp-section--l2.is-collapsed > .insp-section__head .insp-section__title { color: var(--text-secondary); }
+.insp-section--l2 > .insp-section__body { padding: 2px 0 6px 14px; border-left: 1px solid var(--border-subtle); margin-left: 4px; }
 /* Edit-layout mode: reveal drag grips, quiet the twirl, show the section is draggable. */
 .is-editing ~ * .insp-section .insp-section__drag,
 .insp-section[draggable="true"] .insp-section__drag { display: inline-block; }
@@ -2336,7 +2314,7 @@ body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline
   color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: 500; margin-bottom: 0;
 }
 #model-details > summary:hover { color: var(--text-secondary); }
-#model-details > summary .disc__caret { border-left-color: var(--text-tertiary); }
+#model-details > summary .caret { border-left-color: var(--text-tertiary); }
 .panel-section #model-json {
   margin: 0;
   background: #171717;
@@ -2355,7 +2333,7 @@ summary::-webkit-details-marker {
 summary {
   list-style: none;
 }
-details[open] .disc__caret {
+details[open] .caret {
   transform: rotate(90deg);
 }
 
@@ -3081,7 +3059,6 @@ details[open] .disc__caret {
 }
 
 /* quiet section headers + inline helper text inside modals */
-.modal-box .insp-sub { margin: 18px 0 4px; padding-top: 0; border-top: none; }
 .modal-box .insp-hint {
   margin-top: 6px; padding-top: 0; border-top: none;
   font-size: var(--text-xs); color: var(--text-tertiary);
@@ -3628,8 +3605,8 @@ body.is-dragging-block * {
 .asset-group__summary::-webkit-details-marker { display: none; }
 .asset-group__summary:hover { background: var(--surface-hover); }
 .asset-group__summary:hover .asset-group__title { color: var(--text-secondary); }
-.asset-group__summary .disc__caret { transition: transform var(--dur-fast) var(--ease-standard); }
-.asset-group[open] > .asset-group__summary .disc__caret { transform: rotate(90deg); }
+.asset-group__summary .caret { transition: transform var(--dur-fast) var(--ease-standard); }
+.asset-group[open] > .asset-group__summary .caret { transform: rotate(90deg); }
 .asset-group__title {
   font: var(--type-label); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-caps);
   color: var(--text-tertiary);

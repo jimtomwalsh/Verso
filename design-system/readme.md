@@ -162,6 +162,14 @@ A section is an 11px semibold header (`--text-xs`) with a chevron, an optional s
 one-line summary when collapsed. This is the `PanelSection` / `sectionGroup` contract: a panel is
 never a stack of raw sub-headers.
 
+**One notation, two levels, never three.** A group of rows is a section — always the same
+header, always with a chevron. A bold line with no affordance, a bullet-prefixed sub-heading and
+a second twirl style are all retired: when three header styles share a pane, the same glyph ends
+up meaning "section" in one panel and "sub-section" in another, and the author has to learn which
+headers can be opened. Sections nest **one** deep. A level-2 section is the same header, quieter
+and indented under its parent. A group that wants a third level is not a sub-sub-group — it is a
+section that belongs beside its parent, so promote it. Below a section there are only plain rows.
+
 **The switch and the chevron are independent.** The chevron owns open/closed; the switch owns
 on/off. Turning a section on does not open it, and turning it off does not fold it. An **off**
 section keeps its rows built, dimmed and reachable — never removed, never `disabled` — so setting
