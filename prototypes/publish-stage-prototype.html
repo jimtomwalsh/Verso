@@ -1,0 +1,1245 @@
+<!--
+  PROTOTYPE — throwaway. Not wired into the real app, not shipped.
+  Question: within the already-locked 3-stage rail + "3 panes: pick / configure
+  / queue" model (prototypes/ia-davinci-rail-prototype.html, prototype/ia-davinci-rail
+  branch), what's the best FEATURE SET and information layout for the Publish
+  stage specifically — staleness detail, per-document export autonomy, release
+  history placement? Three structurally different takes, switchable via ?variant=.
+
+  A — Bulk pick, parallel per-row configure cards (centre = one settings card
+      per picked doc, all visible + editable at once; release history collapses
+      under the queue).
+  B — Single-document focus, step through picks one at a time (centre always
+      configures exactly one doc; release history is a separate top-level view,
+      not a pane).
+  C — Two-pane accordion: no separate configure pane at all — pick rows expand
+      inline to reveal settings; right pane stacks queue + history together.
+
+  Run: open this file directly in a browser. No build step.
+  Switch variants: ?variant=A|B|C in the URL, or the floating bottom bar,
+  or ← / → arrow keys.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Verso — Publish Stage Prototype</title>
+<style>
+  /* ===== DSLMS tokens (copied from design-system/tokens/*.css, same as
+     prototypes/ia-davinci-rail-prototype.html for visual continuity) ===== */
+  :root{
+    --gray-1000:#171717; --gray-950:#1e1e1e; --gray-900:#262626; --gray-850:#2c2c2c;
+    --gray-800:#363636; --gray-750:#444444; --gray-700:#525252; --gray-600:#6b6b6b;
+    --gray-500:#808080; --gray-400:#a3a3a3; --gray-300:#b3b3b3; --gray-200:#cfcfcf;
+    --gray-100:#e6e6e6; --gray-050:#f5f5f5; --white:#fff; --black:#000;
+    --alpha-hover:rgba(255,255,255,.06); --alpha-active:rgba(255,255,255,.10);
+    --alpha-border:rgba(255,255,255,.10); --alpha-border-strong:rgba(255,255,255,.16);
+    --blue-500:#0d99ff; --blue-600:#007be5; --blue-700:#005bb5; --blue-tint:rgba(13,153,255,.16);
+    --green-500:#14ae5c; --green-tint:rgba(20,174,92,.16);
+    --red-500:#f24822; --red-tint:rgba(242,72,34,.16);
+    --yellow-500:#ffcd29; --purple-500:#9747ff; --teal-500:#0e9384;
+
+    --surface-canvas:var(--gray-1000); --surface-app:var(--gray-950); --surface-panel:var(--gray-950);
+    --surface-raised:var(--gray-900); --surface-input:var(--gray-850);
+    --surface-hover:var(--alpha-hover); --surface-active:var(--alpha-active); --surface-selected:var(--blue-tint);
+    --text-primary:var(--gray-100); --text-secondary:var(--gray-300); --text-tertiary:var(--gray-500);
+    --text-disabled:var(--gray-600); --text-on-accent:#fff; --text-link:var(--blue-500);
+    --icon-idle:var(--gray-400); --icon-strong:var(--gray-100); --icon-on-accent:#fff;
+    --border-subtle:var(--alpha-border); --border-strong:var(--alpha-border-strong);
+    --border-input:var(--gray-750); --border-focus:var(--blue-500);
+    --accent:var(--blue-500); --accent-hover:var(--blue-600); --accent-pressed:var(--blue-700);
+    --accent-quiet:var(--blue-tint); --success:var(--green-500); --danger:var(--red-500);
+    --danger-tint:var(--red-tint); --warning:var(--yellow-500); --component:var(--purple-500);
+
+    --space-1:2px; --space-2:4px; --space-3:6px; --space-4:8px; --space-5:10px;
+    --space-6:12px; --space-8:16px; --space-10:20px; --space-12:24px; --space-16:32px;
+    --control-sm:20px; --control-md:24px; --control-lg:32px;
+    --icon-sm:12px; --icon-md:16px; --icon-lg:20px;
+    --panel-left-width:264px; --panel-right-width:280px;
+    --rail-width:48px; --toolbar-height:40px;
+
+    --font-ui:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-brand:"Exo 2",var(--font-ui);
+    --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --text-2xs:10px; --text-xs:11px; --text-sm:12px; --text-md:13px; --text-lg:16px; --text-xl:20px;
+    --weight-regular:400; --weight-medium:500; --weight-semibold:600;
+    --tracking-caps:.06em;
+
+    --radius-xs:2px; --radius-sm:4px; --radius-md:6px; --radius-lg:8px; --radius-full:999px;
+    --shadow-popover:0 2px 5px rgba(0,0,0,.28),0 0 0 1px var(--border-subtle);
+    --shadow-menu:0 4px 12px rgba(0,0,0,.36),0 0 0 1px var(--border-subtle);
+    --ease-out:cubic-bezier(0,0,.2,1); --dur-fast:120ms; --dur-base:180ms;
+  }
+  @media (prefers-color-scheme:light){
+    :root:not([data-theme="dark"]){
+      --surface-canvas:#e5e5e5; --surface-app:#fff; --surface-panel:#fff; --surface-raised:#fff;
+      --surface-input:#f5f5f5; --surface-hover:rgba(0,0,0,.05); --surface-active:rgba(0,0,0,.08);
+      --surface-selected:rgba(13,153,255,.12);
+      --text-primary:#1e1e1e; --text-secondary:#4d4d4d; --text-tertiary:#8c8c8c; --text-disabled:#b3b3b3;
+      --icon-idle:#6b6b6b; --icon-strong:#1e1e1e;
+      --border-subtle:rgba(0,0,0,.08); --border-strong:rgba(0,0,0,.14); --border-input:#d9d9d9;
+      --accent-quiet:rgba(13,153,255,.12);
+    }
+  }
+  :root[data-theme="light"]{
+    --surface-canvas:#e5e5e5; --surface-app:#fff; --surface-panel:#fff; --surface-raised:#fff;
+    --surface-input:#f5f5f5; --surface-hover:rgba(0,0,0,.05); --surface-active:rgba(0,0,0,.08);
+    --surface-selected:rgba(13,153,255,.12);
+    --text-primary:#1e1e1e; --text-secondary:#4d4d4d; --text-tertiary:#8c8c8c; --text-disabled:#b3b3b3;
+    --icon-idle:#6b6b6b; --icon-strong:#1e1e1e;
+    --border-subtle:rgba(0,0,0,.08); --border-strong:rgba(0,0,0,.14); --border-input:#d9d9d9;
+    --accent-quiet:rgba(13,153,255,.12);
+  }
+  :root[data-theme="dark"]{
+    --surface-canvas:var(--gray-1000); --surface-app:var(--gray-950); --surface-panel:var(--gray-950);
+    --surface-raised:var(--gray-900); --surface-input:var(--gray-850);
+    --surface-hover:var(--alpha-hover); --surface-active:var(--alpha-active); --surface-selected:var(--blue-tint);
+    --text-primary:var(--gray-100); --text-secondary:var(--gray-300); --text-tertiary:var(--gray-500);
+    --icon-idle:var(--gray-400); --icon-strong:var(--gray-100);
+    --border-subtle:var(--alpha-border); --border-strong:var(--alpha-border-strong); --border-input:var(--gray-750);
+    --accent-quiet:var(--blue-tint);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--surface-canvas); color:var(--text-primary);
+    font:var(--weight-regular) var(--text-xs)/1.4 var(--font-ui);
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  button{font:inherit; color:inherit; background:none; border:0; cursor:pointer;}
+  select,textarea,input{font:inherit; color:inherit;}
+  svg{display:block;}
+
+  /* ---- Prototype-only chrome ---- */
+  .proto-badge{
+    position:fixed; top:8px; right:8px; z-index:50;
+    background:var(--warning); color:#1e1e1e; font-weight:var(--weight-semibold);
+    font-size:var(--text-2xs); letter-spacing:var(--tracking-caps); text-transform:uppercase;
+    padding:3px 8px; border-radius:var(--radius-full); box-shadow:var(--shadow-popover);
+    pointer-events:none;
+  }
+  .scope-note{
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    height:100%; color:var(--text-tertiary); font-size:var(--text-xs);
+    border:1px dashed var(--border-strong); border-radius:var(--radius-md); padding:var(--space-8);
+  }
+  /* Floating variant switcher — bottom-centre, high-contrast, obviously not
+     part of the design being judged. */
+  .switcher{
+    position:fixed; left:50%; bottom:16px; transform:translateX(-50%); z-index:80;
+    display:flex; align-items:center; gap:2px; background:#0a0a0a; border:1px solid rgba(255,255,255,.18);
+    border-radius:var(--radius-full); padding:4px; box-shadow:0 6px 18px rgba(0,0,0,.5);
+  }
+  .switcher button{ width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#e6e6e6; }
+  .switcher button:hover{ background:rgba(255,255,255,.12); }
+  .switcher svg{ width:13px; height:13px; stroke:currentColor; }
+  .switcher-label{ padding:0 var(--space-6); font-size:var(--text-xs); color:#fff; white-space:nowrap; min-width:220px; text-align:center; }
+  .switcher-label b{ color:#8ec9ff; }
+
+  /* ===== App shell ===== */
+  .app{ height:100vh; display:flex; flex-direction:column; }
+  .topbar{
+    height:var(--toolbar-height); flex:0 0 auto; display:flex; align-items:center;
+    gap:var(--space-6); padding:0 var(--space-8);
+    background:var(--surface-app); border-bottom:1px solid var(--border-subtle);
+  }
+  .brand{ font:var(--weight-semibold) var(--text-md) var(--font-brand); color:var(--text-primary); letter-spacing:-.01em; flex:0 0 auto; }
+  .product-picker{ position:relative; flex:0 0 auto; }
+  .product-picker select{
+    appearance:none; height:var(--control-md); padding:0 var(--space-10) 0 var(--space-6);
+    background:var(--surface-input); border:1px solid var(--border-input); border-radius:var(--radius-sm);
+    color:var(--text-primary); font-size:var(--text-xs); min-width:168px;
+  }
+  .product-picker::after{
+    content:""; position:absolute; right:var(--space-3); top:50%; width:8px; height:8px;
+    transform:translateY(-60%) rotate(45deg); border-right:1.4px solid var(--icon-idle); border-bottom:1.4px solid var(--icon-idle);
+    pointer-events:none;
+  }
+  .topbar-spacer{ flex:1; min-width:var(--space-4); }
+  .topbar-right{ display:flex; align-items:center; gap:var(--space-4); color:var(--text-tertiary); font-size:var(--text-2xs); flex:0 0 auto; }
+  .save-dot{ width:6px; height:6px; border-radius:50%; background:var(--success); }
+
+  .body{ flex:1; display:flex; min-height:0; }
+  .rail{
+    width:var(--rail-width); flex:0 0 auto; background:var(--surface-app);
+    border-right:1px solid var(--border-subtle); display:flex; flex-direction:column;
+    align-items:center; padding:var(--space-6) 0; gap:var(--space-2);
+  }
+  .rail-stage{
+    width:36px; height:36px; border-radius:var(--radius-sm); display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:3px; color:var(--icon-idle); position:relative;
+  }
+  .rail-stage svg{ width:var(--icon-md); height:var(--icon-md); stroke:currentColor; }
+  .rail-stage span{ font-size:8px; letter-spacing:.01em; }
+  .rail-stage.is-active{ background:var(--surface-selected); color:var(--accent); }
+  .rail-stage.is-active::before{
+    content:""; position:absolute; left:-1px; top:6px; bottom:6px; width:2px;
+    background:var(--accent); border-radius:var(--radius-full);
+  }
+  .rail-stage.is-disabled{ opacity:.4; cursor:default; }
+  .rail-spacer{ flex:1; }
+
+  .workspace{ flex:1; display:flex; flex-direction:column; min-width:0; }
+  .stage{ flex:1; display:flex; min-height:0; }
+  .pane{ background:var(--surface-panel); min-height:0; display:flex; flex-direction:column; }
+  .pane-left{ width:var(--panel-left-width); flex:0 0 auto; border-right:1px solid var(--border-subtle); }
+  .pane-right{ width:var(--panel-right-width); flex:0 0 auto; border-left:1px solid var(--border-subtle); }
+  .pane-main{ flex:1; min-width:0; background:var(--surface-canvas); overflow:auto; }
+  .pane-header{
+    height:34px; flex:0 0 auto; display:flex; align-items:center; padding:0 var(--space-6);
+    font:var(--weight-semibold) var(--text-2xs)/1 var(--font-ui); letter-spacing:var(--tracking-caps);
+    text-transform:uppercase; color:var(--text-tertiary); border-bottom:1px solid var(--border-subtle); gap:var(--space-4);
+    justify-content:space-between;
+  }
+  .pane-header-tabs{ display:flex; gap:2px; }
+  .pane-header-tabs button{ padding:3px 8px; border-radius:var(--radius-sm); color:var(--text-tertiary); font-size:var(--text-2xs); letter-spacing:var(--tracking-caps); text-transform:uppercase; }
+  .pane-header-tabs button.is-on{ background:var(--surface-selected); color:var(--accent); }
+  .pane-body{ flex:1; overflow:auto; padding:var(--space-4); }
+
+  .btn{ height:var(--control-lg); padding:0 var(--space-8); border-radius:var(--radius-sm); font-size:var(--text-xs); font-weight:var(--weight-medium); display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+  .btn-primary{ background:var(--accent); color:#fff; }
+  .btn-primary:hover{ background:var(--accent-hover); }
+  .btn-primary:disabled{ background:var(--gray-700); color:var(--text-disabled); cursor:default; }
+  .btn-ghost{ border:1px solid var(--border-input); color:var(--text-secondary); }
+  .btn-ghost:hover{ color:var(--text-primary); border-color:var(--border-strong); }
+  .btn-sm{ height:24px; padding:0 8px; font-size:10px; }
+  .btn-block{ width:100%; }
+  .btn svg{ width:13px; height:13px; stroke:currentColor; }
+  .icon-btn{ width:24px; height:24px; border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:center; color:var(--icon-idle); flex:0 0 auto; }
+  .icon-btn:hover{ background:var(--surface-hover); color:var(--icon-strong); }
+  .icon-btn:disabled{ opacity:.3; cursor:default; }
+  .icon-btn:disabled:hover{ background:none; }
+  .icon-btn svg{ width:14px; height:14px; stroke:currentColor; }
+
+  .chip{
+    height:var(--control-sm); padding:0 var(--space-5); border-radius:var(--radius-full);
+    border:1px solid var(--border-input); color:var(--text-secondary); font-size:var(--text-xs);
+    display:inline-flex; align-items:center; gap:5px;
+  }
+  .chip.is-on{ background:var(--accent-quiet); border-color:var(--accent); color:var(--accent); }
+  .chip-dot{ width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .seg{ display:flex; gap:2px; background:var(--surface-input); border-radius:var(--radius-sm); padding:2px; }
+  .seg button{ padding:3px 9px; border-radius:3px; font-size:10px; color:var(--text-tertiary); }
+  .seg button.is-on{ background:var(--surface-raised); color:var(--text-primary); }
+
+  /* ---- Doc rows (pick list) ---- */
+  .doc-group-label{ padding:var(--space-5) var(--space-6) var(--space-2); font-size:var(--text-2xs); letter-spacing:var(--tracking-caps); text-transform:uppercase; color:var(--text-tertiary); }
+  .doc-row{ display:flex; align-items:center; gap:var(--space-4); padding:var(--space-4) var(--space-6); border-bottom:1px solid var(--border-subtle); }
+  .doc-row:hover{ background:var(--surface-hover); }
+  .doc-row.is-focused{ background:var(--surface-selected); }
+  .doc-check{ width:15px; height:15px; border-radius:3px; border:1px solid var(--border-input); flex:0 0 auto; display:flex; align-items:center; justify-content:center; }
+  .doc-check.is-on{ background:var(--accent); border-color:var(--accent); }
+  .doc-check svg{ width:10px; height:10px; stroke:#fff; }
+  .doc-icon{ width:26px; height:26px; border-radius:var(--radius-sm); background:var(--surface-raised); display:flex; align-items:center; justify-content:center; color:var(--icon-idle); flex:0 0 auto; }
+  .doc-icon svg{ width:14px; height:14px; stroke:currentColor; }
+  .doc-info{ flex:1; min-width:0; }
+  .doc-title{ font-size:var(--text-sm); color:var(--text-primary); font-weight:var(--weight-medium); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .doc-meta{ font-size:var(--text-2xs); color:var(--text-tertiary); text-transform:uppercase; letter-spacing:var(--tracking-caps); margin-top:2px; display:flex; align-items:center; gap:5px; }
+  .doc-row-status{ margin-top:4px; }
+  .expand-chevron{ width:11px !important; height:11px !important; flex:0 0 auto; color:var(--icon-idle) !important; transition:transform var(--dur-fast) var(--ease-out); }
+  .expand-chevron.is-open{ transform:rotate(90deg); }
+
+  /* ---- Staleness / publish-state badges (shared across variants) ---- */
+  .pub-badge{ display:inline-flex; align-items:center; gap:4px; font-size:10px; padding:1px 7px; border-radius:var(--radius-full); white-space:nowrap; }
+  .pub-badge--stale{ background:rgba(255,205,41,.16); color:var(--warning); cursor:pointer; }
+  .pub-badge--stale:hover{ background:rgba(255,205,41,.26); }
+  .pub-badge--fresh{ background:var(--green-tint); color:var(--success); }
+  .pub-badge--fresh svg{ width:9px; height:9px; stroke:currentColor; }
+  .pub-badge--never{ background:var(--surface-raised); color:var(--text-tertiary); border:1px solid var(--border-input); }
+
+  .stale-popover{
+    position:fixed; z-index:70; background:var(--surface-raised); border:1px solid var(--border-strong);
+    box-shadow:var(--shadow-menu); border-radius:var(--radius-md); padding:var(--space-5) var(--space-6);
+    font-size:var(--text-xs); color:var(--text-secondary); max-width:240px; display:none;
+  }
+  .stale-popover-title{ font-size:10px; text-transform:uppercase; letter-spacing:var(--tracking-caps); color:var(--text-tertiary); margin-bottom:var(--space-3); }
+  .stale-popover ul{ margin:0; padding-left:1.1em; }
+  .stale-popover li{ margin-bottom:3px; }
+
+  /* ---- Settings fields (shared) ---- */
+  .settings-field{ margin-bottom:var(--space-8); }
+  .settings-field label{ display:block; font-size:10px; text-transform:uppercase; letter-spacing:var(--tracking-caps); color:var(--text-tertiary); margin-bottom:var(--space-3); }
+  .settings-field select, .settings-field textarea{
+    width:100%; background:var(--surface-input); border:1px solid var(--border-input); border-radius:var(--radius-sm);
+    padding:0 var(--space-4); color:var(--text-primary); box-sizing:border-box;
+  }
+  .settings-field select{ height:var(--control-md); appearance:none; }
+  .settings-field textarea{ min-height:52px; padding:var(--space-4); resize:vertical; }
+
+  /* ---- Queue + release history (shared) ---- */
+  .queue-row{ display:flex; align-items:center; gap:var(--space-4); padding:var(--space-3) var(--space-6); border-bottom:1px solid var(--border-subtle); }
+  .queue-row .doc-title{ font-size:11px; }
+  .status-check{ width:16px; height:16px; border-radius:50%; background:var(--success); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+  .status-check svg{ width:10px; height:10px; stroke:#fff; }
+  .spinner{ width:12px; height:12px; border-radius:50%; border:2px solid var(--accent-quiet); border-top-color:var(--accent); animation:spin .7s linear infinite; flex:0 0 auto; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .pub-footer{ padding:var(--space-6); border-top:1px solid var(--border-subtle); flex:0 0 auto; }
+
+  .history-toggle{ display:flex; align-items:center; justify-content:space-between; width:100%; padding:var(--space-4) var(--space-6); color:var(--text-secondary); border-top:1px solid var(--border-subtle); }
+  .history-toggle:hover{ background:var(--surface-hover); }
+  .history-list{ display:flex; flex-direction:column; }
+  .history-entry{ border-bottom:1px solid var(--border-subtle); }
+  .history-entry-head{ display:flex; align-items:center; justify-content:space-between; padding:var(--space-4) var(--space-6); gap:var(--space-4); }
+  .history-entry-head:hover{ background:var(--surface-hover); }
+  .history-date{ font-size:var(--text-xs); color:var(--text-primary); }
+  .history-count{ font-size:10px; color:var(--text-tertiary); }
+  .history-entry-body{ padding:0 var(--space-6) var(--space-4) var(--space-10); display:flex; flex-direction:column; gap:3px; }
+  .history-item{ font-size:var(--text-2xs); color:var(--text-tertiary); display:flex; justify-content:space-between; gap:var(--space-4); }
+  .history-item b{ color:var(--text-secondary); font-weight:var(--weight-regular); }
+  .history-view{ padding:var(--space-10) var(--space-12); }
+  .history-view-title{ font:var(--weight-semibold) var(--text-lg); margin-bottom:var(--space-10); }
+  .history-table{ width:100%; border-collapse:collapse; }
+  .history-table th{ text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:var(--tracking-caps); color:var(--text-tertiary); padding:var(--space-3) var(--space-6); border-bottom:1px solid var(--border-strong); }
+  .history-table td{ padding:var(--space-4) var(--space-6); border-bottom:1px solid var(--border-subtle); font-size:var(--text-xs); color:var(--text-secondary); vertical-align:top; }
+  .history-table tr:hover td{ background:var(--surface-hover); }
+
+  /* ---- Variant A: per-row configure cards ---- */
+  .a-configure-head{ display:flex; align-items:center; justify-content:space-between; padding:var(--space-8) var(--space-10) var(--space-4); }
+  .a-configure-title{ font:var(--weight-semibold) var(--text-md); }
+  .a-cards{ padding:0 var(--space-10) var(--space-10); display:flex; flex-direction:column; gap:var(--space-6); }
+  .a-card{ background:var(--surface-panel); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:var(--space-6); }
+  .a-card-head{ display:flex; align-items:center; gap:var(--space-4); margin-bottom:var(--space-6); }
+  .a-card-title{ font-size:var(--text-sm); color:var(--text-primary); font-weight:var(--weight-medium); flex:1; }
+  .a-card-fields{ display:grid; grid-template-columns:1fr 1fr; gap:var(--space-6); margin-bottom:var(--space-6); }
+  .a-card-fields .settings-field{ margin-bottom:0; }
+
+  /* Round 2 — multi-format chips, per-variant save path, advanced twirl-down */
+  .a-format-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .a-format-chips .chip{ position:relative; }
+  .a-format-chips .chip:disabled{ opacity:.7; cursor:default; }
+  .a-aspirational-dot{ color:var(--warning); margin-left:3px; font-weight:var(--weight-semibold); }
+
+  .a-path-row{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); padding:var(--space-4) 0; border-top:1px solid var(--border-subtle); }
+  .a-path-row:first-of-type{ border-top:0; }
+  .a-path-main{ min-width:0; flex:1; }
+  .a-path-label{ font-size:10px; text-transform:uppercase; letter-spacing:var(--tracking-caps); color:var(--text-tertiary); margin-bottom:2px; }
+  .a-path-value{ font-size:var(--text-xs); color:var(--text-secondary); font-family:var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .a-path-value--unset{ color:var(--text-tertiary); font-family:var(--font-ui); font-style:italic; }
+  .a-filename-preview{ font-size:10px; color:var(--text-tertiary); margin-top:3px; line-height:1.5; }
+  .a-path-actions{ display:flex; align-items:center; gap:var(--space-3); flex:0 0 auto; }
+  .a-path-remembered{ width:16px; height:16px; border-radius:50%; background:var(--green-tint); color:var(--success); display:flex; align-items:center; justify-content:center; }
+  .a-path-remembered svg{ width:9px; height:9px; stroke:currentColor; }
+
+  .a-adv-toggle{ display:flex; align-items:center; gap:var(--space-3); color:var(--text-tertiary); font-size:var(--text-xs); padding:var(--space-3) 0; margin-top:var(--space-2); }
+  .a-adv-toggle:hover{ color:var(--text-primary); }
+  .a-adv-body{ display:flex; flex-direction:column; gap:var(--space-3); padding:var(--space-4); margin-bottom:var(--space-2); background:var(--surface-raised); border-radius:var(--radius-sm); }
+  .a-adv-field{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); font-size:var(--text-xs); color:var(--text-secondary); }
+  .a-adv-field[data-aspirational]{ color:var(--text-tertiary); }
+  .a-adv-select{ height:var(--control-sm); background:var(--surface-input); border:1px solid var(--border-input); border-radius:var(--radius-sm); color:var(--text-primary); font-size:10px; padding:0 4px; }
+  .a-adv-number{ width:64px; height:var(--control-sm); background:var(--surface-input); border:1px solid var(--border-input); border-radius:var(--radius-sm); color:var(--text-primary); font-size:10px; padding:0 4px; }
+
+  /* ---- Variant B: single-focus stepper ---- */
+  .b-view-tabs{ display:flex; gap:2px; padding:var(--space-4) var(--space-6) 0; }
+  .b-view-tabs button{ padding:5px 10px; border-radius:var(--radius-sm) var(--radius-sm) 0 0; font-size:var(--text-2xs); text-transform:uppercase; letter-spacing:var(--tracking-caps); color:var(--text-tertiary); }
+  .b-view-tabs button.is-on{ background:var(--surface-panel); color:var(--text-primary); }
+  .b-stepper{ display:flex; align-items:center; justify-content:center; gap:var(--space-6); padding:var(--space-8) var(--space-10) 0; }
+  .b-stepper-count{ font-size:var(--text-xs); color:var(--text-tertiary); min-width:64px; text-align:center; }
+  .b-focus-card{ max-width:420px; margin:var(--space-8) auto 0; padding:0 var(--space-10) var(--space-10); }
+  .b-focus-title{ font:var(--weight-semibold) var(--text-lg); margin-bottom:var(--space-2); text-align:center; }
+  .b-focus-meta{ text-align:center; color:var(--text-tertiary); font-size:var(--text-xs); margin-bottom:var(--space-8); }
+  .b-focus-meta .pub-badge{ margin-left:6px; vertical-align:middle; }
+
+  /* ---- Variant C: accordion pick+configure ---- */
+  .c-row-wrap{ border-bottom:1px solid var(--border-subtle); }
+  .c-row-settings{ padding:var(--space-5) var(--space-6) var(--space-6) 46px; background:var(--surface-raised); }
+  .c-row-settings .settings-field{ margin-bottom:var(--space-5); }
+  .c-history-section{ flex:0 0 auto; max-height:38%; overflow:auto; border-top:1px solid var(--border-subtle); }
+
+  ::-webkit-scrollbar{ width:9px; height:9px; }
+  ::-webkit-scrollbar-thumb{ background:var(--border-strong); border-radius:5px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+</style>
+</head>
+<body>
+<div class="proto-badge">Prototype — Publish stage, not final</div>
+<div class="app" id="app"></div>
+<div class="stale-popover" id="stale-popover"></div>
+
+<script>
+/* ---------------------------------------------------------------------
+   Icons — no external icon font / CDN.
+--------------------------------------------------------------------- */
+const ICON = {
+  layers:`<path d="M8 2 2 5l6 3 6-3-6-3Z"/><path d="m2 8 6 3 6-3"/><path d="m2 11 6 3 6-3"/>`,
+  pencil:`<path d="m11.5 2.5 2 2L5 13l-3 1 1-3 8.5-8.5Z"/>`,
+  send:`<path d="M14 2 6 10"/><path d="M14 2 9.5 14l-2-4-4-2L14 2Z"/>`,
+  search:`<circle cx="6.5" cy="6.5" r="4.5"/><path d="m13 13-3-3"/>`,
+  x:`<path d="m2 2 10 10M12 2 2 12"/>`,
+  plus:`<path d="M7 1.5v11M1.5 7h11"/>`,
+  chevronRight:`<path d="m5 3 4 4-4 4"/>`,
+  chevronLeft:`<path d="m11 3-4 4 4 4"/>`,
+  check:`<path d="M2 6.5 5 9.5 10 3.5"/>`,
+  fileText:`<path d="M4 1.5h5l3 3v9.5H4v-13Z"/><path d="M9 1.5V4.5H12"/><path d="M6 8h4M6 10.5h4"/>`,
+  monitor:`<rect x="2" y="2.5" width="12" height="8" rx="1"/><path d="M5.5 13.5h5M8 10.5v3"/>`,
+  slides:`<rect x="1.5" y="3" width="13" height="8.5" rx="1"/><path d="M4.5 6h4M4.5 8h6"/>`,
+  history:`<path d="M2.5 8a5.5 5.5 0 1 0 1.9-4.1"/><path d="M1.8 3v2.4h2.4"/><path d="M8 5v3l2 1.2"/>`,
+};
+function icon(name, cls=""){
+  return `<svg class="${cls}" viewBox="0 0 16 16" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${ICON[name]||""}</svg>`;
+}
+
+/* ---------------------------------------------------------------------
+   Fictional, hygiene-safe sample content (generic industrial hardware
+   documentation — no real products, no proprietary terminology).
+--------------------------------------------------------------------- */
+const PRODUCTS = [
+  { id:"meridian", name:"Meridian 400", color:"#0d99ff" },
+  { id:"solace",   name:"Solace X2",    color:"#9747ff" },
+];
+
+const DOC_KIND_ICON = { Print:"fileText", eLearning:"monitor", Presentation:"slides" };
+// Round 2 feedback: output to several formats from one card at once (Presentation ->
+// PDF + PPTX + Keynote together). Real pipeline today only ships SCORM 1.2 — everything
+// else here is aspirational, marked with data-real="0" so it reads as a design probe,
+// not a claim it already works (src/export.js has no PDF/PPTX/Keynote/InDesign pipeline).
+const FORMATS_BY_KIND = {
+  Print:[{ f:"PDF", real:false }, { f:"InDesign package", real:false }],
+  eLearning:[{ f:"SCORM 1.2 package", real:true }],
+  Presentation:[{ f:"PPTX", real:false }, { f:"PDF", real:false }, { f:"Keynote", real:false }],
+};
+const VARIANT_SCOPES = ["Flagship only", "All variants"];
+// Named variants per product, reused from prototypes/ia-davinci-rail-prototype.html —
+// "All variants" scope needs one save-path row per name here (James: variants produce
+// separate files, so they need separate paths).
+const PRODUCT_VARIANTS = { meridian:["Extended Range","Compact"], solace:["Extended Range","Compact"] };
+
+// Advanced (twirl-down) fields per doc kind. eLearning's list is pulled straight from
+// src/export.js's real defaultOptions() (embedFonts, optimiseMedia, maxImageDim,
+// imageQuality, externalizeMedia, scrollbar, learnerTheme, webVideo, reviewFile) — real
+// today. Print/Presentation fields are plausible but invented (aspirational, real:false),
+// since no print/presentation export pipeline exists yet.
+const ADVANCED_FIELDS = {
+  eLearning:[
+    { key:"embedFonts", label:"Embed fonts", type:"toggle", default:true, real:true },
+    { key:"optimiseMedia", label:"Optimise media", type:"toggle", default:true, real:true },
+    { key:"maxImageDim", label:"Max image dimension (px)", type:"number", default:2000, real:true },
+    { key:"imageQuality", label:"Image quality", type:"number", default:0.85, step:0.05, real:true },
+    { key:"externalizeMedia", label:"Externalize media (smaller index.html)", type:"toggle", default:true, real:true },
+    { key:"scrollbar", label:"Show scrollbar", type:"toggle", default:true, real:true },
+    { key:"learnerTheme", label:"Allow learner theme switch", type:"toggle", default:false, real:true },
+    { key:"webVideo", label:"Web video", type:"select", options:["link","local"], default:"link", real:true },
+    { key:"reviewFile", label:"Include review snapshot", type:"toggle", default:false, real:true },
+  ],
+  Print:[
+    { key:"bleed", label:"Include bleed", type:"toggle", default:false, real:false },
+    { key:"slug", label:"Include slug", type:"toggle", default:false, real:false },
+    { key:"cropMarks", label:"Crop marks", type:"toggle", default:false, real:false },
+  ],
+  Presentation:[
+    { key:"speakerNotes", label:"Include speaker notes", type:"toggle", default:true, real:false },
+    { key:"slideSize", label:"Slide size", type:"select", options:["16:9","4:3"], default:"16:9", real:false },
+  ],
+};
+
+// staleCount:null + noLinkedGT:true -> no badge at all (spec story 12).
+// lastPublishedAt:null -> "Never published" (story 10), distinct from staleCount 0 (story 7/10).
+const DOCS = [
+  { id:"d1", title:"Meridian 400 — Installation Guide", product:"meridian", kind:"Print",
+    lastPublishedAt:"18 Jul 2026", staleCount:3, lastFormat:"PDF", lastVariant:"All variants",
+    staleTopics:["Power Requirements","Mounting & Enclosure","Firmware Update Procedure"] },
+  { id:"d2", title:"Meridian 400 — Field Technician Course", product:"meridian", kind:"eLearning",
+    lastPublishedAt:"24 Jul 2026", staleCount:0, lastFormat:"SCORM 1.2 package", lastVariant:"All variants", staleTopics:[] },
+  { id:"d3", title:"Solace X2 — Sales Overview", product:"solace", kind:"Presentation",
+    lastPublishedAt:null, staleCount:null, lastFormat:"PPTX", lastVariant:"Flagship only", staleTopics:[] },
+  { id:"d4", title:"Solace X2 — Facilitator Guide", product:"solace", kind:"Print",
+    lastPublishedAt:"10 Jul 2026", staleCount:1, lastFormat:"PDF", lastVariant:"All variants",
+    staleTopics:["Safety Interlocks"] },
+  { id:"d5", title:"Meridian 400 — Quick Reference Card", product:"meridian", kind:"Print",
+    lastPublishedAt:"20 Jul 2026", staleCount:null, lastFormat:"PDF", lastVariant:"Flagship only",
+    noLinkedGT:true, staleTopics:[] },
+];
+
+const RELEASES = [
+  { id:"r2", createdAt:"24 Jul 2026 · 09:14", entries:[
+      { doc:"d2", format:"SCORM 1.2 package", variant:"All variants" },
+      { doc:"d1", format:"PDF", variant:"All variants" },
+  ] },
+  { id:"r1", createdAt:"10 Jul 2026 · 15:40", entries:[
+      { doc:"d4", format:"PDF", variant:"All variants" },
+  ] },
+];
+
+function productOf(id){ return PRODUCTS.find(p=>p.id===id); }
+function docOf(id){ return DOCS.find(d=>d.id===id); }
+function filteredDocs(){ return state.product==="all" ? DOCS : DOCS.filter(d=>d.product===state.product); }
+function groupedByProduct(docs){
+  const out = [];
+  PRODUCTS.forEach(p=>{
+    const ds = docs.filter(d=>d.product===p.id);
+    if(ds.length) out.push({ product:p, docs:ds });
+  });
+  return out;
+}
+
+function stalenessKind(d){
+  if(d.noLinkedGT) return "none";
+  if(d.lastPublishedAt===null) return "never";
+  if(d.staleCount===0) return "fresh";
+  return "stale";
+}
+function stalenessBadge(d){
+  const k = stalenessKind(d);
+  if(k==="none") return "";
+  if(k==="never") return `<span class="pub-badge pub-badge--never">Never published</span>`;
+  if(k==="fresh") return `<span class="pub-badge pub-badge--fresh">${icon("check")}Up to date</span>`;
+  return `<span class="pub-badge pub-badge--stale" data-stale-doc="${d.id}">${d.staleCount} topic${d.staleCount>1?"s":""} changed</span>`;
+}
+
+/* ---------------------------------------------------------------------
+   State — one slice per variant so switching A/B/C never loses the
+   in-progress picks of the variant you switched away from.
+--------------------------------------------------------------------- */
+const VARIANTS = ["A","B","C"];
+const VARIANT_NAMES = { A:"Bulk cards", B:"Single-focus stepper", C:"Accordion, no configure pane" };
+
+function freshQueueState(){ return { queue:[], status:{} }; }
+
+const state = {
+  variant: (new URLSearchParams(location.search).get("variant") || "A").toUpperCase(),
+  product: "all",
+  a: {
+    picked: new Set(), ...freshQueueState(),
+    scope: {},    // docId -> "Flagship only" | "All variants"
+    formats: {},  // docId -> Set of selected format strings
+    paths: {},    // docId -> { variantName: pathString }
+    advOpen: new Set(), // docIds with the advanced twirl-down open
+    advVals: {},  // docId -> { fieldKey: value }
+  },
+  b: { picked: new Set(), focusIdx: 0, view:"publish", ...freshQueueState() },
+  c: { expanded: null, picked: new Set(), ...freshQueueState() },
+};
+if(!VARIANTS.includes(state.variant)) state.variant = "A";
+
+/* ---------------------------------------------------------------------
+   Variant A helpers — per-card format/scope/path/advanced state, all
+   lazily defaulted so a freshly-picked doc reads sensibly immediately.
+--------------------------------------------------------------------- */
+function aFormatsFor(d){
+  if(!state.a.formats[d.id]){
+    state.a.formats[d.id] = new Set([d.lastFormat]);
+  }
+  return state.a.formats[d.id];
+}
+function aScopeFor(d){ return state.a.scope[d.id] || d.lastVariant; }
+function aPathsFor(d){ return (state.a.paths[d.id] ||= {}); }
+function aVariantNamesFor(d){
+  const scope = aScopeFor(d);
+  if(scope !== "All variants") return ["Flagship"];
+  return ["Flagship", ...(PRODUCT_VARIANTS[d.product] || [])];
+}
+function aAdvValsFor(d){
+  if(!state.a.advVals[d.id]){
+    const defaults = {};
+    (ADVANCED_FIELDS[d.kind]||[]).forEach(f=>{ defaults[f.key] = f.default; });
+    state.a.advVals[d.id] = defaults;
+  }
+  return state.a.advVals[d.id];
+}
+// Mirrors src/export.js's suggestVersion()/packageName() so the filename preview
+// isn't invented — same "V001 -> V002" scheme, same auto-avoid-overwrite mechanism.
+function aSuggestVersion(d){
+  const m = String(d.lastFormat && d.staleCount!==null ? "V003" : "V001").match(/^(.*?)(\d+)(\D*)$/);
+  return m ? m[1] + String(parseInt(m[2],10) + (stalenessKind(d)==="never"?0:1)).padStart(m[2].length,"0") + m[3] : "V001";
+}
+function aFileExt(format){
+  if(format==="SCORM 1.2 package") return ".zip";
+  if(format==="InDesign package") return ".indd.zip";
+  if(format==="PPTX") return ".pptx";
+  if(format==="Keynote") return ".key";
+  return ".pdf";
+}
+function aPackageName(d, format, variantName){
+  const code = d.title.split(" — ")[0].toLowerCase().replace(/[^a-z0-9]+/g,"");
+  const ver = aSuggestVersion(d);
+  const parts = [code, ver];
+  if(variantName && variantName!=="Flagship") parts.push(variantName.toLowerCase().replace(/[^a-z0-9]+/g,"-"));
+  return parts.join("_") + aFileExt(format);
+}
+
+/* ---------------------------------------------------------------------
+   Shell — topbar + rail identical across variants for real-app context.
+--------------------------------------------------------------------- */
+function render(){
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    ${renderTopbar()}
+    <div class="body">
+      ${renderRail()}
+      <div class="workspace"><main class="stage">${renderVariant()}</main></div>
+    </div>
+    ${renderSwitcher()}
+  `;
+  wireShell();
+  if(state.variant==="A") wireA();
+  if(state.variant==="B") wireB();
+  if(state.variant==="C") wireC();
+  wireStalePopovers();
+}
+
+function renderTopbar(){
+  return `
+  <header class="topbar">
+    <div class="brand">Verso.</div>
+    <div class="product-picker">
+      <select id="product-select">
+        <option value="all" ${state.product==="all"?"selected":""}>All products</option>
+        ${PRODUCTS.map(p=>`<option value="${p.id}" ${state.product===p.id?"selected":""}>${p.name}</option>`).join("")}
+      </select>
+    </div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-right"><span class="save-dot"></span> Saved 14:02</div>
+  </header>`;
+}
+
+function renderRail(){
+  return `
+  <nav class="rail">
+    <button class="rail-stage is-disabled" title="Source (not part of this prototype)">${icon("layers")}<span>Source</span></button>
+    <button class="rail-stage is-disabled" title="Edit (not part of this prototype)">${icon("pencil")}<span>Edit</span></button>
+    <button class="rail-stage is-active" title="Publish">${icon("send")}<span>Publish</span></button>
+    <div class="rail-spacer"></div>
+  </nav>`;
+}
+
+function renderSwitcher(){
+  return `
+  <div class="switcher">
+    <button id="sw-prev" title="Previous variant (←)">${icon("chevronLeft")}</button>
+    <div class="switcher-label"><b>${state.variant}</b> — ${VARIANT_NAMES[state.variant]}</div>
+    <button id="sw-next" title="Next variant (→)">${icon("chevronRight")}</button>
+  </div>`;
+}
+
+function wireShell(){
+  document.getElementById("product-select").onchange = e=>{ state.product = e.target.value; render(); };
+  const cycle = dir=>{
+    const i = VARIANTS.indexOf(state.variant);
+    state.variant = VARIANTS[(i + dir + VARIANTS.length) % VARIANTS.length];
+    const url = new URL(location); url.searchParams.set("variant", state.variant);
+    history.replaceState(null, "", url);
+    render();
+  };
+  document.getElementById("sw-prev").onclick = ()=>cycle(-1);
+  document.getElementById("sw-next").onclick = ()=>cycle(1);
+}
+document.addEventListener("keydown", e=>{
+  const t = e.target;
+  if(t && (t.tagName==="INPUT" || t.tagName==="TEXTAREA" || t.isContentEditable)) return;
+  if(e.key==="ArrowLeft") document.getElementById("sw-prev")?.click();
+  if(e.key==="ArrowRight") document.getElementById("sw-next")?.click();
+});
+
+function wireStalePopovers(){
+  const pop = document.getElementById("stale-popover");
+  document.querySelectorAll("[data-stale-doc]").forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      const d = docOf(el.dataset.staleDoc);
+      pop.innerHTML = `<div class="stale-popover-title">Changed since last publish</div>
+        <ul>${d.staleTopics.map(t=>`<li>${t}</li>`).join("")}</ul>`;
+      const r = el.getBoundingClientRect();
+      pop.style.left = r.left + "px";
+      pop.style.top = (r.bottom + 6) + "px";
+      pop.style.display = "block";
+    };
+  });
+  document.addEventListener("click", ()=>{ pop.style.display="none"; }, { once:true });
+}
+
+function renderVariant(){
+  if(state.variant==="A") return renderA();
+  if(state.variant==="B") return renderB();
+  return renderC();
+}
+
+/* Shared queue-running simulation, parameterised per variant's state slice. */
+function runPublish(slice){
+  const ids = slice.queue.filter(id => slice.status[id] !== "done").map(q=>q);
+  ids.forEach(id=> slice.status[id] = "running");
+  render();
+  ids.forEach((id, i)=>{
+    setTimeout(()=>{ slice.status[id] = "done"; render(); }, 450 + i*400);
+  });
+}
+
+/* =======================================================================
+   VARIANT A — Bulk pick, parallel per-row configure cards.
+   Every picked doc gets its own settings card in the centre, all visible
+   and editable simultaneously; "Add all" plus per-card "Add" buttons.
+   Release history collapses under the queue in the right pane.
+======================================================================= */
+function renderA(){
+  const docs = filteredDocs();
+  const groups = groupedByProduct(docs);
+  return `
+  <div class="pane pane-left">
+    <div class="pane-header">Select to publish</div>
+    <div class="pane-body" style="padding:0">
+      ${groups.map(g=>`
+        <div class="doc-group-label">${g.product.name}</div>
+        ${g.docs.map(d=>renderPickRow(d, state.a.picked)).join("")}
+      `).join("")}
+    </div>
+  </div>
+  <div class="pane-main">${renderACenter()}</div>
+  <div class="pane pane-right">${renderQueueAndHistory(state.a, "history-a")}</div>`;
+}
+
+function renderPickRow(d, pickedSet){
+  const p = productOf(d.product);
+  const checked = pickedSet.has(d.id);
+  return `<div class="doc-row">
+    <button class="doc-check ${checked?"is-on":""}" data-pick="${d.id}">${checked?icon("check"):""}</button>
+    <div class="doc-icon">${icon(DOC_KIND_ICON[d.kind])}</div>
+    <div class="doc-info">
+      <div class="doc-title">${d.title}</div>
+      <div class="doc-meta"><span style="color:${p.color}">${p.name}</span>·${d.kind}</div>
+      <div class="doc-row-status">${stalenessBadge(d)}</div>
+    </div>
+  </div>`;
+}
+
+function renderACenter(){
+  const picked = Array.from(state.a.picked).map(docOf);
+  if(!picked.length){
+    return `<div class="pane-header">Configure</div>
+    <div class="scope-note" style="margin:var(--space-10);height:200px">Select one or more documents on the left — each gets its own export settings here.</div>`;
+  }
+  return `
+  <div class="a-configure-head">
+    <div class="a-configure-title">Configure — ${picked.length} selected</div>
+    <button class="btn btn-primary btn-sm" id="a-add-all">${icon("plus")}Add all ${picked.length} to queue</button>
+  </div>
+  <div style="padding:0 var(--space-10) var(--space-6);font-size:10px;color:var(--text-tertiary)">
+    Round 2 — save path + auto-version, per-variant paths, multi-format. <span style="color:var(--warning)">*</span> = design probe, no real pipeline yet.
+  </div>
+  <div class="a-cards">
+    ${picked.map(d=>renderACard(d)).join("")}
+  </div>`;
+}
+
+function renderACard(d){
+  const inQueue = state.a.queue.includes(d.id);
+  const formats = FORMATS_BY_KIND[d.kind];
+  const selectedFormats = aFormatsFor(d);
+  const scope = aScopeFor(d);
+  const variantNames = aVariantNamesFor(d);
+  const paths = aPathsFor(d);
+  const advFields = ADVANCED_FIELDS[d.kind] || [];
+  const advOpen = state.a.advOpen.has(d.id);
+  const advVals = aAdvValsFor(d);
+
+  return `<div class="a-card" data-a-card="${d.id}">
+    <div class="a-card-head">
+      <div class="doc-icon">${icon(DOC_KIND_ICON[d.kind])}</div>
+      <div class="a-card-title">${d.title}</div>
+      ${stalenessBadge(d)}
+    </div>
+
+    <div class="settings-field">
+      <label>Export format${formats.length>1?" — pick one or several":""}</label>
+      <div class="a-format-chips">
+        ${formats.map(fo=>`
+          <button class="chip ${selectedFormats.has(fo.f)?"is-on":""}" data-a-format-toggle="${d.id}:${fo.f}" ${(formats.length===1)?"disabled":""}>
+            ${selectedFormats.has(fo.f)?icon("check"):""}${fo.f}${!fo.real?`<span class="a-aspirational-dot" title="Not built yet — no ${fo.f} pipeline in the real app">*</span>`:""}
+          </button>`).join("")}
+      </div>
+    </div>
+
+    <div class="settings-field">
+      <label>Variant scope</label>
+      <select data-a-variant="${d.id}">${VARIANT_SCOPES.map(v=>`<option ${v===scope?"selected":""}>${v}</option>`).join("")}</select>
+    </div>
+
+    <div class="settings-field">
+      <label>Save to${variantNames.length>1?" — one path per variant":""}</label>
+      ${variantNames.map(vn=>renderAPathRow(d, vn, paths, Array.from(selectedFormats))).join("")}
+    </div>
+
+    ${advFields.length ? `
+    <button class="a-adv-toggle" data-a-adv-toggle="${d.id}">
+      ${icon("chevronRight","expand-chevron"+(advOpen?" is-open":""))}
+      Advanced ${d.kind} settings
+    </button>
+    ${advOpen ? `<div class="a-adv-body">
+      ${advFields.map(f=>renderAdvField(d, f, advVals)).join("")}
+    </div>` : ""}
+    ` : ""}
+
+    <button class="btn ${inQueue?"btn-ghost":"btn-primary"} btn-sm" data-a-add="${d.id}" ${inQueue?"disabled":""} style="margin-top:var(--space-4)">
+      ${inQueue?`${icon("check")}In queue`:`${icon("plus")}Add to queue`}
+    </button>
+  </div>`;
+}
+
+function renderAPathRow(d, variantName, paths, formats){
+  const path = paths[variantName];
+  const filenames = formats.map(f=>aPackageName(d, f, variantName));
+  return `<div class="a-path-row">
+    <div class="a-path-main">
+      <div class="a-path-label">${variantName}</div>
+      ${path
+        ? `<div class="a-path-value" title="${path}">${path}</div>`
+        : `<div class="a-path-value a-path-value--unset">No folder chosen — will download instead</div>`}
+      <div class="a-filename-preview">${filenames.map(fn=>`→ ${fn}`).join("<br>")}</div>
+    </div>
+    <div class="a-path-actions">
+      ${path ? `<span class="a-path-remembered" title="Remembered — used automatically next time">${icon("check")}</span>` : ""}
+      <button class="btn btn-ghost btn-sm" data-a-path="${d.id}:${variantName}">${path?"Change":"Choose folder…"}</button>
+    </div>
+  </div>`;
+}
+
+function renderAdvField(d, f, advVals){
+  const val = advVals[f.key];
+  const dim = f.real ? "" : ` data-aspirational="1" title="Design probe — not wired to a real export setting yet"`;
+  if(f.type==="toggle"){
+    return `<div class="a-adv-field"${dim}>
+      <button class="doc-check ${val?"is-on":""}" data-a-adv="${d.id}:${f.key}">${val?icon("check"):""}</button>
+      <span>${f.label}${!f.real?" *":""}</span>
+    </div>`;
+  }
+  if(f.type==="select"){
+    return `<div class="a-adv-field"${dim}>
+      <span>${f.label}${!f.real?" *":""}</span>
+      <select class="a-adv-select" data-a-adv-select="${d.id}:${f.key}">
+        ${f.options.map(o=>`<option ${o===val?"selected":""}>${o}</option>`).join("")}
+      </select>
+    </div>`;
+  }
+  return `<div class="a-adv-field"${dim}>
+    <span>${f.label}${!f.real?" *":""}</span>
+    <input class="a-adv-number" type="number" step="${f.step||1}" value="${val}" data-a-adv-number="${d.id}:${f.key}" />
+  </div>`;
+}
+
+function wireA(){
+  document.querySelectorAll("[data-pick]").forEach(el=>{
+    el.onclick = ()=>{ toggleSet(state.a.picked, el.dataset.pick); render(); };
+  });
+  const addAll = document.getElementById("a-add-all");
+  if(addAll) addAll.onclick = ()=>{
+    state.a.picked.forEach(id=>{ if(!state.a.queue.includes(id)) state.a.queue.push(id); });
+    render();
+  };
+  document.querySelectorAll("[data-a-add]").forEach(el=>{
+    el.onclick = ()=>{
+      const id = el.dataset.aAdd;
+      if(!state.a.queue.includes(id)) state.a.queue.push(id);
+      render();
+    };
+  });
+  document.querySelectorAll("[data-a-format-toggle]").forEach(el=>{
+    el.onclick = ()=>{
+      const [id, format] = el.dataset.aFormatToggle.split(":");
+      const set = aFormatsFor(docOf(id));
+      if(set.has(format)){ if(set.size>1) set.delete(format); } else set.add(format);
+      render();
+    };
+  });
+  document.querySelectorAll("[data-a-variant]").forEach(el=>{
+    el.onchange = ()=>{ state.a.scope[el.dataset.aVariant] = el.value; render(); };
+  });
+  document.querySelectorAll("[data-a-path]").forEach(el=>{
+    el.onclick = ()=>{
+      const [id, variantName] = el.dataset.aPath.split(":");
+      const paths = aPathsFor(docOf(id));
+      const next = prompt("Choose a save folder for " + variantName + " (mocked — real app uses the browser's folder picker):", paths[variantName] || "/Volumes/Shared/Exports/" + variantName.replace(/\s+/g,""));
+      if(next){ paths[variantName] = next; render(); }
+    };
+  });
+  document.querySelectorAll("[data-a-adv-toggle]").forEach(el=>{
+    el.onclick = ()=>{
+      const id = el.dataset.aAdvToggle;
+      if(state.a.advOpen.has(id)) state.a.advOpen.delete(id); else state.a.advOpen.add(id);
+      render();
+    };
+  });
+  document.querySelectorAll("[data-a-adv]").forEach(el=>{
+    el.onclick = ()=>{
+      const [id, key] = el.dataset.aAdv.split(":");
+      const vals = aAdvValsFor(docOf(id));
+      vals[key] = !vals[key];
+      render();
+    };
+  });
+  document.querySelectorAll("[data-a-adv-select]").forEach(el=>{
+    el.onchange = ()=>{
+      const [id, key] = el.dataset.aAdvSelect.split(":");
+      aAdvValsFor(docOf(id))[key] = el.value;
+    };
+  });
+  document.querySelectorAll("[data-a-adv-number]").forEach(el=>{
+    el.onchange = ()=>{
+      const [id, key] = el.dataset.aAdvNumber.split(":");
+      aAdvValsFor(docOf(id))[key] = parseFloat(el.value);
+    };
+  });
+  wireQueueAndHistory(state.a, "history-a");
+}
+
+/* =======================================================================
+   VARIANT B — Single-document focus, step through picks one at a time.
+   Centre never shows more than one document's settings. Release history
+   is promoted to a top-level view (a tab), not a pane at all.
+======================================================================= */
+function renderB(){
+  if(state.b.view==="history") return renderBHistoryView();
+  const docs = filteredDocs();
+  const groups = groupedByProduct(docs);
+  const pickedList = Array.from(state.b.picked);
+  return `
+  <div class="pane pane-left">
+    <div class="pane-header">
+      Select to publish
+      <div class="pane-header-tabs">
+        <button class="is-on" data-b-view="publish">Publish</button>
+        <button data-b-view="history">${icon("history")}History</button>
+      </div>
+    </div>
+    <div class="pane-body" style="padding:0">
+      ${groups.map(g=>`
+        <div class="doc-group-label">${g.product.name}</div>
+        ${g.docs.map(d=>renderBPickRow(d)).join("")}
+      `).join("")}
+    </div>
+  </div>
+  <div class="pane-main">${renderBCenter(pickedList)}</div>
+  <div class="pane pane-right">${renderQueueOnly(state.b)}</div>`;
+}
+
+function renderBPickRow(d){
+  const p = productOf(d.product);
+  const checked = state.b.picked.has(d.id);
+  const focused = pickedIdAt(state.b.focusIdx) === d.id;
+  return `<div class="doc-row ${focused?"is-focused":""}" data-b-focus-row="${d.id}">
+    <button class="doc-check ${checked?"is-on":""}" data-pick="${d.id}">${checked?icon("check"):""}</button>
+    <div class="doc-icon">${icon(DOC_KIND_ICON[d.kind])}</div>
+    <div class="doc-info">
+      <div class="doc-title">${d.title}</div>
+      <div class="doc-meta"><span style="color:${p.color}">${p.name}</span>·${d.kind}</div>
+      <div class="doc-row-status">${stalenessBadge(d)}</div>
+    </div>
+  </div>`;
+}
+
+function pickedIdAt(idx){
+  const list = Array.from(state.b.picked);
+  return list[idx];
+}
+
+function renderBCenter(pickedList){
+  if(!pickedList.length){
+    return `<div class="pane-header">Configure</div>
+    <div class="scope-note" style="margin:var(--space-10);height:200px">Select one or more documents on the left — you'll configure them one at a time here.</div>`;
+  }
+  if(state.b.focusIdx >= pickedList.length) state.b.focusIdx = pickedList.length - 1;
+  const id = pickedList[state.b.focusIdx];
+  const d = docOf(id);
+  const p = productOf(d.product);
+  const inQueue = state.b.queue.includes(d.id);
+  return `
+  <div class="pane-header" style="justify-content:center">Configure</div>
+  <div class="b-stepper">
+    <button class="icon-btn" id="b-prev" ${state.b.focusIdx===0?"disabled":""}>${icon("chevronLeft")}</button>
+    <div class="b-stepper-count">${state.b.focusIdx+1} of ${pickedList.length}</div>
+    <button class="icon-btn" id="b-next" ${state.b.focusIdx===pickedList.length-1?"disabled":""}>${icon("chevronRight")}</button>
+  </div>
+  <div class="b-focus-card">
+    <div class="doc-icon" style="width:40px;height:40px;margin:0 auto var(--space-5)">${icon(DOC_KIND_ICON[d.kind])}</div>
+    <div class="b-focus-title">${d.title}</div>
+    <div class="b-focus-meta"><span style="color:${p.color}">${p.name}</span> · ${d.kind}${stalenessBadge(d)}</div>
+    <div class="settings-field">
+      <label>Export format</label>
+      <select id="b-format">${FORMATS_BY_KIND[d.kind].map(fo=>`<option ${fo.f===d.lastFormat?"selected":""}>${fo.f}</option>`).join("")}</select>
+    </div>
+    <div class="settings-field">
+      <label>Variant scope</label>
+      <select id="b-variant">${VARIANT_SCOPES.map(v=>`<option ${v===d.lastVariant?"selected":""}>${v}</option>`).join("")}</select>
+    </div>
+    <button class="btn ${inQueue?"btn-ghost":"btn-primary"} btn-block" id="b-add" ${inQueue?"disabled":""}>
+      ${inQueue?`${icon("check")}In queue`:`${icon("plus")}Add to queue`}
+    </button>
+  </div>`;
+}
+
+function renderBHistoryView(){
+  return `
+  <div class="pane pane-left">
+    <div class="pane-header">
+      Select to publish
+      <div class="pane-header-tabs">
+        <button data-b-view="publish">Publish</button>
+        <button class="is-on" data-b-view="history">${icon("history")}History</button>
+      </div>
+    </div>
+    <div class="scope-note" style="margin:var(--space-6)">Switch back to Publish to pick documents.</div>
+  </div>
+  <div class="pane-main">
+    <div class="history-view">
+      <div class="history-view-title">Release history</div>
+      <table class="history-table">
+        <thead><tr><th>Released</th><th>Documents</th><th>Format</th><th>Variant scope</th></tr></thead>
+        <tbody>
+          ${RELEASES.flatMap(r=>r.entries.map((e,i)=>`
+            <tr>
+              <td>${i===0?r.createdAt:""}</td>
+              <td>${docOf(e.doc)?.title || e.doc}</td>
+              <td>${e.format}</td>
+              <td>${e.variant}</td>
+            </tr>`)).join("")}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="pane pane-right">${renderQueueOnly(state.b)}</div>`;
+}
+
+function renderQueueOnly(slice){
+  const anyRunning = Object.values(slice.status).some(s=>s==="running");
+  return `
+  <div class="pane-header">Queue (${slice.queue.length})</div>
+  <div class="pane-body" style="padding:0">
+    ${slice.queue.length
+      ? slice.queue.map(id=>renderQueueRow(docOf(id), slice)).join("")
+      : `<div class="scope-note" style="height:120px;margin:var(--space-4)">Nothing queued yet</div>`}
+  </div>
+  <div class="pub-footer">
+    <button class="btn btn-primary btn-block" id="publish-btn" ${(!slice.queue.length || anyRunning)?"disabled":""}>
+      ${anyRunning ? `<span class="spinner"></span>Publishing…` : `${icon("send")}Publish queue`}
+    </button>
+  </div>`;
+}
+
+function wireB(){
+  document.querySelectorAll("[data-b-view]").forEach(el=>{
+    el.onclick = ()=>{ state.b.view = el.dataset.bView; render(); };
+  });
+  document.querySelectorAll("[data-pick]").forEach(el=>{
+    el.onclick = ()=>{
+      toggleSet(state.b.picked, el.dataset.pick);
+      state.b.focusIdx = Math.max(0, Array.from(state.b.picked).indexOf(el.dataset.pick));
+      render();
+    };
+  });
+  document.querySelectorAll("[data-b-focus-row]").forEach(el=>{
+    el.onclick = (e)=>{
+      if(e.target.closest("[data-pick]")) return;
+      const idx = Array.from(state.b.picked).indexOf(el.dataset.bFocusRow);
+      if(idx>=0){ state.b.focusIdx = idx; render(); }
+    };
+  });
+  const prev = document.getElementById("b-prev"); if(prev) prev.onclick = ()=>{ state.b.focusIdx--; render(); };
+  const next = document.getElementById("b-next"); if(next) next.onclick = ()=>{ state.b.focusIdx++; render(); };
+  const add = document.getElementById("b-add");
+  if(add) add.onclick = ()=>{
+    const id = pickedIdAt(state.b.focusIdx);
+    if(!state.b.queue.includes(id)) state.b.queue.push(id);
+    const list = Array.from(state.b.picked);
+    if(state.b.focusIdx < list.length - 1) state.b.focusIdx++;
+    render();
+  };
+  wireQueueOnly(state.b);
+}
+
+/* =======================================================================
+   VARIANT C — Two-pane accordion. No separate configure pane at all:
+   clicking a row expands it inline to reveal settings + its own "Add to
+   queue" button. Right pane stacks Queue on top of Release history.
+======================================================================= */
+function renderC(){
+  const docs = filteredDocs();
+  const groups = groupedByProduct(docs);
+  return `
+  <div class="pane pane-left" style="width:calc(var(--panel-left-width) + 120px)">
+    <div class="pane-header">Publish — click a document to configure</div>
+    <div class="pane-body" style="padding:0">
+      ${groups.map(g=>`
+        <div class="doc-group-label">${g.product.name}</div>
+        ${g.docs.map(d=>renderCRow(d)).join("")}
+      `).join("")}
+    </div>
+  </div>
+  <div class="pane pane-main" style="flex:1;display:flex;flex-direction:column">
+    <div class="pane" style="flex:1;min-height:0">${renderQueueAndHistoryC(state.c)}</div>
+  </div>`;
+}
+
+function renderCRow(d){
+  const p = productOf(d.product);
+  const checked = state.c.picked.has(d.id);
+  const open = state.c.expanded === d.id;
+  const inQueue = state.c.queue.includes(d.id);
+  return `<div class="c-row-wrap">
+    <div class="doc-row" data-c-toggle="${d.id}" style="cursor:pointer">
+      <button class="doc-check ${checked?"is-on":""}" data-pick="${d.id}">${checked?icon("check"):""}</button>
+      <div class="doc-icon">${icon(DOC_KIND_ICON[d.kind])}</div>
+      <div class="doc-info">
+        <div class="doc-title">${d.title}</div>
+        <div class="doc-meta"><span style="color:${p.color}">${p.name}</span>·${d.kind}</div>
+        <div class="doc-row-status">${stalenessBadge(d)}</div>
+      </div>
+      ${icon("chevronRight", "expand-chevron"+(open?" is-open":""))}
+    </div>
+    ${open ? `
+    <div class="c-row-settings">
+      <div class="settings-field">
+        <label>Export format</label>
+        <select data-c-format="${d.id}">${FORMATS_BY_KIND[d.kind].map(fo=>`<option ${fo.f===d.lastFormat?"selected":""}>${fo.f}</option>`).join("")}</select>
+      </div>
+      <div class="settings-field">
+        <label>Variant scope</label>
+        <select data-c-variant="${d.id}">${VARIANT_SCOPES.map(v=>`<option ${v===d.lastVariant?"selected":""}>${v}</option>`).join("")}</select>
+      </div>
+      <button class="btn ${inQueue?"btn-ghost":"btn-primary"} btn-sm" data-c-add="${d.id}" ${inQueue?"disabled":""}>
+        ${inQueue?`${icon("check")}In queue`:`${icon("plus")}Add to queue`}
+      </button>
+    </div>` : ""}
+  </div>`;
+}
+
+function renderQueueAndHistoryC(slice){
+  const anyRunning = Object.values(slice.status).some(s=>s==="running");
+  return `
+  <div class="pane-header">Queue (${slice.queue.length})</div>
+  <div class="pane-body" style="padding:0;flex:1">
+    ${slice.queue.length
+      ? slice.queue.map(id=>renderQueueRow(docOf(id), slice)).join("")
+      : `<div class="scope-note" style="height:100px;margin:var(--space-4)">Nothing queued yet — expand a document on the left to add it.</div>`}
+  </div>
+  <div class="pub-footer">
+    <button class="btn btn-primary btn-block" id="publish-btn" ${(!slice.queue.length || anyRunning)?"disabled":""}>
+      ${anyRunning ? `<span class="spinner"></span>Publishing…` : `${icon("send")}Publish queue`}
+    </button>
+  </div>
+  <div class="c-history-section">
+    <div class="pane-header">Release history</div>
+    <div class="history-list">${RELEASES.map(r=>renderHistoryEntry(r, "history-c")).join("")}</div>
+  </div>`;
+}
+
+function wireC(){
+  document.querySelectorAll("[data-pick]").forEach(el=>{
+    el.onclick = (e)=>{ e.stopPropagation(); toggleSet(state.c.picked, el.dataset.pick); render(); };
+  });
+  document.querySelectorAll("[data-c-toggle]").forEach(el=>{
+    el.onclick = (e)=>{
+      if(e.target.closest("[data-pick]") || e.target.closest(".c-row-settings")) return;
+      const id = el.dataset.cToggle;
+      state.c.expanded = state.c.expanded===id ? null : id;
+      render();
+    };
+  });
+  document.querySelectorAll("[data-c-add]").forEach(el=>{
+    el.onclick = (e)=>{
+      e.stopPropagation();
+      const id = el.dataset.cAdd;
+      if(!state.c.queue.includes(id)) state.c.queue.push(id);
+      render();
+    };
+  });
+  wireQueueOnly(state.c);
+  wireHistoryToggles("history-c");
+}
+
+/* ---------------------------------------------------------------------
+   Shared queue-row + release-history renderers/wiring (A and shared bits).
+--------------------------------------------------------------------- */
+function renderQueueRow(d, slice){
+  if(!d) return "";
+  const p = productOf(d.product);
+  const status = slice.status[d.id];
+  // Only Variant A tracks per-doc save paths (the feature James asked for) — show
+  // where each queued item will actually land, since "hit publish, it saves where
+  // it needs to" is the whole point of the feature.
+  const destLine = (slice === state.a) ? renderQueueDest(d) : "";
+  return `<div class="queue-row">
+    <div class="doc-icon" style="width:22px;height:22px">${icon(DOC_KIND_ICON[d.kind])}</div>
+    <div class="doc-info">
+      <div class="doc-title">${d.title}</div>
+      <div class="doc-meta" style="color:${p.color}">${p.name}</div>
+      ${destLine}
+    </div>
+    ${status==="running" ? `<span class="spinner"></span>`
+      : status==="done" ? `<span class="status-check">${icon("check")}</span>`
+      : `<button class="icon-btn" data-queue-remove="${d.id}" title="Remove">${icon("x")}</button>`}
+  </div>`;
+}
+
+function renderQueueDest(d){
+  const names = aVariantNamesFor(d);
+  const paths = aPathsFor(d);
+  const set = names.map(n=>{
+    const p = paths[n];
+    return p ? `${n}: ${p.split("/").slice(-2).join("/")}` : `${n}: Downloads`;
+  }).join(" · ");
+  return `<div class="doc-meta" style="text-transform:none;letter-spacing:0;color:var(--text-tertiary)">→ ${set}</div>`;
+}
+
+function renderQueueAndHistory(slice, historyId){
+  const anyRunning = Object.values(slice.status).some(s=>s==="running");
+  return `
+  <div class="pane-header">Queue (${slice.queue.length})</div>
+  <div class="pane-body" style="padding:0">
+    ${slice.queue.length
+      ? slice.queue.map(id=>renderQueueRow(docOf(id), slice)).join("")
+      : `<div class="scope-note" style="height:100px;margin:var(--space-4)">Nothing queued yet</div>`}
+  </div>
+  <div class="pub-footer">
+    <button class="btn btn-primary btn-block" id="publish-btn" ${(!slice.queue.length || anyRunning)?"disabled":""}>
+      ${anyRunning ? `<span class="spinner"></span>Publishing…` : `${icon("send")}Publish queue`}
+    </button>
+  </div>
+  <div class="history-list">${RELEASES.map(r=>renderHistoryEntry(r, historyId)).join("")}</div>`;
+}
+
+const historyOpen = {}; // per-list-id -> Set of open release ids (module-level, survives re-render)
+function renderHistoryEntry(r, listId){
+  historyOpen[listId] ||= new Set();
+  const open = historyOpen[listId].has(r.id);
+  return `<div class="history-entry">
+    <div class="history-entry-head" data-history-toggle="${listId}:${r.id}">
+      <div><div class="history-date">${r.createdAt}</div><div class="history-count">${r.entries.length} document${r.entries.length>1?"s":""}</div></div>
+      ${icon("chevronRight", "expand-chevron"+(open?" is-open":""))}
+    </div>
+    ${open ? `<div class="history-entry-body">
+      ${r.entries.map(e=>`<div class="history-item"><b>${docOf(e.doc)?.title || e.doc}</b><span>${e.format}</span></div>`).join("")}
+    </div>` : ""}
+  </div>`;
+}
+function wireHistoryToggles(listId){
+  document.querySelectorAll(`[data-history-toggle^="${listId}:"]`).forEach(el=>{
+    el.onclick = ()=>{
+      const rid = el.dataset.historyToggle.split(":")[1];
+      historyOpen[listId] ||= new Set();
+      if(historyOpen[listId].has(rid)) historyOpen[listId].delete(rid); else historyOpen[listId].add(rid);
+      render();
+    };
+  });
+}
+
+function wireQueueAndHistory(slice, historyId){
+  wireQueueOnly(slice);
+  wireHistoryToggles(historyId);
+}
+function wireQueueOnly(slice){
+  document.querySelectorAll("[data-queue-remove]").forEach(el=>{
+    el.onclick = ()=>{
+      const id = el.dataset.queueRemove;
+      slice.queue = slice.queue.filter(x=>x!==id);
+      delete slice.status[id];
+      render();
+    };
+  });
+  const pubBtn = document.getElementById("publish-btn");
+  if(pubBtn) pubBtn.onclick = ()=>runPublish(slice);
+}
+
+function toggleSet(set, id){ if(set.has(id)) set.delete(id); else set.add(id); }
+
+render();
+</script>
+</body>
+</html>
