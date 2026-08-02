@@ -673,6 +673,32 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
    step, the spine's own language for a resolved value you did not set. */
 .publish-chip--static { cursor: default; color: var(--text-tertiary, var(--text-secondary)); }
 .publish-chip--static:hover { color: var(--text-tertiary, var(--text-secondary)); border-color: var(--border-subtle); }
+/* T3 (product-rail-publish-queue-t3-save-path): a destination is now a real choice, so its chip is a
+   real control — the same chip chrome, keeping the interactive affordances the static one gave up.
+   A path is long and a queue row is narrow, so it truncates from the LEFT: the folder that matters
+   when you are scanning a queue is the leaf, not the volume it sits on. */
+.publish-chip--dest { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The Product folder, in the pane head beside the queue's own actions. It carries the same chip
+   chrome as the rows it governs, so the inheritance reads as one family rather than a separate
+   setting bolted above them. */
+.publish-chip--root { flex: 0 0 auto; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One path row per output inside the destination popover: the output's name and where it lands,
+   the filename it will write, then its two verbs. Popover rows, so they follow the shared row
+   anatomy (label column, canonical control) rather than inventing a layout. */
+.chrome-pop--publish-dest { min-width: 300px; max-width: 380px; }
+.publish-destrow { padding: 8px 0; border-top: 1px solid var(--border-subtle); }
+.publish-destrow:first-of-type { border-top: 0; }
+.publish-destrow__head { display: flex; align-items: baseline; gap: 8px; line-height: 1.5; }
+.publish-destrow__name { font-size: var(--text-xs, 11px); font-weight: 600; color: var(--text-primary); flex: 0 0 auto; }
+/* The resolved path. An INHERITED one sits back one ink step — the spine's own language for a value
+   you did not set — while an override reads at chrome baseline. */
+/* The path WRAPS rather than truncating: inside the popover there is room for it, and the folder an
+   author is about to write into is the one thing here that must not be guessed at from an ellipsis. */
+.publish-destrow__path { font-size: var(--text-2xs); color: var(--text-secondary); flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.publish-destrow__path.is-inherited { color: var(--text-tertiary, var(--text-secondary)); }
+.publish-destrow__file { font-size: var(--text-2xs); color: var(--text-tertiary, var(--text-secondary)); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.publish-destrow__acts { display: flex; gap: 6px; margin-top: 6px; }
+.publish-destrow__replace { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
 .publish-queuerow.is-running .publish-chip { cursor: default; opacity: 0.7; }
 .publish-queuerow.is-running { border-color: var(--accent); }
 .publish-queuerow.is-running .publish-queuerow__status { color: var(--accent); }

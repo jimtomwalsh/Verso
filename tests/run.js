@@ -7906,7 +7906,7 @@ section("panel system v2 — layout engine");
   ok("renderToolbarPipeline renders into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
   ok("the overflow lists every OUTBOUND pipeline action + Publish to Viewer", /var items = outbound\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
   ok("#pipeline-actions is gone from the rail (relocated to the Publish stage)", !/id="pipeline-actions"/.test(src("index.html")) && !/left-rail__pipeline/.test(src("index.html")));
-  ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,260}renderToolbarPipeline\(\);/.test(e));
+  ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,600}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
   // Phase 6 (D7): raw window.prompt/confirm replaced by shared in-app modals
   ok("promptModal + confirmModal route through the DS modal shell (VersoUI.Modal via dsModalShell)", /function dsModalShell\(opts\)[\s\S]*?window\.VersoUI\.Modal\([\s\S]*?function promptModal\(title, label, initial, onOk, subtitle\)[\s\S]*?dsModalShell\(\{[\s\S]*?function confirmModal\(title, message, onOk, opts\)[\s\S]*?dsModalShell\(\{/.test(e));
@@ -8926,7 +8926,7 @@ section("Product Rail: Publish queue store (T1)");
   var e = src("src/editor.js");
   ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(e));
   ok("the queue persists through the durable key/value writer", /writeStore\(localStorage, PUBLISH_QUEUE_KEY, JSON\.stringify\(PQ\.toJSON\(__publishQueue\)\)\)/.test(e));
-  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
+  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
   ok("index.html loads publish-queue.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/publish-queue.js") > -1 && idx.indexOf("src/publish-queue.js") < idx.indexOf("src/editor.js");
   })());
@@ -8953,9 +8953,9 @@ section("Product Rail: Release history store (whole-family export)");
 
   // Editor wiring: the store loads/saves through the durable seam, and a run writes exactly one record.
   ok("release history loads + persists through the durable key/value seam", /RELEASE_HISTORY_KEY = "authoring.releaseHistory"/.test(e) && /writeStore\(localStorage, RELEASE_HISTORY_KEY, JSON\.stringify\(RH\.toJSON\(__releaseHistory\)\)\)/.test(e));
-  ok("runPublishQueue accumulates a release entry per row and appends ONE record on finish", /runEntries\.push\(releaseEntryForRow\(row, res\)\);/.test(e) && /if \(runEntries\.length && window\.ReleaseHistory\) \{[\s\S]{0,220}ReleaseHistory\.append\(releaseHistory\(\), \{ productId: getActiveProduct\(\), createdAt: Date\.now\(\), entries: runEntries \}\);/.test(e));
-  ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row, result\)[\s\S]{0,700}exportFormat: opts\.format[\s\S]{0,400}groundTruthVersions: gtv/.test(e));
-  ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row, res\)\);[\s\S]{0,200}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
+  ok("runPublishQueue accumulates a release entry per row and appends ONE record on finish", /runEntries\.push\(releaseEntryForRow\(row, res, variant\)\);/.test(e) && /if \(runEntries\.length && window\.ReleaseHistory\) \{[\s\S]{0,220}ReleaseHistory\.append\(releaseHistory\(\), \{ productId: getActiveProduct\(\), createdAt: Date\.now\(\), entries: runEntries \}\);/.test(e));
+  ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row, result, variant\)[\s\S]{0,700}exportFormat: opts\.format[\s\S]{0,400}groundTruthVersions: gtv/.test(e));
+  ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row, res, variant\)\);[\s\S]{0,600}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
   // uio-P-C03 flipped the DEFAULT: reverse-chron and per-release expansion are unchanged, but the
   // section is now open and fills the pane's empty half instead of hiding collapsed below the queue.
   ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
@@ -9012,7 +9012,7 @@ section("Product Rail: Publish presets (T2)");
 
   // Editor wiring (grep guards -- the dropdown + modal are browser-verified)
   var e = src("src/editor.js");
-  ok("the run loop packages each row with its resolved preset options, not bare defaults", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e));
+  ok("the run loop packages each row with its resolved preset options, not bare defaults", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e));
   ok("publishOptionsForRow merges the preset overrides onto defaultOptions()", /Object\.assign\(base, PP\.optionsFor\(publishPresets\(\), row\.preset \|\| "master"\)\)/.test(e));
   ok("adding a doc recalls its last-used preset (zero-config re-queue)", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e));
   ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
@@ -9024,6 +9024,111 @@ section("Product Rail: Publish presets (T2)");
   ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
   // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
   ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\);/.test(e) && !/Send to publish — coming soon/.test(e));
+})();
+
+// ---- product-rail-publish-queue-t3: remembered save path + version preview ----
+// A published package now has somewhere to land and a name that steps. The model holds the Product
+// ROOT folder every output inherits, the per-output OVERRIDE, and the version ledger; the File System
+// Access handles live in IndexedDB under the keys this model computes, so the model stays pure.
+// Grilled decisions it encodes: one folder pick per Product (not per row), and never a silent
+// overwrite -- a new incremented version by default, overwrite only on an explicit per-row opt-in.
+section("Product Rail: Publish save paths + version ledger (T3)");
+(function () {
+  var PA = require(path.join(ROOT, "src/publish-paths.js"));
+  var e = src("src/editor.js"), css = src("editor.css");
+
+  // --- keys: one output = one document + one variant ---
+  ok("a path key is doc + variant, and flagship is the empty variant", PA.pathKey("D1", "coastal") === "D1::coastal" && PA.pathKey("D1", null) === "D1::" && PA.pathKey("D1", "") === "D1::");
+  ok("a variant keys separately from its flagship, so the two never share a folder or a version", PA.pathKey("D1", null) !== PA.pathKey("D1", "coastal"));
+  ok("handle keys are namespaced so publish handles can't collide with the backup/review ones", PA.rootHandleKey("prodA") === "publish:root:prodA" && PA.rowHandleKey("D1::") === "publish:row:D1::");
+
+  // --- the tidy tree an inherited root nests into ---
+  ok("folder segments are Product / doc-variant", (function () { var s = PA.folderSegments("Acme Product Line", "ACME-101", "coastal"); return s.length === 2 && s[0] === "Acme-Product-Line" && s[1] === "ACME-101-coastal"; })());
+  ok("a flagship contributes no variant suffix", PA.folderSegments("Acme", "ACME-101", null).join("/") === "Acme/ACME-101");
+  ok("a blank product name contributes no segment rather than a folder called '-'", PA.folderSegments("", "ACME-101", null).join("/") === "ACME-101" && PA.folderSegments("///", "ACME-101", null).join("/") === "ACME-101");
+  ok("unsafe characters are scrubbed and a nameless document still gets a folder", PA.folderSafe("A/B:C*?") === "A-B-C" && PA.folderSegments("P", "", null)[1] === "document");
+
+  // --- resolution: override > inherited root > download ---
+  var s = PA.create();
+  var ctx = { productId: "prodA", productName: "Acme", docId: "D1", docCode: "ACME-101", variant: null };
+  ok("nothing set means the output downloads (blank until set -- no invented convention)", (function () { var d = PA.resolve(s, ctx); return d.kind === "download" && d.label === "Downloads" && d.handleKey === null; })());
+  ok("the download destination says why in words an author can read", /downloads/i.test(PA.resolve(s, ctx).hint));
+  PA.setRoot(s, "prodA", "Drops");
+  ok("a Product root is inherited by the output and nests into Product/doc-variant", (function () {
+    var d = PA.resolve(s, ctx);
+    return d.kind === "root" && d.inherited === true && d.label === "Drops" && d.segments.join("/") === "Acme/ACME-101" && d.chip === "Drops/Acme/ACME-101/" && d.handleKey === "publish:root:prodA";
+  })());
+  ok("ONE root pick covers every output -- a variant inherits it too, into its own subfolder", (function () {
+    var d = PA.resolve(s, { productId: "prodA", productName: "Acme", docId: "D1", docCode: "ACME-101", variant: "coastal" });
+    return d.kind === "root" && d.chip === "Drops/Acme/ACME-101-coastal/";
+  })());
+  PA.setRowPath(s, PA.pathKey("D1", null), "Elsewhere");
+  ok("a per-output path OVERRIDES the inherited root, and writes straight in (no nesting)", (function () {
+    var d = PA.resolve(s, ctx);
+    return d.kind === "row" && d.inherited === false && d.chip === "Elsewhere/" && d.segments.length === 0 && d.handleKey === "publish:row:D1::";
+  })());
+  ok("the override is per-output: the variant beside it still inherits the root", PA.resolve(s, { productId: "prodA", productName: "Acme", docId: "D1", docCode: "ACME-101", variant: "coastal" }).kind === "root");
+  ok("clearing the override falls back to the root, not to download", (function () { PA.clearRowPath(s, PA.pathKey("D1", null)); return PA.resolve(s, ctx).kind === "root"; })());
+  ok("clearing the root falls its outputs back to download", (function () { PA.clearRoot(s, "prodA"); return PA.resolve(s, ctx).kind === "download"; })());
+  ok("resolve degrades on junk instead of throwing", PA.resolve(null, null).kind === "download" && PA.resolve(PA.create(), {}).kind === "download");
+
+  // --- the version ledger: never a silent overwrite ---
+  var suggest = function (last) { return last ? last.replace(/(\d+)$/, function (n) { return String(+n + 1).padStart(n.length, "0"); }) : "V001"; };
+  var v = PA.create(), k = PA.pathKey("D1", null);
+  ok("nothing published yet starts at V001", PA.nextVersion(v, k, { suggest: suggest }) === "V001" && PA.lastVersion(v, k) === null);
+  PA.recordVersion(v, k, "V001");
+  ok("the default steps to a new version every run (the previous export survives)", PA.nextVersion(v, k, { suggest: suggest }) === "V002");
+  ok("'replace current version' reuses the last one -- the only way to overwrite, and it is opt-in", PA.nextVersion(v, k, { replace: true, suggest: suggest }) === "V001");
+  ok("replace on an output that never published still starts at V001 rather than reusing nothing", PA.nextVersion(v, PA.pathKey("D9", null), { replace: true, suggest: suggest }) === "V001");
+  ok("a variant versions independently of its flagship", (function () { PA.recordVersion(v, PA.pathKey("D1", "coastal"), "V007"); return PA.nextVersion(v, PA.pathKey("D1", "coastal"), { suggest: suggest }) === "V008" && PA.nextVersion(v, k, { suggest: suggest }) === "V002"; })());
+  ok("a suggest function that throws degrades to the last version, not a broken preview", PA.nextVersion(v, k, { suggest: function () { throw new Error("boom"); } }) === "V001");
+  ok("recordVersion refuses a blank version rather than storing an empty name", (function () { PA.recordVersion(v, k, ""); PA.recordVersion(v, k, null); return PA.lastVersion(v, k) === "V001"; })());
+
+  // --- persistence: labels + versions round-trip; handles never enter the blob ---
+  ok("the store round-trips through toJSON/fromJSON", (function () {
+    var s2 = PA.create(); PA.setRoot(s2, "prodA", "Drops"); PA.setRowPath(s2, "D1::coastal", "Elsewhere"); PA.recordVersion(s2, "D1::", "V004");
+    var back = PA.fromJSON(JSON.parse(JSON.stringify(PA.toJSON(s2))));
+    return PA.rootLabel(back, "prodA") === "Drops" && PA.rowLabel(back, "D1::coastal") === "Elsewhere" && PA.lastVersion(back, "D1::") === "V004";
+  })());
+  ok("a directory handle is never serialised into the blob (only its label)", (function () {
+    var s2 = PA.create(); PA.setRoot(s2, "prodA", "Drops");
+    var blob = JSON.stringify(PA.toJSON(s2));
+    return blob.indexOf("Drops") > -1 && blob.indexOf("handle") === -1 && Object.keys(PA.toJSON(s2).roots.prodA).join() === "label";
+  })());
+  ok("fromJSON is tolerant of a malformed blob (starts empty, never throws)", Object.keys(PA.fromJSON(null).roots).length === 0 && Object.keys(PA.fromJSON({ roots: "nope", rows: 7 }).rows).length === 0);
+  ok("fromJSON drops an entry with no label rather than resolving to a blank folder", Object.keys(PA.fromJSON({ roots: { a: {}, b: { label: "ok" } } }).roots).join() === "b");
+  ok("the model is DOM-free and time-free, so it is reproducible", (function () {
+    var t = src("src/publish-paths.js").replace(/^\s*\/\/.*$/gm, "");
+    return !/\bwindow\.(?!PublishPaths)/.test(t) && !/document\./.test(t) && !/Date\.now|Math\.random/.test(t);
+  })());
+
+  // --- editor wiring (grep guards -- the picker + write path are browser-verified) ---
+  ok("the path store persists through the same durable key/value seam as the queue", /PUBLISH_PATHS_KEY = "authoring\.publishPaths"/.test(e) && /writeStore\(localStorage, PUBLISH_PATHS_KEY, JSON\.stringify\(PA\.toJSON\(__publishPaths\)\)\)/.test(e));
+  ok("directory handles persist in the existing keyed-handle IndexedDB store, under the model's keys", /saveBackupHandle\(handleKey, h\)/.test(e) && /loadBackupHandle\(handleKey\)/.test(e) && /pickPublishDir\(PA\.rootHandleKey\(pid\)\)/.test(e) && /pickPublishDir\(PA\.rowHandleKey\(dest\.key\)\)/.test(e));
+  ok("a remembered handle whose permission lapsed resolves to null so the run downloads instead", /dirPermission\(h, false\)[\s\S]{0,160}perm === "granted" \? h : null/.test(e));
+  ok("the filename preview asks the ledger for the next version, not defaultOptions' frozen V001", /out\.version = PA\.nextVersion\(publishPaths\(\), PA\.pathKey\(row\.docId, out\.variant\),\s*\n?\s*\{ replace: !!row\.replaceVersion, suggest: SX && SX\.suggestVersion \}\)/.test(e));
+  ok("the increment rule stays in the exporter -- the ledger is handed suggestVersion, not a copy of it", /suggest: SX && SX\.suggestVersion/.test(e) && !/padStart/.test(src("src/publish-paths.js")));
+  ok("an inherited root nests before writing; an override writes straight in", /publishEnsureDir\(root, dest\.segments\)/.test(e) && /getDirectoryHandle\(seg, \{ create: true \}\)/.test(e));
+  ok("delivery writes the package into the resolved folder via a File System Access writable", /function deliverPublishPackage\(row, variant, pkg\)[\s\S]{0,700}getFileHandle\(pkg\.name, \{ create: true \}\)[\s\S]{0,200}createWritable\(\)/.test(e));
+  ok("no folder, no handle, or a failed write all fall back to the download -- a publish never fails for want of a folder", /if \(!dest \|\| dest\.kind === "download"\) return Promise\.resolve\(downloadPublishPackage\(pkg\)\)/.test(e) && /if \(!root\) return downloadPublishPackage\(pkg\)/.test(e) && /folder write failed, downloading instead[\s\S]{0,80}return downloadPublishPackage\(pkg\)/.test(e));
+  ok("the version is recorded only AFTER the package lands, so a failed write never burns a number", /results\.push\(res\);[\s\S]{0,320}PA\.recordVersion\(publishPaths\(\), PA\.pathKey\(row\.docId, opts\.variant\), opts\.version\)/.test(e));
+  ok("the run expands a row into one package per output, sequentially", /var outs = publishRowOutputs\(row\), results = \[\];\s*\n\s*outs\.reduce\(function \(chain, variant\)/.test(e));
+  ok("the outputs it expands to come from the SAME f04 fact the row's chip states", /function publishRowOutputs\(row\)[\s\S]{0,420}f04OutputsFact\(d && d\.variants\)[\s\S]{0,120}fact\.variants\.length \? \[null\]\.concat\(fact\.variants\) : \[null\]/.test(e));
+  ok("a preset that pins one variant narrows the row to that single output", /if \(pinned\) return \[String\(pinned\)\]/.test(e));
+  ok("the Product folder is set once in the pane head, not per row", /var rootChip = publishRootChip\(\);\s*\n\s*if \(rootChip\) actions\.appendChild\(rootChip\);/.test(e) && /function publishRootChip\(\)/.test(e));
+  ok("the destination popover builds one path row per output, each with its own picker", /function openPublishDestPopover\(anchor, rowId\)[\s\S]{0,900}publishRowOutputs\(row\)\.forEach\(function \(v\)[\s\S]{0,900}publish-destrow/.test(e));
+  ok("an overridden row offers Reset, and its tooltip names what Reset restores (the spine's inheritance tail)", /label: "Reset"[\s\S]{0,400}rst\.title = rootLbl \? "Go back to inheriting the Product folder/.test(e));
+  ok("'replace current version' is a canonical SwitchRow on the row, defaulting off", /U\.SwitchRow\(\{\s*\n?\s*label: "Replace current version"/.test(e) && /checked: !!row\.replaceVersion/.test(e));
+  ok("a new queue row starts with replaceVersion off, and a garbled stored flag is read as off", (function () {
+    var PQ = require(path.join(ROOT, "src/publish-queue.js"));
+    var q = PQ.create(); var r = PQ.addDoc(q, "D1", {});
+    var back = PQ.fromJSON({ rows: [{ docId: "D2", replaceVersion: "yes" }, { docId: "D3", replaceVersion: true }] });
+    return r.replaceVersion === false && back.rows[0].replaceVersion === false && back.rows[1].replaceVersion === true;
+  })());
+  ok("the popover + path rows are styled, not unstyled markup", /\.chrome-pop--publish-dest \{/.test(css) && /\.publish-destrow__path\.is-inherited \{/.test(css) && /\.publish-chip--root \{/.test(css));
+  ok("index.html loads publish-paths.js before editor.js", (function () {
+    var idx = src("index.html"); return idx.indexOf("src/publish-paths.js") > -1 && idx.indexOf("src/publish-paths.js") < idx.indexOf("src/editor.js");
+  })());
 })();
 
 // ---- product-rail-staleness-tracking: Ground-Truth staleness (export-is-publish) ----
@@ -10538,18 +10643,32 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
   var e = src("src/editor.js"), css = src("editor.css"), ex = src("src/export.js");
   var m = e.match(/\/\* @publish-dest-start \*\/([\s\S]*?)\/\* @publish-dest-end \*\//);
   if (!m) { ok("locate @publish-dest fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { PUBLISH_DESTINATIONS: PUBLISH_DESTINATIONS, publishDestinationFor: publishDestinationFor, publishDestinationPickable: publishDestinationPickable, publishRowFilename: publishRowFilename, publishShowsFilename: publishShowsFilename };")();
+  var g = new Function(m[1] + "\nreturn { publishRowDestSummary: publishRowDestSummary, commonPrefix: commonPrefix, publishRowFilename: publishRowFilename, publishShowsFilename: publishShowsFilename };")();
 
-  // --- the one destination (Conservative tier) ---
-  ok("Downloads is the only destination there is", g.PUBLISH_DESTINATIONS.length === 1 && g.PUBLISH_DESTINATIONS[0].id === "download" && g.PUBLISH_DESTINATIONS[0].label === "Downloads");
-  ok("it carries a reason an author can read, not just a label", /downloads/i.test(g.PUBLISH_DESTINATIONS[0].why) && g.PUBLISH_DESTINATIONS[0].why.length > 20);
-  ok("every row resolves to it, with or without a stored choice", g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { id: "r1" }).id === "download" && g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { destination: "download" }).id === "download");
-  ok("an unknown stored destination falls back rather than leaving the row blank", g.publishDestinationFor(g.PUBLISH_DESTINATIONS, { destination: "lms-drop" }).id === "download");
-  ok("a junk lookup degrades to null, not a throw", g.publishDestinationFor(null, null) === null && g.publishDestinationFor([], {}) === null);
-  // the design call this ticket rests on: one destination means there is nothing to pick, so the
-  // chip must NOT be a control. It becomes one the moment a second destination is added.
-  ok("with one destination the chip is not pickable", g.publishDestinationPickable(g.PUBLISH_DESTINATIONS) === false);
-  ok("with two it becomes pickable, so the rule is the count and not a hardcoded 'off'", g.publishDestinationPickable([{ id: "a" }, { id: "b" }]) === true);
+  // --- the collapsed chip speaks for every output of the row (T3 made a row several outputs) ---
+  var dl = { kind: "download", label: "Downloads", chip: "Downloads", handleKey: null, hint: "No folder set." };
+  var fld = { kind: "root", label: "Drops", chip: "Drops/Acme/course/", handleKey: "publish:root:prodA", hint: "Inherits." };
+  var sib = { kind: "root", label: "Drops", chip: "Drops/Acme/course-coastal/", handleKey: "publish:root:prodA", hint: "Inherits." };
+  var other = { kind: "row", label: "Elsewhere", chip: "Elsewhere/", handleKey: "publish:row:D1::", hint: "Own folder." };
+  ok("a single output states its own destination", g.publishRowDestSummary([fld]).label === "Drops/Acme/course/" && g.publishRowDestSummary([fld]).mixed === false);
+  ok("outputs that agree state the one destination they share", g.publishRowDestSummary([fld, fld]).label === "Drops/Acme/course/" && g.publishRowDestSummary([fld, fld]).mixed === false);
+  ok("the download fallback shows its plain label, not a path", g.publishRowDestSummary([dl]).label === "Downloads" && g.publishRowDestSummary([dl]).kind === "download");
+  // outputs under one inherited root nest into their own subfolders. Naming the flagship's folder
+  // would be true of one and false of the rest, so the chip states only the part they all share --
+  // cut at a folder boundary, so it never states half a folder name.
+  ok("outputs sharing a picked folder state the shared part, ending in an ellipsis", (function () {
+    var s = g.publishRowDestSummary([fld, sib]); return s.label === "Drops/Acme/…" && s.mixed === false && s.kind === "root";
+  })());
+  ok("the shared part is cut at a folder boundary, never mid-name", g.publishRowDestSummary([fld, sib]).label.indexOf("course") === -1);
+  ok("and it says the outputs subdivide below it", /own subfolder/i.test(g.publishRowDestSummary([fld, sib]).why));
+  // the honesty rule: naming one folder for a row whose outputs went to two PICKED folders would be
+  // a false statement, so the chip declines to name any and hands over to its own popover.
+  ok("outputs from different picked folders say Mixed rather than naming one and implying the rest", (function () {
+    var s = g.publishRowDestSummary([fld, other]); return s.label === "Mixed" && s.mixed === true && s.kind === "mixed";
+  })());
+  ok("Mixed carries a reason that routes the author onward", /different folders/i.test(g.publishRowDestSummary([fld, other]).why));
+  ok("a queued download beside a folder is Mixed too, not silently one of them", g.publishRowDestSummary([dl, fld]).mixed === true);
+  ok("no outputs degrades to null, not a throw", g.publishRowDestSummary(null) === null && g.publishRowDestSummary([]) === null && g.publishRowDestSummary([null]) === null);
 
   // --- the filename comes from the exporter, never rebuilt here ---
   var seen = null, namer = function (o) { seen = o; return "ACME_V003_coastal_SCORM.zip"; };
@@ -10565,17 +10684,17 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
   // --- wiring: one naming function, one options object ---
   // The whole point of the ticket. If the preview called its own string-builder, the row could
   // promise one name and the run write another; both go through SCORMExport.packageName here.
-  ok("the row previews with the exporter's own packageName", /publishRowFilename\(window\.SCORMExport && window\.SCORMExport\.packageName, publishOptionsForRow\(r\)\)/.test(e));
-  ok("the run builds with the SAME options the preview was named from", /SX\.buildPackage\(publishOptionsForRow\(row\)\)/.test(e));
+  ok("the row previews with the exporter's own packageName", /publishRowFilename\(window\.SCORMExport && window\.SCORMExport\.packageName, publishOptionsForRow\(r, outs\[0\]\)\)/.test(e));
+  ok("the run builds with the SAME options the preview was named from", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e));
   ok("those options name the ROW's document, not whichever one is open", /var d = registry\[row\.docId\], code = d && d\.meta && d\.meta\.code;\s*\n\s*if \(code\) out\.code = code;/.test(e));
   ok("packageName honours that code and still falls back to the open document", /var parts = \[fileSafe\(\(opts && opts\.code\) \|\| docCode\(\)\)\];/.test(ex));
   ok("packageName is exported, so nothing has to reimplement it", /packageName: packageName/.test(ex));
 
-  // --- chrome: the pane's existing chip, minus the affordances it hasn't earned ---
-  ok("the destination reuses publish-chip rather than a second chrome", /"publish-chip" \+ \(publishDestinationPickable\(PUBLISH_DESTINATIONS\) \? "" : " publish-chip--static"\)/.test(e));
-  ok("with one destination it renders as a span, so there is no dead button to click", /h\(publishDestinationPickable\(PUBLISH_DESTINATIONS\) \? "button" : "span",/.test(e));
-  ok("it says why it can't be changed", /dchip\.title = "Destination · " \+ dest\.why;/.test(e));
-  ok("the static chip drops the hover affordance and sits back one ink step", /\.publish-chip--static \{ cursor: default; color: var\(--text-tertiary, var\(--text-secondary\)\); \}/.test(css) && /\.publish-chip--static:hover \{ color: var\(--text-tertiary, var\(--text-secondary\)\); border-color: var\(--border-subtle\); \}/.test(css));
+  // --- chrome: the pane's existing chip, now a real control because it has something to open ---
+  ok("the destination reuses publish-chip rather than a second chrome", /h\("button", "publish-chip publish-chip--dest", summary\.label\)/.test(e));
+  ok("it opens the destination popover rather than sitting inert", /dchip\.addEventListener\("click", function \(\) \{ openPublishDestPopover\(dchip, r\.id\); \}\)/.test(e));
+  ok("it still says what it means, and that it can be changed", /dchip\.title = "Destination · " \+ summary\.why \+ " Click to set a folder\.";/.test(e));
+  ok("a running row's destination is not clickable mid-write", /if \(r\.status !== "running"\) dchip\.addEventListener/.test(e));
   ok("the filename takes the slack and the status pins right, like the history rows", /\.publish-queuerow__file \{ flex: 1 1 auto; min-width: 0;[^}]*text-overflow: ellipsis; \}/.test(css) && /\.publish-queuerow__status \{[^}]*margin-left: auto;/.test(css));
 })();
 

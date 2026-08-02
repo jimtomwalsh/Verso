@@ -1408,6 +1408,80 @@
     try { writeStore(localStorage, PUBLISH_QUEUE_KEY, JSON.stringify(PQ.toJSON(__publishQueue))); } catch (e) {}
   }
 
+  // ---- Publish save paths (Product Rail Epic 6, T3) — where each package lands + its version ------
+  // The PublishPaths model (src/publish-paths.js) holds only labels + the version ledger, so it rides
+  // the same durable key/value seam as the queue. The File System Access directory HANDLES can't be
+  // serialised, so each one lives in the existing keyed-handle IndexedDB store under the key the model
+  // computes — one handle per Product root, one per per-output override.
+  var PUBLISH_PATHS_KEY = "authoring.publishPaths";
+  var __publishPaths = null;
+  var __publishDirHandles = {}; // handleKey -> handle|null, so a run doesn't re-read IndexedDB per output
+  function loadPublishPaths() {
+    var PA = window.PublishPaths; if (!PA) return null;
+    try { var raw = localStorage.getItem(PUBLISH_PATHS_KEY); if (raw) return PA.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return PA.create();
+  }
+  function publishPaths() { if (!__publishPaths) __publishPaths = loadPublishPaths(); return __publishPaths; }
+  function savePublishPaths() {
+    var PA = window.PublishPaths; if (!PA || !__publishPaths) return;
+    try { writeStore(localStorage, PUBLISH_PATHS_KEY, JSON.stringify(PA.toJSON(__publishPaths))); } catch (e) {}
+  }
+  // The persisted handle for a resolved destination: memory first, then IndexedDB (saveBackupHandle /
+  // loadBackupHandle, the same store the backup + review folders already use). A handle whose
+  // permission has lapsed and can't be re-granted resolves to null, and the caller downloads instead —
+  // a publish never fails because a folder went away.
+  function publishDirHandle(handleKey) {
+    if (!handleKey) return Promise.resolve(null);
+    if (Object.prototype.hasOwnProperty.call(__publishDirHandles, handleKey)) return Promise.resolve(__publishDirHandles[handleKey]);
+    return Promise.resolve(loadBackupHandle(handleKey)).then(function (h) {
+      if (!h) { __publishDirHandles[handleKey] = null; return null; }
+      return Promise.resolve(dirPermission(h, false)).then(function (perm) {
+        __publishDirHandles[handleKey] = perm === "granted" ? h : null;
+        return __publishDirHandles[handleKey];
+      });
+    }).catch(function () { __publishDirHandles[handleKey] = null; return null; });
+  }
+  // Pick a folder and remember it. Returns the handle's folder name (the label the model stores) or
+  // null if the browser can't pick or the author cancelled.
+  function pickPublishDir(handleKey) {
+    if (!window.showDirectoryPicker) return Promise.resolve(null);
+    return Promise.resolve(window.showDirectoryPicker({ mode: "readwrite" })).then(function (h) {
+      __publishDirHandles[handleKey] = h;
+      return Promise.resolve(saveBackupHandle(handleKey, h)).then(function () { return h.name || "folder"; });
+    }).catch(function () { return null; });
+  }
+  function forgetPublishDir(handleKey) { delete __publishDirHandles[handleKey]; saveBackupHandle(handleKey, null); }
+  // Walk (creating as needed) the `Product/<doc-variant>/` nesting an inherited root writes into.
+  function publishEnsureDir(root, segments) {
+    return (segments || []).reduce(function (chain, seg) {
+      return chain.then(function (dir) { return dir.getDirectoryHandle(seg, { create: true }); });
+    }, Promise.resolve(root));
+  }
+  // What one output of one row resolves against. The Product is the document's own, falling back to
+  // the active one, so a row publishes into the tree it belongs to rather than the one on screen.
+  function publishPathCtx(row, variant) {
+    var d = registry[row.docId] || {}, meta = d.meta || {};
+    var pid = meta.productId || getActiveProduct() || "";
+    var prod = pid && window.ProductsStore && window.ProductsStore[pid];
+    return { productId: pid, productName: (prod && prod.name) || "", docId: row.docId,
+             docCode: meta.code || row.docId, variant: variant || null };
+  }
+  function publishResolveDest(row, variant) {
+    var PA = window.PublishPaths; if (!PA) return null;
+    return PA.resolve(publishPaths(), publishPathCtx(row, variant));
+  }
+  // Every package this row produces, flagship first. It reads f04OutputsFact — the SAME fact the
+  // row's outputs chip states — so the count promised and the packages that land cannot disagree.
+  // A preset that pins one variant narrows the row to that single output.
+  function publishRowOutputs(row) {
+    var SX = window.SCORMExport, PP = window.PublishPresets;
+    var pinned = (SX && PP) ? PP.optionsFor(publishPresets(), (row && row.preset) || "master").variant : null;
+    if (pinned) return [String(pinned)];
+    var d = registry[row && row.docId];
+    var fact = f04OutputsFact(d && d.variants);
+    return fact.variants.length ? [null].concat(fact.variants) : [null];
+  }
+
   // ---- Release history (Product Rail Epic 6) — the append-only whole-family export log --------------
   // Every completed Publish run appends ONE immutable release record (ReleaseHistory model) capturing
   // what was published together. Persisted through the same k/v seam as the queue; append-only.
@@ -1428,9 +1502,12 @@
   // uio-P-C03 (PUB-10): the record also captures the PRESET it went out under, WHERE it was
   // delivered, and whether it succeeded -- the three things a history row has to state and which
   // nothing else stores. `result` is the delivery outcome (null on a row that never delivered).
-  function releaseEntryForRow(row, result) {
+  // T3: one entry per OUTPUT, not per row — a document with variants ships several packages, each
+  // with its own variant, version and destination, and a record that collapsed them into one row
+  // would misreport what actually went out.
+  function releaseEntryForRow(row, result, variant) {
     var d = registry[row.docId] || {}, meta = d.meta || {};
-    var opts = publishOptionsForRow(row);
+    var opts = publishOptionsForRow(row, variant);
     var PP = window.PublishPresets;
     var gtv = {}; docLinkedMasterIds(d).forEach(function (id) { gtv[id] = currentMasterVersions()[id]; });
     var failed = !result || result.to === "error";
@@ -1466,40 +1543,78 @@
   }
   // Resolve a row's preset id to real export options: the exporter defaults with the preset's
   // overrides applied on top (T2). Falls back to plain defaults if presets aren't available.
-  function publishOptionsForRow(row) {
-    var SX = window.SCORMExport, PP = window.PublishPresets;
+  // T3 added the second argument: a row is several OUTPUTS (flagship + each variant), and each one is
+  // named and versioned in its own right. Passing the variant explicitly keeps one function answering
+  // "what options build this package" for the preview on the row and for the run that writes it.
+  function publishOptionsForRow(row, variant) {
+    var SX = window.SCORMExport, PP = window.PublishPresets, PA = window.PublishPaths;
     var base = (SX && SX.defaultOptions) ? SX.defaultOptions() : {};
     if (!PP || !row) return base;
     var out = Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
+    if (variant !== undefined) out.variant = variant || null;
     // uio-P-C07 (PUB-05): name the package for THIS row's document, not for whichever document
     // happens to be open. The publish run hands these same options to buildPackage, so the
     // filename shown on the row is the filename that lands.
     var d = registry[row.docId], code = d && d.meta && d.meta.code;
     if (code) out.code = code;
+    // T3: the version is the ledger's, not defaultOptions()' frozen "V001". Per doc+variant, so a
+    // variant steps independently of its flagship; "replace current version" reuses the last one.
+    if (PA) out.version = PA.nextVersion(publishPaths(), PA.pathKey(row.docId, out.variant),
+      { replace: !!row.replaceVersion, suggest: SX && SX.suggestVersion });
     return out;
   }
   // uio-P-C07 (PUB-05): a queue row used to say nothing about where its package goes or what it is
   // called — the first mention of either was "Done · <name>" after the run, which is too late to be
   // a decision. Every row now states its destination and, before you press Publish, the exact
-  // filename it will write. Downloads is the only destination there is today, so the chip STATES it
-  // rather than opening a menu of one; it becomes a real picker the moment a second destination
-  // exists. Named product-level destinations and per-variant folders are the Moderate tier of the
-  // audit finding and are deliberately not built here.
+  // filename it will write. T3 turned that statement into a real destination: a Product root folder
+  // set once and inherited, a per-output override, or the download fallback (PublishPaths.resolve).
   /* @publish-dest-start */
-  var PUBLISH_DESTINATIONS = [
-    { id: "download", label: "Downloads", why: "Every run downloads the package to your browser's downloads folder. Saving straight to a chosen folder isn't available yet." }
-  ];
-  // Which destination a row delivers to. One entry today, so every row resolves to the same one;
-  // the lookup exists so that adding a second destination is a data change, not a rewrite.
-  function publishDestinationFor(dests, row) {
-    var list = dests || [];
-    var id = (row && row.destination) || "download";
-    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
-    return list[0] || null;
+  // A row is several outputs, so the collapsed chip has to speak for all of them. Three cases, in
+  // order of how much it can honestly say:
+  //   · every output lands on the same path -> state that path;
+  //   · they share the folder the author PICKED but nest differently under it (an inherited root
+  //     gives each variant its own subfolder) -> state the shared part and end it in an ellipsis,
+  //     which is true of all of them rather than true of one and implied of the rest;
+  //   · they came from different picked folders -> "Mixed", and the popover has the detail.
+  // The shared part is cut at a folder boundary, so the chip never states half a folder name.
+  function publishRowDestSummary(dests) {
+    var list = (dests || []).filter(Boolean);
+    if (!list.length) return null;
+    var first = list[0];
+    if (list.every(function (dd) { return dd.chip === first.chip; })) {
+      return { label: first.kind === "download" ? first.label : first.chip, kind: first.kind, mixed: false, why: first.hint };
+    }
+    if (list.every(function (dd) { return dd.handleKey === first.handleKey; })) {
+      var shared = list.reduce(function (acc, dd) { return commonPrefix(acc, dd.chip); }, first.chip);
+      var cut = shared.lastIndexOf("/");
+      return { label: (cut > -1 ? shared.slice(0, cut + 1) : shared) + "…", kind: first.kind, mixed: false,
+               why: first.hint + " Each output gets its own subfolder." };
+    }
+    return { label: "Mixed", kind: "mixed", mixed: true,
+             why: "These outputs publish to different folders. Open to see each one." };
   }
-  // The destination is the author's to pick only once there is more than one to pick between. With
-  // one, a menu would open on a single already-chosen item — a control that does nothing.
-  function publishDestinationPickable(dests) { return (dests || []).length > 1; }
+  function commonPrefix(a, b) {
+    var i = 0, n = Math.min(a.length, b.length);
+    while (i < n && a.charAt(i) === b.charAt(i)) i++;
+    return a.slice(0, i);
+  }
+  // Which Product the head's folder chip is setting. The rail's scope when one is chosen; otherwise
+  // the Product the queued rows agree on, and failing that the open document's. A queue spanning
+  // several Products has no single root to state, so it resolves to null and the chip says so rather
+  // than naming one Product's folder and quietly writing it to another's.
+  function publishRootScope() {
+    var active = getActiveProduct(); if (active) return active;
+    var PQ = window.PublishQueue, seen = {};
+    if (PQ) (publishQueue().rows || []).forEach(function (r) {
+      var d = registry[r.docId], p = d && d.meta && d.meta.productId;
+      if (p) seen[p] = 1;
+    });
+    var keys = Object.keys(seen);
+    if (keys.length === 1) return keys[0];
+    if (keys.length > 1) return null;
+    var od = registry[activeDocId];
+    return (od && od.meta && od.meta.productId) || "";
+  }
   // What the row promises to write. The name is asked of the exporter's OWN naming function (passed
   // in) instead of being rebuilt here, so the promise on the row and the file that lands can never
   // drift apart. No exporter, or a namer that throws, yields "" — the row states nothing rather
@@ -2301,6 +2416,10 @@
     // stage's export/publish surface). #publish-io is filled by renderToolbarPipeline below.
     var actions = h("div", "publish-pane__head-actions");
     var io = h("div", "publish-io"); io.id = "publish-io";
+    // T3: the Product publish folder — one pick for the whole family, stated where the queue's own
+    // actions live so it reads as a property of this queue rather than of any one row.
+    var rootChip = publishRootChip();
+    if (rootChip) actions.appendChild(rootChip);
     actions.appendChild(io); actions.appendChild(pub);
     head.appendChild(actions);
     host.appendChild(head);
@@ -2328,20 +2447,29 @@
         openPublishPresetMenu(r.id, rr.left, rr.bottom + 4);
       });
       meta.appendChild(chip);
-      // uio-P-C07 (PUB-05): destination + resolved filename, in the same chip family as the preset
-      // beside them. The destination chip is a plain span, not a button — with Downloads the only
-      // place a run can write, a menu would open on one already-chosen item. Its tooltip says so,
-      // so nothing here is a click that quietly does nothing.
-      var dest = publishDestinationFor(PUBLISH_DESTINATIONS, r);
-      if (dest) {
-        var dchip = h(publishDestinationPickable(PUBLISH_DESTINATIONS) ? "button" : "span",
-          "publish-chip" + (publishDestinationPickable(PUBLISH_DESTINATIONS) ? "" : " publish-chip--static"), dest.label);
-        dchip.title = "Destination · " + dest.why;
+      // uio-P-C07 (PUB-05) / T3: destination + resolved filename, in the same chip family as the
+      // preset beside them. Now that a folder is a real choice, the chip is a real button: it opens
+      // the destination popover, which owns one path row per output plus the re-cut opt-in.
+      var outs = publishRowOutputs(r);
+      var dests = outs.map(function (v) { return publishResolveDest(r, v); });
+      var summary = publishRowDestSummary(dests);
+      if (summary) {
+        var dchip = h("button", "publish-chip publish-chip--dest", summary.label);
+        dchip.type = "button";
+        dchip.title = "Destination · " + summary.why + " Click to set a folder.";
+        if (r.status !== "running") dchip.addEventListener("click", function () { openPublishDestPopover(dchip, r.id); });
         meta.appendChild(dchip);
       }
       if (publishShowsFilename(r)) {
-        var fname = publishRowFilename(window.SCORMExport && window.SCORMExport.packageName, publishOptionsForRow(r));
-        if (fname) { var fEl = h("span", "publish-queuerow__file", fname); fEl.title = "Writes " + fname; meta.appendChild(fEl); }
+        // The flagship's name leads; a row with variants says how many more follow rather than
+        // listing filenames it has no room for — the popover holds the full list.
+        var fname = publishRowFilename(window.SCORMExport && window.SCORMExport.packageName, publishOptionsForRow(r, outs[0]));
+        if (fname) {
+          var more = outs.length > 1 ? "  +" + (outs.length - 1) + " more" : "";
+          var fEl = h("span", "publish-queuerow__file", fname + more);
+          fEl.title = outs.length > 1 ? "Writes " + outs.length + " packages, starting with " + fname : "Writes " + fname;
+          meta.appendChild(fEl);
+        }
       }
       meta.appendChild(h("span", "publish-queuerow__status", publishStatusLabel(r)));
       // uio-F04 (PUB-01/02/15): the same three facts the picker row states, on the row that is actually
@@ -2452,6 +2580,122 @@
     }
     showContextMenu(x, y, items);
   }
+  // T3: the destination popover. It is the row's "where does this land, and what is it called"
+  // surface — one path row PER OUTPUT (flagship + each variant), each independently pickable and
+  // independently remembered, each showing the filename it will write. It also carries the one
+  // setting that changes those filenames: the deliberate re-cut.
+  //
+  // Why a popover rather than an expanded row: the spine puts a few settings for the thing you
+  // clicked in a popover anchored to it, and keeps the collapsed row's name in front of the author
+  // instead of trading it for a column of folder paths.
+  function openPublishDestPopover(anchor, rowId) {
+    var PQ = window.PublishQueue, PA = window.PublishPaths, SX = window.SCORMExport, U = window.VersoUI;
+    if (!PQ || !PA) return;
+    var q = publishQueue();
+    var row = PQ.rowById(q, rowId); if (!row) return;
+    openChromePop(anchor, function (pop) {
+      pop.appendChild(h("div", "chrome-pop__title", "Publish destination"));
+      var rootLbl = PA.rootLabel(publishPaths(), publishPathCtx(row, null).productId);
+      var note = h("div", "chrome-pop__note", rootLbl
+        ? "Outputs inherit the Product folder “" + rootLbl + "” and nest by document and variant. Pick a folder below to override one."
+        : "No Product folder is set, so these outputs download. Pick a folder below, or set a Product folder once in the pane header.");
+      pop.appendChild(note);
+      publishRowOutputs(row).forEach(function (v) {
+        var dest = PA.resolve(publishPaths(), publishPathCtx(row, v));
+        var opts = publishOptionsForRow(row, v);
+        var line = h("div", "publish-destrow");
+        var head = h("div", "publish-destrow__head");
+        head.appendChild(h("span", "publish-destrow__name", v ? String(v) : "Flagship"));
+        var pathEl = h("span", "publish-destrow__path" + (dest.inherited ? " is-inherited" : ""), dest.chip);
+        pathEl.title = dest.hint;
+        head.appendChild(pathEl);
+        line.appendChild(head);
+        var fn = publishRowFilename(SX && SX.packageName, opts);
+        if (fn) line.appendChild(h("div", "publish-destrow__file", fn));
+        var acts = h("div", "publish-destrow__acts");
+        var pickLabel = dest.kind === "row" ? "Change folder" : "Choose folder";
+        var pick = U ? U.Button({ variant: "secondary", label: pickLabel, onClick: function () {
+          pickPublishDir(PA.rowHandleKey(dest.key)).then(function (name) {
+            if (!name) return;
+            PA.setRowPath(publishPaths(), dest.key, name); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          });
+        } }) : h("button", null, pickLabel);
+        acts.appendChild(pick);
+        if (dest.kind === "row") {
+          var rst = U ? U.Button({ variant: "secondary", label: "Reset", onClick: function () {
+            forgetPublishDir(PA.rowHandleKey(dest.key));
+            PA.clearRowPath(publishPaths(), dest.key); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          } }) : h("button", null, "Reset");
+          // The spine's inheritance tail: Reset says, in words, what it puts the row back to.
+          rst.title = rootLbl ? "Go back to inheriting the Product folder “" + rootLbl + "”." : "Go back to downloading this output.";
+          acts.appendChild(rst);
+        }
+        line.appendChild(acts);
+        pop.appendChild(line);
+      });
+      // Q2: never a silent overwrite. Off (the default) steps to a new version every run; on reuses
+      // the last one, which is the only way to write over a package on purpose.
+      var sw = U && U.SwitchRow ? U.SwitchRow({
+        label: "Replace current version",
+        description: row.replaceVersion ? "Overwrites the last package instead of adding a new version." : "Off: every run writes a new incremented version.",
+        checked: !!row.replaceVersion,
+        onChange: function (on) {
+          row.replaceVersion = !!on; savePublishQueue();
+          closeChromePop(); renderPublishQueue();
+        }
+      }) : null;
+      if (sw) { sw.classList.add("publish-destrow__replace"); pop.appendChild(sw); }
+    }, { cls: "chrome-pop--publish-dest" });
+  }
+  // The Product root folder, set once for the whole family (T3, Q1). It lives in the pane head rather
+  // than on a row because it is a Product-scoped setting that every row inherits — putting it on a row
+  // would imply it belonged to that row.
+  function publishRootChip() {
+    var PA = window.PublishPaths, U = window.VersoUI; if (!PA) return null;
+    var pid = publishRootScope();
+    if (pid === null) {
+      // Several Products are queued. Each keeps its own folder, so there is nothing here to set —
+      // and a control that would write one Product's folder onto another's rows would be a trap.
+      var span = h("span", "publish-chip publish-chip--root publish-chip--static", "Folder · per Product");
+      span.title = "This queue spans several Products, and each one has its own publish folder. Pick a Product in the rail to set its folder.";
+      return span;
+    }
+    var lbl = PA.rootLabel(publishPaths(), pid);
+    var chip = h("button", "publish-chip publish-chip--root", lbl ? "Folder · " + lbl : "Set publish folder");
+    chip.type = "button";
+    chip.title = lbl
+      ? "Every queued output publishes under “" + lbl + "”, nested by document and variant, unless it has its own folder."
+      : "Pick one folder for this Product and every queued output publishes under it. Until then, packages download.";
+    chip.addEventListener("click", function () {
+      openChromePop(chip, function (pop) {
+        pop.appendChild(h("div", "chrome-pop__title", "Product publish folder"));
+        pop.appendChild(h("div", "chrome-pop__note", lbl
+          ? "Rows inherit this folder and nest into Product / document-variant. A row with its own folder ignores it."
+          : "One pick covers the whole queue. Without it every package downloads instead."));
+        var pick = U ? U.Button({ variant: "primary", full: true, label: lbl ? "Change folder" : "Choose folder", onClick: function () {
+          pickPublishDir(PA.rootHandleKey(pid)).then(function (name) {
+            if (!name) return;
+            PA.setRoot(publishPaths(), pid, name); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          });
+        } }) : h("button", null, "Choose folder");
+        pop.appendChild(pick);
+        if (lbl) {
+          var clr = U ? U.Button({ variant: "secondary", full: true, label: "Clear folder", onClick: function () {
+            forgetPublishDir(PA.rootHandleKey(pid));
+            PA.clearRoot(publishPaths(), pid); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          } }) : h("button", null, "Clear folder");
+          clr.title = "Rows without their own folder go back to downloading.";
+          pop.appendChild(clr);
+        }
+        if (!window.showDirectoryPicker) pop.appendChild(h("div", "chrome-pop__note", "This browser can't save straight to a folder, so packages download."));
+      }, { cls: "chrome-pop--publish-dest", align: "right" });
+    });
+    return chip;
+  }
   // A minimal DS name modal (no raw prompt()): a single TextField + Save/Cancel. Reused for save +
   // rename of an output preset. onOk receives the trimmed name (never fires on a blank name).
   function promptPublishPresetName(title, initial, onOk) {
@@ -2473,13 +2717,45 @@
     document.body.appendChild(modal);
     if (inputEl) { setTimeout(function () { inputEl.focus(); inputEl.select && inputEl.select(); }, 0); inputEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); commit(); } }); }
   }
-  // Download a built package (T1 fallback; the File System Access folder-write is T3's save-path).
+  // Download a built package — the fallback whenever no folder is set, the browser can't write to
+  // one, or a remembered folder's permission has lapsed. A publish never fails for want of a folder.
   function downloadPublishPackage(pkg) {
     var a = document.createElement("a");
     a.href = URL.createObjectURL(pkg.blob); a.download = pkg.name;
     document.body.appendChild(a); a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
     return { to: "download", path: pkg.name };
+  }
+  // T3: write one built package to its resolved destination. An override writes straight into the
+  // picked folder; an inherited root nests into `Product/<doc-variant>/` first. `create: true` on the
+  // file handle is what makes "replace current version" an overwrite — with the flag off the filename
+  // has already stepped, so there is nothing to overwrite.
+  function deliverPublishPackage(row, variant, pkg) {
+    var PA = window.PublishPaths;
+    var dest = PA ? publishResolveDest(row, variant) : null;
+    if (!dest || dest.kind === "download") return Promise.resolve(downloadPublishPackage(pkg));
+    return publishDirHandle(dest.handleKey).then(function (root) {
+      if (!root) return downloadPublishPackage(pkg);
+      return publishEnsureDir(root, dest.segments)
+        .then(function (dir) { return dir.getFileHandle(pkg.name, { create: true }); })
+        .then(function (fh) { return fh.createWritable(); })
+        .then(function (w) { return Promise.resolve(w.write(pkg.blob)).then(function () { return w.close(); }); })
+        .then(function () { return { to: "folder", path: dest.chip + pkg.name }; });
+    }).catch(function (e) {
+      console.warn("[publish] folder write failed, downloading instead: " + pkg.name, e);
+      return downloadPublishPackage(pkg);
+    });
+  }
+  // A row's outcome after all of its outputs have run. One output states its own result; several
+  // state the count and where they went, because "Done · <one filename>" would under-report a row
+  // that shipped three packages.
+  function publishRowResult(results) {
+    var rs = (results || []).filter(Boolean);
+    if (!rs.length) return { to: "error", path: "nothing to publish" };
+    if (rs.length === 1) return rs[0];
+    var toFolder = rs.filter(function (r) { return r.to === "folder"; }).length;
+    return { to: toFolder === rs.length ? "folder" : (toFolder ? "mixed" : "download"),
+             path: rs.length + " packages" + (toFolder ? " · " + rs[rs.length - 1].path.replace(/[^/]+$/, "") : "") };
   }
   var __publishRunning = false;
   // Run every PENDING row sequentially: switch to that doc so buildPackage reads it, build a SCORM
@@ -2515,14 +2791,27 @@
       }
       PQ.setStatus(q, row.id, "running"); renderPublishQueue();
       var run = function () {
-        Promise.resolve()
-          .then(function () { return SX.buildPackage(publishOptionsForRow(row)); })
-          .then(function (pkg) { return downloadPublishPackage(pkg); })
-          .then(function (res) {
-            // Capture the release entry BEFORE the baseline snapshot, so groundTruthVersions reflects
-            // the source versions this package was actually built against.
-            runEntries.push(releaseEntryForRow(row, res));
-            PQ.setStatus(q, row.id, "done", res);
+        // T3: a row is several OUTPUTS — flagship plus each variant — built and delivered in sequence,
+        // each to its own resolved folder and under its own version. The version is recorded only
+        // after the package actually lands, so a failed write never burns a version number.
+        var PA = window.PublishPaths;
+        var outs = publishRowOutputs(row), results = [];
+        outs.reduce(function (chain, variant) {
+          return chain.then(function () {
+            var opts = publishOptionsForRow(row, variant);
+            return Promise.resolve(SX.buildPackage(opts))
+              .then(function (pkg) { return deliverPublishPackage(row, variant, pkg); })
+              .then(function (res) {
+                results.push(res);
+                // Capture the release entry BEFORE the baseline snapshot, so groundTruthVersions
+                // reflects the source versions this package was actually built against.
+                runEntries.push(releaseEntryForRow(row, res, variant));
+                if (PA && opts.version) { PA.recordVersion(publishPaths(), PA.pathKey(row.docId, opts.variant), opts.version); savePublishPaths(); }
+              });
+          });
+        }, Promise.resolve())
+          .then(function () {
+            PQ.setStatus(q, row.id, "done", publishRowResult(results));
             // staleness-tracking: a finished export IS this document's new "last published" baseline.
             snapshotGroundTruthBaseline(registry[row.docId]); saveRegistry(registry);
           })
