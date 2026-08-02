@@ -36,8 +36,16 @@ setTimeout(() => { console.log("e2e: WATCHDOG 45s timeout"); process.exit(1); },
   // ---- 1. edit the first editable text block -> autosave ----
   const editRes = await pg.evaluate(async (MARK) => {
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-    const node = [].find.call(document.querySelectorAll("[data-edit]"), n => n.getAttribute("contenteditable") === "true" && n.__bind && !n.getAttribute("data-rich"));
+    // Text on the canvas is two-state: a block is selected on a single click and only becomes
+    // editable on a double-click. So find the BOUND plain-text node and enter edit the way an author
+    // does. (Selecting on contenteditable alone finds nothing at rest, which is what silently
+    // stranded this gate when two-state text landed.)
+    const node = [].find.call(document.querySelectorAll("[data-edit]"), n => n.__bind && !n.getAttribute("data-rich"));
     if (!node) return { found: false };
+    node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    node.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await sleep(100);
+    if (node.getAttribute("contenteditable") !== "true") return { found: false, reason: "double-click did not enter text edit" };
     const bind = node.__bind, original = bind.obj[bind.field];
     node.focus();
     node.textContent = MARK;
@@ -91,8 +99,13 @@ setTimeout(() => { console.log("e2e: WATCHDOG 45s timeout"); process.exit(1); },
   // ---- 4. revert the edit so the live doc is left unchanged ----
   const reverted = await pg.evaluate(async (original) => {
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-    const node = [].find.call(document.querySelectorAll("[data-edit]"), n => n.getAttribute("contenteditable") === "true" && n.__bind && !n.getAttribute("data-rich"));
+    // Same two-state entry as the edit above: the blur that committed the marker also dropped this
+    // node back out of edit, so re-enter before writing the original back.
+    const node = [].find.call(document.querySelectorAll("[data-edit]"), n => n.__bind && !n.getAttribute("data-rich"));
     if (!node) return false;
+    node.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    node.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await sleep(100);
     node.focus(); node.textContent = original; node.dispatchEvent(new InputEvent("input", { bubbles: true })); node.blur();
     await sleep(300);
     return node.__bind.obj[node.__bind.field] === original;
