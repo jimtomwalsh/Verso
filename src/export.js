@@ -1178,13 +1178,20 @@
     var box = elh("div");
     var modal;
 
-    // section helper
-    function section(title) { box.appendChild(elh("div", "insp-sub", title)); }
+    // uio-O-W2 (OVL-07): the dialog's groups are the ONE canonical section, same as every
+    // other surface — a chevron and a title, not a bold line with no affordance. `host` is
+    // whichever section body the rows below are currently landing in.
+    var host = box;
+    function section(title) {
+      var sec = UI.PanelSection({ title: title });
+      box.appendChild(sec);
+      host = sec.querySelector(".insp-section__body");
+    }
     // a label + right-aligned control row
     function row(labelText) {
       var r = elh("div", "modal-field");
       r.appendChild(elh("span", "modal-field__label", labelText));
-      box.appendChild(r); return r;
+      host.appendChild(r); return r;
     }
     // segmented control bound to opts[key]; pairs = [[label,value],...]
     function seg(labelText, key, pairs, onChange, isToggle) {
@@ -1222,7 +1229,7 @@
     var exportRows = null;
     if (variants.length) {
       section("Variant");
-      box.appendChild(elh("div", "insp-hint", "Tick the packages to export. Choose an output folder for each, or leave it to download to your browser's Downloads folder."));
+      host.appendChild(elh("div", "insp-hint", "Tick the packages to export. Choose an output folder for each, or leave it to download to your browser's Downloads folder."));
       exportRows = [{ variant: null, label: "Flagship (base course)" }]
         .concat(variants.map(function (v) { return { variant: v, label: v }; }));
       exportRows.forEach(function (r) {
@@ -1242,7 +1249,7 @@
           }).catch(function () {});
         });
         rowEl.appendChild(pick);
-        box.appendChild(rowEl);
+        host.appendChild(rowEl);
       });
     }
 
@@ -1253,7 +1260,7 @@
     verIn.addEventListener("input", function () { opts.version = verIn.value.trim(); updateName(); });
     verRow.appendChild(verIn);
     var verHint = elh("div", "insp-hint", "Suggested next version — bumps automatically each export.");
-    box.appendChild(verHint);
+    host.appendChild(verHint);
 
     // Include toggles
     section("Include");
@@ -1274,25 +1281,25 @@
     dimSel.addEventListener("change", function () { opts.maxImageDim = parseInt(dimSel.value, 10) || 0; });
     dimRow.appendChild(dimSel);
     seg("Quality", "imageQuality", [["Small", 0.7], ["Balanced", 0.85], ["High", 0.92]], null);
-    box.appendChild(elh("div", "insp-hint", "Caps each image's longest edge and re-encodes it (JPEG stays JPEG; PNG/WebP/static GIF become WebP). Animated GIFs are re-encoded as GIFs (downscaled + fewer colours; Small also halves the frame rate) so they finally shrink too - they are usually the heaviest thing in a course. Only applied when it actually shrinks the file; small images and video/SVG are left as-is."));
+    host.appendChild(elh("div", "insp-hint", "Caps each image's longest edge and re-encodes it (JPEG stays JPEG; PNG/WebP/static GIF become WebP). Animated GIFs are re-encoded as GIFs (downscaled + fewer colours; Small also halves the frame rate) so they finally shrink too - they are usually the heaviest thing in a course. Only applied when it actually shrinks the file; small images and video/SVG are left as-is."));
 
     // #193: media as separate files vs one inlined index.html. Separate files keep
     // index.html tiny so the LMS can start the course immediately (the ~30s Moodle
     // Start-button freeze was the LMS downloading the whole inlined file first).
     section("Package structure");
     toggle("Package media as separate files (recommended)", "externalizeMedia");
-    box.appendChild(elh("div", "insp-hint", "Ships images, GIFs and video as separate files INSIDE this same SCORM zip (referenced by relative path), instead of base64-inlining everything into index.html. Keeps index.html tiny so the course starts at once and media streams in - fixes the ~30s delay before the Start button responds in Moodle on heavy courses. Everything still lives in the one uploaded zip; nothing is hosted elsewhere. Turn off only to reproduce the old single-file behaviour."));
+    host.appendChild(elh("div", "insp-hint", "Ships images, GIFs and video as separate files INSIDE this same SCORM zip (referenced by relative path), instead of base64-inlining everything into index.html. Keeps index.html tiny so the course starts at once and media streams in - fixes the ~30s delay before the Start button responds in Moodle on heavy courses. Everything still lives in the one uploaded zip; nothing is hosted elsewhere. Turn off only to reproduce the old single-file behaviour."));
 
     // Review (Verso Viewer) — also emit the frozen .versopub.json snapshot so this
     // exact version can go out for review alongside the SCORM package.
     section("Review");
     toggle("Also publish review file", "reviewFile");
-    box.appendChild(elh("div", "insp-hint", "Emits a Verso Viewer snapshot (.versopub.json) of this version — to the connected review folder, or a download — so reviewers can comment on it."));
+    host.appendChild(elh("div", "insp-hint", "Emits a Verso Viewer snapshot (.versopub.json) of this version — to the connected review folder, or a download — so reviewers can comment on it."));
 
     // Web video
     section("Web video embeds");
     seg("Video handling", "webVideo", [["Package locally", "package"], ["Link on web", "link"]], updateVideoNote);
-    var vidNote = elh("div", "insp-hint", ""); box.appendChild(vidNote);
+    var vidNote = elh("div", "insp-hint", ""); host.appendChild(vidNote);
     function updateVideoNote() {
       if (scan.live === 0 && scan.local === 0) { vidNote.textContent = "No web video embeds in this course."; return; }
       var msg = [];

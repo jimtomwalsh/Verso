@@ -30,6 +30,12 @@ export interface PanelSectionProps {
   summary?: React.ReactNode;
   /** Top hairline divider. Default true (turn off for the first section). */
   divider?: boolean;
+  /**
+   * Nesting depth. 1 = a section in a panel body; 2 = a section inside another section's body,
+   * drawn quieter and indented. There is no level 3: a group that would nest a third time is
+   * promoted to a section of its own. See readme "The UI spine" -> "The shared row".
+   */
+  level?: 1 | 2;
   style?: React.CSSProperties;
 }
 

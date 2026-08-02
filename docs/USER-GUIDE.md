@@ -92,8 +92,9 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   distinguishable at a glance, plus a **per-product colour dot** (hover it to see which Product).
   **Document:** a **Document-settings** button (a sliders glyph, deliberately not the same cog as
   the app-wide one on the left rail; opens this document's settings —
-  **Document type** (geometry + interactivity, set once), Header & Footer, Learner nav, Theme and the
-  rest; app-wide settings live under the left-rail cog), the **Build / Read** toggle (glyphs), and the
+  **Document type** (geometry + interactivity, set once), **Header**, **Footer**, the learner-nav
+  sections, Theme and the rest; app-wide settings live under the left-rail cog), the **Build /
+  Read** toggle (glyphs), and the
   **Variant** and **Version** selectors as **named dropdowns**, each captioned with its axis and
   showing the current value ("Flagship", the version name) at a glance. The moment either leaves
   base, a chip appears in the bar — **Read-only** when you're previewing (a variant preview locks
@@ -217,6 +218,24 @@ Four ideas cover most of how Verso works.
 - **The Inspector mirrors your selection.** Select nothing for document-wide settings (theme,
   fonts, header/footer); select a block for that block's settings. Editing a text block shows its
   Type controls and its layout, spacing and appearance settings together in one scrolling panel.
+
+### Sections
+
+Every group of settings — in the inspector, in the settings sheet, in a dialog — is a **section**:
+a title with a chevron, sometimes a switch, and rows underneath. Click the title to fold it; folded,
+it states what it will do in one line ("On · centred, bottom rule"), so a closed section never reads
+as unknown. The chevron and the switch are independent: turning a section off dims its rows but
+keeps them there and usable, so you can set something up before you switch it on.
+
+Sections nest **one** level deep at most, and a nested one looks the same, just quieter and
+indented. There is no third level and no other kind of heading, so anything with a chevron opens
+and anything without one is an ordinary row.
+
+The **Header** and **Footer** settings are two sections of their own (they used to be nested inside
+one "Header & Footer"), and with a nav bar in place each learner-nav group — **Nav buttons**,
+**Progress pill**, **Progression**, **Nav sections**, **Guided tour** — is its own section too. ⌘K
+still finds any of them by what you want rather than by their names: "disclaimer" finds Footer,
+"logo" finds Header, "pill" finds Progress pill.
 
 ### Inherited and overridden settings
 

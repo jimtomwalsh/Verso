@@ -50,9 +50,9 @@
   });
 
   // ---- section header ------------------------------------------------------
-  group("sub — section header", function (g) {
-    g.appendChild(K.sub("Appearance"));
-    note(g, "sub(title) — the quiet grouping header used inside a panel.");
+  group("panelSection — section header", function (g) {
+    K.panelSection(g, "Appearance");
+    note(g, "panelSection(host, title) — the one grouping header used inside a panel. It appends the section and hands back its body, so the rows that follow go inside it. The old flat sub() header is retired.");
   });
 
   group("propHeader — section header with add", function (g) {
@@ -98,14 +98,14 @@
     // A frame: every container row applies.
     var frame = { align: "start", width: 600, padX: 24, gap: 12, hasFill: true, fillColor: "#0d99ff", hasStroke: false, radius: 8, spaceTop: 0, spaceBottom: 24 };
     window.__kitDemoFrame = frame;
-    g.appendChild(K.sub("Frame — every container row"));
-    K.renderContainerChrome(g, { align: true, width: true, padding: true, gap: true },
+    var frameBody = K.panelSection(g, "Frame — every container row");
+    K.renderContainerChrome(frameBody, { align: true, width: true, padding: true, gap: true },
       { get: function (k) { return frame[k]; }, set: function (k, v) { frame[k] = v; } }, noop);
     // A spacer: only spacing + actions apply — the rest are hidden, order unchanged.
     var spacer = { spaceTop: 0, spaceBottom: 40 };
     window.__kitDemoSpacer = spacer;
-    g.appendChild(K.sub("Spacer — only spacing + actions (rest hidden, order kept)"));
-    K.renderContainerChrome(g, { fill: false, stroke: false, radius: false },
+    var spacerBody = K.panelSection(g, "Spacer — only spacing + actions (rest hidden, order kept)");
+    K.renderContainerChrome(spacerBody, { fill: false, stroke: false, radius: false },
       { get: function (k) { return spacer[k]; }, set: function (k, v) { spacer[k] = v; } }, noop);
     note(g, "ONE renderer; each block DECLARES which rows apply. Fixed order; omitted rows hidden — a block can't lay it out differently. Fill/stroke are collapsed-optional; dims are iconField; actions reuse iconBtn.");
   });

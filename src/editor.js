@@ -3432,7 +3432,7 @@
       return openDocIds.indexOf(id) === -1;
     });
     if (closedIds.length > 0) {
-      modalSection(box, "Open a saved course");
+      var openBody = modalSection(box, "Open a saved course");
       var list = h("div", "modal-list");
       closedIds.forEach(function (id) {
         var d = registry[id];
@@ -3462,10 +3462,10 @@
         item.appendChild(del);
         list.appendChild(item);
       });
-      box.appendChild(list);
+      openBody.appendChild(list);
     }
 
-    modalSection(box, "New course");
+    box = modalSection(box, "New course");
     // Product (defaults to the current scope) -> preset (matrix cell) -> name, per SPEC 7.
     var prodRow = modalField(box, "Product");
     prodRow.appendChild(window.VersoUI.Select({
@@ -6008,10 +6008,65 @@
   var panelEditMode = false; // "Edit panel layout" mode: reorder sections by drag
   var _sectionBuf = null;    // active buffer during a v2 panel render
   function beginSections() { _sectionBuf = []; }
-  function sectionGroup(type, title, buildFn) {
-    var sec = h("div", "insp-section"); sec.setAttribute("data-section-type", type);
-    var collapsed = window.PanelLayout.isCollapsed(type);
-    if (collapsed) sec.classList.add("is-collapsed");
+  // uio-O-W2 (OVL-07): THE section. Every group of rows in every settings surface is this one
+  // function -- a chevron, a title, an optional switch, an optional one-line summary when
+  // collapsed, and a body of plain rows. The three other header styles are retired: a plain bold
+  // heading with no affordance (`sub()`), a bullet-prefixed twirl (`.disc`) and a second nested
+  // twirl (`.subdisc`) all shared one pane, so the same glyph meant "section" in one panel and
+  // "sub-section" in another, and which headers could be opened was something you learned by
+  // clicking. `panelSection`/`subDisclosure`/`disclosure` are now thin adapters over this.
+  //
+  // TWO LEVELS, NEVER THREE. Depth is counted while building, not declared: a section built
+  // inside another section's body is level 2 -- same header, quieter and indented. A group that
+  // would nest a third time is not a sub-sub-group; it is a section that belongs beside its
+  // parent, so promote it. The guard below still renders a too-deep section as level 2 (nothing
+  // disappears) and records where it came from, so the depth cannot creep back unnoticed.
+  //
+  //   type              PanelLayout taxonomy key -- reorderable, collapse persisted per type.
+  //                     Null for a section outside the reorderable set.
+  //   opts.key          openSections key: open/closed persists across rebuilds and reloads.
+  //   opts.defaultOpen  first-run state when neither store knows this section.
+  //   opts.toggle       {get,set} -- a switch in the header, independent of the chevron (OVL-08).
+  //   opts.summary      fn -> string: the collapsed one-liner ("On - centred, bottom rule").
+  //   opts.overridden   fn -> bool: the section-level override dot; opts.onReset enables Reset.
+  //   opts.actions      element (or array) pinned to the right of the title.
+  var _sectionDepth = 0;
+  // Published so a browser probe can NAME an offender instead of the depth quietly creeping
+  // back: a static test can read the source, but only a real render knows how deep a panel
+  // actually nests once every builder has run.
+  var _sectionDepthViolations = window.__sectionDepth3 = [];
+  /* @ovl07-start */
+  // Depth is observed two ways, because sections are built two ways: a `buildFn` nests while it
+  // runs (the counter sees that), and an imperative caller appends into a body it already holds
+  // (only the DOM sees that). Either signal makes this a level-2 section. Past that the section
+  // is STILL DRAWN, at level 2 — dropping rows to enforce a rule would hide an author's settings
+  // — and reported, so the offender gets promoted rather than the depth quietly returning.
+  // `counterDepth` = how many buildFn calls are on the stack. `hostBodies` = how many section
+  // bodies the host sits inside, itself included. They OVERLAP by one whenever a caller appends
+  // into the very body being built, so that one is subtracted rather than counted twice; the
+  // rest of `hostBodies` is real extra nesting the counter cannot see, and the counter in turn
+  // sees the nesting the DOM cannot (a section still detached from its parent while it builds).
+  function sectionDepthOf(counterDepth, hostBodies) {
+    var extra = Math.max(0, (hostBodies || 0) - (counterDepth > 0 ? 1 : 0));
+    var depth = counterDepth + extra;
+    return { level: depth === 0 ? 1 : 2, tooDeep: depth > 1 };
+  }
+  /* @ovl07-end */
+  function sectionGroup(type, title, buildFn, opts) {
+    opts = opts || {};
+    var d = sectionDepthOf(_sectionDepth, opts.hostBodies);
+    var level = d.level;
+    if (d.tooDeep) _sectionDepthViolations.push(title);
+    var keyed = opts.key != null;
+    var collapsed = keyed
+      ? !(openSections[opts.key] == null ? opts.defaultOpen !== false : openSections[opts.key])
+      : (type != null ? window.PanelLayout.isCollapsed(type) : opts.defaultOpen === false);
+    var enabled = opts.toggle ? !!opts.toggle.get() : true;
+    var over = !!(opts.overridden && opts.overridden());
+    var sec = h("div", "insp-section" + (level === 2 ? " insp-section--l2" : "") +
+      (collapsed ? " is-collapsed" : "") + (enabled ? "" : " is-inactive") +
+      (opts.divider === false ? " insp-section--no-divider" : ""));
+    if (type != null) sec.setAttribute("data-section-type", type);
     var head = h("div", "insp-section__head");
     var twirl = h("span", "insp-section__twirl" + (collapsed ? "" : " is-open"));
     var titleEl = h("span", "insp-section__title", title);
@@ -6020,24 +6075,59 @@
     // instead of inheriting one ("3 overridden"). Filled after buildFn, from the tally the
     // inheritance tails push into. Empty (and invisible) when nothing is overridden.
     var rollup = h("span", "insp-section__rollup");
-    head.appendChild(twirl); head.appendChild(titleEl); head.appendChild(rollup); head.appendChild(handle);
+    head.appendChild(twirl); head.appendChild(titleEl);
+    if (over) { var dot = h("span", "insp-section__dot"); dot.title = "Customized from theme default"; head.appendChild(dot); }
+    // The one-line summary, shown only while collapsed: what this section will actually do.
+    // With a switch it always leads with On/Off, so "collapsed" never has to mean "unknown".
+    var summaryText = sectionSummary(opts, enabled);
+    if (summaryText) { var sum = h("span", "insp-section__summary", summaryText); sum.title = summaryText; head.appendChild(sum); }
+    head.appendChild(rollup);
+    var ctrls = h("div", "insp-section__ctrls");
+    if (over && opts.onReset) {
+      var rb = h("button", "insp-section__reset", "Reset"); rb.type = "button"; rb.title = "Reset this section to the theme default";
+      rb.addEventListener("click", function (e) { e.stopPropagation(); pushHistory(); opts.onReset(); renderInspector(); });
+      ctrls.appendChild(rb);
+    }
+    if (opts.toggle) {
+      ctrls.appendChild(switchEl(enabled, function (v) {
+        pushHistory();
+        opts.toggle.set(v);   // the switch NEVER moves the disclosure (OVL-08)
+        renderInspector();
+      }));
+    }
+    if (opts.actions) [].concat(opts.actions).forEach(function (a) { if (a) ctrls.appendChild(a); });
+    head.appendChild(ctrls);
+    head.appendChild(handle);
     var body = h("div", "insp-section__body");
     head.addEventListener("click", function () {
       if (panelEditMode) return; // in edit mode the header is a drag grip, not a collapse toggle
       var nowCollapsed = !sec.classList.contains("is-collapsed");
       sec.classList.toggle("is-collapsed", nowCollapsed); twirl.classList.toggle("is-open", !nowCollapsed);
-      window.PanelLayout.setCollapsed(type, nowCollapsed);
+      if (keyed) { openSections[opts.key] = !nowCollapsed; saveOpenSections(); }
+      else if (type != null) window.PanelLayout.setCollapsed(type, nowCollapsed);
     });
+    // Assembled BEFORE the body is built, so a nested section can see the chain it is being
+    // appended into (sectionBodiesAbove walks the tree even while the panel is still detached).
+    sec.appendChild(head); sec.appendChild(body);
+    // Nested sections must not land in the panel's own ordering buffer (they belong to their
+    // parent's body), so the buffer is suspended for the duration of the build.
     var prevTally = _scopeTally; _scopeTally = [];
+    var prevBuf = _sectionBuf; _sectionBuf = null;
+    _sectionDepth++;
     try { buildFn(body); } catch (e) {}
-    var overrides = overrideCount(_scopeTally); _scopeTally = prevTally;
+    _sectionDepth--;
+    _sectionBuf = prevBuf;
+    var childTally = _scopeTally; _scopeTally = prevTally;
+    // A parent counts what its nested sections resolved too, so the roll-up on a level-1 header
+    // is the truth for everything folded underneath it.
+    if (_scopeTally) [].push.apply(_scopeTally, childTally);
+    var overrides = overrideCount(childTally);
     rollup.textContent = rollupLabel(overrides);
     if (overrides) {
       sec.classList.add("has-overrides");
       rollup.title = overrides + (overrides === 1 ? " value in this section is" : " values in this section are") +
         " set here instead of inherited";
     }
-    sec.appendChild(head); sec.appendChild(body);
     if (_sectionBuf) _sectionBuf.push({ type: type, el: sec });
     return sec;
   }
@@ -6470,7 +6560,7 @@
         inspector.appendChild(codeIn);
       }
 
-      inspector.appendChild(sub("Or bundled file"));
+      inspector = panelSection(inspector, "Or bundled file");
       // §10 design-consistency: canonical fieldRow (was labeledRow); commits on change.
       fieldRow("src", block.src, function (v) { block.src = v || undefined; node = reRenderBlockNode(node); renderModelView(); }, "path/to/file.html");
       } finally { inspector = _eins; }
@@ -6562,7 +6652,8 @@
       sectionGroup("Content", "Source", function (secBody) {
       var _wins = inspector; inspector = secBody;
       try {
-      inspector.appendChild(sub("URL"));
+      var _srcBody = inspector;
+      inspector = panelSection(_srcBody, "URL");
       var urlIn = h("textarea", "prop-input"); urlIn.spellcheck = false;
       urlIn.placeholder = "Vimeo / YouTube / embed URL";
       urlIn.value = block.url || "";
@@ -6571,7 +6662,7 @@
       urlIn.addEventListener("change", function () { block.url = urlIn.value; node = reRenderBlockNode(node); readout.textContent = describeUrl(urlIn.value); });
       inspector.appendChild(urlIn); inspector.appendChild(readout);
 
-      inspector.appendChild(sub("Offline video (self-host)"));
+      inspector = panelSection(_srcBody, "Offline video (self-host)");
       var fileBtn = h("button", "prop-btn", block.localVideo ? "Replace Video file" : "Upload local video (MP4)");
       fileBtn.addEventListener("click", function () {
         var input = document.createElement("input");
@@ -6608,6 +6699,8 @@
       inspector.appendChild(rmBtn);
 
       // §10 design-consistency: canonical iconField (was labeledRow); live-applies iframe height.
+      // Height is the section's own row, not the offline-video group's — back onto the body.
+      inspector = _srcBody;
       inspector.appendChild(iconField("H", { value: block.height || 360, unit: "px", placeholder: "360", step: 10, min: 50, max: 2000, datalist: "dl-gap", title: "Height",
         onchange: function (v) { var n = parseInt(v, 10); if (!isNaN(n)) { block.height = n; var f = node.querySelector(".embed__iframe"); if (f) f.style.height = n + "px"; renderModelView(); } } }).wrap);
       } finally { inspector = _wins; }
@@ -7073,8 +7166,8 @@
       var type = block.type;
       var bs = getBlockStyles();
       var hasTypeDef = bs && bs[type] && Object.keys(bs[type]).length;
-      body.appendChild(sub("Theme default (" + type + ")"));
-      body.appendChild(h("div", "insp-hint", hasTypeDef
+      var tdBody = panelSection(body, "Theme default (" + type + ")");
+      tdBody.appendChild(h("div", "insp-hint", hasTypeDef
         ? "Every " + type + " block inherits this captured look unless it sets its own. Capture again to update it."
         : "Capture this look as the default for every " + type + " block in the course."));
       var capRow = h("div", null); capRow.style.display = "flex"; capRow.style.gap = "6px"; capRow.style.marginTop = "2px";
@@ -7100,7 +7193,7 @@
         });
         capRow.appendChild(clrBtn);
       }
-      body.appendChild(capRow);
+      tdBody.appendChild(capRow);
     });
   }
 
@@ -7383,8 +7476,7 @@
   // (grid / dots / none) and its colour. Pure data on the block (block.pattern +
   // block.patternColor) -> render stamps data-pattern + --tex-color; ships in SCORM.
   function patternControls(block, refresh, target) {
-    var host = target || inspector;
-    host.appendChild(sub("Texture"));
+    var host = panelSection(target || inspector, "Texture");
     segmentedLive("Pattern", [["Grid", "grid"], ["Dots", "dots"], ["None", "none"]],
       function (v) { return (block.pattern || "grid") === v; },
       function (v) { if (v === "grid") delete block.pattern; else block.pattern = v; refresh(); }, host);
@@ -7719,7 +7811,7 @@
     courseNavControls(block, inspector);
     var toFooter = h("button", "insp-hint insp-backlink", "Footer padding, logo & disclaimer → ⚙ Header & Footer");
     toFooter.type = "button";
-    toFooter.addEventListener("click", function () { openSettingsModal("project"); if (settingsModal) { settingsModal.sectionKey.project = "headerFooter"; renderSettingsBody(); } });
+    toFooter.addEventListener("click", function () { openSettingsModal("project"); if (settingsModal) { settingsModal.sectionKey.project = "footer"; renderSettingsBody(); } });
     inspector.appendChild(toFooter);
   }
 
@@ -8119,8 +8211,8 @@
   // its instances live on the canvas (no Content panel) -> single-level.
   function renderComponentGridBody(node) {
     var block = node.__block;
-      inspector.appendChild(sub("Grid Layout"));
-
+    var _ins = inspector; inspector = panelSection(inspector, "Grid Layout");
+    try {
       var comps = getComponents();
       var optComps = Object.keys(comps).map(function (k) { return [comps[k].name, k]; });
       selectRow("Component Template", optComps, block.component, function (v) {
@@ -8169,6 +8261,7 @@
           reselectBlockNode(block, "block");
         }, "Add " + def.name));
       }
+    } finally { inspector = _ins; }
   }
 
   // #20/#21: a live-linked mirror of a shared library master, placed inline on the canvas
@@ -8312,7 +8405,8 @@
       // section — the label is edited on canvas, plus a self-contained acknowledgement
       // gate that reuses the shipped gate engine (GGGG): a required self-referencing
       // "checked" gate keeps the footer Next disabled until the learner ticks it.
-      inspector.appendChild(sub("Acknowledgement"));
+      var _ins = inspector; inspector = panelSection(inspector, "Acknowledgement");
+      try {
       inspector.appendChild(h("div", "insp-hint", "The checkbox label is edited on the canvas."));
       var isAckGate = !!(block.gate && block.gate.required && block.gate.when && block.gate.when.source === block.id && block.gate.when.is === "checked");
       switchRow("Require to continue", function () { return isAckGate; },
@@ -8322,10 +8416,12 @@
           reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block");
         });
       inspector.appendChild(h("div", "insp-hint", "On: the footer Next stays disabled until the learner ticks this box. Ships in the exported course."));
+      } finally { inspector = _ins; }
   }
   function renderColumnsBody(node) {
     var block = node.__block;
-      inspector.appendChild(sub("Columns Layout"));
+      var _ins = inspector; inspector = panelSection(inspector, "Columns Layout");
+      try {
       // Column gap = horizontal (between columns); Row gap = vertical (between
       // stacked blocks in a column). Row gap defaults to 0 so the blocks' own
       // Space top/bottom drive vertical spacing (GG); set it to add a uniform gap.
@@ -8344,7 +8440,8 @@
         });
         inspector.appendChild(resetColW);
       }
-    inspector.appendChild(h("div", "insp-hint", "Blocks inside each column are edited on the canvas — click one to select it."));
+      inspector.appendChild(h("div", "insp-hint", "Blocks inside each column are edited on the canvas — click one to select it."));
+      } finally { inspector = _ins; }
   }
 
   function renderSpacerBody(node) {
@@ -8377,7 +8474,8 @@
     function refresh() { reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block"); }
     function newRow(n) { var r = []; for (var i = 0; i < n; i++) r.push({ t: "" }); return r; }
 
-    inspector.appendChild(sub("Table"));
+    var _tblRoot = inspector;
+    inspector = panelSection(_tblRoot, "Table");
     switchRow("Header row", function () { return block.header !== false; }, function (v) { block.header = !!v; refresh(); });
     segmentedLive("Borders", [["All", "all"], ["Rows", "rows"], ["None", "none"]],
       function (v) { return (block.borders || "all") === v; },
@@ -8386,7 +8484,7 @@
     inspector.appendChild(iconField(Icon("padding"), { value: block.cellPad == null ? 10 : block.cellPad, unit: "px", placeholder: "10", step: 1, min: 0, max: 48, datalist: "dl-gap", title: "Cell padding",
       onchange: function (v) { var n = parseInt(v, 10); block.cellPad = isNaN(n) ? undefined : n; refresh(); } }).wrap);
 
-    inspector.appendChild(sub("Structure"));
+    inspector = panelSection(_tblRoot, "Structure");
     inspector.appendChild(propHeader("Rows (" + block.rows.length + ")", function () { pushHistory(); block.rows.push(newRow(ncols())); refresh(); }, "Add row"));
     inspector.appendChild(propHeader("Columns (" + ncols() + ")", function () { pushHistory(); block.rows.forEach(function (r) { r.push({ t: "" }); }); refresh(); }, "Add column"));
     var rmRow = h("button", "prop-btn", "Remove last row"); rmRow.disabled = block.rows.length <= 1;
@@ -8396,7 +8494,7 @@
     rmRow.style.marginTop = "8px";
     inspector.appendChild(rmRow); inspector.appendChild(rmCol);
 
-    inspector.appendChild(sub("Column alignment"));
+    inspector = panelSection(_tblRoot, "Column alignment");
     for (var ci = 0; ci < ncols(); ci++) {
       (function (i) {
         segmentedIconLive("Column " + (i + 1), [[Icon("align-left"), "left", "Left"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "right", "Right"]],
@@ -8404,10 +8502,11 @@
           function (v) { block.align[i] = v; refresh(); });
       })(ci);
     }
+    inspector = _tblRoot;
   }
   function renderTextContent(node) {
     var block = node.__block;
-      inspector.appendChild(sub("Content"));
+      var _ins = inspector; inspector = panelSection(inspector, "Content");
       var textIn = h("textarea", "prop-input");
       textIn.value = block.text || "";
       textIn.addEventListener("input", function () {
@@ -8421,7 +8520,8 @@
         renderModelView();
       });
       inspector.appendChild(textIn);
-    inspector.appendChild(h("div", "insp-hint", "Or edit on the canvas; double-click the text to style it (font, size, colour)."));
+      inspector.appendChild(h("div", "insp-hint", "Or edit on the canvas; double-click the text to style it (font, size, colour)."));
+      inspector = _ins;
   }
 
   // SPEC-ui-kit ticket 7: image Content = the image + all its display params
@@ -8482,7 +8582,7 @@
   function renderImageVariantVersions(block) {
     var names = variantNames();
     if (!names.length) return;
-    inspector.appendChild(sub("Variant versions"));
+    var _ins = inspector; inspector = panelSection(inspector, "Variant versions");
     inspector.appendChild(h("div", "insp-hint", "Show a different image per product variant. The image above is the Flagship; a variant with its own version swaps to it at runtime and in the export."));
     // uio-O-W1 (OVL-06): the hint used to end with an instruction ("preview a variant from the
     // top-bar switcher"). Which variant is being previewed is owned by the top-bar switcher, so
@@ -8509,6 +8609,7 @@
       }
       inspector.appendChild(row);
     });
+    inspector = _ins;
   }
 
   // #148: on-canvas VERSION CYCLE. An image block that has >=1 variant version gets a
@@ -8705,8 +8806,9 @@
       sectionGroup("Light/Dark", "Light & dark", function (secBody) {
         var _ins = inspector; inspector = secBody;
         try {
-      // Item Y — light/dark contrast (its own dimension, NOT the CSV variant axis).
-      inspector.appendChild(sub("Light / dark"));
+      // Item Y — light/dark contrast (its own dimension, NOT the CSV variant axis). No inner
+      // "Light / dark" header: it restated the section's own title one style down (OVL-07).
+      var _ldBody = inspector;
       // Tri-state contrast: Auto (default) tints VECTOR art (SVG) and leaves RASTER
       // photos alone, so assets adapt to light/dark out of the box; On/Off override.
       var isVec = window.isVectorSrc && window.isVectorSrc(srcForInspect(block.src));
@@ -8727,7 +8829,7 @@
       // fallback (e.g. a raster photo that needs distinct artwork per mode).
       var svgColors = (window.detectSvgColorsFromSrc && window.detectSvgColorsFromSrc(srcForInspect(block.src))) || [];
       if (svgColors.length) {
-        inspector.appendChild(sub("Palette — SVG colours"));
+        inspector = panelSection(_ldBody, "Palette — SVG colours");
         inspector.appendChild(h("div", "insp-hint", "Give each colour a role — Background and Text follow light/dark automatically; Keep leaves a brand colour as-is. Use ⋯ to map to a specific theme token, or switch it to a fixed custom colour."));
         block.colorMap = block.colorMap || {};
         // Three plain roles instead of raw token names: BG -> surface, Text -> ink,
@@ -8756,7 +8858,7 @@
         });
       }
 
-      inspector.appendChild(sub("Per-mode image (fallback)"));
+      inspector = panelSection(_ldBody, "Per-mode image (fallback)");
       inspector.appendChild(h("div", "insp-hint", "Rarely needed — for a raster asset that needs different artwork per mode. For SVGs use the palette above. Blank = use Image URL."));
       // optional per-mode raster sources; blank falls back to Image URL above
       function modeSrcRow(labelText, key) {
@@ -8791,7 +8893,8 @@
     var block = node.__block;
     var isCard = block.type === "frame";
     block.children = block.children || [];
-    inspector.appendChild(sub("Inside"));
+    var _frameRoot = inspector;
+    inspector = panelSection(_frameRoot, "Inside");
     block.children.forEach(function (child, ci) {
       var crow = h("div", "insp-row");
       crow.appendChild(h("span", "insp-row__label", blockIcon(child) + "  " + blockLabel(child)));
@@ -8818,7 +8921,7 @@
     addWrap.appendChild(addSel);
     inspector.appendChild(addWrap);
 
-    inspector.appendChild(sub("Actions"));
+    inspector = panelSection(_frameRoot, "Actions");
     var saveBtn = h("button", "prop-btn prop-btn--accent", "Save as component…");
     saveBtn.addEventListener("click", function () { saveBlockAsComponent(block); });
     inspector.appendChild(saveBtn);
@@ -8835,6 +8938,7 @@
     ungBtn.style.marginTop = "6px";
     ungBtn.addEventListener("click", function () { ungroupContainer(block); });
     inspector.appendChild(ungBtn);
+    inspector = _frameRoot;
   }
   function renderFrameOrGroupTwoLevel(node) {
     var block = node.__block;
@@ -9272,7 +9376,8 @@
     if (!active) active = curScreen.markers[0] || null;
     hotspotEditId = active ? active.id : null;
     if (active) {
-      inspector.appendChild(sub("Selected hotspot"));
+      var _hsListBody = inspector;
+      inspector = panelSection(_hsListBody, "Selected hotspot");
       // #49: per-hotspot Action — the real truth (block "Default for new hotspots" only seeds
       // new ones). Flip freely: card blocks AND a navigate target are both kept, so switching
       // back and forth is lossless. Everything below re-renders for the chosen action.
@@ -9396,6 +9501,7 @@
           inspector.appendChild(h("div", "insp-hint", "Then select the video block inside the card to upload the file."));
         }
       }
+      inspector = _hsListBody;
     }
     } finally { inspector = _hins; }
     });
@@ -9790,21 +9896,23 @@
   }
   function renderTourLoopInspector(body, loop) {
     var li = tourLoops().indexOf(loop);
-    body.appendChild(h("div", "insp-sub", "Loop"));
+    // uio-O-W2 (OVL-07): two sections in the one notation — the loop's own settings, then its
+    // ordered members — instead of a bold "Loop" line with a stack of labels under it.
+    var loopBody = panelSection(body, "Loop");
     // name
-    body.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Name"));
+    loopBody.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Name"));
     var nm = h("input", "prop-text"); nm.type = "text"; nm.spellcheck = false; nm.placeholder = "Loop " + (li + 1); nm.value = loop.name || "";
     nm.addEventListener("change", function () { pushHistory(); if (nm.value.trim()) loop.name = nm.value.trim(); else delete loop.name; scheduleSave(); renderTourNodes(); });
-    body.appendChild(nm);
+    loopBody.appendChild(nm);
     // wrap toggle — cycle past the ends (last -> first) or stop at the ends
     var wrapRow = h("label", "tourb__switch"); wrapRow.style.margin = "10px 0";
     wrapRow.appendChild(h("span", "tourb__switch-label", "Wrap around"));
     wrapRow.appendChild(switchEl(!!loop.wrap, function (v) { pushHistory(); if (v) loop.wrap = true; else delete loop.wrap; scheduleSave(); }));
-    body.appendChild(wrapRow);
+    loopBody.appendChild(wrapRow);
     // ordered member strip: reorder (up/down) + remove. Order = carousel order.
-    body.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Screens in this loop"));
+    var memBody = panelSection(body, "Screens in this loop");
     var members = loop.screens || [];
-    if (!members.length) body.appendChild(h("div", "tourb-loop__hint", "None yet. Drag screens into the frame, or add them below."));
+    if (!members.length) memBody.appendChild(h("div", "tourb-loop__hint", "None yet. Drag screens into the frame, or add them below."));
     var list = h("div", "tourb-memlist");
     members.forEach(function (sid, idx) {
       var s = tourScreenById(sid); if (!s) return;
@@ -9820,13 +9928,13 @@
       row.appendChild(up); row.appendChild(dn); row.appendChild(rm);
       list.appendChild(row);
     });
-    body.appendChild(list);
+    memBody.appendChild(list);
     // add-screens picker (the fallback to drag-in): every screen not already in this loop
     var addOpts = [["Add a screen…", ""]];
     tourScreens().forEach(function (s, si) { if (s && members.indexOf(s.id) < 0) addOpts.push([tourScreenLabel(s, si), s.id]); });
     if (addOpts.length > 1) {
       var addSel = dsSelect(addOpts, "", function (v) { if (!v) return; pushHistory(); members.push(v); scheduleSave(); renderTourNodes(); renderTourInspector(); });
-      addSel.title = "Add a screen to this loop"; body.appendChild(addSel);
+      addSel.title = "Add a screen to this loop"; memBody.appendChild(addSel);
     }
     // delete the loop (members become free nodes; any inbound navigate target is cleared)
     var del = h("button", "prop-btn prop-btn--danger", "Delete loop"); del.style.marginTop = "12px";
@@ -11415,25 +11523,30 @@
     renderTourEdges(); scheduleSave();
   });
 
-  function sub(title) { return h("div", "insp-sub", title); }
-  // DS PanelSection (issue #14, parent #22) — the canonical collapsible section
-  // wrapper (VersoUI.PanelSection -> .insp-section). Re-skins the two-level
-  // inspector's flat sub()/insp-sub headers to the DS mockup
-  // (design-system/ui_kits/editor/Inspector.jsx), so every section reads the same
-  // sibling-to-sibling. Returns the section BODY element so imperative builders
-  // append their rows into it. Falls back to sub() if the DS library is somehow
-  // absent (same library-absent guard as switchEl). The section carries NO
-  // data-section-type, so it is not part of the PanelLayout drag-reorder set
-  // (that stays the sectionGroup panels' feature) — see maybeRenderLayoutBar.
+  // A section built for an imperative caller: appends it to `host` and hands back the BODY, so
+  // the rows that follow append into the section rather than beside it. uio-O-W2 (OVL-07): this
+  // is now an adapter over the ONE sectionGroup, not a second section implementation — it used
+  // to build VersoUI.PanelSection and fall back to a flat sub() header, which is how a panel
+  // ended up mixing two section chromes. It carries no data-section-type, so it stays out of
+  // the PanelLayout drag-reorder set (that remains the taxonomy panels' feature).
   function panelSection(host, title, opts) {
     opts = opts || {};
-    if (window.VersoUI && window.VersoUI.PanelSection) {
-      var sec = window.VersoUI.PanelSection({ title: title, divider: opts.divider, collapsible: opts.collapsible, defaultOpen: opts.defaultOpen !== false, actions: opts.actions });
-      (host || inspector).appendChild(sec);
-      return sec.querySelector(".insp-section__body");
+    host = host || inspector;
+    var sec = sectionGroup(null, title, function () {}, {
+      key: opts.key, defaultOpen: opts.defaultOpen, divider: opts.divider, actions: opts.actions,
+      hostBodies: sectionBodiesAbove(host)
+    });
+    host.appendChild(sec);
+    return sec.querySelector(".insp-section__body");
+  }
+  // How many section bodies `host` sits inside, itself included. The host may still be detached
+  // (a panel is built before it is mounted), so this walks the tree it is in, not the document.
+  function sectionBodiesAbove(host) {
+    var n = 0;
+    for (var el = host; el; el = el.parentNode) {
+      if (el.nodeType === 1 && el.classList && el.classList.contains("insp-section__body")) n++;
     }
-    (host || inspector).appendChild(sub(title));
-    return host || inspector;
+    return n;
   }
   // DS inline-labelled segmented row (mockup AlignRow) — a canonical FieldRow whose
   // control is a VersoUI.SegmentedControl. Preserves the segmented wiring exactly
@@ -11480,16 +11593,11 @@
   var openSections = loadOpenSections();
   function saveOpenSections() { try { localStorage.setItem(OPEN_KEY, JSON.stringify(openSections)); } catch (e) {} }
   function toggleSection(key) { openSections[key] = !openSections[key]; saveOpenSections(); renderInspector(); }
+  // uio-O-W2 (OVL-07): an adapter over the ONE section, kept for the callers that name their
+  // open-state key. It used to be its own bullet-caret chrome — the third header style in a pane
+  // that already had two.
   function disclosure(key, title, buildBody) {
-    var open = !!openSections[key];
-    var secEl = h("div", "disc" + (open ? " is-open" : ""));
-    var head = h("button", "disc__head");
-    head.appendChild(h("span", "disc__caret"));
-    head.appendChild(h("span", "disc__title", title));
-    head.addEventListener("click", function () { toggleSection(key); });
-    secEl.appendChild(head);
-    if (open) { var body = h("div", "disc__body"); buildBody(body); secEl.appendChild(body); }
-    return secEl;
+    return sectionGroup(null, title, buildBody, { key: key, defaultOpen: false });
   }
 
   // ---- Canonical panel primitives -------------------
@@ -11548,59 +11656,25 @@
     });
     host.appendChild(rowEl);
   }
-  // Nested (level-2) twirl. opts: { toggle:{get,set} (switch in header, feature-enable),
-  // overridden:fn->bool (active-override dot + enables Reset), onReset:fn (revert styling) }.
-  // Auto-opens the nest when its switch is turned ON (decision 3).
+  // A section that carries a feature switch. opts: { toggle:{get,set} (the switch),
+  // overridden:fn->bool (override dot + enables Reset), onReset:fn (revert styling),
+  // summary:fn->string (the collapsed one-liner) }.
+  //
   // uio-O-W2 (OVL-08): the switch and the disclosure used to fight each other. Being OFF forced
   // `is-collapsed` whatever the author had twirled open, turning it ON auto-opened the section,
   // and an off section never built its body at all -- so it showed nothing of the configuration
-  // it still held, and turning the header back on was a leap of faith.
+  // it still held, and turning the header back on was a leap of faith. They are independent now:
+  // the chevron owns open/closed, the switch owns on/off, an OFF section dims but keeps its rows.
   //
-  // They are independent now, per the spine ("a chevron, an optional switch, and a one-line
-  // summary when collapsed"): the chevron owns open/closed, the switch owns on/off. A collapsed
-  // section states its value in one line. An OFF section dims, but its rows stay built and
-  // reachable -- marked inactive, not removed -- so you can see and set what it will do before
-  // you turn it on.
+  // uio-O-W2 (OVL-07): and it is no longer its own chrome. It was the second of three header
+  // styles in the Header & Footer pane; every one of those behaviours now lives in the ONE
+  // section, so this is a named adapter rather than a parallel implementation.
   function subDisclosure(key, title, buildBody, opts) {
     opts = opts || {};
-    var enabled = opts.toggle ? !!opts.toggle.get() : true;
-    var open = !!openSections[key];
-    var over = !!(opts.overridden && opts.overridden());
-    var sec = h("div", "subdisc" + (open ? " is-open" : " is-collapsed") + (enabled ? "" : " is-inactive"));
-    var head = h("div", "subdisc__head");
-    var twirl = h("button", "subdisc__twirl"); twirl.type = "button";
-    twirl.appendChild(h("span", "disc__caret"));
-    twirl.appendChild(h("span", "subdisc__title", title));
-    if (over) { var dot = h("span", "subdisc__dot"); dot.title = "Customized from theme default"; twirl.appendChild(dot); }
-    twirl.addEventListener("click", function () { toggleSection(key); });
-    head.appendChild(twirl);
-    // The one-line summary, shown only while collapsed: what this section will actually do.
-    // With a switch it always leads with On/Off, so "collapsed" never has to mean "unknown".
-    var summaryText = sectionSummary(opts, enabled);
-    if (summaryText) {
-      var sum = h("span", "subdisc__summary", summaryText);
-      sum.title = summaryText;
-      head.appendChild(sum);
-    }
-    var ctrls = h("div", "subdisc__ctrls");
-    if (over && opts.onReset) {
-      var rb = h("button", "subdisc__reset", "Reset"); rb.type = "button"; rb.title = "Reset this section to the theme default";
-      rb.addEventListener("click", function (e) { e.stopPropagation(); pushHistory(); opts.onReset(); renderInspector(); });
-      ctrls.appendChild(rb);
-    }
-    if (opts.toggle) {
-      ctrls.appendChild(switchEl(enabled, function (v) {
-        pushHistory();
-        opts.toggle.set(v);   // the switch NEVER moves the disclosure (OVL-08)
-        renderInspector();
-      }));
-    }
-    head.appendChild(ctrls);
-    sec.appendChild(head);
-    // Built whenever it is OPEN, on or off. An off section's rows are dimmed by .is-inactive and
-    // stay usable, so configuring it before enabling it is an ordinary thing to do.
-    if (open) { var body = h("div", "subdisc__body"); buildBody(body); sec.appendChild(body); }
-    return sec;
+    return sectionGroup(null, title, buildBody, {
+      key: key, defaultOpen: false, toggle: opts.toggle, summary: opts.summary,
+      overridden: opts.overridden, onReset: opts.onReset
+    });
   }
   // "Off · centred, top rule" — the collapsed section's one line. Pure string assembly over
   // whatever the caller reports, so a section with nothing to say adds nothing rather than
@@ -12965,14 +13039,14 @@
     // product-rail-review-diff: a real line-level diff (LineDiff, classic LCS) instead of
     // two flat side-by-side blocks -- removed lines (your text) and added lines (the
     // source's) are visually distinguished so the actual change is legible at a glance.
-    modalSection(shell.body, "What changed");
+    var diffBody = modalSection(shell.body, "What changed");
     var diffBlock = h("div", "source-stage__diff-block");
     var ops = window.LineDiff ? window.LineDiff.diff(sec.facets.technical || "", sec.sourceUpdate.text || "") : [];
     ops.forEach(function (op) {
       var prefix = op.type === "removed" ? "− " : op.type === "added" ? "+ " : "  ";
       diffBlock.appendChild(h("div", "source-stage__diff-line source-stage__diff-line--" + op.type, prefix + op.text));
     });
-    shell.body.appendChild(diffBlock);
+    diffBody.appendChild(diffBlock);
   }
 
   // source-stage-comments: the same feedback/discussion system the canvas editor already
@@ -15729,11 +15803,11 @@
           " — change it in Document settings (the sliders button in the editor header)."));
         var tools = (window.__docType && window.__docType.condToolsFor) ? window.__docType.condToolsFor(_cell.geo) : [];
         if (tools.length) {
-          inspector.appendChild(sub((CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " tools"));
+          var toolsBody = panelSection(inspector, (CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " tools");
           tools.forEach(function (t) {
             var row = h("div", "insp-row insp-doc-tool");
             row.appendChild(h("span", "insp-row__label", t));
-            inspector.appendChild(row);
+            toolsBody.appendChild(row);
           });
         }
       } finally { inspector = _i; }
@@ -15843,7 +15917,7 @@
   // Reuses the cell model (currentCell / setCellGeo / setCellInteractive); a geometry change still
   // warns + reflows via setCellGeo's confirm.
   function buildDocTypeBody(host) {
-    var body = panelSection(host, "Document type");
+    var body = host; // OVL-07: no inner "Document type" heading restating the section's own title
     segmentedLive("Geometry",
       [{ value: "reflow", label: "Reflow" }, { value: "frame", label: "Fixed frame" }, { value: "paged", label: "Paged" }],
       function (v) { return currentCell().geo === v; },
@@ -15855,7 +15929,7 @@
   function getSettingsSections(tab) {
     if (tab === "system") return [
       { key: "canvas", title: "Canvas", build: function (host) {
-          var cvBody = panelSection(host, "Canvas");
+          var cvBody = host; // OVL-07: the section is already called Canvas — no second heading
           colourControl("Background", canvasBg, function (val) { applyCanvasBg(val == null ? BG_DEFAULT : val); }, cvBody, true);
           cvBody.appendChild(h("div", "insp-hint", "System settings persist across every document on this machine."));
           // #44: light theme for Verso's OWN UI (chrome), distinct from the learner course light/dark.
@@ -15875,17 +15949,20 @@
     return [
       { key: "docType", title: "Document type", build: buildDocTypeBody },
       { key: "backup", title: "Backup", build: buildBackupBody },
-      { key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody },
+      // OVL-07: promoted out of one "Header & Footer" section, so their own groups are level 2
+      // rather than a third level of headings. `opts` rides the section header (switch + summary
+      // + Reset) and is resolved per render, because it reads the live document.
+      { key: "header", title: "Header", build: buildHeaderBody, opts: function () { return hfSectionOpts(true); } },
+      { key: "footer", title: "Footer", build: buildFooterBody, opts: function () { return hfSectionOpts(false); } },
+      { key: "hfDefault", title: "New-course default", build: buildHeaderFooterDefaultBody },
       // #168: canonical footer nav (was first-found, which could drift to a stray).
       // uio-O-W1 (OVL-06): with no nav bar yet, the pane used to instruct the author to walk to
       // Header & Footer. It now states the fact and links there.
-      { key: "nav", title: "Learner nav", build: function (host) {
-        var n = footerCourseNav();
-        if (n) { courseNavControls(n, host); return; }
-        crossRefRow({ label: "Learner nav bar", value: "Not added", linkLabel: "Header & Footer", host: host,
-          title: "Open Header & Footer, where the nav bar is added",
-          onNavigate: function () { openSettingsSection("project", "headerFooter"); } });
-      } },
+      // OVL-07: with a nav bar present its five groups are sheet sections of their own, so their
+      // inner groups (Labels, Appearance, Size…) sit at level 2 instead of a third level under a
+      // "Learner nav" wrapper. With no nav bar there is nothing to configure, so the one section
+      // states that and links to where a nav bar is added.
+      ].concat(navSettingsSections()).concat([
       { key: "layout", title: "Page layout", build: buildLayoutBody },
       { key: "endScreen", title: "Completion screen", build: buildEndScreenBody },
       { key: "theme", title: "Theme", build: renderThemeControls },
@@ -15894,7 +15971,29 @@
       { key: "motion", title: "Motion", build: buildMotionBody },
       { key: "components", title: "Custom Components", build: buildComponentsBody },
       { key: "pipeline", title: "Review (Viewer)", build: buildPipelineBody }
-    ];
+    ]);
+  }
+  // The learner-nav sections for the settings sheet. One descriptor list, two surfaces: the
+  // same five groups are the nav BLOCK's inspector sections when the bar is selected on the
+  // canvas (courseNavControls) and sheet sections here.
+  function navSettingsSections() {
+    var n = footerCourseNav();
+    if (!n) {
+      return [{ key: "nav", title: "Learner nav", build: function (host) {
+        crossRefRow({ label: "Learner nav bar", value: "Not added", linkLabel: "Footer", host: host,
+          title: "Open Footer, where the nav bar is added",
+          onNavigate: function () { openSettingsSection("project", "footer"); } });
+      } }];
+    }
+    return courseNavNests(n).map(function (nest) {
+      return {
+        // Under the selected nav block "Buttons" is unambiguous; standing on their own in the
+        // sheet they say which thing they belong to.
+        key: nest.key, title: nest.sheetTitle || nest.title,
+        build: function (host) { nest.build(host); },
+        opts: nest.opts ? function () { return nest.opts; } : null
+      };
+    });
   }
   // uio-F05: render EVERY section of the active tab into the content pane as one scroll.
   // This used to be a 220px nav rail plus one section at a time. Both are gone: a nav rail
@@ -15917,7 +16016,7 @@
         var sec = sectionGroup("settings:" + s.key, s.title, function (body) {
           inspector = body;
           try { s.build(body); } finally { inspector = _ins; }
-        });
+        }, s.opts ? s.opts() : null);
         sec.setAttribute("data-settings-section", s.key);
         settingsModal.content.appendChild(sec);
       });
@@ -15989,7 +16088,7 @@
     // to allow. Close and Esc are the only dismissals.
     var ws = document.querySelector(".workspace");
     (ws || document.body).appendChild(host);
-    settingsModal = { host: host, overlay: host, box: box, content: content, selectTab: selectTab, active: false, tab: "project", sectionKey: { system: "canvas", project: "headerFooter" } };
+    settingsModal = { host: host, overlay: host, box: box, content: content, selectTab: selectTab, active: false, tab: "project", sectionKey: { system: "canvas", project: "header" } };
     return settingsModal;
   }
   function openSettingsModal(tab) {
@@ -16520,57 +16619,70 @@
   // SPEC-panel-cleanup slice 2: the nav block inspector as nests — Buttons / Progress
   // pill / Progression / Sections. Same primitives as slice 1 (switch/eye/icon segments
   // + dot/reset). Word-boolean segments retired.
-  function courseNavControls(child, host) {
+  // uio-O-W2 (OVL-07): the nav's five groups are described ONCE and drawn in two places. On the
+  // canvas the nav block is selected and they are the panel's own sections; in the settings sheet
+  // they are sheet sections in their own right. They used to be nested inside a "Learner nav"
+  // section there, which made their inner groups (Labels, Appearance, Size…) a third level.
+  function courseNavNests(child) {
     child.sections = child.sections || [];
-    host.appendChild(subDisclosure("nav.buttons", "Buttons", function (b) { navButtonsNest(child, b); }, {
-      overridden: function () { return nestOverridden(child, NAV_BTN_KEYS); },
-      onReset: function () { nestReset(child, NAV_BTN_KEYS); reapplyHeaderFooter(); }
-    }));
-    host.appendChild(subDisclosure("nav.pill", "Progress pill", function (b) { navPillNest(child, b); }, {
-      toggle: { get: function () { return child.showBar !== false; }, set: function (v) { if (v) delete child.showBar; else child.showBar = false; reapplyHeaderFooter(); } },
-      overridden: function () { return nestOverridden(child, NAV_PILL_KEYS); },
-      onReset: function () { nestReset(child, NAV_PILL_KEYS); reapplyHeaderFooter(); }
-    }));
-    host.appendChild(subDisclosure("nav.progression", "Progression", function (b) {
-      b.appendChild(h("div", "insp-hint", "On: each chapter must pass its knowledge check (native quiz) before the learner can advance to the next; play it in demo mode to test. Add the chapter's dot-point summary to the quiz's \"Chapter summary\" list (on the quiz completion panel) — it shows once the learner passes."));
-      // §5: auto-gate ALL interactions — one course-level DEFAULT switch (per-page override
-      // lives in the page inspector). Default off.
-      // uio-F03: the SAME ladder, seen from the Course rung — one primitive, two surfaces.
-      var courseGateRes = resolveScoped(gateScopeChain(null), "gateInteractions", { at: "course" });
-      switchRow("Require all interactions before Next", function () { return !!courseGateRes.value; },
-        function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector(); }, b, false,
-        { inherit: { res: courseGateRes, format: onOffLabel, onReset: function () {
-            pushHistory(); delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector();
-          } } });
-      b.appendChild(h("div", "insp-hint", "Course default: on every page the learner must finish its interactions — pass quizzes, view all hotspots, watch videos, tick checkboxes, reveal all cards, step through sequences, open every accordion section — before Next enables. The gated Next greys out and shows a reminder. Override per page in the page's settings. Interactions we can't detect (embedded HTML interactions) are skipped, so a page can never trap the learner."));
-      // Author-overridable reminder copy (optional; blank -> the default sentence).
-      var gmRow = h("div", "insp-row");
-      gmRow.appendChild(h("span", "insp-row__label", "Reminder message"));
-      var gmIn = h("input", "prop-text"); gmIn.type = "text"; gmIn.spellcheck = false;
-      gmIn.placeholder = "Complete the interactions on this page to continue.";
-      gmIn.value = doc.gateMessage || "";
-      gmIn.addEventListener("change", function () { pushHistory(); var v = gmIn.value.trim(); if (v) doc.gateMessage = v; else delete doc.gateMessage; reapplyHeaderFooter(); });
-      gmRow.appendChild(gmIn); b.appendChild(gmRow);
-    }, {
-      // §2 chapter progression: opt-in course-level gate (feature-enable = the switch).
-      toggle: { get: function () { return !!doc.gatedProgression; }, set: function (v) { if (v) doc.gatedProgression = true; else delete doc.gatedProgression; reapplyHeaderFooter(); } }
-    }));
-    host.appendChild(subDisclosure("nav.sections", "Sections", function (b) { navSectionsNest(child, b); }));
-    // Guided tour (learner coach-marks over the footer controls). Feature-enable = the
-    // header switch; body = which page it appears on + editable copy per marker.
-    host.appendChild(subDisclosure("nav.tour", "Guided tour", function (b) { navTourNest(child, b); }, {
-      toggle: {
-        get: function () { return !!(child.tour && child.tour.on); },
-        set: function (v) {
-          if (v) {
-            child.tour = child.tour || {};
-            child.tour.on = true;
-            if (child.tour.page == null) child.tour.page = (doc.pages && doc.pages[0] && doc.pages[0].id) || "";
-          } else if (child.tour) { child.tour.on = false; }
-          reapplyHeaderFooter();
+    return [
+      { key: "nav.buttons", title: "Buttons", sheetTitle: "Nav buttons", build: function (b) { navButtonsNest(child, b); }, opts: {
+        overridden: function () { return nestOverridden(child, NAV_BTN_KEYS); },
+        onReset: function () { nestReset(child, NAV_BTN_KEYS); reapplyHeaderFooter(); }
+      } },
+      { key: "nav.pill", title: "Progress pill", build: function (b) { navPillNest(child, b); }, opts: {
+        toggle: { get: function () { return child.showBar !== false; }, set: function (v) { if (v) delete child.showBar; else child.showBar = false; reapplyHeaderFooter(); } },
+        overridden: function () { return nestOverridden(child, NAV_PILL_KEYS); },
+        onReset: function () { nestReset(child, NAV_PILL_KEYS); reapplyHeaderFooter(); }
+      } },
+      { key: "nav.progression", title: "Progression", build: function (b) { navProgressionNest(child, b); }, opts: {
+        // §2 chapter progression: opt-in course-level gate (feature-enable = the switch).
+        toggle: { get: function () { return !!doc.gatedProgression; }, set: function (v) { if (v) doc.gatedProgression = true; else delete doc.gatedProgression; reapplyHeaderFooter(); } }
+      } },
+      { key: "nav.sections", title: "Sections", sheetTitle: "Nav sections", build: function (b) { navSectionsNest(child, b); } },
+      // Guided tour (learner coach-marks over the footer controls). Feature-enable = the
+      // header switch; body = which page it appears on + editable copy per marker.
+      { key: "nav.tour", title: "Guided tour", build: function (b) { navTourNest(child, b); }, opts: {
+        toggle: {
+          get: function () { return !!(child.tour && child.tour.on); },
+          set: function (v) {
+            if (v) {
+              child.tour = child.tour || {};
+              child.tour.on = true;
+              if (child.tour.page == null) child.tour.page = (doc.pages && doc.pages[0] && doc.pages[0].id) || "";
+            } else if (child.tour) { child.tour.on = false; }
+            reapplyHeaderFooter();
+          }
         }
-      }
-    }));
+      } }
+    ];
+  }
+  function courseNavControls(child, host) {
+    courseNavNests(child).forEach(function (n) {
+      host.appendChild(subDisclosure(n.key, n.title, n.build, n.opts));
+    });
+  }
+  // Progression body — a course-level gate, so it reads the doc rather than the nav block.
+  function navProgressionNest(child, b) {
+    b.appendChild(h("div", "insp-hint", "On: each chapter must pass its knowledge check (native quiz) before the learner can advance to the next; play it in demo mode to test. Add the chapter's dot-point summary to the quiz's \"Chapter summary\" list (on the quiz completion panel) — it shows once the learner passes."));
+    // §5: auto-gate ALL interactions — one course-level DEFAULT switch (per-page override
+    // lives in the page inspector). Default off.
+    // uio-F03: the SAME ladder, seen from the Course rung — one primitive, two surfaces.
+    var courseGateRes = resolveScoped(gateScopeChain(null), "gateInteractions", { at: "course" });
+    switchRow("Require all interactions before Next", function () { return !!courseGateRes.value; },
+      function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector(); }, b, false,
+      { inherit: { res: courseGateRes, format: onOffLabel, onReset: function () {
+          pushHistory(); delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector();
+        } } });
+    b.appendChild(h("div", "insp-hint", "Course default: on every page the learner must finish its interactions — pass quizzes, view all hotspots, watch videos, tick checkboxes, reveal all cards, step through sequences, open every accordion section — before Next enables. The gated Next greys out and shows a reminder. Override per page in the page's settings. Interactions we can't detect (embedded HTML interactions) are skipped, so a page can never trap the learner."));
+    // Author-overridable reminder copy (optional; blank -> the default sentence).
+    var gmRow = h("div", "insp-row");
+    gmRow.appendChild(h("span", "insp-row__label", "Reminder message"));
+    var gmIn = h("input", "prop-text"); gmIn.type = "text"; gmIn.spellcheck = false;
+    gmIn.placeholder = "Complete the interactions on this page to continue.";
+    gmIn.value = doc.gateMessage || "";
+    gmIn.addEventListener("change", function () { pushHistory(); var v = gmIn.value.trim(); if (v) doc.gateMessage = v; else delete doc.gateMessage; reapplyHeaderFooter(); });
+    gmRow.appendChild(gmIn); b.appendChild(gmRow);
   }
   // Tour body: a page picker (when the dots appear) + per-marker Title/Description. Copy
   // is optional -> empty falls back to the render default (shown as the field placeholder,
@@ -16721,30 +16833,39 @@
     row.appendChild(input); return row;
   }
 
-  // SPEC-panel-cleanup slice 1: Header & Footer split into two nests, each with a
-  // header switch (feature-enable), an active-override dot + Reset (styling revert),
-  // and canonical inner order (Layout -> Appearance -> Content) via sub() dividers.
-  function buildHeaderFooterBody(c) {
-    var ch = doc.headerFooter || (doc.headerFooter = { header: { on: false }, footer: { on: false } });
-    c.appendChild(subDisclosure("hf.header", "Header", function (host) { buildHeaderNest(ch.header, host); }, {
-      toggle: { get: function () { return ch.header.on === true; }, set: function (v) { ch.header.on = v; reapplyHeaderFooter(); } },
-      summary: function () { return headerFooterSummary(ch.header, true); },
-      overridden: function () { return nestOverridden(ch.header, HEADER_STYLE_KEYS); },
-      onReset: function () { nestReset(ch.header, HEADER_STYLE_KEYS); reapplyHeaderFooter(); }
-    }));
-    c.appendChild(subDisclosure("hf.footer", "Footer", function (host) { buildFooterNest(ch.footer, host); }, {
-      toggle: { get: function () { return ch.footer.on === true; }, set: function (v) { ch.footer.on = v; reapplyHeaderFooter(); } },
-      summary: function () { return headerFooterSummary(ch.footer, false); },
-      overridden: function () { return nestOverridden(ch.footer, FOOTER_STYLE_KEYS); },
-      onReset: function () { nestReset(ch.footer, FOOTER_STYLE_KEYS); reapplyHeaderFooter(); }
-    }));
-    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide header/footer on one page, select that page (its name in Structure or its label on the canvas)."));
-
+  // uio-O-W2 (OVL-07): Header and Footer are their own SHEET SECTIONS now, not two nests inside
+  // a "Header & Footer" one. Nested, their own groups (Logo / Layout / Appearance / Added
+  // content) were a third level of headings, which is what put three header styles in this pane.
+  // Promoted, the pane is exactly two levels: the section, and its groups. Each keeps the switch,
+  // summary and Reset it carried as a nest — those live on the section header (hfSectionOpts).
+  function headerFooterConfig() {
+    return doc.headerFooter || (doc.headerFooter = { header: { on: false }, footer: { on: false } });
+  }
+  function hfSectionOpts(isHeader) {
+    var ch = headerFooterConfig();
+    var part = isHeader ? ch.header : ch.footer;
+    var keys = isHeader ? HEADER_STYLE_KEYS : FOOTER_STYLE_KEYS;
+    return {
+      toggle: { get: function () { return part.on === true; }, set: function (v) { part.on = v; reapplyHeaderFooter(); } },
+      summary: function () { return headerFooterSummary(part, isHeader); },
+      overridden: function () { return nestOverridden(part, keys); },
+      onReset: function () { nestReset(part, keys); reapplyHeaderFooter(); }
+    };
+  }
+  function buildHeaderBody(c) {
+    buildHeaderNest(headerFooterConfig().header, c);
+    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide the header on one page, select that page (its name in Structure or its label on the canvas)."));
+  }
+  function buildFooterBody(c) {
+    buildFooterNest(headerFooterConfig().footer, c);
+    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide the footer on one page, select that page (its name in Structure or its label on the canvas)."));
+  }
+  function buildHeaderFooterDefaultBody(c) {
     // New-course default: capture THIS course's header/footer as the starting point
     // for every new course (machine-wide). Look only — a new course keeps its own
     // name + chapter-derived nav (see sanitizeHeaderFooterDefault).
     var hasDefault = !!getHeaderFooterDefault();
-    var ncd = panelSection(c, "New-course default");
+    var ncd = c;
     var setBtn = h("button", "prop-btn", hasDefault ? "Update the default from this course" : "Set as default for new courses");
     setBtn.addEventListener("click", function () {
       if (saveHeaderFooterDefault()) renderInspector(); // re-render -> shows Clear + updated hint
@@ -17097,14 +17218,16 @@
     // A block's own box always wins over its type default (render/export cascade).
     var sBlock = panelSection(c, "Block styles");
     sBlock.appendChild(h("div", "insp-hint", "Default appearance per block type. Capture a styled block's look from its Appearance panel, then fine-tune it here. Any block's own styling overrides its type default."));
-    (function blockStylesEditor(c) {
+    // uio-O-W2 (OVL-07): each captured type is its OWN section beside "Block styles", not a
+    // third level of headings inside it. `listHost` is the Theme body they sit in.
+    (function blockStylesEditor(intro, listHost) {
       var bstyles = getBlockStyles();
       var types = Object.keys(bstyles);
       function commit() { window.__blockStyles = getBlockStyles(); scheduleSave(); mount(); }
-      if (!types.length) { c.appendChild(h("div", "insp-hint", "No block defaults captured yet.")); return; }
+      if (!types.length) { intro.appendChild(h("div", "insp-hint", "No block defaults captured yet.")); return; }
       types.forEach(function (type) {
         var box = bstyles[type];
-        c.appendChild(sub(type));
+        var c = panelSection(listHost, type + " blocks");
         colorFieldFlat("Fill", box.fill, function (v) { if (v == null) delete box.fill; else box.fill = v; commit(); }, c, { noHistory: true });
         colorFieldFlat("Text", box.textColor, function (v) { if (v == null) delete box.textColor; else box.textColor = v; commit(); }, c, { noHistory: true });
         // uio-F03: the SAME row, at the COURSE rung — the type default overriding the system
@@ -17125,7 +17248,7 @@
         clr.addEventListener("click", function () { pushHistory(); delete bstyles[type]; commit(); refreshSettingsPanes(); });
         c.appendChild(clr);
       });
-    })(sBlock);
+    })(sBlock, c);
 
     var reset = h("button", "prop-btn", "Reset " + themeEditName() + " theme");
     reset.addEventListener("click", function () {
@@ -18521,7 +18644,9 @@
     box.appendChild(head);
     return head;
   }
-  function modalSection(box, title) { box.appendChild(sub(title)); }
+  // A modal groups its rows with the same section as every other surface (OVL-07). Returns the
+  // body so the caller's rows land inside it rather than beside it.
+  function modalSection(box, title) { return panelSection(box, title); }
   // one aligned label -> control row; returns the row so the caller appends a control
   function modalField(box, labelText) {
     var r = h("div", "modal-field");
@@ -18624,11 +18749,11 @@
     var host = styleKey ? (obj[styleKey] || (obj[styleKey] = {})) : obj;
     // plain fields keep a simple textarea
     if (!node.getAttribute("data-rich")) {
-      inspector.appendChild(sub(field));
+      var plainBody = panelSection(inspector, field);
       var input = h("textarea", "prop-input");
       input.value = obj[field];
       input.addEventListener("input", function () { writeModel(node, input.value); if (node.textContent !== input.value) node.textContent = input.value; });
-      inspector.appendChild(input);
+      plainBody.appendChild(input);
       return;
     }
     // rich field -> Text properties (in the panel, no floating window)
@@ -18742,8 +18867,8 @@
     // so the marker (incl. Numbered / Lettered / Roman) lives entirely in the Bullet-style
     // dropdown; marker size stays a numeric iconField (exception).
     if (rootIsList) {
-      inspector.appendChild(sub("List"));
-      var MARKERS = [["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
+      var _typeBody = inspector; inspector = panelSection(_typeBody, "List");
+      var MARKERS =[["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
       var MARK_GLYPH = { disc: "•", circle: "◦", square: "▪", dash: "–", arrow: "→", check: "✓", decimal: "1.", "lower-alpha": "a.", "lower-roman": "i.", custom: (obj.listMarkerChar || "✱") };
       var markerOpts = MARKERS.map(function (o) { var g = MARK_GLYPH[o[1]] || ""; return [o[1], o[0], { html: '<span class="cs-mark">' + g + '</span>' + o[0] }]; });
       customSelectRow("Bullet style", markerOpts, (obj.listMarker || "disc"), function (v) {
@@ -18766,6 +18891,7 @@
       });
       inspector.appendChild(iconField("H", { value: obj.listMarkerSize == null ? "" : obj.listMarkerSize, unit: "em", placeholder: "1", step: 0.1, min: 0.5, max: 4, datalist: "dl-gap", title: "Marker size (relative to text)",
         onchange: function (val) { pushHistory(); var n = parseFloat(val); if (isNaN(n)) { delete obj.listMarkerSize; node.style.removeProperty("--li-marker-size"); } else { obj.listMarkerSize = n; node.style.setProperty("--li-marker-size", n + "em"); } renderModelView(); } }).wrap);
+      inspector = _typeBody;
     }
     } finally { inspector = _ins; }
     });
@@ -18804,7 +18930,8 @@
     inspector.appendChild(head);
 
     // Content
-    inspector.appendChild(sub("Content"));
+    var _instRoot = inspector;
+    inspector = panelSection(_instRoot, "Content");
     def.slots.forEach(function (slot) {
       var control;
       if (slot.multiline) {
@@ -18831,7 +18958,7 @@
 
     // Variant (style-swap)
     if (def.variants && def.variants.status) {
-      inspector.appendChild(sub("Variant"));
+      inspector = panelSection(_instRoot, "Variant");
       var row = h("div", "prop-toggle-row");
       def.variants.status.options.forEach(function (opt) {
         var on = (instance.status || def.variants.status.default) === opt;
@@ -18843,21 +18970,24 @@
     }
 
     // Actions (flagship): where this card navigates on click
+    inspector = _instRoot;
     buildActions(instance, card, function () { reselectByIndex(block, index); });
 
     // Component (instance-specific): detach from the component definition. Hide /
     // move / duplicate / delete now live in the shared footer below, so this row
     // holds only the action the footer can't express.
-    inspector.appendChild(sub("Component"));
+    inspector = panelSection(_instRoot, "Component");
     var compRow = h("div", "icon-row");
     var detach = iconBtn("unlink", instance.detached ? "Detached" : "Detach from component");
     if (instance.detached) detach.classList.add("is-on");
     detach.addEventListener("click", function () { pushHistory(); instance.detached = true; mount(); reselectByIndex(block, index); });
     compRow.appendChild(detach);
     inspector.appendChild(compRow);
+    inspector = _instRoot;
 
-    // Grid — header-with-"+" add affordance (same handler as before).
-    inspector.appendChild(propHeader("Grid", function () {
+    // Grid — the cards row carries the "+" add affordance (same handler as before).
+    inspector = panelSection(_instRoot, "Grid");
+    inspector.appendChild(propHeader("Cards", function () {
       pushHistory();
       var fresh = { status: "incomplete", slots: {} };
       def.slots.forEach(function (s) { fresh.slots[s.key] = ""; });
@@ -18874,6 +19004,7 @@
       setSelection("block", gridNode);
     });
     inspector.appendChild(selGrid);
+    inspector = _instRoot;
 
     // Shared footer — SAME markup as every other inspector, wired to operate on
     // this card within its grid's instances[] rather than a page's blocks[].
@@ -18976,7 +19107,7 @@
   // Actions inspector section. host = the object that holds .action (an instance
   // or a block); sourceNode = its canvas node; reselect = re-select after remount.
   function buildActions(host, sourceNode, reselect) {
-    inspector.appendChild(sub("Actions"));
+    var _actRoot = inspector; inspector = panelSection(_actRoot, "Actions");
     var opts = [["No navigation", ""]]
       .concat(doc.pages.map(function (p) { return [pageDisplayName(p, doc), p.id]; }))
       .concat([["Exit course (end SCORM session)", EXIT_ACTION]]);
@@ -18993,6 +19124,7 @@
     } else {
       inspector.appendChild(h("div", "insp-hint", "No navigation set. Drag onto a frame, or pick a page above."));
     }
+    inspector = _actRoot;
   }
 
   // a nav-button block selected -> its label + Actions
@@ -19679,13 +19811,14 @@
   // ---- "Locked until ->" reactive gate -------------------------------------
   var IS_OPTIONS = [["visited", "visited"], ["watched", "watched"], ["checked", "checked"]];
   function renderGateSection(block) {
-    inspector.appendChild(sub("Locked until"));
+    var _gateRoot = inspector;
     var on = !!block.gate;
-    switchRow("Gate", function () { return on; }, function (v) {
-      if (v) { ensureId(block); block.gate = block.gate || { mode: "disable", when: { source: "", is: "visited" } }; }
-      else { delete block.gate; }
-      mount(); interactReselect(block);
-    });
+    // uio-O-W2 (OVL-07): the gate's own on/off is the SECTION's switch, not a "Gate" row one
+    // line under a heading that said the same thing. Off, the section states so and stops --
+    // there is no configuration to keep, because turning it off deletes the gate.
+    _gateRoot.appendChild(sectionGroup(null, "Locked until", function (gateBody) {
+    var _gins = inspector; inspector = gateBody;
+    try {
     if (!on) {
       inspector.appendChild(h("div", "insp-hint", "Off. Turn on to keep this element locked (greyed or hidden) until a condition is met."));
       return;
@@ -19714,7 +19847,7 @@
     addCond.addEventListener("click", function () { pushHistory(); addGateCondition(g); mount(); interactReselect(block); });
     inspector.appendChild(addCond);
 
-    inspector.appendChild(sub("Hint + completion"));
+    inspector = panelSection(gateBody, "Hint + completion");
     // hint writes live (no rebuild) so the field keeps focus while typing.
     var hintRow = h("div", "insp-row"); hintRow.appendChild(h("span", "insp-row__label", "Hint"));
     var hintIn = h("input", "prop-text"); hintIn.type = "text"; hintIn.spellcheck = false;
@@ -19728,6 +19861,19 @@
       mount(); interactReselect(block);
     });
     inspector.appendChild(h("div", "insp-hint", "Required gates must be satisfied (plus every page visited) before the course reports complete."));
+    } finally { inspector = _gins; }
+    }, {
+      key: "gate.lockedUntil",
+      toggle: {
+        get: function () { return !!block.gate; },
+        set: function (v) {
+          if (v) { ensureId(block); block.gate = block.gate || { mode: "disable", when: { source: "", is: "visited" } }; }
+          else { delete block.gate; }
+          mount(); interactReselect(block);
+        }
+      },
+      summary: function () { return block.gate ? ((block.gate.mode || "disable") === "hide" ? "hidden until met" : "greyed until met") : ""; }
+    }));
   }
 
   // normalise gate.when into an editable array of {source,is} conditions.
@@ -21233,7 +21379,7 @@
       var det = h("details", "asset-group"); det.open = !collapsed[g];
       det.addEventListener("toggle", function () { setGroupCollapsed(g, !det.open); });
       var sum = h("summary", "asset-group__summary");
-      sum.appendChild(h("span", "disc__caret"));
+      sum.appendChild(h("span", "caret"));
       sum.appendChild(h("span", "asset-group__title", g));
       det.appendChild(sum);
       var body = groupBody();
@@ -21264,7 +21410,7 @@
       var det = h("details", "asset-group"); det.open = !collapsed[title];
       det.addEventListener("toggle", function () { setGroupCollapsed(title, !det.open); });
       var sum = h("summary", "asset-group__summary");
-      sum.appendChild(h("span", "disc__caret"));
+      sum.appendChild(h("span", "caret"));
       sum.appendChild(h("span", "asset-group__title", title));
       det.appendChild(sum);
       if (rows.length) {
@@ -22628,7 +22774,9 @@
     library:      ["shared components", "reusable", "master", "cross-course"],
     docType:      ["geometry", "reflow", "paged", "frame", "slide", "interactive", "static", "layout mode", "preset", "format"],
     backup:       ["restore", "snapshot", "recover", "copy"],
-    headerFooter: ["disclaimer", "logo", "brand", "masthead", "copyright", "nav bar"],
+    header:       ["logo", "brand", "masthead", "banner", "header & footer"],
+    footer:       ["disclaimer", "copyright", "nav bar", "small print", "header & footer"],
+    hfDefault:    ["new course default", "starting header", "starting footer", "reuse header"],
     nav:          ["learner nav", "next", "previous", "progress", "pill"],
     layout:       ["page width", "margins", "padding", "column", "gutter"],
     endScreen:    ["completion", "finish", "exit", "congratulations", "certificate"],
@@ -23127,7 +23275,10 @@
     inspector.innerHTML = ""; panelFields = {}; // self-clearing: the filter/resolve/row
     // handlers call this directly (not via renderInspector), so it must not double-append.
     var UI = window.VersoUI; // DS canonical control set (re-skin, issue #17)
-    inspector.appendChild(sub("Comments"));
+    // uio-O-W2 (OVL-07): the identity + sidecar controls are a section, not a bold line with no
+    // affordance. The filter and the list below are the panel's own rows.
+    var _cmtRoot = inspector;
+    inspector = panelSection(_cmtRoot, "Comments");
     // §12 slice 5: who am I (author identity) + sidecar transport
     var idn = commentIdentity();
     var idRow = h("div", "comment-identity");
@@ -23143,6 +23294,7 @@
       UI.Button({ variant: "secondary", full: true, label: "Export…", title: "Save comments as a sidecar JSON", onClick: function () { exportComments(); } }),
       UI.Button({ variant: "secondary", full: true, label: "Import…", title: "Merge a reviewer's comments file", onClick: function () { importComments(); } })
     ] }));
+    inspector = _cmtRoot;
     var list = (doc.comments || []);
     var openN = list.filter(function (c) { return !c.done; }).length;
     var resN = list.length - openN;
@@ -26145,9 +26297,11 @@
     if (!vs.length) return;
     var t = variantTargetForSelection();
     if (!t) return;
-    inspector.appendChild(sub("Variant text"));
+    var _varRoot = inspector;
+    inspector = panelSection(_varRoot, "Variant text");
     if (activeVariant) {
       inspector.appendChild(h("div", "insp-hint", "Previewing “" + activeVariant + "”. Switch to Flagship (top bar) to edit variant text."));
+      inspector = _varRoot;
       return;
     }
     inspector.appendChild(h("div", "insp-hint", "An alternate for a variant. Blank = inherit the flagship."));
@@ -26176,6 +26330,7 @@
         if (multiline) requestAnimationFrame(function () { autoGrowVariant(input); }); // size to content once in the DOM
       });
     });
+    inspector = _varRoot;
   }
 
   function isHiddenIn(node, variant) { var vv = node.variantVis; return !!(vv && vv.hide && vv.hide.indexOf(variant) !== -1); }
@@ -26668,7 +26823,7 @@
   // unconditionally (in kit mode AND normal mode) — a pure reference to defined fns.
   window.__kit = {
     Icon: Icon, ICON_ALIAS: ICON_ALIAS, h: h,
-    sub: sub, propHeader: propHeader, optionalRow: optionalRow, repeatedList: repeatedList, renderContainerChrome: renderContainerChrome, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS, breadcrumb: breadcrumb, disclosure: disclosure, subDisclosure: subDisclosure,
+    panelSection: panelSection, propHeader: propHeader, optionalRow: optionalRow, repeatedList: repeatedList, renderContainerChrome: renderContainerChrome, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS, breadcrumb: breadcrumb, disclosure: disclosure, subDisclosure: subDisclosure,
     switchRow: switchRow, eyeRow: eyeRow, segmentedIconLive: segmentedIconLive,
     fieldRow: fieldRow, iconField: iconField, twoUp: twoUp,
     selectRow: selectRow, customSelectRow: customSelectRow,
