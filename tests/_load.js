@@ -40,9 +40,13 @@ function makeNode(tag) {
     hidden: false,
     style: makeStyle(),
     classList: makeClassList(),
-    appendChild: function (c) { node.childNodes.push(c); return c; },
-    removeChild: function (c) { var i = node.childNodes.indexOf(c); if (i !== -1) node.childNodes.splice(i, 1); return c; },
-    insertBefore: function (c) { node.childNodes.unshift(c); return c; },
+    parentNode: null,
+    // The parent link is real, because code checks it: the snapshot proxy removes itself through
+    // `img.parentNode`, and a section's body has to be attached to its section before its builder
+    // runs so a nested builder can walk the chain up. arch-P3b-03.
+    appendChild: function (c) { node.childNodes.push(c); if (c) c.parentNode = node; return c; },
+    removeChild: function (c) { var i = node.childNodes.indexOf(c); if (i !== -1) { node.childNodes.splice(i, 1); if (c) c.parentNode = null; } return c; },
+    insertBefore: function (c) { node.childNodes.unshift(c); if (c) c.parentNode = node; return c; },
     setAttribute: function (k, v) { node.attributes[k] = String(v); },
     getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(node.attributes, k) ? node.attributes[k] : null; },
     removeAttribute: function (k) { delete node.attributes[k]; },
@@ -57,7 +61,13 @@ function makeNode(tag) {
       var i = a.indexOf(fn); if (i !== -1) a.splice(i, 1);
     },
     dispatch: function (type, ev) {
-      (node.listeners[type] || []).slice().forEach(function (fn) { fn(ev || { type: type }); });
+      var e = ev || {};
+      if (e.type == null) e.type = type;
+      if (e.target == null) e.target = node;
+      // Handlers routinely call these first; a bare object throws before reaching the behaviour.
+      if (!e.stopPropagation) e.stopPropagation = function () {};
+      if (!e.preventDefault) e.preventDefault = function () {};
+      (node.listeners[type] || []).slice().forEach(function (fn) { fn(e); });
       return node;
     },
     querySelector: function () { return null; },
@@ -69,6 +79,11 @@ function makeNode(tag) {
     remove: function () {},
     getBoundingClientRect: function () { return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
   };
+  Object.defineProperty(node, "className", {
+    enumerable: true,
+    get: function () { return node.classList.__text(); },
+    set: function (v) { node.classList.__set(v); }
+  });
   return node;
 }
 
@@ -80,14 +95,25 @@ function makeStyle() {
   return s;
 }
 
+// classList and className are ONE thing in a browser, and they have to be one thing here too: the
+// editor builds an element with a class STRING (h("div", "insp-section is-collapsed")) and then
+// asks classList whether it is collapsed. Two independent stores would answer no, and a test would
+// read a state the browser never has. arch-P3b-03.
 function makeClassList() {
   var set = {};
-  return {
-    add: function () { for (var i = 0; i < arguments.length; i++) set[arguments[i]] = 1; },
+  var list = {
+    add: function () { for (var i = 0; i < arguments.length; i++) if (arguments[i]) set[arguments[i]] = 1; },
     remove: function () { for (var i = 0; i < arguments.length; i++) delete set[arguments[i]]; },
     toggle: function (c, on) { if (on === undefined) { if (set[c]) delete set[c]; else set[c] = 1; } else if (on) set[c] = 1; else delete set[c]; },
-    contains: function (c) { return !!set[c]; }
+    contains: function (c) { return !!set[c]; },
+    // the string form, so className can be backed by this one store
+    __text: function () { return Object.keys(set).join(" "); },
+    __set: function (v) {
+      set = {};
+      String(v == null ? "" : v).split(/\s+/).forEach(function (c) { if (c) set[c] = 1; });
+    }
   };
+  return list;
 }
 
 function makeDocument() {
