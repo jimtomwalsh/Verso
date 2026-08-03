@@ -383,8 +383,13 @@ section("P3b namespace (load order)");
     });
   })(dir, "");
   files.forEach(function (f) {
+    // arch-P3b-04: the rule is about LOAD ORDER, so it applies to what a module reads as it loads.
+    // A read inside install() is safe by construction: editor.js calls install after every script
+    // on the page has run, and the VM tier runs them into the same context in the same order. Only
+    // the top-level half can be bitten, so only the top-level half is checked.
+    var head = f.text.split(/function install\s*\(/)[0];
     var self = "window." + ("Verso" + path.basename(f.rel, ".js"));
-    var reaches = (f.text.match(/window\.Verso[A-Z]\w*/g) || []).filter(function (ref) {
+    var reaches = (head.match(/window\.Verso[A-Z]\w*/g) || []).filter(function (ref) {
       // its own publish line, and the namespace itself, are not cross-module reads
       return ref !== self && ref !== "window.VersoEditor" && f.text.indexOf(ref + " =") < 0;
     });
@@ -847,8 +852,11 @@ section("platform-pivot 15 base-only editing guard");
     /function collaborating\(\) \{ return !!\(window\.VersoSync && window\.VersoSync\.isCollaborating\(\)\); \}/.test(t));
   // AC3 footgun: structural/inline edits unwrap to the BASE node (versionBaseNode) so an edit
   // captured under an active preview axis lands on the base and can't be lost.
+  // arch-P3b-04: the tour builder's unwrap moved with it to src/editor/board/builder.js; the
+  // guard is the same claim, now asserted where the code lives.
   ok("inline edits unwrap to the base node via versionBaseNode (version-clone footgun guard)",
-    /block = versionBaseNode\(block\);/.test(t));
+    /block = versionBaseNode\(block\);/.test(t) ||
+    /block = versionBaseNode\(block\);/.test(src("src/editor/board/builder.js")));
 })();
 
 // ---- platform-pivot 11: presence chrome (avatar cluster pure model + gated wiring) ----
@@ -3478,6 +3486,8 @@ section("#146 hotspot base-image size + margin popover");
 
 section("#48 box (region) hotspot marker");
 (function () {
+  // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
+  var eb = src("src/editor/board/builder.js");
   var r = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ecss = src("editor.css");
   // render: a box marker renders as a sized region (transparent, no glyph), not a point badge.
   ok("render: shape==box adds .hotspot-marker--box + inline w/h %", /if \(hs\.shape === "box"\) \{[\s\S]*?mk\.classList\.add\("hotspot-marker--box"\);[\s\S]*?mk\.style\.width = \(hs\.w == null \? 20 : hs\.w\) \+ "%";[\s\S]*?mk\.style\.height = \(hs\.h == null \? 12 : hs\.h\) \+ "%";/.test(r));
@@ -3489,7 +3499,7 @@ section("#48 box (region) hotspot marker");
   // editor: inspector Shape control + W/H fields; box seeds default 20x12.
   ok("editor: inspector Shape control writes marker.shape=box + seeds w/h", /segmentedLive\("Shape", \[\["Point", "point"\], \["Box \(region\)", "box"\]\][\s\S]*?active\.shape = "box"; if \(active\.w == null\) active\.w = 20; if \(active\.h == null\) active\.h = 12;/.test(e));
   // editor: both resize surfaces write m.w/m.h (tour board) and hs.w/hs.h (canvas), doubled from centre.
-  ok("editor: tour-board box resize sets m.w/m.h from centre", /function tourBeginPinResize[\s\S]*?m\.w = Math\.max\(2, Math\.min\(100, Math\.round\(\(px - cx\) \* 2\)\)\);/.test(e));
+  ok("editor: tour-board box resize sets m.w/m.h from centre", /function tourBeginPinResize[\s\S]*?m\.w = Math\.max\(2, Math\.min\(100, Math\.round\(\(px - cx\) \* 2\)\)\);/.test(eb));
   ok("editor: on-canvas box resize handle sets hs.w/hs.h", /hs\.shape === "box" && !mk\.querySelector\("\.hotspot-resize"\)[\s\S]*?hs\.w = Math\.max\(2, Math\.min\(100, Math\.round\(\(px - cx\) \* 2\)\)\);/.test(e));
   ok("editor.css: box pin + resize handles styled (chrome only)", /\.tourb-pin--box \{/.test(ecss) && /\.tourb-pin__resize \{/.test(ecss) && /\.hotspot-resize \{/.test(ecss));
 })();
@@ -3525,6 +3535,8 @@ section("#52 tour nav + progress outside the screen frame");
 
 section("#53 reveal hotspots after a play-once video ends");
 (function () {
+  // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
+  var eb = src("src/editor/board/builder.js");
   var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
   // render: markers on a video+once+revealAfterEnd screen start gated (hidden).
   ok("render: gates markers on a play-once reveal-after-end screen", /scr\.kind === "video" && scr\.playback === "once" && scr\.revealAfterEnd[\s\S]*?mk\.classList\.add\("hotspot-marker--gated"\);/.test(r));
@@ -3534,7 +3546,7 @@ section("#53 reveal hotspots after a play-once video ends");
   ok("runtime: reveals gated markers on 'ended' AND up front for reduced motion", /v\.addEventListener\("ended", function \(\) \{[\s\S]*?hsRevealGated\(\);[\s\S]*?if \(hsReduce\(\)\) hsRevealGated\(\);/.test(rt));
   // editor: inspector toggle (once-only) + poster seeks to the LAST frame.
   ok("editor: inspector offers a reveal-after-end toggle for play-once video", /switchRow\("Reveal hotspots after it ends", function \(\) \{ return !!curScreen\.revealAfterEnd;/.test(e));
-  ok("editor: tour poster seeks to the last frame before capture", /var last = Math\.max\(0, dur - 0\.05\);[\s\S]*?v\.currentTime = last;/.test(e));
+  ok("editor: tour poster seeks to the last frame before capture", /var last = Math\.max\(0, dur - 0\.05\);[\s\S]*?v\.currentTime = last;/.test(eb));
   // authoring visibility: gated markers are opacity:0 at runtime but must be visible (dimmed) on
   // the editing canvas so the author can place them -- scoped to #canvas-viewport so it does not
   // leak into Demo / the tour Preview (which show the true reveal-after-video behaviour).
@@ -3544,35 +3556,43 @@ section("#53 reveal hotspots after a play-once video ends");
 
 section("#55 video vs image tour-node badge");
 (function () {
+  // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
+  var eb = src("src/editor/board/builder.js");
   var e = src("src/editor.js"), ecss = src("editor.css");
-  ok("editor: renderTourNodes adds a video badge for kind==video", /if \(s\.kind === "video"\) \{ var vbadge = h\("span", "tourb-node__badge tourb-node__badge--video"\)[\s\S]*?window\.Icon\("play"\)/.test(e));
+  ok("editor: renderTourNodes adds a video badge for kind==video", /if \(s\.kind === "video"\) \{ var vbadge = h\("span", "tourb-node__badge tourb-node__badge--video"\)[\s\S]*?window\.Icon\("play"\)/.test(eb));
   ok("editor.css: .tourb-node__badge--video styled at a free corner", /\.tourb-node__badge--video \{[^}]*bottom: var\(--space-2\);[^}]*left: var\(--space-2\);/.test(ecss));
 })();
 
 section("#54 hover a video tour-node to scrub");
 (function () {
+  // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
+  var eb = src("src/editor/board/builder.js");
   var e = src("src/editor.js");
-  ok("editor: video board branch wires hover-scrub", /thumb\.appendChild\(v\); tourWireHoverScrub\(thumb, src\);/.test(e));
-  ok("editor: hover brings a live video back and scrubs X->currentTime", /function tourWireHoverScrub\(thumb, src\)[\s\S]*?thumb\.replaceChild\(v, poster\);[\s\S]*?var frac = Math\.max\(0, Math\.min\(1, \(e\.clientX - r\.left\) \/ r\.width\)\);[\s\S]*?v\.currentTime = frac \* dur;/.test(e));
-  ok("editor: only one node scrubs at a time (restore previous on enter)", /if \(tourScrubNode && tourScrubNode !== thumb\) tourRestoreScrub\(tourScrubNode\);/.test(e));
-  ok("editor: leave restores the cached poster", /thumb\.addEventListener\("pointerleave", function \(\) \{ tourRestoreScrub\(thumb\); \}\)/.test(e) && /if \(thumb\.__scrubPoster\) thumb\.replaceChild\(thumb\.__scrubPoster, v\)/.test(e));
-  ok("editor: board rebuild drops the stale scrub reference", /tourScrubNode = null; \/\/ #54/.test(e));
+  ok("editor: video board branch wires hover-scrub", /thumb\.appendChild\(v\); tourWireHoverScrub\(thumb, src\);/.test(eb));
+  ok("editor: hover brings a live video back and scrubs X->currentTime", /function tourWireHoverScrub\(thumb, src\)[\s\S]*?thumb\.replaceChild\(v, poster\);[\s\S]*?var frac = Math\.max\(0, Math\.min\(1, \(e\.clientX - r\.left\) \/ r\.width\)\);[\s\S]*?v\.currentTime = frac \* dur;/.test(eb));
+  ok("editor: only one node scrubs at a time (restore previous on enter)", /if \(tourScrubNode && tourScrubNode !== thumb\) tourRestoreScrub\(tourScrubNode\);/.test(eb));
+  ok("editor: leave restores the cached poster", /thumb\.addEventListener\("pointerleave", function \(\) \{ tourRestoreScrub\(thumb\); \}\)/.test(eb) && /if \(thumb\.__scrubPoster\) thumb\.replaceChild\(thumb\.__scrubPoster, v\)/.test(eb));
+  ok("editor: board rebuild drops the stale scrub reference", /tourScrubNode = null; \/\/ #54/.test(eb));
 })();
 
 section("WYSIWYG: tour board renders the REAL learner marker");
 (function () {
+  // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
+  var eb = src("src/editor/board/builder.js");
   var e = src("src/editor.js"), r = src("src/render.js");
   // board markers = the shared render.js builder (identical to the learner), not abstract pins.
-  ok("editor: board markers built via window.hotspotMarkerEl (real learner marker)", /var pin = window\.hotspotMarkerEl\(tourBlock, m, mi, loopById\);/.test(e));
-  ok("editor: course theme applied to the thumb so markers resolve real colours", /window\.applyTheme\(thumb, activeTheme\(\)\); thumb\.setAttribute\("data-mode", activeMode\);/.test(e));
-  ok("editor: fixed-px point markers scaled to the thumb; boxes are %-sized (unscaled)", /if \(!isBox\) pin\.style\.setProperty\("--hotspot-size", \(\(tourBlock\.markerSize \|\| 34\) \* TOUR_NODE_W \/ TOUR_NOMINAL_W\)/.test(e));
-  ok("editor: board marker carries .tourb-marker + selection + data-pin (drag/resize/connect intact)", /pin\.classList\.add\("tourb-marker"\);[\s\S]*?if \(hotspotEditId === m\.id\) pin\.classList\.add\("is-selected"\);[\s\S]*?pin\.setAttribute\("data-pin", m\.id\);/.test(e));
+  ok("editor: board markers built via window.hotspotMarkerEl (real learner marker)", /var pin = window\.hotspotMarkerEl\(tourBlock, m, mi, loopById\);/.test(eb));
+  ok("editor: course theme applied to the thumb so markers resolve real colours", /window\.applyTheme\(thumb, activeTheme\(\)\); thumb\.setAttribute\("data-mode", E\.activeMode\);/.test(eb));
+  ok("editor: fixed-px point markers scaled to the thumb; boxes are %-sized (unscaled)", /if \(!isBox\) pin\.style\.setProperty\("--hotspot-size", \(\(tourBlock\.markerSize \|\| 34\) \* TOUR_NODE_W \/ TOUR_NOMINAL_W\)/.test(eb));
+  ok("editor: board marker carries .tourb-marker + selection + data-pin (drag/resize/connect intact)", /pin\.classList\.add\("tourb-marker"\);[\s\S]*?if \(E\.hotspotEditId === m\.id\) pin\.classList\.add\("is-selected"\);[\s\S]*?pin\.setAttribute\("data-pin", m\.id\);/.test(eb));
   // the shared builder is the single source of the marker DOM (editor == learner).
   ok("render: hotspotMarkerEl is the shared marker builder used by renderMarkers", /window\.hotspotMarkerEl = hotspotMarkerEl;/.test(r) && /var mk = hotspotMarkerEl\(block, hs, i, loopById\);/.test(r));
 })();
 
 section("hotspot chrome: caption + video progress + nav toggle + counter placement");
 (function () {
+  // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
+  var eb = src("src/editor/board/builder.js");
   var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
   // caption: an updating below-screen line; per-screen text rides the DOM; runtime syncs on nav.
   ok("render: caption emitted (entry text) when any screen has one", /screens\.some\(function \(s\) \{ return s && s\.caption; \}\)[\s\S]*?el\("div", "hotspot-caption", entry\.caption \|\| ""\)/.test(r));
@@ -3592,7 +3612,7 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   // editor: nav toggle + per-screen caption fields (inspector + board node).
   ok("editor: External nav buttons toggle writes block.hideNav", /switchRow\("External nav buttons", function \(\) \{ return !block\.hideNav;/.test(e));
   ok("editor: Caption field (inspector) writes curScreen.caption", /textLine\("Caption", function \(\) \{ return curScreen\.caption;/.test(e));
-  ok("editor: board node has a secondary caption field writing s.caption", /h\("input", "tourb-node__caption"\)[\s\S]*?if \(capIn\.value\) s\.caption = capIn\.value; else delete s\.caption;/.test(e));
+  ok("editor: board node has a secondary caption field writing s.caption", /h\("input", "tourb-node__caption"\)[\s\S]*?if \(capIn\.value\) s\.caption = capIn\.value; else delete s\.caption;/.test(eb));
   // restart glyph: centred, hidden, shown when the interaction finishes; click restarts.
   ok("render: hidden restart glyph emitted for tours + play-once video screens", /screenMode \|\| screens\.some\(function \(s\) \{ return s && s\.kind === "video" && s\.playback === "once"; \}\)[\s\S]*?el\("button", "hotspot-restart"\)[\s\S]*?frame\.appendChild\(rstb\)/.test(r));
   // restart shows ONLY when finished: every reachable screen visited AND every watched play-once
@@ -16343,10 +16363,12 @@ section("arch-P3-06 tour board layout");
   })());
 
   // ---- the wiring ----
-  ok("editor.js plans, then applies, and keeps history + the repaint",
-    /var plan = BL\.tidyPlan\(tourScreens\(\), tourLoops\(\), tourNodeSel\);[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}BL\.applyTidyPlan\(plan, tourScreens\(\), tourLoops\(\)\);/.test(e));
-  ok("editor.js keeps no board geometry of its own",
-    !/LOOP_PAD|LOOP_HEADER|LOOP_CELL_H|LOOP_MIN_W|LOOP_EMPTY_H|LOOP_COLS_MAX/.test(e));
+  // arch-P3b-04: the caller moved to src/editor/board/builder.js with the rest of the board.
+  ok("the board plans, then applies, and keeps history + the repaint",
+    /var plan = BL\.tidyPlan\(tourScreens\(\), tourLoops\(\), tourNodeSel\);[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}BL\.applyTidyPlan\(plan, tourScreens\(\), tourLoops\(\)\);/.test(src("src/editor/board/builder.js")));
+  ok("neither editor.js nor the board keeps geometry of its own",
+    !/LOOP_PAD|LOOP_HEADER|LOOP_CELL_H|LOOP_MIN_W|LOOP_EMPTY_H|LOOP_COLS_MAX/.test(e) &&
+    !/LOOP_PAD|LOOP_HEADER|LOOP_CELL_H|LOOP_MIN_W|LOOP_EMPTY_H|LOOP_COLS_MAX/.test(src("src/editor/board/builder.js")));
   ok("both board modules are DOM-free", ["src/editor/board/layout.js", "src/editor/board/harvest.js"].every(function (f) {
     var t = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     return !/document\.[A-Za-z$_]+\s*\(/.test(t) && !/\bDate\.now|Math\.random/.test(t);
