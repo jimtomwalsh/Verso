@@ -26103,6 +26103,33 @@
     inspector: inspector
   };
 
+  // ---- editor namespace: the host surface (arch-P3b-01) --------------------
+  // What a region moved out of this file may reach back for. Sits here, beside __kit and outside
+  // the __KIT_MODE gate, for the same reason __kit does: it is a pure reference to functions
+  // already defined above, and the table has to exist on both pages that load this file.
+  //
+  // The panel context first, because the inspector is the region this exists for -- it is the
+  // highest-churn surface in the app and the one whose merge conflicts the split is meant to stop.
+  window.VersoEditor.provide({
+    h: h,
+    panelSection: panelSection,
+    sectionGroup: sectionGroup,
+    selectRow: selectRow,
+    iconField: iconField,
+    History: History
+  });
+  // doc and selection are REPLACED, not mutated -- a doc swap (setDoc, undo, a collab frame)
+  // rebinds `doc` wholesale, and every click rebinds `selection`. They go through getters so a
+  // region reads the live one at the moment it renders. Handing over the value instead is how the
+  // tour builder lost an author's work, and it is what P3-02's close-active-tab fix was about.
+  window.VersoEditor.provideLive({
+    doc: function () { return doc; },
+    selection: function () { return selection; }
+  });
+  // This list grows as regions move and ask for more -- deliberately, one binding at a time, so
+  // the surface stays a record of what is actually depended on rather than a guess. audit().unmet
+  // names anything a region asked for that nobody here supplies.
+
   // ---- init ----------------------------------------------------------------
   // Skipped in kit mode (kit.html only needs the primitives defined above, not a
   // booted editor — no doc load, mount, fonts, storage/backup wiring, or panels).

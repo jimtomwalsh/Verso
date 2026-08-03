@@ -219,7 +219,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/hotspots.js", "src/editor/dnd.js", "src/editor/canvas-view.js", "src/editor/selection.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/kernel.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/hotspots.js", "src/editor/dnd.js", "src/editor/canvas-view.js", "src/editor/selection.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -231,6 +231,168 @@ section("syntax");
   ok("node --check " + f, r.status === 0);
   if (r.status !== 0) console.error(r.stderr);
 });
+
+// ---- arch-P3b-01: the editor namespace -----------------------------------
+// The wiring table a moved region and editor.js reach each other through. Two halves: the table
+// itself, driven directly, and the table AS THE EDITOR ACTUALLY WIRES IT -- booted whole in the
+// VM tier, which is the thing P3 believed was impossible and the reason it left every region's
+// DOM behind.
+var KERNEL = require(path.join(ROOT, "src/editor/kernel.js"));
+var EDITOR_BOOT = require(path.join(__dirname, "_editor.js"));
+section("P3b namespace");
+(function () {
+  var K = KERNEL;
+  K.reset();
+
+  K.provide("h", function () { return "node"; });
+  ok("provide + get round trip", K.get("h")() === "node");
+  ok("has() reports what is provided", K.has("h") === true && K.has("nope") === false);
+  ok("get() on an unprovided name throws, and names it", (function () {
+    try { K.get("panelSection"); return false; } catch (e) { return /`panelSection`/.test(e.message); }
+  })());
+
+  // Rule 1, the load-bearing one. need() must never cache: a re-provide has to be visible to a
+  // region that took its view at load.
+  var ctx = K.need("h");
+  K.provide("h", function () { return "replaced"; });
+  ok("need() resolves at access, so a re-provide is seen", ctx.h() === "replaced");
+
+  // provideLive is the same rule for a binding that is REASSIGNED rather than re-provided --
+  // which is what a document swap does to `doc`.
+  var live = { pages: [] };
+  K.provideLive("doc", function () { return live; });
+  var view = K.need("doc", "h");
+  ok("provideLive reads through the getter", view.doc === live);
+  live = { pages: [1] };
+  ok("provideLive tracks a reassigned binding", view.doc.pages.length === 1);
+  ok("provideLive without a getter throws", (function () {
+    try { K.provideLive("bad", {}); return false; } catch (e) { return /needs a getter/.test(e.message); }
+  })());
+
+  // Rule 2: a name nobody supplies is recorded the moment it is asked for, so a boot alone
+  // reveals it -- no one has to open the panel that would have rendered empty.
+  K.need("neverProvided");
+  ok("an unmet need is recorded in the audit", KERNEL.audit().unmet.indexOf("neverProvided") >= 0);
+  ok("reading an unmet need throws rather than returning undefined", (function () {
+    try { return K.need("neverProvided").neverProvided === undefined ? false : false; }
+    catch (e) { return /`neverProvided`/.test(e.message); }
+  })());
+
+  // The region side, and the call sites editor.js keeps. bind() is handed out BEFORE the region
+  // exposes anything -- that is the whole point, and it is what keeps a region move to one hunk.
+  var renderInspector = K.bind("renderInspector");
+  ok("a bound name with no exposer is in the audit", KERNEL.audit().unbound.indexOf("renderInspector") >= 0);
+  ok("calling it before anything exposes it throws, and names it", (function () {
+    try { renderInspector(); return false; } catch (e) { return /`renderInspector`/.test(e.message); }
+  })());
+  K.expose("renderInspector", function (n) { return "painted:" + n; });
+  ok("the pre-bound call site now dispatches to the region", renderInspector(3) === "painted:3");
+  ok("exposing clears the unbound entry", KERNEL.audit().unbound.indexOf("renderInspector") < 0);
+
+  // Rule 3: one entry point, one owner. Re-registering the SAME function is a reload, not a
+  // collision, so only a genuine second owner fails.
+  var fn = function () {};
+  K.expose("once", fn);
+  ok("re-exposing the same function is not a collision", (function () {
+    try { K.expose("once", fn); return true; } catch (e) { return false; }
+  })());
+  ok("two owners of one entry point throws", (function () {
+    try { K.expose("once", function () {}); return false; } catch (e) { return /exposed twice/.test(e.message); }
+  })());
+
+  // Bulk forms, since both sides register in blocks.
+  K.reset();
+  K.provide({ a: 1, b: 2 });
+  K.expose({ x: function () { return "x"; } });
+  ok("provide(object) registers every key", K.get("a") === 1 && K.get("b") === 2);
+  ok("expose(object) registers every key", K.bind("x")() === "x");
+  ok("reset() empties the table", (function () { K.reset(); var a = K.audit(); return !a.provided.length && !a.exposed.length && !a.needed.length && !a.bound.length; })());
+})();
+
+// The same table, wired by the real editor. This boots src/editor.js whole -- every script the
+// page loads before it, in page order, inline scripts included -- against the VM tier's stub
+// window. It is the precedent every remaining P3b ticket tests its moved region against.
+section("P3b namespace (booted)");
+(function () {
+  var r = EDITOR_BOOT.tryBoot();
+  ok("index.html's editor boots whole in the VM tier", r.error === null);
+  if (!r.win) { console.error(r.error); return; }
+  var win = r.win;
+  var E = win.VersoEditor;
+  ok("the booted editor publishes the namespace", !!E);
+  ok("the boot logged no errors", win.__log.filter(function (l) { return l.level === "error"; }).length === 0);
+
+  // The host surface editor.js actually provides. Named here rather than read off the audit, so a
+  // binding that silently stops being provided fails instead of shrinking the expectation.
+  var SEED = ["h", "panelSection", "sectionGroup", "selectRow", "iconField", "History", "doc", "selection"];
+  SEED.forEach(function (name) { ok("editor.js provides `" + name + "`", E.has(name)); });
+  ["h", "panelSection", "sectionGroup", "selectRow", "iconField"].forEach(function (name) {
+    ok("`" + name + "` resolves to a function", typeof E.get(name) === "function");
+  });
+  ok("`History` resolves to the history seam", !!E.get("History") && typeof E.get("History").push === "function");
+  ok("`selection` resolves to the selection shape", !!E.get("selection") && typeof E.get("selection").type === "string");
+
+  // Rule 1 against shipping code. Editor.setDoc is the real document swap -- the one that stranded
+  // the tour builder on a closed course and the one P3-02's close-active-tab fix was about. A
+  // region holding this binding has to see the new document, not the one it was wired with.
+  win.Editor.setDoc({ id: "p3b-probe", title: "Probe", pages: [{ id: "p1", blocks: [] }], chapters: [] }, true);
+  ok("`doc` follows a real document swap", E.get("doc").id === "p3b-probe");
+  ok("`doc` is the same object the Editor seam reports", E.get("doc") === win.Editor.getDoc());
+
+  // The ratchet. Nothing has moved yet, so both lists start empty; from here a region that asks
+  // for a binding editor.js does not provide, or a call site forwarding to an entry point nobody
+  // publishes, fails the suite instead of rendering the wrong thing.
+  var a = E.audit();
+  ok("no region needs something nobody provides", a.unmet.length === 0);
+  ok("no call site binds an entry point nobody exposes", a.unbound.length === 0);
+  if (a.unmet.length || a.unbound.length) console.error("  unmet: " + a.unmet.join(",") + "  unbound: " + a.unbound.join(","));
+})();
+
+// kit.html boots editor.js too, in __KIT_MODE, and arch-P3-01 found it broken because a new
+// dependency went into index.html alone. The namespace sits OUTSIDE that gate for the same reason
+// __kit does, so the gallery page has to carry it as well.
+section("P3b namespace (kit page)");
+(function () {
+  var r = EDITOR_BOOT.tryBoot({ page: "kit.html" });
+  ok("kit.html's editor boots whole in the VM tier", r.error === null);
+  if (!r.win) { console.error(r.error); return; }
+  ok("kit mode gets the namespace too", !!r.win.VersoEditor && r.win.VersoEditor.has("panelSection"));
+  ok("kit mode skips init", r.win.__KIT_MODE === true);
+})();
+
+section("P3b namespace (load order)");
+(function () {
+  ["index.html", "kit.html"].forEach(function (page) {
+    var html = src(page);
+    var k = html.indexOf("src/editor/kernel.js");
+    var e = html.indexOf("src/editor.js\"");
+    ok(page + " loads the namespace before editor.js", k > -1 && e > -1 && k < e);
+  });
+  // The cross-module footgun, ratcheted. A module that reaches a sibling through `window.VersoX`
+  // works in the browser and reads undefined under a bare require, because each module there gets
+  // its own window stand-in -- a difference that lives only in the tests, which is the worst place
+  // for one. dnd.js hit it and wired hotspots explicitly through use(); every module that reaches
+  // a sibling must offer the same setter.
+  var dir = path.join(ROOT, "src/editor");
+  var files = [];
+  (function walk(d, prefix) {
+    fs.readdirSync(d).forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, prefix + f + "/");
+      else if (/\.js$/.test(f)) files.push({ rel: "src/editor/" + prefix + f, text: fs.readFileSync(full, "utf8") });
+    });
+  })(dir, "");
+  files.forEach(function (f) {
+    var self = "window." + ("Verso" + path.basename(f.rel, ".js"));
+    var reaches = (f.text.match(/window\.Verso[A-Z]\w*/g) || []).filter(function (ref) {
+      // its own publish line, and the namespace itself, are not cross-module reads
+      return ref !== self && ref !== "window.VersoEditor" && f.text.indexOf(ref + " =") < 0;
+    });
+    if (!reaches.length) return;
+    ok(f.rel + " wires its sibling explicitly (use())", /function use\s*\(/.test(f.text));
+  });
+  ok("every module under src/editor was checked", files.length >= 12);
+})();
 
 // ---- XX: durable-write core ----------------------------------------------
 // arch-P3-01: the durable-write core, the adapter swap and the StorageBackend all moved to

@@ -113,7 +113,10 @@ function makeStorage() {
 //                 activation gate, or supply a dependency the file expects another script to have
 //                 published first.
 //   opts.also     other src files to run into the SAME context first, in order, when the file
-//                 genuinely depends on an earlier script (e.g. render.js needs theme.js).
+//                 genuinely depends on an earlier script (e.g. render.js needs theme.js). An entry
+//                 may also be { code, filename } -- a page's INLINE <script> carries real load-time
+//                 state (kit.html sets __KIT_MODE that way) and a boot replayed without it takes a
+//                 branch the page never takes.
 //
 // Returns the window object itself, so a test reads the real published interface:
 //   var win = load("src/theme.js"); win.THEMES.dark ...
@@ -168,8 +171,8 @@ function load(rel, opts) {
 
   var ctx = vm.createContext(win);
   (opts.also || []).concat([rel]).forEach(function (f) {
-    var code = fs.readFileSync(path.join(ROOT, f), "utf8");
-    vm.runInContext(code, ctx, { filename: f });
+    var code = typeof f === "string" ? fs.readFileSync(path.join(ROOT, f), "utf8") : f.code;
+    vm.runInContext(code, ctx, { filename: typeof f === "string" ? f : (f.filename || "<inline>") });
   });
   return win;
 }
