@@ -11131,8 +11131,10 @@ section("line diff (LineDiff)");
 // across pages / nested blocks / componentGrid instances, so a renamed key still resolves.
 (function () {
   section("version rename (name a version so it can be identified)");
-  var e = src("src/editor.js");
-  var m = e.match(/function renameVersion\(d, oldName, newName\)\s*\{[\s\S]*?\n  \}/);
+  // arch-P3b-07l: the version axis moved to src/editor/variants.js.
+  var e = src("src/editor/variants.js"), VARIANTS = e;
+  // The closing brace is one indent deeper inside install(), so the terminator widened with it.
+  var m = e.match(/function renameVersion\(d, oldName, newName\)\s*\{[\s\S]*?\n    \}/);
   if (!m) { ok("locate renameVersion", false); return; }
   var renameVersion = new Function(m[0] + "\nreturn renameVersion;")();
   function mk() {
@@ -11170,10 +11172,10 @@ section("line diff (LineDiff)");
   ok("unknown old name rejected (false)", renameVersion(d3, "vX", "vY") === false && JSON.stringify(d3) === snap);
   ok("clash with an existing version rejected (false)", renameVersion(d3, "v2", "v1") === false && JSON.stringify(d3) === snap);
   // wiring: the switcher surfaces the base name + offers a rename, and the base badge exists
-  ok("menu labels base with its name", /"Base · " \+ base/.test(e));
-  ok("menu excludes base from the pickable list", /vs\.slice\(\)\.reverse\(\)\.forEach\(function \(v\) \{\s*if \(v === base\) return;/.test(e));
-  ok("menu offers a rename action", /renameVersionPrompt\(activeVersion \|\| null\)/.test(e));
-  ok("base badge identifies the current version", /"Editing base · " \+ baseName/.test(e));
+  ok("menu labels base with its name", /"Base · " \+ base/.test(VARIANTS));
+  ok("menu excludes base from the pickable list", /vs\.slice\(\)\.reverse\(\)\.forEach\(function \(v\) \{\s*if \(v === base\) return;/.test(VARIANTS));
+  ok("menu offers a rename action", /renameVersionPrompt\(E\.activeVersion \|\| null\)/.test(VARIANTS));
+  ok("base badge identifies the current version", /"Editing base · " \+ baseName/.test(VARIANTS));
 })();
 
 // #206 editor version switcher: a SECOND top-bar glyph, parallel to the variant pill, that
@@ -11181,7 +11183,8 @@ section("line diff (LineDiff)");
 // real editor source (headless can't boot the DOM; the switcher is DOM-bound).
 (function () {
   section("#206 version switcher (editor wiring)");
-  var e = src("src/editor.js");
+  // arch-P3b-07l: the switchers moved to src/editor/variants.js; the axis STATE stays in editor.js.
+  var e = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");
   ok("activeVersion state exists (null = editable base)", /var activeVersion = null;/.test(e));
   ok("versionNames() reads doc.versions", /function versionNames\(\) \{ return \(doc\.versions \|\| \[\]\)\.slice\(\); \}/.test(e));
   // NESTING: currentDoc resolves variant (product) FIRST, then version on top (#207 routes an
@@ -11192,21 +11195,21 @@ section("line diff (LineDiff)");
   ok("setDoc drops a stale activeVersion the new doc lacks", /if \(activeVersion && \(doc\.versions \|\| \[\]\)\.indexOf\(activeVersion\) === -1\) activeVersion = null;/.test(e));
   // SWITCHER: face-up named dropdown (edit-header-ia-v2), menu, newest = default, Base entry,
   // order after the variant control.
-  ok("version switch is a face-up axis button, named axis + words (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,400}axis-btn__axis">Version<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/versionWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
-  ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(e));
-  ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(e));
-  ok("menu offers Base as the editable anchor (null activeVersion)", /active: !activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(e));
-  ok("menu lists versions newest-first", /vs\.slice\(\)\.reverse\(\)\.forEach/.test(e));
-  ok("+ New version prompt writes doc.versions (append = moving default)", /function newVersionPrompt\(then\)[\s\S]*?doc\.versions\.push\(name\)/.test(e));
+  ok("version switch is a face-up axis button, named axis + words (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,400}axis-btn__axis">Version<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(VARIANTS) && !/versionWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
+  ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(VARIANTS));
+  ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(VARIANTS));
+  ok("menu offers Base as the editable anchor (null activeVersion)", /active: !E\.activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(VARIANTS));
+  ok("menu lists versions newest-first", /vs\.slice\(\)\.reverse\(\)\.forEach/.test(VARIANTS));
+  ok("+ New version prompt writes doc.versions (append = moving default)", /function newVersionPrompt\(then\)[\s\S]*?doc\.versions\.push\(name\)/.test(VARIANTS));
   // FIX 4a: order encodes nesting — version glyph inserted AFTER the variant glyph.
-  ok("version glyph inserts after the variant glyph (outer->inner order)", /host\.insertBefore\(versionWrapEl, variantWrapEl\.nextSibling\)/.test(e));
+  ok("version glyph inserts after the variant glyph (outer->inner order)", /host\.insertBefore\(versionWrapEl, variantWrapEl\.nextSibling\)/.test(VARIANTS));
   ok("renderVersionSwitch wired into init + setDoc", (e.match(/renderVersionSwitch\(\)/g) || []).length >= 2);
   // PREVIEW: read-only badge + right-click nav back to Base.
-  ok("previewVersion sets activeVersion + re-mounts (flushing in-flight edits)", /function previewVersion\(v\) \{ flushSave\(\); activeVersion = v; syncVersionSwitch\(\); mount\(\); \}/.test(e));
-  ok("version badge distinguishes editing vs read-only (#207)", /label = editable \? \("Editing version · " \+ activeVersion\) : \("Previewing version · " \+ activeVersion \+ " · read-only"\)/.test(e));
-  ok("composed badge offsets below the variant pill (FIX 4b)", /badge\.classList\.toggle\("is-composed", !!activeVariant\)/.test(e));
-  ok("variant badge gates on the variant axis ONLY (no null badge in a version-only preview)", /var badge = document\.getElementById\("variant-preview-badge"\);\s*if \(!activeVariant\)/.test(e));
-  ok("version menu offers 'Back to Base' as the editable-anchor return", /openVersionMenu[\s\S]{0,800}"Base \(edit\)"/.test(e));
+  ok("previewVersion sets activeVersion + re-mounts (flushing in-flight edits)", /function previewVersion\(v\) \{ flushSave\(\); E\.setActiveVersion\(v\); syncVersionSwitch\(\); mount\(\); \}/.test(VARIANTS));
+  ok("version badge distinguishes editing vs read-only (#207)", /label = editable \? \("Editing version · " \+ E\.activeVersion\) : \("Previewing version · " \+ E\.activeVersion \+ " · read-only"\)/.test(VARIANTS));
+  ok("composed badge offsets below the variant pill (FIX 4b)", /badge\.classList\.toggle\("is-composed", !!E\.activeVariant\)/.test(VARIANTS));
+  ok("variant badge gates on the variant axis ONLY (no null badge in a version-only preview)", /var badge = document\.getElementById\("variant-preview-badge"\);\s*if \(!E\.activeVariant\)/.test(VARIANTS));
+  ok("version menu offers 'Back to Base' as the editable-anchor return", /openVersionMenu[\s\S]{0,800}"Base \(edit\)"/.test(VARIANTS));
   // canvas rings: teal version ring, split from the purple variant ring.
   ok("canvas toggles a distinct is-version-preview ring", /canvas\.classList\.toggle\("is-version-preview", !!activeVersion\)/.test(e));
   var css = src("editor.css");
@@ -11222,6 +11225,7 @@ section("line diff (LineDiff)");
 section("edit-header-ia-v2: single-bar three-zone editor header");
 (function () {
   var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
+  var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   // MARKUP: one bar, three zones, two hairline seps, no leftover two-row structure.
   // uio-E-C01 (EDIT-07): the doc header was merged UP into the single global .toolbar. The
   // separate editor-window bar/wrapper is gone; the three zones are now direct children of .toolbar.
@@ -11232,9 +11236,9 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   ok("standalone #mode-toggle is retired from the header", html.indexOf('id="mode-toggle"') === -1);
   ok("Build/Read toggle + axes host present in the doc zone (cell chip retired)", html.indexOf('id="editor-cell-chip"') === -1 && /id="editor-view-toggle"/.test(html) && /id="editor-doc-axes"/.test(html));
   // FACE-UP DROPDOWNS: variant is a WORDS-ONLY named axis button (no leading glyph; caret only).
-  ok("variant switch is a face-up axis button, named axis + words (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,400}axis-btn__axis">Variant<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/variantWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
-  ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(e));
-  ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(e));
+  ok("variant switch is a face-up axis button, named axis + words (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,400}axis-btn__axis">Variant<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(VARIANTS) && !/variantWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
+  ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(VARIANTS));
+  ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(VARIANTS));
   // LIGHT/DARK now lives in the Preview chevron menu (size presets + palette, divider between).
   ok("Preview chevron menu adds a Palette section with light/dark -> setMode", /head: "Palette"[\s\S]{0,220}setMode\("light"\)[\s\S]{0,120}setMode\("dark"\)/.test(e) && /function openPreviewBpMenu/.test(e));
   // DOC-SETTINGS button opens the settings modal on the Project tab + wired at boot.
@@ -11284,10 +11288,12 @@ section("uio-E-C02: text field inspector — one scroll, block chrome, no jump l
 section("uio-E-C04: labelled variant/version axes + off-base return chip");
 (function () {
   var e = src("src/editor.js"), css = src("editor.css");
-  ok("both axis buttons carry a muted axis-name caption", /axis-btn__axis">Variant</.test(e) && /axis-btn__axis">Version</.test(e) && /\.axis-btn__axis \{[^}]*color: var\(--text-tertiary\)/.test(css));
-  ok("an off-base chip appears when previewing (isPreview) with Return to base", /function syncAxisReturnChip\(\)[\s\S]{0,200}var off = isPreview\(\)/.test(e) && /axis-return-chip__btn", "Return to base"/.test(e));
-  ok("chip wording tracks the real edit mode (read-only vs editing)", /var locked = !canvasEditable\(\)[\s\S]{0,240}"Read-only"[\s\S]{0,240}"Editing "/.test(e));
-  ok("Return to base clears BOTH axes and flushes", /function returnToBase\(\) \{[\s\S]{0,160}activeVariant = null; activeVersion = null;[\s\S]{0,80}mount\(\)/.test(e));
+  var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
+  ok("both axis buttons carry a muted axis-name caption", /axis-btn__axis">Variant</.test(VARIANTS) && /axis-btn__axis">Version</.test(VARIANTS) && /\.axis-btn__axis \{[^}]*color: var\(--text-tertiary\)/.test(css));
+  ok("an off-base chip appears when previewing (isPreview) with Return to base", /function syncAxisReturnChip\(\)[\s\S]{0,200}var off = isPreview\(\)/.test(VARIANTS) && /axis-return-chip__btn", "Return to base"/.test(VARIANTS));
+  ok("chip wording tracks the real edit mode (read-only vs editing)", /var locked = !canvasEditable\(\)[\s\S]{0,240}"Read-only"[\s\S]{0,240}"Editing "/.test(VARIANTS));
+  ok("Return to base clears BOTH axes and flushes", /function returnToBase\(\) \{[\s\S]{0,200}E\.setActiveVariant\(null\); E\.setActiveVersion\(null\);[\s\S]{0,80}mount\(\)/.test(VARIANTS));
+  ok("the axis state itself still lives in editor.js, written through one setter each", /setActiveVariant: function \(v\) \{ activeVariant = v; \}/.test(e) && /setActiveVersion: function \(v\) \{ activeVersion = v; \}/.test(e));
   ok(".axis-return-chip has a locked (danger) variant + a button", /\.axis-return-chip \{/.test(css) && /\.axis-return-chip--locked \{/.test(css) && /\.axis-return-chip__btn \{/.test(css));
 })();
 
@@ -11816,7 +11822,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
     /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(e));
   ok("'preview a variant from the top-bar switcher' is gone", e.indexOf("preview a variant from the top-bar switcher)") === -1);
   ok("the image panel shows which variant is live and opens the switcher",
-    /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenu\(variantSwitchEl\)/.test(e));
+    /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenuAtSwitch\(\)/.test(e));
   ok("the cross-reference row is styled once, not per site", /\.insp-xref \{/.test(css) && /\.insp-xref__link \{/.test(css));
 
   // --- OVL-14: one verb list, two doors ----------------------------------------------
@@ -12881,7 +12887,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // versionVis tagging + a disabled inspector notice (no dead controls) while editing a version.
 (function () {
   section("#207 edit-in-version (editor wiring)");
-  var e = src("src/editor.js");
+  var e = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   // ticket 15 rewired the #207 gate through the pure collabEditGate (the "version editable only
   // when no variant, and not collaborating" semantic now lives + is tested there). versionEditable()
   // delegates to it; the standalone #207 behaviour is asserted in the "base-only editing guard" section.
@@ -12896,8 +12902,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("block context menu adds a Software version show/hide section", /var versAll = versionNames\(\);[\s\S]{0,700}toggleHiddenInVersion\(host, v\)/.test(src("src/editor/context-menu.js")));
   ok("FIX 2: editing a version disables inert block controls with a reason", /function applyVersionEditGuard\(\)[\s\S]*?is-version-readonly-panel[\s\S]*?version-edit-notice/.test(e));
   ok("FIX 2: the field (inline text) inspector stays live — only block/instance/embed are disabled", /\["block", "instance", "embed"\]\.indexOf\(selection\.type\) === -1\) return;/.test(e));
-  ok("FIX 3: switching version flushes an in-flight edit", (e.match(/flushSave\(\);/g) || []).length >= 3 && /function onVersionPick\(v\) \{\s*flushSave\(\);/.test(e));
-  ok("editable badge uses the 'type' glyph (editing this version's text)", /Ic\("type"\)/.test(e));
+  ok("FIX 3: switching version flushes an in-flight edit", (VARIANTS.match(/flushSave\(\);/g) || []).length >= 3 && /function onVersionPick\(v\) \{\s*flushSave\(\);/.test(VARIANTS));
+  ok("editable badge uses the 'type' glyph (editing this version's text)", /Ic\("type"\)/.test(VARIANTS));
   var css = src("editor.css");
   ok("editor.css disables the version-readonly inspector + styles the notice", /#inspector\.is-version-readonly-panel > \*:not\(\.version-edit-notice\)/.test(css) && /\.version-edit-notice \{/.test(css));
 })();
@@ -12906,7 +12912,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // merge add-if-missing into the target doc.
 (function () {
   section("§96 cross-file paste deps");
-  var ed = src("src/editor.js");
+  var ed = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   var css = src("editor.css");
   var m = ed.match(/\/\* @pastedeps-start \*\/([\s\S]*?)\/\* @pastedeps-end \*\//);
   ok("pastedeps region is extractable", !!m);
@@ -12962,10 +12968,10 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   // the variant-text field placeholder shows the flagship copy with tags stripped.
   ok("switchDoc rebuilds the top-bar variant pill for the new doc", /function switchDoc[\s\S]*mount\(\);\s*renderTabs\(\);\s*renderVariantSwitch\(\);/.test(ed));
   ok("switchDoc drops a variant the new doc doesn't have", /if \(activeVariant && \(doc\.variants \|\| \[\]\)\.indexOf\(activeVariant\) === -1\) activeVariant = null;/.test(ed));
-  ok("variant-text placeholder strips flagship HTML tags", /input\.placeholder = stripToText\(baseFieldValue\(t\.host, f\)\);/.test(ed));
-  ok("variant text-bearing field is an auto-growing textarea", /var multiline = !f\.isSlot \|\| \/obj\|desc\|body\|summary\|para\|text\/i\.test\(f\.key\);[\s\S]*multiline \? h\("textarea", "prop-input prop-input--grow"\)/.test(ed));
-  ok("autoGrowVariant measures with a hidden mirror (never mutates the live field)", /function autoGrowVariant\(ta\)[\s\S]*autoGrowVariant\._mirror[\s\S]*m\.textContent = \(ta\.value \|\| ta\.placeholder \|\| ""\)/.test(ed) && !/ta\.value = ta\.placeholder/.test(ed));
-  ok("autoGrowVariant caps the height at 320px", /Math\.min\(Math\.max\(m\.scrollHeight, 32\), 320\)/.test(ed));
+  ok("variant-text placeholder strips flagship HTML tags", /input\.placeholder = stripToText\(baseFieldValue\(t\.host, f\)\);/.test(VARIANTS));
+  ok("variant text-bearing field is an auto-growing textarea", /var multiline = !f\.isSlot \|\| \/obj\|desc\|body\|summary\|para\|text\/i\.test\(f\.key\);[\s\S]*multiline \? h\("textarea", "prop-input prop-input--grow"\)/.test(VARIANTS));
+  ok("autoGrowVariant measures with a hidden mirror (never mutates the live field)", /function autoGrowVariant\(ta\)[\s\S]*autoGrowVariant\._mirror[\s\S]*m\.textContent = \(ta\.value \|\| ta\.placeholder \|\| ""\)/.test(VARIANTS) && !/ta\.value = ta\.placeholder/.test(VARIANTS));
+  ok("autoGrowVariant caps the height at 320px", /Math\.min\(Math\.max\(m\.scrollHeight, 32\), 320\)/.test(VARIANTS));
 
   // Find & replace: a variant target selector routes replacements to overrides for the
   // chosen variant (and previews it); the core is scoped on frVariant, not activeVariant.
@@ -12974,7 +12980,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("no stray activeVariant in the F&R replace ops", !/frCore\.write\(t, activeVariant/.test(ed));
 
   // Obvious variant-preview highlight: an inset ring + a floating badge naming the variant.
-  ok("updateVariantBadge shows a canvas badge while previewing a variant", /function updateVariantBadge\(\)[\s\S]*variant-preview-badge[\s\S]*"Previewing variant · " \+ activeVariant/.test(ed));
+  ok("updateVariantBadge shows a canvas badge while previewing a variant", /function updateVariantBadge\(\)[\s\S]*variant-preview-badge[\s\S]*"Previewing variant · " \+ E\.activeVariant/.test(VARIANTS));
   ok("updateVariantBadge is called at the variant-preview toggle", /canvas\.classList\.toggle\("is-variant-preview"[\s\S]*updateVariantBadge\(\);/.test(ed));
   ok("editor.css styles the variant badge + bold preview ring", /\.variant-preview-badge\b/.test(css) && /\.canvas\.is-variant-preview \{ box-shadow:/.test(css));
 })();
