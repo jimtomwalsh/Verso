@@ -12345,7 +12345,8 @@ section("uio-O-W1 scroll-edge affordance (OVL-10)");
 section("uio-F06 command index (Cmd-K)");
 (function () {
   var e = src("src/editor.js");
-  var m = e.match(/\/\* @f06-start \*\/([\s\S]*?)\/\* @f06-end \*\//);
+  // arch-P3b-07p: a fenced slice must follow its code -- the index moved to editor/palette.js.
+  var m = src("src/editor/palette.js").match(/\/\* @f06-start \*\/([\s\S]*?)\/\* @f06-end \*\//);
   if (!m) { ok("locate @f06 fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { entries: commandEntries, score: scoreCommand, rank: rankCommands," +
@@ -12415,6 +12416,8 @@ section("uio-F06 command index (Cmd-K)");
 // ---- uio-F06: the palette + the keyboard contract --------------------------------
 section("uio-F06 palette wiring + keyboard contract");
 (function () {
+  // arch-P3b-07p: the palette overlay moved to src/editor/palette.js.
+  var ep6 = src("src/editor/palette.js");
   var e = src("src/editor.js");
   ok("Cmd-K opens the one palette", /meta && \(e\.key === "k" \|\| e\.key === "K"\)[\s\S]{0,120}openQuickJump\(\)/.test(e));
   ok("Cmd-, opens Settings and Alt+Cmd-, opens the selection's settings",
@@ -12424,18 +12427,18 @@ section("uio-F06 palette wiring + keyboard contract");
   ok("and it lands on the inspector's first control, not its tab strip",
     /var body = document\.getElementById\("inspector"\);[\s\S]{0,200}body\.querySelector\('input:not\(\[type="hidden"\]\), select, button, \[tabindex="0"\]'\)/.test(e));
   ok("the palette draws from the one index, not its own page list",
-    /var entries = commandEntries\(commandSources\(__guideIndexCache\)\);/.test(e)
-    && /filtered = rankCommands\(entries, "", PALETTE_LIMIT\)/.test(e));
+    /var entries = commandEntries\(commandSources\(__guideIndexCache\)\);/.test(ep6)
+    && /filtered = rankCommands\(entries, "", PALETTE_LIMIT\)/.test(ep6));
   ok("the palette joins the layer stack instead of owning Escape",
-    /pushLayer\("palette", close\)/.test(e) && /popLayer\("palette"\)/.test(e)
+    /pushLayer\("palette", close\)/.test(ep6) && /popLayer\("palette"\)/.test(ep6)
     && !/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); close\(\); \}\s*\n\s*else if \(e\.key === "ArrowDown"\)/.test(e));
   ok("a result routes by kind, and a settings result opens its named section",
-    /function runCommandEntry\(entry\)[\s\S]{0,200}openSettingsSection\(entry\.ref\.tab, entry\.ref\.key\)/.test(e));
-  ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(e));
+    /function runCommandEntry\(entry\)[\s\S]{0,200}openSettingsSection\(entry\.ref\.tab, entry\.ref\.key\)/.test(ep6));
+  ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(ep6));
   ok("the guide index is fetched once and cached, and degrades to no guide results",
-    /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(e));
-  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(e));
-  ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(e));
+    /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(ep6));
+  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(ep6));
+  ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(ep6));
   // DS first, per the gate: the canonical set had no palette, so it was added there before it
   // was built here — and the spine settles that it is navigation, not a seventh presentation.
   var ds = src("design-system/components/overlays/CommandPalette.d.ts");
