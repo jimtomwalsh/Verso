@@ -113,6 +113,51 @@ function publishHarness(opts) {
            activeDocId: function () { return active; } };
 }
 
+// arch-P3-05: a Product Rail bound to fixtures. The REAL facts layer over a fake registry, a fake
+// library-stamp map and a fake release log, so alignment, drift and the roll-ups can be exercised
+// on literals instead of by slicing three comment fences out of editor.js.
+function railHarness(opts) {
+  opts = opts || {};
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+  var mem = {};
+  var storage = {
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+    setItem: function (k, v) { mem[k] = String(v); },
+    removeItem: function (k) { delete mem[k]; }
+  };
+  var registry = opts.registry || {};
+  var library = opts.library || {};
+  var products = opts.products || {};
+  var publishedIds = opts.published || {};
+  function countWords(v) {
+    var t = String(v == null ? "" : v).replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&[a-z0-9#]+;/gi, "");
+    var w = t.match(/\S+/g); return w ? w.length : 0;
+  }
+  // Mirrors the real walkBlocks: every nesting key, and doc.blocks accepted as well as doc.pages
+  // so the fixtures below can stay flat.
+  function walkBlocks(doc, cb) {
+    (function rec(list) {
+      (list || []).forEach(function (b) {
+        if (!b) return;
+        if (Array.isArray(b)) { rec(b); return; }
+        cb(b);
+        ["blocks", "children", "items", "cells", "columns", "pages"].forEach(function (k) { if (Array.isArray(b[k])) rec(b[k]); });
+      });
+    })((doc && doc.blocks) || (doc && doc.pages));
+  }
+  var rail = PR.create({
+    storage: storage, docById: function (id) { return registry[id]; },
+    allDocIds: function () { return Object.keys(registry); },
+    walkBlocks: walkBlocks, countWords: countWords,
+    libraryComponents: function () { return library; },
+    productsStore: function () { return products; },
+    sourceIndexedFor: opts.sourceIndexedFor || function () { return true; },
+    whereUsed: opts.whereUsed || function () { return []; },
+    published: function (id) { return !!publishedIds[id]; }
+  });
+  return { PR: PR, rail: rail, registry: registry, library: library, products: products, storage: mem };
+}
+
 // Spin up a server-of-one on an ephemeral port against a temp SQLite store, run an
 // async probe(base, server, dbPath), and always tear it down. Shared by the pivot
 // server-integration sections (callers guard on node:sqlite before invoking).
@@ -135,7 +180,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -2422,10 +2467,7 @@ section("editor-rework matrix doc-type");
 // ---- SPEC 7: product-filtered tab scope (pure predicate) ----
 section("editor-rework tab scope");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @pure-tabscope-start \*\/([\s\S]*?)\/\* @pure-tabscope-end \*\//);
-  if (!m) { ok("locate @pure-tabscope fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { visibleTabIds: visibleTabIds };")();
+  var g = { visibleTabIds: require(path.join(ROOT, "src/editor/product-rail.js")).visibleTabIds };
   var reg = {
     a: { meta: { title: "A", productId: "prod-a" } },
     b: { meta: { title: "B", productId: "prod-b" } },
@@ -8987,8 +9029,23 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("productSelectOptions falls back to id when a product has no name", g.productSelectOptions({ x: {} })[1].label === "x");
 
   // product-scope-persist: the active product survives a refresh (mirrors STAGE_PERSIST_KEY).
-  ok("setActiveProduct persists to verso.activeProduct (removes the pref on 'All products')", /var PRODUCT_PERSIST_KEY = "verso\.activeProduct";/.test(e) && /function setActiveProduct\(id\)[\s\S]{0,220}localStorage\.setItem\(PRODUCT_PERSIST_KEY, __activeProduct\)[\s\S]{0,120}removeItem\(PRODUCT_PERSIST_KEY\)/.test(e));
-  ok("restoreActiveProduct validates the stored id against ProductsStore + clears a stale one", /function restoreActiveProduct\(\)[\s\S]{0,320}window\.ProductsStore\[saved\]\) __activeProduct = saved;[\s\S]{0,120}removeItem\(PRODUCT_PERSIST_KEY\)/.test(e));
+  // arch-P3-05: the scope is the module's state, so these run it.
+  ok("setActiveProduct persists to verso.activeProduct (removes the pref on 'All products')", (function () {
+    var H = railHarness({ products: { "prod-a": { id: "prod-a" } } });
+    H.rail.setActiveProduct("prod-a");
+    var stored = H.storage["verso.activeProduct"] === "prod-a";
+    H.rail.setActiveProduct("");
+    return stored && H.storage["verso.activeProduct"] === undefined && H.rail.getActiveProduct() === "";
+  })());
+  ok("restoreActiveProduct validates the stored id against ProductsStore + clears a stale one", (function () {
+    var good = railHarness({ products: { "prod-a": { id: "prod-a" } } });
+    good.storage["verso.activeProduct"] = "prod-a";
+    var kept = good.rail.restoreActiveProduct() === "prod-a";
+    var stale = railHarness({ products: { "prod-b": { id: "prod-b" } } });
+    stale.storage["verso.activeProduct"] = "prod-gone";
+    var dropped = stale.rail.restoreActiveProduct() === "" && stale.storage["verso.activeProduct"] === undefined;
+    return kept && dropped;
+  })());
   ok("mountProductPicker restores the persisted scope on first mount (boot)", /function mountProductPicker\(\)[\s\S]{0,120}restoreActiveProduct\(\);/.test(e));
 
   // index.html wiring: exactly 3 rail segments (Source/Edit/Publish free-form, no
@@ -9506,16 +9563,12 @@ section("Product Rail: Publish save paths + version ledger (T3)");
 // ---- product-rail-staleness-tracking: Ground-Truth staleness (export-is-publish) ----
 section("Product Rail: Ground-Truth staleness");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @gt-staleness-start \*\/([\s\S]*?)\/\* @gt-staleness-end \*\//);
-  if (!m) { ok("locate @gt-staleness fence", false); return; }
-  // Inject the module deps the fenced core reaches for: a generic recursive block walk (mirrors the
-  // real walkBlocks visiting nested children) and a LibraryStore accessor.
-  var LIB = {};
-  var pre = "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b);" +
-            " ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.blocks); }\n" +
-            "function libComponents(){ return LIB; }\n";
-  var g = new Function("LIB", pre + m[1] + "\nreturn { docLinkedMasterIds: docLinkedMasterIds, driftedMasterIds: driftedMasterIds, groundTruthStaleCount: groundTruthStaleCount, currentMasterVersions: currentMasterVersions, snapshotGroundTruthBaseline: snapshotGroundTruthBaseline };")(LIB);
+  // arch-P3-05: the real module, bound to a fixture library.
+  var H = railHarness();
+  var LIB = H.library;
+  var g = { docLinkedMasterIds: H.rail.linkedMasterIds, driftedMasterIds: H.rail.driftedMasterIds,
+            groundTruthStaleCount: H.rail.staleCount, currentMasterVersions: H.rail.currentMasterVersions,
+            snapshotGroundTruthBaseline: H.rail.snapshotBaseline };
 
   // A doc linking two distinct masters (one nested inside a column), plus a non-linked block.
   var doc = { meta: {}, blocks: [
@@ -9560,13 +9613,10 @@ section("Product Rail: Ground-Truth staleness");
 // ---- product-rail-source-alignment-metric: % linked-to-approved-source vs novel ----
 section("Product Rail: source-alignment metric");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @src-align-start \*\/([\s\S]*?)\/\* @src-align-end \*\//);
-  if (!m) { ok("locate @src-align fence", false); return; }
-  // Inject the two module deps the fenced core uses: frWords (HTML-stripping word count) + walkBlocks.
-  var pre = "function frWords(v){ var s=String(v==null?'':v).replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&[a-z0-9#]+;/gi,''); var w=s.match(/\\S+/g); return w?w.length:0; }\n" +
-            "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b); ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.pages); }\n";
-  var g = new Function(pre + m[1] + "\nreturn { sourceAlignment: sourceAlignment, sourceAlignmentPct: sourceAlignmentPct, sourceLinkedSpanWords: sourceLinkedSpanWords };")();
+  // arch-P3-05: the real module, over the same fixtures.
+  var RH5 = railHarness().rail;
+  var g = { sourceAlignment: RH5.sourceAlignment, sourceAlignmentPct: RH5.sourceAlignmentPct,
+            sourceLinkedSpanWords: RH5.linkedSpanWords };
 
   var doc = { pages: [ { blocks: [
     { type: "paragraph", text: "one two three four" },                                   // 4 novel
@@ -10564,11 +10614,10 @@ section("uio-P-C05: format control on Publish, import on Source");
 section("uio-F04: cross-stage data surfacing");
 (function () {
   var e = src("src/editor.js");
-  var m = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
-  if (!m) { ok("locate @f04 fence", false); return; }
-  var g = new Function(m[1] +
-    "\nreturn { band: f04Band, alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment," +
-    " driftFact: f04DriftFact, whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact, BANDS: F04_BANDS };")();
+  // arch-P3-05: these are the module's pure facts now.
+  var PR5 = require(path.join(ROOT, "src/editor/product-rail.js"));
+  var g = { band: PR5.band, alignmentFact: PR5.alignmentFact, rollUp: PR5.rollUpAlignment,
+            driftFact: PR5.driftFact, whereUsedFact: PR5.whereUsedFact, outputsFact: PR5.outputsFact, BANDS: PR5.BANDS };
 
   // --- bands: >=85 verified / 60-84 mixed / <60 mostly novel, boundaries included ---
   ok("band >=85 is verified (boundary included)", g.band(85).key === "verified" && g.band(100).key === "verified");
@@ -10627,11 +10676,48 @@ section("uio-F04: cross-stage data surfacing");
   ok("empty variant names are ignored, never shipped as a blank package", g.outputsFact(["", null, "Pro"]).count === 2);
 
   // --- the wiring: every surface reads the SAME resolver, none re-computes ---
-  ok("the adapter binds the resolver to the EXISTING Product Rail helpers, not new ones",
-    /alignment: f04AlignmentFact\(sourceAlignment\(d\), f04SourceIndexed\(d\)\)/.test(e) &&
-    /drift: f04DriftFact\(driftedMasterIds\(d, vers\), f04Published\(docId\)\)/.test(e) &&
-    /outputs: f04OutputsFact\(d\.variants\)/.test(e));
-  ok("'has this ever published' comes from the release log, not a second record", /function f04Published\(docId\)[\s\S]{0,220}RH\.lastPublishedFor\(releaseHistory\(\), docId\)/.test(e));
+  // arch-P3-05: the binding is the env handed to VersoProductRail.create, and it is exercised for
+  // real -- one call, three facts, each derived from the primitive underneath it and nothing else.
+  ok("the adapter binds the resolver to the EXISTING Product Rail helpers, not new ones", (function () {
+    var H = railHarness({
+      registry: { "D1": { meta: { title: "First", lastPublishedGroundTruthVersions: { mA: 1 } }, variants: ["Pro"],
+        blocks: [ { type: "paragraph", text: "aa bb cc dd", sourceLink: { masterId: "mA", markId: "k1" } },
+                  { type: "paragraph", text: "one two three four five six" } ] } },
+      library: { mA: { updatedAt: 2 } },              // the master moved since the baseline
+      published: { "D1": true }
+    });
+    var f = H.rail.docFacts("D1");
+    return f.alignment.pct === 40 && f.alignment.linkedWords === 4 && f.alignment.totalWords === 10 &&
+      f.drift.state === "drifted" && f.drift.ids.join(",") === "mA" &&
+      f.outputs.count === 2 && f.outputs.names.join(",") === "Flagship,Pro";
+  })());
+  ok("'has this ever published' comes from the release log, not a second record", (function () {
+    // Same document, same drift, but never published -> "unpublished", not "everything changed".
+    var docs = { "D1": { meta: {}, blocks: [ { type: "paragraph", text: "x y", sourceLink: { masterId: "mA", markId: "k" } } ] } };
+    var never = railHarness({ registry: docs, library: { mA: { updatedAt: 2 } } }).rail.docFacts("D1");
+    var once = railHarness({ registry: docs, library: { mA: { updatedAt: 2 } }, published: { "D1": true } }).rail.docFacts("D1");
+    return never.drift.state === "unpublished" && never.drift.count === 0 && once.drift.state === "drifted" &&
+      /published: function \(docId\) \{[\s\S]{0,220}RH\.lastPublishedFor\(releaseHistory\(\), docId\)/.test(e);
+  })());
+  // arch-P3-05: editor.js keeps the drawing and the picker; it holds no fact of its own.
+  ok("the facts layer lives in its own module, and editor.js only delegates", (function () {
+    var mod = src("src/editor/product-rail.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    return !/document\.[A-Za-z$_]+\s*\(/.test(mod) &&                          // DOM-free (a prose "document." is not a call)
+      /function f04AlignmentFact\(alignment, indexed\) \{ return PR\.alignmentFact\(alignment, indexed\); \}/.test(e) &&
+      /function f04DocFacts\(docId, versions\) \{ return ProductRail\.docFacts\(docId, versions\); \}/.test(e) &&
+      /function currentMasterVersions\(\) \{ return ProductRail\.currentMasterVersions\(\); \}/.test(e);
+  })());
+  ok("there is exactly ONE alignment computation and ONE staleness computation in the repo", (function () {
+    // The bug this layer exists to prevent: a second copy that drifts from the first.
+    var files = ["src/editor.js", "src/editor/publish.js", "src/editor/product-rail.js", "src/export.js", "src/render.js"];
+    var align = 0, drift = 0;
+    files.forEach(function (f) {
+      var t = src(f);
+      align += (t.match(/data-source-link\\b\[\^>\]\*>/g) || []).length;   // the linked-span scanner
+      drift += (t.match(/lastPublishedGroundTruthVersions\) \|\| \{\}/g) || []).length;
+    });
+    return align === 1 && drift === 1;
+  })());
   ok("where-used comes from sourceLinkWhereUsed, not a stored list", /f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, null\)\)/.test(e));
   ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(e));
   ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(e) && /\.source-stage__facts/.test(src("editor.css")));
@@ -10649,10 +10735,8 @@ section("uio-F04: cross-stage data surfacing");
 section("uio-P-C01: alignment meter on Publish");
 (function () {
   var e = src("src/editor.js"), css = src("editor.css"), kit = src("src/ui-kit.js");
-  var m = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
-  if (!m) { ok("locate @f04 fence", false); return; }
-  var g = new Function(m[1] +
-    "\nreturn { meterModel: f04AlignmentMeterModel, alignmentFact: f04AlignmentFact };")();
+  var PR5 = require(path.join(ROOT, "src/editor/product-rail.js"));
+  var g = { meterModel: PR5.alignmentMeterModel, alignmentFact: PR5.alignmentFact };
   var fact = function (pct, indexed) { return g.alignmentFact({ linkedWords: pct, totalWords: 100 }, indexed !== false); };
 
   // --- band boundaries drive the meter's tone + band name (>=85 / 60-84 / <60) ---
@@ -11113,9 +11197,7 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
 section("uio-P-C08: variant roll-up chip + variant popover on Publish");
 (function () {
   var e = src("src/editor.js"), css = src("editor.css");
-  var fm = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
-  if (!fm) { ok("locate the @f04 fence", false); return; }
-  var f04 = new Function(fm[1] + "\nreturn { outputsFact: f04OutputsFact };")();
+  var f04 = { outputsFact: require(path.join(ROOT, "src/editor/product-rail.js")).outputsFact };
   // arch-P3-03: the roll-up is the module's.
   var g = { rollup: require(path.join(ROOT, "src/editor/publish.js")).variantRollup };
 
@@ -14414,7 +14496,17 @@ section("Source/Editor feedback batch (UI wiring guards)");
   // Issue 3: an empty source text block gets a <br> so an Enter-split new line is visible.
   ok("empty source block renders a <br> so it is not zero-height", /if \(!text\) \{ el\.appendChild\(document\.createElement\("br"\)\); return; \}/.test(e));
   // Issue 4: an auto-picked Product is NOT persisted before the saved scope is restored.
-  ok("auto-pick does not clobber the saved Product before restore", /if \(__productRestored\) setActiveProduct\(keys\[i\]\); else __activeProduct = keys\[i\]/.test(e));
+  // arch-P3-05: adopting a scope in memory is now a named operation, not an assignment to a
+  // closure variable -- and the module keeps the "don't persist before restore" rule itself.
+  ok("auto-pick does not clobber the saved Product before restore", (function () {
+    var wired = /if \(ProductRail\.hasRestoredActiveProduct\(\)\) setActiveProduct\(keys\[i\]\); else ProductRail\.adoptActiveProduct\(keys\[i\]\)/.test(e);
+    var H = railHarness({ products: { "prod-saved": { id: "prod-saved" }, "prod-auto": { id: "prod-auto" } } });
+    H.storage["verso.activeProduct"] = "prod-saved";
+    H.rail.adoptActiveProduct("prod-auto");                       // the boot-time auto-pick
+    var notPersisted = H.storage["verso.activeProduct"] === "prod-saved";
+    var restoredToSaved = H.rail.restoreActiveProduct() === "prod-saved";
+    return wired && notPersisted && restoredToSaved;
+  })());
   // Editor: entering Edit reframes the canvas once it is actually visible.
   ok("entering Edit frames the canvas the first time it is visible", /stage === "edit" && !__framedWhileVisible[\s\S]{0,500}view\.ready = false; fitAll\(\); __framedWhileVisible = true/.test(e));
   // Editor: a source-linked image counts as having an image (full inspector shows).
@@ -15435,7 +15527,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 160, SLICE_BUDGET = 17;
+  var FN_BUDGET = 154, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);
