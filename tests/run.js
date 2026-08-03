@@ -472,6 +472,46 @@ section("P3b namespace (load order)");
     ok(f.rel + " wires its sibling explicitly (use())", /function use\s*\(/.test(f.text));
   });
   ok("every module under src/editor was checked", files.length >= 12);
+
+  // arch-P3b-07w. An ALIAS resolves at INSTALL time. A live binding is safe either way -- E hands
+  // back a getter and the read happens on use -- but a CONSTANT published by another module is
+  // whatever that module has provided by the moment the alias is taken. Alias one before its owner
+  // installs and you get `undefined`, permanently, with no unmet need and no failing boot.
+  // TEXT_CONTENT_TYPES moved to structure-ops.js and copy-editor.js aliases it; the install call
+  // landed after copy-editor's and the table read empty until this gate was written.
+  var order = (src("src/editor.js").match(/window\.(Verso\w+)\.install\(VE\)/g) || [])
+    .map(function (m) { return /window\.(Verso\w+)\./.exec(m)[1]; });
+  var globalOf = {}, constOwner = {};
+  files.forEach(function (f) {
+    var g = /window\.(Verso\w+)\s*=\s*\{\s*install/.exec(f.text);
+    if (g) globalOf[f.rel] = g[1];
+  });
+  files.forEach(function (f) {
+    // kernel.provide({...}) publishes DATA. kernel.provideLive is a getter and is not at risk.
+    var blocks = f.text.match(/kernel\.provide\(\{[\s\S]*?\n\s*\}\)/g) || [];
+    blocks.forEach(function (b) {
+      (b.match(/^\s*(\w+):/gm) || []).forEach(function (k) {
+        constOwner[k.trim().replace(":", "")] = f.rel;
+      });
+    });
+  });
+  var aliasChecked = 0;
+  files.forEach(function (f) {
+    var alias = /\/\/ The stable half[\s\S]*?\n(\s*var [\s\S]*?;)\n/.exec(f.text);
+    if (!alias) return;
+    (alias[1].match(/(\w+) = E\.\1\b/g) || []).forEach(function (pair) {
+      var name = pair.split(" ")[0], owner = constOwner[name];
+      if (!owner || owner === f.rel) return;
+      // Safe by construction when editor.js ALSO binds the name: bind() returns a stable
+      // forwarder that dispatches on call, so the alias points at something that works from the
+      // moment it is taken. The exposed case is a name editor.js only reads back with VE.get.
+      if (src("src/editor.js").indexOf('VE.bind("' + name + '")') > -1) return;
+      aliasChecked++;
+      var oi = order.indexOf(globalOf[owner]), ai = order.indexOf(globalOf[f.rel]);
+      ok(f.rel + " aliases `" + name + "` after its owner installs", oi > -1 && ai > -1 && oi < ai);
+    });
+  });
+  ok("the constant-alias order gate found aliases to check", aliasChecked >= 1);
 })();
 
 // The check no boot performs. A moved region's functions are declared inside its install(), so a
@@ -4082,6 +4122,7 @@ section("exit preview focuses the demo's page (#100)");
 // #90: native Table block — 4-file contract wiring (render / course.css / editor).
 section("table block (#90)");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
@@ -4097,7 +4138,7 @@ section("table block (#90)");
   ok("table header + zebra use theme tokens (no ad-hoc colour)", /th\.table-block__cell \{[\s\S]*?background: var\(--color-surface\)/.test(css) && /\[data-zebra\][\s\S]*?background: var\(--color-surface-alt\)/.test(css));
   // editor.js: palette entry, block-selection type, inspector dispatch, BLOCK_LUCIDE glyph
   ok("Table is in the block palette (Layout group)", /label: "Table", make: function \(\) \{ return \{ type: "table"/.test(ASSETS));
-  ok("table selects as a block (not an inline field)", /=== "table"\) return "block"/.test(e));
+  ok("table selects as a block (not an inline field)", /=== "table"\) return "block"/.test(SOPS));
   ok("table dispatches to renderTableInspector via two-level", /block\.type === "table"\) \{ renderBlockTwoLevel\(node, "Table", CONTENT_DECL, renderTableInspector\)/.test(IB));
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
   ok("table has a Lucide glyph", /table: "table"/.test(OUT) && /"table":/.test(ic));
@@ -5185,8 +5226,13 @@ section("page-dup");
   ok("remintIds re-mints a nested child cid", cdup.children[0].cid !== "c_child" && /^c_9/.test(cdup.children[0].cid));
   ok("remintIds re-mints an item-child cid", cdup.items[0].children[0].cid !== "c_item" && /^c_9/.test(cdup.items[0].children[0].cid));
   // extract duplicatePage, injecting its closure deps
-  var dStart = etxt.indexOf("function duplicatePage(pi)");
-  var dbody = etxt.slice(dStart, etxt.indexOf("\n  }", dStart) + 4);
+  // arch-P3b-07w: the op moved to editor/structure-ops.js, where it reads the live document and
+  // writes the page index through E. Two consequences for an eval'd body: inject an E stand-in
+  // instead of `doc`, and widen the closing marker, because inside install() it closes one indent
+  // deeper.
+  var SOPS = src("src/editor/structure-ops.js");
+  var dStart = SOPS.indexOf("function duplicatePage(pi)");
+  var dbody = SOPS.slice(dStart, SOPS.indexOf("\n    }", dStart) + 6);
   var doc = {
     pages: [
       { id: "src1", name: "Intro", chapterId: "c1", padX: 40, blocks: [
@@ -5208,9 +5254,9 @@ section("page-dup");
   new Function("window", etxt.slice(etxt.indexOf("// >>> P2 auto page-naming helpers"), etxt.indexOf("// <<< P2 auto page-naming helpers"))).call(null, hWin);
   var firstCopyOf = hWin.__firstCopyOf;
   var duplicatePage = new Function(
-    "doc", "clone", "remintIds", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "firstCopyOf",
-    "var currentPage=0;\n" + dbody + "\nreturn duplicatePage;"
-  )(doc, clone, remintIds, eachCourseNav, noop, noop, noop, noop, noop, firstCopyOf);
+    "E", "clone", "remintIds", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "firstCopyOf",
+    dbody + "\nreturn duplicatePage;"
+  )({ doc: doc, setCurrentPage: noop }, clone, remintIds, eachCourseNav, noop, noop, noop, noop, noop, firstCopyOf);
 
   duplicatePage(0);
   ok("page inserted right after source", doc.pages.length === 3 && doc.pages[2].id === "p2");
@@ -5249,9 +5295,11 @@ section("page-dup");
 // ---- page-merge: mergePageWithNext (concat blocks, same-chapter guard, nav sync)
 section("page-merge");
 (function () {
-  var etxt = src("src/editor.js");
+  // arch-P3b-07w: in editor/structure-ops.js now — E stands in for the live document and page
+  // index, and the body closes one indent deeper inside install().
+  var etxt = src("src/editor/structure-ops.js");
   var s = etxt.indexOf("function mergePageWithNext(pi)");
-  var body = etxt.slice(s, etxt.indexOf("\n  }", s) + 4);
+  var body = etxt.slice(s, etxt.indexOf("\n    }", s) + 6);
   var doc = {
     pages: [
       { id: "a", chapterId: "c1", blocks: [{ type: "heading", id: "b_1" }] },
@@ -5265,8 +5313,8 @@ section("page-merge");
     [hf.header, hf.footer].forEach(function (r) { if (r && r.children) r.children.forEach(function (bl) { if (bl.type === "courseNav") fn(bl); }); });
   };
   var alerts = [], noop = function () {};
-  var merge = new Function("doc", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "window",
-    "var currentPage=1;\n" + body + "\nreturn mergePageWithNext;")(doc, eachCourseNav, noop, noop, noop, noop, noop, { alert: function (m) { alerts.push(m); } });
+  var merge = new Function("E", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "window",
+    body + "\nreturn mergePageWithNext;")({ doc: doc, currentPage: 1, setCurrentPage: noop }, eachCourseNav, noop, noop, noop, noop, noop, { alert: function (m) { alerts.push(m); } });
   merge(0); // a + b (same chapter)
   ok("merge: pages reduced to 2", doc.pages.length === 2);
   ok("merge: blocks concatenated in order", doc.pages[0].blocks.map(function (x) { return x.id; }).join(",") === "b_1,b_2,b_3");
@@ -5558,6 +5606,7 @@ section("shared-library palette insert");
 // ---- #20: library-instance mirror (live-linked, promote ANY composed block) -----
 section("#20 library-instance mirror");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
@@ -5577,7 +5626,7 @@ section("#20 library-instance mirror");
   // componentGrid's existing precedent for a def-resolving block type.
   ok("TWO_LEVEL_TYPES includes libraryInstance (contentless like componentGrid)",
     require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("libraryInstance"));
-  ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(etxt));
+  ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(SOPS));
   ok("inspector dispatch reuses renderContentlessBlock", /if \(block\.type === "libraryInstance"\) \{ renderContentlessBlock\(node, "Library instance", renderLibraryInstanceBody\); return; \}/.test(IB));
   ok("block-icon map has a libraryInstance glyph", /libraryInstance: "component"/.test(OUT));
   ok("tree label resolves the master's name via resolveComponentDef", /if \(b\.type === "libraryInstance"\) \{ var libDef = resolveComponentDef\(b\.ref\)/.test(OUT));
@@ -5918,6 +5967,7 @@ section("product-rail facet pointer schema");
 // ---- #22: section + page library masters ------------------------------------
 section("#22 section + page library masters");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var rtxt = src("src/render.js");
   var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
@@ -5949,20 +5999,20 @@ section("#22 section + page library masters");
 
   // 3. editor.js: capture / insert / detach / where-used, all mirroring the block-level
   // (#19/#20/#21/#24) conventions at page scope.
-  var spStart = etxt.indexOf("function savePageAsLibraryMaster(pi)");
-  var spBody = etxt.slice(spStart, spStart + 900);
+  var spStart = SOPS.indexOf("function savePageAsLibraryMaster(pi)");
+  var spBody = SOPS.slice(spStart, spStart + 900);
   ok("savePageAsLibraryMaster found", spStart !== -1);
   ok("page capture mints every block's id ONCE (remintIds per block, #19's contract)", /var blocks = \(page\.blocks \|\| \[\]\)\.map\(function \(b\) \{ return remintIds\(clone\(b\)\); \}\)/.test(spBody));
   ok("saves kind:\"page\" directly to the shared library (no doc.components staging step)", /kind: "page", template: \{ blocks: blocks \}/.test(spBody));
 
-  var ipStart = etxt.indexOf("function insertPageFromLibrary(key)");
+  var ipStart = SOPS.indexOf("function insertPageFromLibrary(key)");
   ok("insertPageFromLibrary found", ipStart !== -1);
-  var ipBody = etxt.slice(ipStart, ipStart + 700);
+  var ipBody = SOPS.slice(ipStart, ipStart + 700);
   ok("mints a fresh page id (never reused from the master)", /id: "page-" \+ Date\.now\(\) \+ "-" \+ Math\.random\(\)/.test(ipBody));
   ok("syncs courseNav section membership like duplicatePage does", /eachCourseNav\(function \(nav\)/.test(ipBody));
 
-  var dpStart = etxt.indexOf("function detachPageLibraryInstance(pi)");
-  var dpBody = etxt.slice(dpStart, dpStart + 900);
+  var dpStart = SOPS.indexOf("function detachPageLibraryInstance(pi)");
+  var dpBody = SOPS.slice(dpStart, dpStart + 900);
   ok("detachPageLibraryInstance found", dpStart !== -1);
   var dpAxisIdx = dpBody.indexOf("resolveLibraryAxisContent(withOverrides");
   var dpOvIdx = dpBody.indexOf("applyInstanceOverrides(withOverrides");
@@ -6042,13 +6092,19 @@ section("multi-selection batch style");
 // ---- DDD: undo coverage — structural mutators push history, redo invalidates
 section("DDD undo-coverage");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var t = src("src/editor.js");
   // arch-P3b-07h: insertBlock moved to src/editor/assets.js with the palette that calls it, and a
   // function body there closes one indent deeper, inside install().
   var ASSETS = src("src/editor/assets.js");
   function bodyOf(name) {
     var s = t.indexOf("function " + name + "("), src2 = t, end = "\n  }";
-    if (s < 0) { s = ASSETS.indexOf("function " + name + "("); src2 = ASSETS; end = "\n    }"; }
+    // arch-P3b-07w: duplicateBlock and moveBlock left with the structure ops, and a body inside
+    // install() closes one indent deeper in either module.
+    [ASSETS, SOPS].forEach(function (mod) {
+      if (s >= 0) return;
+      s = mod.indexOf("function " + name + "("); src2 = mod; end = "\n    }";
+    });
     return s < 0 ? "" : src2.slice(s, src2.indexOf(end, s) + end.length);
   }
   ok("duplicateBlock pushes history", /pushHistory\(\)/.test(bodyOf("duplicateBlock")));
@@ -6329,6 +6385,7 @@ section("chapter menu dismiss");
 // ---- #168 Nav settings single-source: Settings 'Learner nav' targets the canonical footer nav ----
 section("#168 learner-nav single source");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
@@ -6338,8 +6395,8 @@ section("#168 learner-nav single source");
   ok("Settings 'Learner nav' sections use footerCourseNav (not first-found)", /function navSettingsSections\(\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(SS));
   ok("old first-found pattern is gone from the nav tab", !/title: "Learner nav"[\s\S]{0,120}eachCourseNav\(function \(x\) \{ if \(!n\) n = x; \}\)/.test(e));
   // footerCourseNav resolves ONLY the footer region's courseNav (the single creatable instance).
-  var fn = slice(e, "function footerCourseNav()", "\n  }");
-  ok("footerCourseNav reads doc.headerFooter.footer", /doc\.headerFooter && doc\.headerFooter\.footer/.test(fn));
+  var fn = slice(SOPS, "function footerCourseNav()", "\n    }");
+  ok("footerCourseNav reads doc.headerFooter.footer", /E\.doc\.headerFooter && E\.doc\.headerFooter\.footer/.test(fn));
   ok("footerCourseNav walks the footer children for a courseNav", /walkPageBlocks\(f\.children, function \(b\) \{ if \(b\.type === "courseNav" && !found\) found = b; \}\)/.test(fn));
   // The canvas side panel still edits the SELECTED nav (direct manipulation) — when the footer
   // nav is selected that is the SAME object footerCourseNav returns, so the two surfaces mirror.
@@ -6948,6 +7005,7 @@ section("nested items[].children traversal");
 // these guards lock the tracer render + registration + token-driven styling.
 section("sequence block tracer");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -6965,7 +7023,7 @@ section("sequence block tracer");
   // shared surface-texture shape (data-pattern + --tex-color), like accordion / card-reveal
   ok("sequence stamps data-pattern + --tex-color", /root\.setAttribute\("data-pattern", block\.pattern === "dots" \|\| block\.pattern === "none" \? block\.pattern : "grid"\)/.test(r) && /block\.patternColor\) root\.style\.setProperty\("--tex-color", block\.patternColor\)/.test(r.slice(r.indexOf("sequence: function"))));
   // registration: container-classifier treats it as a "block", palette entry exists in Layout
-  ok("sequence is a container 'block' in the selection classifier", /block\.type === "cardReveal" \|\| block\.type === "sequence"/.test(e));
+  ok("sequence is a container 'block' in the selection classifier", /block\.type === "cardReveal" \|\| block\.type === "sequence"/.test(SOPS));
   ok("sequence has a Layout palette entry seeding 3 steps", /label: "Sequence[\s\S]*?type: "sequence", spine: "numbered", orient: "vertical", reveal: "scroll", items: \[1, 2, 3\]/.test(ASSETS));
   // token-driven styling only (design-gate: no bespoke per-element colour): connector = hairline,
   // node surface = per-mode card fill, marker text = accent
@@ -6981,6 +7039,7 @@ section("sequence block tracer");
 // sequence -> nested delete/drag/drop/traversal inherited. Numbers DERIVED at render.
 section("card deck block");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
@@ -7002,7 +7061,7 @@ section("card deck block");
   // per-mode fill switches light/dark (author override via cardBox.fillDark/fillLight)
   ok("cardDeck fill switches per-mode", /--cd-fill-dark/.test(cd) && /--cd-fill-light/.test(cd));
   // registration: container-classifier treats it as a "block"; TWO_LEVEL; Layout palette
-  ok("cardDeck is a container 'block' in the selection classifier", /block\.type === "cardDeck" \|\| block\.type === "courseNav"/.test(e));
+  ok("cardDeck is a container 'block' in the selection classifier", /block\.type === "cardDeck" \|\| block\.type === "courseNav"/.test(SOPS));
   ok("cardDeck is a two-level type", require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("cardDeck"));
   ok("cardDeck has a Layout palette entry", /label: "Card Deck \(carousel\)"[\s\S]*?type: "cardDeck", items:/.test(ASSETS));
   ok("block inspector dispatches cardDeck -> two-level shell (renderCardDeckInspector)", /block\.type === "cardDeck"\) \{ renderBlockTwoLevel\(node, "Card deck", CONTENT_DECL, renderCardDeckInspector\); return; \}/.test(IB));
@@ -7182,10 +7241,12 @@ section("clear content #174");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
-  var s = e.indexOf("var TEXT_CONTENT_TYPES = {");
-  var end = e.indexOf("window.__clearBlockContent");
-  ok("#174 clearBlockContent + TEXT_CONTENT_TYPES present in editor.js", s >= 0 && end > s);
-  var clearBlockContent = new Function(e.slice(s, end) + "\nreturn clearBlockContent;")();
+  // arch-P3b-07w: the pure subtree clear and its type table moved to editor/structure-ops.js.
+  var SOPS = src("src/editor/structure-ops.js");
+  var s = SOPS.indexOf("var TEXT_CONTENT_TYPES = {");
+  var end = SOPS.indexOf("window.__clearBlockContent");
+  ok("#174 clearBlockContent + TEXT_CONTENT_TYPES present in structure-ops.js", s >= 0 && end > s);
+  var clearBlockContent = new Function(SOPS.slice(s, end) + "\nreturn clearBlockContent;")();
 
   // text-style blocks -> empty .text
   var tb = { type: "paragraph", text: "hello" }; clearBlockContent(tb);
@@ -7228,7 +7289,7 @@ section("clear content #174");
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
   ok("#174 container-chrome acts[] includes the eraser via handlers.clearContent", /handlers\.clearContent === "function"\) acts\.push\(\["eraser", "Clear content \(keep structure\)", handlers\.clearContent, false\]\)/.test(ep));
   ok("#174 blockChromeHandlers exposes clearContent -> clearBlockContentAction([block])", /clearContent: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(eh));
-  ok("#174 clear action is confirm-gated + pushes history (destructive, undoable)", /confirmModal\("Clear content",[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}list\.forEach\(clearBlockContent\)/.test(e));
+  ok("#174 clear action is confirm-gated + pushes history (destructive, undoable)", /confirmModal\("Clear content",[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}list\.forEach\(clearBlockContent\)/.test(SOPS));
   ok("#174 eraser glyph vendored in icons.js", /"eraser":/.test(src("src/icons.js")));
 })();
 
@@ -7259,6 +7320,7 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
@@ -7360,7 +7422,7 @@ section("richer bullet lists");
   ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(SS) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(SS));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(IB) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, E\.inspector\)/.test(IB));
-  ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
+  ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(SOPS));
   ok("clicking the nav-bar background selects it (not its buttons/toggle)", /var navBar = e\.target\.closest\("\.course-nav\.canvas-block"\)[\s\S]*?!e\.target\.closest\("\[data-edit\], \.course-nav__btn, \.mode-toggle, button, a"\)[\s\S]*?setSelection\("block", navBar\)/.test(DRILL));
   // PERF: incremental single-page render — James 2026-07-08
   ok("reapplyPage rebuilds ONE frame's content (renderPage + fold), not the world", /function reapplyPage\(i\)[\s\S]*?frameDescs\[i\][\s\S]*?window\.renderPage\(page[\s\S]*?enableEditing\(frame\)/.test(e));
@@ -7387,6 +7449,7 @@ section("richer bullet lists");
 // ---- bullet-list discoverability: toggle on any text box + spacing promoted ----
 section("list discoverability + spacing");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var e = src("src/editor.js");
   ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
@@ -7395,7 +7458,7 @@ section("list discoverability + spacing");
   // heads only the marker-settings section, shown when the field root is a list.
   ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(e));
   ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);/.test(e));
-  ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(e) && /block\.__priorTextType/.test(e));
+  ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(SOPS) && /block\.__priorTextType/.test(SOPS));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();
 
@@ -9488,6 +9551,7 @@ section("FR find/replace");
 // ---- PERF: block edits rebuild one page, not the whole world -------------
 section("PERF one-page re-render");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
@@ -9520,7 +9584,7 @@ section("PERF one-page re-render");
   // #171: deletePage re-anchors the viewport by page IDENTITY (keepId -> pageIndexById),
   // so deleting a page BEFORE the active one no longer jumps the view to a random page.
   ok("deletePage #171 re-anchors by page identity, not raw index", /var keepId = pi === currentPage[\s\S]{0,200}doc\.pages\.splice\(pi, 1\);\s*var ni = keepId \? pageIndexById\(keepId\) : -1;\s*currentPage = ni >= 0 \? ni : Math\.min\(currentPage, doc\.pages\.length - 1\);/.test(e));
-  ok("duplicateBlock + moveBlock rebuild one page", /reapplyStructural\(pi\); \/\/ PERF: one page/.test(e));
+  ok("duplicateBlock + moveBlock rebuild one page", /reapplyStructural\(pi\); \/\/ PERF: one page/.test(SOPS));
   ok("insertBlock rebuilds only the block's page", /L\.array\.splice\(L\.index, 0, block\);\s*reapplyStructural\(findPageOfBlock\(block\)\);/.test(ASSETS));
   ok("pasteClipboard rebuilds only the paste page", /reapplyStructural\(findPageOfBlock\(news\[0\]\)\); return true;/.test(CLIP));
   ok("image max-width edit uses reapplyBlock (not mount)", /block\.maxWidth = n; reapplyBlock\(block\); reselectBlockNode/.test(e));
@@ -13475,7 +13539,9 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   // editor inspector wiring + split-page inheritance
   var ed = src("src/editor.js");
   ok("inspector writes per-breakpoint padX keys", /pagePadX\("padX"/.test(ed) && /pagePadX\("padXTablet"/.test(ed) && /pagePadX\("padXMobile"/.test(ed));
-  ok("split-page carries padXTablet/padXMobile", /newPage\.padXTablet = P\.padXTablet/.test(ed) && /newPage\.padXMobile = P\.padXMobile/.test(ed));
+  // arch-P3b-07w: splitPageAtBlock moved to editor/structure-ops.js.
+  var SOPS = src("src/editor/structure-ops.js");
+  ok("split-page carries padXTablet/padXMobile", /newPage\.padXTablet = P\.padXTablet/.test(SOPS) && /newPage\.padXMobile = P\.padXMobile/.test(SOPS));
 })();
 
 // ---- #62 canvas gap affordance (add / merge between stacked pages) --------
@@ -13774,10 +13840,11 @@ section("#170/#158 shared formatting toggle-bar");
 // ---- #170/#33: text<->list block-type conversion (pure) -----------------------
 section("#170/#33 text<->list block-type conversion");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var e = src("src/editor.js");
-  var a = e.indexOf("/* @list-convert-start */"), b = e.indexOf("/* @list-convert-end */");
+  var a = SOPS.indexOf("/* @list-convert-start */"), b = SOPS.indexOf("/* @list-convert-end */");
   if (a === -1 || b === -1) { ok("locate @list-convert fence", false); return; }
-  var g = new Function(e.slice(a, b) +
+  var g = new Function(SOPS.slice(a, b) +
     "\nreturn { htmlToListItems: htmlToListItems, listItemsToHtml: listItemsToHtml, convertTextListBlockType: convertTextListBlockType };")();
 
   // htmlToListItems: block-level breaks become <li> boundaries; inline formatting survives.

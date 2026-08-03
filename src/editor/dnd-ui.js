@@ -38,9 +38,12 @@
     // The stable half, aliased once so the moved body reads exactly as it did. `doc` and
     // `currentPage` are NOT here: a document swap replaces `doc` wholesale and every focusFrame
     // reassigns `currentPage`, so both are read through E at the moment they are used.
+    // `LIBRARY` is not here either, and for a different reason: it is a CONSTANT owned by
+    // assets.js, which installs fourteen calls later. Aliased here it froze at undefined, and
+    // dropping a NEW palette block on the canvas threw on `LIBRARY[i].make()`. Read at use.
     var h = E.h, pushHistory = E.pushHistory, findPageOfBlock = E.findPageOfBlock, clone = E.clone,
         cleanupColumns = E.cleanupColumns, reapplyStructural = E.reapplyStructural,
-        LIBRARY = E.LIBRARY, walkBlocks = E.walkBlocks, walkPageBlocks = E.walkPageBlocks,
+        walkBlocks = E.walkBlocks, walkPageBlocks = E.walkPageBlocks,
         renderModelView = E.renderModelView, scheduleSave = E.scheduleSave,
         reselectBlockNode = E.reselectBlockNode, iconBtn = E.iconBtn;
 
@@ -190,7 +193,7 @@
     function handleDrop(target) {
       var res = DND.resolveDrop({
         doc: E.doc, payload: dragPayload, target: target, zone: dragTargetZone, currentPage: E.currentPage,
-        make: function (i) { return LIBRARY[i].make(); },
+        make: function (i) { return E.LIBRARY[i].make(); },
         beginEdit: pushHistory,
         findPageOfBlock: findPageOfBlock,
         walkBlocks: walkPageBlocks,
