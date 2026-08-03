@@ -219,14 +219,29 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/kernel.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/hotspots.js", "src/editor/dnd.js", "src/editor/canvas-view.js", "src/editor/selection.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
+// arch-P3b-07: src/editor/ is DISCOVERED, not listed. The hand list had drifted four modules
+// behind the directory (source-stage, hotspots-editor, board/builder, inspector/sections were
+// never added), so a syntax error in any of them would have shipped. A new region file is now
+// checked the moment it exists.
+(function () {
+  var acc = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, rel + f + "/");
+      else if (/\.js$/.test(f)) acc.push("src/editor/" + rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+  return acc;
+})().concat(
+["src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
-].forEach(function (f) {
+]).forEach(function (f) {
   var r = cp.spawnSync(process.execPath, ["--check", path.join(ROOT, f)], { encoding: "utf8" });
   ok("node --check " + f, r.status === 0);
   if (r.status !== 0) console.error(r.stderr);
@@ -7186,8 +7201,9 @@ section("TTT into-container");
 // ---- QQ: colour math (colour picker) --------------------------------------
 section("QQ colour-math");
 (function () {
-  var t = src("src/editor.js");
-  var body = t.slice(t.indexOf("function hexToRgb(hex)"), t.indexOf("window.__colourMath"));
+  var t = src("src/editor/color.js");   // arch-P3b-07: the maths moved out of editor.js with the rest of the region
+  // Match the ASSIGNMENT, not the bare name -- the module's header comment mentions the hook.
+  var body = t.slice(t.indexOf("function hexToRgb(hex)"), t.indexOf("window.__colourMath ="));
   var m = new Function(body + "\nreturn { hexToRgb: hexToRgb, rgbToHex: rgbToHex, rgbToHsv: rgbToHsv, hsvToRgb: hsvToRgb, hsvToHex: hsvToHex };")();
   var eq = function (a, b) { return Math.abs(a - b) < 0.5; };
   ok("hexToRgb 6-digit", JSON.stringify(m.hexToRgb("#ff0000")) === JSON.stringify({ r: 255, g: 0, b: 0 }));
@@ -8746,6 +8762,8 @@ section("panel system v2 — layout engine");
 (function () {
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
+  // arch-P3b-07: colourControl, colorField and colorFieldFlat moved to src/editor/color.js.
+  var ecol = src("src/editor/color.js");
   var e = src("src/editor.js");
   // arch-P3b-03: the engine moved to src/editor/inspector/sections.js, which means PanelLayout is
   // a plain `require` now instead of a regex that pulled its IIFE out of editor.js's text and
@@ -8832,10 +8850,10 @@ section("panel system v2 — layout engine");
   ok("layout bar has Edit + Reset (reset → PanelLayout.reset)",
     /reset\.addEventListener\("click", function \(\) \{ PanelLayout\.reset\(\); E\.renderInspector\(\); \}\)/.test(src("src/editor/inspector/sections.js")));
   // Phase 2a: unified colorField (D5) — normalized value + resolver + token/custom/per-mode + recents
-  ok("resolveColorField: token→var, per-mode→mode value, else hex", /window\.resolveColorField = function \(v, mode\) \{[\s\S]*?if \(v\.token\) return "var\(--color-" \+ v\.token \+ "\)";[\s\S]*?if \(v\.light \|\| v\.dark\) return \(mode === "dark" \? v\.dark : v\.light\)/.test(e));
-  ok("normColorField coerces legacy flat hex → {hex}", /function normColorField\(v\)[\s\S]*?if \(typeof v === "string"\) return isHex\(v\) \? \{ hex: v \} : null;/.test(e));
-  ok("colorField opens a 3-tab popover (Token/Custom/Per-mode; Per-mode hidden when noPerMode)", /var TABS = opts\.noPerMode \? \[\["Token", "token"\], \["Custom", "custom"\]\] : \[\["Token", "token"\], \["Custom", "custom"\], \["Per-mode", "per"\]\]/.test(e));
-  ok("colorFieldFlat: CSS-string adapter for element colour sites (token→var, hex→hex)", /function colorFieldFlat\(labelText, cssVal, onPick, target, fopts\)[\s\S]*?if \(v\.token\) return onPick\("var\(--color-" \+ v\.token \+ "\)"\);[\s\S]*?if \(v\.hex\) return onPick\(v\.hex\)/.test(e));
+  ok("resolveColorField: token→var, per-mode→mode value, else hex", /window\.resolveColorField = function \(v, mode\) \{[\s\S]*?if \(v\.token\) return "var\(--color-" \+ v\.token \+ "\)";[\s\S]*?if \(v\.light \|\| v\.dark\) return \(mode === "dark" \? v\.dark : v\.light\)/.test(ecol));
+  ok("normColorField coerces legacy flat hex → {hex}", /function normColorField\(v\)[\s\S]*?if \(typeof v === "string"\) return isHex\(v\) \? \{ hex: v \} : null;/.test(ecol));
+  ok("colorField opens a 3-tab popover (Token/Custom/Per-mode; Per-mode hidden when noPerMode)", /var TABS = opts\.noPerMode \? \[\["Token", "token"\], \["Custom", "custom"\]\] : \[\["Token", "token"\], \["Custom", "custom"\], \["Per-mode", "per"\]\]/.test(ecol));
+  ok("colorFieldFlat: CSS-string adapter for element colour sites (token→var, hex→hex)", /function colorFieldFlat\(labelText, cssVal, onPick, target, fopts\)[\s\S]*?if \(v\.token\) return onPick\("var\(--color-" \+ v\.token \+ "\)"\);[\s\S]*?if \(v\.hex\) return onPick\(v\.hex\)/.test(ecol));
   // Phase 3 Batch 1: frame/box appearance migrated to colorFieldFlat
   ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
@@ -8884,10 +8902,10 @@ section("panel system v2 — layout engine");
   // changes while scrolling the panel). Assert the wheel-to-change handler is GONE; the glyph
   // drag-scrub (makeScrubbable) remains the deliberate quick-adjust.
   ok("iconField no longer changes value on wheel (retired)", !/wrap\.addEventListener\("wheel"/.test(e) && /makeScrubbable\(g, i,/.test(e));
-  ok("token pane stores {token}; custom stores {hex}+recents; per stores {light,dark}", /doPick\(\{ token: t\[1\] \}\)/.test(e) && /doPick\(\{ hex: hx \}\); colorRecents\(hx\)/.test(e) && /doPick\(\{ light: lightV, dark: darkV \}\)/.test(e));
-  ok("colorField pushes undo history once per open (debounced; skipped when noHistory)", /function doPick\(v\) \{ if \(!pushed\) \{ if \(!opts\.noHistory\) \{ try \{ pushHistory\(\); \} catch \(e\) \{\} \} pushed = true; \} onPick\(v\); \}/.test(e));
-  ok("colorField has eyedropper (reuses eyeDropperAvailable/pickScreenColor)", /if \(eyeDropperAvailable\(\)\) \{ var ed[\s\S]*?pickScreenColor\(\)/.test(e));
-  ok("recents persisted to localStorage (max 8)", /function colorRecents\(add\)[\s\S]*?verso\.colorRecents[\s\S]*?\.slice\(0, 8\)/.test(e));
+  ok("token pane stores {token}; custom stores {hex}+recents; per stores {light,dark}", /doPick\(\{ token: t\[1\] \}\)/.test(ecol) && /doPick\(\{ hex: hx \}\); colorRecents\(hx\)/.test(ecol) && /doPick\(\{ light: lightV, dark: darkV \}\)/.test(ecol));
+  ok("colorField pushes undo history once per open (debounced; skipped when noHistory)", /function doPick\(v\) \{ if \(!pushed\) \{ if \(!opts\.noHistory\) \{ try \{ pushHistory\(\); \} catch \(e\) \{\} \} pushed = true; \} onPick\(v\); \}/.test(ecol));
+  ok("colorField has eyedropper (reuses eyeDropperAvailable/pickScreenColor)", /if \(eyeDropperAvailable\(\)\) \{ var ed[\s\S]*?pickScreenColor\(\)/.test(ecol));
+  ok("recents persisted to localStorage (max 8)", /function colorRecents\(add\)[\s\S]*?verso\.colorRecents[\s\S]*?\.slice\(0, 8\)/.test(ecol));
   // Phase 2b: the reusable typeCluster (D4) — one Type control body writing to a model
   ok("typeCluster renders font(buildFontPicker) + colorField + type controls", /function typeCluster\(container, model, onChange, opts\)[\s\S]*?buildFontPicker\(model\.font[\s\S]*?colorField\("Colour", tcVal\(\)/.test(e));
   ok("typeCluster colour adapter maps token/hex/per-mode onto the model", /if \(v && v\.token\) model\.colorToken = v\.token;[\s\S]*?else if \(v && \(v\.light \|\| v\.dark\)\) \{ model\.colorLight = v\.light; model\.colorDark = v\.dark; \}[\s\S]*?else if \(v && v\.hex\) model\.color = v\.hex;/.test(e));
@@ -9575,11 +9593,25 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   // off-token hex remains (one-off overlays, alpha washes, shadows with no clean
   // DS equivalent), so report the count via warn() rather than fail. design-system/
   // vendored files + non-chrome are exempt.
+  // arch-P3b: the SUBJECT is the chrome, not one file. A region that leaves editor.js takes its
+  // hex literals with it, and counting editor.js alone would report the move as debt repaid.
+  // Same widening the taxonomy-adoption gate got, and for the same reason.
   var HEX = /#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?(?:[0-9a-fA-F]{2})?\b/g;
+  var chromeJs = [e].concat((function () {
+    var acc = [];
+    (function walk(d) {
+      fs.readdirSync(d).forEach(function (f) {
+        var full = path.join(d, f);
+        if (fs.statSync(full).isDirectory()) walk(full);
+        else if (/\.js$/.test(f)) acc.push(fs.readFileSync(full, "utf8"));
+      });
+    })(path.join(ROOT, "src/editor"));
+    return acc;
+  })()).join("\n");
   var cssHex = (css.match(HEX) || []).length;
-  var jsHex = (e.match(HEX) || []).length;
+  var jsHex = (chromeJs.match(HEX) || []).length;
   if (cssHex) warn("raw hex in editor.css: " + cssHex + " residual literals (SOFT — no clean DS equivalent)");
-  if (jsHex) warn("raw hex in chrome JS (editor.js): " + jsHex + " residual literals (SOFT)");
+  if (jsHex) warn("raw hex in chrome JS (editor.js + src/editor/**): " + jsHex + " residual literals (SOFT)");
 
   // (item 1 / ui-alias) HARD-FAIL (#21 teardown): the legacy ui-alias layer is
   // deleted and every chrome surface references DS tokens directly — so ZERO
