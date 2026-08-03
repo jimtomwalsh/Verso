@@ -1232,41 +1232,63 @@
   window.ProductsStore = loadProducts();
   function saveProducts() { Store.saveProducts(window.ProductsStore); }
 
-  // ---- Publish queue (Product Rail Epic 6, T1) — the persistent Publish-stage queue -----------
-  // A single app-global queue (PublishQueue model, src/publish-queue.js), persisted through the
-  // durable key/value writer (writeStore) so it survives refresh + stage-switches. Lazily loaded
-  // on first use; every mutation calls savePublishQueue().
-  var PUBLISH_QUEUE_KEY = "authoring.publishQueue";
-  var __publishQueue = null;
-  function loadPublishQueue() {
-    var PQ = window.PublishQueue; if (!PQ) return null;
-    try { var raw = localStorage.getItem(PUBLISH_QUEUE_KEY); if (raw) return PQ.fromJSON(JSON.parse(raw)); } catch (e) {}
-    return PQ.create();
-  }
-  function publishQueue() { if (!__publishQueue) __publishQueue = loadPublishQueue(); return __publishQueue; }
-  function savePublishQueue() {
-    var PQ = window.PublishQueue; if (!PQ || !__publishQueue) return;
-    try { writeStore(localStorage, PUBLISH_QUEUE_KEY, JSON.stringify(PQ.toJSON(__publishQueue))); } catch (e) {}
-  }
+  // ---- Publish orchestration -> src/editor/publish.js (arch-P3-03) -----------------------------
+  // The four stores (queue / paths / presets / release history), the plan every row expands into,
+  // and the run that drains the queue all live in the module. It is DOM-free: it resolves
+  // destinations, it does not pick them; it builds and delivers through the callbacks below. What
+  // stays here is the chrome -- the pane, the rows, the chips, the folder picker, the file writes.
+  // Every callback below is deferred, so the module can be built here even though half of what it
+  // reaches for (the outputs fact, the delivery, the repaint) is declared further down the file.
+  var Publish = window.VersoPublish.create({
+    store: Store,                                            // the same durable k/v the registry rides
+    docById: function (id) { return registry[id]; },
+    productById: function (id) { return window.ProductsStore && window.ProductsStore[id]; },
+    activeProduct: function () { return getActiveProduct(); },
+    activeDocId: function () { return activeDocId; },
+    outputsFact: function (variants) { return f04OutputsFact(variants); },
+    masterVersions: function (d) {
+      var gtv = {}, cur = currentMasterVersions();
+      docLinkedMasterIds(d).forEach(function (id) { gtv[id] = cur[id]; });
+      return gtv;
+    },
+    // --- the run's four contact points with the browser ---
+    deliver: function (row, variant, pkg) { return deliverPublishPackage(row, variant, pkg); },
+    // The exporter reads the LIVE document, so each row's document has to be current before it
+    // builds. requestAnimationFrame lets the canvas finish mounting first, as it always has.
+    activateDoc: function (id) {
+      if (activeDocId === id) return Promise.resolve();
+      switchDoc(id);
+      return new Promise(function (resolve) { requestAnimationFrame(resolve); });
+    },
+    onQueueChange: function () { renderPublishQueue(); },
+    // A finished export IS this document's new "last published" baseline (staleness tracking).
+    afterRowPublished: function (d) { snapshotGroundTruthBaseline(d); saveRegistry(registry); }
+  });
+  function publishQueue() { return Publish.queue(); }
+  function savePublishQueue() { return Publish.saveQueue(); }
+  function publishPaths() { return Publish.paths(); }
+  function savePublishPaths() { return Publish.savePaths(); }
+  function publishPresets() { return Publish.presets(); }
+  function savePublishPresets() { return Publish.savePresets(); }
+  function releaseHistory() { return Publish.history(); }
+  function saveReleaseHistory() { return Publish.saveHistory(); }
+  function publishPathCtx(row, variant) { return Publish.pathCtx(row, variant); }
+  function publishResolveDest(row, variant) { return Publish.resolveDest(row, variant); }
+  function publishRowOutputs(row) { return Publish.outputsForRow(row); }
+  function publishOptionsForRow(row, variant) { return Publish.optionsForRow(row, variant); }
+  function releaseEntryForRow(row, result, variant) { return Publish.releaseEntryForRow(row, result, variant); }
+  function publishRootScope() { return Publish.rootScope(); }
+  function publishRowDestSummary(dests) { return window.VersoPublish.destSummary(dests); }
+  function publishRowFilename(nameFn, opts) { return window.VersoPublish.rowFilename(nameFn, opts); }
+  function publishShowsFilename(row) { return window.VersoPublish.showsFilename(row); }
+  function publishVariantRollup(fact) { return window.VersoPublish.variantRollup(fact); }
 
   // ---- Publish save paths (Product Rail Epic 6, T3) — where each package lands + its version ------
-  // The PublishPaths model (src/publish-paths.js) holds only labels + the version ledger, so it rides
-  // the same durable key/value seam as the queue. The File System Access directory HANDLES can't be
-  // serialised, so each one lives in the existing keyed-handle IndexedDB store under the key the model
-  // computes — one handle per Product root, one per per-output override.
-  var PUBLISH_PATHS_KEY = "authoring.publishPaths";
-  var __publishPaths = null;
+  // The PublishPaths model holds only labels + the version ledger. The File System Access directory
+  // HANDLES can't be serialised, so each one lives in the existing keyed-handle IndexedDB store
+  // under the key the model computes — one handle per Product root, one per per-output override.
+  // Handles are browser objects, so this half stays here.
   var __publishDirHandles = {}; // handleKey -> handle|null, so a run doesn't re-read IndexedDB per output
-  function loadPublishPaths() {
-    var PA = window.PublishPaths; if (!PA) return null;
-    try { var raw = localStorage.getItem(PUBLISH_PATHS_KEY); if (raw) return PA.fromJSON(JSON.parse(raw)); } catch (e) {}
-    return PA.create();
-  }
-  function publishPaths() { if (!__publishPaths) __publishPaths = loadPublishPaths(); return __publishPaths; }
-  function savePublishPaths() {
-    var PA = window.PublishPaths; if (!PA || !__publishPaths) return;
-    try { writeStore(localStorage, PUBLISH_PATHS_KEY, JSON.stringify(PA.toJSON(__publishPaths))); } catch (e) {}
-  }
   // The persisted handle for a resolved destination: memory first, then IndexedDB (saveBackupHandle /
   // loadBackupHandle, the same store the backup + review folders already use). A handle whose
   // permission has lapsed and can't be re-granted resolves to null, and the caller downloads instead —
@@ -1298,198 +1320,6 @@
       return chain.then(function (dir) { return dir.getDirectoryHandle(seg, { create: true }); });
     }, Promise.resolve(root));
   }
-  // What one output of one row resolves against. The Product is the document's own, falling back to
-  // the active one, so a row publishes into the tree it belongs to rather than the one on screen.
-  function publishPathCtx(row, variant) {
-    var d = registry[row.docId] || {}, meta = d.meta || {};
-    var pid = meta.productId || getActiveProduct() || "";
-    var prod = pid && window.ProductsStore && window.ProductsStore[pid];
-    return { productId: pid, productName: (prod && prod.name) || "", docId: row.docId,
-             docCode: meta.code || row.docId, variant: variant || null };
-  }
-  function publishResolveDest(row, variant) {
-    var PA = window.PublishPaths; if (!PA) return null;
-    return PA.resolve(publishPaths(), publishPathCtx(row, variant));
-  }
-  // Every package this row produces, flagship first. It reads f04OutputsFact — the SAME fact the
-  // row's outputs chip states — so the count promised and the packages that land cannot disagree.
-  // A preset that pins one variant narrows the row to that single output.
-  function publishRowOutputs(row) {
-    var SX = window.SCORMExport, PP = window.PublishPresets;
-    var pinned = (SX && PP) ? PP.optionsFor(publishPresets(), (row && row.preset) || "master").variant : null;
-    if (pinned) return [String(pinned)];
-    var d = registry[row && row.docId];
-    var fact = f04OutputsFact(d && d.variants);
-    return fact.variants.length ? [null].concat(fact.variants) : [null];
-  }
-
-  // ---- Release history (Product Rail Epic 6) — the append-only whole-family export log --------------
-  // Every completed Publish run appends ONE immutable release record (ReleaseHistory model) capturing
-  // what was published together. Persisted through the same k/v seam as the queue; append-only.
-  var RELEASE_HISTORY_KEY = "authoring.releaseHistory";
-  var __releaseHistory = null;
-  function loadReleaseHistory() {
-    var RH = window.ReleaseHistory; if (!RH) return null;
-    try { var raw = localStorage.getItem(RELEASE_HISTORY_KEY); if (raw) return RH.fromJSON(JSON.parse(raw)); } catch (e) {}
-    return RH.create();
-  }
-  function releaseHistory() { if (!__releaseHistory) __releaseHistory = loadReleaseHistory(); return __releaseHistory; }
-  function saveReleaseHistory() {
-    var RH = window.ReleaseHistory; if (!RH || !__releaseHistory) return;
-    try { writeStore(localStorage, RELEASE_HISTORY_KEY, JSON.stringify(RH.toJSON(__releaseHistory))); } catch (e) {}
-  }
-  // One release entry for a document published in a run: its identity + the export options it went out
-  // with + the source-version stamps it was built against (auditable against later Ground-Truth drift).
-  // uio-P-C03 (PUB-10): the record also captures the PRESET it went out under, WHERE it was
-  // delivered, and whether it succeeded -- the three things a history row has to state and which
-  // nothing else stores. `result` is the delivery outcome (null on a row that never delivered).
-  // T3: one entry per OUTPUT, not per row — a document with variants ships several packages, each
-  // with its own variant, version and destination, and a record that collapsed them into one row
-  // would misreport what actually went out.
-  function releaseEntryForRow(row, result, variant) {
-    var d = registry[row.docId] || {}, meta = d.meta || {};
-    var opts = publishOptionsForRow(row, variant);
-    var PP = window.PublishPresets;
-    var gtv = {}; docLinkedMasterIds(d).forEach(function (id) { gtv[id] = currentMasterVersions()[id]; });
-    var failed = !result || result.to === "error";
-    return {
-      docId: row.docId,
-      code: meta.code || "",
-      stage: meta.stage || "",
-      title: row.title || meta.title || row.docId,
-      exportFormat: opts.format || "",
-      variant: opts.variant || "",
-      version: opts.version || "",
-      preset: PP ? PP.presetName(publishPresets(), row.preset || "master") : "",
-      destination: failed ? "" : (result.to === "download" ? "Downloads" : (result.path || result.to || "")),
-      status: failed ? "error" : "done",
-      groundTruthVersions: gtv
-    };
-  }
-
-  // ---- Publish presets (Product Rail Epic 6, T2) — app-global output presets -------------------
-  // Named export-option bundles (PublishPresets model). App-global, persisted through the same k/v
-  // seam; each queue row references a preset by id, resolved to real options at Publish time.
-  var PUBLISH_PRESETS_KEY = "authoring.publishPresets";
-  var __publishPresets = null;
-  function loadPublishPresets() {
-    var PP = window.PublishPresets; if (!PP) return null;
-    try { var raw = localStorage.getItem(PUBLISH_PRESETS_KEY); if (raw) return PP.fromJSON(JSON.parse(raw)); } catch (e) {}
-    return PP.create();
-  }
-  function publishPresets() { if (!__publishPresets) __publishPresets = loadPublishPresets(); return __publishPresets; }
-  function savePublishPresets() {
-    var PP = window.PublishPresets; if (!PP || !__publishPresets) return;
-    try { writeStore(localStorage, PUBLISH_PRESETS_KEY, JSON.stringify(PP.toJSON(__publishPresets))); } catch (e) {}
-  }
-  // Resolve a row's preset id to real export options: the exporter defaults with the preset's
-  // overrides applied on top (T2). Falls back to plain defaults if presets aren't available.
-  // T3 added the second argument: a row is several OUTPUTS (flagship + each variant), and each one is
-  // named and versioned in its own right. Passing the variant explicitly keeps one function answering
-  // "what options build this package" for the preview on the row and for the run that writes it.
-  function publishOptionsForRow(row, variant) {
-    var SX = window.SCORMExport, PP = window.PublishPresets, PA = window.PublishPaths;
-    var base = (SX && SX.defaultOptions) ? SX.defaultOptions() : {};
-    if (!PP || !row) return base;
-    var out = Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
-    if (variant !== undefined) out.variant = variant || null;
-    // uio-P-C07 (PUB-05): name the package for THIS row's document, not for whichever document
-    // happens to be open. The publish run hands these same options to buildPackage, so the
-    // filename shown on the row is the filename that lands.
-    var d = registry[row.docId], code = d && d.meta && d.meta.code;
-    if (code) out.code = code;
-    // T3: the version is the ledger's, not defaultOptions()' frozen "V001". Per doc+variant, so a
-    // variant steps independently of its flagship; "replace current version" reuses the last one.
-    if (PA) out.version = PA.nextVersion(publishPaths(), PA.pathKey(row.docId, out.variant),
-      { replace: !!row.replaceVersion, suggest: SX && SX.suggestVersion });
-    return out;
-  }
-  // uio-P-C07 (PUB-05): a queue row used to say nothing about where its package goes or what it is
-  // called — the first mention of either was "Done · <name>" after the run, which is too late to be
-  // a decision. Every row now states its destination and, before you press Publish, the exact
-  // filename it will write. T3 turned that statement into a real destination: a Product root folder
-  // set once and inherited, a per-output override, or the download fallback (PublishPaths.resolve).
-  /* @publish-dest-start */
-  // A row is several outputs, so the collapsed chip has to speak for all of them. Three cases, in
-  // order of how much it can honestly say:
-  //   · every output lands on the same path -> state that path;
-  //   · they share the folder the author PICKED but nest differently under it (an inherited root
-  //     gives each variant its own subfolder) -> state the shared part and end it in an ellipsis,
-  //     which is true of all of them rather than true of one and implied of the rest;
-  //   · they came from different picked folders -> "Mixed", and the popover has the detail.
-  // The shared part is cut at a folder boundary, so the chip never states half a folder name.
-  function publishRowDestSummary(dests) {
-    var list = (dests || []).filter(Boolean);
-    if (!list.length) return null;
-    var first = list[0];
-    if (list.every(function (dd) { return dd.chip === first.chip; })) {
-      return { label: first.kind === "download" ? first.label : first.chip, kind: first.kind, mixed: false, why: first.hint };
-    }
-    if (list.every(function (dd) { return dd.handleKey === first.handleKey; })) {
-      var shared = list.reduce(function (acc, dd) { return commonPrefix(acc, dd.chip); }, first.chip);
-      var cut = shared.lastIndexOf("/");
-      return { label: (cut > -1 ? shared.slice(0, cut + 1) : shared) + "…", kind: first.kind, mixed: false,
-               why: first.hint + " Each output gets its own subfolder." };
-    }
-    return { label: "Mixed", kind: "mixed", mixed: true,
-             why: "These outputs publish to different folders. Open to see each one." };
-  }
-  function commonPrefix(a, b) {
-    var i = 0, n = Math.min(a.length, b.length);
-    while (i < n && a.charAt(i) === b.charAt(i)) i++;
-    return a.slice(0, i);
-  }
-  // Which Product the head's folder chip is setting. The rail's scope when one is chosen; otherwise
-  // the Product the queued rows agree on, and failing that the open document's. A queue spanning
-  // several Products has no single root to state, so it resolves to null and the chip says so rather
-  // than naming one Product's folder and quietly writing it to another's.
-  function publishRootScope() {
-    var active = getActiveProduct(); if (active) return active;
-    var PQ = window.PublishQueue, seen = {};
-    if (PQ) (publishQueue().rows || []).forEach(function (r) {
-      var d = registry[r.docId], p = d && d.meta && d.meta.productId;
-      if (p) seen[p] = 1;
-    });
-    var keys = Object.keys(seen);
-    if (keys.length === 1) return keys[0];
-    if (keys.length > 1) return null;
-    var od = registry[activeDocId];
-    return (od && od.meta && od.meta.productId) || "";
-  }
-  // What the row promises to write. The name is asked of the exporter's OWN naming function (passed
-  // in) instead of being rebuilt here, so the promise on the row and the file that lands can never
-  // drift apart. No exporter, or a namer that throws, yields "" — the row states nothing rather
-  // than guessing at a filename.
-  function publishRowFilename(nameFn, opts) {
-    if (typeof nameFn !== "function" || !opts) return "";
-    try { return String(nameFn(opts) || ""); } catch (e) { return ""; }
-  }
-  // The filename is a promise about a run that hasn't happened, so it is shown only while the run is
-  // still ahead. Once a row is done or failed its status carries the real outcome, and repeating the
-  // prediction beside it would be noise at best and a contradiction at worst.
-  function publishShowsFilename(row) {
-    var s = row && row.status;
-    return s === "pending" || s === "running";
-  }
-  /* @publish-dest-end */
-  // uio-P-C08 (PUB-15, Conservative): one Edit document with variants is several packages -- "the
-  // real unit of publishing" -- and a Publish row said so only in a static badge. The roll-up below
-  // turns the F04 outputs fact into the chip + popover model. It INVENTS no expansion of its own:
-  // count, names and phrasing come from f04OutputsFact verbatim, the same fact the publish run's
-  // variant expansion reads, so the chip and the packages that land can never disagree. A document
-  // without variants rolls up to null -- a flagship-only row carries no chip at all rather than a
-  // chip that says "1 output" about nothing.
-  /* @publish-varpop-start */
-  function publishVariantRollup(outputsFact) {
-    if (!outputsFact || !(outputsFact.count > 1)) return null;
-    return {
-      count: outputsFact.count,
-      label: outputsFact.label,   // the F04 phrasing, verbatim -- never re-worded here
-      title: outputsFact.title,
-      rows: (outputsFact.names || []).map(function (name, i) { return { name: name, flagship: i === 0 }; })
-    };
-  }
-  /* @publish-varpop-end */
   // The chip itself: the same publish-chip family as the preset + destination chips beside it, and
   // -- unlike P-C07's destination -- a real button, because it has somewhere to go: the canonical
   // anchored popover (openChromePop, the storage dot's own machinery) listing every output. Both
@@ -2199,14 +2029,11 @@
   // uio-P-C06 (PUB-04): `quiet` suppresses only the confirmation, never the save. A batch adds every
   // document through this exact path and then confirms once, so one toast per document never stacks.
   function addToQueue(docId, opts) {
-    var PQ = window.PublishQueue, PP = window.PublishPresets, d = registry[docId]; if (!PQ || !d) return;
-    var preset = PP ? PP.lastForDoc(publishPresets(), docId) : "master"; // zero-config recall
-    PQ.addDoc(publishQueue(), docId, { title: (d.meta && d.meta.title) || docId, preset: preset });
-    savePublishQueue();
+    var added = Publish.addDoc(docId); // zero-config preset recall lives with the queue
+    if (!added) return;
     renderPublishQueue();
-    var n = PQ.pendingRows(publishQueue()).length;
     syncSendToPublishCount();
-    if (!(opts && opts.quiet)) publishToast("Added to the publish queue — " + n + " pending.");
+    if (!(opts && opts.quiet)) publishToast("Added to the publish queue — " + added.pending + " pending.");
   }
   // uio-P-C06 (PUB-04): queue the whole selection in one action -- every ticked document, including
   // any the current search or filter is hiding, because that is what the author ticked and the
@@ -2228,7 +2055,7 @@
   function syncSendToPublishCount() {
     var el = document.getElementById("send-to-publish-count"); if (!el) return;
     var PQ = window.PublishQueue;
-    var n = (PQ && __publishQueue !== undefined) ? PQ.pendingRows(publishQueue()).length : 0;
+    var n = PQ ? PQ.pendingRows(publishQueue()).length : 0;
     el.textContent = n ? String(n) : "";
     el.hidden = !n;
   }
@@ -2246,12 +2073,12 @@
     // button is the accent primary ONLY when there are rows to run; otherwise it's a quiet disabled
     // secondary that states the reason on hover, so a dead button never hogs the pane's one accent.
     var pending = PQ.pendingRows(q).length;
-    var canRun = !!pending && !__publishRunning;
-    var pubLabel = __publishRunning ? "Publishing…" : ("Publish" + (pending ? " (" + pending + ")" : ""));
+    var canRun = !!pending && !Publish.isRunning();
+    var pubLabel = Publish.isRunning() ? "Publishing…" : ("Publish" + (pending ? " (" + pending + ")" : ""));
     var pub = U ? U.Button({ variant: canRun ? "primary" : "secondary", icon: "upload", label: pubLabel, onClick: runPublishQueue }) : h("button", null, pubLabel);
     if (!canRun) {
       pub.setAttribute("disabled", "disabled");
-      pub.title = __publishRunning ? "Publishing…" : "Nothing queued to publish — add documents from the left.";
+      pub.title = Publish.isRunning() ? "Publishing…" : "Nothing queued to publish — add documents from the left.";
     }
     // side-rail-cleanup slice 2: the relocated Import/Export menu sits with the Publish button (the
     // stage's export/publish surface). #publish-io is filled by renderToolbarPipeline below.
@@ -2587,87 +2414,13 @@
       return downloadPublishPackage(pkg);
     });
   }
-  // A row's outcome after all of its outputs have run. One output states its own result; several
-  // state the count and where they went, because "Done · <one filename>" would under-report a row
-  // that shipped three packages.
-  function publishRowResult(results) {
-    var rs = (results || []).filter(Boolean);
-    if (!rs.length) return { to: "error", path: "nothing to publish" };
-    if (rs.length === 1) return rs[0];
-    var toFolder = rs.filter(function (r) { return r.to === "folder"; }).length;
-    return { to: toFolder === rs.length ? "folder" : (toFolder ? "mixed" : "download"),
-             path: rs.length + " packages" + (toFolder ? " · " + rs[rs.length - 1].path.replace(/[^/]+$/, "") : "") };
-  }
-  var __publishRunning = false;
-  // Run every PENDING row sequentially: switch to that doc so buildPackage reads it, build a SCORM
-  // package with the default options, deliver (download), and record the result. The active doc is
-  // restored at the end. Done rows stay (greyed) with their result; the queue is not auto-emptied.
+  function publishRowResult(results) { return window.VersoPublish.rowResult(results); }
+  // The run itself is the module's (arch-P3-03). What is left here is the one thing it cannot
+  // decide: whether this origin can publish at all. A file:// page can't read course.css, the fonts
+  // or the interactions it has to bundle, so the packages would be silently incomplete.
   function runPublishQueue() {
-    var PQ = window.PublishQueue, SX = window.SCORMExport; if (!PQ || !SX) return;
     if (location.protocol === "file:") { window.alert("Publish needs the http:// origin so it can bundle fonts, course.css and interactions.\n\nRun ./serve.command and open http://localhost:8123, then Publish again."); return; }
-    var q = publishQueue();
-    var pend = PQ.pendingRows(q);
-    if (!pend.length || __publishRunning) return;
-    __publishRunning = true;
-    var originalId = activeDocId, i = 0;
-    var runEntries = []; // whole-family release record: one entry per successfully-published row this run
-    renderPublishQueue();
-    function finish() {
-      __publishRunning = false;
-      if (activeDocId !== originalId && registry[originalId]) switchDoc(originalId);
-      // Write ONE immutable release record for everything that published together this run (Epic 6).
-      if (runEntries.length && window.ReleaseHistory) {
-        window.ReleaseHistory.append(releaseHistory(), { productId: getActiveProduct(), createdAt: Date.now(), entries: runEntries });
-        saveReleaseHistory();
-      }
-      savePublishQueue(); renderPublishQueue();
-    }
-    function step() {
-      if (i >= pend.length) { finish(); return; }
-      var row = pend[i++];
-      if (!registry[row.docId]) {
-        var gone = { to: "error", path: "document not found" };
-        runEntries.push(releaseEntryForRow(row, gone));
-        PQ.setStatus(q, row.id, "error", gone); savePublishQueue(); renderPublishQueue(); step(); return;
-      }
-      PQ.setStatus(q, row.id, "running"); renderPublishQueue();
-      var run = function () {
-        // T3: a row is several OUTPUTS — flagship plus each variant — built and delivered in sequence,
-        // each to its own resolved folder and under its own version. The version is recorded only
-        // after the package actually lands, so a failed write never burns a version number.
-        var PA = window.PublishPaths;
-        var outs = publishRowOutputs(row), results = [];
-        outs.reduce(function (chain, variant) {
-          return chain.then(function () {
-            var opts = publishOptionsForRow(row, variant);
-            return Promise.resolve(SX.buildPackage(opts))
-              .then(function (pkg) { return deliverPublishPackage(row, variant, pkg); })
-              .then(function (res) {
-                results.push(res);
-                // Capture the release entry BEFORE the baseline snapshot, so groundTruthVersions
-                // reflects the source versions this package was actually built against.
-                runEntries.push(releaseEntryForRow(row, res, variant));
-                if (PA && opts.version) { PA.recordVersion(publishPaths(), PA.pathKey(row.docId, opts.variant), opts.version); savePublishPaths(); }
-              });
-          });
-        }, Promise.resolve())
-          .then(function () {
-            PQ.setStatus(q, row.id, "done", publishRowResult(results));
-            // staleness-tracking: a finished export IS this document's new "last published" baseline.
-            snapshotGroundTruthBaseline(registry[row.docId]); saveRegistry(registry);
-          })
-          .catch(function (e) {
-            // uio-P-C03: a failed row is part of the release record too — a history row that omits
-            // its failures would report a clean "Published" for a run that partly didn't.
-            var err = { to: "error", path: String((e && e.message) || e) };
-            runEntries.push(releaseEntryForRow(row, err));
-            PQ.setStatus(q, row.id, "error", err);
-          })
-          .then(function () { savePublishQueue(); renderPublishQueue(); step(); });
-      };
-      if (activeDocId !== row.docId) { switchDoc(row.docId); requestAnimationFrame(run); } else run();
-    }
-    step();
+    return Publish.run();
   }
   // Creates a Product container and persists it; the sole write path other Product Rail
   // tickets (new-product-flow, promote-to-product) build their UI on top of.
