@@ -3,7 +3,7 @@
  *
  * The guide is hand-written prose (rich per-feature detail we do NOT want to auto-overwrite),
  * so this tool does NOT regenerate the guide. It DETECTS DRIFT: it introspects the app's
- * author-facing surfaces from source (today: the block palette `LIBRARY` in src/editor.js,
+ * author-facing surfaces from source (today: the block palette `LIBRARY` in src/editor/assets.js,
  * grouped by category) and checks that `docs/USER-GUIDE.md` documents each one — so adding a
  * feature without documenting it is caught, in the same session, before it ships.
  *
@@ -24,7 +24,8 @@ var path = require("path");
 
 // ---- Pure core (no IO; shared with the tests/run.js #91 gate) ----------------------------
 
-// Extract the top-level block palette from src/editor.js source -> [{ group, label }].
+// Extract the top-level block palette from src/editor/assets.js source -> [{ group, label }].
+// (arch-P3b-07h: the palette moved there with the Assets tab it feeds.)
 // Matches only top-level LIBRARY entries (`group:"..", icon:"..", label:".."`), skipping
 // nested labels inside make() bodies (checkbox default, quiz retry, ...), same as the gate.
 function extractLibrary(editorSrc) {
@@ -66,7 +67,7 @@ module.exports = {
 if (require.main === module) {
   var ROOT = path.resolve(__dirname, "..");
   var mode = process.argv.indexOf("--report") !== -1 ? "report" : "check";
-  var editorSrc = fs.readFileSync(path.join(ROOT, "src/editor.js"), "utf8");
+  var editorSrc = fs.readFileSync(path.join(ROOT, "src/editor/assets.js"), "utf8");
   var guide = fs.readFileSync(path.join(ROOT, "docs/USER-GUIDE.md"), "utf8");
   var cov = blockCoverage(editorSrc, guide);
 

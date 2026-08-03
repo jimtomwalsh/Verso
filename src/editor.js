@@ -5628,7 +5628,7 @@
     courseNavControls(block, inspector);
     var toFooter = h("button", "insp-hint insp-backlink", "Footer padding, logo & disclaimer → ⚙ Header & Footer");
     toFooter.type = "button";
-    toFooter.addEventListener("click", function () { openSettingsModal("project"); if (settingsModal) { settingsModal.sectionKey.project = "footer"; renderSettingsBody(); } });
+    toFooter.addEventListener("click", function () { openSettingsSection("project", "footer"); });
     inspector.appendChild(toFooter);
   }
 
@@ -7027,7 +7027,7 @@
     __activeStage = stage;
     try { localStorage.setItem(STAGE_PERSIST_KEY, stage); } catch (e) {}
     if (typeof document === "undefined") return;
-    if (typeof applyLeftSection === "function") applyLeftSection(_activeLeftSection); // SPEC 7: re-apply the left switcher's active section (Edit shows the panel; the switcher owns pane visibility)
+    applyLeftSection(activeLeftSection()); // SPEC 7: re-apply the left switcher's active section (Edit shows the panel; the switcher owns pane visibility)
     var ws = document.getElementById("workspace");
     if (ws) {
       ws.classList.remove("workspace--stage-source", "workspace--stage-publish");
@@ -7522,374 +7522,24 @@
   }
 
   // ---- uio-F05: the overlay LAYER STACK (the spine's Esc contract) ----------
-  // Every dismissible surface pushes itself here as it opens and pops as it closes. ONE global
-  // keydown owns Escape, and it closes the TOPMOST layer only, last-in-first-out — so a confirm
-  // raised over the settings sheet closes the confirm and leaves the sheet standing. Before
-  // this, each surface listened for Escape on its own, so one keypress could close two things
-  // (or the wrong one). Focus returns to whatever opened the layer, per the spine's keyboard
-  // contract. `window.__overlayLayers` is the test hook.
-  /* @f05-start */
-  var overlayLayers = []; // [{ name, close, returnFocus }] — topmost is last
-  function pushLayer(name, close) {
-    var active = document.activeElement;
-    var layer = { name: name, close: close, returnFocus: active && active.focus ? active : null };
-    overlayLayers.push(layer);
-    if (overlayLayers.length === 1) document.addEventListener("keydown", overlayEsc, true);
-    return layer;
-  }
-  function popLayer(name) {
-    // Remove the TOPMOST layer with this name (a surface may legitimately be stacked twice).
-    for (var i = overlayLayers.length - 1; i >= 0; i--) {
-      if (overlayLayers[i].name !== name) continue;
-      var layer = overlayLayers.splice(i, 1)[0];
-      if (!overlayLayers.length) document.removeEventListener("keydown", overlayEsc, true);
-      if (layer.returnFocus && document.contains(layer.returnFocus)) {
-        try { layer.returnFocus.focus(); } catch (e) {}
-      }
-      return layer;
-    }
-    return null;
-  }
-  function topLayer() { return overlayLayers.length ? overlayLayers[overlayLayers.length - 1] : null; }
-  function overlayEsc(e) {
-    if (e.key !== "Escape") return;
-    var top = topLayer();
-    if (!top) return;
-    e.preventDefault();
-    e.stopPropagation(); // the topmost layer answers this keypress, and only it
-    try { top.close(); } catch (err) {}
-  }
-  /* @f05-end */
-  window.__overlayLayers = {
-    push: pushLayer, pop: popLayer, top: topLayer,
-    names: function () { return overlayLayers.map(function (l) { return l.name; }); }
-  };
+  // arch-P3b-07g: the layer stack and the settings sheet it was written for -- both tabs, the
+  // section registry and four panel bodies that were filed under the fonts banner -- moved to
+  // editor/settings-sheet.js.
+  var pushLayer = VE.bind("pushLayer");
+  var popLayer = VE.bind("popLayer");
+  var openSettingsModal = VE.bind("openSettingsModal");
+  var closeSettingsModal = VE.bind("closeSettingsModal");
+  var openSettingsSection = VE.bind("openSettingsSection");
+  var openSelectionSettings = VE.bind("openSelectionSettings");
+  var renderSettingsBody = VE.bind("renderSettingsBody");
+  var refreshSettingsPanes = VE.bind("refreshSettingsPanes");
+  var getSettingsSections = VE.bind("getSettingsSections");
+  var wireScrollEdges = VE.bind("wireScrollEdges");
+  var glossaryTerms = VE.bind("glossaryTerms");
+  var buildGlossaryBody = VE.bind("buildGlossaryBody");
+  var buildMotionBody = VE.bind("buildMotionBody");
+  var buildBackupBody = VE.bind("buildBackupBody");
 
-  // ---- ⚙ Settings sheet (System / Project tabs) ----------------------------
-  // uio-F05: this was a centred modal on a scrim. It is now the spine's SHEET — right-docked,
-  // full-height, NO scrim — so the canvas stays live and editable beside it (squeezed, never
-  // covered). The doc-settings panels are mounted by redirecting `inspector` at the content
-  // pane (the same trick the sectioned inspectors use). SYSTEM = global / cross-document
-  // (canvas + shared component library); PROJECT = this document (header/footer, nav, layout,
-  // theme, fonts, glossary, motion, components, review).
-  var settingsModal = null; // { host, box, content, active, tab }
-  // Section registry per tab. Each section's `build(host)` fills the CONTENT pane — the same
-  // body-builders the old sidebar used, so no logic is duplicated; they just render into the
-  // dialog's right pane one-at-a-time instead of a stacked wall of disclosures.
-  // #42: apply an edited preview dimension — clamp, persist, and (like setBreakpoint)
-  // re-mount so the frames resize when the edited device is the one being previewed.
-  function setBpSize(bp, dim, val) {
-    if (!BREAKPOINTS[bp]) return;
-    BREAKPOINTS[bp][dim] = bpClampDim(val, BP_DEFAULTS[bp][dim]);
-    saveBpSizes();
-    applyBp();
-    view.ready = false; mount(); // frames may have changed size -> refit (mirrors setBreakpoint)
-  }
-  function buildPreviewSizesBody(host) {
-    host.appendChild(h("div", "insp-hint", "The pixel dimensions behind the desktop / tablet / mobile preview buttons. These size the preview frame only — the course's own responsive layout (which keys off the device name) is unchanged. Saved on this machine."));
-    [["desktop", "Desktop"], ["tablet", "Tablet"], ["mobile", "Mobile"]].forEach(function (pair) {
-      var bp = pair[0];
-      var body = panelSection(host, pair[1]);
-      var wField = iconField("W", { value: BREAKPOINTS[bp].w, unit: "px", placeholder: String(BP_DEFAULTS[bp].w), step: 10, min: BP_MIN, max: BP_MAX, datalist: "dl-gap", title: pair[1] + " width",
-        onchange: function (v) { setBpSize(bp, "w", v); } }).wrap;
-      var hField = iconField("H", { value: BREAKPOINTS[bp].h, unit: "px", placeholder: String(BP_DEFAULTS[bp].h), step: 10, min: BP_MIN, max: BP_MAX, datalist: "dl-gap", title: pair[1] + " height",
-        onchange: function (v) { setBpSize(bp, "h", v); } }).wrap;
-      body.appendChild(twoUp(wField, hField));
-    });
-    var reset = h("button", "prop-btn", "Reset to defaults"); reset.style.marginTop = "10px";
-    reset.addEventListener("click", function () {
-      Object.keys(BP_DEFAULTS).forEach(function (k) { BREAKPOINTS[k].w = BP_DEFAULTS[k].w; BREAKPOINTS[k].h = BP_DEFAULTS[k].h; });
-      saveBpSizes(); applyBp(); view.ready = false; mount(); refreshSettingsPanes();
-    });
-    host.appendChild(reset);
-  }
-  // edit-header-ia-v2: the document type (geometry . interactivity) moved off the header bar into
-  // the Document settings modal -- it's set once, so it belongs here, not on a face-up control.
-  // Reuses the cell model (currentCell / setCellGeo / setCellInteractive); a geometry change still
-  // warns + reflows via setCellGeo's confirm.
-  function buildDocTypeBody(host) {
-    var body = host; // OVL-07: no inner "Document type" heading restating the section's own title
-    segmentedLive("Geometry",
-      [{ value: "reflow", label: "Reflow" }, { value: "frame", label: "Fixed frame" }, { value: "paged", label: "Paged" }],
-      function (v) { return currentCell().geo === v; },
-      function (v) { setCellGeo(v); },
-      body, true);
-    switchRow("Interactive", function () { return currentCell().interactive; }, function (on) { setCellInteractive(on); }, body, true);
-    body.appendChild(h("div", "insp-hint", "Set once per document. Geometry lays out the canvas — Reflow scrolls; Fixed frame and Paged are fixed-size. Changing geometry reflows existing content. Interactive allows interactive blocks; Static is print/read-oriented."));
-  }
-  function getSettingsSections(tab) {
-    if (tab === "system") return [
-      { key: "canvas", title: "Canvas", build: function (host) {
-          var cvBody = host; // OVL-07: the section is already called Canvas — no second heading
-          colourControl("Background", canvasBg, function (val) { applyCanvasBg(val == null ? BG_DEFAULT : val); }, cvBody, true);
-          cvBody.appendChild(h("div", "insp-hint", "System settings persist across every document on this machine."));
-          // #44: light theme for Verso's OWN UI (chrome), distinct from the learner course light/dark.
-          var ifBody = panelSection(host, "Interface");
-          switchRow("Light interface", function () { return uiThemeIsLight(); }, function (v) { applyUiTheme(v); }, ifBody);
-          ifBody.appendChild(h("div", "insp-hint", "Light theme for Verso's own UI (panels, toolbar, inspector). Separate from the learner course's light/dark mode."));
-          // P0 spellcheck: mark misspellings across every text box, on or off selection.
-          switchRow("Spellcheck", function () { return spellcheckOn(); }, function (v) { setSpellcheckEnabled(v); }, ifBody);
-          ifBody.appendChild(h("div", "insp-hint", "Underlines likely typos in every text box on the canvas and in the copy editor, whether or not it's selected. Editor-only — never shown to learners or exported."));
-          // uio-E-C05 (EDIT-10): the live JSON document model is a developer affordance, off by default.
-          switchRow("Developer tools", function () { return devToolsOn(); }, function (v) { setDevToolsEnabled(v); }, ifBody);
-          ifBody.appendChild(h("div", "insp-hint", "Shows the live document model (JSON) below the inspector for debugging. Off by default; editor-only, never exported."));
-        } },
-      { key: "preview", title: "Preview sizes", build: buildPreviewSizesBody },
-      { key: "library", title: "Component Library", build: buildLibraryBody }
-    ];
-    return [
-      { key: "docType", title: "Document type", build: buildDocTypeBody },
-      { key: "backup", title: "Backup", build: buildBackupBody },
-      // OVL-07: promoted out of one "Header & Footer" section, so their own groups are level 2
-      // rather than a third level of headings. `opts` rides the section header (switch + summary
-      // + Reset) and is resolved per render, because it reads the live document.
-      { key: "header", title: "Header", build: buildHeaderBody, opts: function () { return hfSectionOpts(true); } },
-      { key: "footer", title: "Footer", build: buildFooterBody, opts: function () { return hfSectionOpts(false); } },
-      { key: "hfDefault", title: "New-course default", build: buildHeaderFooterDefaultBody },
-      // #168: canonical footer nav (was first-found, which could drift to a stray).
-      // uio-O-W1 (OVL-06): with no nav bar yet, the pane used to instruct the author to walk to
-      // Header & Footer. It now states the fact and links there.
-      // OVL-07: with a nav bar present its five groups are sheet sections of their own, so their
-      // inner groups (Labels, Appearance, Size…) sit at level 2 instead of a third level under a
-      // "Learner nav" wrapper. With no nav bar there is nothing to configure, so the one section
-      // states that and links to where a nav bar is added.
-      ].concat(navSettingsSections()).concat([
-      { key: "layout", title: "Page layout", build: buildLayoutBody },
-      { key: "endScreen", title: "Completion screen", build: buildEndScreenBody },
-      { key: "theme", title: "Theme", build: renderThemeControls },
-      { key: "fonts", title: "Custom fonts", build: buildFontsBody },
-      { key: "glossary", title: "Glossary", build: buildGlossaryBody },
-      { key: "motion", title: "Motion", build: buildMotionBody },
-      { key: "components", title: "Custom Components", build: buildComponentsBody },
-      { key: "pipeline", title: "Review (Viewer)", build: buildPipelineBody }
-    ]);
-  }
-  // The learner-nav sections for the settings sheet. One descriptor list, two surfaces: the
-  // same five groups are the nav BLOCK's inspector sections when the bar is selected on the
-  // canvas (courseNavControls) and sheet sections here.
-  function navSettingsSections() {
-    var n = footerCourseNav();
-    if (!n) {
-      return [{ key: "nav", title: "Learner nav", build: function (host) {
-        crossRefRow({ label: "Learner nav bar", value: "Not added", linkLabel: "Footer", host: host,
-          title: "Open Footer, where the nav bar is added",
-          onNavigate: function () { openSettingsSection("project", "footer"); } });
-      } }];
-    }
-    return courseNavNests(n).map(function (nest) {
-      return {
-        // Under the selected nav block "Buttons" is unambiguous; standing on their own in the
-        // sheet they say which thing they belong to.
-        key: nest.key, title: nest.sheetTitle || nest.title,
-        build: function (host) { nest.build(host); },
-        opts: nest.opts ? function () { return nest.opts; } : null
-      };
-    });
-  }
-  // uio-F05: render EVERY section of the active tab into the content pane as one scroll.
-  // This used to be a 220px nav rail plus one section at a time. Both are gone: a nav rail
-  // inside a dock is a second navigation system competing with the section headers and with
-  // the one ⌘K index, and one-section-at-a-time is the same divergence uio-E-C02 removes from
-  // the inspector. Sections are the canonical sectionGroup -- collapsible, with the F03
-  // "N overridden" roll-up -- and open collapsed, so the sheet reads as a browsable list.
-  // The section builders are untouched: `inspector` is still rebound at the host they append
-  // into, exactly as before, so all 15 keep working.
-  function renderSettingsBody() {
-    if (!settingsModal) return;
-    var tab = settingsModal.tab, sections = getSettingsSections(tab);
-    var activeKey = settingsModal.sectionKey[tab];
-    if (!sections.some(function (s) { return s.key === activeKey; })) activeKey = sections[0].key;
-    settingsModal.sectionKey[tab] = activeKey;
-    settingsModal.content.innerHTML = "";
-    var _ins = inspector;
-    try {
-      sections.forEach(function (s) {
-        var sec = sectionGroup("settings:" + s.key, s.title, function (body) {
-          inspector = body;
-          try { s.build(body); } finally { inspector = _ins; }
-        }, s.opts ? s.opts() : null);
-        sec.setAttribute("data-settings-section", s.key);
-        settingsModal.content.appendChild(sec);
-      });
-    } finally { inspector = _ins; }
-    wireScrollEdges(settingsModal.content); // uio-O-W1: idempotent — wires once, re-measures every time
-  }
-  // Open one section and bring it into view — the landing move for every cross-reference link
-  // (uio-O-W1/OVL-06) now that there is no nav rail to highlight.
-  function revealSettingsSection(key) {
-    if (!settingsModal) return;
-    var sec = settingsModal.content.querySelector('[data-settings-section="' + key + '"]');
-    if (!sec) return;
-    if (sec.classList.contains("is-collapsed")) {
-      var head = sec.querySelector(".insp-section__head");
-      if (head) head.click(); // reuse the header's own toggle, so the stored state follows
-    }
-    if (sec.scrollIntoView) sec.scrollIntoView({ block: "start" });
-  }
-  function ensureSettingsModal() {
-    if (settingsModal) return settingsModal;
-    // uio-F05: the sheet is a grid child of .workspace pinned to the SAME column the inspector
-    // uses. Opening it widens that column to --panel-sheet-width and hides the inspector, so the
-    // canvas is squeezed exactly ONCE and stays live. No overlay element, because there is no
-    // scrim: the whole point of the sheet is that the author can keep editing beside it.
-    var host = h("div", "settings-sheet"); host.id = "settings-modal"; host.hidden = true;
-    var box = h("div", "settings-sheet__box");
-    // Header: title + subtitle + System/Project tabs (canonical VersoUI.Tabs).
-    var head = h("div", "settings-head");
-    head.appendChild(h("div", "settings-title", "Settings"));
-    head.appendChild(h("div", "settings-sub", "System settings persist across documents; project settings belong to this course."));
-    var tabs = window.VersoUI.Tabs({
-      tabs: [{ value: "system", label: "System" }, { value: "project", label: "Project" }],
-      value: "project",
-      onChange: function (v) { selectTab(v); }
-    });
-    head.appendChild(tabs); box.appendChild(head);
-    // Body: ONE scroll of collapsible sections (the nav rail is gone — see renderSettingsBody).
-    // uio-O-W1 (OVL-10): the body sits in a scroll-frame so its top/bottom edges can say when
-    // there is more. The sheet is exactly where the audit found content sliced by the footer.
-    var content = h("div", "settings-content");
-    var frame = h("div", "scroll-frame"); frame.appendChild(content);
-    box.appendChild(frame);
-    function selectTab(name) {
-      settingsModal.tab = name;
-      // Keep the canonical Tabs strip in sync on programmatic opens (open("system")/open("project")).
-      Array.prototype.forEach.call(tabs.children, function (b) {
-        b.classList.toggle("is-on", b.textContent === (name === "system" ? "System" : "Project"));
-      });
-      renderSettingsBody();
-    }
-    // uio-O-W1 (OVL-09): the footer used to carry one accent "Done", which implied a commit
-    // that never happens — settings apply live and save themselves. The surface now STATES its
-    // contract (the spine's save contract: autosave + live-apply + Undo) and offers a plain
-    // Close. The accent is spent on the app's real primary action, never on dismissing a panel.
-    var foot = h("div", "settings-foot");
-    foot.appendChild(h("div", "settings-foot__contract", "Changes apply live, saved automatically. Undo with " + MOD_KEY + "Z."));
-    foot.appendChild(window.VersoUI.Button({ variant: "secondary", label: "Close", onClick: closeSettingsModal }));
-    box.appendChild(foot);
-    host.appendChild(box);
-    // uio-F05-fb1: the sheet is resizable like every other dock, and keeps its own persisted
-    // width (--sheet-w) rather than borrowing the inspector's. 340px minimum because below that
-    // the shared row's 76px label column plus a 24px control stops being legible; 720px maximum
-    // so the sheet can never take more room than the canvas it is meant to sit beside.
-    var grip = h("div", "panel-resizer"); grip.id = "resizer-sheet";
-    host.appendChild(grip);
-    wirePanelResizer(grip, "sheet-w", "right", 340, 720);
-    // uio-F05: NO scrim click-out. There is no scrim, and dismissing on a canvas click would
-    // make the canvas unusable while the sheet is open — which is the one thing the sheet exists
-    // to allow. Close and Esc are the only dismissals.
-    var ws = document.querySelector(".workspace");
-    (ws || document.body).appendChild(host);
-    settingsModal = { host: host, overlay: host, box: box, content: content, selectTab: selectTab, active: false, tab: "project", sectionKey: { system: "canvas", project: "header" } };
-    return settingsModal;
-  }
-  function openSettingsModal(tab) {
-    ensureSettingsModal();
-    if (settingsModal.active) { settingsModal.selectTab(tab || settingsModal.tab || "project"); return; }
-    settingsModal.active = true;
-    settingsModal.selectTab(tab || settingsModal.tab || "project");
-    settingsModal.host.hidden = false;
-    var ws = document.querySelector(".workspace");
-    if (ws) ws.classList.add("has-sheet"); // widens the right dock; hides the inspector
-    pushLayer("settings", closeSettingsModal);
-  }
-  // uio-O-W1 (OVL-06): the navigation target behind every settings cross-reference — open
-  // Settings on a NAMED section, so a link lands the author on the row instead of at the top.
-  function openSettingsSection(tab, sectionKey) {
-    ensureSettingsModal();
-    if (sectionKey) settingsModal.sectionKey[tab] = sectionKey;
-    openSettingsModal(tab);
-    if (sectionKey) revealSettingsSection(sectionKey);
-  }
-  function closeSettingsModal() {
-    if (!settingsModal || !settingsModal.active) return;
-    settingsModal.active = false;
-    settingsModal.host.hidden = true;
-    var ws = document.querySelector(".workspace");
-    if (ws) ws.classList.remove("has-sheet"); // restores the inspector at --panel-right-width
-    popLayer("settings"); // returns focus to whatever opened the sheet
-  }
-  // uio-O-W1 (OVL-10): tell a scrolling body to state where there is more. The classes go on the
-  // `.scroll-frame` WRAPPER, not the scroller -- pseudo-elements inside an overflow box scroll
-  // away with the content, so the edges have to be drawn by a positioned host around it. Safe to
-  // call repeatedly; `sync` is kept on the element so a re-render can re-measure.
-  function wireScrollEdges(scroller) {
-    if (!scroller) return null;
-    var frame = scroller.parentNode;
-    if (!frame || !frame.classList || !frame.classList.contains("scroll-frame")) return null;
-    function sync() {
-      var slack = scroller.scrollHeight - scroller.clientHeight;
-      frame.classList.toggle("has-edge-top", scroller.scrollTop > 1);
-      frame.classList.toggle("has-edge-bottom", slack - scroller.scrollTop > 1);
-    }
-    if (!scroller.__scrollEdges) {
-      scroller.__scrollEdges = true;
-      scroller.addEventListener("scroll", sync);
-      // ResizeObserver catches the panel being dragged wider/narrower and the window resizing.
-      if (typeof ResizeObserver === "function") {
-        try { new ResizeObserver(sync).observe(scroller); } catch (e) {}
-      }
-      // It does NOT catch the CONTENT changing height -- the scroller's own box never moves for
-      // that -- and folding a section open is exactly the case the affordance exists for. So
-      // watch the subtree too, coalesced to one measure per frame so a burst of class toggles
-      // during a re-render costs one layout read, not one per mutation.
-      if (typeof MutationObserver === "function") {
-        var queued = false;
-        try {
-          new MutationObserver(function () {
-            if (queued) return; queued = true;
-            var run = function () { queued = false; sync(); };
-            if (typeof requestAnimationFrame === "function") requestAnimationFrame(run); else run();
-          }).observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
-        } catch (e) {}
-      }
-    }
-    sync();
-    return sync;
-  }
-  // uio-F06 (Alt+Cmd-,): the settings for the CURRENT SELECTION. Those are the inspector's rows --
-  // the spine has the inspector holding the sheet's Block scope -- so this is not a second
-  // surface. It puts the sheet away if it is covering the dock, brings the panels back if they
-  // are hidden, and puts focus in the inspector.
-  function openSelectionSettings() {
-    closeSettingsModal();
-    var ws = document.querySelector(".workspace");
-    if (ws && ws.classList.contains("is-panels-hidden")) togglePanels();
-    // Focus the first control of the inspector's BODY, not the panel's Design/Interact tab strip
-    // -- landing on the tabs would answer "settings for what I selected" with "here is a panel".
-    var body = document.getElementById("inspector");
-    if (!body) return;
-    var focusable = body.querySelector('input:not([type="hidden"]), select, button, [tabindex="0"]');
-    if (focusable && focusable.focus) { try { focusable.focus(); } catch (e) {} }
-    else if (body.scrollIntoView) body.scrollIntoView({ block: "nearest" });
-  }
-  // #111 course-completion / exit splash. Course-level config on doc.endScreen; ON for
-  // every course unless the author turns it off here. Copy is optional -> empty falls back
-  // to the render defaults (shown as placeholders, read from window.VERSO_ENDSCREEN_DEFAULTS
-  // so editor + render never drift). Preview it in Demo mode: play the course, Exit course.
-  function buildEndScreenBody(host) {
-    var es = doc.endScreen || (doc.endScreen = {});
-    var defs = window.VERSO_ENDSCREEN_DEFAULTS || {};
-    host.appendChild(h("div", "insp-hint", "A branded screen shown when the learner selects Exit course. It ships inside the SCORM package and replaces the LMS's default exit page. On by default for every course."));
-    switchRow("Show completion screen", function () { return es.on !== false; }, function (v) { if (v) delete es.on; else es.on = false; scheduleSave(); }, host);
-    function textRow(label, key, ph) {
-      var row = h("div", "insp-row"); row.appendChild(h("span", "insp-row__label", label));
-      var input = h("input", "prop-text"); input.type = "text"; input.spellcheck = false;
-      input.value = es[key] == null ? "" : es[key]; input.placeholder = ph || "";
-      input.addEventListener("input", function () { if (input.value === "") delete es[key]; else es[key] = input.value; scheduleSave(); });
-      row.appendChild(input); return row;
-    }
-    var msg = panelSection(host, "Message");
-    msg.appendChild(textRow("Eyebrow", "eyebrow", defs.eyebrow || ""));
-    msg.appendChild(textRow("Title", "title", defs.title || ""));
-    msg.appendChild(textRow("Body", "body", defs.body || ""));
-    msg.appendChild(textRow("Footnote", "footnote", defs.footnote || ""));
-    var det = panelSection(host, "Details");
-    switchRow("Show modules completed + date", function () { return es.showMeta === true; }, function (v) { if (v) es.showMeta = true; else delete es.showMeta; scheduleSave(); }, det);
-    det.appendChild(h("div", "insp-hint", "Empty fields use the placeholder defaults. Preview in Demo mode: play the course, then select Exit course to see the screen learners get."));
-  }
-  // Keep the open modal in sync when an in-modal control mutates the doc + re-renders.
-  function refreshSettingsPanes() { if (settingsModal && settingsModal.active) renderSettingsBody(); }
-  window.__settingsModal = { open: openSettingsModal, close: closeSettingsModal, build: renderSettingsBody }; // test hook
 
   // ---- KKK: custom (uploaded) fonts ----------------------------------------
   // arch-P3b-07: uploaded and Google fonts -- the store, the embedding, the picker and the
@@ -7904,181 +7554,8 @@
   var isEmbeddableFont = VE.bind("isEmbeddableFont");
   var buildFontPicker = VE.bind("buildFontPicker");
 
-  // §1 glossary: doc-wide term/definition list. Returns a cleaned [{term,def}] array
-  // (rows with SOME text kept; both fields coerced to strings) or null when empty, so
-  // render/export only emit the glossary button + popover when there's real content.
-  function glossaryTerms(d) {
-    var t = d && d.glossary && d.glossary.terms;
-    if (!Array.isArray(t)) return null;
-    var out = [];
-    t.forEach(function (x) {
-      if (!x) return;
-      var term = String(x.term == null ? "" : x.term);
-      var def = String(x.def == null ? "" : x.def);
-      if (term.trim() || def.trim()) out.push({ term: term, def: def });
-    });
-    return out.length ? out : null;
-  }
-  window.__glossaryTermsFn = glossaryTerms;
-  // §1 glossary: upload a doc-wide abbreviations SVG/image. Stored as an asset;
-  // Global motion: author fade durations for the light/dark toggle + chapter changes
-  // (doc.motion = { modeMs, chapterMs }). Blank = the ON-by-default CSS values (300/450ms);
-  // 0 = instant. prefers-reduced-motion always overrides to instant (handled in course.css).
-  function buildMotionBody(c) {
-    c.appendChild(h("div", "insp-hint", "Fade the light/dark switch and chapter changes. Milliseconds — 0 = instant, blank = default (300 / 450). Learners with 'reduce motion' always get instant transitions."));
-    function setMotion(key, v) {
-      var n = parseInt(v, 10);
-      doc.motion = doc.motion || {};
-      if (v === "" || v == null || isNaN(n)) delete doc.motion[key]; else doc.motion[key] = Math.max(0, Math.min(2000, n));
-      if (!Object.keys(doc.motion).length) delete doc.motion;
-      reapplyLayout(); scheduleSave();
-    }
-    var m = doc.motion || {};
-    var mFade = panelSection(c, "Light / dark fade");
-    mFade.appendChild(iconField(Icon("contrast"), { value: m.modeMs, unit: "ms", placeholder: "300", step: 50, min: 0, max: 2000, datalist: "dl-gap", title: "Light/dark fade duration (ms; 0 = instant)",
-      onchange: function (v) { setMotion("modeMs", v); } }).wrap);
-    var cFade = panelSection(c, "Chapter change fade");
-    cFade.appendChild(iconField(Icon("contrast"), { value: m.chapterMs, unit: "ms", placeholder: "450", step: 50, min: 0, max: 2000, datalist: "dl-gap", title: "Chapter-change fade duration (ms; 0 = instant)",
-      onchange: function (v) { setMotion("chapterMs", v); } }).wrap);
-  }
+  // ...continues in settings-sheet.js (arch-P3b-07).
 
-  // a button appears in the footer nav pill that opens it as a centred overlay.
-  var glossaryPreviewMode = null; // which mode the settings preview shows (null = follow the editor's active mode)
-  // Project auto-backup settings. Bind / re-bind the folder;
-  // shows live status. The picker MUST run from this click (a user gesture) for FSA.
-  function buildBackupBody(c) {
-    c.appendChild(h("div", "insp-hint", "Auto-save a durable copy of this course to a real folder (e.g. its OneDrive project folder) on every change. Writes a self-contained " + backupSlug() + ".json (fully restorable, images included) + " + backupSlug() + ".schema.csv, plus timestamped snapshots. The live app storage is not a file — this is your hard backup."));
-    var bound = !!(doc && doc.backup);
-    var connected = bound && (backupMode() === "native" ? !!doc.backup.folderPath : backupHandleSet());
-    var row = h("div", "insp-row");
-    var lbl = h("span", "insp-row__label"); lbl.style.flex = "1 1 auto";
-    lbl.textContent = bound
-      ? (connected ? "Backing up to: " + doc.backup.folderName : "Bound to “" + doc.backup.folderName + "” — NOT connected this session")
-      : "No backup folder — your work is only in app storage.";
-    row.appendChild(lbl); c.appendChild(row);
-    if (!bound || !connected) {
-      var warn = h("div", "insp-hint"); warn.style.color = "var(--danger)";
-      warn.textContent = bound ? "Reconnect to resume auto-backup (the browser needs a click to re-authorise the folder after a restart)." : "Bind a folder now — without it, clearing app storage loses this course.";
-      c.appendChild(warn);
-    }
-    var pick = h("button", "prop-btn", bound ? "Change folder…" : "Choose project folder…");
-    pick.addEventListener("click", function () { bindProjectFolder().then(function () { renderSettingsBody(); }); });
-    c.appendChild(pick);
-    if (bound && !connected) {
-      var rc = h("button", "prop-btn", "Reconnect folder");
-      rc.addEventListener("click", function () { reconnectBackupFolder().then(function () { renderSettingsBody(); }); });
-      c.appendChild(rc);
-    }
-  }
-  function buildGlossaryBody(c) {
-    c.appendChild(h("div", "insp-hint", "Add glossary terms and definitions. A 'Glossary' button then appears in the footer nav pill and opens a searchable term list — in the editor demo and the exported course. Fill the table below, or import a two-column CSV (Term, Definition)."));
-    doc.glossary = doc.glossary || {};
-    if (!Array.isArray(doc.glossary.terms)) doc.glossary.terms = [];
-    var refresh = function () { mount(); };
-
-    // Canonical repeated-item list (same control as the Sequence block's steps, per the
-    // DS control set): one row per term — grip · TERM field · DEFINITION field (rowExtra)
-    // · trash, with a "+ Add term" header. Edits commit through repeatedList's own
-    // pushHistory; the definition rowExtra commits its own on change.
-    repeatedList(c, "Terms", {
-      items: function () { return doc.glossary.terms; },
-      value: function (it) { return it.term; },
-      setValue: function (it, v) { it.term = v; refresh(); },
-      add: function () { doc.glossary.terms.push({ term: "", def: "" }); refresh(); },
-      remove: function (i) { doc.glossary.terms.splice(i, 1); refresh(); },
-      move: function (from, to) { var m = doc.glossary.terms.splice(from, 1)[0]; doc.glossary.terms.splice(to, 0, m); refresh(); },
-      placeholder: "Term", addLabel: "Add term", removeTitle: "Delete term",
-      rowExtras: function (item) {
-        var defIn = h("input", "rep-row__extra-field"); defIn.type = "text"; defIn.spellcheck = false;
-        defIn.value = item.def || ""; defIn.placeholder = "Definition"; defIn.title = "Definition";
-        defIn.style.flex = "2 1 0"; defIn.style.minWidth = "0"; // the wider of the two fields
-        defIn.addEventListener("change", function () { pushHistory(); item.def = defIn.value; scheduleSave(); });
-        return [defIn];
-      }
-    });
-
-    // CSV import — a two-column "Term,Definition" file (a header row is auto-skipped when
-    // the first cell reads like a term label). Reuses the shared CSVBind.parseCSV. Imported
-    // rows are MERGED + DE-DUPLICATED into the current list by term (case-insensitive): a
-    // term already present has its definition UPDATED (CSV wins) instead of adding a
-    // duplicate row; new terms append. Air-gap clean (no network, no asset store).
-    var importCsv = function () {
-      var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv,text/csv";
-      inp.addEventListener("change", function () {
-        var f = inp.files && inp.files[0]; if (!f) return;
-        var r = new FileReader();
-        r.onload = function () {
-          var added = window.parseGlossaryCsv ? window.parseGlossaryCsv(String(r.result)) : [];
-          if (!added.length) { alert("No Term/Definition rows found in that CSV."); return; }
-          pushHistory();
-          doc.glossary.terms = mergeGlossaryTerms(doc.glossary.terms, added);
-          scheduleSave();
-          mount();
-        };
-        r.readAsText(f);
-      });
-      inp.click();
-    };
-    var csvBtn = (window.VersoUI && window.VersoUI.Button)
-      ? window.VersoUI.Button({ variant: "secondary", full: true, icon: "download", label: "Import CSV (Term, Definition)…", onClick: importCsv })
-      : (function () { var b = h("button", "prop-btn", "Import CSV (Term, Definition)…"); b.addEventListener("click", importCsv); return b; })();
-    c.appendChild(csvBtn);
-
-    // Clear all — a guarded wipe of every term (shown only when there are terms).
-    if (doc.glossary.terms.length) {
-      var clearAll = function () {
-        confirmModal("Clear all terms", "Remove all " + doc.glossary.terms.length + " glossary terms? This can't be undone from here (use Undo).", function () {
-          pushHistory();
-          doc.glossary.terms = [];
-          scheduleSave();
-          mount();
-        }, { okLabel: "Clear all", danger: true });
-      };
-      var clearBtn = (window.VersoUI && window.VersoUI.Button)
-        ? window.VersoUI.Button({ variant: "secondary", full: true, icon: "trash-2", label: "Clear all terms", danger: true, onClick: clearAll })
-        : (function () { var b = h("button", "prop-btn prop-btn--danger", "Clear all terms"); b.addEventListener("click", clearAll); return b; })();
-      c.appendChild(clearBtn);
-    }
-  }
-  // Pure MERGE + DE-DUP of glossary terms by term (case-insensitive, trimmed): keeps the
-  // FIRST occurrence's term casing + position, and takes the LATEST definition for a repeat
-  // (so a CSV re-import updates rather than duplicates). Rows with an empty term aren't
-  // de-duped (each is kept). Extracted so tests/run.js can guard it headlessly.
-  function mergeGlossaryTerms(existing, incoming) {
-    var out = [], pos = {};
-    (existing || []).concat(incoming || []).forEach(function (t) {
-      if (!t) return;
-      var term = String(t.term == null ? "" : t.term);
-      var def = String(t.def == null ? "" : t.def);
-      var key = term.trim().toLowerCase();
-      if (key && Object.prototype.hasOwnProperty.call(pos, key)) {
-        out[pos[key]].def = def; // duplicate term -> update definition (later wins)
-      } else {
-        if (key) pos[key] = out.length;
-        out.push({ term: term, def: def });
-      }
-    });
-    return out;
-  }
-  window.mergeGlossaryTerms = mergeGlossaryTerms;
-  // Pure CSV -> [{term,def}] parse for the glossary import (extracted so tests/run.js can
-  // guard it headlessly). Skips a leading header row (first cell = term/abbr/acronym/…),
-  // trims cells, and drops wholly-empty rows.
-  function parseGlossaryCsv(text) {
-    var rows = (window.CSVBind && window.CSVBind.parseCSV) ? window.CSVBind.parseCSV(String(text)) : [];
-    if (!rows.length) return [];
-    var start = 0;
-    var h0 = String(rows[0][0] == null ? "" : rows[0][0]).trim().toLowerCase();
-    if (h0 === "term" || h0 === "abbreviation" || h0 === "abbr" || h0 === "acronym" || h0 === "word") start = 1;
-    var out = [];
-    for (var i = start; i < rows.length; i++) {
-      var term = String(rows[i][0] == null ? "" : rows[i][0]).trim();
-      var def = String(rows[i][1] == null ? "" : rows[i][1]).trim();
-      if (term || def) out.push({ term: term, def: def });
-    }
-    return out;
-  }
-  window.parseGlossaryCsv = parseGlossaryCsv;
   // ...continues in fonts.js (arch-P3b-07).
 
   // A headerFooter/footer numeric field (padding, logo size). Applies LIVE via
@@ -10977,969 +10454,46 @@
   function setActivePage(i) { currentPage = i; pageItems.forEach(function (it, idx) { it.classList.toggle("is-active", idx === i); }); if (frameDescs) frameDescs.forEach(function (f) { if (f.label) f.label.classList.toggle("is-active", f.i === i); }); refreshGridOverlay(); }
 
   // ---- Assets tab: the library of insertable block/component types ----------
-  // This is where everything draggable/insertable converges. For now items are
-  // click-to-insert (append to the focused page); drag-drop is M7.5.
-  // Flat list (index = dragPayload.makeIndex, kept stable), grouped in the panel
-  // by `group` into collapsible sections.
-  var LIBRARY = [
-    { group: "Text", icon: "H", label: "Heading", make: function () { return { type: "heading", text: "New heading" }; } },
-    { group: "Text", icon: "h", label: "Subheading", make: function () { return { type: "subheading", text: "New subheading" }; } },
-    { group: "Text", icon: "¶", label: "Paragraph", make: function () { return { type: "paragraph", text: "New paragraph of body copy." }; } },
-    { group: "Text", icon: "❝", label: "Quote", make: function () { return { type: "quote", text: "A pulled quote." }; } },
-    { group: "Text", icon: "•", label: "Bulleted list", make: function () { return { type: "list", text: "<li>First item</li><li>Second item</li>" }; } },
-    { group: "Text", icon: "!", label: "Note / callout", make: function () { return { type: "note", text: "Note / callout text." }; } },
-    { group: "Media", icon: "▦", label: "Image", make: function () { return { type: "image", src: "", alt: "" }; } },
-    { group: "Media", icon: "</>", label: "HTML Interaction", make: function () { return { type: "htmlEmbed", height: 420, align: "center" }; } },
-    { group: "Media", icon: "▶", label: "Web Embed", make: function () { return { type: "webEmbed", url: "" }; } },
-    { group: "Media", icon: "◎", label: "Image hotspots", make: function () { return { type: "hotspot", entry: "scr-entry", screens: [{ id: "scr-entry", visual: "", kind: "image", alt: "", markers: [] }] }; } },
-    { group: "Layout", icon: "▭", label: "Card (container)", make: function () { return { type: "frame", padding: 20, radius: 12, border: false, children: [{ type: "subheading", text: "Card title" }, { type: "paragraph", text: "Card body text." }] }; } },
-    // #94: place an EMPTY multi-column container up front, then drop content into each
-    // column. Defaults to 2 equal empty columns; render.js shows an empty-column drop
-    // slot per column (mirrors the empty-frame/-group placeholders) and the editor
-    // wires each empty column as an intoColumn drop target.
-    { group: "Layout", icon: "▥", label: "Columns", make: function () { return { type: "columns", explicit: true, columns: [[], []] }; } },
-    // #90: native table. rows = array of rows; each row an array of cell objects { t }.
-    { group: "Layout", icon: "▦", label: "Table", make: function () { return { type: "table", header: true, borders: "all", zebra: false, cellPad: 10, align: [], rows: [[{ t: "Column 1" }, { t: "Column 2" }, { t: "Column 3" }], [{ t: "" }, { t: "" }, { t: "" }], [{ t: "" }, { t: "" }, { t: "" }]] }; } },
-    { group: "Layout", icon: "—", label: "Divider", make: function () { return { type: "divider", spaceTop: 60, spaceBottom: 60 }; } },
-    { group: "Layout", icon: "↕", label: "Spacer", make: function () { return { type: "spacer", height: 40 }; } },
-    { group: "Layout", icon: "▤", label: "Accordion / Tabs", make: function () { return { type: "accordion", mode: "accordion", items: [{ title: "Section 1", children: [{ type: "paragraph", text: "Section content." }] }, { title: "Section 2", children: [{ type: "paragraph", text: "Section content." }] }] }; } },
-    { group: "Layout", icon: "▦", label: "Card Reveal", make: function () { return { type: "cardReveal", cols: 4, gap: 24, hint: "Hold to reveal", items: [1, 2, 3, 4].map(function (n) { return { children: [{ type: "heading", text: "Card " + n }, { type: "paragraph", text: "Hidden detail revealed on hover." }] }; }) }; } },
-    { group: "Layout", icon: "▸", label: "Sequence (process / timeline)", make: function () { return { type: "sequence", spine: "numbered", orient: "vertical", reveal: "scroll", items: [1, 2, 3].map(function (n) { return { title: "Step " + n, children: [{ type: "paragraph", text: "Describe step " + n + "." }] }; }) }; } },
-    { group: "Layout", icon: "❐", label: "Card Deck (carousel)", make: function () { return { type: "cardDeck", items: [1, 2].map(function (n) { return { label: "", children: [{ type: "heading", text: "Card " + n + " title" }, { type: "paragraph", text: "Card body text — drop any blocks in here." }] }; }) }; } },
-    { group: "Interactive", icon: "→", label: "Navigation button", make: function () { return { type: "navButton", text: "Continue", action: {} }; } },
-    { group: "Interactive", icon: "☑", label: "Acknowledge / Checkbox", make: function () { return { type: "checkbox", label: "I acknowledge / understand this." }; } },
-    { group: "Interactive", icon: "?", label: "Quiz (knowledge check)", make: function () { return {
-      type: "quiz",
-      kicker: "Knowledge Check",
-      title: "Chapter knowledge check",
-      intro: { on: false, body: "Answer the questions to check your understanding.", startLabel: "Start" },
-      settings: { shuffleQuestions: false, shuffleOptions: false },
-      questions: [
-        { id: "q" + Date.now(), type: "multipleChoice", methodLabel: "Select the answer", prompt: "Type your question here?", options: [ { text: "Correct answer", correct: true }, { text: "Wrong answer", correct: false }, { text: "Another wrong answer", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> Explain why this is right.", feedbackIncorrect: "Give a hint and point to the material to review." },
-        { id: "q" + (Date.now() + 1), type: "fillBlank", methodLabel: "Complete the sentence", stemBefore: "This step is important because", stemAfter: "", options: [ { text: "it has no real effect", correct: false }, { text: "it directly supports the topic being covered", correct: true }, { text: "it only matters in rare cases", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> Explain why this is right.", feedbackIncorrect: "Give a hint and point to the material to review." }
-      ],
-      done: { title: "Knowledge Check Complete", body: "All questions answered correctly. Continue to the next section.", retry: { on: false, label: "Try again" } }
-    }; } },
-    { group: "Components", icon: "◆", label: "Chapter Card grid", make: function () { return { type: "componentGrid", component: "chapter-card", className: "card-grid", instances: [{ status: "incomplete", slots: { number: "00", title: "New Chapter", objective: "Objective text." } }] }; } }
-  ];
-  var ASSET_GROUP_KEY = "authoring.assetGroupsCollapsed";
-  function collapsedGroups() { try { return JSON.parse(localStorage.getItem(ASSET_GROUP_KEY)) || {}; } catch (e) { return {}; } }
-  function setGroupCollapsed(g, collapsed) { var c = collapsedGroups(); if (collapsed) c[g] = 1; else delete c[g]; try { localStorage.setItem(ASSET_GROUP_KEY, JSON.stringify(c)); } catch (e) {} }
-  // Issue #13: the Blocks palette can lay out as a scannable icon GRID (DS default)
-  // or a labelled LIST — persisted, toggled by the DS SegmentedControl in the head.
-  var PALETTE_VIEW_KEY = "authoring.palette.view";
-  function paletteView() { try { return localStorage.getItem(PALETTE_VIEW_KEY) === "list" ? "list" : "grid"; } catch (e) { return "grid"; } }
-  function setPaletteView(v) { try { localStorage.setItem(PALETTE_VIEW_KEY, v === "list" ? "list" : "grid"); } catch (e) {} }
-  // The Lucide glyph for a LIBRARY entry, derived from the block it inserts (cached).
-  function libLucide(item) {
-    if (item.__lucide) return item.__lucide;
-    var t = null; try { t = item.make().type; } catch (e) {}
-    return (item.__lucide = (BLOCK_LUCIDE[t] || "square"));
-  }
-  // Build ONE palette entry from the canonical control set: a BlockTile (grid) or a
-  // BlockPaletteItem (list). Re-skin only — the click-to-insert + drag-to-canvas
-  // wiring is attached to the returned element exactly as before.
-  function paletteEntry(view, opts) {
-    var U = window.VersoUI, el;
-    if (view === "grid" && U && U.BlockTile) el = U.BlockTile({ icon: opts.icon, label: opts.gridLabel || opts.label, draggable: !!opts.dragData, onClick: opts.onInsert });
-    else if (U && U.BlockPaletteItem) el = U.BlockPaletteItem({ icon: opts.icon, label: opts.label, draggable: !!opts.dragData, onClick: opts.onInsert });
-    else { el = h("div", "asset-item"); el.appendChild(h("span", "asset-item__icon")); el.appendChild(h("span", "asset-item__name", opts.label)); el.addEventListener("click", opts.onInsert); }
-    // issue 105: a grid tile's label is single-line + ellipsised, so its tooltip must be the
-    // FULL label (what got truncated) rather than the generic insert hint; the list view,
-    // whose label never truncates, keeps the hint.
-    if (view === "grid" && opts.label != null) el.title = String(opts.label);
-    else if (opts.title) el.title = opts.title;
-    if (opts.dragData) {
-      el.setAttribute("draggable", "true");
-      el.addEventListener("dragstart", function (e) {
-        setDragPayload(opts.dragData());
-        e.dataTransfer.effectAllowed = "copy";
-        try { e.dataTransfer.setData("text/plain", ""); } catch (_) {}
-        document.body.classList.add("is-dragging-block");
-      });
-      el.addEventListener("dragend", function () {
-        clearDropMarks(); setDragPayload(null); document.body.classList.remove("is-dragging-block");
-      });
-    } else {
-      el.removeAttribute("draggable");
-    }
-    return el;
-  }
-  // Kept for compatibility: a single LIBRARY entry in the current view.
-  function makeAssetRow(item, idx) {
-    return paletteEntry(paletteView(), {
-      icon: libLucide(item), label: item.label, gridLabel: item.label.split(" (")[0],
-      title: "Click to add, or drag into the Structure panel / a canvas page",
-      onInsert: function () { insertBlock(item.make()); },
-      dragData: function () { return { kind: "insert", makeIndex: idx }; }
-    });
-  }
-  function renderAssets() {
-    var view = paletteView();
-    var U = window.VersoUI;
-    // The grid/list toggle lives in the "Insert" section head (DS SegmentedControl).
-    var toggleHost = document.getElementById("palette-view-toggle");
-    if (toggleHost) {
-      toggleHost.innerHTML = "";
-      if (U && U.SegmentedControl) {
-        toggleHost.appendChild(U.SegmentedControl({
-          size: "sm", value: view,
-          options: [{ value: "grid", icon: "layout-grid", title: "Grid" }, { value: "list", icon: "list", title: "List" }],
-          onChange: function (v) { setPaletteView(v); renderAssets(); renderComponentsPalette(); }
-        }));
-      }
-    }
-    var list = document.getElementById("assets-list");
-    list.innerHTML = "";
-    var collapsed = collapsedGroups();
-    // A group's body: a BlockGrid (grid view) or a flat list (list view).
-    function groupBody() {
-      // issue 105: width-adaptive columns — the left dock is user-resizable (--left-w), so a
-      // fixed 3-col grid balloons the tiles as the panel widens. auto-fill keeps each
-      // tile at a stable target size and flexes the column count with the panel instead.
-      if (view === "grid" && U && U.BlockGrid) return U.BlockGrid({ minColWidth: 84 });
-      return h("div", "asset-group__list");
-    }
-    // SPEC 7: in a static cell, hide interactive block types from the library (existing blocks
-    // are untouched -- this only gates what NEW content can be added).
-    var cellInteractive = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc).interactive : true;
-    var order = [], byGroup = {};
-    LIBRARY.forEach(function (item, idx) {
-      // A palette item's block type lives in item.make() (the item itself has no .type). Cache it
-      // on first read, then gate on the cell: a static cell hides interactive types.
-      if (item.__bt === undefined) item.__bt = item.type || (item.make ? (item.make() || {}).type : null);
-      if (!paletteAllowsType(item.__bt, cellInteractive)) return; // static cell: skip interactive types
-      var g = item.group || "Blocks";
-      if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
-      byGroup[g].push({ item: item, idx: idx });
-    });
-    order.forEach(function (g) {
-      var det = h("details", "asset-group"); det.open = !collapsed[g];
-      det.addEventListener("toggle", function () { setGroupCollapsed(g, !det.open); });
-      var sum = h("summary", "asset-group__summary");
-      sum.appendChild(h("span", "caret"));
-      sum.appendChild(h("span", "asset-group__title", g));
-      det.appendChild(sum);
-      var body = groupBody();
-      byGroup[g].forEach(function (entry) { body.appendChild(makeAssetRow(entry.item, entry.idx)); });
-      det.appendChild(body);
-      list.appendChild(det);
-    });
+  // arch-P3b-07h: the shelf of insertable types, the left-panel section switch and the asset-store
+  // seam behind them moved to editor/assets.js. The source-link glue that shared this banner is a
+  // different concern and moved to editor/source-link.js.
+  var assetRef = VE.bind("assetRef");
+  var editorAssetResolve = VE.bind("editorAssetResolve");
+  var srcForInspect = VE.bind("srcForInspect");
+  var embedColorVarsCached = VE.bind("embedColorVarsCached");
+  var sweepAllAssets = VE.bind("sweepAllAssets");
+  var migrateAllAssets = VE.bind("migrateAllAssets");
+  var migrateToFileBackendPrompt = VE.bind("migrateToFileBackendPrompt");
+  var exportVersoPackage = VE.bind("exportVersoPackage");
+  var renderAssets = VE.bind("renderAssets");
+  var renderComponentsPalette = VE.bind("renderComponentsPalette");
+  var insertBlock = VE.bind("insertBlock");
+  var insertLoc = VE.bind("insertLoc");
+  var applyLeftSection = VE.bind("applyLeftSection");
+  var activeLeftSection = VE.bind("activeLeftSection");
+  var wireLeftSwitcher = VE.bind("wireLeftSwitcher");
+  var migrateToFileBackend = VE.bind("migrateToFileBackend");
+  // Constants, read back from their owner right after it installs (see the bottom of this file).
+  var LIBRARY;
 
-  }
-  // The "Components" left-pane twirl: the SOLE browse/insert surface for reusable
-  // components (moved out of the Blocks palette, which used to carry "My Components" /
-  // "Shared Library" as asset-groups here — see git history for the prior layout).
-  // Three groups: My Components (course-local, copy-only), Blocks (shared cross-course
-  // library, live-linked), Pages (shared cross-course page masters, live-linked).
-  function renderComponentsPalette() {
-    var view = paletteView();
-    var U = window.VersoUI;
-    var list = document.getElementById("components-palette-list");
-    if (!list) return;
-    list.innerHTML = "";
-    var collapsed = collapsedGroups();
-    function groupBody() {
-      if (view === "grid" && U && U.BlockGrid) return U.BlockGrid({ minColWidth: 84 });
-      return h("div", "asset-group__list");
-    }
-    function renderGroup(title, rows, emptyHint) {
-      if (!rows.length && !emptyHint) return;
-      var det = h("details", "asset-group"); det.open = !collapsed[title];
-      det.addEventListener("toggle", function () { setGroupCollapsed(title, !det.open); });
-      var sum = h("summary", "asset-group__summary");
-      sum.appendChild(h("span", "caret"));
-      sum.appendChild(h("span", "asset-group__title", title));
-      det.appendChild(sum);
-      if (rows.length) {
-        var body = groupBody();
-        rows.forEach(function (row) { body.appendChild(row); });
-        det.appendChild(body);
-      } else {
-        det.appendChild(h("div", "asset-empty", emptyHint));
-      }
-      list.appendChild(det);
-    }
+  // arch-P3b-07: the source-link glue -- the read-only Source tab, range placement, alternates,
+  // where-used and the base-edit warning -- moved to editor/source-link.js. It shared the Assets
+  // banner because both put content on the canvas; nothing else about them is the same.
+  var renderEditSourcePanel = VE.bind("renderEditSourcePanel");
+  var sourceLinkWhereUsed = VE.bind("sourceLinkWhereUsed");
+  var sourceLinkAlternates = VE.bind("sourceLinkAlternates");
+  var sourceAltSnippet = VE.bind("sourceAltSnippet");
+  var applyAltToLocation = VE.bind("applyAltToLocation");
+  var decorateSourceLinks = VE.bind("decorateSourceLinks");
+  var snapshotSourceLinkBase = VE.bind("snapshotSourceLinkBase");
+  var sourceBaseEditImpact = VE.bind("sourceBaseEditImpact");
+  var showSourceBaseEditModal = VE.bind("showSourceBaseEditModal");
+  var finalizeSourceLock = VE.bind("finalizeSourceLock");
+  var jumpToLinkedBlock = VE.bind("jumpToLinkedBlock");
+  var jumpToSourceTopic = VE.bind("jumpToSourceTopic");
 
-    // user-saved composed components (from "Save as component") — course-local, copy-only
-    var comps = getComponents();
-    var composedRows = Object.keys(comps).filter(function (k) { return comps[k].kind === "composed"; }).map(function (k) {
-      var comp = comps[k];
-      return paletteEntry(view, {
-        icon: "component", label: comp.name, title: "Click to insert a copy",
-        onInsert: function () { insertBlock(clone(comp.template)); }
-      });
-    });
-    renderGroup("My Components", composedRows);
+  // ...continues in assets.js (arch-P3b-07).
 
-    // SHARED component library (cross-course single-source). Composed components only: a
-    // slot-def carries a `render` FUNCTION, which JSON can't serialise, so only
-    // template-based (composed) defs survive the library round-trip. Insert places a
-    // LIVE-LINKED libraryInstance wrapper (edit the master, every placement updates) —
-    // "My Components" above stays copy-only, since it has no cross-course concern. Use
-    // the block inspector's Detach action to convert a placement into an independent,
-    // editable copy. ALWAYS rendered (even when empty) so the feature is DISCOVERABLE.
-    var lib = libComponents();
-    var libBlockRows = Object.keys(lib).filter(function (k) { return lib[k] && lib[k].kind === "composed" && lib[k].template; }).map(function (k) {
-      var comp = lib[k];
-      return paletteEntry(view, {
-        icon: "component", label: comp.name || k, title: "Insert a live-linked instance from the shared cross-course library — editing the master updates every placement",
-        onInsert: function () { insertBlock({ type: "libraryInstance", id: mintId(), ref: k }); }
-      });
-    });
-    renderGroup("Blocks", libBlockRows, "No shared components yet. Design a block, then use “Save as component” and “Save to library” (document panel) to reuse it across courses.");
-
-    // shared library PAGE masters — same live-linked model as Blocks above, one page at a
-    // time. Inserting places a new page right after the current one (insertPageFromLibrary).
-    var libPageRows = Object.keys(lib).filter(function (k) { return lib[k] && lib[k].kind === "page"; }).map(function (k) {
-      var comp = lib[k];
-      return paletteEntry(view, {
-        icon: "file-text", label: comp.name || k, title: "Insert a new page from this shared page master — editing the master updates every placement",
-        onInsert: function () { insertPageFromLibrary(k); }
-      });
-    });
-    renderGroup("Pages", libPageRows, "No shared pages yet. Use “Save page to library…” (page Inspector or right-click) to reuse a page across courses.");
-  }
-  // FFFF: new/pasted blocks drop AFTER the selected top-level block on the current
-  // page (so an insert lands where you are working), else append at the bottom.
-  function insertAfterIndex(page) {
-    if (selection && selection.block) {
-      var loc = getBlockPageIndexAndIndex(selection.block);
-      if (loc && loc.pageIndex === currentPage && page.blocks[loc.blockIndex] === selection.block)
-        return loc.blockIndex + 1;
-    }
-    return page.blocks.length;
-  }
-  // Resolve WHERE a new/pasted block should land: into the selected block's OWN
-  // container (nested — e.g. a hotspot popover card, a columns cell, a group), right
-  // after it; else the bottom of the current page. This lets you insert/paste INTO
-  // a hotspot card by first selecting a block inside it (findBlockParent descends
-  // hotspots[].blocks). Returns the actual array + index to splice at.
-  function insertLoc() {
-    var page = doc.pages[currentPage];
-    if (selection && selection.block) {
-      var loc = findBlockParent(page.blocks, selection.block);
-      if (loc) return { array: loc.parentArray, index: loc.index + 1 };
-    }
-    return { array: page.blocks, index: page.blocks.length };
-  }
-  function insertBlock(block) {
-    pushHistory(); // DDD: was undoable-gap — inserting a block from the palette couldn't be undone
-    stampRoleStyle(block); // #145: auto-link a dropped text block (+ its children) to its type's theme role style
-    // #161 part 1: a source-link drop targets an explicit between-block gap (the drop-line the drag
-    // showed), not the selection-based insertLoc. __sourceLinkDropAt is set only for the duration of a
-    // source-link placement and auto-advances so a format-split's multiple blocks stack in order.
-    var L;
-    if (__sourceLinkDropAt && doc.pages[__sourceLinkDropAt.pageIndex]) {
-      var tp = doc.pages[__sourceLinkDropAt.pageIndex];
-      L = { array: tp.blocks, index: Math.max(0, Math.min(__sourceLinkDropAt.index, tp.blocks.length)) };
-      currentPage = __sourceLinkDropAt.pageIndex;
-      __sourceLinkDropAt.index = L.index + 1; // the next block in this placement lands after this one
-    } else {
-      L = insertLoc();
-    }
-    L.array.splice(L.index, 0, block);
-    reapplyStructural(findPageOfBlock(block)); // PERF: one page, not the world
-    setActivePage(currentPage);
-    focusFrame(currentPage);
-    reselectBlockNode(block, "block"); // select the new block so repeated inserts stack after it
-  }
-  // SPEC 7 (decision 11): the left panel is a single 3-way switcher -- Structure . Blocks .
-  // Source -- with equal billing (Source insertion is a primary use now, not a bolt-on). Each
-  // .lpane carries data-lsec; the active section's pane(s) show and the rest drop out. Components
-  // folds INTO Blocks (James's call), so the Blocks section shows the Insert palette with the
-  // Reusable-components pane beneath it. The last-active section persists across reloads.
-  var LEFT_SECTIONS = ["structure", "blocks", "source"];
-  var LEFT_SECTION_KEY = "authoring.lpane.active";
-  var _activeLeftSection = "structure";
-  function applyLeftSection(sec) {
-    if (LEFT_SECTIONS.indexOf(sec) === -1) sec = "structure";
-    _activeLeftSection = sec;
-    try { localStorage.setItem(LEFT_SECTION_KEY, sec); } catch (e) {}
-    var panel = document.querySelector(".panel--left"); if (!panel) return;
-    Array.prototype.forEach.call(panel.querySelectorAll(".lpane[data-lsec]"), function (el) {
-      el.hidden = el.getAttribute("data-lsec") !== sec;
-    });
-    mountLeftSwitcher(); // re-render so the active segment reflects the state (also on programmatic switches)
-    if (sec === "source") renderEditSourcePanel();
-  }
-  function mountLeftSwitcher() {
-    var host = document.getElementById("lpane-switch"); if (!host) return;
-    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
-    host.innerHTML = "";
-    host.appendChild(U.SegmentedControl({
-      size: "sm",
-      options: [{ value: "structure", label: "Structure" }, { value: "blocks", label: "Blocks" }, { value: "source", label: "Source" }],
-      value: _activeLeftSection,
-      onChange: function (v) { applyLeftSection(v); }
-    }));
-  }
-  // SPEC 8 (source-link 02): the Edit left-panel Source tab is a read-only, live view of the OPEN
-  // document's product source doc -- the same content the author sees in the Source stage, in a
-  // narrow reading column, with its own find (SourceDoc.findMatches + cycle) and a TOC
-  // (SourceDoc.outline, click-to-jump + scroll-spy). It keys off the open doc's product
-  // (doc.meta.productId), NOT the rail scope, so it always matches the course in front of you. All
-  // source editing stays in the Source stage (the single-host lesson) -- nothing here is editable.
-  function renderEditSourcePanel() {
-    var host = document.getElementById("tab-source"); if (!host) return;
-    host.innerHTML = "";
-    var SD = window.SourceDoc, U = window.VersoUI;
-    var productId = (doc && doc.meta && doc.meta.productId) || "";
-    if (!productId) {
-      host.appendChild(h("div", "source-stage__empty", "This document isn't attached to a Product. Use Save/Recents -> Promote to Product to link it, then its source appears here."));
-      return;
-    }
-    var master = productId ? sourceMasterFor(productId) : null;
-    if (!master || !master.doc || !SD) {
-      host.appendChild(h("div", "source-stage__empty", "This Product has no source document yet. Build it in the Source stage."));
-      return;
-    }
-    var model = SD.fromJSON(master.doc);
-    // source-link 03: keep the live master + model + its component id so the Place gesture can add a
-    // link mark to the master and persist it (and so the canvas can resolve placements back to it).
-    __editSourceMaster = master; __editSourceModel = model;
-    __editSourceMasterId = (window.ProductsStore[productId] && window.ProductsStore[productId].groundTruthId) || null;
-    var wrap = h("div", "edit-source");
-
-    // ---- find (reuses SD.findMatches + a small local cycle, mirroring the Source stage). The
-    // search field reuses the shared .vbrowser__search chrome (same control as the doc browser +
-    // Source stage) rather than a bespoke input, for app-wide search parity. ----
-    var matches = [], findIdx = 0;
-    var searchBar = h("div", "edit-source__searchbar");
-    var search = h("label", "vbrowser__search");
-    search.innerHTML = window.Icon ? window.Icon("search") : "";
-    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "find in source"; input.spellcheck = false;
-    var count = h("span", "edit-source__count", "");
-    search.appendChild(input); search.appendChild(count);
-    searchBar.appendChild(search);
-    wrap.appendChild(searchBar);
-
-    var docCol = h("div", "edit-source__doc");
-    function clearFindHi() { Array.prototype.forEach.call(docCol.querySelectorAll(".is-find-current"), function (el) { el.classList.remove("is-find-current"); }); }
-    function scrollToHit(i) {
-      clearFindHi();
-      var mt = matches[i]; if (!mt) return;
-      var el = docCol.querySelector('[data-node="' + mt.nodeKey + '"]');
-      if (el) { el.classList.add("is-find-current"); el.scrollIntoView({ block: "center", behavior: "smooth" }); }
-    }
-    function runFind() {
-      var q = input.value.trim();
-      matches = q ? SD.findMatches(model, q) : [];
-      findIdx = 0;
-      count.textContent = q ? (matches.length ? (matches.length + " found") : "no matches") : "";
-      if (matches.length) scrollToHit(0); else clearFindHi();
-    }
-    function cycleFind(dir) {
-      if (!matches.length) return;
-      findIdx = (findIdx + dir + matches.length) % matches.length;
-      count.textContent = (findIdx + 1) + " / " + matches.length;
-      scrollToHit(findIdx);
-    }
-    input.addEventListener("input", runFind);
-    input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); cycleFind(e.shiftKey ? -1 : 1); } });
-
-    // ---- table of contents (SD.outline: chapters + headings, click to jump, scroll-spy) ----
-    var outline = SD.outline(model), tocRows = [];
-    if (outline.length) {
-      var toc = h("nav", "edit-source__toc"); toc.setAttribute("aria-label", "Source outline");
-      function tocRow(node) {
-        // Reuse the shared .source-doc__toc-item row (look + is-current scroll-spy class the Source
-        // stage's own TOC uses) rather than a bespoke row.
-        var r = h("button", "source-doc__toc-item source-doc__toc-item--l" + (node.level || 2), node.text || "Untitled");
-        r.type = "button"; r.setAttribute("data-toc-key", node.key); r.title = node.text || "";
-        r.addEventListener("click", function () { var t = docCol.querySelector('[data-node="' + node.key + '"]'); if (t) t.scrollIntoView({ block: "start", behavior: "smooth" }); });
-        toc.appendChild(r); tocRows.push(r);
-      }
-      outline.forEach(function (ch) { tocRow(ch); (ch.children || []).forEach(tocRow); });
-      wrap.appendChild(toc);
-    }
-
-    // ---- reading column (read-only projection; the SAME renderSourceDocNode the stage uses) ----
-    (model.nodes || []).forEach(function (n) { docCol.appendChild(renderSourceDocNode(n)); });
-    // 07: a source figure is draggable as one unit -> a linked image block. Object-anchor descriptor
-    // (no start/len). Images aren't text-selectable, so a pointerdown-drag on the figure is safe.
-    Array.prototype.forEach.call(docCol.querySelectorAll("figure.source-doc__figure[data-object]"), function (figEl) {
-      figEl.classList.add("edit-source__figure");
-      figEl.addEventListener("pointerdown", function (ev) {
-        ev.preventDefault();
-        startSourceLinkDrag({ anchor: { nodeKey: figEl.getAttribute("data-node") } }, ev);
-      });
-    });
-    // Scroll-spy: highlight the TOC entry for the last heading scrolled above the top.
-    docCol.addEventListener("scroll", function () {
-      if (!tocRows.length) return;
-      var top = docCol.getBoundingClientRect().top + 8, curKey = null;
-      Array.prototype.forEach.call(docCol.querySelectorAll(".source-doc__h[data-node]"), function (el) { if (el.getBoundingClientRect().top <= top) curKey = el.getAttribute("data-node"); });
-      tocRows.forEach(function (r) { r.classList.toggle("is-current", r.getAttribute("data-toc-key") === curKey); });
-    });
-    wrap.appendChild(docCol);
-    host.appendChild(wrap);
-
-    // source-link 03: paint passages already linked into the OPEN document (a persistent highlight,
-    // distinct from the transient find highlight), and honour a pending jump-to-source request.
-    paintPanelLinkedPassages(docCol, model);
-    // A text selection in the read-only column raises the floating "Place" bar (arm-then-click).
-    docCol.addEventListener("mouseup", function () { setTimeout(function () { maybeShowPlaceBar(docCol, model); }, 0); });
-    if (__pendingSourceJumpMark && __pendingSourceJumpMark.masterId === __editSourceMasterId) {
-      var jm = SD.markById(model, __pendingSourceJumpMark.markId);
-      __pendingSourceJumpMark = null;
-      if (jm) {
-        var jk = jm.anchor && jm.anchor.nodeKey;
-        var tel = jk && docCol.querySelector('[data-node="' + jk + '"]');
-        if (tel) { tel.classList.add("is-find-current"); setTimeout(function () { tel.scrollIntoView({ block: "center", behavior: "smooth" }); }, 0); }
-      }
-    }
-  }
-  if (window.__productRail) window.__productRail.renderEditSourcePanel = renderEditSourcePanel; // browser-verify hook
-
-  // ==== source-link 03: select a range -> place a live-linked text block (arm-then-click) ========
-  // The panel viewer (02) is read-only, but its text is selectable. Selecting a range raises a
-  // small floating "Place" bar; Place creates a type:"link" mark on the source master and arms
-  // placement; the next canvas click drops one locked, live-linked text block that resolves through
-  // the 01 resolver. Cross-node selections (a heading through a paragraph) link as one passage.
-  var __editSourceMaster = null, __editSourceModel = null, __editSourceMasterId = null;
-  var __armedSourceLink = null;        // { masterId, markId } armed for the next canvas click
-  var __pendingSourceJumpMark = null;  // { masterId, markId } to scroll to after the panel re-renders
-  var __sourceLinkDropAt = null;       // #161 part 1: { pageIndex, index } explicit drop gap for a placement
-
-  // #161 part 1: the between-block gap under the cursor on the target page -> where a dropped linked
-  // block should land, plus the Y to draw the drop-line at. Only TOP-LEVEL page blocks are gap targets
-  // (a linked block drops between page blocks, not inside a column); returns null off any page.
-  function sourceLinkDropGap(cx, cy) {
-    var pi = pageIndexFromPoint(cx, cy); if (pi < 0) return null;
-    var fr = frameElementUnder(cx, cy); if (!fr) return null;
-    var page = doc.pages[pi]; if (!page) return null;
-    var tops = Array.prototype.filter.call(fr.querySelectorAll(".canvas-block"), function (el) {
-      return el.__block && page.blocks.indexOf(el.__block) !== -1; // top-level only (skip nested)
-    });
-    tops.sort(function (a, b) { return page.blocks.indexOf(a.__block) - page.blocks.indexOf(b.__block); });
-    var index = page.blocks.length, lineY = null;
-    for (var i = 0; i < tops.length; i++) {
-      var r = tops[i].getBoundingClientRect();
-      if (cy < r.top + r.height / 2) { index = page.blocks.indexOf(tops[i].__block); lineY = r.top; break; }
-    }
-    if (lineY == null) { // below every block -> the trailing gap
-      if (tops.length) lineY = tops[tops.length - 1].getBoundingClientRect().bottom;
-      else lineY = fr.getBoundingClientRect().top + 14; // empty page
-    }
-    return { pageIndex: pi, index: index, lineY: lineY, frameRect: fr.getBoundingClientRect() };
-  }
-  function hideSourceLinkDropLine() { var l = document.getElementById("source-link-dropline"); if (l) l.remove(); }
-  function showSourceLinkDropLine(cx, cy) {
-    var gap = sourceLinkDropGap(cx, cy);
-    if (!gap) { hideSourceLinkDropLine(); return; }
-    var line = document.getElementById("source-link-dropline");
-    if (!line) { line = h("div", "source-link-dropline"); line.id = "source-link-dropline"; document.body.appendChild(line); }
-    line.style.left = gap.frameRect.left + "px";
-    line.style.width = gap.frameRect.width + "px";
-    line.style.top = gap.lineY + "px";
-  }
-
-  // Char offset of a DOM point within a block element's text (walks all text nodes -> matches the
-  // SourceDoc plain-text offset model the marks anchor to).
-  function panelCharOffset(blockEl, container, offset) {
-    var r = document.createRange();
-    r.selectNodeContents(blockEl);
-    try { r.setEnd(container, offset); } catch (e) { return 0; }
-    return r.toString().length;
-  }
-  // Build a SourceDoc range descriptor {anchor, endAnchor?} from the current selection in the panel,
-  // or null when the selection is empty / collapsed / outside the reading column. Single-node ->
-  // one anchor; cross-node -> anchor (first node, start..end) + endAnchor (last node, 0..end),
-  // matching SourceDoc.addMark's multi-block shape.
-  function panelSelectionDescriptor(docCol, model) {
-    var sel = window.getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
-    var rng = sel.getRangeAt(0);
-    if (!docCol.contains(rng.startContainer) || !docCol.contains(rng.endContainer)) return null;
-    var sEl = (rng.startContainer.nodeType === 3 ? rng.startContainer.parentNode : rng.startContainer);
-    var eEl = (rng.endContainer.nodeType === 3 ? rng.endContainer.parentNode : rng.endContainer);
-    var sBlock = sEl && sEl.closest ? sEl.closest("[data-node]") : null;
-    var eBlock = eEl && eEl.closest ? eEl.closest("[data-node]") : null;
-    if (!sBlock || !eBlock) return null;
-    var sKey = sBlock.getAttribute("data-node"), eKey = eBlock.getAttribute("data-node");
-    var sOff = panelCharOffset(sBlock, rng.startContainer, rng.startOffset);
-    var eOff = panelCharOffset(eBlock, rng.endContainer, rng.endOffset);
-    var SD = window.SourceDoc;
-    if (sKey === eKey) {
-      if (eOff <= sOff) return null;
-      return { anchor: { nodeKey: sKey, start: sOff, len: eOff - sOff } };
-    }
-    var sNode = SD.nodeByKey(model, sKey);
-    var sLen = sNode ? SD.nodeText(sNode).length : sOff;
-    return { anchor: { nodeKey: sKey, start: sOff, len: Math.max(0, sLen - sOff) }, endAnchor: { nodeKey: eKey, start: 0, len: eOff } };
-  }
-  function hidePlaceBar() { var b = document.querySelector("[data-source-placebar]"); if (b) b.remove(); }
-  function maybeShowPlaceBar(docCol, model) {
-    hidePlaceBar();
-    if (__armedSourceLink) return; // already arming -> don't stack
-    var desc = panelSelectionDescriptor(docCol, model);
-    if (!desc) return;
-    var sel = window.getSelection();
-    var rect = sel.getRangeAt(0).getBoundingClientRect();
-    var bar = h("div", "source-placebar"); bar.setAttribute("data-source-placebar", "1");
-    // 04: a grab handle starts a custom pointer-drag (decoupled from the text selection, which is why
-    // it's NOT native HTML5 DnD -- setting draggable would kill selecting text in the panel).
-    var grip = h("button", "source-placebar__grip"); grip.type = "button"; grip.title = "Drag onto the canvas to place";
-    grip.innerHTML = window.Icon ? window.Icon("grip-vertical") : "";
-    grip.addEventListener("pointerdown", function (ev) { ev.preventDefault(); startSourceLinkDrag(desc, ev); });
-    bar.appendChild(grip);
-    var btn = window.VersoUI && window.VersoUI.Button
-      ? window.VersoUI.Button({ variant: "primary", size: "sm", icon: "link", label: "Place", onClick: function () { armSourceLinkPlacement(desc); } })
-      : h("button", null, "Place");
-    if (!(window.VersoUI && window.VersoUI.Button)) btn.addEventListener("click", function () { armSourceLinkPlacement(desc); });
-    bar.appendChild(btn);
-    document.body.appendChild(bar);
-    bar.style.top = Math.max(8, rect.top - bar.offsetHeight - 8) + "px";
-    bar.style.left = Math.max(8, rect.left) + "px";
-  }
-  // Place: arm the next canvas click to drop the linked copy. Mark creation is DEFERRED to the drop
-  // (05): a range spanning formats splits into several linked blocks, each with its own link mark,
-  // so the marks are minted per run when the drop resolves — we carry the range descriptor, not a
-  // pre-made single mark.
-  function armSourceLinkPlacement(desc) {
-    if (!window.SourceDoc || !__editSourceModel || !__editSourceMasterId) return;
-    __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
-    document.body.classList.add("is-arming-source-link");
-    hidePlaceBar();
-    var s = window.getSelection(); if (s) s.removeAllRanges();
-    sourceToast("Linked passage armed — click a spot in the canvas to place it. Esc to cancel.");
-  }
-  function cancelArmedSourceLink() {
-    if (!__armedSourceLink) return;
-    __armedSourceLink = null;
-    document.body.classList.remove("is-arming-source-link");
-    sourceToast("Placement cancelled.");
-  }
-  // format-split (05): source structure -> destination block type. heading lvl1 -> Heading 1
-  // (heading block), heading lvl2/3 -> Heading 2 (subheading block), paragraph/callout -> Body.
-  var SOURCE_LINK_BLOCK_TYPE = { h1: "heading", h2: "subheading", body: "paragraph" };
-  var SOURCE_LINK_TEXT_TYPES = { heading: 1, subheading: 1, paragraph: 1, note: 1, quote: 1 };
-  // A drop target counts as "a text block to merge into" (06) only if it's an editable text block
-  // that isn't itself a whole-block linked placement (don't nest a link inside a link).
-  function isSourceLinkTextBlock(b) { return !!(b && SOURCE_LINK_TEXT_TYPES[b.type] && !b.sourceLink); }
-  // The armed drop. Dropping ONTO an existing text block appends a locked linked inline span there
-  // (06); dropping in a gap runs the format-split planner and inserts one linked block per same-
-  // format run (05). Optional (cx,cy) = the drop point (from the drag or the armed click); absent ->
-  // gap placement on the current page.
-  function placeArmedSourceLink(cx, cy) {
-    var a = __armedSourceLink; if (!a) return false;
-    __armedSourceLink = null;
-    document.body.classList.remove("is-arming-source-link");
-    // An object anchor (no start/len) is a figure link (07) -> always a new linked image block.
-    var isObject = !!(a.descriptor && a.descriptor.anchor && a.descriptor.anchor.len == null);
-    if (cx != null) {
-      if (!isObject) {
-        var el = document.elementFromPoint(cx, cy);
-        var blockEl = el && el.closest ? el.closest(".canvas-block") : null;
-        if (blockEl && isSourceLinkTextBlock(blockEl.__block)) return dropInlineSourceLink(a, blockEl.__block);
-      }
-      var pi = pageIndexFromPoint(cx, cy); if (pi >= 0) setActivePage(pi);
-      // #161 part 1: land the block(s) at the between-block gap under the cursor (where the drop-line
-      // showed), not at the current selection. Consumed by insertBlock, cleared after the placement.
-      var gap = sourceLinkDropGap(cx, cy);
-      if (gap) __sourceLinkDropAt = { pageIndex: gap.pageIndex, index: gap.index };
-    }
-    var result = isObject ? placeSourceLinkImage(a) : placeSourceLinkBlocks(a);
-    __sourceLinkDropAt = null; // one placement only -- never leak the gap into ordinary insertBlock calls
-    return result;
-  }
-  // 07: drop a source figure -> a new linked image block. The link is an OBJECT mark (anchor
-  // {nodeKey}, no start/len); the image block resolves its src/alt from the figure node via 01.
-  function placeSourceLinkImage(a) {
-    var SD = window.SourceDoc;
-    var master = libComponents()[a.masterId];
-    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
-    var model = SD.fromJSON(master.doc);
-    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor }); // object mark (len null)
-    master.doc = SD.toJSON(model); saveLibrary();
-    insertBlock({ type: "image", id: mintId(), sourceLink: { masterId: a.masterId, markId: mk.id } });
-    decorateSourceLinks();
-    if (_activeLeftSection === "source") renderEditSourcePanel();
-    sourceToast("Linked image placed.");
-    return true;
-  }
-  // 05: gap placement -- run the format-split planner and insert ONE locked, live-linked text block
-  // per contiguous same-format run (each in the destination's matching preset). A single-format range
-  // yields one block; consecutive same-format nodes stay in one block joined by line breaks.
-  function placeSourceLinkBlocks(a) {
-    var SD = window.SourceDoc;
-    var master = libComponents()[a.masterId];
-    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
-    var model = SD.fromJSON(master.doc);
-    var plan = SD.planLinkedBlocks(model, a.descriptor);
-    if (!plan.length) return false;
-    // Mint every link mark and PERSIST them to the master BEFORE inserting any block (#161): insertBlock
-    // renders the canvas, and the render resolver (resolveSourceLinkContent) reads master.doc to fill the
-    // linked copy live. Persisting AFTER the insert loop (the old order) meant that first render saw the
-    // pre-mark master.doc, markById returned null, and the block rendered blank + collapsed until an
-    // unrelated re-render. placeSourceLinkImage already persists before its insertBlock -- match it.
-    var markIds = plan.map(function (run) {
-      return SD.addMark(model, { type: "link", anchor: run.anchor, endAnchor: run.endAnchor }).id;
-    });
-    master.doc = SD.toJSON(model); saveLibrary();
-    plan.forEach(function (run, i) {
-      insertBlock({ type: SOURCE_LINK_BLOCK_TYPE[run.format] || "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: markIds[i] } });
-    });
-    decorateSourceLinks();
-    if (_activeLeftSection === "source") renderEditSourcePanel(); // repaint so newly-linked passages highlight
-    sourceToast(plan.length > 1 ? ("Placed " + plan.length + " linked blocks.") : "Linked block placed.");
-    return true;
-  }
-  function slEscape(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-  // 06: drop onto a text block -> append a locked, live-linked inline span to that block. The whole
-  // dropped range flattens to ONE link mark (you're merging into body prose; the 05 format-split is
-  // between-block only). Owned text around the span stays editable; the span is contenteditable=false
-  // (locked) and resolves live via 01's #120-style inline post-pass, baking at export.
-  function dropInlineSourceLink(a, block) {
-    var SD = window.SourceDoc;
-    var master = libComponents()[a.masterId];
-    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
-    var model = SD.fromJSON(master.doc);
-    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor, endAnchor: a.descriptor.endAnchor });
-    master.doc = SD.toJSON(model); saveLibrary();
-    pushHistory();
-    var span = '<span data-source-link="' + mk.id + '" data-master="' + a.masterId + '">' + slEscape(SD.markText(model, mk)) + '</span>';
-    block.text = (block.text ? block.text + " " : "") + span;
-    reapplyBlock(block);
-    decorateSourceLinks();
-    if (_activeLeftSection === "source") renderEditSourcePanel();
-    sourceToast("Linked span added.");
-    return true;
-  }
-  // 04: the destination page under a drop point (its .frame -> .page[data-page-id] -> doc index).
-  function pageIndexFromPoint(cx, cy) {
-    var fr = frameElementUnder(cx, cy); if (!fr) return -1;
-    var pageEl = fr.querySelector(".page[data-page-id]");
-    var pid = pageEl && pageEl.getAttribute("data-page-id");
-    return pid ? (doc.pages || []).findIndex(function (p) { return p.id === pid; }) : -1;
-  }
-  // 04: the preferred placement gesture -- press the grab handle and drag the passage onto the
-  // canvas. A ghost follows the cursor; the page under the cursor lights up as the drop target;
-  // release resolves through the SAME placement the arm-then-click path uses (placeArmedSourceLink).
-  // Custom pointer events (not native DnD) so selecting text in the read-only panel still works.
-  function startSourceLinkDrag(desc, ev) {
-    hidePlaceBar();
-    var ghost = h("div", "source-link-ghost", "Linked copy"); document.body.appendChild(ghost);
-    document.body.classList.add("is-dragging-source-link");
-    function clearTarget() { var p = document.querySelector(".frame.is-drop-target"); if (p) p.classList.remove("is-drop-target"); }
-    // Dropping ONTO an editable text block appends an inline span there (06); dropping in a gap inserts
-    // a new block. Show the between-block drop-line only for the gap case; highlight the block for the
-    // inline case -- so the drag always previews exactly where the copy will land (#161 part 1).
-    var isObjDrag = !!(desc && desc.anchor && desc.anchor.len == null);
-    function overTextBlock(x, y) {
-      if (isObjDrag) return null; // a figure always becomes a new image block, never an inline span
-      var el = document.elementFromPoint(x, y); var be = el && el.closest ? el.closest(".canvas-block") : null;
-      return (be && isSourceLinkTextBlock(be.__block)) ? be : null;
-    }
-    function clearInlineTarget() { var b = document.querySelector(".canvas-block.is-sl-inline-target"); if (b) b.classList.remove("is-sl-inline-target"); }
-    function move(e) {
-      ghost.style.left = (e.clientX + 12) + "px"; ghost.style.top = (e.clientY + 12) + "px";
-      clearTarget(); clearInlineTarget();
-      var fr = frameElementUnder(e.clientX, e.clientY); if (fr) fr.classList.add("is-drop-target");
-      var tb = overTextBlock(e.clientX, e.clientY);
-      if (tb) { tb.classList.add("is-sl-inline-target"); hideSourceLinkDropLine(); }
-      else if (fr) { showSourceLinkDropLine(e.clientX, e.clientY); }
-      else { hideSourceLinkDropLine(); }
-    }
-    function up(e) {
-      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-      ghost.remove(); document.body.classList.remove("is-dragging-source-link"); clearTarget(); clearInlineTarget(); hideSourceLinkDropLine();
-      if (!frameElementUnder(e.clientX, e.clientY)) { sourceToast("Dropped outside the canvas — nothing placed."); return; }
-      __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
-      placeArmedSourceLink(e.clientX, e.clientY); // routes to inline-span (onto a text block) or gap placement
-    }
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
-    move(ev);
-  }
-  // Two-way jump (direction: canvas -> panel): clicking a linked block's indicator opens the Source
-  // tab and scrolls the panel to the exact source passage.
-  function jumpSourcePanelToMark(masterId, markId) {
-    __pendingSourceJumpMark = { masterId: masterId, markId: markId };
-    if (typeof applyLeftSection === "function") applyLeftSection("source"); // re-renders the panel, which honours the pending jump
-  }
-  // On-canvas link indicator: a small clickable badge on every placed linked block (editor chrome
-  // only -- never rendered into the shipped course). Idempotent; re-run after each render.
-  function decorateSourceLinks(scope) {
-    var root = scope || canvas; if (!root) return;
-    Array.prototype.forEach.call(root.querySelectorAll(".source-link-badge"), function (b) { b.remove(); });
-    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block"), function (node) {
-      node.classList.remove("is-source-linked");
-      var b = node.__block;
-      if (b && b.sourceLink && b.sourceLink.markId) {
-        node.classList.add("is-source-linked");
-        var badge = h("button", "source-link-badge"); badge.type = "button";
-        badge.innerHTML = window.Icon ? window.Icon("link") : "";
-        badge.title = "Linked from source — jump, or pick / create an alternate";
-        badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); openSourceLinkMenu({ kind: "block", block: b }, b.sourceLink.masterId, b.sourceLink.markId, e.clientX, e.clientY); });
-        node.appendChild(badge);
-      }
-    });
-    // 06: per-span indicator inside a mixed block -- each locked linked inline span gets its own
-    // contextual menu (jump + alternate), distinct from the whole-block badge above.
-    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block span[data-source-link]"), function (sp) {
-      sp.classList.add("is-source-linked-span");
-      if (sp.__slWired) return; sp.__slWired = true;
-      sp.title = "Linked from source — jump, or pick / create an alternate";
-      sp.addEventListener("click", function (e) {
-        e.stopPropagation();
-        var owner = sp.closest ? sp.closest(".canvas-block") : null;
-        if (!owner || !owner.__block) return;
-        openSourceLinkMenu({ kind: "span", block: owner.__block, spanEl: sp, markId: sp.getAttribute("data-source-link") }, sp.getAttribute("data-master"), sp.getAttribute("data-source-link"), e.clientX, e.clientY);
-      });
-    });
-  }
-  // Panel: highlight passages already linked into the OPEN document (a persistent cue, distinct from
-  // the find highlight). A link mark counts as "used here" when a block in the open doc points at it.
-  function paintPanelLinkedPassages(docCol, model) {
-    var SD = window.SourceDoc;
-    var used = {};
-    walkBlocks(doc, function (b) { if (b.sourceLink && b.sourceLink.masterId === __editSourceMasterId && b.sourceLink.markId) used[b.sourceLink.markId] = 1; });
-    (model.marks || []).forEach(function (m) {
-      if (m.type !== "link" || !used[m.id]) return;
-      SD.markSpans(model, m).forEach(function (sp) {
-        var el = docCol.querySelector('[data-node="' + sp.nodeKey + '"]');
-        if (el) el.classList.add("is-source-linked-passage");
-      });
-    });
-  }
-  // ==== source-link 08: alternates (create + pick) from the canvas ==============================
-  // Linked copy is locked; the sanctioned way to say it differently in ONE place is an alternate --
-  // a named fork registered on the source master (so it's visible + pushable from the Source stage,
-  // 10) that this single placement points at via altId. A location shows base until an alternate is
-  // picked or pushed to it (never automatic). Text alternates are span/range-contextual.
-  function sourceAltSnippet(s) { s = String(s == null ? "" : s); return s.length > 32 ? s.slice(0, 32) + "…" : s; }
-  // Alternate marks anchored identically to a link mark (its candidate alternates).
-  function sourceLinkAlternates(model, link) {
-    var SD = window.SourceDoc, a = link.anchor, end = link.endAnchor;
-    return (model.marks || []).filter(function (m) {
-      if (m.type !== "alternate" || SD.isObjectMark(m) !== SD.isObjectMark(link)) return false;
-      if (!m.anchor || m.anchor.nodeKey !== a.nodeKey || m.anchor.start !== a.start || m.anchor.len !== a.len) return false;
-      if (!!end !== !!m.endAnchor) return false;
-      return !end || (m.endAnchor.nodeKey === end.nodeKey && m.endAnchor.len === end.len);
-    });
-  }
-  // The altId a target (a whole linked block, or one inline span inside a block) currently points at.
-  function sourceLinkTargetAlt(target) {
-    if (target.kind === "block") return (target.block.sourceLink && target.block.sourceLink.altId) || null;
-    return target.spanEl ? (target.spanEl.getAttribute("data-alt") || null) : null;
-  }
-  // Point a target at an alternate (altId) or back to base (null). Block -> block.sourceLink.altId;
-  // span -> data-alt on that span inside the owning block's rich text. This block/span ONLY.
-  function setSourceLinkTargetAlt(target, altId) {
-    if (target.kind === "block") {
-      if (!target.block.sourceLink) return;
-      if (altId) target.block.sourceLink.altId = altId; else delete target.block.sourceLink.altId;
-    } else {
-      var host = document.createElement("div"); host.innerHTML = target.block.text || "";
-      var sp = host.querySelector('span[data-source-link="' + target.markId + '"]');
-      if (!sp) return;
-      if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt");
-      target.block.text = host.innerHTML;
-    }
-    pushHistory(); reapplyBlock(target.block); decorateSourceLinks(); scheduleSave();
-    sourceToast(altId ? "Alternate applied to this block." : "Reset to base wording.");
-  }
-  // Create a new alternate wording on the source master, then point THIS target at it. Text only in
-  // v1 (an object/figure alternate is whole-block; figure-swap storage is a follow-up).
-  function createSourceAlternate(target, masterId, markId) {
-    var SD = window.SourceDoc, master = libComponents()[masterId];
-    if (!master || !master.doc) return;
-    var model = SD.fromJSON(master.doc);
-    var link = SD.markById(model, markId); if (!link) return;
-    if (SD.isObjectMark(link)) { sourceToast("Object (figure) alternates are coming soon."); return; }
-    var base = SD.markText(model, link);
-    var shell = dsModalShell({
-      title: "Create an alternate",
-      subtitle: "A named fork of this passage, applied to this block only. It registers on the source, so you can reuse or push it later.",
-      primaryLabel: "Create alternate",
-      onPrimary: function () {
-        var wording = (ta.value || "").trim();
-        if (!wording) { ta.focus(); return; }
-        var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: wording, tag: (nameIn.value || "").trim(), baseText: base });
-        master.doc = SD.toJSON(model); saveLibrary();
-        setSourceLinkTargetAlt(target, alt.id);
-        shell.modal.close();
-      }
-    });
-    var nameIn = modalText(shell.body, "Name (optional)", "", "e.g. Short form");
-    var lbl = modalField(shell.body, "Wording");
-    var ta = h("textarea", "prop-text modal-field__control"); ta.rows = 3; ta.value = base; lbl.appendChild(ta);
-    setTimeout(function () { ta.focus(); ta.select(); }, 0);
-  }
-  // The per-target source-link menu (badge / span indicator): jump to source, pick base or an
-  // existing alternate, or create a new one. Reuses the canonical context menu.
-  function openSourceLinkMenu(target, masterId, markId, x, y) {
-    var SD = window.SourceDoc, master = libComponents()[masterId];
-    var cur = sourceLinkTargetAlt(target);
-    var items = [{ label: "Jump to source", onClick: function () { jumpSourcePanelToMark(masterId, markId); } }, { sep: true },
-      { label: "Base wording", active: !cur, onClick: function () { setSourceLinkTargetAlt(target, null); } }];
-    if (master && master.doc) {
-      var model = SD.fromJSON(master.doc);
-      var link = SD.markById(model, markId);
-      if (link) sourceLinkAlternates(model, link).forEach(function (alt) {
-        items.push({ label: (alt.tag ? alt.tag + " — " : "") + sourceAltSnippet(alt.alt), active: cur === alt.id, onClick: function () { setSourceLinkTargetAlt(target, alt.id); } });
-      });
-    }
-    items.push({ sep: true }, { label: "Create an alternate…", onClick: function () { createSourceAlternate(target, masterId, markId); } });
-    showContextMenu(x, y, items);
-  }
-
-  // ==== source-link 09/10: live where-used + base-edit warning + alternate push =================
-  // The real, live where-used for a source link mark: every block (or inline span) in ANY document
-  // that references it, computed by walking the registry (like libraryWhereUsedDetail) so it never
-  // drifts from a stored list. altId per location = whether that placement shows base or a fork.
-  function sourceLinkWhereUsed(masterId, markId) {
-    var out = [], reg = registry; // the LIVE in-memory registry (getRegistry() returns a stale storage copy)
-    Object.keys(reg).forEach(function (code) {
-      var d = reg[code]; if (!d) return;
-      var title = (d.meta && d.meta.title) || code;
-      walkBlocks(d, function (b) {
-        if (b.sourceLink && b.sourceLink.masterId === masterId && (!markId || b.sourceLink.markId === markId)) {
-          out.push({ docCode: code, docTitle: title, blockId: b.id, markId: b.sourceLink.markId, altId: b.sourceLink.altId || null, kind: "block" });
-        }
-        if (b.text && typeof b.text === "string" && b.text.indexOf("data-source-link=") !== -1) {
-          var probe = document.createElement("div"); probe.innerHTML = b.text;
-          Array.prototype.forEach.call(probe.querySelectorAll("span[data-source-link]"), function (sp) {
-            if (sp.getAttribute("data-master") !== masterId) return;
-            var mid = sp.getAttribute("data-source-link"); if (markId && mid !== markId) return;
-            out.push({ docCode: code, docTitle: title, blockId: b.id, markId: mid, altId: sp.getAttribute("data-alt") || null, kind: "span" });
-          });
-        }
-      });
-    });
-    return out;
-  }
-  // Set/clear a where-used location's altId in ITS OWN document (block field or inline span data-alt).
-  // Shared by the 09 fork + the 10 push.
-  function applyAltToLocation(reg, loc, altId) {
-    var d = reg[loc.docCode]; if (!d) return;
-    walkBlocks(d, function (b) {
-      if (b.id !== loc.blockId) return;
-      if (loc.kind === "span") {
-        var host = document.createElement("div"); host.innerHTML = b.text || "";
-        var sp = host.querySelector('span[data-source-link="' + loc.markId + '"]');
-        if (sp) { if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt"); b.text = host.innerHTML; }
-      } else if (b.sourceLink) {
-        if (altId) b.sourceLink.altId = altId; else delete b.sourceLink.altId;
-      }
-    });
-  }
-
-  // --- 09: base-edit warning + fork (fires at LOCK, matching the unlock->lock commit model) ---
-  var __sourceLinkOldText = null, __sourcePreEditModelJson = null;
-  // On unlock: snapshot each link mark's current wording (so "fork" can freeze it) + the whole model
-  // (so "cancel" can revert the edits). Only when the doc actually carries link marks.
-  function snapshotSourceLinkBase() {
-    var SD = window.SourceDoc, model = sourceDocModel();
-    __sourceLinkOldText = null; __sourcePreEditModelJson = null;
-    if (!SD || !model || !(model.marks || []).some(function (m) { return m.type === "link"; })) return;
-    __sourceLinkOldText = {};
-    (model.marks || []).forEach(function (m) { if (m.type === "link") __sourceLinkOldText[m.id] = SD.markText(model, m); });
-    __sourcePreEditModelJson = SD.toJSON(model);
-  }
-  // The blast radius of the just-finished edit session: base-showing locations of edited link marks.
-  function sourceBaseEditImpact() {
-    var SD = window.SourceDoc, model = sourceDocModel();
-    if (!SD || !model || !__sourceLinkOldText) return { affected: [], pinned: [], editedMarks: [] };
-    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(sourceActiveTopicId(), null));
-  }
-  // "Keep as-is (fork)": freeze each edited link mark's OLD wording as an alternate on the master,
-  // and pin every affected (base-showing) location -- in whatever document uses it -- to that
-  // alternate. The source base then moves on; those placements keep the old words.
-  function forkAffectedToAlternate(impact) {
-    var SD = window.SourceDoc, model = sourceDocModel(), reg = registry, byMark = {};
-    impact.affected.forEach(function (loc) { (byMark[loc.markId] = byMark[loc.markId] || []).push(loc); });
-    Object.keys(byMark).forEach(function (markId) {
-      var link = SD.markById(model, markId); if (!link) return;
-      var oldText = __sourceLinkOldText[markId];
-      var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: oldText, tag: "Frozen", baseText: oldText });
-      byMark[markId].forEach(function (loc) { applyAltToLocation(reg, loc, alt.id); });
-    });
-    saveRegistry(reg); // the alternate marks on the master persist via the lock's own commit
-  }
-  function finalizeSourceLock(topic, opts) {
-    flushSourceEditSession(topic, { prompt: opts.prompt });
-    lockSourceEditing(); __sourceLinkOldText = null; __sourcePreEditModelJson = null;
-    applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
-  }
-  function revertSourceEditSession(topic) {
-    var SD = window.SourceDoc;
-    if (SD && __sourcePreEditModelJson && topic) {
-      setSourceDocModel(SD.fromJSON(__sourcePreEditModelJson), topic.id);
-      persistSourceDocModel(topic, sourceDocModel());
-    }
-    clearSourceEditSession(); lockSourceEditing(); __sourceLinkOldText = null; __sourcePreEditModelJson = null;
-    renderSourceArticle();
-    sourceToast("Edit cancelled.");
-  }
-  // The three-way warning shown at lock when the edit changed linked passages (09).
-  function showSourceBaseEditModal(topic, impact, opts) {
-    var n = impact.affected.length, resolved = false;
-    var forkBtn = window.VersoUI.Button({ variant: "secondary", label: "Keep as-is (fork)", onClick: function () {
-      resolved = true; forkAffectedToAlternate(impact); shell.modal.close(); finalizeSourceLock(topic, opts);
-      sourceToast("Kept " + n + " linked place" + (n === 1 ? "" : "s") + " on the old wording.");
-    } });
-    var shell = dsModalShell({
-      title: "This source is linked in " + n + " place" + (n === 1 ? "" : "s"),
-      subtitle: "Your edit changes wording that other documents link. Choose what those linked copies do.",
-      primaryLabel: "Update all",
-      cancelLabel: "Cancel edit",
-      extras: [forkBtn],
-      onPrimary: function () { resolved = true; shell.modal.close(); finalizeSourceLock(topic, opts); sourceToast("Updated " + n + " linked place" + (n === 1 ? "" : "s") + "."); },
-      onClose: function () { if (resolved) return; revertSourceEditSession(topic); } // Cancel / Escape / scrim = revert
-    });
-    shell.body.appendChild(h("div", "insp-hint", "Update all — the linked copies re-resolve to your new wording. Keep as-is — freeze their current wording as an alternate, then your source moves on. Cancel — undo this edit."));
-  }
-
-  window.__sourceLink = { // browser-verify hooks
-    sourceLinkWhereUsed: sourceLinkWhereUsed, snapshotSourceLinkBase: snapshotSourceLinkBase,
-    sourceBaseEditImpact: sourceBaseEditImpact, forkAffectedToAlternate: forkAffectedToAlternate,
-    pushSourceAlternate: pushSourceAlternate, applyAltToLocation: applyAltToLocation,
-    armSourceLinkPlacement: armSourceLinkPlacement, placeArmedSourceLink: placeArmedSourceLink,
-    jumpSourcePanelToMark: jumpSourcePanelToMark, panelSelectionDescriptor: panelSelectionDescriptor,
-    startSourceLinkDrag: startSourceLinkDrag, pageIndexFromPoint: pageIndexFromPoint,
-    openSourceLinkMenu: openSourceLinkMenu, createSourceAlternate: createSourceAlternate,
-    setSourceLinkTargetAlt: setSourceLinkTargetAlt, sourceLinkAlternates: sourceLinkAlternates,
-    isArmed: function () { return !!__armedSourceLink; }
-  };
-  // One-time global wiring: while a linked passage is armed, the next canvas click PLACES it (capture
-  // phase, before the canvas's own click-select), and Escape cancels arming.
-  if (typeof document !== "undefined" && !window.__sourceLinkWired) {
-    window.__sourceLinkWired = true;
-    document.addEventListener("click", function (e) {
-      if (!__armedSourceLink) return;
-      var cv = document.getElementById("canvas-viewport");
-      if (cv && cv.contains(e.target)) { e.preventDefault(); e.stopPropagation(); placeArmedSourceLink(e.clientX, e.clientY); }
-    }, true);
-    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && __armedSourceLink) { e.preventDefault(); cancelArmedSourceLink(); } });
-  }
-  // (source-link 03) The SPEC 7 / #137 whole-topic +-insert (insertSourceLinkedBlock) is retired:
-  // the Edit Source tab is now a read-only viewer (02) and copy is placed as a range-linked block
-  // via select-then-place (armSourceLinkPlacement above), not a whole-topic libraryInstance.
-  // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
-  function jumpToSourceTopic(topicId) {
-    if (!topicId) return;
-    openSourceTopicId(topicId);
-    setStage("source");
-  }
-  // Two-way link, direction 1: open the doc, land in Edit, and select the exact linked block.
-  function jumpToLinkedBlock(docCode, blockId) {
-    openCourseFromBrowser(docCode);
-    setStage("edit");
-    var b = blockById(blockId);
-    if (b) {
-      var pi = findPageOfBlock(b);
-      if (pi != null && pi >= 0) { focusFrame(pi); setActivePage(pi); }
-      reselectBlockNode(b, "block");
-    }
-  }
-  function wireLeftSwitcher() {
-    renderAssets();
-    renderComponentsPalette();
-    try { var saved = localStorage.getItem(LEFT_SECTION_KEY); if (LEFT_SECTIONS.indexOf(saved) !== -1) _activeLeftSection = saved; } catch (e) {}
-    applyLeftSection(_activeLeftSection);
-  }
 
   // ---- mount / re-mount (preserves view) -----------------------------------
   function mount() {
@@ -13952,254 +12506,8 @@
   // ...continues in demo.js (arch-P3b-07).
 
 
-  // ---- Asset store seam glue (YY) ------------------------------------------
-  var ASSET_SCHEMA = 1;
-  function editorAssetResolve(id) {
-    return window.AssetStore ? window.AssetStore.url(id) : null;
-  }
-  // .verso project export (#67) — the portable authoring artifact (doc + its media),
-  // distinct from SCORM (published output) and the self-contained Export JSON. Media
-  // stays as asset:<id> refs in doc.json; each referenced asset is packed raw so ids
-  // (content hashes) survive the round-trip and refs re-resolve on import.
-  function collectDocAssetRefs(d) {
-    var out = {};
-    if (window.resolveMedia && window.AssetStore) {
-      var undo = window.resolveMedia(d, function (id) {
-        if (!out[id]) { var a = window.AssetStore.get(id); if (a) out[id] = { dataUrl: a.dataUrl, mime: a.mime }; }
-        return null; // return null -> leave the ref untouched; we only collect
-      });
-      if (typeof undo === "function") undo();
-    }
-    return out;
-  }
-  // targetDoc lets the file browser (#74) export a specific course; the pipeline
-  // button passes no doc (its onClick may hand us an event), so only honour an arg
-  // that actually looks like a doc — otherwise fall back to the active `doc`.
-  function exportVersoPackage(targetDoc) {
-    var src = (targetDoc && targetDoc.meta && targetDoc.pages) ? targetDoc : doc;
-    try {
-      if (!window.VersoFormat) throw new Error("The .verso packer isn't loaded.");
-      var d = JSON.parse(JSON.stringify(src)); // keep asset:<id> refs (not inlined)
-      var assets = collectDocAssetRefs(d);
-      var bytes = window.VersoFormat.buildPackage(d, assets, {});
-      var blob = new Blob([bytes], { type: "application/zip" });
-      var a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = String((src.meta && src.meta.code) || "course").replace(/[^\w.-]+/g, "_") + ".verso";
-      document.body.appendChild(a); a.click(); a.remove();
-      if (window.console && console.log) console.log("[export] .verso built (" + Object.keys(assets).length + " assets, " + bytes.length + " bytes)");
-    } catch (e) {
-      if (window.console && console.error) console.error("[export] .verso failed:", e);
-      confirmModal("Export failed", "Could not build the .verso package: " + (e && e.message || e), function () {});
-    }
-  }
-  // #69 guarded cutover: the ONLY sanctioned way to move browser storage -> file
-  // storage. Never flip authoring.storageBackend by hand (the 2026-07-12 clobber).
-  // ASYNC because the live path awaits the native bridge (WKWebView replies): backup
-  // EVERY course to a verified .verso up front (the HARD gate) -> suppress saves ->
-  // write the registry to disk (awaited) -> read it BACK FROM DISK and verify -> flip
-  // the flag -> controlled reload (saves stay suppressed through it; a fresh boot resets
-  // the guard). Fails safe at every stage: any abort leaves the browser store
-  // authoritative and untouched, and resumes saves (rollback = flip the flag back).
-  // // Dependency-injected so the harness drives the whole flow against fakes (async
-  // nativeStore + setFlag/reload) with no real data. The LIVE deps come from
-  // window.__nativeStore (store-native.js glue over the Swift bridge) -> the app-rebuild
-  // test boundary (issue #68/#69). Returns { ok, flip, stage, error?, codes? }.
-  async function migrateToFileBackend(opts) {
-    opts = opts || {};
-    var log = opts.log || function (m) { if (window.console && console.log) console.log("[migrate] " + m); };
-    function fail(stage, error) { log("aborted at " + stage + ": " + error); return { ok: false, flip: false, stage: stage, error: error }; }
-    // HARD precondition: must start from the browser backend holding the real registry.
-    var backend = opts.backend || storageBackend();
-    if (backend !== "browser") return fail("precondition", "not on the browser backend (already " + backend + ")");
-    // The native store glue must be present (Swift bridge). Absent in a plain browser.
-    var ns = opts.nativeStore || window.__nativeStore;
-    if (!ns) return fail("precondition", "native file storage is not available on this build (rebuild the desktop app)");
-    var browserAdapter = opts.browserAdapter || Store.browserAdapter;
-    var browserLibAdapter = opts.browserLibraryAdapter || Store.browserAdapter;
-    var putRegistry = opts.putRegistry || ns.putRegistry;
-    var getRegistry = opts.getRegistry || ns.getRegistry;
-    var putLibrary = opts.putLibrary || ns.putLibrary;
-    var getLibrary = opts.getLibrary || ns.getLibrary;
-    var reload = opts.reload || ns.reload || function () { location.reload(); };
-    if (!putRegistry || !getRegistry) return fail("precondition", "native store is missing put/getRegistry");
-    // #18: the library rides the SAME guarded cutover as the registry, so the native
-    // store must support both -- a half-capable build never leaves the library behind.
-    if (!putLibrary || !getLibrary) return fail("precondition", "native store is missing put/getLibrary");
+  // ...continues in assets.js (arch-P3b-07).
 
-    // Read the authoritative sources (never mutated here). The library is OPTIONAL --
-    // a fresh install may have no shared components yet, unlike the registry.
-    var srcJson;
-    try { srcJson = browserAdapter.readRegistry(); } catch (e) { return fail("read", "browser read threw: " + (e && e.message || e)); }
-    if (!srcJson) return fail("read", "browser registry is empty");
-    var src; try { src = JSON.parse(srcJson); } catch (e) { return fail("read", "browser registry unparseable"); }
-    var codes = Object.keys(src);
-    if (!codes.length) return fail("read", "no courses in browser registry");
-    var libJson;
-    try { libJson = browserLibAdapter.readLibrary(); } catch (e) { return fail("read", "browser library read threw: " + (e && e.message || e)); }
-
-    // 1. BACKUP GATE (awaited, verified on disk) BEFORE any target write or suppression.
-    var backup = opts.backup ? opts.backup(src) : window.Migration.runBackupsAsync(src, {
-      versoFormat: window.VersoFormat, collectAssets: collectDocAssetRefs,
-      writeFile: ns.writeFile, verifySize: ns.verifySize,
-      tsLabel: opts.tsLabel || (ns.tsLabel && ns.tsLabel())
-    });
-    var bk; try { bk = await backup; } catch (e) { return fail("backup", "backup threw: " + (e && e.message || e)); }
-    if (!bk || !bk.ok) return fail("backup", (bk && bk.error) || "backup failed");
-    if (bk.count !== codes.length) return fail("backup", "backup incomplete: " + bk.count + "/" + codes.length + " courses");
-    log("backup verified: " + bk.count + " course(s) -> " + bk.dir);
-
-    // 1b. Back up the shared library too (same pre-cutover dir, plain JSON, verified
-    // written) -- skipped only when there is nothing to back up (no library yet).
-    if (libJson) {
-      var libBackup = opts.backupLibrary ? opts.backupLibrary(libJson, bk.dir) : (function () {
-        var path = bk.dir + "library.json";
-        return Promise.resolve(ns.writeFile(path, (new TextEncoder()).encode(libJson))).then(function (bw) {
-          if (!bw || !bw.ok) return { ok: false, error: (bw && bw.error) || "library backup write failed" };
-          return Promise.resolve(ns.verifySize(path)).then(function (sz) {
-            return (sz > 0) ? { ok: true, path: path } : { ok: false, error: "library backup verify failed (not on disk)" };
-          });
-        });
-      })();
-      var lbk; try { lbk = await libBackup; } catch (e) { return fail("backup", "library backup threw: " + (e && e.message || e)); }
-      if (!lbk || !lbk.ok) return fail("backup", "library: " + ((lbk && lbk.error) || "backup failed"));
-      log("library backup verified -> " + lbk.path);
-    }
-
-    // 2. SUPPRESS SAVES for the whole switch (no stale flush can land).
-    window.Migration.suppress();
-    // 3. WRITE the registry to disk and AWAIT the durable-write confirmation.
-    var w; try { w = await putRegistry(srcJson); } catch (e) { window.Migration.resume(); return fail("write", "registry write threw: " + (e && e.message || e)); }
-    if (!w || !w.ok) { window.Migration.resume(); return fail("write", (w && w.error) || "registry disk write failed"); }
-    // 4. VERIFY: read the registry BACK FROM DISK; abort (resume) on any drift.
-    var back; try { back = await getRegistry(); } catch (e) { window.Migration.resume(); return fail("verify", "registry read-back threw: " + (e && e.message || e)); }
-    var v = window.Migration.verifyRegistries(srcJson, back);
-    if (!v.ok) { window.Migration.resume(); return fail("verify", v.reason); }
-    log("verified " + v.count + " course(s) on disk");
-
-    // 3b/4b. WRITE + VERIFY the shared library too, in the SAME suppression window --
-    // either both the registry and the library land on disk, or neither does (the flag
-    // never flips), so the two content types can never straddle backends.
-    if (libJson) {
-      var lw; try { lw = await putLibrary(libJson); } catch (e) { window.Migration.resume(); return fail("write", "library write threw: " + (e && e.message || e)); }
-      if (!lw || !lw.ok) { window.Migration.resume(); return fail("write", "library: " + ((lw && lw.error) || "library disk write failed")); }
-      var libBack; try { libBack = await getLibrary(); } catch (e) { window.Migration.resume(); return fail("verify", "library read-back threw: " + (e && e.message || e)); }
-      var lv = window.Migration.verifyLibrary(libJson, libBack);
-      if (!lv.ok) { window.Migration.resume(); return fail("verify", "library: " + lv.reason); }
-      log("verified " + lv.count + " library component(s) on disk");
-    }
-
-    // 5. FLIP the flag, then a controlled reload. Saves stay suppressed through it;
-    // the fresh boot re-reads the on-disk registry (and library) and resets the guard.
-    // The ONE sanctioned write of the backend flag, and it happens here: after a verified backup
-    // of every course, with saves suppressed, and only once the registry (and the library) have
-    // been read BACK from disk and matched. Never flip it by hand -- that is the 2026-07-12 clobber.
-    var setFlag = opts.setFlag || function (vv) { Store.commitBackend(vv); };
-    setFlag("file");
-    log("flag flipped to file; reloading under the migrated store");
-    await reload();
-    return { ok: true, flip: true, stage: "done", codes: codes };
-  }
-  // The guarded entry point for the Export-overflow menu item: a DS confirm (reusing
-  // confirmModal, not bespoke chrome) then the async cutover. On a stopped migration it
-  // surfaces the stage/reason and reassures that nothing changed; on success the app
-  // reloads under the file store, so there is nothing more to report.
-  function migrateToFileBackendPrompt() {
-    confirmModal("Migrate to file storage",
-      "This first backs up EVERY course to a .verso, then moves storage (including your shared component library) from this browser to on-disk files and reloads. Your browser copy is kept as a read-only fallback. Continue?",
-      function () {
-        migrateToFileBackend({}).then(function (res) {
-          if (res && !res.ok) confirmModal("Migration stopped",
-            "Nothing was changed - you are still on browser storage.\n\nStopped at: " + res.stage + "\n" + (res.error || ""),
-            function () {}, { okLabel: "OK" });
-        });
-      }, { okLabel: "Back up + migrate" });
-  }
-  // render.js resolves "asset:<id>" srcs through this hook at the point of use,
-  // so EVERY editor render path (buildWorld, single-block re-render, demo,
-  // inspector) shows media -- not just the ones wrapped in resolveMedia. Export
-  // overrides doc media to base64 before it serialises, so this editor
-  // (objectURL) resolver never leaks into the shipped package.
-  window.applyRenderContext({ assetResolver: editorAssetResolve });
-  // Upload sites call this instead of storing base64 on the doc: store the blob,
-  // get back an "asset:<id>" ref. If the store is absent or the write fails
-  // (quota), fall back to the inline data: URL so the media still shows (and XX's
-  // save-state surfaces the failure).
-  function assetRef(dataUrl, file) {
-    var id = window.AssetStore ? window.AssetStore.put(dataUrl, { mime: (file && file.type) || "", name: (file && file.name) || null }) : null;
-    return id ? "asset:" + id : dataUrl;
-  }
-  // Inspector code that inspects a media value OUTSIDE the render resolve-window
-  // (e.g. SVG-palette colour detection) must see the real src, not the ref. SVG
-  // assets resolve to a data: URL so detectSvgColorsFromSrc/isVectorSrc still work.
-  function srcForInspect(v) {
-    var m = typeof v === "string" && /^asset:(.+)$/.exec(v);
-    return (m && window.AssetStore) ? window.AssetStore.url(m[1]) : v;
-  }
-  // The interaction's HTML for the inspector's palette detection: inline block.html, or
-  // a bundled `src` decoded from its data URL (so the "Interaction colours" picker
-  // appears for uploaded-file interactions too, not just pasted-inline ones).
-  function embedHtmlForInspect(block) {
-    // block.html may be an asset ref / data: URL / raw -> resolve to raw markup
-    // so palette detection sees the real source, not "asset:<id>".
-    if (block.html) return window.resolveEmbedHtml ? window.resolveEmbedHtml(block.html) : block.html;
-    var s = srcForInspect(block.src);
-    var m = typeof s === "string" && /^data:text\/html([^,]*),([\s\S]*)$/i.exec(s);
-    if (!m) return "";
-    try { return /base64/i.test(m[1]) ? decodeURIComponent(escape(atob(m[2]))) : decodeURIComponent(m[2]); }
-    catch (_) { try { return atob(m[2]); } catch (_2) { return ""; } }
-  }
-  // #85: the inspector's colour palette needs the interaction's declared colour
-  // vars, which means decoding the full markup (atob + decodeURIComponent) and
-  // regex-parsing the ENTIRE HTML string. That ran on EVERY inspector render
-  // (open + every re-render after a toggle) with no caching -> a 2-3s freeze for a
-  // large interaction. Cache the detected vars per block, keyed on the block's
-  // html/src so it only recomputes when the actual source changes.
-  var _embedVarCache = new WeakMap();
-  function embedColorVarsCached(block) {
-    if (!window.detectEmbedColorVars) return [];
-    var sig = block.html != null ? "h:" + block.html : "s:" + (block.src || "");
-    var hit = _embedVarCache.get(block);
-    if (hit && hit.sig === sig) return hit.vars;
-    var vars = window.detectEmbedColorVars(embedHtmlForInspect(block));
-    _embedVarCache.set(block, { sig: sig, vars: vars });
-    return vars;
-  }
-  // Hoist legacy inline base64 media in every registry doc into the store, once
-  // per doc. Non-destructive (migrateDocMedia keeps un-hoistable data: URLs), and
-  // only stamps a doc migrated when ALL its media hoisted -> a partial pass retries
-  // next boot. Called by persist.js after the store hydrates.
-  function migrateAllAssets() {
-    if (!window.AssetStore || !window.migrateDocMedia) return;
-    var changed = false;
-    Object.keys(registry).forEach(function (id) {
-      var d = registry[id];
-      if (!d || d.assetSchema === ASSET_SCHEMA) return;
-      var res = window.migrateDocMedia(d, function (dataUrl) { return window.AssetStore.put(dataUrl, {}); });
-      // Also drain any legacy RAW htmlEmbed markup that already bloated the doc
-      // (pre-reroute stores) out to AssetStore, so an over-full registry recovers.
-      var eres = window.migrateDocEmbedHtml ? window.migrateDocEmbedHtml(d, function (dataUrl) { return window.AssetStore.put(dataUrl, { mime: "text/html" }); }) : { migrated: 0, failed: 0 };
-      if (res.failed === 0) d.assetSchema = ASSET_SCHEMA;
-      if (res.migrated || eres.migrated) changed = true;
-    });
-    if (changed) saveRegistry(registry);
-    // Always re-mount once after the store is ready: editor.js booted (and did its
-    // first mount) BEFORE persist.js defined window.AssetStore, so any doc that
-    // already held asset refs rendered blank on that first pass -- re-render now
-    // that assetSrc can resolve, whether or not anything migrated this boot.
-    mount();
-  }
-  // Mark-sweep: union asset refs across ALL registry docs (the store is shared),
-  // then delete orphaned blobs. Called on unload.
-  function sweepAllAssets() {
-    if (!window.AssetStore || !window.collectAssetRefs) return;
-    var ids = {};
-    Object.keys(registry).forEach(function (id) {
-      var d = registry[id];
-      if (d) window.collectAssetRefs(d).forEach(function (a) { ids[a] = true; });
-    });
-    window.AssetStore.sweep(Object.keys(ids));
-  }
 
   // ---- integration seam (FROZEN CONTRACT — do not widen without coordination)-
   // Sibling modules that own NO editor internals (src/csv.js, src/export.js,
@@ -14652,6 +12960,8 @@
   // Both are flipped as the author works: comment mode inside the preview, and which comment's
   // popover is open. A captured value would leave the preview drawing the last state.
   window.VersoEditor.provideLive({
+    // arch-P3b-07g: the canvas backdrop the System tab edits; reassigned on every change.
+    canvasBg: function () { return canvasBg; },
     demoCommentMode: function () { return demoCommentMode; },
     openCommentId: function () { return openCommentId; }
   });
@@ -14675,6 +12985,75 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    repeatedList: repeatedList,
+    reconnectBackupFolder: reconnectBackupFolder,
+    bindProjectFolder: bindProjectFolder,
+    backupHandleSet: backupHandleSet,
+    backupMode: backupMode,
+    wirePanelResizer: wirePanelResizer,
+    MOD_KEY: MOD_KEY,
+    courseNavNests: courseNavNests,
+    footerCourseNav: footerCourseNav,
+    buildPipelineBody: buildPipelineBody,
+    buildComponentsBody: buildComponentsBody,
+    buildFontsBody: buildFontsBody,
+    renderThemeControls: renderThemeControls,
+    buildLayoutBody: buildLayoutBody,
+    buildHeaderFooterDefaultBody: buildHeaderFooterDefaultBody,
+    buildFooterBody: buildFooterBody,
+    buildHeaderBody: buildHeaderBody,
+    buildLibraryBody: buildLibraryBody,
+    setDevToolsEnabled: setDevToolsEnabled,
+    devToolsOn: devToolsOn,
+    setSpellcheckEnabled: setSpellcheckEnabled,
+    spellcheckOn: spellcheckOn,
+    applyUiTheme: applyUiTheme,
+    uiThemeIsLight: uiThemeIsLight,
+    BG_DEFAULT: BG_DEFAULT,
+    applyCanvasBg: applyCanvasBg,
+    setCellInteractive: setCellInteractive,
+    setCellGeo: setCellGeo,
+    bpClampDim: bpClampDim,
+    backupSlug: backupSlug,
+    hfSectionOpts: hfSectionOpts,
+    currentCell: currentCell,
+    BP_MAX: BP_MAX,
+    BP_MIN: BP_MIN,
+    applyBp: applyBp,
+    saveBpSizes: saveBpSizes,
+    BP_DEFAULTS: BP_DEFAULTS,
+    blockById: blockById,
+    openCourseFromBrowser: openCourseFromBrowser,
+    openSourceTopicId: openSourceTopicId,
+    renderSourceArticle: renderSourceArticle,
+    clearSourceEditSession: clearSourceEditSession,
+    persistSourceDocModel: persistSourceDocModel,
+    setSourceDocModel: setSourceDocModel,
+    updateSourceDocBar: updateSourceDocBar,
+    refreshSourceSelBar: refreshSourceSelBar,
+    applySourceLockState: applySourceLockState,
+    flushSourceEditSession: flushSourceEditSession,
+    sourceActiveTopicId: sourceActiveTopicId,
+    applyLeftSection: applyLeftSection,
+    renderSourceDocNode: renderSourceDocNode,
+    sourceMasterFor: sourceMasterFor,
+    pushSourceAlternate: pushSourceAlternate,
+    lockSourceEditing: lockSourceEditing,
+    insertBlock: insertBlock,
+    activeLeftSection: activeLeftSection,
+    sourceDocModel: sourceDocModel,
+    frameElementUnder: frameElementUnder,
+    sourceToast: sourceToast,
+    renderEditSourcePanel: renderEditSourcePanel,
+    stampRoleStyle: stampRoleStyle,
+    findBlockParent: findBlockParent,
+    getBlockPageIndexAndIndex: getBlockPageIndexAndIndex,
+    insertPageFromLibrary: insertPageFromLibrary,
+    getComponents: getComponents,
+    paletteAllowsType: paletteAllowsType,
+    clearDropMarks: clearDropMarks,
+    BLOCK_LUCIDE: BLOCK_LUCIDE,
+    Store: Store,
     getTextRoles: getTextRoles,
     renameTextStyle: renameTextStyle,
     scopeChain: scopeChain,
@@ -14881,6 +13260,9 @@
   window.VersoHelp.install(VE);   // the in-app user guide
   window.VersoTheme.install(VE);   // the course palette and the Theme panel
   window.VersoFonts.install(VE);   // fonts, embedded so a course works offline
+  window.VersoAssets.install(VE);   // the shelf of insertable types and the asset store
+  window.VersoSourceLink.install(VE);   // copy that stays joined to its source
+  window.VersoSettingsSheet.install(VE);   // the settings sheet and the one Escape contract
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has
@@ -14892,6 +13274,8 @@
   NAV_BTN_KEYS = VE.get("NAV_BTN_KEYS");
   NAV_PILL_KEYS = VE.get("NAV_PILL_KEYS");
   BOX_SYSTEM_DEFAULTS = VE.get("BOX_SYSTEM_DEFAULTS");
+
+  LIBRARY = VE.get("LIBRARY");
 
   // ---- UI kit gallery seam ----------------------
   // Expose the canonical control primitives + Icon accessor so kit.html can render
