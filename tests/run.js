@@ -69,7 +69,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -4017,7 +4017,7 @@ section("#126 theme presets (copy-on-apply)");
   // course switch (copy-on-apply keeps no live link, so it must not bleed across courses).
   ok("picker placeholder is neutral (no duplicate option)", /placeholder: names\.length \? "Saved themes…" : "No saved themes yet"/.test(t));
   ok("switchDoc resets themePresetSel (no cross-course bleed)", /function switchDoc\(id\)[\s\S]*?themePresetSel = null;/.test(t));
-  ok("closeTab resets themePresetSel on active-doc change", /doc = registry\[activeDocId\];\s*\n\s*themePresetSel = null;[\s\S]*?mount\(\);/.test(t));
+  ok("every active-doc change resets themePresetSel (arch-P3-02: one owner, activateDoc)", /function activateDoc\(id\)[\s\S]{0,700}themePresetSel = null;/.test(t) && !/themePresetSel = null;/.test(t.slice(t.indexOf("function closeTab("), t.indexOf("function switchDoc("))));
 })();
 
 // ---- #127: blockStyles per type + capture-from-block + render/export cascade --
@@ -5324,7 +5324,9 @@ section("DDD undo-coverage");
   ok("insertBlock pushes history", /pushHistory\(\)/.test(bodyOf("insertBlock")));
   ok("deleteBlockByRef pushes history", /pushHistory\(\)/.test(bodyOf("deleteBlockByRef")));
   // redo-invalidation: pushHistory must clear redoStack
-  ok("pushHistory clears redoStack (redo-invalidation)", /function pushHistory\(\)[\s\S]*?redoStack = \[\]/.test(t));
+  // arch-P3-02: redo invalidation moved into src/editor/history.js and is exercised for real in
+  // "arch-P3-02 editor history" (a new edit discards the redo branch).
+  ok("pushHistory routes to the history module", /function pushHistory\(\) \{ History\.push\(\); \}/.test(t));
 })();
 
 // ---- §2 chapter progression: gated wiring present (opt-in, ungated unchanged)
@@ -8294,11 +8296,13 @@ section("PERF one-page re-render");
   ok("reapplyStructural = reapplyPage + cheap chrome (no all-pages rebuild)",
     /function reapplyStructural\(pi\) \{[\s\S]{0,220}if \(!ok \|\| isPreview\(\)\) \{ mount\(\); return; \}[\s\S]{0,120}reapplyPage\(i\);[\s\S]{0,600}renderStructure\(\);[\s\S]{0,60}renderModelView\(\);[\s\S]{0,60}renderCommentPins\(\);/.test(e));
   ok("reapplyStructural accepts one index OR an array (drag = source+dest pages)", /var list = Array\.isArray\(pi\) \? pi : \[pi\];/.test(e));
-  ok("undo/redo restore reapplies only the changed pages (isolatedPageChanges), full mount otherwise", /function isolatedPageChanges\(prev, next\)[\s\S]{0,400}return null;[\s\S]{0,400}changed\.push\(j\)/.test(e) && /function restoreSnapshot\(next\)[\s\S]{0,220}reapplyStructural\(changed\)/.test(e));
+  // arch-P3-02: the isolation decision moved into src/editor/history.js (and is exercised
+  // behaviourally in "arch-P3-02 editor history"); applying it is still editor.js's job.
+  ok("undo/redo restore reapplies only the changed pages, full mount otherwise", /function applyDocSwap\(next, changed\) \{[\s\S]{0,260}reapplyStructural\(changed\)[\s\S]{0,120}mount\(\);/.test(e));
   // #50: undo/redo used to reassign only `doc`, leaving registry[activeDocId] stale — the
   // next save (e.g. closeTourBuilder -> flushSave) persisted the pre-undo doc, dropping any
-  // edits made after the undo. restoreSnapshot must pair-write doc + registry like setDoc.
-  ok("restoreSnapshot #50 keeps registry[activeDocId] in sync with doc (undo/redo no longer diverges)", /function restoreSnapshot\(next\) \{[\s\S]{0,200}doc = next;\s*registry\[activeDocId\] = next;/.test(e));
+  // edits made after the undo. The pair-write is now one function, and the only one.
+  ok("the doc/registry pair-write is a single named function", /function setActiveDocObject\(next\) \{\s*doc = next;\s*registry\[activeDocId\] = next;/.test(e));
   ok("handleDrop rebuilds source+dest pages, not the world", /var destPi = findPageOfBlock\(draggedBlock\);[\s\S]{0,320}reapplyStructural\(affected\.length \? affected : -1\);/.test(e));
   // #171: deletePage re-anchors the viewport by page IDENTITY (keepId -> pageIndexById),
   // so deleting a page BEFORE the active one no longer jumps the view to a random page.
@@ -8362,7 +8366,8 @@ section("UI kit seam");
   // iframes; renderDemo must push the theme (tokens + embedColorMap) into demoDevice or
   // the interaction shows its own default palette (colours "change" on entering preview).
   ok("renderDemo pushes theme into preview embeds", /fitEmbedsIn\(demoDevice\); renderCommentPins\(\);[\s\S]{0,160}pushEmbedTheme\(demoDevice, activeMode, activeTheme\(\)\.color\)/.test(e));
-  ok("pushHistory no-ops with no doc (kit / pre-boot)", /function pushHistory\(\) \{\s*if \(doc == null\) return;/.test(e));
+  // arch-P3-02: the guard lives in the module now (and is tested there against a null document).
+  ok("the kit gallery loads the history seam before editor.js", src("kit.html").indexOf("src/editor/history.js") < src("kit.html").indexOf("src/editor.js\""));
   ok("renderInspector no-ops in kit mode (gallery owns #inspector)", /function renderInspector\(\) \{\s*if \(window\.__KIT_MODE\) return;/.test(e));
   // The gallery files exist and pull from the real primitives.
   var html = "", gal = "";
@@ -11643,7 +11648,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("editable version uses the resolveVersionForEdit tree", /versionEditable\(\) && window\.resolveVersionForEdit\)\s*\? window\.resolveVersionForEdit\(d, activeVersion\)/.test(e));
   ok("enableEditing gate keys off canvasEditable() (version = editable flagship UNLESS collaborating)", (e.match(/if \(canvasEditable\(\)\) enableEditing\(world\);/g) || []).length >= 2);
   ok("writeModel captures into versionOverrides via __vbase when editing a version", /if \(versionEditable\(\) && obj && obj\.__vbase\) setVersionOverrideField\(obj\.__vbase, activeVersion, field, value\);\s*else obj\[field\] = value;/.test(e));
-  ok("capture is undoable — the input handler pushHistory precedes writeModel", /pushHistory\(\);[\s\S]{0,120}hasPushedForFocus = true;[\s\S]{0,200}writeModel\(node,/.test(e));
+  ok("capture is undoable — the input handler snapshots before writeModel", /History\.pushOnce\(\);[\s\S]{0,200}writeModel\(node,/.test(e));
   ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(e));
   ok("version tagging targets the BASE node (__vbase) not the display clone", /function versionBaseNode\(node\) \{ return \(node && node\.__vbase\) \|\| node; \}/.test(e));
   ok("block context menu adds a Software version show/hide section", /var versAll = versionNames\(\);[\s\S]{0,700}toggleHiddenInVersion\(host, v\)/.test(e));
@@ -14976,6 +14981,146 @@ section("arch-P2 test seam");
     return toks.length === 3 && toks[1].word === "quick" && toks[1].start === 4;
   })());
   ok("tokenize ignores digits and punctuation runs", SPELL._core.tokenize("a1 -- b").every(function (t) { return /^[A-Za-z']+$/.test(t.word); }));
+})();
+
+// ---- arch-P3-02: undo/redo and the document-swap rule --------------------
+// Undo here is a stack of whole-document snapshots, so every restore REPLACES the object the
+// editor is holding. The stack semantics were only ever asserted by matching editor.js's source
+// text; the swap rule -- that `doc` and registry[activeDocId] move together, and that a history
+// stack belongs to exactly one document -- was not asserted at all, which is how closeDoc came
+// to leave the closed course's undo stack standing over a different course.
+section("arch-P3-02 editor history");
+(function () {
+  var H = require(path.join(ROOT, "src/editor/history.js"));
+
+  // A stand-in editor: one live doc, one registry entry, and the pair-write between them.
+  function fakeEditor(opts) {
+    var ed = {
+      doc: { pages: [{ id: "p1", blocks: [{ t: "a" }] }, { id: "p2", blocks: [{ t: "b" }] }] },
+      registry: {}, activeId: "C-1", applied: [], repaints: 0, changes: 0, isolate: true
+    };
+    ed.registry["C-1"] = ed.doc;
+    ed.history = H.create({
+      getDoc: function () { return ed.doc; },
+      applyDoc: function (next, changed) {
+        ed.doc = next; ed.registry[ed.activeId] = next;      // THE pair-write
+        ed.applied.push(changed); ed.repaints++;
+      },
+      canIsolate: function () { return ed.isolate; },
+      onChange: function () { ed.changes++; },
+      max: (opts && opts.max) || undefined
+    });
+    return ed;
+  }
+
+  // ---- the stack ----
+  var ed = fakeEditor();
+  ok("nothing to undo or redo at rest", !ed.history.canUndo() && !ed.history.canRedo());
+  ed.history.push();
+  ok("a push arms undo but not redo", ed.history.canUndo() && !ed.history.canRedo());
+  ed.doc.pages[0].blocks[0].t = "EDITED";
+  ok("undo restores the snapshot, not a reference to the live doc", ed.history.undo() && ed.doc.pages[0].blocks[0].t === "a");
+  ok("undo arms redo", ed.history.canRedo() && !ed.history.canUndo());
+  ok("redo puts the edit back", ed.history.redo() && ed.doc.pages[0].blocks[0].t === "EDITED");
+  ok("an empty stack is a no-op, not a throw", ed.history.undo() === true && ed.history.undo() === false);
+
+  // The snapshot must be a COPY. Editing the live doc after a push must not rewrite history.
+  var copyEd = fakeEditor();
+  copyEd.history.push();
+  copyEd.doc.pages[1].blocks[0].t = "mutated in place";
+  copyEd.history.undo();
+  ok("a snapshot is a deep copy, so a later in-place edit cannot corrupt it", copyEd.doc.pages[1].blocks[0].t === "b");
+
+  // ---- the pair-write: doc and the registry entry move together, always ----
+  var pairEd = fakeEditor();
+  pairEd.history.push();
+  pairEd.doc.pages[0].blocks[0].t = "x";
+  pairEd.history.undo();
+  ok("undo leaves the registry entry pointing at the restored doc", pairEd.registry["C-1"] === pairEd.doc);
+  pairEd.history.redo();
+  ok("redo leaves the registry entry pointing at the restored doc", pairEd.registry["C-1"] === pairEd.doc);
+
+  // ---- reset: a history stack belongs to ONE document ----
+  // The closeDoc bug. Edit course A, close its tab, and the editor switches to course B with A's
+  // undo stack still standing -- one Ctrl+Z restores A's snapshot INTO B, in memory and in the
+  // registry, and the next save persists it. Every document swap drops the stack.
+  var swapEd = fakeEditor();
+  swapEd.history.push();
+  var courseB = { pages: [{ id: "b1", blocks: [{ t: "course B" }] }] };
+  swapEd.activeId = "C-2"; swapEd.doc = courseB; swapEd.registry["C-2"] = courseB;
+  swapEd.history.reset();
+  ok("a document swap drops the outgoing course's history", !swapEd.history.canUndo() && !swapEd.history.canRedo());
+  ok("so an undo after the swap cannot overwrite the incoming course", swapEd.history.undo() === false && swapEd.doc === courseB);
+  ok("and the registry still holds the incoming course", swapEd.registry["C-2"] === courseB && swapEd.registry["C-1"] !== courseB);
+
+  // ---- the cap ----
+  var capEd = fakeEditor({ max: 3 });
+  for (var i = 0; i < 6; i++) { capEd.doc.marker = i; capEd.history.push(); }
+  ok("the stack is capped, oldest first", capEd.history.depth().undo === 3);
+  capEd.history.undo(); capEd.history.undo(); capEd.history.undo();
+  ok("the oldest snapshots really are gone", capEd.doc.marker === 3 && !capEd.history.canUndo());
+
+  // ---- redo invalidation: a new edit forks the branch ----
+  var forkEd = fakeEditor();
+  forkEd.history.push();
+  forkEd.history.undo();
+  ok("redo is available after an undo", forkEd.history.canRedo());
+  forkEd.history.push();
+  ok("a new edit discards the redo branch", !forkEd.history.canRedo());
+
+  // ---- one undo step per typing burst ----
+  var typeEd = fakeEditor();
+  typeEd.history.beginEpisode();
+  typeEd.history.pushOnce(); typeEd.history.pushOnce(); typeEd.history.pushOnce();
+  ok("a burst of input pushes exactly one snapshot", typeEd.history.depth().undo === 1);
+  typeEd.history.beginEpisode();
+  typeEd.history.pushOnce();
+  ok("the next focus starts a new undo step", typeEd.history.depth().undo === 2);
+  ok("reset also ends the episode", (function () {
+    typeEd.history.reset(); typeEd.history.pushOnce();
+    return typeEd.history.depth().undo === 1;
+  })());
+
+  // ---- the repaint hint ----
+  var pages = function (ids) { return { pages: ids.map(function (id) { return { id: id, blocks: [] }; }) }; };
+  var a = pages(["p1", "p2"]), b = JSON.parse(JSON.stringify(a));
+  b.pages[1].blocks.push({ t: "new" });
+  ok("only the pages that differ are listed", H.isolatedPageChanges(a, b).join(",") === "1");
+  ok("identical docs list nothing (a no-op repaint)", H.isolatedPageChanges(a, JSON.parse(JSON.stringify(a))).length === 0);
+  ok("a changed page count is not isolatable", H.isolatedPageChanges(a, pages(["p1", "p2", "p3"])) === null);
+  ok("reordered pages are not isolatable", H.isolatedPageChanges(a, pages(["p2", "p1"])) === null);
+  var themed = JSON.parse(JSON.stringify(a)); themed.theme = { color: {} };
+  ok("a doc-level field change forces a full mount", H.isolatedPageChanges(a, themed) === null);
+  ok("a missing snapshot is not isolatable", H.isolatedPageChanges(null, a) === null && H.isolatedPageChanges(a, null) === null);
+
+  // the hint reaches the caller, and a preview suppresses it (resolved clones on screen)
+  var hintEd = fakeEditor();
+  hintEd.history.push();
+  hintEd.doc.pages[1].blocks.push({ t: "new" });
+  hintEd.history.undo();
+  ok("the caller is handed the changed-page list", JSON.stringify(hintEd.applied[0]) === "[1]");
+  hintEd.isolate = false;
+  hintEd.history.redo();
+  ok("a variant/version preview forces the full mount", hintEd.applied[1] === null);
+
+  // ---- pre-boot safety: the kit gallery has no document ----
+  var bare = H.create({ getDoc: function () { return null; }, applyDoc: function () {} });
+  ok("a push with no document is a no-op", bare.push() === false && !bare.canUndo());
+
+  // ---- the wiring ratchet: nothing else may move the pair or the active id ----
+  var e = src("src/editor.js");
+  var owner = e.slice(e.indexOf("function setActiveDocObject(next)"), e.indexOf("function pushHistory()"));
+  // One assignment to the live `doc`, and it is inside the owner. `var doc = ...` is excluded:
+  // those are declarations of a LOCAL doc (the boot binding, a per-course loop variable).
+  var code = e.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("setActiveDocObject is the only place the live `doc` is replaced",
+    (code.match(/(?<![.\w])(?<!var )doc = /g) || []).length === 1 && /doc = next;/.test(owner));
+  ok("setActiveDocObject is the only place the registry entry is replaced",
+    (e.match(/registry\[activeDocId\] = /g) || []).length === 1);
+  ok("every tab switch, tab close and course delete goes through activateDoc",
+    (e.match(/activateDoc\(/g) || []).length === 4 && /function activateDoc\(id\)[\s\S]{0,700}History\.reset\(\);/.test(e));
+  ok("editor.js holds no undo/redo state of its own",
+    e.indexOf("undoStack") === -1 && e.indexOf("redoStack") === -1);
 })();
 
 // ---- arch-P2-04: the slice ratchet ----------------------------------------
