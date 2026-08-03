@@ -114,6 +114,9 @@
   <script src="src/editor/product-rail.js"></script>
   <!-- arch-P3-06 tour board: window.VersoBoardLayout (node/loop geometry + the tidy plan) and window.VersoHarvest (the source-video segment math). Both pure. Must precede editor.js. -->
   <!-- arch-P3-07: window.VersoCanvasView (fit/focus/zoom maths) + window.VersoSelection (the selection shape + drill chain). Both pure. Must precede editor.js. -->
+  <!-- arch-P3-08: window.VersoHotspots (screen-graph reads) + window.VersoDnd (drop resolution + block-tree surgery). dnd reads the graph through hotspots, so that one loads first. -->
+  <script src="src/editor/hotspots.js"></script>
+  <script src="src/editor/dnd.js"></script>
   <script src="src/editor/canvas-view.js"></script>
   <script src="src/editor/selection.js"></script>
   <script src="src/editor/board/layout.js"></script>

@@ -22,6 +22,9 @@
   // by index.html before this file.
   var CV = window.VersoCanvasView;
   var SEL = window.VersoSelection;
+  // arch-P3-08: the drop resolver + block-tree surgery, and the screen-graph read accessors.
+  var DND = window.VersoDnd;
+  var HS = window.VersoHotspots;
   // uio-O-W1: one spelling of the modifier key, so every printed shortcut in the chrome
   // (save-contract line, menu hints) reads the same on a Mac as on Windows/Linux.
   var MOD_KEY = (function () {
@@ -3536,70 +3539,7 @@
   function frameY(i) { return (framePos[i] && framePos[i].y != null) ? framePos[i].y : 0; }
   function isHex(s) { return /^#[0-9a-fA-F]{6}$/.test(s); }
 
-  function findBlockParent(blocks, targetBlock) {
-    for (var i = 0; i < blocks.length; i++) {
-      var b = blocks[i];
-      if (b === targetBlock) {
-        return { parentArray: blocks, index: i, ownerBlock: null };
-      }
-      if (b.type === "columns" && b.columns) {
-        for (var c = 0; c < b.columns.length; c++) {
-          var res = findBlockParent(b.columns[c], targetBlock);
-          if (res) {
-            res.ownerBlock = b;
-            res.columnIndex = c;
-            return res;
-          }
-        }
-      }
-      // Group children render as real .canvas-block nodes and get drag handles +
-      // drop targets wired, so they must be resolvable too. parentArray = the
-      // group's children (ownerBlock stays null: a group is not a columns row, so
-      // vertical reorder within the group works and a left/right drop wraps the
-      // child into a columns row IN PLACE via parentArray/index -- issue #55).
-      if (b.type === "group" && b.children) {
-        var gres = findBlockParent(b.children, targetBlock);
-        if (gres) return gres;
-      }
-      // Accordion / Card-Reveal children live under items[].children and render as
-      // real .canvas-block nodes (drag handles + drop targets wired), so delete +
-      // drag-move + drop-insert must resolve them too — otherwise deleteBlockByRef
-      // no-ops (loc null) and handleDrop drops nothing (destLoc null) after minting
-      // the block, so a newly-added block silently disappears. ownerBlock stays null
-      // (not a columns row): reorder within the container works, and a left/right
-      // drop wraps the child into a columns row IN PLACE (parentArray/index) so a
-      // card body / accordion panel / card-reveal face can hold columns -- issue #55.
-      if (Array.isArray(b.items)) {
-        for (var it = 0; it < b.items.length; it++) {
-          var kids = b.items[it] && b.items[it].children;
-          if (Array.isArray(kids)) {
-            var ires = findBlockParent(kids, targetBlock);
-            if (ires) return ires;
-          }
-          // flip cards: Side 1 (items[].front) is a first-class block list too, so
-          // delete / drag-move / drop-insert resolve front-face blocks as well.
-          var fkids = b.items[it] && b.items[it].front;
-          if (Array.isArray(fkids)) {
-            var fres = findBlockParent(fkids, targetBlock);
-            if (fres) return fres;
-          }
-        }
-      }
-      // Hotspot popover-card blocks live under hotspots[].blocks and render as real
-      // .canvas-block nodes (in the revealed popover) — so delete + drag-move +
-      // drop-insert + paste-location must resolve them too, else the block is
-      // undeletable and a drop/paste onto it silently no-ops. ownerBlock stays null
-      // (not a columns row): before/after reorder within the card works, and a
-      // left/right drop wraps the block into a columns row IN PLACE (parentArray/
-      // index) so a hotspot card can hold columns too -- issue #55.
-      var hArrs = hotspotCardArrays(b); // #215: screens[].markers[].blocks
-      for (var hz = 0; hz < hArrs.length; hz++) {
-        var hres = findBlockParent(hArrs[hz], targetBlock);
-        if (hres) return hres;
-      }
-    }
-    return null;
-  }
+  function findBlockParent(blocks, targetBlock) { return DND.findBlockParent(blocks, targetBlock); }
 
   // #95: the group block that holds `target` as a DIRECT child (innermost group wins),
   // or null. A group is a boxless (display:contents) content chunk whose children are
@@ -3608,68 +3548,10 @@
   // Only DIRECT group children match: a child inside a Card/accordion/hotspot/columns
   // that is NOT itself a group child returns null, preserving the #55 in-place wrap.
   /* @groupparent-start */
-  function groupParentOf(blocks, target) {
-    for (var i = 0; i < blocks.length; i++) {
-      var b = blocks[i];
-      if (b.type === "group" && Array.isArray(b.children)) {
-        var deep = groupParentOf(b.children, target); // nested group wins
-        if (deep) return deep;
-        if (b.children.indexOf(target) !== -1) return b;
-      } else if (Array.isArray(b.children)) {
-        var rc = groupParentOf(b.children, target); if (rc) return rc; // frame children
-      }
-      if (b.type === "columns" && b.columns) {
-        for (var c = 0; c < b.columns.length; c++) { var r = groupParentOf(b.columns[c], target); if (r) return r; }
-      }
-      if (Array.isArray(b.items)) {
-        for (var it = 0; it < b.items.length; it++) {
-          var item = b.items[it]; if (!item) continue;
-          if (Array.isArray(item.children)) { var ri = groupParentOf(item.children, target); if (ri) return ri; }
-          if (Array.isArray(item.front)) { var rf = groupParentOf(item.front, target); if (rf) return rf; }
-        }
-      }
-      // #215: hotspot card blocks live at screens[].markers[].blocks. Inlined (not the
-      // hotspotCardArrays helper) so the @groupparent test fence stays self-contained.
-      if (Array.isArray(b.screens)) {
-        for (var sz = 0; sz < b.screens.length; sz++) {
-          var mks = b.screens[sz] && b.screens[sz].markers;
-          if (!Array.isArray(mks)) continue;
-          for (var mz = 0; mz < mks.length; mz++) {
-            var hb = mks[mz] && mks[mz].blocks;
-            if (Array.isArray(hb)) { var rh = groupParentOf(hb, target); if (rh) return rh; }
-          }
-        }
-      }
-    }
-    return null;
-  }
+  function groupParentOf(blocks, target) { return DND.groupParentOf(blocks, target); }
   /* @groupparent-end */
 
-  function cleanupColumns(blocks) {
-    for (var i = blocks.length - 1; i >= 0; i--) {
-      var b = blocks[i];
-      if (b.type === "columns" && b.columns) {
-        for (var c = 0; c < b.columns.length; c++) {
-          cleanupColumns(b.columns[c]);
-        }
-        // #94: an EXPLICIT palette Columns block keeps its author-defined column
-        // structure — an emptied column shows a drop slot instead of collapsing, and
-        // the block is never auto-unwrapped. Only the implicit side-by-side-wrap
-        // columns auto-prune empty columns / unwrap to one child (unchanged).
-        if (b.explicit) continue;
-        b.columns = b.columns.filter(function (col) { return col.length > 0; });
-        // Dropping an empty column changes the count; stale per-column widths would
-        // misalign -> revert to equal (render falls back to flex:1 when absent).
-        if (b.colWidths && b.colWidths.length !== b.columns.length) delete b.colWidths;
-        if (b.columns.length === 0) {
-          blocks.splice(i, 1);
-        } else if (b.columns.length === 1) {
-          var children = b.columns[0];
-          blocks.splice.apply(blocks, [i, 1].concat(children));
-        }
-      }
-    }
-  }
+  function cleanupColumns(blocks) { return DND.cleanupColumns(blocks); }
 
   function ensureDatalists() {
     var lists = {
@@ -3847,23 +3729,10 @@
   }
   // TTT: append a block INTO a container — a group/frame's children, or the first
   // column of a columns block (creating the column if empty). Pure model op.
-  function appendIntoContainer(cont, blk) {
-    if (cont.type === "columns") {
-      cont.columns = (cont.columns && cont.columns.length) ? cont.columns : [[]];
-      (cont.columns[0] = cont.columns[0] || []).push(blk);
-    } else {
-      cont.children = cont.children || [];
-      cont.children.push(blk);
-    }
-  }
+  function appendIntoContainer(cont, blk) { return DND.appendIntoContainer(cont, blk); }
   // #94: append a block into a SPECIFIC column of a columns block (the targeted
   // empty-column drop slot). Creates the column array if absent. Pure model op.
-  function appendIntoColumn(cont, ci, blk) {
-    if (!cont || cont.type !== "columns") return;
-    cont.columns = cont.columns || [];
-    cont.columns[ci] = cont.columns[ci] || [];
-    cont.columns[ci].push(blk);
-  }
+  function appendIntoColumn(cont, ci, blk) { return DND.appendIntoColumn(cont, ci, blk); }
   // #94: wire each EMPTY column of a Columns block as its own drop target, so content
   // dropped onto it lands in THAT column (a fresh palette Columns block starts with two
   // empty columns). Non-empty columns keep their existing per-block drop zones; only
@@ -3909,129 +3778,23 @@
       wire(panel, ownerOf(panel), parseInt(panel.getAttribute("data-acc-index"), 10), "children"); // accordion/sequence parity
     });
   }
+  // The drop's model surgery is src/editor/dnd.js (arch-P3-08). This owns what a module cannot:
+  // the drag payload, the undo push, the active page and the repaint.
   function handleDrop(target) {
-    if (!dragPayload || !target) { dragPayload = null; return; }
-
-    // Guard: a non-duplicate self-drop (drop a moved block onto its own zone)
-    // would splice the block out and then fail to re-find it -> silent data loss.
-    // It is a no-op; bail before touching history or the model.
-    if (dragPayload.kind === "move" && !dragPayload.duplicate &&
-        target.targetBlock && target.targetBlock === dragPayload.block) {
-      dragPayload = null; return;
-    }
-    // TTT: dropping a container INTO itself or its own descendant would create a
-    // cycle (a block nested inside itself). Bail before touching the model.
-    var __intoCont = target.intoContainer || (target.intoColumn && target.intoColumn.block) || (target.intoBlocks && target.intoBlocks.ownerBlock);
-    if (dragPayload.kind === "move" && !dragPayload.duplicate && __intoCont) {
-      var cyc = false;
-      walkPageBlocks([dragPayload.block], function (b) { if (b === __intoCont) cyc = true; });
-      if (cyc) { dragPayload = null; clearDropMarks(); return; }
-    }
-
-    // Resolve what we are dropping BEFORE pushing history, so a no-op drop (source
-    // not found, empty insert) never dirties the undo stack.
-    var draggedBlock = null;
-    if (dragPayload.kind === "move") {
-      var srcLoc = findBlockParent(doc.pages[dragPayload.page].blocks, dragPayload.block);
-      if (srcLoc) {
-        pushHistory();
-        if (dragPayload.duplicate) {
-          draggedBlock = clone(dragPayload.block); // Alt-drag: leave the original
-        } else {
-          draggedBlock = dragPayload.block;
-          srcLoc.parentArray.splice(srcLoc.index, 1);
-        }
-      }
-    } else if (dragPayload.kind === "insert") {
-      pushHistory();
-      draggedBlock = LIBRARY[dragPayload.makeIndex].make();
-    }
-
-    if (!draggedBlock) { dragPayload = null; return; }
-    
-    if (target.append) {
-      var tp = doc.pages[target.pageIndex];
-      tp.blocks.push(draggedBlock);
-      currentPage = target.pageIndex;
-    } else if (target.targetBlock) {
-      // #141: a drop must land on the page the TARGET block lives on, not on
-      // whatever page happens to be selected. Resolve the target's own page by
-      // identity; assuming currentPage silently no-ops any cross-page drop
-      // (findBlockParent returns null when the target isn't on the active page).
-      var destPi141 = findPageOfBlock(target.targetBlock);
-      var activePage = destPi141 >= 0 ? doc.pages[destPi141] : doc.pages[currentPage];
-      var destLoc = findBlockParent(activePage.blocks, target.targetBlock);
-      if (destLoc) {
-        if (destPi141 >= 0) currentPage = destPi141; // follow the drop to its page
-        // #95: a group behaves as one content chunk. Its children are full-width, so a
-        // LEFT/RIGHT (side-by-side) drop on a direct group child means "beside the whole
-        // group" — retarget the wrap to the GROUP so it becomes one column, rather than
-        // wrapping the individual child inside the group. before/after (in-group reorder)
-        // and Card/accordion/hotspot children (not group children) are untouched.
-        if (dragTargetZone === "left" || dragTargetZone === "right") {
-          var grp = groupParentOf(activePage.blocks, target.targetBlock);
-          if (grp && grp !== draggedBlock) {
-            var gLoc = findBlockParent(activePage.blocks, grp);
-            if (gLoc) { destLoc = gLoc; target = { targetBlock: grp }; }
-          }
-        }
-        if (dragTargetZone === "before") {
-          destLoc.parentArray.splice(destLoc.index, 0, draggedBlock);
-        } else if (dragTargetZone === "after") {
-          destLoc.parentArray.splice(destLoc.index + 1, 0, draggedBlock);
-        } else if (dragTargetZone === "left") {
-          if (destLoc.ownerBlock === null) {
-            // Wrap the target in a new 2-column row IN PLACE. Key off
-            // destLoc.parentArray/index (the block's REAL parent array) — NOT
-            // activePage.blocks.indexOf, which returns -1 (silent no-op) whenever the
-            // target lives inside a container whose children are not page.blocks:
-            // card-deck / accordion / card-reveal / group / hotspot. Issue #55.
-            destLoc.parentArray[destLoc.index] = {
-              type: "columns",
-              columns: [ [draggedBlock], [target.targetBlock] ]
-            };
-          } else {
-            destLoc.ownerBlock.columns.splice(destLoc.columnIndex, 0, [draggedBlock]);
-            delete destLoc.ownerBlock.colWidths; // new column added -> revert to equal
-          }
-        } else if (dragTargetZone === "right") {
-          if (destLoc.ownerBlock === null) {
-            // Wrap in place via parentArray/index — see the "left" branch (issue #55).
-            destLoc.parentArray[destLoc.index] = {
-              type: "columns",
-              columns: [ [target.targetBlock], [draggedBlock] ]
-            };
-          } else {
-            destLoc.ownerBlock.columns.splice(destLoc.columnIndex + 1, 0, [draggedBlock]);
-            delete destLoc.ownerBlock.colWidths; // new column added -> revert to equal
-          }
-        }
-      }
-    } else if (target.intoColumn) {
-      appendIntoColumn(target.intoColumn.block, target.intoColumn.index, draggedBlock); // #94: drop INTO a specific empty column
-    } else if (target.intoContainer) {
-      appendIntoContainer(target.intoContainer, draggedBlock); // TTT: drop INTO a group/frame/columns
-    } else if (target.intoBlocks && target.intoBlocks.arrayRef) {
-      target.intoBlocks.arrayRef.push(draggedBlock); // #134: drop INTO a specific card/side body array (items[i].children / .front)
-    } else if (target.page !== undefined && target.index !== undefined) {
-      var tp = doc.pages[target.page];
-      tp.blocks.splice(target.index, 0, draggedBlock);
-      currentPage = target.page;
-    }
-    
-    doc.pages.forEach(function (page) {
-      cleanupColumns(page.blocks);
+    var res = DND.resolveDrop({
+      doc: doc, payload: dragPayload, target: target, zone: dragTargetZone, currentPage: currentPage,
+      make: function (i) { return LIBRARY[i].make(); },
+      beginEdit: pushHistory,
+      findPageOfBlock: findPageOfBlock,
+      walkBlocks: walkPageBlocks,
+      clone: clone,
+      cleanupColumns: cleanupColumns
     });
-
-    // PERF: a drop touches at most the SOURCE page (block removed) + the DEST page
-    // (block landed) — rebuild just those, not the whole world (every iframe). The
-    // dragged block now lives on the dest page; capture the source before clearing.
-    var srcPi = (dragPayload.kind === "move" && !dragPayload.duplicate) ? dragPayload.page : -1;
-    var destPi = findPageOfBlock(draggedBlock);
     dragPayload = null;
-    var affected = [];
-    [destPi, srcPi].forEach(function (i) { if (i != null && i >= 0 && i < doc.pages.length && affected.indexOf(i) === -1) affected.push(i); });
-    reapplyStructural(affected.length ? affected : -1); // -1 -> full-mount fallback
+    if (!res.ok) { if (res.reason === "cycle") clearDropMarks(); return; }
+    currentPage = res.currentPage;
+    // A drop touches at most the source and destination pages; -1 falls back to a full mount.
+    reapplyStructural(res.affected.length ? res.affected : -1);
   }
 
   // AA: a `columns` row is skipped as a canvas drop target (its inner column
@@ -7508,33 +7271,14 @@
   }
   // #215 unified screen-graph accessors. findHotspot returns the MARKER with that id
   // (searching every screen), keeping the legacy call sites' shape (id/x/y/label/blocks).
-  function findHotspot(block, id) {
-    var found = null;
-    if (block && Array.isArray(block.screens)) block.screens.forEach(function (s) {
-      if (found || !s) return;
-      (s.markers || []).forEach(function (m) { if (!found && m && m.id === id) found = m; });
-    });
-    return found;
-  }
+  function findHotspot(block, id) { return HS.findMarker(block, id); }
   // The entry Screen node (block.entry, else the first screen). The base image and
   // its markers live here; legacy block.src/alt/hotspots migrated onto it (#215).
-  function hotspotEntryScreen(block) {
-    if (!block || !Array.isArray(block.screens) || !block.screens.length) return null;
-    for (var i = 0; i < block.screens.length; i++) if (block.screens[i] && block.screens[i].id === block.entry) return block.screens[i];
-    return block.screens[0] || null;
-  }
+  function hotspotEntryScreen(block) { return HS.entryScreen(block); }
   // Every card-blocks array nested in a hotspot block (screens[].markers[].blocks) —
   // the canonical reach-in for the deep walks (remint/find/clear/F&R/rename/...).
   // Returns the LIVE arrays so walks can splice.
-  function hotspotCardArrays(b) {
-    var out = [];
-    if (b && Array.isArray(b.screens)) b.screens.forEach(function (s) {
-      if (s && Array.isArray(s.markers)) s.markers.forEach(function (m) {
-        if (m && Array.isArray(m.blocks)) out.push(m.blocks);
-      });
-    });
-    return out;
-  }
+  function hotspotCardArrays(b) { return HS.cardArrays(b); }
 
   // Force-show ONE hotspot's popover on the canvas so its child blocks (title /
   // body / image) are editable in place; hide the rest. Positioned by the SAME
@@ -7609,26 +7353,7 @@
   // Which hotspot popover-card (if any) a block lives inside — the owning hotspot
   // BLOCK + its hs. Used to keep the card revealed across edits (paste/delete/drag
   // all rebuild the canvas; without this the open card snaps shut to the image).
-  function hotspotOwnerOf(target) {
-    if (!target) return null;
-    var found = null;
-    for (var pi = 0; pi < doc.pages.length; pi++) {
-      walkPageBlocks(doc.pages[pi].blocks, function (b) {
-        if (found || b.type !== "hotspot" || !Array.isArray(b.screens)) return;
-        b.screens.forEach(function (s) {
-          if (found || !s || !Array.isArray(s.markers)) return;
-          s.markers.forEach(function (m) {
-            if (found || !m || !Array.isArray(m.blocks)) return;
-            var hit = false;
-            walkPageBlocks(m.blocks, function (x) { if (x === target) hit = true; });
-            if (hit) found = { block: b, hs: m }; // hs = the owning MARKER (#215)
-          });
-        });
-      });
-      if (found) break;
-    }
-    return found;
-  }
+  function hotspotOwnerOf(target) { return HS.ownerOf(doc.pages, target, walkPageBlocks); }
 
   // After a mount() rebuild, if the current selection (or a just-pasted/dropped
   // block) sits inside a hotspot card, re-reveal that card so it stays open for
