@@ -382,6 +382,12 @@
   <script src="src/editor/shortcuts.js"></script>
   <!-- arch-P3b-07u diagnostics: window.VersoDiagnostics — the pan/zoom frame-cadence HUD (off by default, never shipped) that separates the browser's frame rate from the JS this app spends per frame. Must precede editor.js. -->
   <script src="src/editor/diagnostics.js"></script>
+  <!-- arch-P3b-07m drill: window.VersoDrill — select-first progressive drill-in (each click on the same spot steps one level deeper, Escape steps back out) and the zoom-to-fit that needs the same depth-aware rectangles. Must precede editor.js. -->
+  <script src="src/editor/drill.js"></script>
+  <!-- arch-P3b-07n editing: window.VersoEditing — what makes the canvas typeable: contentEditable on copy fields (selected first, editable second), drop targets, column resizers, the embed shield, and the collaboration edit lifecycle. Nothing it adds may leak into render(). Must precede editor.js. -->
+  <script src="src/editor/editing.js"></script>
+  <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->
+  <script src="src/editor/actions.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->

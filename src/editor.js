@@ -8310,112 +8310,17 @@
   }
 
   // ---- Actions (flagship: prototype navigation) ----------------------------
-  // A navigable element (a nav-button block or a component instance) carries
-  // action.goto = a page id. This is set here (dropdown or drag-to-link), drawn
-  // as an accent connector on the canvas, and followed in demo mode.
-  function pageIndexById(id) { for (var i = 0; i < doc.pages.length; i++) if (doc.pages[i].id === id) return i; return -1; }
-  function pageById(id) { var i = pageIndexById(id); return i >= 0 ? doc.pages[i] : null; }
-  function currentGoto(host) { return (host.action && host.action.goto) ? host.action.goto : ""; }
-  // Combined action selector value: "__exit" for the Exit-course DO-action, else
-  // the goto page id (or "" for none). Keeps the single "On click" dropdown one control.
-  var EXIT_ACTION = "__exit";
-  function currentAction(host) { return (host.action && host.action.exit) ? EXIT_ACTION : currentGoto(host); }
-  function setGoto(host, pageId) {
-    pushHistory();
-    if (pageId) host.action = { goto: pageId };
-    else if (host.action) delete host.action;
-  }
-  function setExitAction(host) { pushHistory(); host.action = { exit: true }; }
-  function setAction(host, v) { if (v === EXIT_ACTION) setExitAction(host); else setGoto(host, v); }
+  // arch-P3b-07: what a learner's click does -- the action model, its panel and the "On click"
+  // list -- moved to editor/actions.js. An action targets a PAGE ID, never an index.
+  var renderNavButtonInspector = VE.bind("renderNavButtonInspector");
+  var renderOnClickSection = VE.bind("renderOnClickSection");
+  var pageIndexById = VE.bind("pageIndexById");
+  var pageById = VE.bind("pageById");
+  var buildActions = VE.bind("buildActions");
+  var buildTargetPicker = VE.bind("buildTargetPicker");
+  var currentGoto = VE.bind("currentGoto");
+  var setGoto = VE.bind("setGoto");
 
-  // Actions inspector section. host = the object that holds .action (an instance
-  // or a block); sourceNode = its canvas node; reselect = re-select after remount.
-  function buildActions(host, sourceNode, reselect) {
-    var _actRoot = inspector; inspector = panelSection(_actRoot, "Actions");
-    var opts = [["No navigation", ""]]
-      .concat(doc.pages.map(function (p) { return [pageDisplayName(p, doc), p.id]; }))
-      .concat([["Exit course (end SCORM session)", EXIT_ACTION]]);
-    selectRow("On click", opts, currentAction(host), function (v) { setAction(host, v); mount(); reselect(); });
-    var drag = h("button", "prop-btn", "⤳  Drag onto a page to link");
-    drag.title = "Press here and drag onto a target frame on the canvas";
-    drag.addEventListener("mousedown", function (e) { e.preventDefault(); startLink(host, sourceNode, reselect); });
-    inspector.appendChild(drag);
-    if (currentAction(host) === EXIT_ACTION) {
-      inspector.appendChild(h("div", "insp-hint", "Exits the course — ends the SCORM session (LMSFinish) and hands the learner back to the LMS. In demo mode it just shows a notice; test the real exit in the LMS."));
-    } else if (currentGoto(host)) {
-      var tgt = pageById(currentGoto(host));
-      inspector.appendChild(h("div", "insp-hint", "Navigates to “" + (tgt ? tgt.name : currentGoto(host)) + "”. Click it in demo mode to follow the link."));
-    } else {
-      inspector.appendChild(h("div", "insp-hint", "No navigation set. Drag onto a frame, or pick a page above."));
-    }
-    inspector = _actRoot;
-  }
-
-  // a nav-button block selected -> its label + Actions
-  function renderNavButtonInspector(node) {
-    var block = node.__block;
-    var head = h("div", "prop-component");
-    head.appendChild(h("span", null, "Navigation button"));
-    inspector.appendChild(head);
-
-    // #161: canonical taxonomy — Content (label), Appearance (button style), Behaviour
-    // (on-click navigation). renderBlockActionsSection then pins the box Appearance/Layout/
-    // Spacing container sections (its own begin/endSections) + the Actions footer.
-    beginSections();
-
-    // Content — the button label.
-    sectionGroup("Content", "Label", function (secBody) {
-      var row = h("div", "insp-row"); row.appendChild(h("span", "insp-row__label", "Text"));
-      var input = h("input", "prop-text"); input.type = "text"; input.spellcheck = false; input.value = block.text || "";
-      input.addEventListener("input", function () { block.text = input.value; if (node.textContent !== input.value) node.textContent = input.value; renderModelView(); });
-      row.appendChild(input); secBody.appendChild(row);
-    });
-
-    // Appearance — unified, live-apply button style (never rebuilds the panel, so the
-    // button stays selected on every change; colours are real pickers).
-    sectionGroup("Appearance", "Style", function (secBody) {
-      var _ins = inspector; inspector = secBody;
-      try {
-      function restyle() { window.applyButtonStyle(node, block); renderModelView(); }
-
-      colorFieldFlat("Fill", block.bg, function (v) { if (v == null) delete block.bg; else block.bg = v; restyle(); });
-      colorFieldFlat("Text", block.fg, function (v) { if (v == null) delete block.fg; else block.fg = v; restyle(); });
-      // Per-block hover-state override (KK); empty falls back to the theme bundle.
-      colorFieldFlat("Hover fill", block.hoverBg, function (v) { if (v == null) delete block.hoverBg; else block.hoverBg = v; restyle(); });
-      colorFieldFlat("Hover text", block.hoverFg, function (v) { if (v == null) delete block.hoverFg; else block.hoverFg = v; restyle(); });
-
-      segmentedLive("Size", [["S", "s"], ["M", "m"], ["L", "l"]], function (v) { return (block.size || "m") === v; },
-        function (v) { if (v === "m") delete block.size; else block.size = v; restyle(); });
-      segmentedLive("Shape", [["rounded", ""], ["pill", "pill"], ["square", "square"]], function (v) { return (block.shape || "") === v; },
-        function (v) { if (!v) delete block.shape; else block.shape = v; delete block.radius; restyle(); });
-      segmentedLive("Width", [["hug", false], ["full", true]], function (v) { return !!block.fullWidth === v; },
-        function (v) { block.fullWidth = v; restyle(); });
-
-      // Stroke: on/off + colour + width (colour/width always shown; take effect when on)
-      switchRow("Stroke", function () { return !!block.stroke; },
-        function (v) { if (!v) delete block.stroke; else block.stroke = true; restyle(); });
-      colorFieldFlat("Stroke colour", block.strokeColor, function (v) { if (v == null) delete block.strokeColor; else block.strokeColor = v; restyle(); });
-      fieldRow("Stroke width", block.strokeWidth == null ? "" : block.strokeWidth, function (v) { var n = parseFloat(v); if (isNaN(n)) delete block.strokeWidth; else block.strokeWidth = n; restyle(); }, "1", 0.5, 0, 12, "dl-gap");
-
-      inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Font"));
-      var navFontSel = buildFontPicker(block.font || "", function (v) { if (!v) delete block.font; else block.font = v; restyle(); });
-      inspector.appendChild(navFontSel);
-      inspector.appendChild(attachFontWarn(navFontSel));
-      } finally { inspector = _ins; }
-    });
-
-    // Behaviour — on-click navigation target (shared buildActions).
-    sectionGroup("Behaviour", "On click", function (secBody) {
-      var _ins = inspector; inspector = secBody;
-      try { buildActions(block, node, function () { reselectBlockNode(block, "navButton"); }); } finally { inspector = _ins; }
-    });
-
-    // #165: keep the buffer OPEN across the shared footer so the nav's Content/Appearance/
-    // Behaviour + the footer's Appearance(box)/Layout/Spacing emit as ONE PanelLayout-sorted
-    // stream (Behaviour after Layout/Spacing), then flush once.
-    renderBlockActionsSection(block);
-    endSections(inspector);
-  }
 
   // ---- drag-to-link: press the inspector's drag control, drag onto a frame ---
   // A screen-space preview arrow tracks the cursor; the frame under the cursor
@@ -8488,284 +8393,19 @@
   });
 
   // ---- editing wiring (across all frames) ----------------------------------
-  function blockLocked(node) { var b = node.closest && node.closest(".canvas-block"); return !!(b && b.__block && b.__block.locked); }
-  // SSS two-state text (OPT-IN, default off = current always-editable behaviour).
-  // On: a text block SELECTS on single-click (no caret) and enters edit only on
-  // double-click, so drag-to-move / Delete / select behave like any other block.
-  var TWO_STATE_KEY = "authoring.two-state-text";
-  // §74 progressive selection is now the DEFAULT (select-first). The flag is
-  // REUSED, flipped: absent OR "1" => select-first ON; only an explicit "0"
-  // ("Click to edit" escape hatch) opts out. Back-compat: users who had turned
-  // the old opt-in OFF stored "0" and stay click-to-edit; everyone else flips on.
-  // James 2026-07-08: select-first is the only model — always on, no opt-out (the toggle was
-  // removed). Hard-wired true so anyone who previously stored "0" is migrated to select-first.
-  function twoStateText() { return true; }
-  function setTwoStateText(on) { try { localStorage.setItem(TWO_STATE_KEY, on ? "1" : "0"); } catch (e) {} }
-  // shared selection dispatch for an editable field node (instance slot / nav / field)
-  function selectFieldNode(node) {
-    var card = node.closest("[data-instance]");
-    if (card) { setSelection("instance", card); return; }
-    if (node.__block && node.__block.type === "navButton") { setSelection("navButton", node); return; }
-    setSelection("field", node);
-  }
-  // two-state: turn a selected text node into an actively-edited one (caret at end)
-  function enterTextEdit(node) {
-    node.setAttribute("contenteditable", "true");
-    node.classList.add("is-text-editing");
-    node.focus();
-    try {
-      var r = document.createRange(); r.selectNodeContents(node); r.collapse(false);
-      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-    } catch (e) {}
-  }
-  // ticket 11/13: the top-level canvas block a field node belongs to (the sync granularity is the
-  // top-level block by stable id). Used to drive collab lock/edit events off the edit lifecycle.
-  function collabBlockOf(node) {
-    var cb = node && node.closest && node.closest(".canvas-block");
-    return (cb && cb.__block) || (node && node.__block) || null;
-  }
-  // ticket 11 AC2: the caret's character offset within an editable field (for a remote cursor).
-  // Best-effort + guarded -> null if unavailable, so the render falls back to a block-corner flag.
-  function caretOffsetIn(node) {
-    try {
-      var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
-      var r = sel.getRangeAt(0); if (!node.contains(r.endContainer)) return null;
-      var pre = document.createRange(); pre.selectNodeContents(node); pre.setEnd(r.endContainer, r.endOffset);
-      return pre.toString().length;
-    } catch (e) { return null; }
-  }
-  function enableEditing(root) {
-    // locked blocks: mark them (editor.css lays a click-shield) and skip all
-    // editing/selection wiring below, so they can't be moved or edited on the
-    // canvas — unlock from the inspector (reachable via the Structure outliner).
-    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block"), function (n) {
-      if (n.__block && n.__block.locked) { n.setAttribute("data-locked", "true"); n.style.position = "relative"; }
-      // §12 slice 0: stamp the stable comment-anchor id on the node for hit-testing
-      // (editor-chrome — render never emits it, so the export stays clean).
-      if (n.__block && n.__block.cid) n.setAttribute("data-cid", n.__block.cid);
-    });
-    Array.prototype.forEach.call(root.querySelectorAll("[data-edit]"), function (node) {
-      if (blockLocked(node)) return;
-      // a locked card instance can't have its slot text edited inline (mirrors a
-      // locked block); unlock from the inspector's Block-actions footer.
-      var lockedCard = node.closest("[data-instance]");
-      if (lockedCard && lockedCard.__instance && lockedCard.__instance.locked) return;
-      node.classList.add("is-editable");
-      node.setAttribute("spellcheck", "false");
-      node.addEventListener("focus", function () { History.beginEpisode(); selectFieldNode(node); if (collabChrome()) collabChrome().onEditFocus(collabBlockOf(node)); }); // collab: implicit lock acquire on edit-intent (server mode only)
-      node.addEventListener("input", function () {
-        History.pushOnce(); // one undo step per typing burst, not one per keystroke
-        var rich = node.getAttribute("data-rich");
-        writeModel(node, rich ? node.innerHTML : node.textContent);
-        scheduleSpellcheck(); // P0: re-check typos as the author types
-        var key = node.getAttribute("data-edit");
-        if (!rich && panelFields[key] && panelFields[key].value !== node.textContent) panelFields[key].value = node.textContent;
-        if (collabChrome()) { collabChrome().onEditCommit(collabBlockOf(node)); collabChrome().onCaret(collabBlockOf(node), caretOffsetIn(node)); } // collab: fan the edit out (debounced) + share the caret (throttled)
-      });
-      node.addEventListener("keyup", function () { if (collabChrome()) collabChrome().onCaret(collabBlockOf(node), caretOffsetIn(node)); }); // collab: caret moves (arrows/click) without an edit
-      node.addEventListener("blur", function () { if (collabChrome()) collabChrome().onEditBlur(collabBlockOf(node)); }); // collab: auto-release the lock on blur (server mode only)
-      // Paste as PLAIN TEXT by default: the browser's default contenteditable paste
-      // drags the SOURCE's rich HTML (fonts/colours/spans + even a copied canvas
-      // block's editor chrome) into the field, overriding its style. Instead strip to
-      // text/plain and insert it so pasted words INHERIT the target element's own
-      // formatting + named styleRef. execCommand("insertText") replaces the selection
-      // and fires `input`, so the normal writeModel path commits + pushes history.
-      node.addEventListener("paste", function (e) {
-        e.preventDefault();
-        var text = "";
-        try { text = (e.clipboardData || window.clipboardData).getData("text/plain"); } catch (_) {}
-        if (window.__sanitizeText) text = window.__sanitizeText(text); // strip invisible/mojibake chars too
-        if (!text) return;
-        // Paste-clean into a bullet list: each non-empty line -> a clean <li>, stripping a
-        // leading bullet char pasted from Word / Confluence / plain text.
-        if (caretInList(node)) {
-          var esc = function (t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
-          var lines = text.split(/\r?\n/).map(function (l) {
-            return l.replace(/^[\s ]*[•‣◦⁃∙▪●–—→✓*\-o]?[\s ]+/, "").replace(/\s+$/, "");
-          }).filter(function (l) { return l.trim(); });
-          if (lines.length) {
-            document.execCommand("insertHTML", false, lines.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join(""));
-            writeModel(node, node.innerHTML);
-            return;
-          }
-        }
-        document.execCommand("insertText", false, text);
-      });
-      // rich fields allow line breaks (Shift+Enter too); plain fields commit on Enter.
-      // Two-state: Escape exits edit back to the selected (no-caret) state.
-      node.addEventListener("keydown", function (e) {
-        // Tab / Shift+Tab in a bullet list nests / un-nests the current item (execCommand
-        // indent/outdent wraps it in a child <ul>); commit the new HTML to the model.
-        if (e.key === "Tab" && caretInList(node)) {
-          e.preventDefault();
-          document.execCommand(e.shiftKey ? "outdent" : "indent");
-          writeModel(node, node.innerHTML);
-          return;
-        }
-        if (e.key === "Enter" && !node.getAttribute("data-rich")) { e.preventDefault(); node.blur(); }
-        else if (e.key === "Escape" && twoStateText()) { e.preventDefault(); node.blur(); }
-      });
-      if (twoStateText()) {
-        // SSS two-state: not editable until double-click; single-click just selects.
-        node.setAttribute("contenteditable", "false");
-        node.addEventListener("mousedown", function (e) {
-          if (node.getAttribute("contenteditable") === "true") return; // already editing -> normal caret
-          e.preventDefault(); selectFieldNode(node); // select the block WITHOUT dropping a caret
-        });
-        node.addEventListener("dblclick", function () { enterTextEdit(node); });
-        node.addEventListener("blur", function () {
-          flushSave(); node.setAttribute("contenteditable", "false"); node.classList.remove("is-text-editing");
-          // §74 rule 3: exiting edit (Escape/blur, NOT a drill-driven reselect) drops
-          // the drill pointer from the "edit" leaf back to the "field" level, so the
-          // next Escape steps further out (edit -> block -> container).
-          if (!applyingDrill) drill.index = SEL.settleAfterRerender(drill);
-          updateDragAffordance(); // exited edit -> the selected block is draggable again
-        });
-      } else {
-        // current behaviour: always editable, click = caret.
-        node.setAttribute("contenteditable", "true");
-        node.addEventListener("blur", function () { flushSave(); });
-      }
-    });
-    Array.prototype.forEach.call(root.querySelectorAll("[data-instance]"), function (card) {
-      card.addEventListener("mousedown", function (e) { if (e.target === card) setSelection("instance", card); });
-    });
-    // embed blocks are opaque — clicking the block (not inside its iframe) selects
-    // it; content-filled iframes eat clicks, so the Structure outliner is the
-    // reliable way to select those.
-    Array.prototype.forEach.call(root.querySelectorAll("[data-embed]"), wireEmbedNode);
-    Array.prototype.forEach.call(root.querySelectorAll("[data-hotspot-block]"), wireHotspotNode);
+  // arch-P3b-07n: what turns render()'s output into something typeable -- contentEditable, the
+  // drop targets, the column resizers, the embed shield and the collab edit lifecycle -- moved to
+  // editor/editing.js. It is the file the pure-render invariant is about.
+  var enableEditing = VE.bind("enableEditing");
+  var wireEmbedNode = VE.bind("wireEmbedNode");
+  var enterTextEdit = VE.bind("enterTextEdit");
+  var selectFieldNode = VE.bind("selectFieldNode");
+  var blockLocked = VE.bind("blockLocked");
+  var twoStateText = VE.bind("twoStateText");
+  var setTwoStateText = VE.bind("setTwoStateText");
+  var collabBlockOf = VE.bind("collabBlockOf");
+  var caretOffsetIn = VE.bind("caretOffsetIn");
 
-    // Wire up direct canvas drag-and-drop & drop targets on the canvas blocks
-    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block"), function (node) {
-      var block = node.__block;
-      if (!block) return;
-      if (block.locked) return; // locked: no drag handle, no click-select (unlock via inspector)
-
-      var pageEl = node.closest(".page");
-      if (!pageEl) return;
-      var pageId = pageEl.getAttribute("data-page-id");
-      var pi = pageIndexById(pageId);
-      if (pi === -1) return;
-
-      // A columns row gets page-level top/bottom edge bands (AA) but no box/drag
-      // handle of its own; a group is an invisible container with neither.
-      if (block.type === "columns") { attachColumnsEdgeBands(node, block, pi); attachColumnResizers(node, block); attachColumnSwaps(node, block); attachEmptyColumnDrops(node, block); return; }
-      if (block.type === "group") return; // no box of its own
-
-      // Hotspot popover-card content is a FULL editing container (parity with
-      // accordion / card-reveal children): its blocks are drop targets AND
-      // draggable, so blocks can be dragged INTO the card and reordered.
-      // findBlockParent resolves hotspots[].blocks, so a move/drop splices into the
-      // right array (a left/right column-wrap safely no-ops inside the overlay).
-      // 1. Make this block a drop target
-      makeDropTarget(node, { targetBlock: block });
-      // 1a. Image blocks also accept an external image FILE dropped from the desktop.
-      if (block.type === "image") attachImageFileDrop(node, block);
-
-      // 1b. Direct click-to-select for blocks with no editable text / instance /
-      // embed of their own (image, divider, spacer, card frame). Guarded so it
-      // never steals a click that a nested block, editable text, instance, embed
-      // or the drag handle should own, and never fights the multi-select
-      // (Shift/Cmd) capture handler.
-      node.addEventListener("mousedown", function (e) {
-        if (e.shiftKey || e.metaKey || e.button !== 0) return;
-        if (e.target.closest(".canvas-drag-handle, [data-edit], [data-instance], [data-embed]")) return;
-        if (e.target.closest(".canvas-block") !== node) return; // a nested block owns it
-        e.stopPropagation();
-        selectByType(node, block);
-      });
-
-      node.style.position = "relative";
-
-      // Shared move-drag payload — identical to the old gripper's, so every drop /
-      // reorder path (makeDropTarget / handleDrop) is untouched. Alt = duplicate.
-      function startBlockDrag(e) {
-        setDragPayload({ kind: "move", page: pi, block: block, duplicate: e.altKey });
-        e.dataTransfer.effectAllowed = e.altKey ? "copy" : "move";
-        try { e.dataTransfer.setData("text/plain", ""); } catch (_) {}
-        node.classList.add("is-dragging");
-        document.body.classList.add("is-dragging-block");
-      }
-      function endBlockDrag() {
-        node.classList.remove("is-dragging");
-        clearDropMarks();
-        setDragPayload(null);
-        document.body.classList.remove("is-dragging-block");
-      }
-
-      if (twoStateText()) {
-        // §74 PHASE 2: NO gripper. The block body itself is the drag surface, but
-        // draggable is toggled ON only when the block is SELECTED (updateDragAffordance,
-        // on every selection change) — so first click selects, a press-drag on the
-        // selected block MOVES it. draggable is cleared while editing text so
-        // the caret / text-selection still works.
-        node.addEventListener("dragstart", function (e) {
-          if (node.getAttribute("draggable") !== "true") { e.preventDefault(); return; }
-          if (isTextTarget(e.target)) { e.preventDefault(); return; } // editing -> select text, don't move
-          startBlockDrag(e);
-        });
-        node.addEventListener("dragend", endBlockDrag);
-      } else {
-        // Click-to-edit escape hatch keeps the gripper handle (unchanged behaviour).
-        if (node.querySelector(".canvas-drag-handle")) return;
-        var handle = h("div", "canvas-drag-handle", "⠿");
-        handle.setAttribute("draggable", "true");
-        handle.setAttribute("contenteditable", "false");
-        handle.title = "Drag to reorder or move side-by-side";
-        handle.addEventListener("dragstart", startBlockDrag);
-        handle.addEventListener("dragend", endBlockDrag);
-        node.appendChild(handle);
-        node.classList.add("canvas-block-wrapper");
-      }
-    });
-
-    // Flip cards: only one face is visible at a time, so give each card an
-    // editor-only flip toggle to author the hidden side in place (WYSIWYG — the
-    // canvas flips exactly like the learner card). View state lives in the
-    // flipEditBack WeakSet keyed on the item object, so it survives mount()
-    // rebuilds but never touches the doc (nothing ships in the export).
-    Array.prototype.forEach.call(root.querySelectorAll('.card-reveal[data-reveal-style="flip"]'), function (grid) {
-      var block = grid.__block;
-      if (!block || !Array.isArray(block.items)) return;
-      Array.prototype.forEach.call(grid.querySelectorAll(".card-reveal__card"), function (card) {
-        var item = block.items[parseInt(card.getAttribute("data-cr-index"), 10)];
-        if (!item) return;
-        if (flipEditBack.has(item)) card.classList.add("is-revealed");
-        var btn = h("button", "card-flip-edit");
-        btn.type = "button";
-        btn.setAttribute("contenteditable", "false");
-        btn.setAttribute("draggable", "false");
-        btn.title = "Flip to edit the other side";
-        btn.innerHTML = Icon("refresh-cw");
-        btn.addEventListener("mousedown", function (e) { e.stopPropagation(); });
-        btn.addEventListener("click", function (e) {
-          e.stopPropagation(); e.preventDefault();
-          if (flipEditBack.has(item)) { flipEditBack.delete(item); card.classList.remove("is-revealed"); }
-          else { flipEditBack.add(item); card.classList.add("is-revealed"); }
-        });
-        card.appendChild(btn);
-      });
-    });
-    wireItemBodyDrops(root); // #134: every card/side body (incl. empty) accepts dropped blocks
-    scheduleSpellcheck(); // P0: (re)mark typos after every canvas render (mount / reapplyStructural)
-  }
-  // Which flip cards are currently edit-flipped to their back (Side 2). Editor view
-  // state only — keyed on the live item object, so it survives mount() but is never
-  // serialised into the doc or the export.
-  var flipEditBack = new WeakSet();
-  // A transparent shield over each embed: keeps wheel/pan/zoom on the CANVAS
-  // (an iframe would otherwise swallow the wheel and the browser would page-zoom),
-  // makes the block reliably selectable, and double-click "enters" the embed to
-  // actually interact with it (shield goes pointer-through until you click away).
-  function wireEmbedNode(node) {
-    var shield = document.createElement("div");
-    shield.className = "embed__shield";
-    shield.title = "Click to select · double-click to interact";
-    shield.addEventListener("mousedown", function (e) { e.stopPropagation(); setSelection("embed", node); });
-    shield.addEventListener("dblclick", function (e) { e.stopPropagation(); node.classList.add("is-interactive"); });
-    node.appendChild(shield);
-  }
 
   // Hotspot block on the canvas: markers drag to reposition (updates x/y %), and a
   // plain click opens that hotspot for editing (reveals its popover so its child
@@ -8942,91 +8582,8 @@
     renderGateSection(block);
   }
 
-  // ---- "On click ->" action list -------------------------------------------
-  function renderOnClickSection(block) {
-    var list = block.interactions || [];
-    inspector.appendChild(propHeader("On click", function () {
-      pushHistory();
-      ensureId(block);
-      block.interactions = block.interactions || [];
-      block.interactions.push({ trigger: { type: "click" }, action: { type: "next" } });
-      mount(); interactReselect(block);
-    }, "Add a click action"));
+  // ...continues in actions.js (arch-P3b-07).
 
-    if (!list.length) {
-      inspector.appendChild(h("div", "insp-hint", "No click actions. Add one, or drag the handle on the element onto a target page to link."));
-    }
-
-    list.forEach(function (ix, idx) {
-      var a = ix.action || (ix.action = { type: "next" });
-      var rowHead = h("div", "insp-int-row");
-      rowHead.appendChild(h("span", "insp-int-row__idx", "Action " + (idx + 1)));
-      var del = iconBtn("trash", "Remove this action", true);
-      del.addEventListener("click", function () {
-        pushHistory();
-        block.interactions.splice(idx, 1);
-        if (!block.interactions.length) delete block.interactions;
-        mount(); interactReselect(block);
-      });
-      rowHead.appendChild(del);
-      inspector.appendChild(rowHead);
-
-      // action type
-      selectRow("Do", ACTION_TYPES, a.type || "next", function (v) {
-        a.type = v;
-        // reset the now-irrelevant target so stale ids never linger
-        if (v === "goto") { if (a.target && !pageById(a.target)) delete a.target; }
-        else if (NAV_ACTIONS[v]) { delete a.target; }
-        mount(); interactReselect(block);
-      });
-
-      if (a.type === "goto") {
-        var pageOpts = [["— pick page —", ""]].concat(doc.pages.map(function (p) { return [pageDisplayName(p, doc), p.id]; }));
-        selectRow("Target page", pageOpts, a.target || "", function (v) {
-          if (!v) delete a.target; else a.target = v;
-          mount(); interactReselect(block);
-        });
-      } else if (!NAV_ACTIONS[a.type]) {
-        // element-target action: dropdown of this page's blocks + click-to-pick.
-        buildTargetPicker(block, a, "Target element");
-      }
-    });
-  }
-
-  // dropdown-of-labels + "pick on canvas" for an element target/source. `holder`
-  // is the object owning the `field`; picking/choosing mints the target's id.
-  function buildTargetPicker(sourceBlock, holder, label, field) {
-    field = field || "target";
-    var pi = findPageOfBlock(sourceBlock);
-    var candidates = pageBlockCandidates(pi, sourceBlock);
-    var opts = [["— pick element —", ""]].concat(candidates.map(function (b, i) {
-      return [blockLabel(b) + (b.id ? "" : ""), b.id || ("new:" + i)];
-    }));
-    selectRow(label, opts, holder[field] || "", function (v) {
-      if (!v) { delete holder[field]; }
-      else {
-        var tb = v.indexOf("new:") === 0 ? candidates[parseInt(v.slice(4), 10)]
-          : candidates.filter(function (b) { return b.id === v; })[0];
-        if (tb) { ensureId(tb); holder[field] = tb.id; }
-      }
-      mount(); interactReselect(sourceBlock);
-    });
-    var pick = h("button", "prop-btn", "Pick on canvas");
-    pick.title = "Then click the target element on the canvas";
-    pick.addEventListener("click", function () {
-      startPick(label.toLowerCase(), function (picked) {
-        if (picked === sourceBlock) { endPick(); renderInspector(); return; }
-        pushHistory(); ensureId(picked); holder[field] = picked.id;
-        mount(); interactReselect(sourceBlock);
-      });
-      renderInspector(); // reflect the "click an element" hint immediately
-    });
-    inspector.appendChild(pick);
-    if (holder[field]) {
-      var tgt = blockById(holder[field]);
-      inspector.appendChild(h("div", "insp-hint", tgt ? ("Targets “" + blockLabel(tgt) + "”.") : "Target element no longer exists."));
-    }
-  }
 
   // ---- "Locked until ->" reactive gate -------------------------------------
   var IS_OPTIONS = [["visited", "visited"], ["watched", "watched"], ["checked", "checked"]];
@@ -9962,185 +9519,14 @@
   }
 
   // ---- "." — zoom to fit the current selection -----------------------------
-  function selectionScreenRects() {
-    var rects = [];
-    multiSel.forEach(function (b) { var n = canvasNodeForBlock(b); if (n) rects.push(n.getBoundingClientRect()); });
-    multiSelPages.forEach(function (i) { var f = frameDescs[i] && frameDescs[i].frame; if (f) rects.push(f.getBoundingClientRect()); });
-    if (selection.type === "page") { var f = frameDescs[selection.pageIndex] && frameDescs[selection.pageIndex].frame; if (f) rects.push(f.getBoundingClientRect()); }
-    else if (selection.node) { var host = (selection.node.closest && selection.node.closest(".canvas-block")) || selection.node; rects.push(host.getBoundingClientRect()); }
-    return rects;
-  }
-  function fitSelection() {
-    var rects = selectionScreenRects();
-    if (!rects.length) { fitAll(); return; }
-    var cr = canvas.getBoundingClientRect();
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    rects.forEach(function (r) { minX = Math.min(minX, r.left); minY = Math.min(minY, r.top); maxX = Math.max(maxX, r.right); maxY = Math.max(maxY, r.bottom); });
-    var wx = (minX - cr.left - view.x) / view.zoom, wy = (minY - cr.top - view.y) / view.zoom;
-    fitWorldRect(wx, wy, (maxX - minX) / view.zoom, (maxY - minY) / view.zoom);
-  }
+  // arch-P3b-07m: progressive drill-in selection and zoom-to-fit moved to editor/drill.js. They are
+  // one concern: both need the screen rectangle of whatever is selected, at whatever depth.
+  var fitSelection = VE.bind("fitSelection");
+  var selectionScreenRects = VE.bind("selectionScreenRects");
+  var applyDrillLevel = VE.bind("applyDrillLevel");
+  var buildDrillLevels = VE.bind("buildDrillLevels");
+  var leafSelectIndex = VE.bind("leafSelectIndex");
 
-  // Canvas multi-select: Shift/Cmd-click an element toggles it into the selection.
-  // Capture phase (registered BEFORE the leaf-first click handler below) so it owns
-  // every modifier-click and beats contentEditable focus / block mousedown handlers.
-  canvas.addEventListener("mousedown", function (e) {
-    // A PAN gesture (middle-click, or Space-held left-drag) must NOT clear the selection —
-    // the whole point of panning/zooming is to reposition and then act on what's selected,
-    // so the selection has to survive it. (The pan itself is handled by the next listener.)
-    if (e.button === 1 || (spaceHeld && e.button === 0)) return;
-    if (e.shiftKey || e.metaKey) {
-      // LEAF-FIRST (James 2026-07-12): toggle the element UNDER THE CURSOR, not the whole
-      // top-level block (canvasTopBlock) — so two siblings inside one card/column can be
-      // multi-selected. Seed from the current single selection so the first modifier-click
-      // makes a pair. Bail on locked / non-block chrome (never selects).
-      var levels = buildDrillLevels(e.target);
-      var node = levels.length ? levels[leafSelectIndex(levels)].node : null;
-      if (node && node.__block && !node.__block.locked) {
-        e.preventDefault(); e.stopPropagation();
-        if (!multiSel.length && selection && selection.block && selection.block !== node.__block) multiSel.push(selection.block);
-        resetDrill(); toggleMulti(node.__block); renderInspector();
-      }
-      return;
-    }
-    if (multiSel.length || multiSelPages.length) { clearAllMulti(); refreshCanvasSelection(); renderInspector(); }
-  }, true);
-
-  // ---- §74 progressive drill-in selection (select-first mode) --------------
-  // Build the outermost->innermost stack of selectable levels at a click point.
-  // Simple text blocks are ONE node that is both `.canvas-block` and `[data-edit]`
-  // (see render.js editable()) -> they collapse to a single "field" level, so the
-  // stack for a bare paragraph is [field, edit] (select then edit). Structural
-  // container blocks (frame/group/columns/cardReveal) add an outer "block" level.
-  // `.layout-column` / `.card-reveal__card` are structural but have no selection
-  // identity yet, so they are skipped (deferred, noted in BACKLOG §74).
-  function buildDrillLevels(target) {
-    var top = canvasTopBlock(target);
-    if (!top || !top.__block || top.__block.locked) return [];
-    var inner = []; // innermost-first
-    var n = target;
-    while (n && n.nodeType === 1) {
-      // Progressive disclosure (James 2026-07-08): a node that is BOTH a canvas-block AND an
-      // editable field (a simple text block) now yields BOTH levels — the block tier (Layout/
-      // Spacing/Appearance) then the field tier (Type). The old `else if` collapsed them, so a
-      // text block jumped straight to the combined field panel and you never got block settings.
-      if (n.matches("[data-edit]")) inner.push({ kind: "field", node: n });
-      if (n.classList.contains("canvas-block") && n.__block) {
-        // Only give a data-edit node its OWN extra block tier when it's a PLAIN text block
-        // (heading/paragraph/note/…, i.e. selection type "field"). Special field-types like
-        // navButton keep their single bespoke inspector and must not gain a generic block panel.
-        if (!n.matches("[data-edit]") || getSelectionTypeForBlock(n.__block) === "field") inner.push({ kind: "block", node: n });
-      }
-      if (n === top) break;
-      n = n.parentNode;
-    }
-    var levels = inner.reverse(); // outermost-first (block before field for a dual-role node)
-    if (!levels.length) return [];
-    // A terminal editable field's final step ENTERS the caret AND shows the Type inspector in
-    // one click (the "edit" step calls selectFieldNode itself), so you go block -> type+edit
-    // without a dead "field selected, not editing" middle click.
-    var leaf = levels[levels.length - 1];
-    if (leaf.kind === "field" && leaf.node.classList.contains("is-editable")) levels[levels.length - 1] = { kind: "edit", node: leaf.node };
-    return levels;
-  }
-  function applyDrillLevel(l) {
-    if (!l) return;
-    applyingDrill = true;
-    try {
-      clearAllMulti();
-      if (l.kind === "edit") { selectFieldNode(l.node); enterTextEdit(l.node); } // Type inspector + caret in one step
-      else if (l.kind === "field") { blurActiveText(); selectFieldNode(l.node); }
-      // Block tier: force a BLOCK selection even for a data-edit text node (selectByType would
-      // map data-edit -> field). Keep selectByType for embeds/navButtons/componentGrid/columns.
-      else if (l.node.getAttribute && l.node.getAttribute("data-edit") != null && l.node.__block) { blurActiveText(); setSelection("block", l.node); }
-      else { blurActiveText(); selectByType(l.node, l.node.__block); }
-    } finally { applyingDrill = false; }
-  }
-  // LEAF-FIRST (James 2026-07-12, issue-follow-up): a plain click selects the
-  // INNERMOST element under the cursor (a heading inside a card selects the
-  // heading, not the card) — the deepest level whose kind is not "edit" (the caret
-  // step is reached by double-click). Pure so tests/run.js can guard it without a DOM.
-  function leafSelectIndex(levels) {
-    // Innermost element = the deepest level's node. Step back over ITS OWN caret
-    // ("edit") level to the block/field select-level, but NEVER past it into an
-    // ancestor: an element whose ONLY level is editable (e.g. navButton, whose block
-    // tier is suppressed) must still select ITSELF, not the container it sits in.
-    return SEL.leafSelectIndex(levels);
-  }
-  // A single capture-phase handler owns canvas clicks in select-first mode: it picks
-  // the leaf level (below) before any per-node mousedown drops a caret / selects a
-  // container, routes Shift/Cmd into the multi-selection, and defers a press-drag on
-  // the selected leaf so a native move wins over entering text edit. Bespoke subtrees
-  // (embeds, hotspots, card instances, the drag / interact handles) keep their own handlers.
-  canvas.addEventListener("mousedown", function (e) {
-    if (!twoStateText()) return;                 // click-to-edit escape hatch: old behaviour
-    if (interactMode || commentModeOn()) return;     // interact / comment mode own their click semantics
-    if (e.button !== 0 || e.shiftKey || e.metaKey || spaceHeld) return;   // Shift/Cmd multi-select is owned by the handler above
-    if (isTextTarget(e.target)) return;          // already editing this field -> native caret
-    if (e.target.closest(".canvas-drag-handle, .interact-handle, [data-embed], [data-hotspot-block], [data-instance]")) return;
-    // Contextual sidebar (James 2026-07-08): the footer nav bar is chrome (parent is the footer,
-    // not .page) so the normal drill/canvasTopBlock never reaches it. Select it when its BACKGROUND
-    // is clicked — not a nav button / mode toggle / editable label (those keep their own behaviour)
-    // — so the sidebar surfaces the Learner-nav controls (renderCourseNavInspector).
-    var navBar = e.target.closest(".course-nav.canvas-block");
-    if (navBar && navBar.__block && !e.target.closest("[data-edit], .course-nav__btn, .mode-toggle, button, a")) {
-      e.preventDefault(); e.stopPropagation();
-      blurActiveText(); resetDrill(); setSelection("block", navBar);
-      return;
-    }
-    var levels = buildDrillLevels(e.target);
-    if (!levels.length) return;                  // background / chrome -> let marquee + deselect run
-    var leafIndex = leafSelectIndex(levels);     // deepest NON-edit level = the element under the cursor
-    var leaf = levels[leafIndex];
-    var editLevel = levels[levels.length - 1];   // kind "edit" only when the leaf is editable text
-    var leafBlock = leaf.node && leaf.node.__block;
-
-    // ---- Plain click already ON the selected leaf: the selected block is the PHASE-2
-    // drag surface, so a press-DRAG must MOVE it and a double-click must EDIT. Defer to
-    // mouseup; if the pointer drags (native dragstart or >4px move) do nothing (the move
-    // ran), else a double-click enters the caret. NOT preventDefault so the browser can
-    // start the native drag; stopPropagation so the field's own mousedown (which would
-    // preventDefault-select and BLOCK the drag) never runs. THIS is the fix for "click,
-    // then click-hold to move" being swallowed as a double-click into text edit.
-    // Keyed on the NODE (the press is on the block that is currently selected AND
-    // draggable), NOT selection.block -- setSelection leaves selection.block null for
-    // some types (e.g. navButton), which would wrongly drop those out of the drag path.
-    var leafHost = leaf.node && leaf.node.closest && leaf.node.closest(".canvas-block");
-    var selHost = selection && selection.node && selection.node.closest && selection.node.closest(".canvas-block");
-    var onSelectedLeaf = leafBlock && !multiSel.length && leafHost && leafHost === selHost &&
-      leafHost.getAttribute("draggable") === "true";
-    if (onSelectedLeaf) {
-      e.stopPropagation();
-      var sx = e.clientX, sy = e.clientY, moved = false;
-      function onMove(ev) { if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 4) moved = true; }
-      function onDrag() { moved = true; }
-      function onUp() {
-        window.removeEventListener("mousemove", onMove, true);
-        window.removeEventListener("mouseup", onUp, true);
-        window.removeEventListener("dragstart", onDrag, true);
-        if (!moved && e.detail >= 2 && editLevel.kind === "edit") {
-          drill.levels = levels; drill.index = levels.length - 1;
-          applyDrillLevel(editLevel);            // double-click, no drag -> enter text edit
-        }
-      }
-      window.addEventListener("mousemove", onMove, true);
-      window.addEventListener("mouseup", onUp, true);
-      window.addEventListener("dragstart", onDrag, true);
-      return;
-    }
-
-    // ---- New target: select the LEAF directly (leaf-first). drill.index tracks the leaf
-    // so Escape steps OUTWARD (leaf -> parent container -> ... -> deselect); a plain click
-    // clears any prior multi-selection.
-    e.preventDefault(); e.stopPropagation();
-    clearAllMulti();
-    drill.levels = levels; drill.index = leafIndex;
-    // A leaf that is the caret ("edit") step -- an element like navButton whose only
-    // drill level is editable -- SELECTS on a single click without dropping the caret
-    // (so it becomes draggable, and doesn't jump straight into text edit); a
-    // double-click still edits (the field's own dblclick + the onSelectedLeaf branch).
-    if (leaf.kind === "edit") { blurActiveText(); selectFieldNode(leaf.node); }
-    else applyDrillLevel(leaf);
-  }, true);
 
   // ==========================================================================
   // ---- canvas input: pan, rubber-band marquee, and the two header buttons ----
@@ -10923,6 +10309,7 @@
     multiSel: function () { return multiSel; },
     // arch-P3b-07: the progressive-drill chain the keyboard map steps through.
     drill: function () { return drill; },
+    applyingDrill: function () { return applyingDrill; },
     multiSelPages: function () { return multiSelPages; },
     // arch-P3b-07i: the page the author last copied, offered as "Paste page after" in the tree.
     // arch-P3b-07: what the comment layer reads as the author works. The pin dropper runs in the
@@ -10953,6 +10340,36 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    endPick: endPick,
+    startPick: startPick,
+    pageBlockCandidates: pageBlockCandidates,
+    ACTION_TYPES: ACTION_TYPES,
+    propHeader: propHeader,
+    renderBlockActionsSection: renderBlockActionsSection,
+    attachFontWarn: attachFontWarn,
+    startLink: startLink,
+    NAV_ACTIONS: NAV_ACTIONS,
+    interactReselect: interactReselect,
+    wireItemBodyDrops: wireItemBodyDrops,
+    attachImageFileDrop: attachImageFileDrop,
+    attachEmptyColumnDrops: attachEmptyColumnDrops,
+    attachColumnSwaps: attachColumnSwaps,
+    attachColumnResizers: attachColumnResizers,
+    attachColumnsEdgeBands: attachColumnsEdgeBands,
+    wireHotspotNode: wireHotspotNode,
+    updateDragAffordance: updateDragAffordance,
+    caretInList: caretInList,
+    collabChrome: collabChrome,
+    selectByType: selectByType,
+    getSelectionTypeForBlock: getSelectionTypeForBlock,
+    canvasTopBlock: canvasTopBlock,
+    toggleMulti: toggleMulti,
+    fitWorldRect: fitWorldRect,
+    resetDrill: resetDrill,
+    selectFieldNode: selectFieldNode,
+    // arch-P3b-07m: the drill sets this while it re-selects, so setSelection knows not to reset the
+    // chain it is walking. A flag, and the only writer is the drill.
+    setApplyingDrill: function (v) { applyingDrill = v; },
     applyDrillLevel: applyDrillLevel,
     openCommentIdNow: openCommentIdNow,
     fitSelection: fitSelection,
@@ -11307,6 +10724,9 @@
   window.VersoClipboard.install(VE);   // the verbs that act on a selection
   window.VersoShortcuts.install(VE);   // one place that says what every key does
   window.VersoDiagnostics.install(VE);   // the frame-cadence readout
+  window.VersoDrill.install(VE);   // select-first drill-in and zoom-to-fit
+  window.VersoEditing.install(VE);   // what makes the canvas typeable
+  window.VersoActions.install(VE);   // what a learner's click does
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has

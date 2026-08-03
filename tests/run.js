@@ -261,6 +261,8 @@ section("syntax");
 // never added), so a syntax error in any of them would have shipped. A new region file is now
 // checked the moment it exists.
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var acc = [];
   (function walk(d, rel) {
     fs.readdirSync(d).sort().forEach(function (f) {
@@ -385,6 +387,7 @@ section("P3b namespace");
 // window. It is the precedent every remaining P3b ticket tests its moved region against.
 section("P3b namespace (booted)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var r = EDITOR_BOOT.tryBoot();
   ok("index.html's editor boots whole in the VM tier", r.error === null);
   if (!r.win) { console.error(r.error); return; }
@@ -424,6 +427,7 @@ section("P3b namespace (booted)");
 // __kit does, so the gallery page has to carry it as well.
 section("P3b namespace (kit page)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var r = EDITOR_BOOT.tryBoot({ page: "kit.html" });
   ok("kit.html's editor boots whole in the VM tier", r.error === null);
   if (!r.win) { console.error(r.error); return; }
@@ -905,6 +909,7 @@ section("platform-pivot 02 http adapter");
 // isCollaborating(): standalone -> false, so the editor never takes a collaborative branch.
 section("client-mount sync-client core");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var t = src("src/sync-client.js");
   var m = t.match(/\/\* @sync-client-start \*\/([\s\S]*?)\/\* @sync-client-end \*\//);
   if (!m) { ok("locate @sync-client fence", false); return; }
@@ -1037,6 +1042,7 @@ section("platform-pivot 15 base-only editing guard");
 // chrome hangs off VersoSync.isCollaborating(), so standalone shows nothing.
 section("platform-pivot 11 presence chrome");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var t = src("src/editor/comments.js");   // arch-P3b-07: the presence chrome moved with them
   var m = t.match(/\/\* @presence-model-start \*\/([\s\S]*?)\/\* @presence-model-end \*\//);
   if (!m) { ok("locate @presence-model fence", false); return; }
@@ -1118,7 +1124,8 @@ section("platform-pivot 11 presence chrome");
   ok("local caret is shared with peers, throttled", /function onCaret\(block, offset\)/.test(t) && /session\.cursorUpdate\(lastCaret\.blockId, \{ offset: lastCaret\.offset \}\)/.test(t) && /CURSOR_THROTTLE_MS/.test(t));
   // arch-P3b-07: the chrome object moved to editor/comments.js; these two claims are about the
   // EDIT LIFECYCLE, which stayed here and drives it through a bound accessor.
-  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (src("src/editor.js").match(/collabChrome\(\)\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
+  // arch-P3b-07n: the edit lifecycle moved with the wiring it belongs to.
+  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (src("src/editor/editing.js").match(/collabChrome\(\)\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
   // sync-client exposes the cursor.update session method + builder
   var scc = src("src/sync-client.js");
   ok("sync-client session: cursorUpdate + cursorMsg builder", /cursorUpdate: function \(blockId, selection\)/.test(scc) && /function cursorMsg\(docId, blockId, selection\)/.test(scc));
@@ -1132,7 +1139,7 @@ section("platform-pivot 11 presence chrome");
   ok("blur auto-releases the lock (after flushing any pending edit)", /function onEditBlur\(block\)/.test(t) && /session\.releaseLock\(block\.id\)/.test(t));
   ok("heartbeat timer starts in ensure() (drives presence TTL, AC4)", /beatTimer = setInterval\(beat, HEARTBEAT_MS\)/.test(t));
   ok("beat sends viewing + editing block ids over the session", /function beat\(\) \{ if \(live\(\) && session && session\.heartbeat\) session\.heartbeat\(viewingBlockId, editingBlockId\); \}/.test(t));
-  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /collabChrome\(\)\.onEditFocus\(collabBlockOf\(node\)\)/.test(src("src/editor.js")) && /collabChrome\(\)\.onEditCommit\(collabBlockOf\(node\)\)/.test(src("src/editor.js")) && /collabChrome\(\)\.onEditBlur\(collabBlockOf\(node\)\)/.test(src("src/editor.js")));
+  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /collabChrome\(\)\.onEditFocus\(collabBlockOf\(node\)\)/.test(src("src/editor/editing.js")) && /collabChrome\(\)\.onEditCommit\(collabBlockOf\(node\)\)/.test(src("src/editor/editing.js")) && /collabChrome\(\)\.onEditBlur\(collabBlockOf\(node\)\)/.test(src("src/editor/editing.js")));
   ok("send-side is gated on live()+session (inert in standalone)", /function onEditFocus\(block\) \{\s*if \(!live\(\) \|\| !block \|\| !block\.id \|\| !session\) return;/.test(t));
   // story 9: auto-release on IDLE (not just blur) so a focused-but-idle author doesn't hold the lock
   ok("idle-timeout releases the held block (spec story 9)", /function touchIdle\(\)/.test(t) && /session\.releaseLock\(editingBlockId\); editingBlockId = null;/.test(t) && /IDLE_RELEASE_MS/.test(t));
@@ -1605,6 +1612,7 @@ section("platform-pivot 12 lease reaper");
 // ---- platform-pivot 14: conflict rule (structure vs content lock) + rollback ----
 section("platform-pivot 14 conflict + rollback");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   try { require("node:sqlite"); }
   catch (e) { warn("node:sqlite unavailable -> conflict/rollback tests skipped"); return; }
   var os = require("os");
@@ -1761,6 +1769,7 @@ section("platform-pivot 23 comments");
 // per-link modes + audit (24).
 section("platform-pivot 22/24 review links (HTTP)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   try { require("node:sqlite"); }
   catch (e) { warn("node:sqlite unavailable -> review-link HTTP tests skipped"); return; }
   var os = require("os");
@@ -1833,6 +1842,7 @@ section("platform-pivot 25 offline comment mode");
 // authenticated boundary. (The wss:// browser pipe is ticket-30 server-only-smoke.)
 section("client-mount sync pipe (HTTP e2e)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   try { require("node:sqlite"); }
   catch (e) { warn("node:sqlite unavailable -> sync-pipe e2e skipped"); return; }
   var os = require("os");
@@ -3916,6 +3926,7 @@ section("hotspot inspector: markers consolidated with the list (#45)");
 // drop content into each column. Additive: the implicit side-by-side wrap is untouched.
 section("columns palette block (#94)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
   var edui = src("src/editor/dnd-ui.js");
@@ -3948,7 +3959,7 @@ section("columns palette block (#94)");
     var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { intoColumn: { block: col, index: 1 } }, null);
     return res.ok && col.columns[1].length === 1 && col.columns[0].length === 0;
   })());
-  ok("empty columns wired as drop targets", /function attachEmptyColumnDrops[\s\S]*?intoColumn: \{ block: b, index: i \}/.test(edui) && /attachEmptyColumnDrops\(node, block\)/.test(e));
+  ok("empty columns wired as drop targets", /function attachEmptyColumnDrops[\s\S]*?intoColumn: \{ block: b, index: i \}/.test(edui) && /attachEmptyColumnDrops\(node, block\)/.test(EDIT));
   ok("cycle guard also covers an intoColumn move", (function () {
     // dropping a columns block into one of its OWN columns would nest it inside itself
     var col = { type: "columns", explicit: true, columns: [[], []] };
@@ -4032,6 +4043,7 @@ section("group as a single side-by-side target (#95)");
 // #42: author-editable pixel dimensions behind the desktop/tablet/mobile preview buttons.
 section("customisable preview preset sizes (#42)");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
@@ -4881,6 +4893,8 @@ section("#159/#163 frontend conformance gate");
 // ---- §12 slice 2: canvas comment mode (drop / anchor / render / resolve) -----
 section("comment mode (canvas)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
+  var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   var t = src("src/editor/comments.js");   // arch-P3b-07: review comments moved here
   ok("setCommentMode toggles the canvas class + persists", /function setCommentMode\(on\)[\s\S]*?setItem\(COMMENT_MODE_KEY[\s\S]*?canvas\.classList\.toggle\("is-comment-mode", commentMode\)/.test(t));
   // 3-tier anchor resolution (block > page > world)
@@ -4912,7 +4926,7 @@ section("comment mode (canvas)");
     return calls === 1;
   })());
   // mode bails: drill + C shortcut
-  ok("drill handler bails in comment mode", /if \(interactMode \|\| commentModeOn\(\)\) return;/.test(src("src/editor.js")));
+  ok("drill handler bails in comment mode", /if \(E\.interactMode \|\| commentModeOn\(\)\) return;/.test(DRILL));
   // arch-P3b-07: the keyboard map moved to src/editor/shortcuts.js.
   ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentModeOn\(\)\)/.test(src("src/editor/shortcuts.js")));
   // export-strip: comment pins/store are editor.js chrome only — render.js knows nothing
@@ -5075,6 +5089,7 @@ section("JJJJ chapters");
 // ---- P2: auto page-naming helpers (derived number + overridable/derived title) --------
 section("P2 auto page-naming");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var etxt = src("src/editor.js");
   var body = etxt.slice(etxt.indexOf("// >>> P2 auto page-naming helpers"), etxt.indexOf("// <<< P2 auto page-naming helpers"));
   var rtxt = src("src/render.js");
@@ -5398,7 +5413,9 @@ section("field-html sanitiser");
   ok("sanitizeDeep heals existing docs on load", /if \(typeof v === "string"\) return sanitizeText\(sanitizeFieldHtml\(v\)\)/.test(etxt));
   // plain-text paste (§3 P1): editable fields strip a rich paste to text/plain so it
   // inherits the target's style — and never re-imports foreign chrome at the source.
-  var pasteBody = etxt.slice(etxt.indexOf('addEventListener("paste"'), etxt.indexOf('// rich fields allow line breaks'));
+  // arch-P3b-07n: the field wiring moved to src/editor/editing.js.
+  var EDT = src("src/editor/editing.js");
+  var pasteBody = EDT.slice(EDT.indexOf('addEventListener("paste"'), EDT.indexOf('// rich fields allow line breaks'));
   ok("editable fields bind a paste handler", pasteBody.length > 0);
   ok("paste prevents the default rich paste", /e\.preventDefault\(\)/.test(pasteBody));
   ok("paste reads text/plain only", /getData\("text\/plain"\)/.test(pasteBody));
@@ -5994,7 +6011,7 @@ section("outliner multi-select any-scope");
   ok("groupMulti resolves by ref + needs one shared parent", /findBlockParent[\s\S]*?parentArray !== pa/.test(grp));
   // selection must persist through PAN (middle-click / space+left) — the deselect handler
   // returns early for pan gestures, but a plain left-click on empty canvas still deselects.
-  ok("pan gestures don't clear the selection", /A PAN gesture[\s\S]*?if \(e\.button === 1 \|\| \(spaceHeld && e\.button === 0\)\) return;/.test(etxt));
+  ok("pan gestures don't clear the selection", /A PAN gesture[\s\S]*?if \(e\.button === 1 \|\| \(E\.spaceHeld && e\.button === 0\)\) return;/.test(src("src/editor/drill.js")));
 })();
 
 // ---- §105 batch-apply a text style / colour / align to a multi-selection ----
@@ -6420,24 +6437,25 @@ section("global motion");
 // ---- §74: select-first (progressive drill) is now the DEFAULT --------------
 section("select-first / progressive drill");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
-  var t = src("src/editor.js");
+  var t = src("src/editor.js"), DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   // rule 6: the flag is reused, flipped -> select-first ON unless an explicit "0".
-  ok("select-first is always on (toggle removed, hard-wired true)", /function twoStateText\(\) \{ return true; \}/.test(t) && !/segmentedLive\("Text editing"/.test(t));
-  ok("enableEditing still branches on twoStateText()", /if \(twoStateText\(\)\) \{[\s\S]*?dblclick[\s\S]*?enterTextEdit/.test(t));
-  ok("click-to-edit mode still sets contenteditable true", /\} else \{[\s\S]*?setAttribute\("contenteditable", "true"\)/.test(t));
+  ok("select-first is always on (toggle removed, hard-wired true)", /function twoStateText\(\) \{ return true; \}/.test(EDIT) && !/segmentedLive\("Text editing"/.test(EDIT));
+  ok("enableEditing still branches on twoStateText()", /if \(twoStateText\(\)\) \{[\s\S]*?dblclick[\s\S]*?enterTextEdit/.test(EDIT));
+  ok("click-to-edit mode still sets contenteditable true", /\} else \{[\s\S]*?setAttribute\("contenteditable", "true"\)/.test(EDIT));
   ok("deleteSelection handles a selected (non-editing) text field", /E\.selection\.type === "field"[\s\S]*?getAttribute\("contenteditable"\) !== "true"[\s\S]*?deleteBlockByRef/.test(src("src/editor/clipboard.js")));
   // drill engine
-  ok("buildDrillLevels resolves outermost->innermost levels", /function buildDrillLevels\(target\)[\s\S]*?inner\.reverse\(\)/.test(t));
-  ok("terminal editable field becomes an \"edit\" step (replaces the field-select)", /leaf\.kind === "field" && leaf\.node\.classList\.contains\("is-editable"\)[\s\S]*?levels\[levels\.length - 1\] = \{ kind: "edit"/.test(t));
-  ok("dual-role node yields BOTH block + field drill levels (progressive disclosure)", /if \(n\.matches\("\[data-edit\]"\)\) inner\.push\(\{ kind: "field"[\s\S]*?if \(n\.classList\.contains\("canvas-block"\) && n\.__block\)[\s\S]*?inner\.push\(\{ kind: "block"/.test(t));
-  ok("extra block tier gated to plain text blocks (navButton keeps bespoke inspector)", /!n\.matches\("\[data-edit\]"\) \|\| getSelectionTypeForBlock\(n\.__block\) === "field"\) inner\.push\(\{ kind: "block"/.test(t));
-  ok("edit drill step selects the field AND enters the caret", /l\.kind === "edit"\) \{ selectFieldNode\(l\.node\); enterTextEdit\(l\.node\)/.test(t));
-  ok("block drill tier forces a block selection for a data-edit text node", /getAttribute\("data-edit"\) != null && l\.node\.__block\) \{ blurActiveText\(\); setSelection\("block", l\.node\)/.test(t));
+  ok("buildDrillLevels resolves outermost->innermost levels", /function buildDrillLevels\(target\)[\s\S]*?inner\.reverse\(\)/.test(DRILL));
+  ok("terminal editable field becomes an \"edit\" step (replaces the field-select)", /leaf\.kind === "field" && leaf\.node\.classList\.contains\("is-editable"\)[\s\S]*?levels\[levels\.length - 1\] = \{ kind: "edit"/.test(DRILL));
+  ok("dual-role node yields BOTH block + field drill levels (progressive disclosure)", /if \(n\.matches\("\[data-edit\]"\)\) inner\.push\(\{ kind: "field"[\s\S]*?if \(n\.classList\.contains\("canvas-block"\) && n\.__block\)[\s\S]*?inner\.push\(\{ kind: "block"/.test(DRILL));
+  ok("extra block tier gated to plain text blocks (navButton keeps bespoke inspector)", /!n\.matches\("\[data-edit\]"\) \|\| getSelectionTypeForBlock\(n\.__block\) === "field"\) inner\.push\(\{ kind: "block"/.test(DRILL));
+  ok("edit drill step selects the field AND enters the caret", /l\.kind === "edit"\) \{ selectFieldNode\(l\.node\); enterTextEdit\(l\.node\)/.test(DRILL));
+  ok("block drill tier forces a block selection for a data-edit text node", /getAttribute\("data-edit"\) != null && l\.node\.__block\) \{ blurActiveText\(\); setSelection\("block", l\.node\)/.test(DRILL));
   // uio-E-C02: a top-level text field inspector now shows the block chrome in one scroll (no jump
   // link); the back-to-block link survives only for the non-text / version-edit fallback branch.
   ok("field/type inspector keeps the back-to-block link only for the non-text fallback", /insp-backlink[\s\S]*?reselectBlockNode\(selection\.block, "block"\)/.test(t) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(t));
-  ok("capture handler bails out in click-to-edit mode", /if \(!twoStateText\(\)\) return;\s*\/\/ click-to-edit/.test(t));
+  ok("capture handler bails out in click-to-edit mode", /if \(!twoStateText\(\)\) return;\s*\/\/ click-to-edit/.test(DRILL));
   // LEAF-FIRST (James 2026-07-12): a plain click selects the INNERMOST non-edit level
   // (the element under the cursor), not the outermost container; Escape steps outward.
   // leafSelectIndex is NODE-AWARE: it steps back over the innermost node's own caret
@@ -6457,17 +6475,17 @@ section("select-first / progressive drill");
     return normal === 1 && editOnly === 1 && foreign === 1 &&
       SEL.leafSelectIndex([]) === -1 && SEL.leafSelectIndex(null) === -1;
   })());
-  ok("plain click selects the leaf directly (leaf-first, not the container)", /var leafIndex = leafSelectIndex\(levels\);[\s\S]*?clearAllMulti\(\);\s*\n\s*drill\.levels = levels; drill\.index = leafIndex;/.test(t));
+  ok("plain click selects the leaf directly (leaf-first, not the container)", /var leafIndex = leafSelectIndex\(levels\);[\s\S]*?clearAllMulti\(\);\s*\n\s*E\.drill\.levels = levels; E\.drill\.index = leafIndex;/.test(DRILL));
   // An "edit"-kind leaf (navButton-like) SELECTS without a caret on single click, so it
   // becomes draggable and doesn't jump into text edit; other leaves select normally.
-  ok("an edit-kind leaf single-click selects without the caret (navButton draggable, no auto-edit)", /if \(leaf\.kind === "edit"\) \{ blurActiveText\(\); selectFieldNode\(leaf\.node\); \}\s*\n\s*else applyDrillLevel\(leaf\);/.test(t));
+  ok("an edit-kind leaf single-click selects without the caret (navButton draggable, no auto-edit)", /if \(leaf\.kind === "edit"\) \{ blurActiveText\(\); selectFieldNode\(leaf\.node\); \}\s*\n\s*else applyDrillLevel\(leaf\);/.test(DRILL));
   // press-drag defer is keyed on the NODE (press is on the currently-selected, draggable
   // block) not selection.block -- setSelection leaves selection.block null for some types
   // (navButton), so a block-ref check would drop them out of the drag path.
-  ok("onSelectedLeaf is keyed on the selected+draggable host node, not selection.block", /var leafHost = leaf\.node && leaf\.node\.closest && leaf\.node\.closest\("\.canvas-block"\);[\s\S]*?var onSelectedLeaf = leafBlock && !multiSel\.length && leafHost && leafHost === selHost &&\s*\n\s*leafHost\.getAttribute\("draggable"\) === "true";/.test(t));
+  ok("onSelectedLeaf is keyed on the selected+draggable host node, not selection.block", /var leafHost = leaf\.node && leaf\.node\.closest && leaf\.node\.closest\("\.canvas-block"\);[\s\S]*?var onSelectedLeaf = leafBlock && !E\.multiSel\.length && leafHost && leafHost === selHost &&\s*\n\s*leafHost\.getAttribute\("draggable"\) === "true";/.test(DRILL));
   // ONE multi-select handler owns Shift/Cmd (registered before the leaf click handler, which bails on modifiers).
-  ok("leaf-first click handler bails on Shift/Cmd (the multi-select handler owns them)", /if \(e\.button !== 0 \|\| e\.shiftKey \|\| e\.metaKey \|\| spaceHeld\) return;/.test(t));
-  ok("Shift/Cmd click multi-selects the LEAF element (not canvasTopBlock), seeded from the single selection", /if \(e\.shiftKey \|\| e\.metaKey\) \{[\s\S]*?var node = levels\.length \? levels\[leafSelectIndex\(levels\)\]\.node : null;[\s\S]*?if \(!multiSel\.length && selection && selection\.block && selection\.block !== node\.__block\) multiSel\.push\(selection\.block\);[\s\S]*?toggleMulti\(node\.__block\)/.test(t));
+  ok("leaf-first click handler bails on Shift/Cmd (the multi-select handler owns them)", /if \(e\.button !== 0 \|\| e\.shiftKey \|\| e\.metaKey \|\| E\.spaceHeld\) return;/.test(DRILL));
+  ok("Shift/Cmd click multi-selects the LEAF element (not canvasTopBlock), seeded from the single selection", /if \(e\.shiftKey \|\| e\.metaKey\) \{[\s\S]*?var node = levels\.length \? levels\[leafSelectIndex\(levels\)\]\.node : null;[\s\S]*?if \(!E\.multiSel\.length && E\.selection && E\.selection\.block && E\.selection\.block !== node\.__block\) E\.multiSel\.push\(E\.selection\.block\);[\s\S]*?toggleMulti\(node\.__block\)/.test(DRILL));
   ok("multi-select no longer keys off canvasTopBlock (would collapse siblings to the container)", !/if \(e\.shiftKey \|\| e\.metaKey\) \{\s*\n\s*var node = canvasTopBlock/.test(t));
   ok("a 2+ multi-selection strips the stray single is-selected highlight", /if \(E\.multiSel\.length >= 2\) Array\.prototype\.forEach\.call\(E\.world\.querySelectorAll\("\.is-selected"\)/.test(OUT));
   // arch-P3-07: the chain rules are src/editor/selection.js now, so these run them.
@@ -6497,19 +6515,21 @@ section("select-first / progressive drill");
 // ---- §74 PHASE 2: grab handle removed; selected block IS the drag surface -----
 section("select-first / grab-handle removal (phase 2)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
+  var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var t = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
   // select-first branch: block body is draggable, gated on the draggable attr + not editing
-  ok("select-first block dragstart is gated on draggable + not editing", /if \(node\.getAttribute\("draggable"\) !== "true"\) \{ e\.preventDefault\(\); return; \}[\s\S]*?if \(isTextTarget\(e\.target\)\) \{ e\.preventDefault\(\); return; \}/.test(t));
+  ok("select-first block dragstart is gated on draggable + not editing", /if \(node\.getAttribute\("draggable"\) !== "true"\) \{ e\.preventDefault\(\); return; \}[\s\S]*?if \(isTextTarget\(e\.target\)\) \{ e\.preventDefault\(\); return; \}/.test(EDIT));
   // the gripper handle now ONLY exists in the click-to-edit escape-hatch branch
-  ok("gripper handle only in the click-to-edit (else) branch", /Click-to-edit escape hatch keeps the gripper[\s\S]*?canvas-drag-handle/.test(t));
+  ok("gripper handle only in the click-to-edit (else) branch", /Click-to-edit escape hatch keeps the gripper[\s\S]*?canvas-drag-handle/.test(EDIT));
   ok("select-first branch does NOT create a handle", !/if \(twoStateText\(\)\) \{[\s\S]{0,400}canvas-drag-handle/.test(t));
   // updateDragAffordance: only the selected block, never group/columns/locked/editing
   ok("updateDragAffordance skips group/columns/locked/editing", /b\.type !== "group" && b\.type !== "columns" &&\s*!\(editing && host\.contains\(editing\)\)/.test(OUT));
   ok("updateDragAffordance sets draggable on the selected block", /if \(sel\) sel\.setAttribute\("draggable", "true"\)/.test(OUT));
   ok("refreshCanvasSelection updates the drag affordance", /drawContainerOutline\(E\.selection\.block\);\s*updateDragAffordance\(\);/.test(OUT));
   // a press-drag on the selected leaf defers to mouseup so a native MOVE wins over edit
-  ok("press-drag on the selected leaf defers to mouseup (move wins over dbl-click edit)", /if \(onSelectedLeaf\) \{/.test(t) && /window\.addEventListener\("mouseup", onUp, true\)/.test(t) && /if \(!moved && e\.detail >= 2 && editLevel\.kind === "edit"\)/.test(t));
+  ok("press-drag on the selected leaf defers to mouseup (move wins over dbl-click edit)", /if \(onSelectedLeaf\) \{/.test(DRILL) && /window\.addEventListener\("mouseup", onUp, true\)/.test(DRILL) && /if \(!moved && e\.detail >= 2 && editLevel\.kind === "edit"\)/.test(DRILL));
 })();
 
 // ---- leaf-first pure core: which level a plain click selects ----------------
@@ -7225,6 +7245,8 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
+  var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
@@ -7258,7 +7280,7 @@ section("richer bullet lists");
   // separate topic-body toolbar a legitimate execCommand("insertUnorderedList") --
   // free-flowing wiki prose has no block-type system to convert, unlike a canvas text
   // block, so inline execCommand is the correct fit there, not a regression of this one.
-  ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
+  ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(EDIT));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
   ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
@@ -7323,7 +7345,7 @@ section("richer bullet lists");
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
-  ok("clicking the nav-bar background selects it (not its buttons/toggle)", /var navBar = e\.target\.closest\("\.course-nav\.canvas-block"\)[\s\S]*?!e\.target\.closest\("\[data-edit\], \.course-nav__btn, \.mode-toggle, button, a"\)[\s\S]*?setSelection\("block", navBar\)/.test(e));
+  ok("clicking the nav-bar background selects it (not its buttons/toggle)", /var navBar = e\.target\.closest\("\.course-nav\.canvas-block"\)[\s\S]*?!e\.target\.closest\("\[data-edit\], \.course-nav__btn, \.mode-toggle, button, a"\)[\s\S]*?setSelection\("block", navBar\)/.test(DRILL));
   // PERF: incremental single-page render — James 2026-07-08
   ok("reapplyPage rebuilds ONE frame's content (renderPage + fold), not the world", /function reapplyPage\(i\)[\s\S]*?frameDescs\[i\][\s\S]*?window\.renderPage\(page[\s\S]*?enableEditing\(frame\)/.test(e));
   ok("reapplyPage falls back to full rebuild for variants\/language\/missing frame", /function reapplyPage\(i\) \{[\s\S]*?if \(!fd \|\| isPreview\(\)\) \{ reapplyWorld\(\); return; \}/.test(e));
@@ -7405,7 +7427,9 @@ section("font preview picker");
   // all 3 plain <select> font pickers replaced by the shared component
   // arch-P3b-07/07f: the three pickers now sit in three files -- two inspectors here, the Theme
   // panel's in theme.js -- so the claim counts across the chrome rather than within one file.
-  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js")).match(/[^_.]buildFontPicker\(/g) || [];
+  // arch-P3b-07n/07: the three pickers now sit in three files again -- the nav-button one moved
+  // with the actions panel, the header/footer one stayed, the Theme panel has its own.
+  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js") + src("src/editor/actions.js") + src("src/editor/header-footer.js")).match(/[^_.]buildFontPicker\(/g) || [];
   ok("all 3 font selects use buildFontPicker", pickerSites.length >= 3);
   ok("no plain <select> font list remains", !/h\("select"[\s\S]{0,80}FONT_LIST\.map/.test(e));
   ok("picker CSS: popup listbox present", /\.font-picker__pop \{[\s\S]*?position: absolute/.test(css) && /\.font-picker__opt \{/.test(css));
@@ -7933,6 +7957,7 @@ section("columns colWidths render");
 // ---- columns colWidths self-heal + resize-handle chrome ----------------------
 section("columns colWidths guards");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
   var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js");
@@ -7952,7 +7977,7 @@ section("columns colWidths guards");
     return res.ok && row.columns.length === 3 && row.colWidths === undefined;
   })());
   ok("resize drag redistributes only the adjacent pair (total held)", /var nj = drag\.total - ni/.test(edui) && /COL_MIN_PX/.test(edui));
-  ok("resize handle attached in the columns decorate branch", /attachColumnResizers\(node, block\)/.test(e));
+  ok("resize handle attached in the columns decorate branch", /attachColumnResizers\(node, block\)/.test(EDIT));
   var css = src("editor.css");
   ok("col-resize handle uses col-resize cursor", /\.col-resize-handle\s*\{[^}]*cursor:\s*col-resize/.test(css));
   ok("handle line uses the accent token + hover reveal", /\.col-resize-handle__line\s*\{[^}]*var\(--accent\)/.test(css) && /:hover \.col-resize-handle__line/.test(css));
@@ -7962,6 +7987,7 @@ section("columns colWidths guards");
 // ---- swap-columns affordance (hover glyph, swaps adjacent columns) ------------
 section("swap-columns affordance");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
   var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js");
@@ -7996,7 +8022,7 @@ section("swap-columns affordance");
 
   // 2. WIRING: the swap glyph is attached in the columns decorate branch, alongside the
   // existing resize handles, and mutates via swapColumns (never a bespoke inline swap).
-  ok("swap glyph attached in the columns decorate branch", /attachColumnSwaps\(node, block\)/.test(e));
+  ok("swap glyph attached in the columns decorate branch", /attachColumnSwaps\(node, block\)/.test(EDIT));
   ok("swap button uses the canonical iconBtn + Icon(\"arrow-left-right\")", /iconBtn\("arrow-left-right", "Swap these two columns"\)/.test(edui));
   ok("swap click pushes history, mutates via swapColumns, then reapplies + reselects", /pushHistory\(\);\s*\n\s*swapColumns\(block, i\);\s*\n\s*reapplyStructural\(findPageOfBlock\(block\)\);\s*\n\s*reselectBlockNode\(block, "block"\);/.test(edui));
   ok("swap button keeps the field/gap pointer semantics (mousedown/pointerdown preventDefault + stopPropagation)", /btn\.addEventListener\("pointerdown", function \(e\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}\);/.test(edui));
@@ -8053,8 +8079,9 @@ section("project auto-backup");
 // ---- desktop image file-drop onto an image block ------------------------------
 section("image file drop");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var e = src("src/editor.js");
-  ok("image blocks get attachImageFileDrop in the decoration loop", /block\.type === "image"\) attachImageFileDrop\(node, block\)/.test(e));
+  ok("image blocks get attachImageFileDrop in the decoration loop", /block\.type === "image"\) attachImageFileDrop\(node, block\)/.test(EDIT));
   // arch-P3b-07t: the drag state moved to editor/dnd-ui.js, so this file reads it through its
   // owner. The guard is the same claim -- an internal block move is not an external file drop.
   ok("only EXTERNAL file drags (no dragPayload) + Files present", /function externalImageDrag[\s\S]{0,220}if \(dragPayloadNow\(\)\) return false;[\s\S]{0,220}indexOf\.call\(dt\.types \|\| \[\], "Files"\)/.test(e));
@@ -8196,6 +8223,7 @@ section("inlineSvg memoisation (#150)");
 // too) so guard the shape of the source.
 section("pan/zoom perf wiring (#150)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var e = src("src/editor.js");
   var persist = e.slice(e.indexOf("function persistView()"), e.indexOf("function persistView()") + 260);
   ok("persistView debounces the localStorage write (setTimeout + clearTimeout)",
@@ -8245,6 +8273,7 @@ section("pan/zoom perf wiring (#150)");
 // to its frame box WHILE moving, snapping back on settle. Editor chrome only.
 section("zoomed-out plain-page LOD (#172)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-02: the threshold and the toggle moved to src/editor/canvas-view.js. Driven rather
   // than matched -- what matters is that the class tracks the CURRENT zoom on every applyView, and
   // that the boundary sits where the CSS expects it. A regex proved neither.
@@ -8305,6 +8334,7 @@ section("background-pause power governor (#179)");
 // on settle. Feature-detected: no native bridge (a plain browser) -> the CSS LOD still runs.
 section("native-snapshot gesture proxy (#151)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-02: the proxy moved to src/editor/canvas-view.js. Most of what mattered here is now
   // driven -- the bridge is stubbed onto the booted window and the request/reply round trip runs
   // for real. The remaining text checks are over the module, not editor.js.
@@ -8372,6 +8402,8 @@ section("native-snapshot gesture proxy (#151)");
 // only writers (pan/zoom/fit) reroute to scroll. Default OFF behind a flag + console toggle.
 section("native-scroll pan (#151 lever 1)");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-02: all of this moved to src/editor/canvas-view.js. The flag is a real runtime switch,
   // so the whole section is driven now -- boot with it on, boot with it off, and read what the
   // editor actually did to the DOM. That is a stronger check than any of the regexes it replaces:
@@ -8401,6 +8433,7 @@ section("native-scroll pan (#151 lever 1)");
   // scroll. The read-back of view from the CLAMPED scroll offset is the load-bearing bit -- the
   // stub clamps nothing, so this asserts the round trip, and the browser probe covers the clamp.
   (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
     var win = EDITOR_BOOT.boot();
     var K = win.VersoEditor;
     win.__nativeScroll(true);
@@ -8462,6 +8495,7 @@ section("native-scroll pan (#151 lever 1)");
   // Driven: under the flag, a zoom gesture animates the world transform rather than re-rastering,
   // then bakes to a crisp scale-only transform with the transient translate folded into scroll.
   (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
     var win = EDITOR_BOOT.boot();
     win.__nativeScroll(true);
     var K = win.VersoEditor, world = K.get("world"), canvas = K.get("canvas"), view = K.get("view");
@@ -8485,6 +8519,7 @@ section("native-scroll pan (#151 lever 1)");
   })();
   ok("the fold itself is exact (bakeView + zoomTranslate)",
     (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
       // arch-P3-07: the fold itself, exercised. A gesture that returns to its base leaves scroll
       // untouched; otherwise the translate comes back out of the scroll offset exactly.
       var CV = require(path.join(ROOT, "src/editor/canvas-view.js"));
@@ -9063,6 +9098,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
@@ -9119,6 +9155,8 @@ section("panel system v2 — layout engine");
   // arch-P3b-03: driven against the booted editor -- the section engine is DOM code, and a regex
   // over it proved the call existed, never that the element came out right.
   (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
     var K = EDITOR_BOOT.boot().VersoEditor;
     var sectionGroup = K.bind("sectionGroup");
     var sec = sectionGroup("Advanced", "Advanced", function () {});
@@ -9206,7 +9244,7 @@ section("panel system v2 — layout engine");
   ok("#161 embed: Content(HTML code)/Layout/Light-Dark/Appearance sectionGroups; loadSource targets secBody", /function renderEmbedInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "HTML code"[\s\S]*?secBody\.appendChild\(codeIn\)[\s\S]*?sectionGroup\("Layout", "Layout"[\s\S]*?sectionGroup\("Light\/Dark", "On light & dark"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?endSections\(inspector\);/.test(e));
   // #165: the shared footer is buffered INTO the nav inspector's open cycle, then flushed once —
   // one PanelLayout-sorted stream (Behaviour after Layout/Spacing), not two independent sorts.
-  ok("#161/#165 navButton: Content(Label)/Appearance(Style)/Behaviour(On click) then renderBlockActionsSection buffered, endSections once", /function renderNavButtonInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Label"[\s\S]*?sectionGroup\("Appearance", "Style"[\s\S]*?sectionGroup\("Behaviour", "On click"[\s\S]*?renderBlockActionsSection\(block\);\s*endSections\(inspector\);/.test(e));
+  ok("#161/#165 navButton: Content(Label)/Appearance(Style)/Behaviour(On click) then renderBlockActionsSection buffered, endSections once", /function renderNavButtonInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Label"[\s\S]*?sectionGroup\("Appearance", "Style"[\s\S]*?sectionGroup\("Behaviour", "On click"[\s\S]*?renderBlockActionsSection\(block\);\s*endSections\(E\.inspector\);/.test(ACT));
   ok("#161 multiSelect batch: one canonical Type sectionGroup", /function renderMultiInspector\(\)[\s\S]*?beginSections\(\);\s*sectionGroup\("Type", "Text — applies to all "[\s\S]*?endSections\(inspector\);/.test(e));
   // RETIRED 2026-07-08 (James): iconField wheel scroll-to-fine-tune removed (accidental value
   // changes while scrolling the panel). Assert the wheel-to-change handler is GONE; the glyph
@@ -9234,6 +9272,7 @@ section("panel system v2 — layout engine");
 // last option of the "On click" dropdown. Demo overrides onExit (no real exit).
 section("exit-course action");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var r = src("src/render.js"), rt = src("src/runtime.js"), e = src("src/editor.js");
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // render: exit -> data-nav-action="exit" (NOT data-goto), href stays "#"
@@ -9250,8 +9289,8 @@ section("exit-course action");
   var sa = src("export/scorm-api.js");
   ok("scorm-api: quit(exitType) sets cmi.core.exit from the arg", /function quit\(exitType\)[\s\S]{0,200}set\("cmi\.core\.exit", exitType \|\| ""\)/.test(sa));
   // authoring: Exit option in the On-click dropdown + non-destructive demo override
-  ok("editor: EXIT_ACTION sentinel + setExitAction writes action.exit", /var EXIT_ACTION = "__exit";/.test(e) && /function setExitAction\(host\) \{ pushHistory\(\); host\.action = \{ exit: true \}; \}/.test(e));
-  ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(e));
+  ok("editor: EXIT_ACTION sentinel + setExitAction writes action.exit", /var EXIT_ACTION = "__exit";/.test(ACT) && /function setExitAction\(host\) \{ pushHistory\(\); host\.action = \{ exit: true \}; \}/.test(ACT));
+  ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(ACT));
   ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(DEMO) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(DEMO));
   // Interact-mode action picker (the "On click -> Do" list): exit is an option + targetless
   ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(e));
@@ -9279,6 +9318,7 @@ section("interact contextual connectors");
 // set a card min-height. Blank inherits the block default. Ships in SCORM.
 section("hotspot per-card size");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
@@ -9314,7 +9354,7 @@ section("hotspot per-card size");
   ok("render: walkBlocks descends hotspot card blocks (#215 screens[].markers[].blocks)", /if \(Array\.isArray\(b\.screens\)\) b\.screens\.forEach\(function \(s\) \{ if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) walkBlocks\(m\.blocks, fn\); \}\); \}\);/.test(r));
   // the old inPopover exclusion (children not drop targets / not draggable) is GONE
   // — popover cards are full editing containers now.
-  ok("editor: popover children are unconditionally drop targets (no inPopover skip)", !/inPopover/.test(e) && /Hotspot popover-card content is a FULL editing container/.test(e));
+  ok("editor: popover children are unconditionally drop targets (no inPopover skip)", !/inPopover/.test(e) && /Hotspot popover-card content is a FULL editing container/.test(EDIT));
   // the open card must survive edits: mount re-reveals it when the selection/paste
   // lands inside a card, and delete reselects the owning hotspot block.
   ok("editor: mount() re-reveals an open hotspot card (keepHotspotCardOpen)", /requestAnimationFrame\(keepHotspotCardOpen\);/.test(e) && /function keepHotspotCardOpen\(\)[\s\S]{0,400}hotspotOwnerOf\(candidates\[i\]\)[\s\S]{0,320}revealHotspot\(canvasNodeForBlock\(owner\.block\), owner\.block, owner\.hs\.id\);/.test(eh));
@@ -10989,6 +11029,7 @@ section("Product Rail: Source stage info panel");
 // DOM-free (string in, HTML string out), so require it directly like ui-kit's _pure.
 section("markdown-lite content render");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var M;
   try { M = require(path.join(ROOT, "src/markdown-lite.js")); } catch (e) { ok("require src/markdown-lite.js", false); return; }
   ok("require src/markdown-lite.js", !!M && !!M._pure && typeof M.render === "function");
@@ -11489,6 +11530,7 @@ section("line diff (LineDiff)");
 // opens the settings modal's Project tab.
 section("edit-header-ia-v2: single-bar three-zone editor header");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
   var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   // MARKUP: one bar, three zones, two hairline seps, no leftover two-row structure.
@@ -11567,6 +11609,7 @@ section("uio-E-C04: labelled variant/version axes + off-base return chip");
 // the panel ⋯ overflow menu, and its on-state becomes a scope-stating banner.
 section("uio-E-C05: JSON model behind Developer tools + reorder in the panel overflow menu");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js"), html = src("index.html");
   // EDIT-10: developer-tools gate, off by default.
@@ -12493,6 +12536,7 @@ section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
 // nothing of the configuration it still held.
 section("uio-O-W2 section switch vs disclosure (OVL-08)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var e = src("src/editor.js"), ecss = src("editor.css");
   // Retargeted by OVL-07: these behaviours now live on the ONE section (`.insp-section`),
   // not on the second twirl chrome they were first built in — the claims are unchanged.
@@ -12549,6 +12593,7 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
 // section, and sections nest one deep: a group that wants a third level is promoted.
 section("uio-O-W2 one section notation, two levels (OVL-07)");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
@@ -12812,6 +12857,7 @@ section("uio-F05 escalation links (popover/menu -> sheet)");
 // inheritance path.
 section("uio-F03 scope + inheritance model");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -13039,6 +13085,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // flagship — inline canvas edits capture into base.versionOverrides[version] (diffed against
 // base), base stays untouched, render/resolveVersion stay pure so editor==export holds.
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   section("#207 edit-in-version (pure resolveVersionForEdit + capture)");
   var rtxt = src("src/render.js");
   var slice = rtxt.slice(rtxt.indexOf("var VARIANT_AXIS"), rtxt.indexOf("// ---- interaction model normalisation"));
@@ -13158,6 +13205,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // #207 editor wiring: version becomes the editable flagship; capture routes through writeModel;
 // versionVis tagging + a disabled inspector notice (no dead controls) while editing a version.
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   section("#207 edit-in-version (editor wiring)");
   var e = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   // ticket 15 rewired the #207 gate through the pure collabEditGate (the "version editable only
@@ -13167,7 +13215,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("editable version uses the resolveVersionForEdit tree", /versionEditable\(\) && window\.resolveVersionForEdit\)\s*\? window\.resolveVersionForEdit\(d, activeVersion\)/.test(e));
   ok("enableEditing gate keys off canvasEditable() (version = editable flagship UNLESS collaborating)", (e.match(/if \(canvasEditable\(\)\) enableEditing\(world\);/g) || []).length >= 2);
   ok("writeModel captures into versionOverrides via __vbase when editing a version", /if \(versionEditable\(\) && obj && obj\.__vbase\) setVersionOverrideField\(obj\.__vbase, activeVersion, field, value\);\s*else obj\[field\] = value;/.test(e));
-  ok("capture is undoable — the input handler snapshots before writeModel", /History\.pushOnce\(\);[\s\S]{0,200}writeModel\(node,/.test(e));
+  ok("capture is undoable — the input handler snapshots before writeModel", /History\.pushOnce\(\);[\s\S]{0,200}writeModel\(node,/.test(EDIT));
   ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(e));
   ok("version tagging targets the BASE node (__vbase) not the display clone", /function versionBaseNode\(node\) \{ return \(node && node\.__vbase\) \|\| node; \}/.test(e));
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
@@ -14068,7 +14116,7 @@ section("P0 spellcheck");
   ok("spellcheck not read by render.js", src("src/render.js").indexOf("VersoSpell") === -1 && src("src/render.js").indexOf("verso-spelling") === -1);
   ok("marking is CSS.highlights (zero DOM mutation)", /CSS\.highlights\.set\(SPELL_HL_NAME, hl\)/.test(src("src/editor.js")));
   ok("checker + dict load before editor.js", (function () { var html = src("index.html"); return html.indexOf("spellcheck-dict.js") < html.indexOf("src/spellcheck.js") && html.indexOf("src/spellcheck.js") < html.indexOf("src/editor.js"); })());
-  ok("re-checks after canvas render + copy-editor render + edits", /scheduleSpellcheck\(\); \/\/ P0: \(re\)mark/.test(src("src/editor.js")) && /scheduleSpellcheck\(\); \/\/ P0: re-check typos as the author types/.test(src("src/editor.js")));
+  ok("re-checks after canvas render + copy-editor render + edits", /scheduleSpellcheck\(\); \/\/ P0: \(re\)mark/.test(src("src/editor/editing.js")) && /scheduleSpellcheck\(\); \/\/ P0: re-check typos as the author types/.test(src("src/editor/editing.js")));
   // #133 add-to-dictionary: API + right-click affordance
   ok("VersoSpell exposes addWord (persists an allow-list)", /addWord: addWord/.test(sc) && /localStorage\.setItem\(IGNORE_KEY, JSON\.stringify\(list\)\)/.test(sc));
   ok("allow-list is consulted by the checker", /function allow\(lower\) \{ return !!\(CONTRACT\[lower\] \|\| ignore\[lower\]\); \}/.test(sc));
@@ -14080,6 +14128,7 @@ section("P0 spellcheck");
 // ---- #134 every card/side is a drop-target container ----------------------
 section("#134 cards as drop containers");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var e = src("src/editor.js");
   var body = OUT.slice(OUT.indexOf("function containerChildGroups(block)"), OUT.indexOf("// DD: select a nested block by REF"));
@@ -14119,7 +14168,7 @@ section("#134 cards as drop containers");
   // arch-P3b-07t: wireItemBodyDrops moved to editor/dnd-ui.js. The scan window widens by the four
   // characters per line the extra indent costs.
   ok("canvas wires each card/side body (incl. front) as a drop target", /function wireItemBodyDrops\(root\)[\s\S]{0,1000}card-reveal__front[\s\S]{0,140}"front"/.test(src("src/editor/dnd-ui.js")));
-  ok("canvas wiring is called from enableEditing", /wireItemBodyDrops\(root\); \/\/ #134/.test(e));
+  ok("canvas wiring is called from enableEditing", /wireItemBodyDrops\(root\); \/\/ #134/.test(EDIT));
   ok("outliner cap rows drop into the item array", /if \(g\.arrayOwner\) \{[\s\S]{0,240}intoBlocks: \{ arrayRef: arr, ownerBlock: blk \}/.test(OUT));
   ok("outliner block-row drop for items containers routes to the first item", /if \(isItems\) \{[\s\S]{0,260}it0\.children = it0\.children \|\| \[\]/.test(OUT));
 })();
@@ -16627,6 +16676,7 @@ section("arch-P2 test seam");
 // to leave the closed course's undo stack standing over a different course.
 section("arch-P3-02 editor history");
 (function () {
+  var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var H = require(path.join(ROOT, "src/editor/history.js"));
 
   // A stand-in editor: one live doc, one registry entry, and the pair-write between them.
