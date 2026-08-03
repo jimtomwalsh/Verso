@@ -135,7 +135,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -4318,7 +4318,12 @@ section("comment mode (canvas)");
 section("comment list (panel)");
 (function () {
   var t = src("src/editor.js");
-  ok("renderInspector routes to the comment list in comment mode", /if \(commentMode\) \{ renderCommentList\(\); return; \}/.test(t));
+  ok("renderInspector routes to the comment list in comment mode", (function () {
+    var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
+    // comment mode wins over the selection AND over interact mode (arch-P3-04: the table's order)
+    return VI.pick({ commentMode: true, selectionType: "block" }).render === "renderCommentList" &&
+      VI.pick({ commentMode: true, interactMode: true, multiSelCount: 5 }).render === "renderCommentList";
+  })());
   ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(interactMode\) setInteractMode\(false\)/.test(t));
   ok("list filters Open vs Resolved", /function renderCommentList[\s\S]*?commentFilter === "resolved" \? c\.done : !c\.done/.test(t));
   ok("row = colour-dot + snippet + done checkbox", /comment-row__dot[\s\S]*?comment-row__snip[\s\S]*?comment-row__done/.test(t));
@@ -5367,7 +5372,11 @@ section("outliner multi-select any-scope");
 section("multi-selection batch style");
 (function () {
   var etxt = src("src/editor.js");
-  ok("renderInspector routes a >=2 multi-selection to the batch inspector", /if \(multiSel\.length >= 2\) \{ renderMultiInspector\(\)/.test(etxt));
+  ok("renderInspector routes a >=2 multi-selection to the batch inspector", (function () {
+    var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
+    return VI.pick({ multiSelCount: 2, selectionType: "block" }).render === "renderMultiInspector" &&
+      VI.pick({ multiSelCount: 1, selectionType: "block" }).render === "renderBlockInspector";
+  })());
   var m = etxt.slice(etxt.indexOf("function renderMultiInspector"), etxt.indexOf("function renderMultiInspector") + 3600);
   ok("filters the selection to text blocks (TEXT_STYLE_TYPES)", /multiSel\.filter\(function \(b\) \{ return TEXT_STYLE_TYPES\[b\.type\]/.test(m));
   ok("batch loops over EVERY selected text block", /function batch\(mut\) \{ pushHistory\(\); textBlocks\.forEach\(function \(b\) \{ mut\(b\)/.test(m));
@@ -8434,7 +8443,11 @@ section("UI kit seam");
   ok("renderDemo pushes theme into preview embeds", /fitEmbedsIn\(demoDevice\); renderCommentPins\(\);[\s\S]{0,160}pushEmbedTheme\(demoDevice, activeMode, activeTheme\(\)\.color\)/.test(e));
   // arch-P3-02: the guard lives in the module now (and is tested there against a null document).
   ok("the kit gallery loads the history seam before editor.js", src("kit.html").indexOf("src/editor/history.js") < src("kit.html").indexOf("src/editor.js\""));
-  ok("renderInspector no-ops in kit mode (gallery owns #inspector)", /function renderInspector\(\) \{\s*if \(window\.__KIT_MODE\) return;/.test(e));
+  ok("renderInspector no-ops in kit mode (gallery owns #inspector)", (function () {
+    var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
+    return VI.pick({ kitMode: true, selectionType: "block" }).render === null &&
+      /if \(!rule\.render\) return;/.test(e);
+  })());
   // The gallery files exist and pull from the real primitives.
   var html = "", gal = "";
   try { html = src("kit.html"); } catch (_) {}
@@ -8568,7 +8581,7 @@ section("UI kit seam");
   // Ticket 8 (6/n) — cardReveal wrapped in two-level.
   ok("cardReveal wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "cardReveal"\) \{ renderBlockTwoLevel\(node, "Card reveal", CONTENT_PURE_DECL, renderCardRevealInspector\); return; \}/.test(e));
   // Ticket 8 (7/n) — embed (htmlEmbed/webEmbed) wrapped in two-level.
-  ok("embed wrapped in the two-level shell (type-aware label; #161 depth-pure)", /selection\.type === "embed"\) renderBlockTwoLevel\(selection\.node, selection\.node\.__block\.type === "htmlEmbed" \? "HTML Interaction" : "Web Embed", CONTENT_PURE_DECL, renderEmbedInspector\)/.test(e));
+  ok("embed wrapped in the two-level shell (type-aware label; #161 depth-pure)", /renderEmbedPanel: function \(\) \{\s*renderBlockTwoLevel\(selection\.node, selection\.node\.__block\.type === "htmlEmbed" \? "HTML Interaction" : "Web Embed",\s*CONTENT_PURE_DECL, renderEmbedInspector\);/.test(e));
   // PERF: a large interaction's source (MBs of inlined base64) is NOT eagerly injected into
   // the inspector <textarea> — a multi-MB editable node made the whole panel chug. It is
   // deferred behind a "Load HTML to edit" button above a threshold; small ones stay inline.
@@ -12193,7 +12206,11 @@ section("#131 merge text boxes");
   ok("join: null input null-safe", join(null) === "" && join(undefined) === "");
   // wiring: exposed in the floating bar, canvas context menu, and outline multi menu
   ok("wiring: floating multi toolbar shows Merge (gated)", /function showMultiToolbar\(\)[\s\S]{0,260}canMergeTextBoxes\(multiSel\)[\s\S]{0,140}iconBtn\("merge", "Merge text boxes"\)/.test(t));
-  ok("wiring: renderInspector multi branch shows the bar", /multiSel\.length >= 2\) \{ renderMultiInspector\(\); renderVariantOverrides\(\); showMultiToolbar\(\);/.test(t));
+  ok("wiring: renderInspector multi branch shows the bar", (function () {
+    var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
+    var multi = VI.pick({ multiSelCount: 2 });
+    return multi.after.indexOf("multiToolbar") !== -1 && multi.after.indexOf("variantOverrides") !== -1;
+  })());
   ok("wiring: canvas context menu multi branch offers Merge", /inMulti\(target\.block\) && multiSel\.length >= 2[\s\S]{0,220}canMergeTextBoxes\(multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(t));
   ok("wiring: outline multi menu offers Merge", /multi && canMergeTextBoxes\(multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(t));
   // action: writes the join into the survivor + shared-parent guard (mirrors groupMulti)
@@ -15346,6 +15363,66 @@ section("arch-P3-02 editor history");
     (e.match(/activateDoc\(/g) || []).length === 4 && /function activateDoc\(id\)[\s\S]{0,700}History\.reset\(\);/.test(e));
   ok("editor.js holds no undo/redo state of its own",
     e.indexOf("undoStack") === -1 && e.indexOf("redoStack") === -1);
+})();
+
+// ---- arch-P3-04: the inspector dispatch table -----------------------------
+// The panel that gets shown was a nine-line if/else chain whose ORDER carried the precedence rule,
+// and whose early returns silently decided which of the six fixed post-render steps ran. Both are
+// data now, so both can be read side by side and tested without a browser.
+section("arch-P3-04 inspector dispatch");
+(function () {
+  var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
+  var e = src("src/editor.js");
+
+  // ---- precedence, top to bottom ----
+  ok("kit mode wins over everything and renders nothing",
+    VI.pick({ kitMode: true, commentMode: true, interactMode: true, multiSelCount: 9, selectionType: "block" }).render === null);
+  ok("comment mode beats interact mode, a multi-selection and the selection type",
+    VI.pick({ commentMode: true, interactMode: true, multiSelCount: 4, selectionType: "page" }).key === "comment");
+  ok("interact mode beats a multi-selection and the selection type",
+    VI.pick({ interactMode: true, multiSelCount: 4, selectionType: "page" }).key === "interact");
+  ok("two or more selected beats the single selection's type",
+    VI.pick({ multiSelCount: 2, selectionType: "instance" }).key === "multi");
+  ok("one selected does not", VI.pick({ multiSelCount: 1, selectionType: "instance" }).key === "instance");
+
+  // ---- every selection type resolves, and an unknown one lands on the document panel ----
+  var BY_TYPE = { instance: "renderInstanceInspector", field: "renderFieldInspector", embed: "renderEmbedPanel",
+                  navButton: "renderNavButtonInspector", page: "renderPageInspector", block: "renderBlockInspector" };
+  Object.keys(BY_TYPE).forEach(function (t) {
+    ok("a " + t + " selection shows its own panel", VI.pick({ selectionType: t }).render === BY_TYPE[t]);
+  });
+  ok("nothing selected shows the document panel", VI.pick({}).render === "renderDocumentInspector");
+  ok("an unrecognised selection type falls to the document panel, never a blank one",
+    VI.pick({ selectionType: "sasquatch" }).render === "renderDocumentInspector");
+  ok("a missing state object never throws", VI.pick(null).render === "renderDocumentInspector" && VI.pick().key === "document");
+
+  // ---- the post-render contract, per panel ----
+  ok("every element/page/document panel gets all six fixed steps, in order", (function () {
+    return ["instance", "field", "embed", "navButton", "page", "block"].every(function (t) {
+      return VI.pick({ selectionType: t }).after.join(",") === VI.FULL.join(",");
+    }) && VI.pick({}).after.join(",") === VI.FULL.join(",");
+  })());
+  ok("the batch panel adds its own toolbar and keeps variant overrides", (function () {
+    var a = VI.pick({ multiSelCount: 3 }).after;
+    return a.indexOf("multiToolbar") !== -1 && a.indexOf("variantOverrides") !== -1 && a.indexOf("versionGuard") === -1;
+  })());
+  // Three panels never called this, purely because `return` came first. It is not visibly stale
+  // only because wireScrollEdges also installs a MutationObserver -- a coincidence propping up a
+  // contract. Now every panel that draws asks for it.
+  ok("EVERY panel that draws wires the panel's scroll edges", VI.INSPECTORS.every(function (r) {
+    return r.render === null || r.after.indexOf("scrollEdges") !== -1;
+  }));
+
+  // ---- the table names steps; editor.js implements them ----
+  ok("every step the table can ask for has an implementation", VI.steps().every(function (name) {
+    return new RegExp("\\n    " + name + ": function ").test(e);
+  }));
+  ok("every panel the table can ask for has an implementation", VI.INSPECTORS.every(function (r) {
+    return r.render === null || new RegExp("\\n    " + r.render + ": function ").test(e);
+  }));
+  ok("editor.js dispatches through the table rather than a branch chain",
+    /window\.VersoInspector\.pick\(\{/.test(e) && /rule\.after\.forEach\(function \(step\) \{ INSPECTOR_STEPS\[step\]\(\); \}\)/.test(e) &&
+    !/if \(selection\.type === "instance"\) renderInstanceInspector/.test(e));
 })();
 
 // ---- arch-P2-04: the slice ratchet ----------------------------------------
