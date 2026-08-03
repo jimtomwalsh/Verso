@@ -33,7 +33,7 @@
 
   function install(kernel) {
     var E = kernel.need(
-      "h", "pushHistory", "panelSection", "sectionGroup", "getBlockStyles", "iconBtn", "alignSeg",
+      "h", "pushHistory", "panelSection", "sectionGroup", "getBlockStyles", "alignSeg",
       "ensureBlockToolbar", "colourControl", "inspector", "doc", "blockToolbarSep"
     );
     // The stable half: function declarations editor.js never reassigns, aliased once so the moved
@@ -42,9 +42,49 @@
     // `doc` wholesale on a document swap, and mints `blockToolbarSep` when it builds the overlay
     // bar. All three are read through E at the moment they are used.
     var h = E.h, pushHistory = E.pushHistory, panelSection = E.panelSection,
-        sectionGroup = E.sectionGroup, getBlockStyles = E.getBlockStyles, iconBtn = E.iconBtn,
+        sectionGroup = E.sectionGroup, getBlockStyles = E.getBlockStyles,
         alignSeg = E.alignSeg, ensureBlockToolbar = E.ensureBlockToolbar,
         colourControl = E.colourControl;
+
+    // ---- the three controls that were living elsewhere (arch-P3b-07) --------------------
+    // A canonical control belongs with the canonical control set, whatever banner its first
+    // caller happened to sit under. The icon button came from the drag-and-drop banner, the
+    // dropdown and its labelled row from the theme banner.
+    //
+    // Legacy icon-button keys -> Lucide (kebab) names, resolved through the offline Icon accessor
+    // (src/icons.js). The hand-drawn ICONS art is retired; callers keep their stable keys, so this
+    // was a re-skin and never a re-wire.
+    var ICON_ALIAS = {
+      duplicate: "copy", trash: "trash-2", grip: "grip-vertical", plus: "plus",
+      minus: "minus", chevron: "chevron-right", image: "image", refresh: "refresh-cw",
+      upload: "upload", unlink: "unlink", eye: "eye", eyeOff: "eye-off",
+      arrowUp: "arrow-up", arrowDown: "arrow-down", lock: "lock", unlock: "lock-open",
+      slice: "scissors", merge: "fold-vertical"
+    };
+    function iconBtn(icon, title, danger) {
+      var b = h("button", "icon-btn" + (danger ? " icon-btn--danger" : ""));
+      b.title = title;
+      b.innerHTML = Icon(ICON_ALIAS[icon] || icon);
+      return b;
+    }
+    // #157/rawSelect review: the canonical dropdown -- VersoUI.Select fed the editor's
+    // [label, value] option pairs. Returns the <select> element so callers can still style
+    // width/flex or attach extra listeners (the weight picker captures a range on mousedown).
+    function dsSelect(pairs, current, onChange, opts) {
+      opts = opts || {};
+      return window.VersoUI.Select({
+        options: (pairs || []).map(function (o) { return { value: o[1], label: o[0] }; }),
+        value: current == null ? "" : String(current),
+        placeholder: opts.placeholder || null,
+        onChange: onChange
+      });
+    }
+    function selectRow(label, options, current, onchange) {
+      E.inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", label));
+      var sel = dsSelect(options, current, function (v) { pushHistory(); onchange(v); });
+      E.inspector.appendChild(sel);
+      return sel;
+    }
 
     function ensureDatalists() {
       var lists = {
@@ -838,7 +878,8 @@
       settingsRow: settingsRow, crossRefRow: crossRefRow, fieldRow: fieldRow,
       segmentedLive: segmentedLive, iconField: iconField, twoUp: twoUp, propHeader: propHeader,
       breadcrumb: breadcrumb, optionalRow: optionalRow, repeatedList: repeatedList,
-      renderContainerChrome: renderContainerChrome
+      renderContainerChrome: renderContainerChrome,
+      iconBtn: iconBtn, dsSelect: dsSelect, selectRow: selectRow
     });
     // Constants the panels read as data rather than call.
     kernel.provide({
@@ -846,7 +887,8 @@
       NAV_BTN_KEYS: NAV_BTN_KEYS, NAV_PILL_KEYS: NAV_PILL_KEYS,
       SCOPE_LADDER: SCOPE_LADDER, SCOPE_LABELS: SCOPE_LABELS, NOT_SET: NOT_SET,
       BOX_SYSTEM_DEFAULTS: BOX_SYSTEM_DEFAULTS,
-      CONTAINER_ROW_ORDER: CONTAINER_ROW_ORDER, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS
+      CONTAINER_ROW_ORDER: CONTAINER_ROW_ORDER, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS,
+      ICON_ALIAS: ICON_ALIAS
     });
   }
 

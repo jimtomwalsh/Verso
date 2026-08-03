@@ -2943,7 +2943,7 @@
     setActiveDocObject(registry[activeDocId]);
     History.reset();
     clearSelection(); clearMultiPages(); multiSel = []; currentPage = 0;
-    themePresetSel = null; // #126: the picker's shown theme is per-course; don't bleed one course's choice into the next
+    clearThemePresetChoice(); // #126: the picker's shown theme is per-course; don't bleed one course's choice into the next
     return doc;
   }
   function pushHistory() { History.push(); }
@@ -3301,402 +3301,38 @@
   function setDragTargetZone(v) { VE.get("setDragTargetZone")(v); }
 
 
-  // Legacy icon-button keys -> Lucide (kebab) names, resolved through the offline
-  // Icon accessor (src/icons.js). Hand-drawn ICONS art retired; callers keep their
-  // stable keys so wiring is untouched (re-skin, never re-wire).
-  var ICON_ALIAS = {
-    duplicate: "copy", trash: "trash-2", grip: "grip-vertical", plus: "plus",
-    minus: "minus", chevron: "chevron-right", image: "image", refresh: "refresh-cw",
-    upload: "upload", unlink: "unlink", eye: "eye", eyeOff: "eye-off",
-    arrowUp: "arrow-up", arrowDown: "arrow-down", lock: "lock", unlock: "lock-open",
-    slice: "scissors", merge: "fold-vertical"
-  };
-  function iconBtn(icon, title, danger) {
-    var b = h("button", "icon-btn" + (danger ? " icon-btn--danger" : ""));
-    b.title = title;
-    b.innerHTML = Icon(ICON_ALIAS[icon] || icon);
-    return b;
-  }
+  // arch-P3b-07: the icon button and its legacy-key alias table are canonical CONTROLS, and moved
+  // to editor/inspector/primitives.js with the rest of the set. They were in the drag-and-drop
+  // banner because that is where the first caller happened to be.
+  var iconBtn = VE.bind("iconBtn");
+  var ICON_ALIAS;   // data, not an entry point -- read from its owner after install (__kit ships it)
 
   // ---- active theme (#124: home is doc.theme) -------------------------------
-  // The theme TOKENS now live per-course on doc.theme (was editor-global). `activeMode`
-  // (which palette you PREVIEW) stays an editor-global UI preference — it's a workspace
-  // toggle, not course identity (export bakes BOTH modes; the learner toggles). The
-  // token payload is per-doc.
-  // // `workingThemes` is a mount-rebuilt CACHE: docThemeToModes(doc.theme) projects the
-  // doc's theme onto the { dark, light } FLAT shape applyTheme/render/export consume,
-  // sharing the doc's group objects BY REFERENCE — so a panel edit (setToken/
-  // setButtonToken) mutates doc.theme in place, and scheduleSave() persists it with the
-  // doc. mount()/switchDoc rebuild the cache so setDoc round-trips doc.theme.
-  var THEME_MODE_KEY = "authoring.themeMode";
-  var activeMode = "dark";
-  var workingThemes = window.docThemeToModes(doc && doc.theme ? doc.theme : window.defaultDocTheme());
-  function activeTheme() { return workingThemes[activeMode]; }
-  // SSSS: which token SET the Theme panel EDITS — independent of the PREVIEWED mode
-  // (the NNN top-bar toggle drives the preview/activeMode). null = follow the preview.
-  // Lets you edit the light AND dark palettes explicitly, not just the active one.
-  var themeEditMode = null;
-  function themeEditName() { return themeEditMode || activeMode; }
-  function themeEdit() { return workingThemes[themeEditName()]; }
-  // Rebuild the working cache from the current doc's theme (called by mount/switchDoc so
-  // the panel + canvas + export always reflect THIS course's theme).
-  function syncWorkingFromDoc() {
-    if (!doc) return;
-    if (!doc.theme) doc.theme = window.defaultDocTheme();
-    workingThemes = window.docThemeToModes(doc.theme);
-  }
-  // Only the preview-mode preference is editor-global now; theme tokens ride the doc.
-  function loadTheme() {
-    try { var m = localStorage.getItem(THEME_MODE_KEY); if (m === "dark" || m === "light") activeMode = m; } catch (e) {}
-    syncWorkingFromDoc();
-  }
-  function persistTheme() {
-    try { localStorage.setItem(THEME_MODE_KEY, activeMode); } catch (e) {} // preview pref only
-    scheduleSave(); // theme tokens live on doc.theme (mutated in place via workingThemes) -> persist the doc
-  }
-  function reapplyTheme() {
-    var t = activeTheme();
-    Array.prototype.forEach.call(canvas.querySelectorAll(".course-root"), function (r) { window.applyTheme(r, t); r.setAttribute("data-mode", activeMode); });
-    Array.prototype.forEach.call(canvas.querySelectorAll(".frame"), function (f) { f.style.backgroundColor = t.color.bg; });
-    // Item Z: push the active theme INTO each HTML-interaction iframe so it
-    // recolours/contrasts too (same call the exported runtime makes on its toggle).
-    if (window.pushEmbedTheme) window.pushEmbedTheme(canvas, activeMode, t.color);
-    // late-loading iframes announce readiness -> re-push so they don't miss it.
-    if (!window.__embedThemeReadyBound) {
-      window.__embedThemeReadyBound = true;
-      window.addEventListener("message", function (e) {
-        var d = e.data; if (typeof d === "string") { try { d = JSON.parse(d); } catch (_) { return; } }
-        if (d && d.type === "theme-shim-ready" && window.pushEmbedTheme) window.pushEmbedTheme(canvas, activeMode, activeTheme().color);
-      });
-    }
-  }
-  function persistThemePref() { try { localStorage.setItem(THEME_MODE_KEY, activeMode); } catch (e) {} }
-  // Switching the previewed palette is a UI pref only — it does NOT touch doc.theme, so
-  // persist the pref without dirtying/saving the doc.
-  function setMode(m) { activeMode = m; reapplyTheme(); persistThemePref(); renderInspector(); updateModeToggle(); }
-  // NNN: top-bar light/dark authoring toggle (replaces the Theme-panel selector).
-  function updateModeToggle() {
-    var b = document.getElementById("mode-toggle");
-    if (!b) return;
-    b.title = "Switch to " + (activeMode === "dark" ? "light" : "dark") + " palette";
-    b.classList.toggle("is-active", activeMode === "light");
-  }
-  (function wireModeToggle() {
-    var b = document.getElementById("mode-toggle");
-    if (b) { b.addEventListener("click", function () { setMode(activeMode === "dark" ? "light" : "dark"); }); updateModeToggle(); }
-  })();
-  // #81 — the Help (?) button used to open the guide in a new browser tab, which
-  // silently no-ops in the WKWebView desktop shell / file:// context (and a raw .md
-  // wouldn't render as a page anyway). Open the guide IN-APP instead: fetch the
-  // markdown (the same fetch mechanism the SCORM export already uses for local src
-  // files) and render it into a modal. mdToHtml is a pure, unit-tested subset renderer.
-  /* @md-start */
-  // Minimal Markdown -> HTML for the in-app Help guide. Trusted, bundled content
-  // (docs/USER-GUIDE.md) but HTML-escaped defensively. Covers the guide's subset:
-  // headings, fenced code, pipe tables, blockquotes, ordered/unordered lists,
-  // horizontal rules, paragraphs, and inline bold / code / links. Deliberately small
-  // (no bundler, classic script) — not a general CommonMark parser.
-  function mdToHtml(md) {
-    function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-    function attr(s) { return esc(s).replace(/"/g, "&quot;"); }
-    // #25 figure directive: a whole line that is a markdown image, optionally with a
-    // CommonMark "caption" title and a {poster=<path>} attribute for the reduced-motion
-    // still of a future motion figure (#28). Kept to the mdToHtml subset (one regex, no
-    // vendored parser). src/poster are docs/assets/ paths; missing assets degrade to alt
-    // text (see openHelpModal's onerror wiring). group order: alt, src, caption, attrs.
-    var FIG_RE = /^!\[([^\]]*)\]\(\s*([^)\s"]+)(?:\s+"([^"]*)")?\s*\)(?:\{([^}]*)\})?\s*$/;
-    // a line that begins a new block — a list item's lazy continuation stops here.
-    function isBlockStart(s) {
-      return /^\s*```/.test(s) || /^#{1,6}\s+/.test(s) || /^\s*>\s?/.test(s)
-        || /^\s*[-*]\s+/.test(s) || /^\s*\d+\.\s+/.test(s)
-        || /^---+\s*$/.test(s) || /^\*\*\*+\s*$/.test(s) || FIG_RE.test(s);
-    }
-    function figHtml(m) {
-      var alt = m[1] || "", srcPath = m[2] || "", caption = m[3] || "", attrs = m[4] || "";
-      var pm = attrs.match(/poster\s*=\s*([^\s}]+)/);
-      var poster = pm ? pm[1] : "";
-      var img = "<img class=\"doc-figure__img\" src=\"" + attr(srcPath) + "\" alt=\"" + attr(alt) + "\" loading=\"lazy\""
-        + (poster ? " data-poster=\"" + attr(poster) + "\"" : "") + ">";
-      var cap = caption ? "<figcaption class=\"doc-figure__cap\">" + inline(caption) + "</figcaption>" : "";
-      return "<figure class=\"doc-figure\">" + img + cap + "</figure>";
-    }
-    // uio-O-W1 (OVL-23): a keyboard shortcut written in the guide renders as the SAME chip the
-    // menus use, instead of bare glyphs floating in a sentence. Pure text pass, run last: a
-    // <code> span always wins the alternation, so a shortcut quoted as code stays code.
-    function kbdify(html) {
-      return String(html).replace(/(<code\b[^>]*>[\s\S]*?<\/code>)|([⌘⌥⇧⌃]+[A-Za-z0-9=\\−-]?)/g,
-        function (_m, codeSpan, chip) { return codeSpan ? codeSpan : "<kbd class=\"help-kbd\">" + chip + "</kbd>"; });
-    }
-    function inline(s) {
-      s = esc(s);
-      s = s.replace(/`([^`]+)`/g, function (_m, c) { return "<code>" + c + "</code>"; });
-      s = s.replace(/\*\*([^*]+)\*\*/g, function (_m, b) { return "<strong>" + b + "</strong>"; });
-      s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_m, t, u) { return "<a href=\"" + u + "\" target=\"_blank\" rel=\"noopener\">" + t + "</a>"; });
-      return kbdify(s);
-    }
-    // uio-O-W1 (OVL-23): ONE callout with three tones. A guide callout already leads with its
-    // own label ("**Note.**", "**Tip.**", "**Caution.**"), so the tone is read from that label:
-    // authors keep writing plain markdown and every callout in the app is drawn one way.
-    function calloutTone(text) {
-      var m = String(text).match(/^\s*\*\*\s*([^*]+?)\s*\.?\s*\*\*/);
-      var w = m ? m[1].trim().toLowerCase() : "";
-      if (w === "caution" || w === "warning" || w === "important") return "caution";
-      if (w === "tip" || w === "reassurance" || w === "remember" || w === "what you build") return "reassure";
-      return "note";
-    }
-    // #8 heading IDs: slugify heading text so the docs reader's TOC nav can deep-link to a
-    // section (ADR 0004 — "guide headings are docs anchors"). Deterministic + unique per doc.
-    var seenSlugs = {};
-    function slugify(s) {
-      var base = String(s).toLowerCase().replace(/`[^`]*`/g, "").replace(/[*_]/g, "")
-        .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
-      var slug = base, n = 2;
-      while (seenSlugs[slug]) { slug = base + "-" + n; n++; }
-      seenSlugs[slug] = true;
-      return slug;
-    }
-    function isTableSep(s) { return /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(s); }
-    function splitRow(s) { return s.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(function (c) { return c.trim(); }); }
-    var lines = String(md).replace(/\r\n/g, "\n").split("\n");
-    var out = [], i = 0;
-    while (i < lines.length) {
-      var line = lines[i];
-      if (/^\s*```/.test(line)) { // fenced code
-        var buf = []; i++;
-        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
-        i++; // consume closing fence
-        out.push("<pre><code>" + esc(buf.join("\n")) + "</code></pre>");
-        continue;
-      }
-      if (/\|/.test(line) && i + 1 < lines.length && isTableSep(lines[i + 1])) { // pipe table
-        var head = splitRow(line); i += 2; var rows = [];
-        while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim() !== "") { rows.push(splitRow(lines[i])); i++; }
-        var th = head.map(function (c) { return "<th>" + inline(c) + "</th>"; }).join("");
-        var trs = rows.map(function (r) { return "<tr>" + r.map(function (c) { return "<td>" + inline(c) + "</td>"; }).join("") + "</tr>"; }).join("");
-        out.push("<table><thead><tr>" + th + "</tr></thead><tbody>" + trs + "</tbody></table>");
-        continue;
-      }
-      var hd = line.match(/^(#{1,6})\s+(.*)$/);
-      if (hd) { var lv = hd[1].length, ht = hd[2].trim(); out.push("<h" + lv + " id=\"" + slugify(ht) + "\">" + inline(ht) + "</h" + lv + ">"); i++; continue; }
-      if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
-      var fig = line.match(FIG_RE);
-      if (fig) { out.push(figHtml(fig)); i++; continue; }
-      if (/^\s*>\s?/.test(line)) { // blockquote -> the one help callout, toned by its own label
-        var qb = [];
-        while (i < lines.length && /^\s*>\s?/.test(lines[i])) { qb.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
-        var qtext = qb.join("\n");
-        out.push("<blockquote class=\"help-callout help-callout--" + calloutTone(qtext) + "\">" + mdToHtml(qtext) + "</blockquote>");
-        continue;
-      }
-      if (/^\s*[-*]\s+/.test(line)) { // unordered list (with lazy continuation of wrapped lines)
-        var ul = [];
-        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-          var uitem = lines[i].replace(/^\s*[-*]\s+/, ""); i++;
-          while (i < lines.length && lines[i].trim() !== "" && !isBlockStart(lines[i])) { uitem += " " + lines[i].trim(); i++; }
-          ul.push("<li>" + inline(uitem) + "</li>");
-        }
-        out.push("<ul>" + ul.join("") + "</ul>");
-        continue;
-      }
-      if (/^\s*\d+\.\s+/.test(line)) { // ordered list (with lazy continuation of wrapped lines)
-        var ol = [];
-        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-          var oitem = lines[i].replace(/^\s*\d+\.\s+/, ""); i++;
-          while (i < lines.length && lines[i].trim() !== "" && !isBlockStart(lines[i])) { oitem += " " + lines[i].trim(); i++; }
-          ol.push("<li>" + inline(oitem) + "</li>");
-        }
-        out.push("<ol>" + ol.join("") + "</ol>");
-        continue;
-      }
-      if (line.trim() === "") { i++; continue; }
-      var pb = []; // paragraph: gather until a blank line or the next block starts
-      while (i < lines.length && lines[i].trim() !== "" &&
-        !/^\s*```/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i]) &&
-        !/^\s*>\s?/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) &&
-        !/^\s*\d+\.\s+/.test(lines[i]) && !/^---+\s*$/.test(lines[i]) &&
-        !FIG_RE.test(lines[i]) &&
-        !(/\|/.test(lines[i]) && i + 1 < lines.length && isTableSep(lines[i + 1]))) {
-        pb.push(lines[i]); i++;
-      }
-      out.push("<p>" + inline(pb.join(" ")) + "</p>");
-    }
-    return out.join("\n");
-  }
-  /* @md-end */
-  // #8 docs reader: a two-pane guide (sidebar TOC + search on the left, reading pane on the
-  // right), modelled on a professional docs site. The TOC is built from the guide's own
-  // heading IDs (mdToHtml emits them), so nav + scroll-spy track the content and never drift.
-  // uio-F06: `focusId` is a guide heading slug -- the palette passes one so a guide result lands
-  // on its section instead of at the top of the guide.
-  function openHelpModal(focusId) {
-    if (document.getElementById("help-modal")) return;
-    var modal = h("div", "modal-overlay"); modal.id = "help-modal";
-    var box = h("div", "modal-box modal-box--docs");
-    var head = modalHead(box, "User guide", "Verso — how to build and export a course.");
-    var x = h("button", "modal-x"); x.type = "button"; x.setAttribute("aria-label", "Close");
-    x.innerHTML = window.Icon ? window.Icon("x") : "×";
-    head.appendChild(x);
+  // arch-P3b-07f: the theme -- the per-course tokens, the two modes, the preset library and the
+  // Theme panel -- moved to editor/theme.js. It owns the previewed mode and provides it.
+  var activeTheme = VE.bind("activeTheme");
+  var activeModeNow = VE.bind("activeModeNow");
+  var setActiveMode = VE.bind("setActiveMode");
+  var setMode = VE.bind("setMode");
+  var loadTheme = VE.bind("loadTheme");
+  var persistTheme = VE.bind("persistTheme");
+  var reapplyTheme = VE.bind("reapplyTheme");
+  var syncWorkingFromDoc = VE.bind("syncWorkingFromDoc");
+  var workingThemesNow = VE.bind("workingThemesNow");
+  var renderThemeControls = VE.bind("renderThemeControls");
+  var clearThemePresetChoice = VE.bind("clearThemePresetChoice");
+  var loadThemePresets = VE.bind("loadThemePresets");
+  var saveThemePreset = VE.bind("saveThemePreset");
+  var applyThemePreset = VE.bind("applyThemePreset");
+  var renameThemePreset = VE.bind("renameThemePreset");
+  var deleteThemePreset = VE.bind("deleteThemePreset");
 
-    var split = h("div", "docs-split");
-    var nav = h("aside", "docs-nav");
-    // uio-F06 (OVL-21): the guide's own "Search the guide" field is GONE. It was a third search
-    // box over a third index, next to the document search and the settings the palette now
-    // covers -- and the question people actually ask ("where is the disclaimer setting and how
-    // does it work?") needed two of them. Guide sections are in the one Cmd-K index; the TOC
-    // stays, because a contents list is navigation, not search.
-    var toc = h("nav", "docs-toc");
-    nav.appendChild(toc);
+  // arch-P3b-07: the in-app user guide -- the Markdown renderer, the modal, its contents list and
+  // the figure handling -- moved to editor/help.js. It sat under the theme banner.
+  var openHelpModal = VE.bind("openHelpModal");
 
-    var body = h("div", "help-doc"); body.appendChild(h("p", "help-doc__loading", "Loading the guide…"));
-    split.appendChild(nav); split.appendChild(body);
-    box.appendChild(split);
-    modal.appendChild(box);
-    document.body.appendChild(modal);
-    // uio-F06: the guide joins the ONE layer stack, so Escape over it closes the topmost layer
-    // only and focus returns to whatever opened it.
-    function close() { if (!modal.parentNode) return; modal.remove(); popLayer("help"); }
-    x.addEventListener("click", close);
-    modal.addEventListener("mousedown", function (e) { if (e.target === modal) close(); });
-    pushLayer("help", close);
+  // ...continues in theme.js (arch-P3b-07).
 
-    fetch("docs/USER-GUIDE.md", { cache: "no-store" })
-      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
-      .then(function (md) {
-        body.innerHTML = mdToHtml(md);
-        postProcessFigures(body);
-        buildDocsNav(body, toc);
-        if (focusId) {
-          var target = body.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(focusId) : focusId));
-          if (target) scrollToHead(body, target);
-        }
-      })
-      .catch(function () {
-        body.innerHTML = "";
-        body.appendChild(h("p", null, "The guide could not be loaded in this context. Open docs/USER-GUIDE.md from the app folder in a text editor or browser."));
-      });
-  }
-
-  // #25/#28 figure post-processing (impure, kept out of the pure renderer): reduced-motion
-  // swaps a motion figure to its poster still; a broken asset drops to a caption placeholder.
-  function postProcessFigures(body) {
-    var reduce = false;
-    try { reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) {}
-    var figs = body.querySelectorAll("figure.doc-figure > img.doc-figure__img");
-    Array.prototype.forEach.call(figs, function (img) {
-      if (reduce && img.getAttribute("data-poster")) { img.src = img.getAttribute("data-poster"); }
-      img.addEventListener("error", function () { var fig = img.parentNode; if (fig) fig.classList.add("doc-figure--missing"); });
-    });
-  }
-
-  // Build the sidebar TOC from the rendered guide's h2/h3 headings and wire click-to-scroll +
-  // scroll-spy (the active section follows the reading pane).
-  // uio-F06: it no longer returns a search function -- searching the guide is Cmd-K's job now.
-  function buildDocsNav(body, toc) {
-    var heads = Array.prototype.slice.call(body.querySelectorAll("h2[id], h3[id]"));
-    var items = []; // { el(nav button), head, id, level, text }
-    heads.forEach(function (hEl) {
-      var level = hEl.tagName === "H2" ? 2 : 3;
-      var text = hEl.textContent.trim();
-      var btn = h("button", "docs-toc__item docs-toc__item--h" + level);
-      btn.type = "button"; btn.textContent = text; btn.setAttribute("data-target", hEl.id);
-      btn.addEventListener("click", function () { scrollToHead(body, hEl); setActive(hEl.id); });
-      toc.appendChild(btn);
-      items.push({ el: btn, head: hEl, id: hEl.id, level: level, text: text.toLowerCase() });
-    });
-    function setActive(id) {
-      items.forEach(function (it) { it.el.classList.toggle("is-active", it.id === id); });
-      var cur = items.filter(function (it) { return it.id === id; })[0];
-      if (cur) cur.el.scrollIntoView({ block: "nearest" });
-    }
-    // scroll-spy: highlight the topmost heading currently at/above the reading-pane top
-    var ticking = false;
-    body.addEventListener("scroll", function () {
-      if (ticking) return; ticking = true;
-      window.requestAnimationFrame(function () {
-        ticking = false;
-        var top = body.getBoundingClientRect().top, active = items[0];
-        for (var k = 0; k < items.length; k++) {
-          if (items[k].head.getBoundingClientRect().top - top <= 8) active = items[k]; else break;
-        }
-        if (active) items.forEach(function (it) { it.el.classList.toggle("is-active", it === active); });
-      });
-    });
-    if (items[0]) items[0].el.classList.add("is-active");
-  }
-  function scrollToHead(body, hEl) {
-    var top = hEl.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
-    body.scrollTo ? body.scrollTo({ top: Math.max(0, top - 8), behavior: "auto" }) : (body.scrollTop = top - 8);
-  }
-  (function wireHelp() {
-    var b = document.getElementById("help-btn");
-    if (b) b.addEventListener("click", openHelpModal);
-    var fb = document.getElementById("find-btn");
-    if (fb) fb.addEventListener("click", function () { openFindReplace(); });
-  })();
-  function setToken(key, val) { themeEdit().color[key] = val; reapplyTheme(); persistTheme(); } // SSSS: edits the chosen set
-  // KK: edit a theme buttonStyle prop (bg/fg/radius/padY/padX/fontSize). Same
-  // live-apply-then-persist path as setToken; reapplyTheme re-emits --button-* so
-  // every non-overridden button restyles at once (reference, not copy).
-  function ensureButton() { var t = themeEdit(); if (!t.button) t.button = clone(window.THEMES[themeEditName()].button); return t.button; } // SSSS
-  function setButtonToken(key, val) { ensureButton()[key] = val; reapplyTheme(); persistTheme(); }
-  // #125: edit a SHARED (mode-independent) theme group -- font / space / radius / size.
-  // themeEdit()'s shared groups ARE doc.theme's groups (shared by reference via
-  // docThemeToModes), so a write mutates doc.theme in place; reapplyTheme re-emits the
-  // --<group>-<key> var (applyTheme is generic over every group) and persistTheme saves
-  // the doc. Same live-apply-then-persist contract as setToken/setButtonToken.
-  function setSharedToken(group, key, val) {
-    var t = themeEdit(); if (!t[group]) t[group] = {}; t[group][key] = val;
-    reapplyTheme(); persistTheme();
-  }
-
-  // ---- theme presets (#126: cross-course library + COPY-ON-APPLY) -----------
-  // A preset is a cross-course snapshot { theme:<doc.theme>, textStyles:<doc.styles> }
-  // kept in localStorage (NOT the per-doc registry) so it's shared across projects.
-  // Applying SNAPSHOTS (deep-clones) the tokens onto THIS doc — no live link — so a
-  // course stays self-contained/portable and editing a preset never retro-changes an
-  // existing course. Deliberately the OPPOSITE of #99 by-reference styles (see #77 spec).
-  // The preset LIBRARY (load/save/merge/apply/rename/delete) is src/theme.js -- it copies theme
-  // tokens, so it belongs beside them (arch-P3-09). What stays here is what a module cannot own:
-  // the undo push, the repaint and the durable save.
-  //
-  // Which saved theme the picker shows. UI-only: copy-on-apply keeps no live link, so this is just
-  // the last applied/saved name, reset on delete. Editor-global, survives renderInspector rebuilds.
-  var themePresetSel = null;
-  var TP = window.ThemePresets;
-  function loadThemePresets() { return TP.load(localStorage); }
-  function saveThemePresets(p) { return TP.save(localStorage, p); }
-  function mergeTextStyles(docStyles, presetStyles) { return window.mergeTextStyles(docStyles, presetStyles); }
-  function applyThemePresetToDoc(d, preset) { return window.applyThemePresetToDoc(d, preset); }
-  function snapshotThemePreset() { return window.snapshotThemePreset(doc.theme, getTextStyles(), Date.now()); }
-  function saveThemePreset(name) {
-    var presets = loadThemePresets();
-    if (!TP.put(presets, name, snapshotThemePreset())) return false;
-    saveThemePresets(presets); return true;
-  }
-  function applyThemePreset(name) {
-    var presets = loadThemePresets(), p = presets[name]; if (!p) return false;
-    pushHistory(); // theme + styles are doc data now -> an apply is undoable
-    applyThemePresetToDoc(doc, p);
-    window.applyRenderContext({ docStyles: getTextStyles() }); // render reads the text-style hook
-    syncWorkingFromDoc();
-    saveRegistry(registry);
-    reapplyTheme(); mount(); renderInspector();
-    return true;
-  }
-  function renameThemePreset(oldName, newName) {
-    var presets = loadThemePresets();
-    var res = TP.rename(presets, oldName, newName);
-    if (!res.ok) {
-      if (res.reason === "exists") window.alert('A preset named "' + (newName || "").trim() + '" already exists.');
-      return false;
-    }
-    saveThemePresets(presets); return true;
-  }
-  function deleteThemePreset(name) {
-    var presets = loadThemePresets();
-    if (!TP.remove(presets, name)) return false;
-    saveThemePresets(presets); return true;
-  }
 
   // ---- master page layout (side padding per breakpoint, persisted) ---------
   // Mode-independent (padding is the same in dark/light). Desktop 10% side
@@ -3755,7 +3391,7 @@
       frame.style.backgroundColor = activeTheme().color.bg;
       var cr = window.renderPage(page, activeTheme(), window.resolveHeaderFooter(renderDoc, page));
       cr.setAttribute("data-bp", activeBp);
-      cr.setAttribute("data-mode", activeMode);
+      cr.setAttribute("data-mode", activeModeNow());
       applyLayoutVars(cr, page);
       frame.appendChild(cr);
       var fold = h("div", "fold-line"); fold.style.top = deviceH + "px";
@@ -4810,7 +4446,7 @@
               embedVars.forEach(function (ev) { full[ev.name] = resolved.hasOwnProperty(ev.name) ? resolved[ev.name] : ev.value; });
               if (Object.keys(full).length) wrap.setAttribute("data-embed-colormap", JSON.stringify(full));
               else wrap.removeAttribute("data-embed-colormap");
-              if (window.pushEmbedTheme) window.pushEmbedTheme(canvas, activeMode, activeTheme().color);
+              if (window.pushEmbedTheme) window.pushEmbedTheme(canvas, activeModeNow(), activeTheme().color);
             }
             renderModelView(); renderInspector();
           };
@@ -8256,49 +7892,18 @@
   window.__settingsModal = { open: openSettingsModal, close: closeSettingsModal, build: renderSettingsBody }; // test hook
 
   // ---- KKK: custom (uploaded) fonts ----------------------------------------
-  // doc.fonts = [{ family, src:"asset:<id>", format }]. The font file is stored in
-  // the asset store (like an image) and base64-inlined as an @font-face in BOTH the
-  // editor (a <style> below) AND the export (theme.css), so a course using an
-  // uploaded font renders offline / air-gapped. render.js already falls back to the
-  // raw family name when it isn't in FONT_STACKS, so a custom family "just works".
-  function fontFormatFor(file) {
-    var n = ((file && file.name) || "").toLowerCase();
-    if (/\.woff2$/.test(n)) return "woff2";
-    if (/\.woff$/.test(n)) return "woff";
-    if (/\.otf$/.test(n)) return "opentype";
-    return "truetype";
-  }
-  function resolveFontDataUrl(src) {
-    if (!src) return null;
-    if (src.indexOf("data:") === 0) return src;
-    var m = /^asset:(.+)$/.exec(src);
-    if (m && window.AssetStore) { var a = window.AssetStore.get(m[1]); return a ? a.dataUrl : null; }
-    return null;
-  }
-  // Shared (editor + export): build the @font-face CSS for a doc's custom fonts.
-  window.buildFontFaceCss = function (d) {
-    return (((d && d.fonts) || []).map(function (f) {
-      var url = resolveFontDataUrl(f.src);
-      if (!url || url.indexOf("data:") !== 0) return "";
-      var wt = f.weight ? "font-weight:" + f.weight + ";" : ""; // multi-weight embeds (e.g. Google 400 + 700)
-      return "@font-face{font-family:'" + String(f.family).replace(/['\\]/g, "") + "';src:url('" + url + "') format('" + (f.format || "truetype") + "');" + wt + "font-display:swap;}";
-    }).filter(Boolean)).join("\n");
-  };
-  function registerDocFontNames() {
-    (doc.fonts || []).forEach(function (f) {
-      if (!f.family) return;
-      if (window.FONT_LIST && window.FONT_LIST.indexOf(f.family) === -1) window.FONT_LIST.push(f.family);
-      if (window.EMBEDDABLE_FONTS && window.EMBEDDABLE_FONTS.indexOf(f.family) === -1) window.EMBEDDABLE_FONTS.push(f.family); // uploaded => embedded => never flagged
-    });
-  }
-  function applyDocFonts() {
-    var st = document.getElementById("doc-font-faces");
-    if (!st) { st = document.createElement("style"); st.id = "doc-font-faces"; document.head.appendChild(st); }
-    st.textContent = window.buildFontFaceCss(doc);
-    registerDocFontNames();
-  }
-  window.__applyDocFonts = applyDocFonts; // headless/browser test hook
-  window.__resolveAssetDataUrl = resolveFontDataUrl; // shared asset->dataURL (fonts, glossary, …)
+  // arch-P3b-07: uploaded and Google fonts -- the store, the embedding, the picker and the
+  // air-gap flag -- moved to editor/fonts.js. This banner also held the header/footer editor
+  // (07e) and three settings-panel bodies, which are separate concerns.
+  var fontFormatFor = VE.bind("fontFormatFor");
+  var resolveFontDataUrl = VE.bind("resolveFontDataUrl");
+  var registerDocFontNames = VE.bind("registerDocFontNames");
+  var applyDocFonts = VE.bind("applyDocFonts");
+  var fetchAndEmbedGoogleFont = VE.bind("fetchAndEmbedGoogleFont");
+  var buildFontsBody = VE.bind("buildFontsBody");
+  var isEmbeddableFont = VE.bind("isEmbeddableFont");
+  var buildFontPicker = VE.bind("buildFontPicker");
+
   // §1 glossary: doc-wide term/definition list. Returns a cleaned [{term,def}] array
   // (rows with SOME text kept; both fields coerced to strings) or null when empty, so
   // render/export only emit the glossary button + popover when there's real content.
@@ -8474,107 +8079,8 @@
     return out;
   }
   window.parseGlossaryCsv = parseGlossaryCsv;
-  // A MODEST curated set of the most popular Google Fonts (James 2026-07-08: "most popular
-  // as long as they include Exo 2 and Arial"). Exo 2 is bundled + already pickable; Arial is
-  // a system font (in FONT_STACKS). Picking one here FETCHES the woff2 at author-time and
-  // EMBEDS it (air-gap: no runtime CDN link ever ships). A hand list, not the full API.
-  var CURATED_GOOGLE_FONTS = [
-    "Roboto", "Open Sans", "Lato", "Montserrat", "Poppins", "Inter", "Oswald", "Raleway",
-    "Nunito", "Nunito Sans", "Merriweather", "Playfair Display", "Source Sans 3", "PT Sans",
-    "Work Sans", "Rubik", "Noto Sans", "Ubuntu", "Mulish", "DM Sans", "Karla", "Fira Sans",
-    "Barlow", "Josefin Sans", "Quicksand", "Libre Franklin", "Archivo", "Space Grotesk",
-    "Manrope", "Cabin", "Bebas Neue", "Titillium Web", "Roboto Slab", "Roboto Condensed",
-    "Kanit", "Heebo", "Assistant"
-  ];
-  window.CURATED_GOOGLE_FONTS = CURATED_GOOGLE_FONTS; // headless test hook
-  // Fetch a Google Font's woff2 at AUTHOR time and embed it via the existing doc.fonts
-  // pipeline (base64 @font-face → editor + export). Needs an internet connection while
-  // authoring; the SHIPPED course stays self-contained. Overridable window.__fontFetch for
-  // tests. Returns a Promise.
-  function fetchAndEmbedGoogleFont(family) {
-    if (!family) return Promise.resolve();
-    if ((doc.fonts || []).some(function (f) { return f.family === family; })) { window.alert(family + " is already added."); return Promise.resolve(); }
-    var doFetch = window.__fontFetch || window.fetch.bind(window);
-    var api = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(family) + ":wght@400;700&display=swap";
-    function blobToDataUrl(blob) { return new Promise(function (res, rej) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = rej; fr.readAsDataURL(blob); }); }
-    return doFetch(api).then(function (r) { if (!r.ok) throw new Error("CSS " + r.status); return r.text(); })
-      .then(function (css) {
-        // The CSS2 API returns one @font-face per weight/subset. Pick ONE woff2 per weight
-        // (400 + 700) so bold is a REAL cut, not synthetic. Falls back to any single woff2.
-        var byWeight = {};
-        css.split("@font-face").forEach(function (blk) {
-          var u = /url\((https:\/\/[^)]+\.woff2)\)/i.exec(blk); if (!u) return;
-          var w = (/font-weight:\s*(\d+)/i.exec(blk) || [])[1] || "400";
-          if (!byWeight[w]) byWeight[w] = u[1];
-        });
-        var weights = Object.keys(byWeight);
-        if (!weights.length) throw new Error("no woff2 found");
-        var wanted = weights.filter(function (w) { return w === "400" || w === "700"; });
-        if (!wanted.length) wanted = [weights[0]];
-        return Promise.all(wanted.map(function (w) {
-          return doFetch(byWeight[w]).then(function (r) { if (!r.ok) throw new Error("woff2 " + r.status); return r.blob(); })
-            .then(blobToDataUrl).then(function (dataUrl) { return { weight: w, dataUrl: dataUrl }; });
-        }));
-      })
-      .then(function (faces) {
-        pushHistory();
-        doc.fonts = doc.fonts || [];
-        faces.forEach(function (f) {
-          doc.fonts.push({ family: family, src: assetRef(f.dataUrl, { name: family + "-" + f.weight + ".woff2", type: "font/woff2" }), format: "woff2", weight: parseInt(f.weight, 10), source: "google" });
-        });
-        applyDocFonts(); renderInspector(); scheduleSave();
-      })
-      .catch(function (e) { window.alert("Couldn't fetch " + family + " from Google Fonts (needs internet while authoring): " + (e && e.message || e)); });
-  }
-  window.__fetchGoogleFont = fetchAndEmbedGoogleFont; // headless test hook
+  // ...continues in fonts.js (arch-P3b-07).
 
-  function buildFontsBody(c) {
-    c.appendChild(h("div", "insp-hint", "Upload a font file (.ttf / .otf / .woff / .woff2) to embed it in the course — it renders offline. Then pick it as a font on any text."));
-    doc.fonts = doc.fonts || [];
-    // One row per FAMILY (a multi-weight embed is several entries but shows as one row;
-    // the count hints at how many weights are embedded). Delete removes all of the family.
-    var seen = {};
-    doc.fonts.forEach(function (f) { if (!seen[f.family]) seen[f.family] = 0; seen[f.family]++; });
-    Object.keys(seen).forEach(function (fam) {
-      var row = h("div", "insp-row");
-      var lbl = h("span", "insp-row__label", fam + (seen[fam] > 1 ? "  ·  " + seen[fam] + " weights" : "")); lbl.style.flex = "1 1 auto"; lbl.style.fontFamily = "'" + fam + "'";
-      row.appendChild(lbl);
-      var del = iconBtn("trash", "Remove font", true);
-      del.addEventListener("click", function () { pushHistory(); doc.fonts = doc.fonts.filter(function (f) { return f.family !== fam; }); applyDocFonts(); renderInspector(); scheduleSave(); });
-      row.appendChild(del);
-      c.appendChild(row);
-    });
-    var up = h("button", "prop-btn", "Upload font…");
-    up.addEventListener("click", function () {
-      var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".ttf,.otf,.woff,.woff2,font/*";
-      inp.addEventListener("change", function () {
-        var file = inp.files && inp.files[0]; if (!file) return;
-        var r = new FileReader();
-        r.onload = function () {
-          promptModal("Name this font", "Name (as it appears in the picker)", file.name.replace(/\.(ttf|otf|woff2?)$/i, ""), function (family) {
-            family = (family || "").trim();
-            if (!family) return;
-            pushHistory();
-            doc.fonts = doc.fonts || [];
-            doc.fonts.push({ family: family, src: assetRef(r.result, file), format: fontFormatFor(file) });
-            applyDocFonts(); renderInspector(); scheduleSave();
-          });
-        };
-        r.readAsDataURL(file);
-      });
-      inp.click();
-    });
-    c.appendChild(up);
-
-    // Google Fonts source: pick a popular family -> fetched + embedded at author-time.
-    var gf = panelSection(c, "Google Fonts");
-    gf.appendChild(h("div", "insp-hint", "Pick a popular Google Font — it's downloaded and EMBEDDED now (needs internet), so the exported course stays offline-safe. Exo 2 is bundled; Arial is a system font — both already in the picker."));
-    var added = {}; (doc.fonts || []).forEach(function (f) { added[f.family] = true; });
-    var opts = CURATED_GOOGLE_FONTS.filter(function (fam) { return !added[fam]; }).map(function (fam) { return [fam, fam]; });
-    gf.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Google Font"));
-    var gsel = dsSelect(opts, "", function (v) { if (!v) return; gsel.value = ""; fetchAndEmbedGoogleFont(v); }, { placeholder: "Add a Google Font…" });
-    gf.appendChild(gsel);
-  }
   // A headerFooter/footer numeric field (padding, logo size). Applies LIVE via
   // arch-P3b-07e: the header/footer editor -- both configurations, their per-page overrides and
   // the learner nav's nests -- moved to editor/header-footer.js.
@@ -8590,474 +8096,16 @@
   var courseNavNests = VE.bind("courseNavNests");
 
 
-  // ---- theme controls (collapsible Theme section) --------------------------
-  function showEditTextStyleDialog(name, s) {
-    var existing = document.getElementById("edit-style-modal");
-    if (existing) return;
-    var modal = h("div", "modal-overlay");
-    modal.id = "edit-style-modal";
-    var box = h("div", "modal-box");
-    modalHead(box, "Edit text style", "Editing the “" + name + "” style — the same controls as the text inspector.");
+  // ...continues in theme.js (arch-P3b-07).
 
-    // Draft the edits so Cancel discards them (the collect-on-save behaviour the
-    // dialog had before); Save commits with the same delete-if-empty semantics.
-    var draft = { font: s.font, weight: s.weight, size: s.size, lineHeight: s.lineHeight, letterSpacing: s.letterSpacing, wordSpacing: s.wordSpacing, color: s.color, colorToken: s.colorToken, colorLight: s.colorLight, colorDark: s.colorDark, align: s.align, textTransform: s.textTransform, textIndent: s.textIndent };
 
-    // NN: live lorem specimen so the style previews as the controls change. Uses
-    // the SAME applyTextStyle render path the canvas + export consume, so what you
-    // see here is what ships. Editor-chrome only; the specimen node never enters
-    // the doc. Each draft mutation below calls syncSpecimen().
-    var specWrap = h("div", null);
-    specWrap.style.cssText = "margin:0 0 14px;padding:12px 14px;border:1px solid rgba(255,255,255,0.14);border-radius:8px;background:rgba(255,255,255,0.03);overflow-wrap:anywhere;";
-    var specimen = h("p", null, "The quick brown fox jumps over the lazy dog. 1234567890");
-    specimen.style.margin = "0";
-    specWrap.appendChild(specimen);
-    // applyTheme seeds --color-* on the specimen so a token colour (var(--color-ink))
-    // resolves in the preview for the mode currently being edited.
-    function syncSpecimen() { window.applyTheme(specimen, activeTheme()); window.applyTextStyle(specimen, draft); }
-    syncSpecimen();
-    box.appendChild(specWrap);
+  // arch-P3b-07: the canonical dropdown and its labelled row moved to
+  // editor/inspector/primitives.js, where every other canonical control lives. They were in the
+  // theme banner, between the Theme panel and the font picker that each happened to use one.
+  var dsSelect = VE.bind("dsSelect");
+  var selectRow = VE.bind("selectRow");
+  // ...continues in fonts.js (arch-P3b-07).
 
-    // Panel System v2 (D4): the SAME typeCluster the field inspector mounts — one Type
-    // control body in BOTH places. Writes to `draft`; syncSpecimen previews it live.
-    typeCluster(box, draft, syncSpecimen);
-
-    modalActions(box, modal, "Save style", function () {
-      pushHistory();
-      if (draft.font) s.font = draft.font; else delete s.font;
-      if (draft.weight) s.weight = draft.weight; else delete s.weight;
-      if (draft.size == null || isNaN(draft.size)) delete s.size; else s.size = draft.size;
-      if (draft.lineHeight == null || draft.lineHeight === "") delete s.lineHeight; else s.lineHeight = draft.lineHeight;
-      if (draft.letterSpacing == null || isNaN(draft.letterSpacing)) delete s.letterSpacing; else s.letterSpacing = draft.letterSpacing;
-      if (draft.wordSpacing == null || isNaN(draft.wordSpacing)) delete s.wordSpacing; else s.wordSpacing = draft.wordSpacing;
-      // colour: token XOR hex (mutually exclusive) — a token wins and clears the hex.
-      delete s.colorLight; delete s.colorDark;
-      if (draft.colorToken) { s.colorToken = draft.colorToken; delete s.color; }
-      else if (draft.colorLight || draft.colorDark) { s.colorLight = draft.colorLight; s.colorDark = draft.colorDark; delete s.color; delete s.colorToken; }
-      else { delete s.colorToken; if (draft.color == null) delete s.color; else s.color = draft.color; }
-      if (draft.align == null || draft.align === "left") delete s.align; else s.align = draft.align;
-      if (!draft.textTransform) delete s.textTransform; else s.textTransform = draft.textTransform;
-      if (draft.textIndent == null || isNaN(draft.textIndent)) delete s.textIndent; else s.textIndent = draft.textIndent;
-      saveRegistry(registry);
-      modal.remove();
-      mount();
-      renderInspector();
-    });
-    modal.appendChild(box);
-    document.body.appendChild(modal);
-  }
-
-  function showAddTextStyleDialog() {
-    var existing = document.getElementById("add-style-modal");
-    if (existing) return;
-    var modal = h("div", "modal-overlay");
-    modal.id = "add-style-modal";
-    var box = h("div", "modal-box");
-    modalHead(box, "Add text style", "Save a named text style you can apply to any text block.");
-
-    var nameIn = modalText(box, "Style name", "", "e.g. Subtitle 3");
-
-    modalActions(box, modal, "Create style", function () {
-      var name = nameIn.value.trim();
-      if (!name) { alert("Style name is required."); return; }
-      var styles = getTextStyles();
-      if (styles[name]) { alert("A style with that name already exists."); return; }
-      pushHistory();
-      styles[name] = { font: "System", size: 15, weight: "400", lineHeight: "1.5" };
-      saveRegistry(registry);
-      modal.remove();
-      renderInspector();
-    });
-    modal.appendChild(box);
-    document.body.appendChild(modal);
-  }
-
-  function renderThemeControls(c) {
-    // #126: cross-course theme presets — the FIRST control in the panel. One drop-down:
-    // pick a saved theme (applies on select, COPY-ON-APPLY so the course stays self-
-    // contained) or "Save current setup as new theme" to snapshot this course's look for
-    // reuse across projects. Rename/Delete appear for the chosen saved theme.
-    // #162: each theme section is a canonical panelSection collapsible. The IIFEs below
-    // take a `c` param (shadowing the outer content pane) so their appends land in the
-    // section body without re-pointing every internal reference.
-    (function themePresetPicker(c) {
-      var presets = loadThemePresets();
-      var names = Object.keys(presets);
-      if (themePresetSel && !presets[themePresetSel]) themePresetSel = null; // stale (deleted elsewhere)
-      // Neutral placeholder — never echo the selected name (that duplicated the chosen
-      // theme: once here, once as its real option). The selected real option below is
-      // what the closed control shows.
-      var presetPairs = names.map(function (name) { return [name, "preset:" + name]; });
-      presetPairs.push(["+ Save current setup as new theme…", "__new"]);
-      var sel = dsSelect(presetPairs, themePresetSel ? ("preset:" + themePresetSel) : "", function (v) {
-        if (v === "__new") {
-          promptModal("Save theme preset", "Theme name", "", function (nm) {
-            if (nm == null) { renderInspector(); return; }
-            nm = (nm || "").trim(); if (!nm) { renderInspector(); return; }
-            var existing = loadThemePresets();
-            function doSave() { if (saveThemePreset(nm)) { themePresetSel = nm; renderInspector(); } else renderInspector(); }
-            if (existing[nm]) confirmModal("Overwrite theme", 'A theme named "' + nm + '" already exists. Overwrite it?', doSave, { okLabel: "Overwrite" });
-            else doSave();
-          });
-          return;
-        }
-        if (v.indexOf("preset:") === 0) {
-          var name = v.slice(7);
-          if (applyThemePreset(name)) { themePresetSel = name; renderInspector(); }
-          return;
-        }
-        // "" (placeholder) -> no-op
-      }, { placeholder: names.length ? "Saved themes…" : "No saved themes yet" });
-      c.appendChild(sel);
-      // Manage the chosen saved theme.
-      if (themePresetSel && presets[themePresetSel]) {
-        var manage = h("div", null);
-        manage.style.display = "flex"; manage.style.gap = "6px"; manage.style.marginTop = "6px";
-        var renBtn = h("button", "prop-btn", "Rename");
-        renBtn.addEventListener("click", function () {
-          promptModal("Rename theme", "New name", themePresetSel, function (nn) {
-            if (nn == null) return;
-            var old = themePresetSel;
-            if (renameThemePreset(old, nn)) { themePresetSel = (nn || "").trim(); renderInspector(); }
-          });
-        });
-        var delBtn = h("button", "prop-btn prop-btn--danger", "Delete");
-        delBtn.addEventListener("click", function () {
-          confirmModal("Delete theme", "Delete the '" + themePresetSel + "' theme? Courses that used it are unaffected.", function () {
-            if (deleteThemePreset(themePresetSel)) { themePresetSel = null; renderInspector(); }
-          }, { okLabel: "Delete", danger: true });
-        });
-        manage.appendChild(renBtn); manage.appendChild(delBtn);
-        c.appendChild(manage);
-      }
-      c.appendChild(h("div", "insp-hint", "Reuse a theme across projects. Picking a saved theme copies its colours, button + text styles onto this course (no live link)."));
-    })(panelSection(c, "Theme preset"));
-
-    // NNN: the Dark/Light palette switch now lives in the TOP BAR (#mode-toggle);
-    // removed from here so there is one place to switch mode. Swatches below show
-    // the ACTIVE mode's palette and rebuild when the top-bar toggle flips it.
-    // SSSS: pick which palette these swatches EDIT — light or dark — independent of
-    // what the canvas previews (NNN top-bar toggle). So you can set both explicitly.
-    segmentedLive("Editing", [["Light", "light"], ["Dark", "dark"]],
-      function (v) { return themeEditName() === v; },
-      function (v) { themeEditMode = v; renderInspector(); }, c);
-    if (themeEditName() !== activeMode) {
-      c.appendChild(h("div", "insp-hint", "Editing the " + themeEditName() + " palette while the canvas previews " + activeMode + " — flip the top-bar palette toggle to preview it."));
-    }
-    var sColors = panelSection(c, "Theme colours");
-    // Each token applies LIVE via setToken (reapplyTheme repaints the canvas in
-    // place); no history (theme is not in doc). Clearing reverts to the default.
-    [["accent", "Accent"], ["bg", "Background"], ["surface", "Surface"], ["ink", "Text"], ["success", "Complete"]].forEach(function (t) {
-      var key = t[0];
-      colourControl(t[1], themeEdit().color[key],
-        function (val) { setToken(key, val == null ? window.THEMES[themeEditName()].color[key] : val); }, sColors, true);
-    });
-
-    // #125: full-token editing -- the mode-SHARED groups (font / space / radius / size).
-    // Unlike the per-mode colours above, these are shared across light + dark (edited once,
-    // applied to both). Each writes through setSharedToken (live via reapplyTheme + persisted
-    // on doc.theme). A shared px field: parse the number, store "<n>px".
-    function sharedPx(group, key, glyph, title) {
-      var cur = parseInt((themeEdit()[group] || {})[key], 10);
-      return iconField(glyph, {
-        value: isNaN(cur) ? "" : cur, unit: "px", step: 1, min: 0, max: 400,
-        title: title, datalist: "dl-gap", noHistory: true,
-        onchange: function (v) { var n = parseInt(v, 10); setSharedToken(group, key, (isNaN(n) ? 0 : n) + "px"); }
-      }).wrap;
-    }
-
-    var sType = panelSection(c, "Typography");
-    sType.appendChild(h("div", "insp-hint", "Font families are shared across the light and dark palettes."));
-    [["heading", "Headings"], ["body", "Body text"]].forEach(function (f) {
-      var key = f[0];
-      sType.appendChild(h("div", "insp-row__label insp-row__label--stacked", f[1]));
-      sType.appendChild(buildFontPicker(window.fontNameFromStack(themeEdit().font[key]), function (name) {
-        setSharedToken("font", key, name ? window.fontStackFor(name) : window.THEMES[themeEditName()].font[key]);
-      }));
-    });
-
-    var sSpace = panelSection(c, "Spacing");
-    sSpace.appendChild(twoUp(sharedPx("space", "xs", "XS", "Space — extra small"), sharedPx("space", "sm", "S", "Space — small")));
-    sSpace.appendChild(twoUp(sharedPx("space", "md", "M", "Space — medium"), sharedPx("space", "lg", "L", "Space — large")));
-    sSpace.appendChild(twoUp(sharedPx("space", "xl", "XL", "Space — extra large")));
-
-    var sRadius = panelSection(c, "Radius");
-    sRadius.appendChild(twoUp(sharedPx("radius", "card", Icon("radius"), "Card corner radius")));
-
-    var sSizes = panelSection(c, "Text sizes");
-    sSizes.appendChild(twoUp(sharedPx("size", "pageTitle", "T", "Page title"), sharedPx("size", "cardTitle", "C", "Card title")));
-    sSizes.appendChild(twoUp(sharedPx("size", "cardBody", "B", "Card body"), sharedPx("size", "cardNum", "#", "Card number / eyebrow")));
-
-    // KK: theme-level Button style. Edits the buttonStyle bundle (--button-*);
-    // every non-overridden button (nav/CTA + footer-nav radius) restyles live via
-    // reapplyTheme -- reference, not copy. Clearing a control reverts to baseline.
-    var sButton = panelSection(c, "Button style");
-    var btn = ensureButton();
-    colorFieldFlat("Fill", btn.bg,
-      function (val) { setButtonToken("bg", val == null ? window.THEMES[themeEditName()].button.bg : val); }, sButton, { noHistory: true });
-    colorFieldFlat("Text", btn.fg,
-      function (val) { setButtonToken("fg", val == null ? window.THEMES[themeEditName()].button.fg : val); }, sButton, { noHistory: true });
-    // Stroke (border) colour. Pairs with the Stroke width field below; clearing
-    // reverts to the transparent baseline (no visible border).
-    colorFieldFlat("Stroke", (btn.borderColor && btn.borderColor !== "transparent") ? btn.borderColor : null,
-      function (val) { setButtonToken("borderColor", val == null ? window.THEMES[themeEditName()].button.borderColor : val); }, sButton, { noHistory: true });
-    // Hover-state colours (interaction feedback). Empty tracks the base fill/text
-    // (course.css fallback), so clearing = revert to the plain brighten-on-hover.
-    colorFieldFlat("Hover fill", btn.hoverBg || null,
-      function (val) { setButtonToken("hoverBg", val == null ? "" : val); }, sButton, { noHistory: true });
-    colorFieldFlat("Hover text", btn.hoverFg || null,
-      function (val) { setButtonToken("hoverFg", val == null ? "" : val); }, sButton, { noHistory: true });
-    function btnPx(key, glyph, title) {
-      var def = window.THEMES[themeEditName()].button[key];
-      return iconField(glyph, {
-        value: parseInt(ensureButton()[key], 10), unit: "px", step: 1, min: 0, max: 400,
-        title: title, datalist: "dl-gap", noHistory: true,
-        onchange: function (v) { var n = parseInt(v, 10); setButtonToken(key, isNaN(n) ? def : (n + "px")); }
-      }).wrap;
-    }
-    sButton.appendChild(twoUp(btnPx("radius", Icon("radius"), "Corner radius"), btnPx("fontSize", "A", "Font size")));
-    sButton.appendChild(twoUp(btnPx("padY", Icon("padding"), "Padding (vertical)"), btnPx("padX", Icon("padding"), "Padding (horizontal)")));
-    sButton.appendChild(twoUp(btnPx("borderWidth", Icon("border-weight"), "Stroke width")));
-
-    // #127: block-type default appearance. Lists each captured type default (fill /
-    // text / border / radius) with canonical controls + a remove action. Capture is done
-    // from a styled block's Appearance panel ("Capture look"); this edits what was captured.
-    // A block's own box always wins over its type default (render/export cascade).
-    var sBlock = panelSection(c, "Block styles");
-    sBlock.appendChild(h("div", "insp-hint", "Default appearance per block type. Capture a styled block's look from its Appearance panel, then fine-tune it here. Any block's own styling overrides its type default."));
-    // uio-O-W2 (OVL-07): each captured type is its OWN section beside "Block styles", not a
-    // third level of headings inside it. `listHost` is the Theme body they sit in.
-    (function blockStylesEditor(intro, listHost) {
-      var bstyles = getBlockStyles();
-      var types = Object.keys(bstyles);
-      function commit() { window.applyRenderContext({ blockStyles: getBlockStyles() }); scheduleSave(); mount(); }
-      if (!types.length) { intro.appendChild(h("div", "insp-hint", "No block defaults captured yet.")); return; }
-      types.forEach(function (type) {
-        var box = bstyles[type];
-        var c = panelSection(listHost, type + " blocks");
-        colorFieldFlat("Fill", box.fill, function (v) { if (v == null) delete box.fill; else box.fill = v; commit(); }, c, { noHistory: true });
-        colorFieldFlat("Text", box.textColor, function (v) { if (v == null) delete box.textColor; else box.textColor = v; commit(); }, c, { noHistory: true });
-        // uio-F03: the SAME row, at the COURSE rung — the type default overriding the system
-        // default. Proves one primitive reads correctly at any rung, in any surface.
-        var typeStrokeRes = resolveScoped(scopeChain([scopeRung("system", BOX_SYSTEM_DEFAULTS), scopeRung("course", box)]), "border", { at: "course" });
-        switchRow("Stroke", function () { return !!typeStrokeRes.value; },
-          function (v) { if (v) box.border = true; else delete box.border; commit(); refreshSettingsPanes(); }, c, false,
-          { inherit: { res: typeStrokeRes, format: onOffLabel, onReset: function () {
-              pushHistory(); delete box.border; commit(); refreshSettingsPanes();
-            } } });
-        if (typeStrokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; commit(); }, c, { noHistory: true });
-        var wf = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", noHistory: true, title: "Stroke width",
-          onchange: function (v) { var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; commit(); } }).wrap;
-        var rf = iconField(Icon("radius"), { value: box.radius, unit: "px", placeholder: "0", step: 1, min: 0, max: 80, datalist: "dl-gap", noHistory: true, title: "Corner radius",
-          onchange: function (v) { var n = parseFloat(v); if (isNaN(n)) delete box.radius; else box.radius = n; commit(); } }).wrap;
-        c.appendChild(twoUp(wf, rf));
-        var clr = h("button", "prop-btn prop-btn--danger", "Remove " + type + " default"); clr.style.marginTop = "6px";
-        clr.addEventListener("click", function () { pushHistory(); delete bstyles[type]; commit(); refreshSettingsPanes(); });
-        c.appendChild(clr);
-      });
-    })(sBlock, c);
-
-    var reset = h("button", "prop-btn", "Reset " + themeEditName() + " theme");
-    reset.addEventListener("click", function () {
-      // Reset THIS course's theme for the edited mode: restore the baseline palette +
-      // the shared button bundle on doc.theme, then re-derive the working cache (keeps
-      // the doc-reference link intact so the next edit still round-trips).
-      var nm = themeEditName();
-      if (!doc.theme) doc.theme = window.defaultDocTheme();
-      doc.theme.color[nm] = clone(window.THEMES[nm].color);
-      doc.theme.button = clone(window.THEMES[nm].button);
-      // #125: also restore the shared (mode-independent) groups now editable here.
-      doc.theme.font = clone(window.THEMES[nm].font);
-      doc.theme.space = clone(window.THEMES[nm].space);
-      doc.theme.radius = clone(window.THEMES[nm].radius);
-      doc.theme.size = clone(window.THEMES[nm].size);
-      window.normalizeDocTheme(doc.theme);
-      syncWorkingFromDoc();
-      reapplyTheme(); persistTheme(); renderInspector();
-    });
-    c.appendChild(reset);
-    c.appendChild(h("div", "insp-hint", "Published SCORM lets the learner pick dark/light at runtime (wired in export)."));
-
-    var sSaved = panelSection(c, "Saved Text Styles");
-    var styles = getTextStyles();
-    var slist = h("div", "insp-group");
-    slist.style.display = "flex";
-    slist.style.flexDirection = "column";
-    slist.style.gap = "6px";
-    slist.style.marginTop = "8px";
-    
-    Object.keys(styles).forEach(function (name) {
-      var s = styles[name];
-      var item = h("div", null);
-      item.style.padding = "6px 8px";
-      item.style.background = "var(--surface-canvas)";
-      item.style.border = "1px solid var(--border-strong)";
-      item.style.borderRadius = "6px";
-      item.style.display = "flex";
-      item.style.justifyContent = "space-between";
-      item.style.alignItems = "center";
-      
-      var left = h("div", null);
-      left.style.display = "flex";
-      left.style.flexDirection = "column";
-      left.style.gap = "2px";
-      
-      var title = h("span", null, name);
-      title.style.fontWeight = "600";
-      title.style.fontSize = "11px";
-      
-      var subtitle = h("span", null, (s.font || "Default") + " • " + (s.size || "auto") + "px • " + (s.weight || "Default"));
-      subtitle.style.fontSize = "9px";
-      subtitle.style.color = "var(--text-secondary)";
-      
-      left.appendChild(title);
-      left.appendChild(subtitle);
-      item.appendChild(left);
-      
-      var actions = h("div", null);
-      actions.style.display = "flex";
-      actions.style.gap = "4px";
-      
-      var editBtn = h("button", "prop-btn", "Edit");
-      editBtn.style.padding = "2px 6px";
-      editBtn.style.fontSize = "10px";
-      editBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        showEditTextStyleDialog(name, s);
-      });
-
-      var renBtn = h("button", "prop-btn", "Rename");
-      renBtn.style.padding = "2px 6px";
-      renBtn.style.fontSize = "10px";
-      renBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        promptModal("Rename text style", "New name", name, function (nn) {
-          if (nn == null) return;
-          if (renameTextStyle(name, nn)) renderInspector();
-        });
-      });
-
-      var delBtn = h("button", "prop-btn prop-btn--danger", "✕");
-      delBtn.style.padding = "2px 6px";
-      delBtn.style.fontSize = "10px";
-      delBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        confirmModal("Delete text style", "Delete the '" + name + "' style? Blocks using it fall back to their default.", function () {
-          pushHistory();
-          delete styles[name];
-          saveRegistry(registry);
-          mount();
-          renderInspector();
-        }, { okLabel: "Delete", danger: true });
-      });
-      
-      actions.appendChild(editBtn);
-      actions.appendChild(renBtn);
-      actions.appendChild(delBtn);
-      item.appendChild(actions);
-      slist.appendChild(item);
-    });
-    sSaved.appendChild(slist);
-
-    var addStyleBtn = h("button", "prop-btn prop-btn--accent", "+ Add Text Style");
-    addStyleBtn.style.marginTop = "10px";
-    addStyleBtn.addEventListener("click", showAddTextStyleDialog);
-    sSaved.appendChild(addStyleBtn);
-
-    // #145: text roles — the named style each block TYPE links to. A CSV/schema import
-    // drops blocks by type with no style; this map lets the editor auto-link each type
-    // to its role style (styleRef is a live ref, so editing the style repaints all).
-    var sRoles = panelSection(c, "Text roles (by block type)");
-    sRoles.appendChild(h("div", "insp-hint", "Each text block type links to a named style. New blocks and imported courses auto-link to these; editing a style repaints every linked block."));
-    var roles = getTextRoles();
-    var styleNames = Object.keys(getTextStyles());
-    var ROLE_TYPES = [["heading", "Heading"], ["subheading", "Subheading"], ["paragraph", "Paragraph"], ["note", "Note / callout"], ["quote", "Quote"], ["list", "List"]];
-    ROLE_TYPES.forEach(function (rt) {
-      var type = rt[0];
-      var row = h("div", "insp-inline-row"); row.style.alignItems = "center"; row.style.gap = "8px"; row.style.marginTop = "4px";
-      var lab = h("span", null, rt[1]); lab.style.flex = "0 0 90px"; lab.style.fontSize = "11px";
-      var rolePairs = [["— none —", ""]].concat(styleNames.map(function (n) { return [n, n]; }));
-      // warn (no crash) when a role points at a style the course does not have.
-      if (roles[type] && styleNames.indexOf(roles[type]) === -1) rolePairs.push([roles[type] + " (missing)", roles[type]]);
-      var sel = dsSelect(rolePairs, roles[type] || "", function (v) { pushHistory(); if (v) roles[type] = v; else delete roles[type]; saveRegistry(registry); });
-      sel.style.flex = "1 1 auto";
-      row.appendChild(lab); row.appendChild(sel);
-      sRoles.appendChild(row);
-    });
-    var applyRolesBtn = h("button", "prop-btn prop-btn--accent", "Apply text styles by type");
-    applyRolesBtn.style.marginTop = "10px";
-    applyRolesBtn.title = "Link every text block that has no style yet to its type's role style (manual choices are kept)";
-    applyRolesBtn.addEventListener("click", function () {
-      var n = window.Editor.applyTextRolesByType();
-      applyRolesBtn.textContent = n ? "Styled " + n + " block" + (n === 1 ? "" : "s") : "All text blocks already styled";
-      setTimeout(function () { renderInspector(); }, 1100);
-    });
-    sRoles.appendChild(applyRolesBtn);
-  }
-
-  // a plain text field selected
-  // #157/rawSelect review: canonical dropdown — VersoUI.Select fed the editor's [label, value]
-  // option pairs. Returns the <select> element so callers can still style width/flex or attach
-  // extra listeners (e.g. the selection-aware weight picker's mousedown range capture).
-  function dsSelect(pairs, current, onChange, opts) {
-    opts = opts || {};
-    return window.VersoUI.Select({
-      options: (pairs || []).map(function (o) { return { value: o[1], label: o[0] }; }),
-      value: current == null ? "" : String(current),
-      placeholder: opts.placeholder || null,
-      onChange: onChange
-    });
-  }
-  function selectRow(label, options, current, onchange) {
-    inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", label));
-    var sel = dsSelect(options, current, function (v) { pushHistory(); onchange(v); });
-    inspector.appendChild(sel);
-    return sel;
-  }
-  // Item I: is a chosen font in the safe/embeddable set (web-loaded + bundled)?
-  // Empty = theme default = safe. Anything else (a system font picked from the
-  // fuller Local-Font-Access list) may not render on an offline/air-gapped target
-  // unless embedded at export -- so we flag it.
-  function isEmbeddableFont(name) {
-    if (!name) return true;
-    var emb = window.EMBEDDABLE_FONTS || [];
-    return emb.indexOf(name) !== -1;
-  }
-  // font picker: a button + popup listbox where each font name is rendered IN
-  // that font. Drop-in for the plain <select> font pickers — exposes `.value` (get/set) and
-  // fires a 'change' event on pick, so attachFontWarn works against it unchanged. Options =
-  // "" (Default) + window.FONT_LIST; only loaded families appear here, so previews render.
-  function buildFontPicker(current, onPick) {
-    var wrap = h("div", "font-picker");
-    var btn = h("button", "font-picker__btn prop-select"); btn.type = "button";
-    var pop = h("div", "font-picker__pop"); pop.hidden = true;
-    var val = current || "";
-    function labelFor(v) { return v ? v : "Default"; }
-    function stackFor(v) { return window.fontStackFor ? window.fontStackFor(v) : (v ? "'" + v + "'" : ""); }
-    function paintBtn() { btn.textContent = labelFor(val); btn.style.fontFamily = stackFor(val); }
-    (([""]).concat(window.FONT_LIST || [])).forEach(function (v) {
-      var row = h("div", "font-picker__opt" + (v === val ? " is-active" : ""), labelFor(v));
-      row.style.fontFamily = stackFor(v);
-      row.addEventListener("click", function () {
-        val = v; paintBtn();
-        Array.prototype.forEach.call(pop.children, function (c) { c.classList.remove("is-active"); });
-        row.classList.add("is-active");
-        close(); onPick(v);
-        try { wrap.dispatchEvent(new Event("change")); } catch (_) {}
-      });
-      pop.appendChild(row);
-    });
-    function onDoc(e) { if (!wrap.contains(e.target)) close(); }
-    function onEsc(e) { if (e.key === "Escape") { close(); } }
-    function open() { pop.hidden = false; btn.classList.add("is-open"); setTimeout(function () { document.addEventListener("mousedown", onDoc); }, 0); document.addEventListener("keydown", onEsc); }
-    function close() { pop.hidden = true; btn.classList.remove("is-open"); document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onEsc); }
-    btn.addEventListener("click", function () { pop.hidden ? open() : close(); });
-    wrap.appendChild(btn); wrap.appendChild(pop);
-    paintBtn();
-    Object.defineProperty(wrap, "value", { get: function () { return val; }, set: function (v) { val = v || ""; paintBtn(); } });
-    return wrap;
-  }
-  window.__buildFontPicker = buildFontPicker; // headless test hook
 
   // #170/#158: ONE canonical, config-driven formatting toggle-bar builder, shared by the
   // block inspector's field editor AND the Course Copy Editor -- replacing their two
@@ -10758,7 +9806,7 @@
       frame.style.backgroundColor = activeTheme().color.bg;
       var cr = window.renderPage(page, activeTheme(), window.resolveHeaderFooter(renderDoc, page));
       cr.setAttribute("data-bp", activeBp);   // course.css responsive rules key off this
-      cr.setAttribute("data-mode", activeMode); // logo auto-tint keys off this
+      cr.setAttribute("data-mode", activeModeNow()); // logo auto-tint keys off this
       applyLayoutVars(cr, page);              // master page padding (+ per-page override)
       frame.appendChild(cr);
 
@@ -14779,8 +13827,8 @@
     // Divider under the size presets, then the palette toggle.
     items.push({ sep: true });
     items.push({ head: "Palette" });
-    items.push({ label: "Light", active: activeMode === "light", onClick: function () { setMode("light"); } });
-    items.push({ label: "Dark", active: activeMode === "dark", onClick: function () { setMode("dark"); } });
+    items.push({ label: "Light", active: activeModeNow() === "light", onClick: function () { setMode("light"); } });
+    items.push({ label: "Dark", active: activeModeNow() === "dark", onClick: function () { setMode("dark"); } });
     showContextMenu(r.right, r.bottom + 4, items);
   }
   function wireBpSwitch() {
@@ -15239,7 +14287,7 @@
     migrateAssets: migrateAllAssets,
     sweepAssets: sweepAllAssets,
     getTheme: function () { return activeTheme(); },
-    getThemes: function () { return workingThemes; },
+    getThemes: function () { return workingThemesNow(); },
     // #126 cross-course preset library (also drives the browser-verify + automation).
     themePresets: {
       list: function () { return loadThemePresets(); },
@@ -15592,17 +14640,13 @@
     rollupLabel: rollupLabel,
     switchEl: switchEl
   });
-  // arch-P3b-04: what the tour builder reads. `activeMode` is the light/dark toggle and the board
-  // themes its thumbnails from it. arch-P3b-06 took the two hotspot selection ids off this list:
-  // the hotspots editor owns them now and provides them itself, which is where they belonged.
-  window.VersoEditor.provideLive({
-    activeMode: function () { return activeMode; }
-  });
-  // arch-P3b-07j: the preview flips light/dark for real, so it writes this one back. Entering the
-  // preview also drops comment mode WITHOUT the side effects of the full setter -- it is about to
-  // rebuild the surface anyway -- so that write crosses as its own narrow function.
+  // arch-P3b-07f: `activeMode` and its setter used to sit here, for the tour board and the preview.
+  // editor/theme.js owns the previewed mode now and provides both itself -- the same tidy-up
+  // P3b-06 made with the hotspot selection, and one fewer thing this file holds on another's
+  // behalf. Entering the preview drops comment mode WITHOUT the side effects of the full setter,
+  // because it is about to rebuild the surface anyway, so that write stays here as its own
+  // narrow function.
   window.VersoEditor.provide({
-    setActiveMode: function (m) { activeMode = m; },
     resetDemoCommentMode: function () { demoCommentMode = false; }
   });
   // Both are flipped as the author works: comment mode inside the preview, and which comment's
@@ -15631,6 +14675,14 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    getTextRoles: getTextRoles,
+    renameTextStyle: renameTextStyle,
+    scopeChain: scopeChain,
+    buildFontPicker: buildFontPicker,
+    typeCluster: typeCluster,
+    modalActions: modalActions,
+    refreshSettingsPanes: refreshSettingsPanes,
+    getTextStyles: getTextStyles,
     syncSendToPublishCount: syncSendToPublishCount,
     publishToast: publishToast,
     addToQueue: addToQueue,
@@ -15826,10 +14878,14 @@
   window.VersoVariants.install(VE);   // the variant and version axes
   window.VersoCopyEditor.install(VE);   // the Read view and its find & replace
   window.VersoDemo.install(VE);   // the fullscreen learner preview
+  window.VersoHelp.install(VE);   // the in-app user guide
+  window.VersoTheme.install(VE);   // the course palette and the Theme panel
+  window.VersoFonts.install(VE);   // fonts, embedded so a course works offline
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has
   // installed. Constants -- nothing reassigns them afterwards.
+  ICON_ALIAS = VE.get("ICON_ALIAS");
   CONTAINER_IO_KEYS = VE.get("CONTAINER_IO_KEYS");
   HEADER_STYLE_KEYS = VE.get("HEADER_STYLE_KEYS");
   FOOTER_STYLE_KEYS = VE.get("FOOTER_STYLE_KEYS");

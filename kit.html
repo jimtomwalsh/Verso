@@ -155,6 +155,12 @@
   <script src="src/editor/copy-editor.js"></script>
   <!-- arch-P3b-07j demo: window.VersoDemo — the fullscreen preview that runs the REAL learner runtime in a device frame, with the breakpoint picker, fit-scale, exit notice and end screen a preview needs and an export must not have. Must precede editor.js. -->
   <script src="src/editor/demo.js"></script>
+  <!-- arch-P3b-07 help: window.VersoHelp — the in-app user guide: a small Markdown renderer for docs/USER-GUIDE.md, the reading modal, its heading contents list and the figure fallbacks. Must precede editor.js. -->
+  <script src="src/editor/help.js"></script>
+  <!-- arch-P3b-07f theme: window.VersoTheme — the per-course palette (doc.theme), its flat two-mode projection, the cross-course preset library and the Theme panel. Owns the previewed mode. Must precede editor.js. -->
+  <script src="src/editor/theme.js"></script>
+  <!-- arch-P3b-07 fonts: window.VersoFonts — uploaded and curated Google fonts, embedded at author-time as base64 @font-face in both the editor and the export so a course works offline, plus the picker and its air-gap flag. Must precede editor.js. -->
+  <script src="src/editor/fonts.js"></script>
   <script src="src/editor.js"></script>
   <script src="kit-gallery.js"></script>
 </body>

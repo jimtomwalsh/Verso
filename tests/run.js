@@ -2233,7 +2233,8 @@ section("platform-pivot 03 doc routes");
 // ---- #81: in-app Help guide markdown renderer -----------------------------
 section("#81 Help markdown renderer");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07: the in-app guide moved to src/editor/help.js.
+  var t = src("src/editor/help.js");
   var m = t.match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
   if (!m) { ok("locate @md fence", false); return; }
   var g = new Function(m[1] + "\nreturn { mdToHtml: mdToHtml };")();
@@ -2287,15 +2288,17 @@ section("#81 Help markdown renderer");
 
 // WIRING: broken figure assets degrade gracefully (impure onerror wiring, not the pure renderer)
 (function () {
-  var ed = src("src/editor.js");
+  var ed = src("src/editor/help.js");   // arch-P3b-07
   ok("#25 openHelpModal wires figure onerror -> --missing", /doc-figure__img[\s\S]{0,220}addEventListener\("error"[\s\S]{0,120}doc-figure--missing/.test(ed));
 })();
 
 // WIRING: the Help button opens the in-app modal, not a (no-op) new tab.
 (function () {
-  var ed = src("src/editor.js");
+  // arch-P3b-07: the guide moved to src/editor/help.js; the stale-window.open guard still reads
+  // editor.js, because that is where the regression it guards against would come back.
+  var ed = src("src/editor/help.js"), e = src("src/editor.js");
   ok("#81 help-btn wired to openHelpModal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(ed));
-  ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
+  ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1 && e.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
   ok("#81 help modal fetches the guide", /fetch\("docs\/USER-GUIDE\.md"/.test(ed));
 })();
 
@@ -2304,7 +2307,7 @@ section("#81 Help markdown renderer");
 // the guide's own heading IDs, so nav + scroll-spy track the content and never drift.
 section("#8 docs reader (TOC + search)");
 (function () {
-  var ed = src("src/editor.js");
+  var ed = src("src/editor/help.js");   // arch-P3b-07
   ok("#8 reader builds the two-pane split (nav + reading pane)", /modal-box--docs/.test(ed) && /docs-split/.test(ed) && /docs-nav/.test(ed));
   // uio-F06 (OVL-21) RETARGETED: the guide's own search box is retired. It was a third search
   // field over a third index; guide sections now live in the one Cmd-K index. The TOC stays,
@@ -2494,7 +2497,7 @@ section("#28 animated-WebP muxer + motion");
 // WIRING: reduced-motion swaps a motion figure to its poster still (impure docs-panel wiring)
 (function () {
   var ed = src("src/editor.js");
-  ok("#28 openHelpModal swaps to poster under prefers-reduced-motion", /prefers-reduced-motion[\s\S]{0,220}data-poster[\s\S]{0,80}img\.src\s*=\s*img\.getAttribute\("data-poster"\)/.test(ed) || /reduce\s*&&\s*img\.getAttribute\("data-poster"\)[\s\S]{0,60}img\.src/.test(ed));
+  ok("#28 openHelpModal swaps to poster under prefers-reduced-motion", /prefers-reduced-motion[\s\S]{0,220}data-poster[\s\S]{0,80}img\.src\s*=\s*img\.getAttribute\("data-poster"\)/.test(src("src/editor/help.js")) || /reduce\s*&&\s*img\.getAttribute\("data-poster"\)[\s\S]{0,60}img\.src/.test(src("src/editor/help.js")));
 })();
 
 // ---- #29: in-editor annotation overlay (capture-only) ---------------------------------
@@ -4476,6 +4479,7 @@ section("#124 doc.theme (per-course theme)");
 // ---- #125: full-token editing in Settings (font/space/radius/size) -----------
 section("#125 full-token theme editing");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // fontNameFromStack (render.js) is the pure reverse of fontStackFor -- it drives the
   // font-family picker's preselect from a stored doc.theme.font stack. Exercise the REAL
   // pair against a stub (no fakes), covering roundtrip + the seeded defaults + custom.
@@ -4510,17 +4514,18 @@ section("#125 full-token theme editing");
   // and the font control writes a resolved STACK (fontStackFor), never a bare name (which
   // would emit an unquoted --font-heading and break the family).
   var e = src("src/editor.js");
-  ok("editor: setSharedToken helper present", /function setSharedToken\(group, key, val\)/.test(e));
+  ok("editor: setSharedToken helper present", /function setSharedToken\(group, key, val\)/.test(THEME));
   ok("editor: Typography section wired to font picker + fontStackFor",
-    /panelSection\(c, "Typography"\)/.test(e) && /setSharedToken\("font", key, name \? window\.fontStackFor\(name\)/.test(e));
+    /panelSection\(c, "Typography"\)/.test(THEME) && /setSharedToken\("font", key, name \? window\.fontStackFor\(name\)/.test(THEME));
   ok("editor: Spacing/Radius/Text-size groups wired via sharedPx",
-    /panelSection\(c, "Spacing"\)/.test(e) && /panelSection\(c, "Radius"\)/.test(e) && /panelSection\(c, "Text sizes"\)/.test(e) && /function sharedPx\(group, key, glyph, title\)/.test(e));
-  ok("editor: Reset restores the shared groups too", /doc\.theme\.space = clone\(window\.THEMES\[nm\]\.space\)/.test(e));
+    /panelSection\(c, "Spacing"\)/.test(THEME) && /panelSection\(c, "Radius"\)/.test(THEME) && /panelSection\(c, "Text sizes"\)/.test(THEME) && /function sharedPx\(group, key, glyph, title\)/.test(THEME));
+  ok("editor: Reset restores the shared groups too", /doc\.theme\.space = clone\(window\.THEMES\[nm\]\.space\)/.test(THEME));
 })();
 
 // ---- #126: cross-course theme presets (copy-on-apply + merge-by-name) --------
 section("#126 theme presets (copy-on-apply)");
 (function () {
+  var THEME = src("src/editor/theme.js"), t = src("src/editor.js");   // arch-P3b-07f
   var tw = {};
   tw = LOAD.load("src/theme.js", { window: tw });
   // arch-P3-09: the preset library folded back into src/theme.js, beside the tokens it copies.
@@ -4599,18 +4604,19 @@ section("#126 theme presets (copy-on-apply)");
     return Object.keys(TP.load(bad)).length === 0 && Object.keys(TP.load(wrong)).length === 0 &&
       Object.keys(TP.load(thrower)).length === 0;
   })());
-  ok("applyThemePreset is undoable (pushHistory) + repaints (mount)", /function applyThemePreset\(name\)[\s\S]*?pushHistory\(\)[\s\S]*?applyThemePresetToDoc\(doc, p\)[\s\S]*?syncWorkingFromDoc\(\)[\s\S]*?mount\(\)/.test(t));
+  ok("applyThemePreset is undoable (pushHistory) + repaints (mount)", /function applyThemePreset\(name\)[\s\S]*?pushHistory\(\)[\s\S]*?applyThemePresetToDoc\(E\.doc, p\)[\s\S]*?syncWorkingFromDoc\(\)[\s\S]*?mount\(\)/.test(THEME));
   // Picker dropdown fixes (James report): the placeholder option must NOT echo the selected
   // name (else the chosen theme rendered twice), and the per-course selection must reset on a
   // course switch (copy-on-apply keeps no live link, so it must not bleed across courses).
-  ok("picker placeholder is neutral (no duplicate option)", /placeholder: names\.length \? "Saved themes…" : "No saved themes yet"/.test(t));
-  ok("switchDoc resets themePresetSel (no cross-course bleed)", /function switchDoc\(id\)[\s\S]*?themePresetSel = null;/.test(t));
-  ok("every active-doc change resets themePresetSel (arch-P3-02: one owner, activateDoc)", /function activateDoc\(id\)[\s\S]{0,700}themePresetSel = null;/.test(t) && !/themePresetSel = null;/.test(t.slice(t.indexOf("function closeTab("), t.indexOf("function switchDoc("))));
+  ok("picker placeholder is neutral (no duplicate option)", /placeholder: names\.length \? "Saved themes…" : "No saved themes yet"/.test(THEME));
+  ok("switchDoc resets themePresetSel (no cross-course bleed)", /function switchDoc\(id\)[\s\S]*?clearThemePresetChoice\(\);/.test(t) && /function clearThemePresetChoice\(\) \{ themePresetSel = null; \}/.test(THEME));
+  ok("every active-doc change resets themePresetSel (arch-P3-02: one owner, activateDoc)", /function activateDoc\(id\)[\s\S]{0,700}clearThemePresetChoice\(\);/.test(t) && !/clearThemePresetChoice();/.test(t.slice(t.indexOf("function closeTab("), t.indexOf("function switchDoc("))));
 })();
 
 // ---- #127: blockStyles per type + capture-from-block + render/export cascade --
 section("#127 blockStyles (per-type default appearance cascade)");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // resolveBlockBox (render.js) is the PURE cascade core: theme.blockStyles[type] is the
   // baseline, block.box overrides key-by-key. Exercise the REAL function against a stub.
   var rw = {};
@@ -4643,7 +4649,7 @@ section("#127 blockStyles (per-type default appearance cascade)");
   // the theme panel edits captured defaults.
   ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?doc\.theme\.blockStyles = \{\};[\s\S]*?return doc\.theme\.blockStyles;/.test(e));
   ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(e) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(e));
-  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(e) && /function blockStylesEditor\(intro, listHost\)/.test(e));
+  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(THEME) && /function blockStylesEditor\(intro, listHost\)/.test(THEME));
 })();
 
 // ---- #128: document + version the doc.theme design-spec contract (ADR 0002) --
@@ -5381,6 +5387,7 @@ section("WWW apply-style colour");
 section("theme-aware style colour");
 (function () {
   var rtxt = src("src/render.js");
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f: the Edit-style dialog moved with the panel
   var body = rtxt.slice(rtxt.indexOf("function applyTextStyle("), rtxt.indexOf("window.applyTextStyle"));
   var applyTextStyle = new Function("FONT_STACKS", body + "\nreturn applyTextStyle;")({});
   var n1 = { style: {} }; applyTextStyle(n1, { colorToken: "ink" });
@@ -5409,17 +5416,17 @@ section("theme-aware style colour");
   ok("MM: word-spacing emits px", n8.style.wordSpacing === "4px");
   ok("MM: unset word-spacing -> empty", n7.style.wordSpacing === "");
   ok("Edit-style dialog offers a Justify align option", /\[Icon\("align-right"\), "right", "Right"\], \[Icon\("align-justify"\), "justify", "Justify"\]/.test(src("src/editor.js")));
-  ok("Edit-style dialog saves word-spacing", /if \(draft\.wordSpacing == null \|\| isNaN\(draft\.wordSpacing\)\) delete s\.wordSpacing; else s\.wordSpacing = draft\.wordSpacing/.test(src("src/editor.js")));
+  ok("Edit-style dialog saves word-spacing", /if \(draft\.wordSpacing == null \|\| isNaN\(draft\.wordSpacing\)\) delete s\.wordSpacing; else s\.wordSpacing = draft\.wordSpacing/.test(THEME));
   // resolveBlockStyle: a per-block override of ONE colour form drops the named style's OTHER form
   ok("resolveBlockStyle: hex override drops the style's token", /if \(ov\.color != null && ov\.color !== ""\) delete merged\.colorToken/.test(rtxt));
   ok("resolveBlockStyle: token override drops the style's hex", /else if \(ov\.colorToken\) delete merged\.color/.test(rtxt));
   // editor dialog: token XOR hex on save + specimen resolves the var
   var etxt = src("src/editor.js");
-  ok("Edit-style dialog saves colorToken (token clears hex)", /s\.colorToken = draft\.colorToken; delete s\.color/.test(etxt));
+  ok("Edit-style dialog saves colorToken (token clears hex)", /s\.colorToken = draft\.colorToken; delete s\.color/.test(THEME));
   ok("Edit-style dialog offers theme-token options", /COLOUR_TOKENS = \[\["Ink", "ink"\]/.test(etxt));
-  ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(etxt));
+  ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(THEME));
   ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(etxt) && /"First-line indent"/.test(etxt));
-  ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(etxt));
+  ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(THEME));
   // body paragraphs default to full ink (matching .body-list), not ink-soft — else a
   // colourless text style leaves paragraphs a shade lighter than lists (James's mismatch).
   var ccss = src("src/course.css");
@@ -7303,13 +7310,17 @@ section("embed align centering");
 // ---- font preview picker (Part B) ----------------------------
 section("font preview picker");
 (function () {
+  var FONTS = src("src/editor/fonts.js");   // arch-P3b-07
   var r = src("src/render.js"), e = src("src/editor.js"), css = src("editor.css");
   ok("render exposes fontStackFor (known stack or quoted family)", /window\.fontStackFor = function \(name\) \{ return name \? \(FONT_STACKS\[name\] \|\| \("'" \+ name \+ "', sans-serif"\)\) : ""; \}/.test(r));
   // the picker renders each option in its own font + exposes .value + fires change (attachFontWarn stays compatible)
-  ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(e));
+  ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(FONTS));
   ok("picker exposes .value + dispatches change", /Object\.defineProperty\(wrap, "value"[\s\S]*?wrap\.dispatchEvent\(new Event\("change"\)\)/.test(e) || /wrap\.dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
   // all 3 plain <select> font pickers replaced by the shared component
-  ok("all 3 font selects use buildFontPicker", (e.match(/buildFontPicker\(/g) || []).length >= 3);
+  // arch-P3b-07/07f: the three pickers now sit in three files -- two inspectors here, the Theme
+  // panel's in theme.js -- so the claim counts across the chrome rather than within one file.
+  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js")).match(/[^_.]buildFontPicker\(/g) || [];
+  ok("all 3 font selects use buildFontPicker", pickerSites.length >= 3);
   ok("no plain <select> font list remains", !/h\("select"[\s\S]{0,80}FONT_LIST\.map/.test(e));
   ok("picker CSS: popup listbox present", /\.font-picker__pop \{[\s\S]*?position: absolute/.test(css) && /\.font-picker__opt \{/.test(css));
 })();
@@ -7317,28 +7328,30 @@ section("font preview picker");
 // ---- Google Fonts source + Arial -----------------------------------------
 section("google fonts + arial");
 (function () {
+  var FONTS = src("src/editor/fonts.js");   // arch-P3b-07
   var r = src("src/render.js"), e = src("src/editor.js");
   // Arial is a directly-pickable, air-gap-safe system font
   ok("Arial in FONT_STACKS", /"Arial": "Arial, Helvetica, sans-serif"/.test(r));
   ok("Arial in the air-gap-safe (embeddable) set", /EMBEDDABLE_FONTS = \["Exo 2", "System", "Arial"/.test(r));
   // curated Google set incl. popular families
-  ok("curated Google set defined (popular families)", /var CURATED_GOOGLE_FONTS = \[[\s\S]*?"Roboto", "Open Sans", "Lato", "Montserrat", "Poppins"/.test(e));
+  ok("curated Google set defined (popular families)", /var CURATED_GOOGLE_FONTS = \[[\s\S]*?"Roboto", "Open Sans", "Lato", "Montserrat", "Poppins"/.test(FONTS));
   // fetch-at-author-time -> embed via the existing doc.fonts pipeline (no runtime CDN link ships)
-  ok("Google font fetch embeds woff2(s) into doc.fonts (source:google)", /function fetchAndEmbedGoogleFont\(family\)[\s\S]*?fonts\.googleapis\.com\/css2[\s\S]*?\.woff2[\s\S]*?doc\.fonts\.push\(\{ family: family, src: assetRef\(f\.dataUrl[\s\S]*?format: "woff2", weight: parseInt\(f\.weight, 10\), source: "google"/.test(e));
+  ok("Google font fetch embeds woff2(s) into doc.fonts (source:google)", /function fetchAndEmbedGoogleFont\(family\)[\s\S]*?fonts\.googleapis\.com\/css2[\s\S]*?\.woff2[\s\S]*?doc\.fonts\.push\(\{ family: family, src: assetRef\(f\.dataUrl[\s\S]*?format: "woff2", weight: parseInt\(f\.weight, 10\), source: "google"/.test(FONTS));
   // multi-weight: pick one woff2 per weight (400 + 700) so bold is a real cut
-  ok("Google fetch embeds a real cut per weight (400 + 700)", /byWeight\[w\][\s\S]*?wanted = weights\.filter\(function \(w\) \{ return w === "400" \|\| w === "700"; \}\)/.test(e));
-  ok("buildFontFaceCss emits font-weight when present", /var wt = f\.weight \? "font-weight:" \+ f\.weight \+ ";" : "";/.test(e));
+  ok("Google fetch embeds a real cut per weight (400 + 700)", /byWeight\[w\][\s\S]*?wanted = weights\.filter\(function \(w\) \{ return w === "400" \|\| w === "700"; \}\)/.test(FONTS));
+  ok("buildFontFaceCss emits font-weight when present", /var wt = f\.weight \? "font-weight:" \+ f\.weight \+ ";" : "";/.test(FONTS));
   // in-app Help: a toolbar button opens the User Guide (#81 — in-app modal, not a
   // new-tab window.open that no-ops in the desktop shell).
   ok("toolbar has a Help button", /id="help-btn"/.test(src("index.html")));
-  ok("Help opens the in-app guide modal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(e));
-  ok("fetch is overridable for tests + air-gap note in the UI", /var doFetch = window\.__fontFetch \|\| window\.fetch/.test(e) && /downloaded and EMBEDDED now/.test(e));
+  ok("Help opens the in-app guide modal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(src("src/editor/help.js")));
+  ok("fetch is overridable for tests + air-gap note in the UI", /var doFetch = window\.__fontFetch \|\| window\.fetch/.test(FONTS) && /downloaded and EMBEDDED now/.test(FONTS));
 })();
 
 // ---- KKK: buildFontFaceCss for uploaded custom fonts -----------------------
 section("KKK custom-fonts");
 (function () {
-  var etxt = src("src/editor.js");
+  // arch-P3b-07: the font embedding moved to src/editor/fonts.js.
+  var etxt = src("src/editor/fonts.js");
   var s = etxt.indexOf("function resolveFontDataUrl(src)");
   var e = etxt.indexOf("};", etxt.indexOf("window.buildFontFaceCss = function")) + 2;
   var win = {};
@@ -8955,6 +8968,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07c: the modal builders moved to src/editor/modals.js.
@@ -9059,8 +9073,8 @@ section("panel system v2 — layout engine");
   ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
   ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
-  ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(e));
-  ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
+  ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(THEME));
+  ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(THEME) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(THEME));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
   // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
   // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
@@ -9113,9 +9127,9 @@ section("panel system v2 — layout engine");
   ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(e));
   // Phase 2c: the SAME typeCluster mounted in BOTH the field inspector and the style dialog
   ok("field inspector mounts typeCluster (reference adopter)", /typeCluster\(inspector, s, apply/.test(e));
-  ok("Edit-Text-Style dialog mounts the SAME typeCluster", /typeCluster\(box, draft, syncSpecimen\)/.test(e));
+  ok("Edit-Text-Style dialog mounts the SAME typeCluster", /typeCluster\(box, draft, syncSpecimen\)/.test(THEME));
   ok("field inspector no longer hand-rolls a colour row (colorField via typeCluster)", !/colourControl\("Colour", s\.color/.test(e));
-  ok("dialog persists per-mode text colour (forward-compat)", /else if \(draft\.colorLight \|\| draft\.colorDark\) \{ s\.colorLight = draft\.colorLight; s\.colorDark = draft\.colorDark;/.test(e));
+  ok("dialog persists per-mode text colour (forward-compat)", /else if \(draft\.colorLight \|\| draft\.colorDark\) \{ s\.colorLight = draft\.colorLight; s\.colorDark = draft\.colorDark;/.test(THEME));
 })();
 // ---- "Exit course" DO-action (SCORM LMS exit) ----------------------------
 // A navButton with action.exit ends the SCORM session instead of navigating.
@@ -9356,6 +9370,7 @@ section("PERF one-page re-render");
 // ---- UI kit gallery seam ----------------------
 section("UI kit seam");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
@@ -9404,7 +9419,7 @@ section("UI kit seam");
   // caller of pushEmbedTheme (+ binds the theme-shim-ready re-push for late iframes).
   // Without it a fresh load leaves each interaction on its own default palette, so an
   // author's block.embedColorMap never applies until the mode toggle fires.
-  ok("boot pushes theme into embeds (reapplyTheme after boot mount)", /\bmount\(\);[\s\S]{0,900}\breapplyTheme\(\);/.test(e) && /function reapplyTheme[\s\S]{0,600}pushEmbedTheme\(canvas/.test(e));
+  ok("boot pushes theme into embeds (reapplyTheme after boot mount)", /\bmount\(\);[\s\S]{0,900}\breapplyTheme\(\);/.test(e) && /function reapplyTheme[\s\S]{0,600}pushEmbedTheme\(canvas/.test(THEME));
   // Regression (same family): entering PREVIEW / navigating in demo rebuilds fresh embed
   // iframes; renderDemo must push the theme (tokens + embedColorMap) into demoDevice or
   // the interaction shows its own default palette (colours "change" on entering preview).
@@ -9439,7 +9454,7 @@ section("UI kit seam");
   ok("repeatedList grip drag reorders via opts.move", /dragstart[\s\S]{0,1000}drop[\s\S]{0,300}opts\.move\(from, i\)/.test(ep));
   ok("repeatedList trash removes via opts.remove", /iconBtn\("trash"[\s\S]{0,200}opts\.remove\(i\)/.test(ep));
   ok("repeatedList field edit is live, no repaint (keeps focus)", /field\.addEventListener\("change", function \(\) \{ if \(!opts\.noHistory\) pushHistory\(\); opts\.setValue\(item, field\.value\);/.test(ep));
-  ok("grip glyph is canonical (Lucide grip-vertical via ICON_ALIAS, not inline one-off)", /grip: "grip-vertical"/.test(e) && /"grip-vertical":/.test(src("src/icons.js")));
+  ok("grip glyph is canonical (Lucide grip-vertical via ICON_ALIAS, not inline one-off)", /grip: "grip-vertical"/.test(ep) && /"grip-vertical":/.test(src("src/icons.js")));
   ok("__kit exposes repeatedList", /window\.__kit[\s\S]{0,900}\brepeatedList\s*:/.test(e));
   ok("kit-gallery demos repeatedList", /K\.repeatedList\(/.test(gal));
 
@@ -12013,7 +12028,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   ok("generic modal prose no longer overrides the help system", /\.modal-box:not\(\.modal-box--docs\) p \{/.test(css) && !/^\.modal-box p \{/m.test(css));
 
   // --- pure: the renderer's share of the help system ----------------------------------
-  var t = e.match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
+  var t = src("src/editor/help.js").match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
   if (!t) { ok("locate @md fence", false); return; }
   var md = new Function(t[1] + "\nreturn mdToHtml;")();
   ok("a callout is toned by the label the author already writes",
