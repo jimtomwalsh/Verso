@@ -8560,467 +8560,16 @@
     gf.appendChild(gsel);
   }
   // A headerFooter/footer numeric field (padding, logo size). Applies LIVE via
-  // reapplyHeaderFooter so the canvas updates while the panel keeps focus. iconField
-  // pushes history itself (headerFooter lives in doc, so it is on the undo stack).
-  function headerFooterNum(cfg, key, glyph, title, placeholder, min, max) {
-    return iconField(glyph, {
-      value: cfg[key] == null ? "" : cfg[key], unit: "px", placeholder: placeholder || "auto",
-      step: 1, min: min, max: max, title: title, datalist: "dl-gap",
-      onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete cfg[key]; else cfg[key] = n; if (!pokeHeaderFooterLive(cfg, key)) reapplyHeaderFooter(); } // PERF: poke live, full rebuild only as fallback
-    }).wrap;
-  }
+  // arch-P3b-07e: the header/footer editor -- both configurations, their per-page overrides and
+  // the learner nav's nests -- moved to editor/header-footer.js.
+  var buildHeaderBody = VE.bind("buildHeaderBody");
+  var buildFooterBody = VE.bind("buildFooterBody");
+  var buildHeaderFooterDefaultBody = VE.bind("buildHeaderFooterDefaultBody");
+  var buildLayoutBody = VE.bind("buildLayoutBody");
+  var makeCourseNav = VE.bind("makeCourseNav");
+  var headerFooterConfig = VE.bind("headerFooterConfig");
+  var hfSectionOpts = VE.bind("hfSectionOpts");
 
-  // global header/footer settings. Text is edited inline on the page.
-  // On/off + reveal toggles (header, footer, underline, top rule, logo presence)
-  // change WHICH controls are shown, so they rebuild the panel (mount). Value
-  // edits (align, tint, size, colour, padding) apply live via reapplyHeaderFooter and
-  // keep panel focus.
-  // Item X — the headerFooter child/slot editor. Lists the added child blocks on a
-  // header/footer config and lets the author add a learner light/dark toggle or a
-  // text element, set each child's alignment, and remove them. Add/remove is
-  // structural -> mount() (rebuilds the list + canvas); align is live -> reapplyHeaderFooter
-  // (keeps the panel). Children render via render.js appendHeaderFooterChildren, so they
-  // show on every page and ship in the export automatically. Text children are
-  // edited inline on the canvas (like the built-in title/footer text).
-  function headerFooterChildrenEditor(config, host, isFooter) {
-    config.children = config.children || [];
-    host = panelSection(host, "Added content"); // #162: canonical collapsible (was the nest's "Placed items" sub + this sub)
-    if (!config.children.length) {
-      host.appendChild(h("div", "insp-hint", "No added elements yet. Add a light/dark toggle so learners can switch theme, or a text element."));
-    }
-    config.children.forEach(function (child, idx) {
-      var row = h("div", "insp-row"); row.appendChild(h("span", "insp-row__label", blockLabel(child)));
-      var del = iconBtn("trash", "Remove element", true);
-      del.addEventListener("click", function () { pushHistory(); config.children.splice(idx, 1); openSections.headerFooter = true; mount(); });
-      row.appendChild(del);
-      host.appendChild(row);
-      // The nav bar is a full-width footer element; per-child alignment is a no-op
-      // for it. Its controls live in the top-level "Learner nav" panel (keeping the nav
-      // nests at level 2 rather than burying them 3 deep under Footer > Placed items).
-      // uio-O-W1 (OVL-06): this used to be a line of prose telling the author to go and find
-      // another panel. The nav bar is owned by the Learner nav section, so the row states its
-      // live value and links straight there.
-      if (child.type === "courseNav") {
-        var navSecs = (child.sections || []).length;
-        crossRefRow({
-          label: "Nav bar",
-          value: navSecs ? (navSecs + (navSecs === 1 ? " section" : " sections")) : "No sections yet",
-          linkLabel: "Learner nav", host: host,
-          title: "Open Settings on Learner nav, where this bar is styled",
-          onNavigate: function () { openSettingsSection("project", "nav"); }
-        });
-        return;
-      }
-      segmentedIconLive("Align", [[Icon("align-left"), "start", "Start"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "end", "End"]],
-        function (v) { return (child.align || "start") === v; },
-        function (v) { if (v === "start") delete child.align; else child.align = v; reapplyHeaderFooter(); }, host);
-    });
-    var addToggle = h("button", "prop-btn", "+ Light/dark toggle");
-    addToggle.addEventListener("click", function () {
-      pushHistory();
-      config.children.push({ type: "modeToggle", label: "Light / Dark" });
-      openSections.headerFooter = true; mount();
-    });
-    var addText = h("button", "prop-btn", "+ Text element");
-    addText.addEventListener("click", function () {
-      pushHistory();
-      config.children.push({ type: "note", text: "New text" });
-      openSections.headerFooter = true; mount();
-    });
-    host.appendChild(addToggle); host.appendChild(addText);
-    // Footer-only: the learner navigation bar (prev / progress / next).
-    if (isFooter && !config.children.some(function (ch) { return ch.type === "courseNav"; })) {
-      var addNav = h("button", "prop-btn", "+ Learner nav bar");
-      addNav.addEventListener("click", function () {
-        pushHistory();
-        config.children.push(makeCourseNav());
-        openSections.headerFooter = true; mount();
-      });
-      host.appendChild(addNav);
-    }
-  }
-
-  // A new nav bar seeds its sections from the current pages (one section per page,
-  // skipping the first page which is conventionally the menu/landing). The author
-  // then edits labels + page membership below.
-  function makeCourseNav() {
-    var secs = (doc.pages || []).slice(1).map(function (p, i) {
-      return { id: "s" + (i + 1), label: p.name || "Section " + (i + 1), pageIds: [p.id] };
-    });
-    return { type: "courseNav", menuLabel: "Menu", prevLabel: "Back", nextLabel: "Next",
-      showPrev: true, showBar: true, showNext: true, sections: secs };
-  }
-
-  // Inline controls for a footer nav-bar child: part toggles, arrow/menu labels,
-  // and a section editor (label + which pages belong to each section). Toggles and
-  // section membership are STRUCTURAL (change the rendered DOM) -> mount(); label
-  // text is live -> reapplyHeaderFooter (keeps the panel + focus).
-  // SPEC-panel-cleanup slice 2: the nav block inspector as nests — Buttons / Progress
-  // pill / Progression / Sections. Same primitives as slice 1 (switch/eye/icon segments
-  // + dot/reset). Word-boolean segments retired.
-  // uio-O-W2 (OVL-07): the nav's five groups are described ONCE and drawn in two places. On the
-  // canvas the nav block is selected and they are the panel's own sections; in the settings sheet
-  // they are sheet sections in their own right. They used to be nested inside a "Learner nav"
-  // section there, which made their inner groups (Labels, Appearance, Size…) a third level.
-  function courseNavNests(child) {
-    child.sections = child.sections || [];
-    return [
-      { key: "nav.buttons", title: "Buttons", sheetTitle: "Nav buttons", build: function (b) { navButtonsNest(child, b); }, opts: {
-        overridden: function () { return nestOverridden(child, NAV_BTN_KEYS); },
-        onReset: function () { nestReset(child, NAV_BTN_KEYS); reapplyHeaderFooter(); }
-      } },
-      { key: "nav.pill", title: "Progress pill", build: function (b) { navPillNest(child, b); }, opts: {
-        toggle: { get: function () { return child.showBar !== false; }, set: function (v) { if (v) delete child.showBar; else child.showBar = false; reapplyHeaderFooter(); } },
-        overridden: function () { return nestOverridden(child, NAV_PILL_KEYS); },
-        onReset: function () { nestReset(child, NAV_PILL_KEYS); reapplyHeaderFooter(); }
-      } },
-      { key: "nav.progression", title: "Progression", build: function (b) { navProgressionNest(child, b); }, opts: {
-        // §2 chapter progression: opt-in course-level gate (feature-enable = the switch).
-        toggle: { get: function () { return !!doc.gatedProgression; }, set: function (v) { if (v) doc.gatedProgression = true; else delete doc.gatedProgression; reapplyHeaderFooter(); } }
-      } },
-      { key: "nav.sections", title: "Sections", sheetTitle: "Nav sections", build: function (b) { navSectionsNest(child, b); } },
-      // Guided tour (learner coach-marks over the footer controls). Feature-enable = the
-      // header switch; body = which page it appears on + editable copy per marker.
-      { key: "nav.tour", title: "Guided tour", build: function (b) { navTourNest(child, b); }, opts: {
-        toggle: {
-          get: function () { return !!(child.tour && child.tour.on); },
-          set: function (v) {
-            if (v) {
-              child.tour = child.tour || {};
-              child.tour.on = true;
-              if (child.tour.page == null) child.tour.page = (doc.pages && doc.pages[0] && doc.pages[0].id) || "";
-            } else if (child.tour) { child.tour.on = false; }
-            reapplyHeaderFooter();
-          }
-        }
-      } }
-    ];
-  }
-  function courseNavControls(child, host) {
-    courseNavNests(child).forEach(function (n) {
-      host.appendChild(subDisclosure(n.key, n.title, n.build, n.opts));
-    });
-  }
-  // Progression body — a course-level gate, so it reads the doc rather than the nav block.
-  function navProgressionNest(child, b) {
-    b.appendChild(h("div", "insp-hint", "On: each chapter must pass its knowledge check (native quiz) before the learner can advance to the next; play it in demo mode to test. Add the chapter's dot-point summary to the quiz's \"Chapter summary\" list (on the quiz completion panel) — it shows once the learner passes."));
-    // §5: auto-gate ALL interactions — one course-level DEFAULT switch (per-page override
-    // lives in the page inspector). Default off.
-    // uio-F03: the SAME ladder, seen from the Course rung — one primitive, two surfaces.
-    var courseGateRes = resolveScoped(gateScopeChain(null), "gateInteractions", { at: "course" });
-    switchRow("Require all interactions before Next", function () { return !!courseGateRes.value; },
-      function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector(); }, b, false,
-      { inherit: { res: courseGateRes, format: onOffLabel, onReset: function () {
-          pushHistory(); delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector();
-        } } });
-    b.appendChild(h("div", "insp-hint", "Course default: on every page the learner must finish its interactions — pass quizzes, view all hotspots, watch videos, tick checkboxes, reveal all cards, step through sequences, open every accordion section — before Next enables. The gated Next greys out and shows a reminder. Override per page in the page's settings. Interactions we can't detect (embedded HTML interactions) are skipped, so a page can never trap the learner."));
-    // Author-overridable reminder copy (optional; blank -> the default sentence).
-    var gmRow = h("div", "insp-row");
-    gmRow.appendChild(h("span", "insp-row__label", "Reminder message"));
-    var gmIn = h("input", "prop-text"); gmIn.type = "text"; gmIn.spellcheck = false;
-    gmIn.placeholder = "Complete the interactions on this page to continue.";
-    gmIn.value = doc.gateMessage || "";
-    gmIn.addEventListener("change", function () { pushHistory(); var v = gmIn.value.trim(); if (v) doc.gateMessage = v; else delete doc.gateMessage; reapplyHeaderFooter(); });
-    gmRow.appendChild(gmIn); b.appendChild(gmRow);
-  }
-  // Tour body: a page picker (when the dots appear) + per-marker Title/Description. Copy
-  // is optional -> empty falls back to the render default (shown as the field placeholder,
-  // read from window.VERSO_TOUR_DEFAULTS so editor + render never drift).
-  var TOUR_MARKERS = [["prev", "Back arrow"], ["mode", "Light/dark + language"], ["menu", "Menu & progress"], ["glossary", "Glossary"], ["next", "Next arrow"]];
-  function navTourNest(child, host) {
-    var tour = child.tour || (child.tour = { on: true });
-    var defs = window.VERSO_TOUR_DEFAULTS || {};
-    host.appendChild(h("div", "insp-hint", "Coach-mark dots pop up over the footer buttons to explain them. They appear automatically when the learner reaches the chosen page (every visit). Preview in Demo to see them."));
-    // page picker (host-scoped select — selectRow targets the global inspector)
-    host.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Show on page"));
-    var opts = [["Every page", ""]].concat((doc.pages || []).map(function (p) { return [pageDisplayName(p, doc), p.id]; }));
-    var sel = dsSelect(opts, tour.page || "", function (v) { pushHistory(); if (!v) tour.page = ""; else tour.page = v; reapplyHeaderFooter(); });
-    host.appendChild(sel);
-    // per-marker copy
-    var items = tour.items || (tour.items = {});
-    TOUR_MARKERS.forEach(function (m) {
-      var key = m[0], d = defs[key] || { title: "", desc: "" };
-      var it = items[key] || (items[key] = {});
-      var mbody = panelSection(host, m[1]);
-      mbody.appendChild(headerFooterTextRow("Title", it, "title", d.title || ""));
-      mbody.appendChild(headerFooterTextRow("Description", it, "desc", d.desc || ""));
-    });
-    host.appendChild(h("div", "insp-hint", "A marker only shows if its button is present (e.g. Glossary needs glossary terms; the arrows/toggle follow their own switches above)."));
-  }
-  function navButtonsNest(child, host) {
-    // Visibility
-    switchRow("Back arrow", function () { return child.showPrev !== false; }, function (v) { if (v) delete child.showPrev; else child.showPrev = false; reapplyHeaderFooter(); }, host);
-    switchRow("Next arrow", function () { return child.showNext !== false; }, function (v) { if (v) delete child.showNext; else child.showNext = false; reapplyHeaderFooter(); }, host);
-    switchRow("Icons only", function () { return child.iconsOnly === true; }, function (v) { if (v) child.iconsOnly = true; else delete child.iconsOnly; reapplyHeaderFooter(); }, host);
-    // #169b: pin is the GLOBAL DEFAULT (on) — the toggle is an opt-OUT (stores pinButtons:false).
-    switchRow("Pin to gutters", function () { return child.pinButtons !== false; }, function (v) { if (v) delete child.pinButtons; else child.pinButtons = false; reapplyHeaderFooter(); }, host);
-    host.appendChild(h("div", "insp-hint", "The progress/chapter pill always floats at the bottom. On (default): Prev/Next pin to the screen's bottom corners and stay visible as the learner scrolls — the same fixed inset in every course, independent of page padding. Off: they sit at the page end and scroll away. The canvas previews the pinned corners; check Demo for the live scroll behaviour."));
-    var h0 = host;
-    // Content
-    host = panelSection(h0, "Labels");
-    host.appendChild(headerFooterTextRow("Back label", child, "prevLabel", "Back"));
-    host.appendChild(headerFooterTextRow("Next label", child, "nextLabel", "Next"));
-    host.appendChild(headerFooterTextRow("Menu label", child, "menuLabel", "Menu"));
-    if (doc.glossary && Array.isArray(doc.glossary.terms) && doc.glossary.terms.length) host.appendChild(headerFooterTextRow("Glossary label", child, "glossaryLabel", "Glossary"));
-    // Appearance — canonical colourControls driving --nav-btn-* vars (default = white outline).
-    host = panelSection(h0, "Appearance"); // gate-ok: Header/Footer nav styling, not a block container
-    host.appendChild(h("div", "insp-hint", "Default: white stroke + text on a subtle background fill. Clear a swatch to revert."));
-    colorFieldFlat("Fill", child.btnFill, function (v) { if (v == null) delete child.btnFill; else child.btnFill = v; reapplyHeaderFooter(); }, host);
-    colorFieldFlat("Stroke", child.btnBorder, function (v) { if (v == null) delete child.btnBorder; else child.btnBorder = v; reapplyHeaderFooter(); }, host);
-    colorFieldFlat("Text", child.btnText, function (v) { if (v == null) delete child.btnText; else child.btnText = v; reapplyHeaderFooter(); }, host);
-    colorFieldFlat("Hover", child.btnHover, function (v) { if (v == null) delete child.btnHover; else child.btnHover = v; reapplyHeaderFooter(); }, host);
-  }
-  function navPillNest(child, host) {
-    // Toggle glyph
-    switchRow("Light/dark toggle", function () { return child.showModeToggle !== false; }, function (v) { if (v) delete child.showModeToggle; else child.showModeToggle = false; reapplyHeaderFooter(); }, host);
-    host.appendChild(h("div", "insp-hint", "Puts a light/dark switch glyph in the pill's left slot (works in demo + the exported course)."));
-    // §1: nudge the light/dark + glossary glyphs toward the pill edges (0 = centred).
-    host.appendChild(iconField(Icon("padding"), { value: child.pillGlyphNudge, unit: "px", placeholder: "0", step: 1, min: 0, max: 24, datalist: "dl-gap", title: "Push the light/dark + glossary glyphs toward the pill edges",
-      onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillGlyphNudge; else child.pillGlyphNudge = n; reapplyHeaderFooter(); } }).wrap);
-    // Size (BACKLOG §pill P2): author pill width (max) + height (min). Blank = the defaults
-    // (width caps at 460px; height is content-derived). Writes --nav-pill-width/-height.
-    var h0 = host;
-    host = panelSection(h0, "Size");
-    host.appendChild(twoUp(
-      iconField("W", { value: child.pillWidth, unit: "px", placeholder: "460", step: 10, min: 160, max: 900, datalist: "dl-gap", title: "Pill width (maximum)",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillWidth; else child.pillWidth = n; reapplyHeaderFooter(); } }).wrap,
-      iconField("H", { value: child.pillHeight, unit: "px", placeholder: "auto", step: 2, min: 24, max: 160, datalist: "dl-gap", title: "Pill height (minimum)",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillHeight; else child.pillHeight = n; reapplyHeaderFooter(); } }).wrap));
-    // Surface
-    host = panelSection(h0, "Surface");
-    host.appendChild(h("div", "insp-hint", "Clear a swatch to revert to the theme default."));
-    colorFieldFlat("Pill fill", child.pillFill, function (v) { if (v == null) delete child.pillFill; else child.pillFill = v; reapplyHeaderFooter(); }, host);
-    host.appendChild(twoUp(
-      iconField(Icon("contrast"), { value: child.pillOpacity, unit: "%", placeholder: "100", step: 5, min: 0, max: 100, datalist: "dl-gap", title: "Pill surface opacity (translucent background; text stays crisp)",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillOpacity; else child.pillOpacity = Math.max(0, Math.min(100, n)); reapplyHeaderFooter(); } }).wrap,
-      iconField(Icon("blur"), { value: child.pillBlur, unit: "px", placeholder: "0", step: 1, min: 0, max: 40, datalist: "dl-gap", title: "Layer blur — frosts the content behind the pill (pairs with opacity)",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillBlur; else child.pillBlur = Math.max(0, Math.min(40, n)); reapplyHeaderFooter(); } }).wrap));
-    switchRow("Stroke", function () { return child.pillStroke !== false; }, function (v) { if (v) delete child.pillStroke; else child.pillStroke = false; reapplyHeaderFooter(); renderInspector(); }, host);
-    if (child.pillStroke !== false) {
-      colorFieldFlat("Stroke colour", child.pillBorder, function (v) { if (v == null) delete child.pillBorder; else child.pillBorder = v; reapplyHeaderFooter(); }, host);
-    }
-    host.appendChild(twoUp(
-      iconField(Icon("border-weight"), { value: child.pillStrokeWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 8, datalist: "dl-gap", title: "Stroke width",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillStrokeWidth; else child.pillStrokeWidth = n; reapplyHeaderFooter(); } }).wrap,
-      iconField(Icon("radius"), { value: child.pillRadius, unit: "px", placeholder: "999", step: 1, min: 0, max: 999, datalist: "dl-gap", title: "Pill corner radius",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillRadius; else child.pillRadius = n; reapplyHeaderFooter(); } }).wrap));
-    // Drop shadow (James 2026-07-08): off -> no shadow; on -> author offset/blur/spread/colour+
-    // opacity, composed by render into --nav-pill-shadow (WYSIWYG in editor + runtime + export).
-    host = panelSection(h0, "Drop shadow");
-    switchRow("Drop shadow", function () { return child.pillShadow !== false; }, function (v) { if (v) delete child.pillShadow; else child.pillShadow = false; reapplyHeaderFooter(); renderInspector(); }, host);
-    if (child.pillShadow !== false) {
-      host.appendChild(twoUp(
-        iconField("X", { value: child.pillShadowX, unit: "px", placeholder: "0", step: 1, min: -60, max: 60, datalist: "dl-gap", title: "Shadow X offset",
-          onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillShadowX; else child.pillShadowX = n; reapplyHeaderFooter(); } }).wrap,
-        iconField("Y", { value: child.pillShadowY, unit: "px", placeholder: "10", step: 1, min: -60, max: 60, datalist: "dl-gap", title: "Shadow Y offset",
-          onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillShadowY; else child.pillShadowY = n; reapplyHeaderFooter(); } }).wrap));
-      host.appendChild(twoUp(
-        iconField(Icon("blur"), { value: child.pillShadowBlur, unit: "px", placeholder: "30", step: 1, min: 0, max: 100, datalist: "dl-gap", title: "Shadow blur",
-          onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillShadowBlur; else child.pillShadowBlur = n; reapplyHeaderFooter(); } }).wrap,
-        iconField(Icon("padding"), { value: child.pillShadowSpread, unit: "px", placeholder: "0", step: 1, min: -40, max: 40, datalist: "dl-gap", title: "Shadow spread",
-          onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillShadowSpread; else child.pillShadowSpread = n; reapplyHeaderFooter(); } }).wrap));
-      colorFieldFlat("Shadow colour", child.pillShadowColor, function (v) { if (v == null) delete child.pillShadowColor; else child.pillShadowColor = v; reapplyHeaderFooter(); }, host);
-      host.appendChild(iconField(Icon("contrast"), { value: child.pillShadowOpacity, unit: "%", placeholder: "35", step: 5, min: 0, max: 100, datalist: "dl-gap", title: "Shadow opacity",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete child.pillShadowOpacity; else child.pillShadowOpacity = Math.max(0, Math.min(100, n)); reapplyHeaderFooter(); } }).wrap);
-    }
-    // Bar
-    host = panelSection(h0, "Progress bar");
-    colorFieldFlat("Bar fill", child.barFill, function (v) { if (v == null) delete child.barFill; else child.barFill = v; reapplyHeaderFooter(); }, host);
-    colorFieldFlat("Bar track", child.barTrack, function (v) { if (v == null) delete child.barTrack; else child.barTrack = v; reapplyHeaderFooter(); }, host);
-  }
-  function navSectionsNest(child, host) {
-    if (!child.sections.length) host.appendChild(h("div", "insp-hint", "No sections yet. Add one per chapter; the bar advances through them and the jump modal lists them."));
-    child.sections.forEach(function (sec, idx) {
-      var row = h("div", "insp-row"); row.appendChild(h("span", "insp-row__label", "Section " + (idx + 1)));
-      var del = iconBtn("trash", "Remove section", true);
-      del.addEventListener("click", function () { pushHistory(); child.sections.splice(idx, 1); renderInspector(); reapplyHeaderFooter(); });
-      row.appendChild(del); host.appendChild(row);
-      host.appendChild(headerFooterTextRow("Label", sec, "label", "Section label"));
-      (doc.pages || []).forEach(function (p) {
-        var pr = h("label", "insp-check");
-        var cb = h("input"); cb.type = "checkbox"; cb.checked = (sec.pageIds || []).indexOf(p.id) >= 0;
-        cb.addEventListener("change", function () {
-          pushHistory();
-          sec.pageIds = sec.pageIds || [];
-          var at = sec.pageIds.indexOf(p.id);
-          if (cb.checked && at < 0) sec.pageIds.push(p.id);
-          else if (!cb.checked && at >= 0) sec.pageIds.splice(at, 1);
-          reapplyHeaderFooter();
-        });
-        pr.appendChild(cb); pr.appendChild(h("span", null, pageDisplayName(p, doc)));
-        host.appendChild(pr);
-      });
-    });
-    var addSec = h("button", "prop-btn", "+ Section");
-    addSec.addEventListener("click", function () {
-      pushHistory();
-      child.sections.push({ id: "s" + (child.sections.length + 1), label: "New section", pageIds: [] });
-      renderInspector(); reapplyHeaderFooter();
-    });
-    host.appendChild(addSec);
-  }
-
-  // small labelled text input bound to obj[key]; live-applies via reapplyHeaderFooter.
-  function headerFooterTextRow(label, obj, key, placeholder) {
-    var row = h("div", "insp-row"); row.appendChild(h("span", "insp-row__label", label));
-    var input = h("input", "prop-text"); input.type = "text"; input.spellcheck = false;
-    input.value = obj[key] == null ? "" : obj[key]; input.placeholder = placeholder || "";
-    input.addEventListener("input", function () {
-      if (input.value === "") delete obj[key]; else obj[key] = input.value;
-      reapplyHeaderFooter();
-    });
-    row.appendChild(input); return row;
-  }
-
-  // uio-O-W2 (OVL-07): Header and Footer are their own SHEET SECTIONS now, not two nests inside
-  // a "Header & Footer" one. Nested, their own groups (Logo / Layout / Appearance / Added
-  // content) were a third level of headings, which is what put three header styles in this pane.
-  // Promoted, the pane is exactly two levels: the section, and its groups. Each keeps the switch,
-  // summary and Reset it carried as a nest — those live on the section header (hfSectionOpts).
-  function headerFooterConfig() {
-    return doc.headerFooter || (doc.headerFooter = { header: { on: false }, footer: { on: false } });
-  }
-  function hfSectionOpts(isHeader) {
-    var ch = headerFooterConfig();
-    var part = isHeader ? ch.header : ch.footer;
-    var keys = isHeader ? HEADER_STYLE_KEYS : FOOTER_STYLE_KEYS;
-    return {
-      toggle: { get: function () { return part.on === true; }, set: function (v) { part.on = v; reapplyHeaderFooter(); } },
-      summary: function () { return headerFooterSummary(part, isHeader); },
-      overridden: function () { return nestOverridden(part, keys); },
-      onReset: function () { nestReset(part, keys); reapplyHeaderFooter(); }
-    };
-  }
-  function buildHeaderBody(c) {
-    buildHeaderNest(headerFooterConfig().header, c);
-    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide the header on one page, select that page (its name in Structure or its label on the canvas)."));
-  }
-  function buildFooterBody(c) {
-    buildFooterNest(headerFooterConfig().footer, c);
-    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide the footer on one page, select that page (its name in Structure or its label on the canvas)."));
-  }
-  function buildHeaderFooterDefaultBody(c) {
-    // New-course default: capture THIS course's header/footer as the starting point
-    // for every new course (machine-wide). Look only — a new course keeps its own
-    // name + chapter-derived nav (see sanitizeHeaderFooterDefault).
-    var hasDefault = !!getHeaderFooterDefault();
-    var ncd = c;
-    var setBtn = h("button", "prop-btn", hasDefault ? "Update the default from this course" : "Set as default for new courses");
-    setBtn.addEventListener("click", function () {
-      if (saveHeaderFooterDefault()) renderInspector(); // re-render -> shows Clear + updated hint
-    });
-    ncd.appendChild(setBtn);
-    if (hasDefault) {
-      var clrBtn = h("button", "prop-btn prop-btn--danger", "Clear saved default");
-      clrBtn.addEventListener("click", function () { clearHeaderFooterDefault(); renderInspector(); });
-      ncd.appendChild(clrBtn);
-    }
-    ncd.appendChild(h("div", "insp-hint", hasDefault
-      ? "New courses start from your saved header & footer (logo, colours, padding, subtitle, footer text). Each keeps its own course name; nav stays chapter-derived."
-      : "New courses use the built-in default. Set one here to reuse this course's logo, colours, padding, subtitle and footer text on every new course."));
-  }
-  function buildHeaderNest(hd, host) {
-    var h0 = host;
-    // Logo (content)
-    host = panelSection(h0, "Logo");
-    var up = h("button", "prop-btn", hd.logo ? "Replace logo (SVG/PNG)" : "Upload logo (SVG/PNG)");
-    var input = document.createElement("input"); input.type = "file"; input.accept = "image/*"; input.style.display = "none";
-    input.addEventListener("change", function () { var f = input.files && input.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { hd.logo = assetRef(r.result, f); reapplyHeaderFooter(); renderInspector(); }; r.readAsDataURL(f); });
-    up.addEventListener("click", function () { input.click(); });
-    host.appendChild(up); host.appendChild(input);
-    if (hd.logo) {
-      var rm = h("button", "prop-btn prop-btn--danger", "Remove logo"); rm.addEventListener("click", function () { hd.logo = null; reapplyHeaderFooter(); renderInspector(); }); host.appendChild(rm);
-      segmentedLive("Logo tint", [["Auto", "auto"], ["Original", "original"]],  // mode-choice (no clear icon) -> stays word segments
-        function (v) { return (hd.logoTint || "auto") === v; },
-        function (v) { hd.logoTint = v; reapplyHeaderFooter(); }, host);
-      host.appendChild(headerFooterNum(hd, "logoSize", "H", "Logo size", "30", 8, 200));
-    }
-    // Layout
-    host = panelSection(h0, "Layout"); // gate-ok: Header/Footer styling, not a block container
-    segmentedIconLive("Align", [[Icon("align-left"), "start", "Start"], [Icon("align-horizontal-space-between"), "between", "Split"], [Icon("align-center"), "center", "Center"]],
-      function (v) { return (hd.align || "start") === v; },
-      function (v) { hd.align = v; reapplyHeaderFooter(); }, host);
-    host.appendChild(twoUp(
-      headerFooterNum(hd, "padX", Icon("pad-x"), "Side padding", "auto", 0, 200),
-      headerFooterNum(hd, "padY", Icon("pad-y"), "Vertical padding", "auto", 0, 200)));
-    // JJJ: pin the header to the top of the viewport (pure CSS position:sticky, export-safe).
-    switchRow("Pin to top", function () { return hd.pinned === true; }, function (v) { hd.pinned = v; reapplyHeaderFooter(); }, host);
-    // Appearance
-    host = panelSection(h0, "Appearance"); // gate-ok: Header/Footer styling, not a block container
-    switchRow("Underline", function () { return hd.border !== false; }, function (v) { hd.border = v; reapplyHeaderFooter(); renderInspector(); }, host);
-    if (hd.border !== false) {
-      colorFieldFlat("Underline colour", hd.borderColor || "#2f6fd0",
-        function (val) { if (val == null) delete hd.borderColor; else hd.borderColor = val; reapplyHeaderFooter(); }, host);
-    }
-    // Content (headerFooterChildrenEditor wraps its own "Added content" section)
-    headerFooterChildrenEditor(hd, h0);
-  }
-  function buildFooterNest(ft, host) {
-    var h0 = host;
-    // Layout
-    host = panelSection(h0, "Layout"); // gate-ok: Header/Footer styling, not a block container
-    segmentedIconLive("Align", [[Icon("align-left"), "left", "Left"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "right", "Right"]],
-      function (v) { return (ft.align || "left") === v; },
-      function (v) { ft.align = v; reapplyHeaderFooter(); }, host);
-    host.appendChild(twoUp(
-      headerFooterNum(ft, "padX", Icon("pad-x"), "Side padding", "auto", 0, 200),
-      headerFooterNum(ft, "padY", Icon("pad-y"), "Vertical padding", "auto", 0, 200)));
-    // Appearance
-    host = panelSection(h0, "Appearance"); // gate-ok: Header/Footer styling, not a block container
-    switchRow("Top rule", function () { return ft.border !== false; }, function (v) { ft.border = v; reapplyHeaderFooter(); renderInspector(); }, host);
-    if (ft.border !== false) {
-      colorFieldFlat("Rule colour", ft.borderColor || "#3c4045",
-        function (val) { if (val == null) delete ft.borderColor; else ft.borderColor = val; reapplyHeaderFooter(); }, host);
-    }
-    // Disclaimer (content) — VVVV(3): show/hide the export-control line; HHHH: its gap.
-    host = panelSection(h0, "Disclaimer");
-    eyeRow("Disclaimer", function () { return ft.hideText !== true; }, function (visible) { ft.hideText = !visible; reapplyHeaderFooter(); renderInspector(); }, host);
-    if (!ft.hideText) {
-      host.appendChild(iconField(Icon("padding"), { value: ft.textGap, unit: "px", placeholder: "8", step: 2, min: 0, max: 120, datalist: "dl-gap", title: "Space above the disclaimer (gap from the nav)",
-        onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete ft.textGap; else ft.textGap = n; reapplyHeaderFooter(); } }).wrap);
-    }
-    // Content (headerFooterChildrenEditor wraps its own "Added content" section)
-    headerFooterChildrenEditor(ft, h0, true);
-  }
-  // Page layout = per-breakpoint side padding (%) + vertical padding (px).
-  // Lives in localStorage (not doc), so it is off the undo stack (noHistory) and
-  // applies live via reapplyLayout, keeping panel focus.
-  function buildLayoutBody(c) {
-    function layoutNum(key, glyph, unit, title, min, max) {
-      return iconField(glyph, {
-        value: layout[key] == null ? "" : layout[key], unit: unit, title: title,
-        step: 1, min: min, max: max, noHistory: true, datalist: unit === "%" ? "dl-pct" : "dl-gap",
-        onchange: function (v) { var n = parseInt(v, 10); if (!isNaN(n)) { layout[key] = n; reapplyLayout(); persistLayout(); } }
-      }).wrap;
-    }
-    var sPad = panelSection(c, "Side padding");
-    sPad.appendChild(twoUp(
-      layoutNum("padDesktop", Icon("monitor"), "%", "Desktop side padding", 0, 45),
-      layoutNum("padTablet", Icon("tablet"), "%", "Tablet side padding", 0, 45)));
-    sPad.appendChild(twoUp(
-      layoutNum("padMobile", Icon("smartphone"), "%", "Mobile side padding", 0, 45),
-      layoutNum("padY", Icon("pad-y"), "px", "Vertical padding", 0, 200)));
-    sPad.appendChild(h("div", "insp-hint", "Desktop 10% = 80%-width content, centred (current project default). Vertical padding is top/bottom in px."));
-    // B: master content-width cap. Stored on the DOC (ships in export via the
-    // __contentMaxWidth hook), unlike the localStorage padding above.
-    var sWidth = panelSection(c, "Content width");
-    sWidth.appendChild(iconField("W", {
-      value: doc.contentMaxWidth == null ? "" : doc.contentMaxWidth, unit: "px", title: "Max content width",
-      placeholder: "full width", step: 20, min: 320, max: 2000, noHistory: true, datalist: "dl-gap",
-      onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete doc.contentMaxWidth; else doc.contentMaxWidth = n; reapplyLayout(); scheduleSave(); }
-    }).wrap);
-    sWidth.appendChild(h("div", "insp-hint", "Caps the readable content column and centres it (blank = full width). Ships in the exported course."));
-    // Master IMAGE corner radius (doc.imageRadius -> --img-radius via __imageRadius). One
-    // control rounds EVERY image; a per-image "Corner radius" (block.radius on the image
-    // inspector) overrides it. 0 = square; blank = the theme default (--radius-card). Ships in export.
-    var sImg = panelSection(c, "Image corner radius");
-    sImg.appendChild(iconField(Icon("radius"), {
-      value: doc.imageRadius == null ? "" : doc.imageRadius, unit: "px", title: "Master image corner radius (per-image overrides)",
-      placeholder: "theme default", step: 1, min: 0, max: 100, noHistory: true, datalist: "dl-radius",
-      onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete doc.imageRadius; else doc.imageRadius = n; mount(); scheduleSave(); }
-    }).wrap);
-    sImg.appendChild(h("div", "insp-hint", "Rounds every image from one control. Set a single image's own radius in its inspector to override; 0 = square corners."));
-  }
 
   // ---- theme controls (collapsible Theme section) --------------------------
   function showEditTextStyleDialog(name, s) {
@@ -9850,103 +9399,18 @@
 
 
   // ---- shared modal builders (the canonical .modal-* dialog pattern) -------
-  // Every editor dialog composes from THESE so menus/dialogs match each other and
-  // the export modal: composed head (title + one-line sub), aligned label->control
-  // rows, sentence-case section headers, and a right-aligned solid-primary /
-  // quiet ghost-cancel action bar.
-  function modalHead(box, title, subtitle) {
-    var head = h("div", "modal-head");
-    head.appendChild(h("h3", null, title));
-    if (subtitle) head.appendChild(h("p", "modal-sub", subtitle));
-    box.appendChild(head);
-    return head;
-  }
-  // A modal groups its rows with the same section as every other surface (OVL-07). Returns the
-  // body so the caller's rows land inside it rather than beside it.
-  function modalSection(box, title) { return panelSection(box, title); }
-  // one aligned label -> control row; returns the row so the caller appends a control
-  function modalField(box, labelText) {
-    var r = h("div", "modal-field");
-    r.appendChild(h("span", "modal-field__label", labelText));
-    box.appendChild(r);
-    return r;
-  }
-  // text input inside a modal-field; returns the input element
-  function modalText(box, labelText, value, placeholder) {
-    var r = modalField(box, labelText);
-    var i = h("input", "prop-text modal-field__control"); i.type = "text"; i.spellcheck = false;
-    i.placeholder = placeholder || ""; i.value = value == null ? "" : value;
-    r.appendChild(i);
-    return i;
-  }
-  // right-aligned action bar: quiet ghost cancel + solid primary, with any quiet
-  // extra buttons placed left of cancel. Returns the primary button.
-  function modalActions(box, modal, primaryLabel, onPrimary, extras) {
-    var actions = h("div", "modal-actions");
-    (extras || []).forEach(function (b) { actions.appendChild(b); });
-    var cancel = h("button", "prop-btn prop-btn--danger", "Cancel");
-    cancel.addEventListener("click", function () { modal.remove(); });
-    actions.appendChild(cancel);
-    var primary = h("button", "prop-btn prop-btn--accent", primaryLabel);
-    primary.addEventListener("click", onPrimary);
-    actions.appendChild(primary);
-    box.appendChild(actions);
-    return primary;
-  }
-  // DS-canonical dialog shell (issue #19) — the whole in-scope modal family (prompt,
-  // confirm, new-doc here + the SCORM export dialog in export.js) routes through the
-  // vendored VersoUI.Modal (design-system/components/overlays/Modal) so every dialog
-  // shares ONE style: a composed head (title + close + optional one-line sub), a body
-  // filled with the existing modal-field/section builders, and a right-aligned
-  // ghost-cancel + primary/danger action bar built from VersoUI.Button. Returns
-  // { modal, body, primary }; modal.close() / scrim / x dismiss it.
-  function dsModalShell(opts) {
-    opts = opts || {};
-    var body = h("div");
-    var footer = [];
-    (opts.extras || []).forEach(function (b) { footer.push(b); });
-    var cancel = window.VersoUI.Button({ variant: "ghost", label: opts.cancelLabel || "Cancel", onClick: function () { modal.close(); } }); // spine-ok: confirm/decision modal primitive (destructive confirm + blocking run)
-    footer.push(cancel);
-    var primary = window.VersoUI.Button({ variant: opts.danger ? "danger" : "primary", label: opts.primaryLabel || "OK", onClick: function () { if (opts.onPrimary) opts.onPrimary(); } });
-    footer.push(primary);
-    var modal = window.VersoUI.Modal({ title: opts.title, description: opts.subtitle || null, width: opts.width || null, children: body, footer: footer, onClose: opts.onClose || null });
-    if (opts.id) modal.id = opts.id;
-    document.body.appendChild(modal);
-    // uio-F05: the modal joins the ONE layer stack, so a confirm raised over the settings sheet
-    // takes the next Escape and leaves the sheet standing. Enter stays on the element (it is the
-    // modal's own submit, not a layer concern). `close` is wrapped once so every dismissal path
-    // — Cancel, the x, the scrim, Escape — pops the layer exactly once.
-    var _close = modal.close;
-    modal.close = function () { popLayer("modal"); modal.close = _close; if (_close) _close.call(modal); };
-    pushLayer("modal", function () { modal.close(); });
-    if (opts.keys !== false) {
-      modal.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") { e.preventDefault(); primary.click(); }
-      });
-    }
-    return { modal: modal, body: body, primary: primary };
-  }
-  // Panel System v2 (D7) — consistent in-app replacements for window.prompt / window.confirm,
-  // now composed on the DS modal shell (issue #19). Async (callback), Cancel = no-op, Esc
-  // closes, Enter submits. onOk(value) for a prompt; onOk() for a confirm.
-  function promptModal(title, label, initial, onOk, subtitle) {
-    var input;
-    var shell = dsModalShell({
-      title: title, subtitle: subtitle || null, primaryLabel: "OK",
-      onPrimary: function () { var v = input.value; shell.modal.close(); onOk(v); }
-    });
-    input = modalText(shell.body, label, initial == null ? "" : initial, "");
-    input.focus(); if (input.select) input.select();
-  }
-  function confirmModal(title, message, onOk, opts) {
-    opts = opts || {};
-    var shell = dsModalShell({
-      title: title, subtitle: message || null, danger: !!opts.danger,
-      primaryLabel: opts.okLabel || "OK",
-      onPrimary: function () { shell.modal.close(); onOk(); }
-    });
-  }
-  window.__modals = { promptModal: promptModal, confirmModal: confirmModal }; // test hook
+  // arch-P3b-07c: the eight builders moved to editor/modals.js. The field inspector, the instance
+  // inspector and the block-reselect helpers shared this banner and are separate concerns; they
+  // stayed.
+  var modalHead = VE.bind("modalHead");
+  var modalSection = VE.bind("modalSection");
+  var modalField = VE.bind("modalField");
+  var modalText = VE.bind("modalText");
+  var modalActions = VE.bind("modalActions");
+  var dsModalShell = VE.bind("dsModalShell");
+  var promptModal = VE.bind("promptModal");
+  var confirmModal = VE.bind("confirmModal");
+
 
   // Caret currently inside a list item within this field? Any rich field can hold an
   // inline list, so Tab-nesting + paste-clean apply wherever the caret sits in an <li>.
@@ -16652,131 +16116,12 @@
   function versionNames() { return (doc.versions || []).slice(); }
 
   // ---- context-menu framework ----
-  var ctxMenuEl = null;
-  function ensureCtxStyle() {
-    if (document.getElementById("ctx-menu-style")) return;
-    var s = document.createElement("style"); s.id = "ctx-menu-style";
-    s.textContent =
-      ".ctx-menu{position:fixed;z-index:9999;min-width:208px;background:#262626;border:1px solid #444;border-radius:9px;padding:5px;box-shadow:0 12px 32px rgba(0,0,0,.45);font:12px/1.3 Inter,system-ui,sans-serif;color:#e6e6e6;}" +
-      ".ctx-item{display:flex;align-items:center;min-height:30px;padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;color:#e6e6e6;transition:background .1s ease,color .1s ease;}" +
-      ".ctx-item:hover{background:#0d99ff;color:#fff;}" +
-      ".ctx-item--danger{color:#ff8a8a;}" +
-      ".ctx-item--danger:hover{background:rgba(255,107,107,.16);color:#ff6b6b;}" +
-      ".ctx-item--active{color:#0d99ff;font-weight:600;}" +
-      ".ctx-item--active:hover{color:#fff;}" +
-      ".ctx-item--disabled{color:#8a8a8a;cursor:default;}" +
-      ".ctx-item--disabled:hover{background:transparent;color:#8a8a8a;}" +
-      ".ctx-item__hint{margin-left:auto;padding-left:14px;font-size:11px;color:#8a8a8a;}" +
-      ".ctx-sep{height:1px;background:#3a3a3a;margin:5px 8px;}" +
-      ".ctx-head{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0;color:#8a8a8a;}" +
-      // uio-O-W2 (OVL-13): submenus. The parent row keeps a trailing chevron; the panel sits to
-      // its right, overlapping by the menu's own padding so the pointer never crosses a gap.
-      ".ctx-item--parent{position:relative;}" +
-      ".ctx-item__chev{margin-left:auto;padding-left:14px;color:#8a8a8a;}" +
-      ".ctx-item--parent:hover .ctx-item__chev{color:#fff;}" +
-      ".ctx-menu--sub{position:absolute;left:100%;top:-5px;margin-left:-2px;display:none;}" +
-      ".ctx-menu--sub.is-flipped{left:auto;right:100%;margin-left:0;margin-right:-2px;}" +
-      ".ctx-item--parent:hover > .ctx-menu--sub{display:block;}" +
-      ".canvas.is-variant-preview{outline:2px solid #8e44ad;outline-offset:-2px;}" +
-      ".canvas.is-version-preview{outline:2px solid #0e9384;outline-offset:-2px;}";
-    document.head.appendChild(s);
-  }
-  function closeCtxMenu() {
-    if (!ctxMenuEl) return;
-    ctxMenuEl.remove(); ctxMenuEl = null;
-    document.removeEventListener("mousedown", onCtxOutside, true);
-    popLayer("ctx-menu"); // uio-F05: Escape is the layer stack's; focus returns to the trigger
-  }
-  function onCtxOutside(e) { if (ctxMenuEl && !ctxMenuEl.contains(e.target)) closeCtxMenu(); }
-  // uio-F05: opts.escalate = { label, tab, section } appends the spine's required route from
-  // this menu of verbs into the settings sheet, after a separator.
-  // uio-O-W2 (OVL-13): a menu never renders a section that has nothing in it. A heading whose
-  // group holds no actionable entry is dropped, and the separators that framed it go with it, so
-  // a menu can offer a section unconditionally and simply not show it when it is empty. PURE, so
-  // it is regression-guarded in tests/run.js.
-  function pruneEmptyMenuSections(items) {
-    var kept = [], i;
-    for (i = 0; i < (items || []).length; i++) {
-      var it = items[i];
-      if (it && it.head) {
-        var hasEntry = false;
-        for (var j = i + 1; j < items.length; j++) {
-          var nx = items[j];
-          if (!nx || nx.head) break;          // the next section starts: this one was empty
-          if (nx.sep) continue;               // a rule is furniture, not an entry
-          hasEntry = true; break;
-        }
-        if (!hasEntry) continue;              // drop the heading itself
-      }
-      kept.push(it);
-    }
-    // Collapse the separators left stranded by a dropped section: no leading rule, no trailing
-    // rule, never two in a row, and never a rule sitting directly under a heading.
-    var out = [];
-    for (i = 0; i < kept.length; i++) {
-      var k = kept[i];
-      if (k && k.sep) {
-        var prev = out[out.length - 1];
-        if (!prev || prev.sep || prev.head) continue;
-        var nextReal = null;
-        for (var n = i + 1; n < kept.length; n++) { if (kept[n] && !kept[n].sep) { nextReal = kept[n]; break; } }
-        if (!nextReal) continue;
-      }
-      out.push(k);
-    }
-    return out;
-  }
-  // Render one menu level. A `submenu` entry opens its own panel to the side on hover, so a
-  // section that would otherwise spend a third of the menu on rows you rarely want collapses to
-  // one row you can ignore. Submenus are display-only nesting -- they never introduce a second
-  // dismissal or a second Escape owner; the whole tree closes with its root.
-  function buildCtxMenuEl(items, isSub) {
-    var m = h("div", "ctx-menu" + (isSub ? " ctx-menu--sub" : ""));
-    items.forEach(function (it) {
-      if (!it) return;
-      if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
-      if (it.head) { m.appendChild(h("div", "ctx-head", it.head)); return; }
-      // uio-P-C05: `disabled` + `hint` complete the DS ContextMenu contract — an entry can be listed
-      // as unavailable, with a trailing state word ("Soon"), instead of being hidden or renamed.
-      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""), it.label);
-      if (it.hint) el.appendChild(h("span", "ctx-item__hint", it.hint));
-      if (it.submenu && it.submenu.length) {
-        el.classList.add("ctx-item--parent");
-        el.appendChild(h("span", "ctx-item__chev", "›"));
-        var sub = buildCtxMenuEl(pruneEmptyMenuSections(it.submenu), true);
-        el.appendChild(sub);
-        // Flip to the left when the panel would run off the window, measured on open rather
-        // than guessed, because a menu near the right edge is the normal case on a wide canvas.
-        el.addEventListener("mouseenter", function () {
-          sub.classList.remove("is-flipped");
-          var r = sub.getBoundingClientRect();
-          if (r.right > window.innerWidth - 8) sub.classList.add("is-flipped");
-        });
-        m.appendChild(el);
-        return;
-      }
-      if (!it.disabled) el.addEventListener("click", function () { closeCtxMenu(); if (it.onClick) it.onClick(); });
-      m.appendChild(el);
-    });
-    return m;
-  }
-  function showContextMenu(x, y, items, opts) {
-    ensureCtxStyle(); closeCtxMenu();
-    if (opts && opts.escalate) {
-      items = items.concat([{ sep: true }, {
-        label: opts.escalate.label || "All settings…",
-        onClick: function () { openSettingsSection(opts.escalate.tab || "project", opts.escalate.section || null); }
-      }]);
-    }
-    var m = buildCtxMenuEl(pruneEmptyMenuSections(items));
-    document.body.appendChild(m);
-    var r = m.getBoundingClientRect();
-    m.style.left = Math.min(x, window.innerWidth - r.width - 8) + "px";
-    m.style.top = Math.min(y, window.innerHeight - r.height - 8) + "px";
-    ctxMenuEl = m;
-    pushLayer("ctx-menu", closeCtxMenu);
-    setTimeout(function () { document.addEventListener("mousedown", onCtxOutside, true); }, 0);
-  }
+  // arch-P3b-07q: the menu and the wiring that decides what a right-click is ON both moved to
+  // editor/context-menu.js. They were 900 lines apart here and are one thing.
+  var showContextMenu = VE.bind("showContextMenu");
+  var closeCtxMenu = VE.bind("closeCtxMenu");
+  var wireContextMenu = VE.bind("wireContextMenu");
+
 
   // ---- variant model mutations ----
   function newVariantPrompt(then) {
@@ -17592,160 +16937,8 @@
     badge.innerHTML = glyph + "<span>" + label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>";
   }
 
-  // ---- context-menu wiring ----
-  function findTargetFromEvent(e) {
-    var node = e.target;
-    while (node && node !== canvas) {
-      if (node.__instance) return { type: "instance", node: node, instance: node.__instance, block: node.__block };
-      if (node.__block) return { type: "block", node: node, block: node.__block };
-      node = node.parentNode;
-    }
-    return null;
-  }
-  // uio-O-W1 (OVL-14): ONE block verb list, two doors. Copy style, Save as component and
-  // Clear content used to be reachable only by right-clicking a canvas object — a gesture
-  // nothing in the UI advertises — so the inspector and the menu describing the same block
-  // shared almost no vocabulary. This is the single definition of that list. The canvas
-  // right-click and the inspector header's "..." overflow both render it, so the two doors
-  // cannot drift apart, and its foot names the way back into the inspector.
-  // target = { block, instance? } — the shape findTargetFromEvent returns.
-  function blockMenuItems(target) {
-    var items = [];
-    var block = target && target.block;
-    var host = (target && target.instance) || block;
-    var vs = variantNames();
-    if (block) {
-      items.push({ label: "Duplicate", onClick: function () { duplicateBlock(block); } });
-      items.push({ label: "Copy", onClick: function () { copySelection(); } });
-      if (clipboard.length) {
-        items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
-        items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
-      }
-      items.push({ label: "Copy style", onClick: function () { copyBlockStyle(block); } });
-      if (styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(block); } });
-      items.push({ label: "Move up", onClick: function () { moveBlock(block, -1); } });
-      items.push({ label: "Move down", onClick: function () { moveBlock(block, 1); } });
-      if (block.type === "group") items.push({ label: "Ungroup", onClick: function () { ungroupBlock(block); } });
-      items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(block); } });
-      // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
-      items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([block]); } });
-      if (canSplitAtBlock(block)) {
-        items.push({ sep: true });
-        items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(block); } });
-      }
-      items.push({ sep: true });
-      items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(block); } });
-    }
-    items.push({ sep: true });
-    // uio-O-W2 (OVL-13): these three groups used to be headings with a row per variant, and the
-    // variant heading rendered even with nothing under it ("Variants (none yet)") — a third of
-    // the menu spent on a feature the block does not use. Each is ONE row with a submenu now,
-    // and with no variants at all the whole family collapses to a single ordinary "Add
-    // variant…" entry. The "+" prefix is gone: it was a fourth style for "create" in a product
-    // that already has filled buttons, ghost add-rows and plain menu verbs.
-    if (vs.length) {
-      // Variant TEXT is edited in the Design panel (the block is selected, so the panel already
-      // shows its "Variant text" fields). The menu keeps only visibility + variant creation.
-      var variantSub = vs.map(function (v) {
-        return { label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } };
-      });
-      variantSub.push({ sep: true });
-      variantSub.push({ label: "New variant…", onClick: function () { newVariantPrompt(); } });
-      items.push({ label: "Variants", submenu: variantSub });
-    } else {
-      items.push({ label: "Add variant…", onClick: function () { newVariantPrompt(); } });
-    }
-    // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
-    // Only when the course has versions; while editing a version the toggle for THAT version
-    // sits first for quick reach (hide this block from the release you're authoring).
-    var versAll = versionNames();
-    if (versAll.length) {
-      var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
-      items.push({ label: "Software versions", submenu: ordered.map(function (v) {
-        return { label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } };
-      }) });
-    }
-    // #148: image / hotspot base image — a direct "Upload image for <variant>" that
-    // opens the file picker straight away and writes that variant's version (overrides[v].src).
-    if (block && IMG_VERSION_TYPES[block.type] && vs.length) {
-      var imgSub = [];
-      vs.forEach(function (v) {
-        var own = imgVariantSrc(block, v);
-        imgSub.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
-          uploadImageVariant(block, v, function () { reapplyBlock(block); reselectBlockNode(block, "block"); });
-        } });
-        if (own) imgSub.push({ label: "Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(block, v, null); reapplyBlock(block); reselectBlockNode(block, "block"); } });
-      });
-      items.push({ label: "Variant images", submenu: imgSub });
-    }
-    if (block) {
-      items.push({ sep: true });
-      items.push({ label: "Block settings", hint: "Inspector", onClick: function () { revealBlockSettings(block); } });
-    }
-    return items;
-  }
-  // The route the menu's foot names: select the block and open its own settings in the
-  // inspector, so the menu always hands off to the panel rather than dead-ending.
-  function revealBlockSettings(block) {
-    if (!block) return;
-    enteredBlock = block;
-    reselectBlockNode(block, "block");
-    renderInspector();
-    if (inspector && inspector.scrollTo) inspector.scrollTo({ top: 0 });
-  }
-  function wireContextMenu() {
-    canvas.addEventListener("contextmenu", function (e) {
-      e.preventDefault(); // always replace the native menu on the canvas
-      var vs = variantNames();
-      var items = [];
+  // ...continues in context-menu.js (arch-P3b-07).
 
-      // While previewing a variant the canvas shows RESOLVED clones, so only offer
-      // navigation between variants — not editing (that stays on the flagship).
-      if (activeVariant) {
-        items.push({ head: "Previewing: " + activeVariant });
-        items.push({ label: "← Back to Flagship (edit)", onClick: function () { previewVariant(null); } });
-        items.push({ sep: true });
-        vs.forEach(function (v) { if (v !== activeVariant) items.push({ label: "Preview: " + v, onClick: function () { previewVariant(v); } }); });
-        showContextMenu(e.clientX, e.clientY, items);
-        return;
-      }
-      // #207: a version-only context is EDITABLE (the dynamic flagship), so it falls through to
-      // the normal block menu below (which gains a "This version" show/hide section). A version
-      // composed with a variant preview is read-only and handled by the activeVariant branch above.
-
-      var target = findTargetFromEvent(e);
-      // #131 multi-selection branch: right-clicking a block that is part of a >=2
-      // selection KEEPS the set (don't reset to single) and offers set actions —
-      // Merge text boxes (only when the whole set is text) / Group / Delete.
-      if (target && target.type === "block" && inMulti(target.block) && multiSel.length >= 2) {
-        items.push({ head: multiSel.length + " items selected" });
-        if (canMergeTextBoxes(multiSel)) items.push({ label: "Merge text boxes", onClick: function () { mergeTextBoxes(); } });
-        items.push({ label: "Group selection", onClick: function () { groupMulti(); } });
-        items.push({ label: "Save selection to library…", onClick: function () { saveSelectionAsSectionMaster(); } }); // #22 section master
-        items.push({ sep: true });
-        items.push({ label: "Delete " + multiSel.length + " items", danger: true, onClick: function () { deleteSelection(); } });
-        showContextMenu(e.clientX, e.clientY, items);
-        return;
-      }
-      if (target) {
-        setSelection(target.type === "instance" ? "instance" : "block", target.node);
-        // uio-O-W1 (OVL-14): one shared definition, rendered identically by the inspector's
-        // "..." overflow. An instance target keeps its variant/version section but not the
-        // block verbs (matching the previous behaviour).
-        items = items.concat(blockMenuItems(target.type === "block" ? target : { instance: target.instance }));
-      } else {
-        if (clipboard.length) { items.push({ label: "Paste", onClick: function () { pasteClipboard(); } }); items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } }); items.push({ sep: true }); }
-        items.push({ head: "Variants" });
-        items.push({ label: "✓ Flagship", onClick: function () { previewVariant(null); } });
-        vs.forEach(function (v) { items.push({ label: "Preview: " + v, onClick: function () { previewVariant(v); } }); });
-        items.push({ sep: true });
-        items.push({ label: "New variant…", onClick: function () { newVariantPrompt(); } });
-      }
-      showContextMenu(e.clientX, e.clientY, items);
-    });
-    window.addEventListener("keydown", function (e) { if (e.key === "Escape") closeCtxMenu(); });
-    window.addEventListener("blur", closeCtxMenu);
-  }
 
   // ---- editor namespace: the host surface (arch-P3b-01) --------------------
   // What a region moved out of this file may reach back for. Sits here, beside __kit and outside
@@ -17830,6 +17023,14 @@
   // builds the canvas overlay bar, so renderContainerChrome has to read the current one.
   window.VersoEditor.provideLive({
     blockToolbarSep: function () { return blockToolbarSep; },
+    // arch-P3b-07q: the state the context menu reads as the author works. `enteredBlock` is also
+    // WRITTEN by it ("Enter group"), and a write has to cross as a function -- assigning to a
+    // provided getter is a TypeError under "use strict", which is what the extraction guard caught.
+    enteredBlock: function () { return enteredBlock; },
+    activeVariant: function () { return activeVariant; },
+    activeVersion: function () { return activeVersion; },
+    clipboard: function () { return clipboard; },
+    styleClipboard: function () { return styleClipboard; },
     // arch-P3b-07d: which document is open. Reassigned on every tab switch, and the backup writer
     // keys its folder and its debounce off it -- a captured value would keep backing up the course
     // the author closed.
@@ -17838,6 +17039,47 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    persistLayout: persistLayout,
+    eyeRow: eyeRow,
+    clearHeaderFooterDefault: clearHeaderFooterDefault,
+    saveHeaderFooterDefault: saveHeaderFooterDefault,
+    getHeaderFooterDefault: getHeaderFooterDefault,
+    headerFooterSummary: headerFooterSummary,
+    onOffLabel: onOffLabel,
+    gateScopeChain: gateScopeChain,
+    resolveScoped: resolveScoped,
+    subDisclosure: subDisclosure,
+    crossRefRow: crossRefRow,
+    pokeHeaderFooterLive: pokeHeaderFooterLive,
+    reapplyLayout: reapplyLayout,
+    pageDisplayName: pageDisplayName,
+    nestReset: nestReset,
+    nestOverridden: nestOverridden,
+    reapplyHeaderFooter: reapplyHeaderFooter,
+    deleteSelection: deleteSelection,
+    saveSelectionAsSectionMaster: saveSelectionAsSectionMaster,
+    groupMulti: groupMulti,
+    mergeTextBoxes: mergeTextBoxes,
+    canMergeTextBoxes: canMergeTextBoxes,
+    inMulti: inMulti,
+    setImgVariantSrc: setImgVariantSrc,
+    uploadImageVariant: uploadImageVariant,
+    imgVariantSrc: imgVariantSrc,
+    IMG_VERSION_TYPES: IMG_VERSION_TYPES,
+    toggleHiddenInVersion: toggleHiddenInVersion,
+    isHiddenInVersion: isHiddenInVersion,
+    versionNames: versionNames,
+    toggleHiddenIn: toggleHiddenIn,
+    isHiddenIn: isHiddenIn,
+    saveBlockAsComponent: saveBlockAsComponent,
+    ungroupBlock: ungroupBlock,
+    pasteBlockStyle: pasteBlockStyle,
+    copyBlockStyle: copyBlockStyle,
+    copySelection: copySelection,
+    reapplyBlock: reapplyBlock,
+    newVariantPrompt: newVariantPrompt,
+    previewVariant: previewVariant,
+    pasteClipboard: pasteClipboard,
     openDocIds: openDocIds,
     renderTabs: renderTabs,
     storageBackend: storageBackend,
@@ -17880,7 +17122,8 @@
     setStage: setStage,
   });
   window.VersoEditor.provide({
-    getBlockStyles: getBlockStyles, alignSeg: alignSeg, ensureBlockToolbar: ensureBlockToolbar,
+    getBlockStyles: getBlockStyles,
+    setEnteredBlock: function (b) { enteredBlock = b; }, alignSeg: alignSeg, ensureBlockToolbar: ensureBlockToolbar,
     // arch-P3b-07t: what the drag overlay reads. `LIBRARY` is the insertable-type table an
     // Assets-tab drag carries an index into.
     LIBRARY: LIBRARY, clone: clone, walkBlocks: walkBlocks, cleanupColumns: cleanupColumns,
@@ -17956,6 +17199,9 @@
   window.VersoPalette.install(VE);   // the Cmd-K index over everything above
   window.VersoBackup.install(VE);   // P0 data-safety: the durable copy on disk
   window.VersoHome.install(VE);   // the pre-document course browser
+  window.VersoContextMenu.install(VE);   // right-click, everywhere
+  window.VersoModals.install(VE);   // the canonical dialog every editor modal composes from
+  window.VersoHeaderFooter.install(VE);   // the global course chrome and the learner nav
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has

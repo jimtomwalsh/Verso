@@ -5713,7 +5713,10 @@ section("#22 section + page library masters");
   var ssBody = etxt.slice(ssStart, ssStart + 200);
   ok("reuses groupMulti + saveBlockAsComponent, no new capture logic", /var frame = groupMulti\(\);[\s\S]{0,40}if \(frame\) saveBlockAsComponent\(frame\)/.test(ssBody));
   ok("'Save selection to library…' wired into the outliner context menu", /label: "Save selection to library…", onClick: function \(\) \{ saveSelectionAsSectionMaster\(\); \}/.test(etxt));
-  var multiMenuCount = (etxt.match(/label: "Save selection to library…"/g) || []).length;
+  // arch-P3b-07q: the canvas menu moved to editor/context-menu.js; the outliner's tree menu
+  // stayed. Same claim -- two doors -- counted across both files.
+  var multiMenuCount = (etxt.match(/label: "Save selection to library…"/g) || []).length +
+                       (src("src/editor/context-menu.js").match(/label: "Save selection to library…"/g) || []).length;
   ok("wired into BOTH multi-select context menus (outliner + canvas)", multiMenuCount === 2);
 
   // 2. render.js: page masters resolve live, same shape as #20's block resolve.
@@ -5912,7 +5915,8 @@ section("auto-gate all interactions");
   ok("render stamps data-gate-all from the hook", /if \(rc\("gateAllInteractions"\)\) root\.setAttribute\("data-gate-all", "1"\)/.test(rn));
   // uio-F03: the switch now reads the RESOLVED value down the scope ladder (System -> Course)
   // and clears the course flag on Reset; the stored data is unchanged.
-  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
+  // arch-P3b-07e: the progression nest moved with the header/footer editor and reads `doc` live.
+  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?E\.doc\.gateAllInteractions = true; else delete E\.doc\.gateAllInteractions/.test(src("src/editor/header-footer.js")));
   // state buckets for the new signals
   ok("runtime adds viewed/revealed/quizDone/sequenceDone/accordionDone buckets", /var state = \{ visited: \{\}, watched: \{\}, checked: \{\}, viewed: \{\}, revealed: \{\}, quizDone: \{\}, sequenceDone: \{\}, accordionDone: \{\} \}/.test(rt));
   // completion emitters (decoupled, bubbling)
@@ -5983,7 +5987,7 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   // uio-F03: still tri-state DATA (true / false / absent = inherit), but the picker's explicit
   // "inherit" option is gone — the switch shows the resolved value and Reset clears the page flag.
   ok("page inspector writes tri-state page.gateInteractions", /page\.gateInteractions = !!v;/.test(ed) && /delete page\.gateInteractions;/.test(ed));
-  ok("progression panel exposes the reminder-message field", /gmIn\.value = doc\.gateMessage \|\| "";[\s\S]*?if \(v\) doc\.gateMessage = v; else delete doc\.gateMessage/.test(ed));
+  ok("progression panel exposes the reminder-message field", /gmIn\.value = E\.doc\.gateMessage \|\| "";[\s\S]*?if \(v\) E\.doc\.gateMessage = v; else delete E\.doc\.gateMessage/.test(src("src/editor/header-footer.js")));
 })();
 
 // ---- footer nav pin: framed forced-device preview pins prev/next to the device
@@ -6137,6 +6141,8 @@ section("#169 pin-to-gutters preview");
 
 section("nav pill cleanup");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var css = src("src/course.css");
@@ -6154,12 +6160,12 @@ section("nav pill cleanup");
   // author pill OPACITY: surface-only via color-mix (keeps text/glyphs crisp), default 100%
   ok("css pill bg uses color-mix with --nav-pill-opacity", /background: color-mix\(in srgb, var\(--nav-pill-fill[^)]*\)[^,]*\) var\(--nav-pill-opacity, 100%\), transparent\);/.test(css));
   ok("render sets --nav-pill-opacity from block.pillOpacity", /block\.pillOpacity != null\) wrap\.style\.setProperty\("--nav-pill-opacity", block\.pillOpacity \+ "%"\)/.test(r));
-  ok("editor has an Opacity iconField writing pillOpacity (clamped 0-100)", /child\.pillOpacity = Math\.max\(0, Math\.min\(100, n\)\)/.test(e));
+  ok("editor has an Opacity iconField writing pillOpacity (clamped 0-100)", /child\.pillOpacity = Math\.max\(0, Math\.min\(100, n\)\)/.test(ehf));
   ok("pillOpacity in NAV_PILL_KEYS (override-dot/reset)", /NAV_PILL_KEYS = \[[^\]]*"pillOpacity"/.test(ep));
   // author pill LAYER BLUR: backdrop-filter behind the pill, default 0
   ok("css pill has backdrop-filter blur var (default 0)", /backdrop-filter: blur\(var\(--nav-pill-blur, 0px\)\);/.test(css) && /-webkit-backdrop-filter: blur\(var\(--nav-pill-blur, 0px\)\);/.test(css));
   ok("render sets --nav-pill-blur from block.pillBlur", /block\.pillBlur != null\) wrap\.style\.setProperty\("--nav-pill-blur", block\.pillBlur \+ "px"\)/.test(r));
-  ok("editor has a Blur iconField writing pillBlur (clamped 0-40)", /child\.pillBlur = Math\.max\(0, Math\.min\(40, n\)\)/.test(e));
+  ok("editor has a Blur iconField writing pillBlur (clamped 0-40)", /child\.pillBlur = Math\.max\(0, Math\.min\(40, n\)\)/.test(ehf));
   ok("pillBlur in NAV_PILL_KEYS", /NAV_PILL_KEYS = \[[^\]]*"pillBlur"/.test(ep));
 })();
 
@@ -6420,22 +6426,26 @@ section("inline links");
 // ---- Copy Style / Paste Style: lift presentation keys, never content -----------
 section("copy/paste style");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
   var _sk = (e.match(/var STYLE_KEYS = (\[[^\]]*\]);/) || [])[1] || "";
   ok("copyBlockStyle lifts only presentation keys from STYLE_KEYS", /"box"/.test(_sk) && /"styleRef"/.test(_sk) && /"colorMap"/.test(_sk) && /function copyBlockStyle\(block\)[\s\S]*?STYLE_KEYS\.forEach\(function \(k\) \{ if \(block\[k\] !== undefined\) out\[k\] = clone\(block\[k\]\)/.test(e));
   ok("STYLE_KEYS excludes content/identity", !/STYLE_KEYS = \[[^\]]*"(text|html|src|children|items|type|id|questions)"/.test(e));
   ok("pasteBlockStyle writes the clipboard keys onto the target + mounts", /function pasteBlockStyle\(block\)[\s\S]*?Object\.keys\(styleClipboard\)\.forEach\(function \(k\) \{ block\[k\] = clone\(styleClipboard\[k\]\); \}\);[\s\S]*?mount\(\)/.test(e));
-  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(e) && /if \(styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(e));
+  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(ecm) && /if \(E\.styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(ecm));
 })();
 
 section("ctx copy/paste");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
-  ok("block context menu has Copy", /items\.push\(\{ label: "Copy", onClick: function \(\) \{ copySelection\(\); \} \}\)/.test(e));
-  ok("block menu offers Paste when the clipboard has blocks", /if \(clipboard\.length\) \{\s*\n\s*items\.push\(\{ label: "Paste", onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(e));
-  ok("empty-canvas menu offers Paste when the clipboard has blocks", /if \(clipboard\.length\) \{ items\.push\(\{ label: "Paste", onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(e));
+  ok("block context menu has Copy", /items\.push\(\{ label: "Copy", onClick: function \(\) \{ copySelection\(\); \} \}\)/.test(ecm));
+  ok("block menu offers Paste when the clipboard has blocks", /if \(E\.clipboard\.length\) \{\s*\n\s*items\.push\(\{ label: "Paste", onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(ecm));
+  ok("empty-canvas menu offers Paste when the clipboard has blocks", /if \(E\.clipboard\.length\) \{ items\.push\(\{ label: "Paste", onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(ecm));
   // §84 paste-without-formatting
-  ok("both menus offer Paste without formatting", (e.match(/label: "Paste without formatting", onClick: function \(\) \{ pasteClipboard\(true\); \}/g) || []).length >= 2);
+  ok("both menus offer Paste without formatting", (ecm.match(/label: "Paste without formatting", onClick: function \(\) \{ pasteClipboard\(true\); \}/g) || []).length >= 2);
   ok("Cmd+Shift+V passes the strip flag to pasteClipboard", /if \(pasteClipboard\(e\.shiftKey\)\) e\.preventDefault\(\)/.test(e));
   ok("pasteClipboard strips formatting when asked", /clipboard\.map\(function \(b\) \{ var c = remintIds\(clone\(b\)\); if \(strip\) stripFormattingDeep\(c\)/.test(e));
   // stripFormattingDeep: clears style/styleRef + inline formatting, keeps structural tags, skips embeds
@@ -6906,6 +6916,8 @@ section("sequence per-step icons");
 // sub-block, column, item and question (the skeleton), and recurse the canonical subtree shape.
 section("clear content #174");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
@@ -6951,7 +6963,7 @@ section("clear content #174");
 
   // wiring guards: exposed on both surfaces + gated
   ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? multiSel\.slice\(\) : block\); \}/.test(e));
-  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(e));
+  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(ecm));
   ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
@@ -6988,6 +7000,8 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var r = src("src/render.js");
@@ -7085,17 +7099,17 @@ section("richer bullet lists");
   ok("block Spacing edits use the incremental page rebuild", /var onSpace  = opts\.onSpace  \|\| function \(\) \{ reapplyBlock\(block\)/.test(e));
   ok("block Align\/Vertical edits use the incremental page rebuild", (e.match(/reapplyBlock\(block\); reselectBlockNode\(block, getSelectionTypeForBlock\(block\)\);/g) || []).length >= 2);
   ok("header\/footer padding pokes live on .course-header\/.course-footer", /function pokeHeaderFooterLive\(cfg, key\)[\s\S]*?cfg === hf\.header\) \? "\.course-header"[\s\S]*?cfg === hf\.footer\) \? "\.course-footer"/.test(e));
-  ok("headerFooterNum tries the live poke before a full rebuild", /if \(!pokeHeaderFooterLive\(cfg, key\)\) reapplyHeaderFooter\(\)/.test(e));
+  ok("headerFooterNum tries the live poke before a full rebuild", /if \(!pokeHeaderFooterLive\(cfg, key\)\) reapplyHeaderFooter\(\)/.test(ehf));
   // nav progress pill: author Width + Height (BACKLOG §pill P2, James 2026-07-08)
   var rjs = src("src/render.js"), ccss = src("src/course.css");
   ok("render pipes pillWidth/pillHeight -> --nav-pill-width/-height + --pill-scale", /block\.pillWidth != null\) wrap\.style\.setProperty\("--nav-pill-width", block\.pillWidth \+ "px"\)[\s\S]*?block\.pillHeight != null\) \{[\s\S]*?setProperty\("--nav-pill-height", block\.pillHeight \+ "px"\)[\s\S]*?setProperty\("--pill-scale"/.test(rjs));
   ok("css pill forces width + height from the vars (border-box)", /box-sizing: border-box[\s\S]*?width: var\(--nav-pill-width, auto\); max-width: var\(--nav-pill-width, 460px\)[\s\S]*?height: var\(--nav-pill-height, auto\)/.test(ccss));
-  ok("pill Width + Height iconFields in the Progress-pill nest", /iconField\("W", \{ value: child\.pillWidth/.test(e) && /iconField\("H", \{ value: child\.pillHeight/.test(e));
+  ok("pill Width + Height iconFields in the Progress-pill nest", /iconField\("W", \{ value: child\.pillWidth/.test(ehf) && /iconField\("H", \{ value: child\.pillHeight/.test(ehf));
   ok("pillWidth/pillHeight in NAV_PILL_KEYS (override-dot + reset)", /NAV_PILL_KEYS = \[[^\]]*"pillWidth", "pillHeight"/.test(ep));
   // nav pill drop shadow (James 2026-07-08)
   ok("render composes --nav-pill-shadow (off -> none, else offset/blur/spread/colour+opacity)", /block\.pillShadow === false\) wrap\.style\.setProperty\("--nav-pill-shadow", "none"\)[\s\S]*?color-mix\(in srgb, " \+ _scol \+ " " \+ _sop \+ "%, transparent\)/.test(rjs));
   ok("pill box-shadow reads the author var (base rule, single source)", /box-shadow: var\(--nav-pill-shadow, 0 10px 30px rgba\(0, 0, 0, 0\.35\)\)/.test(ccss));
-  ok("Drop shadow controls in the Progress-pill nest", /panelSection\(h0, "Drop shadow"\)[\s\S]*?switchRow\("Drop shadow"[\s\S]*?child\.pillShadowX[\s\S]*?child\.pillShadowOpacity/.test(e));
+  ok("Drop shadow controls in the Progress-pill nest", /panelSection\(h0, "Drop shadow"\)[\s\S]*?switchRow\("Drop shadow"[\s\S]*?child\.pillShadowX[\s\S]*?child\.pillShadowOpacity/.test(ehf));
   ok("shadow keys in NAV_PILL_KEYS", /"pillShadow", "pillShadowX", "pillShadowY", "pillShadowBlur", "pillShadowSpread", "pillShadowColor", "pillShadowOpacity"/.test(ep));
 })();
 
@@ -7408,6 +7422,8 @@ section("resolveVariant (variants)");
 // ---- #148: image variant-version authoring helpers (editor) ------------------
 section("#148 per-variant image versions (authoring)");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
@@ -7426,7 +7442,7 @@ section("#148 per-variant image versions (authoring)");
   ok("upload writes via the pure asset ref channel (hoist-safe)", /setImgVariantSrc\(block, variant, assetRef\(r\.result, f\)\)/.test(e));
   // slice 2: right-click "Upload image for <variant>" (direct file picker) + on-canvas
   // version-cycle badge (author-only transient <img>.src swap, WeakMap, never doc state).
-  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(block, v/.test(e));
+  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(block, v/.test(ecm));
   ok("on-canvas version-cycle badge decorates image blocks with versions", /function decorateVariantVersionBadges\(scope\)[\s\S]*?hasImageVersions\(block\)[\s\S]*?"variant-cycle"/.test(e));
   ok("cycle preview is author-only + never mutates the doc (WeakMap base-el swap)", /var imgVersionPreview = new WeakMap\(\);/.test(e) && /function applyImageVersionPreview\(node, block\)[\s\S]*?imgVariantSrc\(block, v\) \|\| baseImgSrc\(block\)[\s\S]*?replaceChild\(next, cur\)/.test(e)); // #215: hotspot base = entry.visual via baseImgSrc
   // #148 cleanup: an inline-SVG base (image OR hotspot) must swap too, not just a raster
@@ -8535,12 +8551,14 @@ section("panel-standards");
   // Header & Footer is converted: switch + icon-align + eye, NO word-boolean segments.
   // OVL-07 promoted the two nests to sheet SECTIONS of their own, so the switch/summary/Reset
   // they carried now ride the section header (hfSectionOpts) instead of a nested twirl.
-  var region = slice(t, "function headerFooterConfig", "// Page layout = per-breakpoint");
+  // arch-P3b-07e: the header/footer editor moved to editor/header-footer.js, so the region this
+  // section reasons about is sliced out of THAT file now.
+  var region = slice(src("src/editor/header-footer.js"), "function headerFooterConfig", "// Page layout = per-breakpoint");
   ok("HF: header + footer are their own sections, switch and all",
     /key: "header", title: "Header", build: buildHeaderBody, opts: function \(\) \{ return hfSectionOpts\(true\); \}/.test(t)
     && /key: "footer", title: "Footer", build: buildFooterBody, opts: function \(\) \{ return hfSectionOpts\(false\); \}/.test(t));
   ok("HF: the section header keeps the switch, the summary and Reset",
-    /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(t));
+    /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(src("src/editor/header-footer.js")));
   ok("HF: switch rows (Underline/Top rule/Pin)", /switchRow\("Underline"/.test(region) && /switchRow\("Top rule"/.test(region) && /switchRow\("Pin to top"/.test(region));
   ok("HF: alignment as icon segments", /segmentedIconLive\("Align"/.test(region));
   ok("HF: disclaimer as eye", /eyeRow\("Disclaimer"/.test(region));
@@ -8555,7 +8573,7 @@ section("panel-standards");
   if (residuals.length) console.error("    offenders: " + residuals.join(" · "));
   // nav (slice 2) converted to nests
   var navRegion = slice(t, "function courseNavControls", "function navButtonsNest");
-  ok("Nav: five groups, described once (Buttons/Pill/Progression/Sections/Tour)", /key: "nav\.buttons", title: "Buttons"/.test(t) && /key: "nav\.pill", title: "Progress pill"/.test(t) && /key: "nav\.sections", title: "Sections"/.test(t));
+  ok("Nav: five groups, described once (Buttons/Pill/Progression/Sections/Tour)", /key: "nav\.buttons", title: "Buttons"/.test(src("src/editor/header-footer.js")) && /key: "nav\.pill", title: "Progress pill"/.test(src("src/editor/header-footer.js")) && /key: "nav\.sections", title: "Sections"/.test(src("src/editor/header-footer.js")));
   ok("Nav: no word booleans in courseNavControls", !/\["(off|on|show|hide)",\s*(true|false)\]/i.test(navRegion));
   // nav promoted to a TOP-LEVEL disclosure (keeps its nests at level 2, not 3-deep under Footer)
   ok("Nav: with a bar its groups ARE the settings sections; with none, one that says so",
@@ -8700,6 +8718,8 @@ section("mode crossfade");
 // ---- image lightbox (click-to-zoom overlay) ------------------------------
 section("image lightbox");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   var r = src("src/render.js"), rt = src("src/runtime.js"), css = src("src/course.css"), e = src("src/editor.js");
   // render: standard-on zoomable + caption carried on the figure, opt-out via noZoom
   ok("render marks images zoomable unless noZoom", /if \(block\.noZoom !== true\) \{\s*fig\.classList\.add\("block-image--zoomable"\)/.test(r));
@@ -8710,7 +8730,7 @@ section("image lightbox");
   // Master image radius: doc.imageRadius -> --img-radius on the ROOT (per-pass hook); the
   // per-image figure var overrides it via CSS specificity. 0 must be a valid value.
   ok("render sets root --img-radius from the imageRadius master hook", /rc\("imageRadius"\) != null\) root\.style\.setProperty\("--img-radius", rc\("imageRadius"\) \+ "px"\)/.test(r));
-  ok("editor: settings write doc.imageRadius (master control)", /doc\.imageRadius = n; mount\(\); scheduleSave\(\)/.test(e) || /delete doc\.imageRadius; else doc\.imageRadius = n/.test(e));
+  ok("editor: settings write doc.imageRadius (master control)", /doc\.imageRadius = n; mount\(\); scheduleSave\(\)/.test(ehf) || /delete E\.doc\.imageRadius; else E\.doc\.imageRadius = n/.test(ehf));
   // arch-P1: the hook is derived once by the shared builder, where 0 (square corners) is a real
   // value and must not collapse to "unset" -- the one field in the context with a falsy trap.
   ok("the imageRadius hook keeps 0 (square), and reports null only when truly unset",
@@ -8744,8 +8764,10 @@ section("onboarding tour retired");
   ok("editor __tour hooks + buildTourBody removed", e.indexOf("__tour") === -1 && e.indexOf("buildTourBody") === -1);
   // The retired ONBOARDING overlay tour had its own settings tab. The learner coach-mark tour
   // (block.tour) is a nav group, and OVL-07 made that group a section descriptor of its own.
+  // arch-P3b-07e: the nav nests (tour among them) moved to editor/header-footer.js.
+  var ehfTour = src("src/editor/header-footer.js");
   ok("no Guided tour settings tab", e.indexOf('key: "tour"') === -1
-    && e.indexOf('key: "nav.tour", title: "Guided tour"') !== -1
+    && ehfTour.indexOf('key: "nav.tour", title: "Guided tour"') !== -1
     && !/key: "tour", title: "Guided tour"/.test(e));
   ok("course.css tour styles removed", css.indexOf(".tour-ring") === -1 && css.indexOf(".tour-bubble") === -1 && css.indexOf(".tour-layer") === -1);
   ok("normalizeDoc strips a stale doc.tour blob", /if \(d\.tour != null\) delete d\.tour;/.test(e));
@@ -8790,6 +8812,10 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
+  // arch-P3b-07c: the modal builders moved to src/editor/modals.js.
+  var emd = src("src/editor/modals.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
@@ -8889,7 +8915,7 @@ section("panel system v2 — layout engine");
   // Phase 3 Batch 1: frame/box appearance migrated to colorFieldFlat
   ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
-  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(e));
+  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(e));
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
@@ -8902,12 +8928,12 @@ section("panel system v2 — layout engine");
   ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,600}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
   // Phase 6 (D7): raw window.prompt/confirm replaced by shared in-app modals
-  ok("promptModal + confirmModal route through the DS modal shell (VersoUI.Modal via dsModalShell)", /function dsModalShell\(opts\)[\s\S]*?window\.VersoUI\.Modal\([\s\S]*?function promptModal\(title, label, initial, onOk, subtitle\)[\s\S]*?dsModalShell\(\{[\s\S]*?function confirmModal\(title, message, onOk, opts\)[\s\S]*?dsModalShell\(\{/.test(e));
+  ok("promptModal + confirmModal route through the DS modal shell (VersoUI.Modal via dsModalShell)", /function dsModalShell\(opts\)[\s\S]*?window\.VersoUI\.Modal\([\s\S]*?function promptModal\(title, label, initial, onOk, subtitle\)[\s\S]*?dsModalShell\(\{[\s\S]*?function confirmModal\(title, message, onOk, opts\)[\s\S]*?dsModalShell\(\{/.test(emd));
   // uio-F05: Enter is still the modal's own submit. Escape moved to the ONE layer stack, so a
   // confirm raised over the settings sheet takes the next Escape and leaves the sheet standing.
-  ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(e)
-    && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(e));
-  ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(e));
+  ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(emd)
+    && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(emd));
+  ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(emd));
   ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(e) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(e));
   ok("only the 2-mode import-merge stays raw confirm (semantics don't map to OK/Cancel)", (e.match(/window\.(prompt|confirm)\(/g) || []).length === 1);
   // Phase 7 (D3): the flagship field inspector adopts the sectionGroup taxonomy (Type + Content)
@@ -11345,6 +11371,8 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
 // lists the unavailable formats once with a "soon" state.
 section("uio-P-C05: format control on Publish, import on Source");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js"), x = src("src/export.js"), css = src("editor.css"), ds = src("design-system/components/overlays/ContextMenu.d.ts");
@@ -11403,9 +11431,9 @@ section("uio-P-C05: format control on Publish, import on Source");
   ok("an import registered after boot still reaches the Source menu", /if \(__activeStage === "source"\) renderSourceToolbar\(\);/.test(e));
 
   // --- the menu primitive grew the states this needs, per the DS contract ---
-  ok("showContextMenu supports disabled + a trailing hint", /\(it\.disabled \? " ctx-item--disabled" : ""\)/.test(e) && /if \(it\.hint\) el\.appendChild\(h\("span", "ctx-item__hint", it\.hint\)\);/.test(e));
-  ok("a disabled entry is not clickable and a missing handler cannot throw", /if \(!it\.disabled\) el\.addEventListener\("click", function \(\) \{ closeCtxMenu\(\); if \(it\.onClick\) it\.onClick\(\); \}\);/.test(e));
-  ok("the disabled + hint states are styled", /\.ctx-item--disabled\{/.test(e) && /\.ctx-item__hint\{/.test(e));
+  ok("showContextMenu supports disabled + a trailing hint", /\(it\.disabled \? " ctx-item--disabled" : ""\)/.test(ecm) && /if \(it\.hint\) el\.appendChild\(h\("span", "ctx-item__hint", it\.hint\)\);/.test(ecm));
+  ok("a disabled entry is not clickable and a missing handler cannot throw", /if \(!it\.disabled\) el\.addEventListener\("click", function \(\) \{ closeCtxMenu\(\); if \(it\.onClick\) it\.onClick\(\); \}\);/.test(ecm));
+  ok("the disabled + hint states are styled", /\.ctx-item--disabled\{/.test(ecm) && /\.ctx-item__hint\{/.test(ecm));
   ok("the DS ContextMenu contract documents the hint", /hint\?: string;/.test(ds));
 })();
 
@@ -11746,6 +11774,10 @@ section("uio-P-C06: picker multi-select + queue selected");
 // menu definition; and help prose gets one small typographic system instead of inventing sizes.
 section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu, help type)");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js"), css = src("editor.css"), typo = src("design-system/tokens/typography.css");
@@ -11778,7 +11810,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   // the three dead-prose references named by the audit are gone, each replaced by a row
   ok("'edit it in the Learner nav panel' is gone", e.indexOf("edit it in the Learner nav panel") === -1);
   ok("the nav row states its live section count and links to Learner nav",
-    /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(e));
+    /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(ehf));
   ok("'Add a footer nav bar in Header & Footer first' is gone", e.indexOf("Add a footer nav bar in Header & Footer first") === -1);
   ok("with no nav bar the row still shows a value plus the link that adds one",
     /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(e));
@@ -11788,21 +11820,26 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   ok("the cross-reference row is styled once, not per site", /\.insp-xref \{/.test(css) && /\.insp-xref__link \{/.test(css));
 
   // --- OVL-14: one verb list, two doors ----------------------------------------------
-  ok("the block verbs have ONE definition", /function blockMenuItems\(target\) \{/.test(e));
+  ok("the block verbs have ONE definition", /function blockMenuItems\(target\) \{/.test(ecm));
   // the block-menu verbs are written exactly once in the whole file (the outliner's own
   // tree menu is a different surface with different verbs, so it is not counted here)
   var verbs = ["Copy style", "Move up", "Move down"];
-  var once = verbs.filter(function (v) { return (e.split('label: "' + v + '"').length - 1) === 1; });
+  // arch-P3b-07q: the verb list lives in editor/context-menu.js, so "written exactly once" is a
+  // claim about that file now.
+  var once = verbs.filter(function (v) { return (ecm.split('label: "' + v + '"').length - 1) === 1; });
   ok("no block verb is written twice (the two doors cannot drift): " + once.length + "/" + verbs.length, once.length === verbs.length);
-  ok("exactly two doors call the one definition", (e.split("blockMenuItems(").length - 1) === 3); // 1 definition + 2 call sites
+  // arch-P3b-07q: the definition and the canvas door are in editor/context-menu.js; the outliner's
+  // door stayed in editor.js. Still one definition and two doors -- counted across both.
+  ok("exactly two doors call the one definition",
+    (ecm.split("blockMenuItems(").length - 1) + (e.split("blockMenuItems(").length - 1) === 3);
   // the canvas handler's block branch builds nothing of its own any more
-  var canvasBranch = (e.match(/setSelection\(target\.type === "instance" \? "instance" : "block", target\.node\);([\s\S]*?)\} else \{/) || [])[1] || "";
+  var canvasBranch = (ecm.match(/setSelection\(target\.type === "instance" \? "instance" : "block", target\.node\);([\s\S]*?)\} else \{/) || [])[1] || "";
   ok("the right-click handler no longer keeps a private copy of the verbs", canvasBranch.indexOf("label:") === -1);
-  ok("door 1 - the canvas right-click renders that list", /items = items\.concat\(blockMenuItems\(target\.type === "block" \? target : \{ instance: target\.instance \}\)\)/.test(e));
+  ok("door 1 - the canvas right-click renders that list", /items = items\.concat\(blockMenuItems\(target\.type === "block" \? target : \{ instance: target\.instance \}\)\)/.test(ecm));
   ok("door 2 - the inspector header's overflow renders the SAME list", /showContextMenu\(r\.right, r\.bottom \+ 4, blockMenuItems\(\{ block: block \}\)\)/.test(e));
   ok("the overflow is the canonical menu glyph and says what it opens", /insp-crumbs__more"\);[\s\S]{0,200}Icon\("more-horizontal"\)[\s\S]{0,120}"Block actions"/.test(e));
-  ok("the menu's foot names its way back into the inspector", /label: "Block settings", hint: "Inspector", onClick: function \(\) \{ revealBlockSettings\(block\); \}/.test(e));
-  ok("that route really opens the block's own settings", /function revealBlockSettings\(block\)[\s\S]{0,220}enteredBlock = block;[\s\S]{0,120}reselectBlockNode\(block, "block"\)/.test(e));
+  ok("the menu's foot names its way back into the inspector", /label: "Block settings", hint: "Inspector", onClick: function \(\) \{ revealBlockSettings\(block\); \}/.test(ecm));
+  ok("that route really opens the block's own settings", /function revealBlockSettings\(block\)[\s\S]{0,240}E\.setEnteredBlock\(block\);[\s\S]{0,140}reselectBlockNode\(block, "block"\)/.test(ecm));
   ok("the overflow is styled once, beside the breadcrumb", /\.insp-crumbs__more \{/.test(css));
 
   // --- OVL-23: one help typographic system -------------------------------------------
@@ -12040,6 +12077,10 @@ section("uio-P-C08: variant roll-up chip + variant popover on Publish");
 // whatever opened it. Exercised against the REAL fenced source, with a stub document.
 section("uio-F05 overlay layer stack (Esc-LIFO)");
 (function () {
+  // arch-P3b-07c: the modal builders moved to src/editor/modals.js.
+  var emd = src("src/editor/modals.js");
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
   var m = e.match(/\/\* @f05-start \*\/([\s\S]*?)\/\* @f05-end \*\//);
   if (!m) { ok("locate @f05 fence", false); return; }
@@ -12117,7 +12158,7 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
   // --- the surfaces that were migrated onto the stack -------------------------------
   ok("the settings sheet, the popover, the menu and the modal all register on the stack",
     /pushLayer\("settings", closeSettingsModal\)/.test(e) && /pushLayer\("chrome-pop", closeChromePop\)/.test(e)
-    && /pushLayer\("ctx-menu", closeCtxMenu\)/.test(e) && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(e));
+    && /pushLayer\("ctx-menu", closeCtxMenu\)/.test(ecm) && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(emd));
   ok("no migrated surface keeps a private Escape handler", !/function _chromePopEsc/.test(e) && !/function settingsEsc/.test(e));
   ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
 })();
@@ -12127,8 +12168,10 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
 // create-affordance style, spending a third of the menu on a feature the block does not use.
 section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
-  var m = e.match(/(function pruneEmptyMenuSections\(items\)[\s\S]*?\n  \})/);
+  var m = ecm.match(/(function pruneEmptyMenuSections\(items\)[\s\S]*?\n    \})/);
   if (!m) { ok("locate pruneEmptyMenuSections", false); return; }
   var prune = new Function(m[1] + "; return pruneEmptyMenuSections;")();
   function labels(list) { return prune(list).map(function (x) { return x.head ? "#" + x.head : (x.sep ? "-" : x.label); }).join("|"); }
@@ -12151,19 +12194,19 @@ section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
   ok("it survives an empty list", prune([]).length === 0 && prune(null).length === 0);
 
   // Wiring.
-  ok("every menu is pruned on the way to the DOM", /var m = buildCtxMenuEl\(pruneEmptyMenuSections\(items\)\);/.test(e));
+  ok("every menu is pruned on the way to the DOM", /var m = buildCtxMenuEl\(pruneEmptyMenuSections\(items\)\);/.test(ecm));
   ok("a submenu renders a nested panel with a chevron, pruned the same way",
-    /if \(it\.submenu && it\.submenu\.length\) \{[\s\S]{0,400}buildCtxMenuEl\(pruneEmptyMenuSections\(it\.submenu\), true\)/.test(e));
+    /if \(it\.submenu && it\.submenu\.length\) \{[\s\S]{0,400}buildCtxMenuEl\(pruneEmptyMenuSections\(it\.submenu\), true\)/.test(ecm));
   ok("a submenu flips left when it would run off the window, measured not guessed",
-    /var r = sub\.getBoundingClientRect\(\);\s*\n\s*if \(r\.right > window\.innerWidth - 8\) sub\.classList\.add\("is-flipped"\);/.test(e));
+    /var r = sub\.getBoundingClientRect\(\);\s*\n\s*if \(r\.right > window\.innerWidth - 8\) sub\.classList\.add\("is-flipped"\);/.test(ecm));
   ok("the variant family is ONE row with a submenu, and New variant sits at its foot",
-    /items\.push\(\{ label: "Variants", submenu: variantSub \}\);/.test(e)
-    && /variantSub\.push\(\{ label: "New variant…"/.test(e));
+    /items\.push\(\{ label: "Variants", submenu: variantSub \}\);/.test(ecm)
+    && /variantSub\.push\(\{ label: "New variant…"/.test(ecm));
   ok("with no variants the whole family is one ordinary row, not a heading saying it is empty",
-    /\} else \{\s*\n\s*items\.push\(\{ label: "Add variant…", onClick: function \(\) \{ newVariantPrompt\(\); \} \}\);/.test(e)
+    /\} else \{\s*\n\s*items\.push\(\{ label: "Add variant…", onClick: function \(\) \{ newVariantPrompt\(\); \} \}\);/.test(ecm)
     && !/head: vs\.length \? "Variants"/.test(e));
   ok("software versions and variant images collapse the same way",
-    /items\.push\(\{ label: "Software versions", submenu:/.test(e) && /items\.push\(\{ label: "Variant images", submenu: imgSub \}\);/.test(e));
+    /items\.push\(\{ label: "Software versions", submenu:/.test(ecm) && /items\.push\(\{ label: "Variant images", submenu: imgSub \}\);/.test(ecm));
   ok("the '+' create prefix is gone everywhere — menu verbs are plain", !/\+ New variant/.test(e));
   ok("the DS carries the submenu entry and the never-empty rule",
     /submenu\?: MenuEntry\[\];/.test(src("design-system/components/overlays/ContextMenu.d.ts"))
@@ -12232,6 +12275,8 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
 // section, and sections nest one deep: a group that wants a third level is promoted.
 section("uio-O-W2 one section notation, two levels (OVL-07)");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js"), ecss = src("editor.css"), ex = src("src/export.js");
@@ -12281,11 +12326,11 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
     /key: "header", title: "Header"/.test(e) && /key: "footer", title: "Footer"/.test(e)
     && !/subDisclosure\("hf\.header"/.test(e));
   ok("the nav's five groups are described once and drawn in both surfaces",
-    /function courseNavNests\(child\)/.test(e)
-    && /function courseNavControls\(child, host\) \{\s*\n\s*courseNavNests\(child\)\.forEach/.test(e)
+    /function courseNavNests\(child\)/.test(ehf)
+    && /function courseNavControls\(child, host\) \{\s*\n\s*courseNavNests\(child\)\.forEach/.test(ehf)
     && /function navSettingsSections\(\)[\s\S]{0,700}courseNavNests\(n\)\.map/.test(e));
   ok("standing alone in the sheet a group says what it belongs to",
-    /sheetTitle: "Nav buttons"/.test(e) && /sheetTitle: "Nav sections"/.test(e));
+    /sheetTitle: "Nav buttons"/.test(ehf) && /sheetTitle: "Nav sections"/.test(ehf));
   ok("with no nav bar there is still one section that says so and links onward",
     /key: "nav", title: "Learner nav"[\s\S]{0,300}value: "Not added"/.test(e));
 
@@ -12466,11 +12511,13 @@ section("uio-F06 palette wiring + keyboard contract");
 // ---- uio-F05: the escalation route out of the narrow surfaces --------------------
 section("uio-F05 escalation links (popover/menu -> sheet)");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js"), css = src("editor.css");
   ok("there is ONE escalation control, not one per surface", /function escalateLink\(spec\)/.test(e)
     && (e.match(/function escalateLink/g) || []).length === 1);
   ok("the popover takes it as an option and appends it after its own rows", /if \(opts && opts\.escalate\) pop\.appendChild\(escalateLink\(opts\.escalate\)\);/.test(e));
-  ok("the menu takes it too, after a separator, so verbs and the route never blur together", /if \(opts && opts\.escalate\) \{[\s\S]{0,300}items = items\.concat\(\[\{ sep: true \}/.test(e));
+  ok("the menu takes it too, after a separator, so verbs and the route never blur together", /if \(opts && opts\.escalate\) \{[\s\S]{0,300}items = items\.concat\(\[\{ sep: true \}/.test(ecm));
   ok("it routes to a NAMED section of the sheet, never just 'open Settings'", /openSettingsSection\(spec\.tab \|\| "project", spec\.section \|\| null\)/.test(e));
   ok("the storage popover uses it for real (a route, not a dead end)", /escalate: \{ label: "Backup settings", tab: "project", section: "backup" \}/.test(e));
   ok("it reads as a quiet link, never a commit button", /\.chrome-pop__escalate \{[\s\S]{0,240}color: var\(--accent\)/.test(css)
@@ -12487,6 +12534,8 @@ section("uio-F05 escalation links (popover/menu -> sheet)");
 // inheritance path.
 section("uio-F03 scope + inheritance model");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js");
@@ -12627,7 +12676,7 @@ section("uio-F03 scope + inheritance model");
   ok("real rows carry the tail at three different rungs", (function () {
     var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
     var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
-    var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(e);
+    var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(ehf);
     return atBlock && atPage && atCourse;
   })());
   ok("the retired inherit-as-an-option picker is gone (never show 'unset')", !/\["Inherit course default", "inherit"\]/.test(e));
@@ -12701,6 +12750,8 @@ section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette"
 // otherwise it's a quiet disabled secondary that states the reason on hover.
 section("uio-P-C02: Publish button — accent only when runnable, reason when disabled");
 (function () {
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
   ok("Publish is accent primary only when runnable, else secondary", /var canRun = !!pending && !Publish\.isRunning\(\);[\s\S]{0,200}variant: canRun \? "primary" : "secondary"/.test(e));
   ok("the disabled Publish button carries the reason on hover", /if \(!canRun\) \{[\s\S]{0,160}pub\.title = Publish\.isRunning\(\) \? "Publishing…" : "Nothing queued to publish/.test(e));
@@ -12841,7 +12892,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("capture is undoable — the input handler snapshots before writeModel", /History\.pushOnce\(\);[\s\S]{0,200}writeModel\(node,/.test(e));
   ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(e));
   ok("version tagging targets the BASE node (__vbase) not the display clone", /function versionBaseNode\(node\) \{ return \(node && node\.__vbase\) \|\| node; \}/.test(e));
-  ok("block context menu adds a Software version show/hide section", /var versAll = versionNames\(\);[\s\S]{0,700}toggleHiddenInVersion\(host, v\)/.test(e));
+  // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
+  ok("block context menu adds a Software version show/hide section", /var versAll = versionNames\(\);[\s\S]{0,700}toggleHiddenInVersion\(host, v\)/.test(src("src/editor/context-menu.js")));
   ok("FIX 2: editing a version disables inert block controls with a reason", /function applyVersionEditGuard\(\)[\s\S]*?is-version-readonly-panel[\s\S]*?version-edit-notice/.test(e));
   ok("FIX 2: the field (inline text) inspector stays live — only block/instance/embed are disabled", /\["block", "instance", "embed"\]\.indexOf\(selection\.type\) === -1\) return;/.test(e));
   ok("FIX 3: switching version flushes an in-flight edit", (e.match(/flushSave\(\);/g) || []).length >= 3 && /function onVersionPick\(v\) \{\s*flushSave\(\);/.test(e));
@@ -13135,9 +13187,11 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("runtime re-clamps open labels on resize", /addEventListener\("resize", function \(\) \{ qsAll\(bar, "\.course-tour__label\.is-open"\)\.forEach\(clampTourLabel\)/.test(run));
   // editor wiring: the Guided tour nest (enable toggle + page picker + per-marker copy)
   var ed = src("src/editor.js");
-  ok("editor adds the Guided tour section", /key: "nav\.tour", title: "Guided tour"/.test(ed));
-  ok("editor tour toggle seeds child.tour on enable", /child\.tour\.on = true;[\s\S]{0,160}child\.tour\.page = /.test(ed));
-  ok("editor tour nest has a page picker + per-marker copy", /function navTourNest\(child, host\)/.test(ed) && /Show on page/.test(ed) && /headerFooterTextRow\("Title", it, "title"/.test(ed));
+  // arch-P3b-07e: the nav nests moved to editor/header-footer.js.
+  var ehfNav = src("src/editor/header-footer.js");
+  ok("editor adds the Guided tour section", /key: "nav\.tour", title: "Guided tour"/.test(ehfNav));
+  ok("editor tour toggle seeds child.tour on enable", /child\.tour\.on = true;[\s\S]{0,160}child\.tour\.page = /.test(ehfNav));
+  ok("editor tour nest has a page picker + per-marker copy", /function navTourNest\(child, host\)/.test(ehfNav) && /Show on page/.test(ehfNav) && /headerFooterTextRow\("Title", it, "title"/.test(ehfNav));
 })();
 
 // ---- #131: merge stacked text boxes (pure gate + join) --------------------
@@ -13171,7 +13225,8 @@ section("#131 merge text boxes");
     var multi = VI.pick({ multiSelCount: 2 });
     return multi.after.indexOf("multiToolbar") !== -1 && multi.after.indexOf("variantOverrides") !== -1;
   })());
-  ok("wiring: canvas context menu multi branch offers Merge", /inMulti\(target\.block\) && multiSel\.length >= 2[\s\S]{0,220}canMergeTextBoxes\(multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(t));
+  // arch-P3b-07q: the canvas menu moved to editor/context-menu.js, where multiSel is read live.
+  ok("wiring: canvas context menu multi branch offers Merge", /inMulti\(target\.block\) && E\.multiSel\.length >= 2[\s\S]{0,240}canMergeTextBoxes\(E\.multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(src("src/editor/context-menu.js")));
   ok("wiring: outline multi menu offers Merge", /multi && canMergeTextBoxes\(multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(t));
   // action: writes the join into the survivor + shared-parent guard (mirrors groupMulti)
   ok("action: mergeTextBoxes folds into the survivor via mergeTextValues", /survivor\.text = mergeTextValues\(locs\.map\(function \(l\) \{ return l\.block\.text; \}\)\);/.test(t));
@@ -14125,7 +14180,9 @@ section("left-panel Components reorg");
   // context-menu additions (Tier 1 per the /verso-frontend ruling): single-block
   // "Save as component…" (canvas + outliner) and page "Save page to library…"
   // (canvas frame-label + outliner), mirroring the existing Inspector buttons.
-  var saveAsComponentCount = (e.match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length;
+  // arch-P3b-07q: the canvas door moved; the outliner's stayed. Two doors, counted across both.
+  var saveAsComponentCount = (e.match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length +
+                             (src("src/editor/context-menu.js").match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length;
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
