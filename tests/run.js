@@ -5915,7 +5915,8 @@ section("auto-gate all interactions");
   ok("render stamps data-gate-all from the hook", /if \(rc\("gateAllInteractions"\)\) root\.setAttribute\("data-gate-all", "1"\)/.test(rn));
   // uio-F03: the switch now reads the RESOLVED value down the scope ladder (System -> Course)
   // and clears the course flag on Reset; the stored data is unchanged.
-  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
+  // arch-P3b-07e: the progression nest moved with the header/footer editor and reads `doc` live.
+  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?E\.doc\.gateAllInteractions = true; else delete E\.doc\.gateAllInteractions/.test(src("src/editor/header-footer.js")));
   // state buckets for the new signals
   ok("runtime adds viewed/revealed/quizDone/sequenceDone/accordionDone buckets", /var state = \{ visited: \{\}, watched: \{\}, checked: \{\}, viewed: \{\}, revealed: \{\}, quizDone: \{\}, sequenceDone: \{\}, accordionDone: \{\} \}/.test(rt));
   // completion emitters (decoupled, bubbling)
@@ -5986,7 +5987,7 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   // uio-F03: still tri-state DATA (true / false / absent = inherit), but the picker's explicit
   // "inherit" option is gone — the switch shows the resolved value and Reset clears the page flag.
   ok("page inspector writes tri-state page.gateInteractions", /page\.gateInteractions = !!v;/.test(ed) && /delete page\.gateInteractions;/.test(ed));
-  ok("progression panel exposes the reminder-message field", /gmIn\.value = doc\.gateMessage \|\| "";[\s\S]*?if \(v\) doc\.gateMessage = v; else delete doc\.gateMessage/.test(ed));
+  ok("progression panel exposes the reminder-message field", /gmIn\.value = E\.doc\.gateMessage \|\| "";[\s\S]*?if \(v\) E\.doc\.gateMessage = v; else delete E\.doc\.gateMessage/.test(src("src/editor/header-footer.js")));
 })();
 
 // ---- footer nav pin: framed forced-device preview pins prev/next to the device
@@ -6140,6 +6141,8 @@ section("#169 pin-to-gutters preview");
 
 section("nav pill cleanup");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var css = src("src/course.css");
@@ -6157,12 +6160,12 @@ section("nav pill cleanup");
   // author pill OPACITY: surface-only via color-mix (keeps text/glyphs crisp), default 100%
   ok("css pill bg uses color-mix with --nav-pill-opacity", /background: color-mix\(in srgb, var\(--nav-pill-fill[^)]*\)[^,]*\) var\(--nav-pill-opacity, 100%\), transparent\);/.test(css));
   ok("render sets --nav-pill-opacity from block.pillOpacity", /block\.pillOpacity != null\) wrap\.style\.setProperty\("--nav-pill-opacity", block\.pillOpacity \+ "%"\)/.test(r));
-  ok("editor has an Opacity iconField writing pillOpacity (clamped 0-100)", /child\.pillOpacity = Math\.max\(0, Math\.min\(100, n\)\)/.test(e));
+  ok("editor has an Opacity iconField writing pillOpacity (clamped 0-100)", /child\.pillOpacity = Math\.max\(0, Math\.min\(100, n\)\)/.test(ehf));
   ok("pillOpacity in NAV_PILL_KEYS (override-dot/reset)", /NAV_PILL_KEYS = \[[^\]]*"pillOpacity"/.test(ep));
   // author pill LAYER BLUR: backdrop-filter behind the pill, default 0
   ok("css pill has backdrop-filter blur var (default 0)", /backdrop-filter: blur\(var\(--nav-pill-blur, 0px\)\);/.test(css) && /-webkit-backdrop-filter: blur\(var\(--nav-pill-blur, 0px\)\);/.test(css));
   ok("render sets --nav-pill-blur from block.pillBlur", /block\.pillBlur != null\) wrap\.style\.setProperty\("--nav-pill-blur", block\.pillBlur \+ "px"\)/.test(r));
-  ok("editor has a Blur iconField writing pillBlur (clamped 0-40)", /child\.pillBlur = Math\.max\(0, Math\.min\(40, n\)\)/.test(e));
+  ok("editor has a Blur iconField writing pillBlur (clamped 0-40)", /child\.pillBlur = Math\.max\(0, Math\.min\(40, n\)\)/.test(ehf));
   ok("pillBlur in NAV_PILL_KEYS", /NAV_PILL_KEYS = \[[^\]]*"pillBlur"/.test(ep));
 })();
 
@@ -6997,6 +7000,8 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var r = src("src/render.js");
@@ -7094,17 +7099,17 @@ section("richer bullet lists");
   ok("block Spacing edits use the incremental page rebuild", /var onSpace  = opts\.onSpace  \|\| function \(\) \{ reapplyBlock\(block\)/.test(e));
   ok("block Align\/Vertical edits use the incremental page rebuild", (e.match(/reapplyBlock\(block\); reselectBlockNode\(block, getSelectionTypeForBlock\(block\)\);/g) || []).length >= 2);
   ok("header\/footer padding pokes live on .course-header\/.course-footer", /function pokeHeaderFooterLive\(cfg, key\)[\s\S]*?cfg === hf\.header\) \? "\.course-header"[\s\S]*?cfg === hf\.footer\) \? "\.course-footer"/.test(e));
-  ok("headerFooterNum tries the live poke before a full rebuild", /if \(!pokeHeaderFooterLive\(cfg, key\)\) reapplyHeaderFooter\(\)/.test(e));
+  ok("headerFooterNum tries the live poke before a full rebuild", /if \(!pokeHeaderFooterLive\(cfg, key\)\) reapplyHeaderFooter\(\)/.test(ehf));
   // nav progress pill: author Width + Height (BACKLOG §pill P2, James 2026-07-08)
   var rjs = src("src/render.js"), ccss = src("src/course.css");
   ok("render pipes pillWidth/pillHeight -> --nav-pill-width/-height + --pill-scale", /block\.pillWidth != null\) wrap\.style\.setProperty\("--nav-pill-width", block\.pillWidth \+ "px"\)[\s\S]*?block\.pillHeight != null\) \{[\s\S]*?setProperty\("--nav-pill-height", block\.pillHeight \+ "px"\)[\s\S]*?setProperty\("--pill-scale"/.test(rjs));
   ok("css pill forces width + height from the vars (border-box)", /box-sizing: border-box[\s\S]*?width: var\(--nav-pill-width, auto\); max-width: var\(--nav-pill-width, 460px\)[\s\S]*?height: var\(--nav-pill-height, auto\)/.test(ccss));
-  ok("pill Width + Height iconFields in the Progress-pill nest", /iconField\("W", \{ value: child\.pillWidth/.test(e) && /iconField\("H", \{ value: child\.pillHeight/.test(e));
+  ok("pill Width + Height iconFields in the Progress-pill nest", /iconField\("W", \{ value: child\.pillWidth/.test(ehf) && /iconField\("H", \{ value: child\.pillHeight/.test(ehf));
   ok("pillWidth/pillHeight in NAV_PILL_KEYS (override-dot + reset)", /NAV_PILL_KEYS = \[[^\]]*"pillWidth", "pillHeight"/.test(ep));
   // nav pill drop shadow (James 2026-07-08)
   ok("render composes --nav-pill-shadow (off -> none, else offset/blur/spread/colour+opacity)", /block\.pillShadow === false\) wrap\.style\.setProperty\("--nav-pill-shadow", "none"\)[\s\S]*?color-mix\(in srgb, " \+ _scol \+ " " \+ _sop \+ "%, transparent\)/.test(rjs));
   ok("pill box-shadow reads the author var (base rule, single source)", /box-shadow: var\(--nav-pill-shadow, 0 10px 30px rgba\(0, 0, 0, 0\.35\)\)/.test(ccss));
-  ok("Drop shadow controls in the Progress-pill nest", /panelSection\(h0, "Drop shadow"\)[\s\S]*?switchRow\("Drop shadow"[\s\S]*?child\.pillShadowX[\s\S]*?child\.pillShadowOpacity/.test(e));
+  ok("Drop shadow controls in the Progress-pill nest", /panelSection\(h0, "Drop shadow"\)[\s\S]*?switchRow\("Drop shadow"[\s\S]*?child\.pillShadowX[\s\S]*?child\.pillShadowOpacity/.test(ehf));
   ok("shadow keys in NAV_PILL_KEYS", /"pillShadow", "pillShadowX", "pillShadowY", "pillShadowBlur", "pillShadowSpread", "pillShadowColor", "pillShadowOpacity"/.test(ep));
 })();
 
@@ -8546,12 +8551,14 @@ section("panel-standards");
   // Header & Footer is converted: switch + icon-align + eye, NO word-boolean segments.
   // OVL-07 promoted the two nests to sheet SECTIONS of their own, so the switch/summary/Reset
   // they carried now ride the section header (hfSectionOpts) instead of a nested twirl.
-  var region = slice(t, "function headerFooterConfig", "// Page layout = per-breakpoint");
+  // arch-P3b-07e: the header/footer editor moved to editor/header-footer.js, so the region this
+  // section reasons about is sliced out of THAT file now.
+  var region = slice(src("src/editor/header-footer.js"), "function headerFooterConfig", "// Page layout = per-breakpoint");
   ok("HF: header + footer are their own sections, switch and all",
     /key: "header", title: "Header", build: buildHeaderBody, opts: function \(\) \{ return hfSectionOpts\(true\); \}/.test(t)
     && /key: "footer", title: "Footer", build: buildFooterBody, opts: function \(\) \{ return hfSectionOpts\(false\); \}/.test(t));
   ok("HF: the section header keeps the switch, the summary and Reset",
-    /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(t));
+    /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(src("src/editor/header-footer.js")));
   ok("HF: switch rows (Underline/Top rule/Pin)", /switchRow\("Underline"/.test(region) && /switchRow\("Top rule"/.test(region) && /switchRow\("Pin to top"/.test(region));
   ok("HF: alignment as icon segments", /segmentedIconLive\("Align"/.test(region));
   ok("HF: disclaimer as eye", /eyeRow\("Disclaimer"/.test(region));
@@ -8566,7 +8573,7 @@ section("panel-standards");
   if (residuals.length) console.error("    offenders: " + residuals.join(" · "));
   // nav (slice 2) converted to nests
   var navRegion = slice(t, "function courseNavControls", "function navButtonsNest");
-  ok("Nav: five groups, described once (Buttons/Pill/Progression/Sections/Tour)", /key: "nav\.buttons", title: "Buttons"/.test(t) && /key: "nav\.pill", title: "Progress pill"/.test(t) && /key: "nav\.sections", title: "Sections"/.test(t));
+  ok("Nav: five groups, described once (Buttons/Pill/Progression/Sections/Tour)", /key: "nav\.buttons", title: "Buttons"/.test(src("src/editor/header-footer.js")) && /key: "nav\.pill", title: "Progress pill"/.test(src("src/editor/header-footer.js")) && /key: "nav\.sections", title: "Sections"/.test(src("src/editor/header-footer.js")));
   ok("Nav: no word booleans in courseNavControls", !/\["(off|on|show|hide)",\s*(true|false)\]/i.test(navRegion));
   // nav promoted to a TOP-LEVEL disclosure (keeps its nests at level 2, not 3-deep under Footer)
   ok("Nav: with a bar its groups ARE the settings sections; with none, one that says so",
@@ -8711,6 +8718,8 @@ section("mode crossfade");
 // ---- image lightbox (click-to-zoom overlay) ------------------------------
 section("image lightbox");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   var r = src("src/render.js"), rt = src("src/runtime.js"), css = src("src/course.css"), e = src("src/editor.js");
   // render: standard-on zoomable + caption carried on the figure, opt-out via noZoom
   ok("render marks images zoomable unless noZoom", /if \(block\.noZoom !== true\) \{\s*fig\.classList\.add\("block-image--zoomable"\)/.test(r));
@@ -8721,7 +8730,7 @@ section("image lightbox");
   // Master image radius: doc.imageRadius -> --img-radius on the ROOT (per-pass hook); the
   // per-image figure var overrides it via CSS specificity. 0 must be a valid value.
   ok("render sets root --img-radius from the imageRadius master hook", /rc\("imageRadius"\) != null\) root\.style\.setProperty\("--img-radius", rc\("imageRadius"\) \+ "px"\)/.test(r));
-  ok("editor: settings write doc.imageRadius (master control)", /doc\.imageRadius = n; mount\(\); scheduleSave\(\)/.test(e) || /delete doc\.imageRadius; else doc\.imageRadius = n/.test(e));
+  ok("editor: settings write doc.imageRadius (master control)", /doc\.imageRadius = n; mount\(\); scheduleSave\(\)/.test(ehf) || /delete E\.doc\.imageRadius; else E\.doc\.imageRadius = n/.test(ehf));
   // arch-P1: the hook is derived once by the shared builder, where 0 (square corners) is a real
   // value and must not collapse to "unset" -- the one field in the context with a falsy trap.
   ok("the imageRadius hook keeps 0 (square), and reports null only when truly unset",
@@ -8755,8 +8764,10 @@ section("onboarding tour retired");
   ok("editor __tour hooks + buildTourBody removed", e.indexOf("__tour") === -1 && e.indexOf("buildTourBody") === -1);
   // The retired ONBOARDING overlay tour had its own settings tab. The learner coach-mark tour
   // (block.tour) is a nav group, and OVL-07 made that group a section descriptor of its own.
+  // arch-P3b-07e: the nav nests (tour among them) moved to editor/header-footer.js.
+  var ehfTour = src("src/editor/header-footer.js");
   ok("no Guided tour settings tab", e.indexOf('key: "tour"') === -1
-    && e.indexOf('key: "nav.tour", title: "Guided tour"') !== -1
+    && ehfTour.indexOf('key: "nav.tour", title: "Guided tour"') !== -1
     && !/key: "tour", title: "Guided tour"/.test(e));
   ok("course.css tour styles removed", css.indexOf(".tour-ring") === -1 && css.indexOf(".tour-bubble") === -1 && css.indexOf(".tour-layer") === -1);
   ok("normalizeDoc strips a stale doc.tour blob", /if \(d\.tour != null\) delete d\.tour;/.test(e));
@@ -8801,6 +8812,8 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07c: the modal builders moved to src/editor/modals.js.
   var emd = src("src/editor/modals.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -8902,7 +8915,7 @@ section("panel system v2 — layout engine");
   // Phase 3 Batch 1: frame/box appearance migrated to colorFieldFlat
   ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
-  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(e));
+  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(e));
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
@@ -11761,6 +11774,8 @@ section("uio-P-C06: picker multi-select + queue selected");
 // menu definition; and help prose gets one small typographic system instead of inventing sizes.
 section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu, help type)");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -11795,7 +11810,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   // the three dead-prose references named by the audit are gone, each replaced by a row
   ok("'edit it in the Learner nav panel' is gone", e.indexOf("edit it in the Learner nav panel") === -1);
   ok("the nav row states its live section count and links to Learner nav",
-    /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(e));
+    /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(ehf));
   ok("'Add a footer nav bar in Header & Footer first' is gone", e.indexOf("Add a footer nav bar in Header & Footer first") === -1);
   ok("with no nav bar the row still shows a value plus the link that adds one",
     /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(e));
@@ -12260,6 +12275,8 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
 // section, and sections nest one deep: a group that wants a third level is promoted.
 section("uio-O-W2 one section notation, two levels (OVL-07)");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js"), ecss = src("editor.css"), ex = src("src/export.js");
@@ -12309,11 +12326,11 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
     /key: "header", title: "Header"/.test(e) && /key: "footer", title: "Footer"/.test(e)
     && !/subDisclosure\("hf\.header"/.test(e));
   ok("the nav's five groups are described once and drawn in both surfaces",
-    /function courseNavNests\(child\)/.test(e)
-    && /function courseNavControls\(child, host\) \{\s*\n\s*courseNavNests\(child\)\.forEach/.test(e)
+    /function courseNavNests\(child\)/.test(ehf)
+    && /function courseNavControls\(child, host\) \{\s*\n\s*courseNavNests\(child\)\.forEach/.test(ehf)
     && /function navSettingsSections\(\)[\s\S]{0,700}courseNavNests\(n\)\.map/.test(e));
   ok("standing alone in the sheet a group says what it belongs to",
-    /sheetTitle: "Nav buttons"/.test(e) && /sheetTitle: "Nav sections"/.test(e));
+    /sheetTitle: "Nav buttons"/.test(ehf) && /sheetTitle: "Nav sections"/.test(ehf));
   ok("with no nav bar there is still one section that says so and links onward",
     /key: "nav", title: "Learner nav"[\s\S]{0,300}value: "Not added"/.test(e));
 
@@ -12517,6 +12534,8 @@ section("uio-F05 escalation links (popover/menu -> sheet)");
 // inheritance path.
 section("uio-F03 scope + inheritance model");
 (function () {
+  // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
+  var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js");
@@ -12657,7 +12676,7 @@ section("uio-F03 scope + inheritance model");
   ok("real rows carry the tail at three different rungs", (function () {
     var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
     var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
-    var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(e);
+    var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(ehf);
     return atBlock && atPage && atCourse;
   })());
   ok("the retired inherit-as-an-option picker is gone (never show 'unset')", !/\["Inherit course default", "inherit"\]/.test(e));
@@ -13168,9 +13187,11 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("runtime re-clamps open labels on resize", /addEventListener\("resize", function \(\) \{ qsAll\(bar, "\.course-tour__label\.is-open"\)\.forEach\(clampTourLabel\)/.test(run));
   // editor wiring: the Guided tour nest (enable toggle + page picker + per-marker copy)
   var ed = src("src/editor.js");
-  ok("editor adds the Guided tour section", /key: "nav\.tour", title: "Guided tour"/.test(ed));
-  ok("editor tour toggle seeds child.tour on enable", /child\.tour\.on = true;[\s\S]{0,160}child\.tour\.page = /.test(ed));
-  ok("editor tour nest has a page picker + per-marker copy", /function navTourNest\(child, host\)/.test(ed) && /Show on page/.test(ed) && /headerFooterTextRow\("Title", it, "title"/.test(ed));
+  // arch-P3b-07e: the nav nests moved to editor/header-footer.js.
+  var ehfNav = src("src/editor/header-footer.js");
+  ok("editor adds the Guided tour section", /key: "nav\.tour", title: "Guided tour"/.test(ehfNav));
+  ok("editor tour toggle seeds child.tour on enable", /child\.tour\.on = true;[\s\S]{0,160}child\.tour\.page = /.test(ehfNav));
+  ok("editor tour nest has a page picker + per-marker copy", /function navTourNest\(child, host\)/.test(ehfNav) && /Show on page/.test(ehfNav) && /headerFooterTextRow\("Title", it, "title"/.test(ehfNav));
 })();
 
 // ---- #131: merge stacked text boxes (pure gate + join) --------------------
