@@ -392,6 +392,8 @@
   <script src="src/editor/world.js"></script>
   <!-- arch-P3b-07lib library: window.VersoLibrary — the cross-course shared component library: the store, the where-used counters, and the panel that lists, imports, exports, promotes and removes masters. Must precede editor.js. -->
   <script src="src/editor/library.js"></script>
+  <!-- arch-P3b-07doc documents: window.VersoDocuments — bringing a course into existence: the New dialog, the blank-course builder, the .json import with its id-collision check, and the header/footer default a new course inherits. Must precede editor.js. -->
+  <script src="src/editor/documents.js"></script>
   <!-- arch-P3b-07n editing: window.VersoEditing — what makes the canvas typeable: contentEditable on copy fields (selected first, editable second), drop targets, column resizers, the embed shield, and the collaboration edit lifecycle. Nothing it adds may leak into render(). Must precede editor.js. -->
   <script src="src/editor/editing.js"></script>
   <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->

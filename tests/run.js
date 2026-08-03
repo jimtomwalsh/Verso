@@ -8150,6 +8150,7 @@ section("inspector Enter-to-blur");
 // ---- project auto-backup (P0 data-safety) -------------
 section("project auto-backup");
 (function () {
+  var DOCS = src("src/editor/documents.js");   // arch-P3b-07doc
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07d: the durable-copy writer moved to src/editor/backup.js.
   var ebk = src("src/editor/backup.js");
@@ -8165,13 +8166,13 @@ section("project auto-backup");
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(ebk) && /saveBackupHandle\(E\.activeDocId, h\)/.test(ebk));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(ebk) && /Backup OFF — this course is NOT being saved/.test(ebk) && /No backup folder — this course is NOT being saved anywhere/.test(ebk) && /\? "Reconnect folder" : "Choose folder"/.test(ebk));
   // arch-P3b-07d: the new-doc flow stayed here; only the banner it raises moved.
-  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(E\.doc && E\.doc\.backupRequired\)\)/.test(ebk));
+  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(DOCS) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(DOCS) && /showBackupBanner\(!!\(E\.doc && E\.doc\.backupRequired\)\)/.test(ebk));
   // SPEC 7 create flow: the new-doc dialog resolves the chosen preset to a matrix cell and
   // stamps the new doc with its Product + {geo, interactive}; createBlankDoc applies both.
-  ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(e));
-  ok("create flow passes productId + geo + interactive into createBlankDoc", /createBlankDoc\(title, code, \{ productId: newDocProduct, geo: cell\.geo, interactive: cell\.interactive \}\)/.test(e));
-  ok("createBlankDoc stamps the Product + cell onto the new doc", /if \(opts\.productId\) tagDocProductStage\(newDoc, opts\.productId, null\)/.test(e) && /if \(opts\.geo\) tagDocCell\(newDoc, opts\.geo, opts\.interactive\)/.test(e));
-  ok("create flow offers a ChoiceCards preset grid from the doc-type model", /window\.VersoUI\.ChoiceCards\(\{[\s\S]{0,200}DT\.PRESETS\.map/.test(e));
+  ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(DOCS));
+  ok("create flow passes productId + geo + interactive into createBlankDoc", /createBlankDoc\(title, code, \{ productId: newDocProduct, geo: cell\.geo, interactive: cell\.interactive \}\)/.test(DOCS));
+  ok("createBlankDoc stamps the Product + cell onto the new doc", /if \(opts\.productId\) tagDocProductStage\(newDoc, opts\.productId, null\)/.test(DOCS) && /if \(opts\.geo\) tagDocCell\(newDoc, opts\.geo, opts\.interactive\)/.test(DOCS));
+  ok("create flow offers a ChoiceCards preset grid from the doc-type model", /window\.VersoUI\.ChoiceCards\(\{[\s\S]{0,200}DT\.PRESETS\.map/.test(DOCS));
   ok("Backup section registered at the top of Project settings", /\{ key: "backup", title: "Backup", build: buildBackupBody \}/.test(SS));
   ok("schema CSV has a pure text builder for reuse", /window\.__schemaCsv = schemaCsvText/.test(src("src/schema.js")));
   ok("backup-off banner styled (loud, [hidden]-toggled)", /#backup-off-banner\s*\{[\s\S]{0,320}position: fixed/.test(src("editor.css")) && /#backup-off-banner\[hidden\] \{ display: none; \}/.test(src("editor.css")));
@@ -10120,7 +10121,9 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
 // ---- HFDEF: shared header/footer default for new courses -----------------
 section("HFDEF header-footer default");
 (function () {
-  var e = src("src/editor.js");
+  var DOCS = src("src/editor/documents.js");   // arch-P3b-07doc
+  // arch-P3b-07doc: the fence lives in editor/documents.js, beside the create flow it feeds.
+  var e = src("src/editor/documents.js");
   var a = e.indexOf("/* @hfdefault-start */"), b = e.indexOf("/* @hfdefault-end */");
   if (a < 0 || b < 0) { ok("locate @hfdefault fence", false); return; }
   var hf = new Function(e.slice(a, b) + "\nreturn { sanitize: sanitizeHeaderFooterDefault, fromDefault: headerFooterFromDefault };")();
@@ -10147,13 +10150,13 @@ section("HFDEF header-footer default");
   ok("fromDefault of null -> null (caller falls back to built-in)", hf.fromDefault(null, "X") === null);
 
   ok("createBlankDoc applies the saved default with a built-in fallback",
-    /headerFooter: headerFooterFromDefault\(getHeaderFooterDefault\(\), title\) \|\| \{/.test(e));
-  ok("saveHeaderFooterDefault bakes the logo asset ref to a data URI", /a\.dataUrl\) clean\.header\.logo = a\.dataUrl;/.test(e));
+    /headerFooter: headerFooterFromDefault\(getHeaderFooterDefault\(\), title\) \|\| \{/.test(DOCS));
+  ok("saveHeaderFooterDefault bakes the logo asset ref to a data URI", /a\.dataUrl\) clean\.header\.logo = a\.dataUrl;/.test(DOCS));
 
   // saved-course rows have a confirm-gated delete (trash) that removes from the registry
-  ok("new-doc saved-course row has a trash delete button", /var del = iconBtn\("trash", "Delete this saved course", true\);/.test(e));
+  ok("new-doc saved-course row has a trash delete button", /var del = iconBtn\("trash", "Delete this saved course", true\);/.test(DOCS));
   ok("delete is confirm-gated + removes the course from the registry + refreshes the list",
-    /confirmModal\("Delete course\?"[\s\S]{0,340}delete registry\[id\];\s*saveRegistry\(registry\);[\s\S]{0,220}modal\.remove\(\); showNewDocDialog\(\);/.test(e));
+    /confirmModal\("Delete course\?"[\s\S]{0,340}delete registry\[id\];\s*saveRegistry\(registry\);[\s\S]{0,220}modal\.remove\(\); showNewDocDialog\(\);/.test(DOCS));
 })();
 
 // ---- ui-kit (#10): DS canonical control set — pure logic + wiring guards ----
@@ -10235,6 +10238,7 @@ section("ui-kit #10 DS control set");
 // ---- product-rail-left-rail-and-topbar-3-stage: rail segment switch + product context ----
 section("Product Rail: 3-stage rail + product dropdown");
 (function () {
+  var DOCS = src("src/editor/documents.js");   // arch-P3b-07doc
   // arch-P3b-07k: the course browser moved to src/editor/home.js.
   var ehm = src("src/editor/home.js");
   var e = src("src/editor.js");
@@ -10300,7 +10304,7 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("newProductPrompt lands on the Edit-stage document browser (setStage edit + openBrowser)", /function newProductPrompt\(\)[\s\S]{0,900}setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(e));
   ok("the browser header carries a 'New Product' action wired to newProductPrompt", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,120}newProductPrompt\(\);/.test(ehm));
   ok("the document browser is scoped to the active product (empty state for a zero-doc Product)", /function renderBrowserGrid\(\)[\s\S]{0,400}getActiveProduct\(\)[\s\S]{0,300}docMatchesProductStage\(registry\[id\], scope, null\)/.test(ehm));
-  ok("a document created from the browser pre-stamps the active Product (createBlankDoc gets its id)", /var newDocProduct = \(typeof getActiveProduct === "function"\) \? getActiveProduct\(\) : "";/.test(e) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(e));
+  ok("a document created from the browser pre-stamps the active Product (createBlankDoc gets its id)", /var newDocProduct = \(typeof getActiveProduct === "function"\) \? getActiveProduct\(\) : "";/.test(DOCS) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(DOCS));
   ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
   ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
 
@@ -13403,7 +13407,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   // when a default exists (forNewDoc returns null otherwise, leaving the CSV HF alone).
   var sc = src("src/schema.js");
   ok("importSchema keeps the house header/footer on import", /window\.__hfDefault\.forNewDoc\(root\.meta[\s\S]*if \(hf\) root\.headerFooter = hf;[\s\S]*setDoc\(root\)/.test(sc));
-  ok("forNewDoc returns null when no house default is set", /forNewDoc = function[\s\S]*return saved \? headerFooterFromDefault\(saved, title\) : null;/.test(ed));
+  ok("forNewDoc returns null when no house default is set", /forNewDoc = function[\s\S]*return saved \? headerFooterFromDefault\(saved, title\) : null;/.test(ed + src("src/editor/documents.js")));
 
   // switchDoc must drop the outgoing doc's selection/page cursor (else a stale page
   // index crashes renderPageInspector on the new doc — hit via cross-file page paste).
