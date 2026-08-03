@@ -5027,144 +5027,13 @@
   var hideCanvasFmtBar = VE.bind("hideCanvasFmtBar");
 
 
-  // Panel System v2 (James 2026-07-08): the generalised custom listbox. Same shape as
-  // buildFontPicker (a button + popup, exposes `.value` get/set, fires 'change' on pick)
-  // but each option can carry a live PREVIEW instead of a bare word — a CSS style applied
-  // to the row+button (e.g. render a text-style name IN that style) and/or preview HTML
-  // (e.g. the actual bullet glyph). Reuses the .font-picker chrome so styling stays shared.
-  // options: [value, label, meta?]  meta = { style?: cssText, html?: rowInnerHTML,
-  // btnHtml?: buttonInnerHTML (falls back to html) }.
-  function customSelect(current, options, onPick, opts) {
-    opts = opts || {};
-    var wrap = h("div", "font-picker custom-select");
-    var btn = h("button", "font-picker__btn prop-select"); btn.type = "button";
-    var pop = h("div", "font-picker__pop"); pop.hidden = true;
-    var val = current == null ? "" : String(current);
-    function find(v) { for (var i = 0; i < options.length; i++) { if (String(options[i][0]) === String(v)) return options[i]; } return null; }
-    function paintBtn() {
-      var o = find(val) || options[0] || ["", opts.placeholder || ""];
-      var meta = o[2] || {};
-      btn.style.cssText = ""; // clear any prior preview style
-      if (meta.btnHtml || meta.html) btn.innerHTML = meta.btnHtml || meta.html; else btn.textContent = o[1];
-      if (meta.style) btn.style.cssText = meta.style;
-    }
-    options.forEach(function (o) {
-      var meta = o[2] || {};
-      var row = h("div", "font-picker__opt" + (String(o[0]) === val ? " is-active" : ""));
-      if (meta.html) row.innerHTML = meta.html; else row.textContent = o[1];
-      if (meta.style) row.style.cssText = meta.style;
-      row.addEventListener("click", function () {
-        val = String(o[0]); paintBtn();
-        Array.prototype.forEach.call(pop.children, function (c) { c.classList.remove("is-active"); });
-        row.classList.add("is-active");
-        close(); onPick(o[0]);
-        try { wrap.dispatchEvent(new Event("change")); } catch (_) {}
-      });
-      pop.appendChild(row);
-    });
-    function onDoc(e) { if (!wrap.contains(e.target)) close(); }
-    function onEsc(e) { if (e.key === "Escape") close(); }
-    function open() { pop.hidden = false; btn.classList.add("is-open"); setTimeout(function () { document.addEventListener("mousedown", onDoc); }, 0); document.addEventListener("keydown", onEsc); }
-    function close() { pop.hidden = true; btn.classList.remove("is-open"); document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onEsc); }
-    btn.addEventListener("click", function () { pop.hidden ? open() : close(); });
-    wrap.appendChild(btn); wrap.appendChild(pop);
-    paintBtn();
-    Object.defineProperty(wrap, "value", { get: function () { return val; }, set: function (v) { val = v == null ? "" : String(v); paintBtn(); } });
-    return wrap;
-  }
-  window.__customSelect = customSelect; // headless test hook
-  // Drop-in for selectRow that renders a customSelect (with previews) instead of a native
-  // <select>. Same signature + pushHistory-on-pick behaviour, appended to `inspector`.
-  function customSelectRow(label, options, current, onchange, opts) {
-    inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", label));
-    var cs = customSelect(current, options, function (v) { pushHistory(); onchange(v); }, opts);
-    inspector.appendChild(cs);
-    return cs;
-  }
-
-  // Panel System v2 (D4) — the ONE reusable Type control body. Renders font/weight/size/
-  // colour(colorField)/line-height/tracking/word-spacing/case/indent/alignment onto `model`,
-  // calling onChange() after each edit. Mounted IDENTICALLY in the field inspector AND the
-  // Edit-Text-Style dialog. `model` fields: font,weight,size,lineHeight,letterSpacing,
-  // wordSpacing,textTransform,textIndent,align,color,colorToken,colorLight,colorDark.
-  // opts (field-inspector only): { fieldNode, applyWeightToSelection(weight, range) }.
-  // When present, the Weight control is SELECTION-AWARE — highlighted text is weighted
-  // inline (a font-weight span) and the whole-field model.weight is left untouched; with
-  // no live selection it sets model.weight as before. The Edit-Text-Style dialog passes no
-  // opts (there is no live text there), so its Weight stays whole-model. #99/#44 follow-up:
-  // this collapses the old twin whole-field + selection weight controls into one.
-  function typeCluster(container, model, onChange, opts) {
-    onChange = onChange || function () {};
-    container.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Font"));
-    var fp = buildFontPicker(model.font || "", function (v) { model.font = v; onChange(); });
-    container.appendChild(fp);
-    container.appendChild(attachFontWarn(fp));
-    // Size + Weight
-    var size = iconField("A", { value: model.size == null ? "" : model.size, unit: "px", placeholder: "auto", step: 1, min: 1, max: 200, datalist: "dl-font-size", noHistory: true, title: "Font size",
-      onchange: function (v) { var n = parseInt(v, 10); model.size = isNaN(n) ? undefined : n; onChange(); } }).wrap;
-    // Selection-aware (field inspector): opening the <select> steals focus + collapses the
-    // selection, so capture the live field range on mousedown (same trick the Link button uses).
-    var savedWtRange = null;
-    var wt = dsSelect([["Weight", ""], ["Regular", "400"], ["Medium", "500"], ["Semibold", "600"], ["Bold", "700"], ["Extra", "800"]], model.weight || "", function (weight) {
-      if (savedWtRange && opts && opts.applyWeightToSelection) {
-        var range = savedWtRange; savedWtRange = null;
-        if (!weight) return; // empty on a live selection = no-op (don't clear the whole field)
-        if (opts.applyWeightToSelection(weight, range)) return; // weighted the selection inline
-      }
-      model.weight = weight; onChange(); // no selection -> whole field (or the style draft)
-    });
-    if (opts && opts.fieldNode) {
-      wt.addEventListener("mousedown", function () {
-        var sel = window.getSelection();
-        var r = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
-        savedWtRange = (r && !r.collapsed && opts.fieldNode.contains(r.commonAncestorContainer)) ? r.cloneRange() : null;
-      });
-    }
-    container.appendChild(twoUp(size, wt));
-    // Colour — the unified colorField (token XOR hex XOR per-mode).
-    function tcVal() { return model.colorToken ? { token: model.colorToken } : (model.colorLight || model.colorDark ? { light: model.colorLight, dark: model.colorDark } : (model.color != null ? { hex: model.color } : null)); }
-    colorField("Colour", tcVal(), function (v) {
-      delete model.color; delete model.colorToken; delete model.colorLight; delete model.colorDark;
-      if (v && v.token) model.colorToken = v.token;
-      else if (v && (v.light || v.dark)) { model.colorLight = v.light; model.colorDark = v.dark; }
-      else if (v && v.hex) model.color = v.hex;
-      onChange();
-    }, container);
-    // Line-height + tracking
-    container.appendChild(twoUp(
-      iconField(Icon("line-height"), { value: model.lineHeight == null ? "" : model.lineHeight, placeholder: "1.5", step: 0.05, min: 0.5, max: 3, datalist: "dl-line-height", noHistory: true, title: "Line height",
-        onchange: function (v) { model.lineHeight = (v ? v : undefined); onChange(); } }).wrap,
-      iconField(Icon("letter-spacing"), { value: model.letterSpacing == null ? "" : model.letterSpacing, unit: "px", placeholder: "0", step: 0.1, min: -10, max: 50, datalist: "dl-letter-spacing", noHistory: true, title: "Letter spacing",
-        onchange: function (v) { var n = parseFloat(v); model.letterSpacing = isNaN(n) ? undefined : n; onChange(); } }).wrap));
-    // Word-spacing + first-line indent
-    container.appendChild(twoUp(
-      iconField(Icon("word-spacing"), { value: model.wordSpacing == null ? "" : model.wordSpacing, unit: "px", placeholder: "0", step: 0.5, min: -20, max: 100, datalist: "dl-gap", noHistory: true, title: "Word spacing",
-        onchange: function (v) { var n = parseFloat(v); model.wordSpacing = isNaN(n) ? undefined : n; onChange(); } }).wrap,
-      iconField(Icon("indent-increase"), { value: model.textIndent == null ? "" : model.textIndent, unit: "px", placeholder: "0", step: 2, min: 0, max: 200, datalist: "dl-gap", noHistory: true, title: "First-line indent",
-        onchange: function (v) { var n = parseInt(v, 10); model.textIndent = isNaN(n) ? undefined : n; onChange(); } }).wrap));
-    // Case + Alignment (icon segments)
-    segmentedLive("Case", [["None", ""], ["UPPER", "uppercase"], ["lower", "lowercase"], ["Title", "capitalize"]],
-      function (val) { return (model.textTransform || "") === val; },
-      function (val) { model.textTransform = val || undefined; onChange(); }, container, true);
-    segmentedIconLive("Align", [[Icon("align-left"), "left", "Left"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "right", "Right"], [Icon("align-justify"), "justify", "Justify"]],
-      function (val) { return (model.align || "left") === val; },
-      function (val) { model.align = val; onChange(); }, container, true);
-  }
-  window.__typeCluster = typeCluster; // test hook
-
-  // Builds the "not embeddable" warning note for a font <select> and keeps it in
-  // sync with the current value. Returns the note node; the caller places it just
-  // under the picker. Hidden while the choice is safe; shown (flex) otherwise.
-  function attachFontWarn(selectEl) {
-    var note = h("div", "font-embed-warn");
-    var ic = h("span", "font-embed-warn__icon", "!"); ic.setAttribute("aria-hidden", "true");
-    note.appendChild(ic);
-    note.appendChild(h("span", "font-embed-warn__text", "Not in the embeddable set - may not render on an offline/air-gapped machine unless embedded at export."));
-    function sync() { note.style.display = isEmbeddableFont(selectEl.value) ? "none" : "flex"; }
-    selectEl.addEventListener("change", sync);
-    sync();
-    return note;
-  }
+  // arch-P3b-07prim2: the generalised custom listbox, its labelled row, the Type cluster and the
+  // font-embed warning moved to editor/inspector/primitives.js, joining the rest of the canonical
+  // control set. 07b left them behind because they sat under the format-bar banner rather than the
+  // primitives one; the banner was wrong about them, as it has been about every other region.
+  var customSelectRow = VE.bind("customSelectRow");
+  var typeCluster = VE.bind("typeCluster");
+  var attachFontWarn = VE.bind("attachFontWarn");
   // ---- Scope + inheritance (uio-F03 — the UI spine's five-rung ladder) -------------
   // arch-P3b-07b: the ladder, its resolver and the row anatomy moved to
   // editor/inspector/primitives.js. The scope TALLY moved with them -- this file used to hold the
@@ -6618,6 +6487,8 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    isEmbeddableFont: isEmbeddableFont,
+    colorField: colorField,
     buildActions: buildActions,
     blockChromeIo: blockChromeIo,
     renderContainerChrome: renderContainerChrome,

@@ -5545,7 +5545,7 @@ section("theme-aware style colour");
   ok("MM: justify emits text-align:justify", n8.style.textAlign === "justify");
   ok("MM: word-spacing emits px", n8.style.wordSpacing === "4px");
   ok("MM: unset word-spacing -> empty", n7.style.wordSpacing === "");
-  ok("Edit-style dialog offers a Justify align option", /\[Icon\("align-right"\), "right", "Right"\], \[Icon\("align-justify"\), "justify", "Justify"\]/.test(src("src/editor.js")));
+  ok("Edit-style dialog offers a Justify align option", /\[Icon\("align-right"\), "right", "Right"\], \[Icon\("align-justify"\), "justify", "Justify"\]/.test(src("src/editor/inspector/primitives.js")));   // arch-P3b-07prim2: the dialog mounts typeCluster, and the options are typeCluster's
   ok("Edit-style dialog saves word-spacing", /if \(draft\.wordSpacing == null \|\| isNaN\(draft\.wordSpacing\)\) delete s\.wordSpacing; else s\.wordSpacing = draft\.wordSpacing/.test(THEME));
   // resolveBlockStyle: a per-block override of ONE colour form drops the named style's OTHER form
   ok("resolveBlockStyle: hex override drops the style's token", /if \(ov\.color != null && ov\.color !== ""\) delete merged\.colorToken/.test(rtxt));
@@ -5555,7 +5555,7 @@ section("theme-aware style colour");
   ok("Edit-style dialog saves colorToken (token clears hex)", /s\.colorToken = draft\.colorToken; delete s\.color/.test(THEME));
   ok("Edit-style dialog offers theme-token options", /COLOUR_TOKENS = \[\["Ink", "ink"\]/.test(etxt));
   ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(THEME));
-  ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(etxt) && /"First-line indent"/.test(etxt));
+  ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(src("src/editor/inspector/primitives.js")) && /"First-line indent"/.test(src("src/editor/inspector/primitives.js")));   // arch-P3b-07prim2: both are typeCluster rows
   ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(THEME));
   // body paragraphs default to full ink (matching .body-list), not ink-soft — else a
   // colourless text style leaves paragraphs a shade lighter than lists (James's mismatch).
@@ -7406,7 +7406,7 @@ section("richer bullet lists");
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(EDIT));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(PARTS));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(PARTS));
-  ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
+  ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(src("src/editor/inspector/primitives.js")));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
   ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(SHELL));
   var ecss = src("editor.css");
@@ -7497,7 +7497,7 @@ section("list discoverability + spacing");
   var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var e = src("src/editor.js");
-  ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
+  ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(src("src/editor/inspector/primitives.js")));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
   // #170/#33: the List toggle folds into the shared inline-format bar as a whole
   // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
@@ -7548,13 +7548,13 @@ section("font preview picker");
   ok("render exposes fontStackFor (known stack or quoted family)", /window\.fontStackFor = function \(name\) \{ return name \? \(FONT_STACKS\[name\] \|\| \("'" \+ name \+ "', sans-serif"\)\) : ""; \}/.test(r));
   // the picker renders each option in its own font + exposes .value + fires change (attachFontWarn stays compatible)
   ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(FONTS));
-  ok("picker exposes .value + dispatches change", /Object\.defineProperty\(wrap, "value"[\s\S]*?wrap\.dispatchEvent\(new Event\("change"\)\)/.test(e) || /wrap\.dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
+  ok("picker exposes .value + dispatches change", /Object\.defineProperty\(wrap, "value"[\s\S]*?wrap\.dispatchEvent\(new Event\("change"\)\)/.test(FONTS) || /wrap\.dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(FONTS));
   // all 3 plain <select> font pickers replaced by the shared component
   // arch-P3b-07/07f: the three pickers now sit in three files -- two inspectors here, the Theme
   // panel's in theme.js -- so the claim counts across the chrome rather than within one file.
   // arch-P3b-07n/07: the three pickers now sit in three files again -- the nav-button one moved
   // with the actions panel, the header/footer one stayed, the Theme panel has its own.
-  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js") + src("src/editor/actions.js") + src("src/editor/header-footer.js")).match(/[^_.]buildFontPicker\(/g) || [];
+  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js") + src("src/editor/actions.js") + src("src/editor/header-footer.js") + src("src/editor/inspector/primitives.js")).match(/[^_.]buildFontPicker\(/g) || [];
   ok("all 3 font selects use buildFontPicker", pickerSites.length >= 3);
   ok("no plain <select> font list remains", !/h\("select"[\s\S]{0,80}FONT_LIST\.map/.test(e));
   ok("picker CSS: popup listbox present", /\.font-picker__pop \{[\s\S]*?position: absolute/.test(css) && /\.font-picker__opt \{/.test(css));
@@ -9397,9 +9397,9 @@ section("panel system v2 — layout engine");
   ok("colorField has eyedropper (reuses eyeDropperAvailable/pickScreenColor)", /if \(eyeDropperAvailable\(\)\) \{ var ed[\s\S]*?pickScreenColor\(\)/.test(ecol));
   ok("recents persisted to localStorage (max 8)", /function colorRecents\(add\)[\s\S]*?verso\.colorRecents[\s\S]*?\.slice\(0, 8\)/.test(ecol));
   // Phase 2b: the reusable typeCluster (D4) — one Type control body writing to a model
-  ok("typeCluster renders font(buildFontPicker) + colorField + type controls", /function typeCluster\(container, model, onChange, opts\)[\s\S]*?buildFontPicker\(model\.font[\s\S]*?colorField\("Colour", tcVal\(\)/.test(e));
-  ok("typeCluster colour adapter maps token/hex/per-mode onto the model", /if \(v && v\.token\) model\.colorToken = v\.token;[\s\S]*?else if \(v && \(v\.light \|\| v\.dark\)\) \{ model\.colorLight = v\.light; model\.colorDark = v\.dark; \}[\s\S]*?else if \(v && v\.hex\) model\.color = v\.hex;/.test(e));
-  ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(e));
+  ok("typeCluster renders font(buildFontPicker) + colorField + type controls", /function typeCluster\(container, model, onChange, opts\)[\s\S]*?buildFontPicker\(model\.font[\s\S]*?colorField\("Colour", tcVal\(\)/.test(src("src/editor/inspector/primitives.js")));
+  ok("typeCluster colour adapter maps token/hex/per-mode onto the model", /if \(v && v\.token\) model\.colorToken = v\.token;[\s\S]*?else if \(v && \(v\.light \|\| v\.dark\)\) \{ model\.colorLight = v\.light; model\.colorDark = v\.dark; \}[\s\S]*?else if \(v && v\.hex\) model\.color = v\.hex;/.test(src("src/editor/inspector/primitives.js")));
+  ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(src("src/editor/inspector/primitives.js")));
   // Phase 2c: the SAME typeCluster mounted in BOTH the field inspector and the style dialog
   ok("field inspector mounts typeCluster (reference adopter)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")));
   ok("Edit-Text-Style dialog mounts the SAME typeCluster", /typeCluster\(box, draft, syncSpecimen\)/.test(THEME));
@@ -13814,12 +13814,16 @@ section("inline weight on selection");
   ok("caret-color still stripped but font-weight kept", /font-weight:600/.test(san('<span style="caret-color:#fff;font-weight:600" data-rich="1">x</span>')) === true && san('<span style="caret-color:#fff;font-weight:600" data-rich="1">x</span>').indexOf("caret-color") === -1);
   // wiring: ONE selection-aware Weight control (the old separate "Weight (selection)" row
   // is merged away) — highlighted text is weighted inline, no selection sets the whole field.
-  ok("wiring: no separate 'Weight (selection)' row (merged into the type-cluster Weight)", t.indexOf('"Weight (selection)"') === -1 && /\["Semibold", "600"\]/.test(t));
-  ok("wiring: selection-aware only when a fieldNode is passed (style dialog stays whole-model)", /if \(opts && opts\.fieldNode\)/.test(t) && /applyWeightToSelection: function \(weight, range\)/.test(t + src("src/editor/inspector/parts.js")));
+  // arch-P3b-07prim2: the type-cluster Weight select is typeCluster's, and typeCluster is
+  // inspector/primitives.js now. These five claims were never about editor.js; they only read
+  // against it because the cluster and the sanitizer happened to share the file.
+  var TC = src("src/editor/inspector/primitives.js");
+  ok("wiring: no separate 'Weight (selection)' row (merged into the type-cluster Weight)", TC.indexOf('"Weight (selection)"') === -1 && /\["Semibold", "600"\]/.test(TC));
+  ok("wiring: selection-aware only when a fieldNode is passed (style dialog stays whole-model)", /if \(opts && opts\.fieldNode\)/.test(TC) && /applyWeightToSelection: function \(weight, range\)/.test(TC + src("src/editor/inspector/parts.js")));
   ok("wiring: wraps selection in a font-weight span", /span\.style\.fontWeight = weight;[\s\S]{0,160}r\.surroundContents\(span\)/.test(t + src("src/editor/inspector/parts.js")));
-  ok("wiring: captures the field range on the Weight select mousedown", /wt\.addEventListener\("mousedown"[\s\S]{0,300}cloneRange\(\)/.test(t));
-  ok("wiring: empty weight on a live selection is a no-op (does not clear the whole field)", /if \(!weight\) return; \/\/ empty on a live selection/.test(t));
-  ok("wiring: no live selection falls back to whole-field / model weight", /model\.weight = weight; onChange\(\); \/\/ no selection/.test(t));
+  ok("wiring: captures the field range on the Weight select mousedown", /wt\.addEventListener\("mousedown"[\s\S]{0,300}cloneRange\(\)/.test(TC));
+  ok("wiring: empty weight on a live selection is a no-op (does not clear the whole field)", /if \(!weight\) return; \/\/ empty on a live selection/.test(TC));
+  ok("wiring: no live selection falls back to whole-field / model weight", /model\.weight = weight; onChange\(\); \/\/ no selection/.test(TC));
   ok("wiring: selection commit routes through sanitizeFieldHtml (editor == export)", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); scheduleSave\(\);\s*return true;/.test(t + src("src/editor/inspector/parts.js")));
 })();
 
