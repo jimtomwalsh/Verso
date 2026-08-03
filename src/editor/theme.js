@@ -33,11 +33,11 @@
   function install(kernel) {
     var E = kernel.need(
       "h", "renderInspector", "panelSection", "twoUp", "colorFieldFlat", "clone",
-      "pushHistory", "getTextStyles", "saveRegistry", "registry", "canvas", "mount",
+      "pushHistory", "saveRegistry", "registry", "canvas", "mount",
       "iconField", "promptModal", "confirmModal", "refreshSettingsPanes", "scheduleSave", "modalHead",
-      "modalActions", "dsSelect", "getBlockStyles", "typeCluster", "modalText", "segmentedLive",
+      "modalActions", "dsSelect", "typeCluster", "modalText", "segmentedLive",
       "colourControl", "buildFontPicker", "resolveScoped", "scopeChain", "BOX_SYSTEM_DEFAULTS", "switchRow",
-      "onOffLabel", "renameTextStyle", "getTextRoles", "doc"
+      "onOffLabel", "getTextRoles", "doc"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -48,7 +48,6 @@
         colorFieldFlat = E.colorFieldFlat,
         clone = E.clone,
         pushHistory = E.pushHistory,
-        getTextStyles = E.getTextStyles,
         saveRegistry = E.saveRegistry,
         registry = E.registry,
         canvas = E.canvas,
@@ -61,7 +60,6 @@
         modalHead = E.modalHead,
         modalActions = E.modalActions,
         dsSelect = E.dsSelect,
-        getBlockStyles = E.getBlockStyles,
         typeCluster = E.typeCluster,
         modalText = E.modalText,
         segmentedLive = E.segmentedLive,
@@ -72,8 +70,48 @@
         BOX_SYSTEM_DEFAULTS = E.BOX_SYSTEM_DEFAULTS,
         switchRow = E.switchRow,
         onOffLabel = E.onOffLabel,
-        renameTextStyle = E.renameTextStyle,
         getTextRoles = E.getTextRoles;
+
+    // arch-P3b-07styles: the NAMED styles. They were in editor.js under a banner about Product
+    // tag vocabulary; this file has always owned the panel that edits them, and `renameTextStyle`
+    // is the only thing that knows a rename has to repoint every styleRef in the document.
+    function getTextStyles() {
+      if (!E.doc.styles) {
+        E.doc.styles = clone(window.TEXT_STYLES);
+      }
+      return E.doc.styles;
+    }
+    // #127: per-block-TYPE default appearance, on E.doc.theme.blockStyles (the render arg,
+    // reached in render/export via the __blockStyles per-pass hook). Ensures the theme +
+    // its blockStyles map exist so a capture/edit never crashes on an old/partial E.doc.
+    function getBlockStyles() {
+      if (!E.doc.theme) E.doc.theme = window.defaultDocTheme();
+      if (!E.doc.theme.blockStyles || typeof E.doc.theme.blockStyles !== "object") E.doc.theme.blockStyles = {};
+      return E.doc.theme.blockStyles;
+    }
+    // Rename a named text style AND repoint every block.styleRef to the new name so
+    // references never break (deep-walk the whole E.doc — nested blocks + headerFooter).
+    function renameTextStyle(oldName, newName) {
+      newName = (newName || "").trim();
+      if (!newName || newName === oldName) return false;
+      var styles = getTextStyles();
+      if (styles[newName]) { window.alert('A text style named "' + newName + '" already exists.'); return false; }
+      if (!styles[oldName]) return false;
+      pushHistory();
+      styles[newName] = styles[oldName];
+      delete styles[oldName];
+      (function repoint(v) {
+        if (!v || typeof v !== "object") return;
+        if (v.styleRef === oldName) v.styleRef = newName;
+        Object.keys(v).forEach(function (k) { repoint(v[k]); });
+      })(E.doc);
+      // #145: the type->role map holds style NAMES (not styleRef fields), so repoint it too.
+      if (E.doc.textRoles) Object.keys(E.doc.textRoles).forEach(function (t) { if (E.doc.textRoles[t] === oldName) E.doc.textRoles[t] = newName; });
+      if (window.saveRegistry) saveRegistry(registry);
+      mount();
+      return true;
+    }
+    window.__renameTextStyle = renameTextStyle; // headless/browser test hook
 
     // ---- active theme (#124: home is doc.theme) -------------------------------
     // The theme TOKENS now live per-course on doc.theme (was editor-global). `activeMode`
@@ -628,6 +666,7 @@
     kernel.provideLive({ activeMode: activeModeNow });
     kernel.provide({ setActiveMode: setActiveMode });
     kernel.expose({
+      getTextStyles: getTextStyles, getBlockStyles: getBlockStyles, renameTextStyle: renameTextStyle,
       activeTheme: activeTheme, activeModeNow: activeModeNow, setActiveMode: setActiveMode,
       setMode: setMode, loadTheme: loadTheme, persistTheme: persistTheme,
       reapplyTheme: reapplyTheme, syncWorkingFromDoc: syncWorkingFromDoc, workingThemesNow: workingThemesNow,
