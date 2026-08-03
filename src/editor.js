@@ -17,6 +17,11 @@
   "use strict";
 
   var SVGNS = "http://www.w3.org/2000/svg";
+  // arch-P3-07: the canvas view maths (fit / focus / anchored zoom / the fit + grid cycles) and the
+  // selection model (the shape, the entered-block rule, the drill chain). Both pure, both required
+  // by index.html before this file.
+  var CV = window.VersoCanvasView;
+  var SEL = window.VersoSelection;
   // uio-O-W1: one spelling of the modifier key, so every printed shortcut in the chrome
   // (save-contract line, menu hints) reads the same on a Mac as on Windows/Linux.
   var MOD_KEY = (function () {
@@ -4292,43 +4297,6 @@
     var b = document.getElementById("mode-toggle");
     if (b) { b.addEventListener("click", function () { setMode(activeMode === "dark" ? "light" : "dark"); }); updateModeToggle(); }
   })();
-  /* ===== TEMP PROBE (#43 mode-flip + #41 inspector-collapse) — UNCOMMITTED, delete once caught. grep "vProbe" ===== */
-  var __vProbe = (function () {
-    function snap() {
-      return {
-        activeMode: activeMode,
-        enteredBlock: (typeof enteredBlock !== "undefined" && enteredBlock) ? (enteredBlock.type + (enteredBlock.tid ? "#" + enteredBlock.tid : "")) : null,
-        drillIndex: (typeof drill !== "undefined" && drill) ? drill.index : undefined,
-        selType: (typeof selection !== "undefined" && selection) ? selection.type : undefined,
-        dragging: document.body.classList.contains("is-dragging-block")
-      };
-    }
-    function log(tag) {
-      try {
-        console.warn("[vProbe " + tag + "]", snap(), "\n" + (new Error().stack || "").split("\n").slice(2, 9).join("\n"));
-      } catch (e) {}
-    }
-    return { log: log, snap: snap };
-  })();
-  (function patchDataMode() {
-    var proto = Element.prototype, orig = proto.setAttribute;
-    if (orig.__vPatched) return;
-    proto.setAttribute = function (name, value) {
-      if (name === "data-mode" && this.classList && this.classList.contains("course-root")) {
-        var old = this.getAttribute("data-mode");
-        var dragging = document.body.classList.contains("is-dragging-block");
-        // Only fire on bug-shaped writes: a value that disagrees with the editor's own
-        // mode, or ANY data-mode write while a block drag is in flight (#43). Normal
-        // theming (value === activeMode, no drag) is silent.
-        if (old !== value && (value !== activeMode || dragging)) {
-          __vProbe.log("data-mode " + old + "->" + value + (dragging ? " WHILE-DRAGGING" : "") + (value !== activeMode ? " (!=activeMode)" : "") + " #43");
-        }
-      }
-      return orig.apply(this, arguments);
-    };
-    proto.setAttribute.__vPatched = true;
-  })();
-  /* ===== END TEMP PROBE ===== */
   // #81 — the Help (?) button used to open the guide in a new browser tab, which
   // silently no-ops in the WKWebView desktop shell / file:// context (and a raw .md
   // wouldn't render as a page anyway). Open the guide IN-APP instead: fetch the
@@ -4849,10 +4817,9 @@
   // layer inside the frame, so it rides the world's zoom transform automatically).
   // The choice is a VIEW pref (localStorage), NOT doc data — nothing ships in SCORM.
   var GRID_KEY = "authoring.gridMode";
-  var GRID_MODES = ["off", "thirds", "quarters", "columns", "fine"];
-  var GRID_LABELS = { off: "off", thirds: "rule of thirds", quarters: "quarters", columns: "12-col", fine: "fine" };
+  var GRID_MODES = CV.GRID_MODES, GRID_LABELS = CV.GRID_LABELS;
   var gridMode = "off";
-  try { var _gm = localStorage.getItem(GRID_KEY); if (GRID_MODES.indexOf(_gm) >= 0) gridMode = _gm; } catch (e) {}
+  try { gridMode = CV.readGridMode(localStorage.getItem(GRID_KEY)); } catch (e) {}
   function makeGridOverlay() {
     var g = h("div", "grid-overlay grid-overlay--" + gridMode);
     g.setAttribute("aria-hidden", "true");
@@ -4874,7 +4841,7 @@
     b.title = "Alignment grid (" + GRID_LABELS[gridMode] + ")";
   }
   function cycleGrid() {
-    gridMode = GRID_MODES[(GRID_MODES.indexOf(gridMode) + 1) % GRID_MODES.length];
+    gridMode = CV.nextGridMode(gridMode);
     try { localStorage.setItem(GRID_KEY, gridMode); } catch (e) {}
     updateGridBtn();
     refreshGridOverlay();
@@ -5156,7 +5123,7 @@
     var z = targetZoom, a = zoomAnchor;
     // Keep the anchor world point under the cursor while scaling, WITHOUT moving scroll:
     // translate = anchorWorld * (base - z) (derivation in canvas-perf-151-spec).
-    var tx = a ? a.wx * (_zoomBase - z) : 0, ty = a ? a.wy * (_zoomBase - z) : 0;
+    var t = CV.zoomTranslate(_zoomBase, z, a), tx = t.tx, ty = t.ty;
     // linear (not ease-out) so rapid continuous notches don't pulse/accel-decel each segment;
     // short so the composited-blur window is brief and it crisps quickly.
     world.style.transition = "transform " + _zoomDur + "ms linear";
@@ -5171,30 +5138,25 @@
     _zoomSettleT = null; zooming = false;
     if (!NATIVE_SCROLL || !scrollSizer) return;
     var sl = canvas.scrollLeft, st = canvas.scrollTop;
-    var tx = a ? a.wx * (_zoomBase - z) : 0, ty = a ? a.wy * (_zoomBase - z) : 0;
-    // Fold the transient translate into scroll so the crisp re-render lands in the SAME place
-    // (no jump): canvas-local (PAD + wp*z) - (sl - tx) == (PAD + tx + wp*z) - sl.
+    var t = CV.zoomTranslate(_zoomBase, z, a);
+    // Fold the transient translate into scroll so the crisp re-render lands in the SAME place.
+    var baked = CV.bakeView(SCROLL_PAD, { left: sl, top: st }, t);
     view.zoom = z;
-    view.x = SCROLL_PAD - (sl - tx); view.y = SCROLL_PAD - (st - ty);
+    view.x = baked.x; view.y = baked.y;
     world.style.transition = "";
     applyView(); // sizes the sizer + scale-only transform + drives scroll(=sl-tx) + reconciles view
   }
   function worldW() { return colX(Math.max(0, _numCols - 1)) + FRAME_W; }
+  // The fit/focus maths is src/editor/canvas-view.js (arch-P3-07); these apply what it returns.
   function fitAll() {
-    var rect = canvas.getBoundingClientRect(), pad = 90;
-    var z = clamp(Math.min((rect.width - pad * 2) / worldW(), (rect.height - pad * 2) / (worldH + LABEL_H)), 0.05, 1);
-    view.zoom = z;
-    view.x = (rect.width - worldW() * z) / 2;
-    view.y = (rect.height - worldH * z) / 2 + LABEL_H * z * 0.5;
+    var v = CV.fitWorld(canvas.getBoundingClientRect(), { w: worldW(), h: worldH }, LABEL_H);
+    view.zoom = v.zoom; view.x = v.x; view.y = v.y;
     view.ready = true; applyView();
   }
   // JJJJ: 2D fit helpers + a page->chapter->grid cycle on the zoom-fit button.
   function fitToRect(x, y, w, h) {
-    var rect = canvas.getBoundingClientRect(), pad = 70;
-    var z = clamp(Math.min((rect.width - pad * 2) / w, (rect.height - pad * 2) / h), 0.05, 1);
-    view.zoom = z;
-    view.x = (rect.width - w * z) / 2 - x * z;
-    view.y = (rect.height - h * z) / 2 - y * z;
+    var v = CV.fitRect(canvas.getBoundingClientRect(), { x: x, y: y, w: w, h: h });
+    view.zoom = v.zoom; view.x = v.x; view.y = v.y;
     view.ready = true; applyView();
   }
   function fitChapter(col) {
@@ -5202,22 +5164,21 @@
     frameDescs.forEach(function (f) { if (framePos[f.i] && framePos[f.i].col === col) { var b = framePos[f.i].y + LABEL_H + (f.h || 0); if (b > bottom) bottom = b; } });
     fitToRect(colX(col), 0, FRAME_W, bottom || FRAME_H);
   }
-  var fitMode = 2; // 0 page, 1 chapter, 2 grid -> first click lands on page
+  var fitMode = 2; // starts at the last mode so the FIRST click lands on page
   function fitCycle() {
-    fitMode = (fitMode + 1) % 3;
+    fitMode = CV.nextFitMode(fitMode);
     var col = (framePos[currentPage] && framePos[currentPage].col) || 0;
-    if (fitMode === 0) focusFrame(currentPage);
-    else if (fitMode === 1) fitChapter(col);
+    var mode = CV.fitModeName(fitMode);
+    if (mode === "page") focusFrame(currentPage);
+    else if (mode === "chapter") fitChapter(col);
     else fitAll();
   }
   function focusFrame(i) {
     currentPage = i;
-    var rect = canvas.getBoundingClientRect();
     var fh = frameDescs[i] ? frameDescs[i].frame.offsetHeight : FRAME_H;
-    var z = clamp(Math.min((rect.width - 140) / FRAME_W, (rect.height - 180) / fh), 0.05, 1);
-    view.zoom = z;
-    view.x = rect.width / 2 - (frameX(i) + FRAME_W / 2) * z;
-    view.y = rect.height / 2 - (frameY(i) + LABEL_H + fh / 2) * z; // JJJJ: frame's Y in its chapter column
+    // JJJJ: the frame's Y is its position in its own chapter column.
+    var v = CV.focusRect(canvas.getBoundingClientRect(), { x: frameX(i), y: frameY(i), w: FRAME_W, h: fh }, LABEL_H);
+    view.zoom = v.zoom; view.x = v.x; view.y = v.y;
     applyView();
   }
 
@@ -5286,7 +5247,7 @@
   // while the drill IS the thing driving the selection. Any OTHER selection path
   // (outliner, marquee, delete, programmatic) resets the chain so the next canvas
   // click re-drills from the top.
-  var drill = { levels: null, index: -1 };
+  var drill = SEL.emptyDrill();
   var applyingDrill = false;
   // SPEC-ui-kit ticket 5: the block currently ENTERED to its Content level (null =
   // every block is at Block level). Selecting a different block/nothing exits it.
@@ -5294,7 +5255,7 @@
   // The block types with a Content level you can ENTER (double-click / Edit contents).
   // Text blocks edit inline (their own dblclick); content-less blocks (spacer/divider/
   // columns/componentGrid/checkbox) have no Content level.
-  var TWO_LEVEL_TYPES = { hotspot: 1, sequence: 1, frame: 1, group: 1, image: 1, accordion: 1, quiz: 1, cardReveal: 1, cardDeck: 1, htmlEmbed: 1, webEmbed: 1, spacer: 1, divider: 1, columns: 1, componentGrid: 1, checkbox: 1, libraryInstance: 1 };
+  var TWO_LEVEL_TYPES = SEL.TWO_LEVEL_TYPES;
   // Double-click a block on the canvas to enter its Content level (the gesture James
   // expects, alongside the "Edit contents" button + the breadcrumb to pop back out).
   if (canvas) canvas.addEventListener("dblclick", function (e) {
@@ -5303,31 +5264,17 @@
     enteredBlock = bn.__block;
     setSelection(bn.__block.type === "htmlEmbed" || bn.__block.type === "webEmbed" ? "embed" : "block", bn);
   });
-  function resetDrill() { if (drill.index >= 0 && typeof __vProbe !== "undefined") __vProbe.log("resetDrill #41"); /* TEMP PROBE #41 */ drill.levels = null; drill.index = -1; }
+  function resetDrill() { drill = SEL.emptyDrill(); }
 
   function setSelection(type, node) {
-    if (!applyingDrill) resetDrill(); // a non-drill selection restarts the drill chain
+    if (SEL.resetsDrill(applyingDrill)) resetDrill(); // a non-drill selection restarts the drill chain
     Array.prototype.forEach.call(document.querySelectorAll("[data-embed].is-interactive"), function (e) { e.classList.remove("is-interactive"); });
     if (selectedCard) { selectedCard.classList.remove("is-selected"); selectedCard = null; }
     
     // node is a DOM node for element selections but the PAGE INDEX (an int) for a
     // "page" selection -- so use != null, not truthiness, or page 0 collapses to null
     // and renderPageInspector(null) throws (doc.pages[null].id).
-    selection = { type: type, node: node != null ? node : null, block: null, field: null, instance: null, pageIndex: -1 };
-
-    if (node != null) {
-      if (type === "block" || type === "embed") {
-        selection.block = node.__block;
-      } else if (type === "field") {
-        selection.block = node.__block || (node.__bind && node.__bind.obj);
-        selection.field = node.getAttribute("data-edit");
-      } else if (type === "instance") {
-        selection.instance = node.__instance;
-        selection.block = node.__block;
-      } else if (type === "page") {
-        selection.pageIndex = node;
-      }
-    }
+    selection = SEL.shape(type, node);
 
     // BB: keep the active page in sync with a direct canvas selection so demo/
     // preview and "insert into focused page" target the page you're working on.
@@ -5340,10 +5287,9 @@
     }
 
     // SPEC-ui-kit ticket 5: a selection that isn't the entered block exits Content level.
-    if (enteredBlock && selection.block !== enteredBlock && typeof __vProbe !== "undefined") __vProbe.log("enteredBlock=null on reselect #41"); /* TEMP PROBE #41 */
-    if (enteredBlock && selection.block !== enteredBlock) enteredBlock = null;
+    if (SEL.exitsEnteredBlock(enteredBlock, selection.block)) enteredBlock = null;
 
-    if (type === "instance" || type === "embed" || type === "navButton" || type === "block" || type === "field") {
+    if (SEL.marksCard(type)) {
       selectedCard = node;
       node.classList.add("is-selected");
     }
@@ -19033,8 +18979,7 @@
           // §74 rule 3: exiting edit (Escape/blur, NOT a drill-driven reselect) drops
           // the drill pointer from the "edit" leaf back to the "field" level, so the
           // next Escape steps further out (edit -> block -> container).
-          if (!applyingDrill && drill.levels && drill.index === drill.levels.length - 1 &&
-              drill.levels[drill.index].kind === "edit") drill.index--;
+          if (!applyingDrill) drill.index = SEL.settleAfterRerender(drill);
           updateDragAffordance(); // exited edit -> the selected block is draggable again
         });
       } else {
@@ -22147,10 +22092,10 @@
       // §12: Escape first closes an open comment popover, then exits comment mode.
       if (commentMode) { if (openCommentId) { closeCommentPopover(); renderCommentPins(); } else setCommentMode(false); return; }
       if (multiSel.length || multiSelPages.length) { clearAllMulti(); renderStructure(); refreshCanvasSelection(); }
-      else if (twoStateText() && drill.levels && drill.index > 0) {
+      else if (twoStateText() && SEL.escapeStep(drill) != null) {
         // §74 rule 3: Escape steps OUT one drill level (block -> columns -> ... ),
         // clearing only after the outermost level.
-        drill.index--; applyDrillLevel(drill.levels[drill.index]);
+        drill.index = SEL.escapeStep(drill); applyDrillLevel(drill.levels[drill.index]);
       }
       else clearSelection();
     } else if ((e.key === "Delete" || e.key === "Backspace") && (!isTextTarget(e.target) || multiSel.length)) {
@@ -22766,10 +22711,7 @@
     // ("edit") level to the block/field select-level, but NEVER past it into an
     // ancestor: an element whose ONLY level is editable (e.g. navButton, whose block
     // tier is suppressed) must still select ITSELF, not the container it sits in.
-    var leafNode = levels[levels.length - 1].node;
-    var i = levels.length - 1;
-    while (i > 0 && levels[i].kind === "edit" && levels[i - 1].node === leafNode) i--;
-    return i;
+    return SEL.leafSelectIndex(levels);
   }
   // A single capture-phase handler owns canvas clicks in select-first mode: it picks
   // the leaf level (below) before any per-node mousedown drops a caret / selects a
