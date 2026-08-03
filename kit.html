@@ -104,6 +104,8 @@
        to index.html only, which left this page throwing on load until arch-P3-01 noticed.) -->
   <script src="src/render-context.js"></script>
   <script src="src/editor/storage.js"></script>
+  <!-- arch-P3-02 history seam: window.VersoHistory — undo/redo stacks + the document-swap rule. DOM-free. Must precede editor.js, which creates its History at load. -->
+  <script src="src/editor/history.js"></script>
   <script src="src/editor.js"></script>
   <script src="kit-gallery.js"></script>
 </body>

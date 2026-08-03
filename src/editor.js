@@ -157,8 +157,6 @@
   var modelJson = document.getElementById("model-json");
   var modelDetails = document.getElementById("model-details"); // FFF: the live-model panel (collapsed by default)
   var zoomLevelEl = document.getElementById("zoom-level");
-  var undoBtn = document.getElementById("undo-btn");
-  var redoBtn = document.getElementById("redo-btn");
 
   // ---- Document Registry & Tabs ---------------------------------------------
   // ---- Storage seam (#66/#68/#18, platform-pivot 01) -> src/editor/storage.js ----
@@ -3005,11 +3003,11 @@
     openDocIds.splice(idx, 1);
     saveOpenDocIds(openDocIds);
     if (activeDocId === id) {
-      var nextActiveIdx = Math.max(0, idx - 1);
-      activeDocId = openDocIds[nextActiveIdx];
-      saveActiveDocId(activeDocId);
-      doc = registry[activeDocId];
-      themePresetSel = null; // #126: don't carry the closed course's picker selection onto the newly-active one
+      // Closing the ACTIVE tab is a document swap like any other. It used to move `doc` and the
+      // id by hand and leave the closed course's undo stack standing, so one Ctrl+Z afterwards
+      // restored the closed course's snapshot into the newly-active one -- overwriting it in
+      // memory and in the registry, then saving it. It goes through the one owner now.
+      activateDoc(openDocIds[Math.max(0, idx - 1)]);
       mount();
     }
     renderTabs();
@@ -3017,17 +3015,8 @@
 
   function switchDoc(id) {
     if (activeDocId === id) return;
-    activeDocId = id;
-    saveActiveDocId(activeDocId);
-    doc = registry[activeDocId];
+    activateDoc(id); // id + doc + registry entry together; history and the page cursor reset
     stampDocOpenedAt(doc, Date.now()); // #71 recents: record the open (in-memory; persists on this doc's next save -> no save-indicator churn per tab click)
-    undoStack = [];
-    redoStack = [];
-    // The selection/page cursor belong to the OUTGOING doc — a stale page index would
-    // make restoreSelection -> renderPageInspector read doc.pages[i].id off the end of
-    // the new doc and crash (surfaced by cross-file page paste). Reset before mount.
-    clearSelection(); clearMultiPages(); multiSel = []; currentPage = 0;
-    themePresetSel = null; // #126: the picker's shown theme is per-course (copy-on-apply = no live link); don't bleed the previous course's choice into this one
     // The active variant/version belong to the outgoing doc; drop them if the new doc lacks them.
     if (activeVariant && (doc.variants || []).indexOf(activeVariant) === -1) activeVariant = null;
     if (activeVersion && (doc.versions || []).indexOf(activeVersion) === -1) activeVersion = null;
@@ -3166,8 +3155,7 @@
           var next = openDocIds[0] || Object.keys(registry)[0];
           if (!next) { var fresh = clone(window.SAMPLE_DOC); registry[fresh.meta.code] = fresh; next = fresh.meta.code; }
           if (openDocIds.indexOf(next) === -1) openDocIds.push(next);
-          activeDocId = next; saveActiveDocId(activeDocId); doc = registry[next];
-          undoStack = []; redoStack = []; clearSelection(); clearMultiPages(); multiSel = []; currentPage = 0;
+          activateDoc(next);
           mount();
         }
         saveOpenDocIds(openDocIds);
@@ -3627,44 +3615,37 @@
     codeIn = modalText(box, "Course code", "", "e.g. DRO-NEW-101");
   }
 
-  // ---- history / undo-redo -------------------------------------------------
-  var undoStack = [];
-  var redoStack = [];
-  var MAX_HISTORY = 50;
-  var hasPushedForFocus = false;
+  // ---- history / undo-redo -> src/editor/history.js (arch-P3-02) -------------
+  // The stacks, the cap, redo invalidation, the one-step-per-typing-burst rule and the repaint
+  // hint all live in the module. What stays here is the half it cannot own: the pair-write below.
+  //
+  // No onChange hook is passed, because there is nothing to tell. updateHistoryButtons() drove
+  // #undo-btn / #redo-btn, and no HTML in this repo has carried those elements since the toolbar
+  // merge -- so it read null, did nothing, and was called on every mount and every page rebuild.
+  // Undo state is surfaced by the canvas itself. Removed with the extraction rather than moved.
+  var History = window.VersoHistory.create({
+    getDoc: function () { return doc; },
+    applyDoc: function (next, changed) { applyDocSwap(next, changed); },
+    // A variant/version preview renders resolved clones, so a per-page rebuild would repaint
+    // something the author is not looking at -- full mount while previewing.
+    canIsolate: function () { return !isPreview(); },
+    clone: function (o) { return clone(o); }
+  });
 
-  function pushHistory() {
-    if (doc == null) return; // kit-gallery / pre-boot: nothing to snapshot
-    undoStack.push(clone(doc));
-    if (undoStack.length > MAX_HISTORY) {
-      undoStack.shift();
-    }
-    redoStack = [];
-    updateHistoryButtons();
-  }
-  // Which page indices differ between two doc snapshots — or null if the change
-  // isn't page-isolatable (page count/order/id changed, or a doc-level field like
-  // chapters/theme/headerFooter/variants differs), meaning a full mount is needed.
-  // Lets undo/redo of a single-block edit rebuild ONE page instead of the whole
-  // world (every HTML-interaction iframe) — the Ctrl+Z lag on embed-heavy courses.
-  function isolatedPageChanges(prev, next) {
-    if (!prev || !next) return null;
-    var pp = prev.pages || [], np = next.pages || [];
-    if (pp.length !== np.length) return null;
-    for (var i = 0; i < pp.length; i++) if ((pp[i] && pp[i].id) !== (np[i] && np[i].id)) return null;
-    function shell(d) { var o = {}; Object.keys(d).forEach(function (k) { if (k !== "pages") o[k] = d[k]; }); return JSON.stringify(o); }
-    if (shell(prev) !== shell(next)) return null; // a doc-level field changed -> full rebuild
-    var changed = [];
-    for (var j = 0; j < pp.length; j++) if (JSON.stringify(pp[j]) !== JSON.stringify(np[j])) changed.push(j);
-    return changed;
-  }
-  // #50: mirrors setDoc's doc/registry pair-write — undo/redo used to touch only `doc`,
-  // leaving registry[activeDocId] stale so the next save persisted the pre-undo doc.
-  function restoreSnapshot(next) {
-    var prev = doc;
-    var changed = isPreview() ? null : isolatedPageChanges(prev, next);
+  // THE pair-write, and the only one. `doc` is what every editor surface holds a reference to;
+  // `registry[activeDocId]` is what the next save persists. They are two names for one document.
+  // Replace one without the other and the editor edits an object the registry will never write:
+  // the tour-builder session that lost its edits, and the undo that shipped the pre-undo doc on
+  // the next save (#50), were both this. A ratchet in tests/run.js fails any other assignment.
+  function setActiveDocObject(next) {
     doc = next;
     registry[activeDocId] = next;
+    return next;
+  }
+  // A snapshot (undo, redo, setDoc) reaching the canvas: swap the document, then repaint either
+  // the pages that actually changed or the whole world.
+  function applyDocSwap(next, changed) {
+    setActiveDocObject(next);
     if (changed) {
       clearSelection();
       if (changed.length) reapplyStructural(changed); else { renderStructure(); renderModelView(); }
@@ -3672,22 +3653,24 @@
       mount();
     }
     if (typeof rebindTourBuilderToLiveDoc === "function") rebindTourBuilderToLiveDoc(); // keep an open builder bound to the restored doc
-    updateHistoryButtons();
   }
-  function undo() {
-    if (undoStack.length === 0) return;
-    redoStack.push(clone(doc));
-    restoreSnapshot(undoStack.pop());
+  // Making a different course the active one. Tab click, tab close, course delete: all three
+  // move the id, the live doc and the registry entry together, drop the outgoing course's undo
+  // history (a snapshot of one course must never be restorable into another) and reset the
+  // per-document cursor -- a stale page index makes restoreSelection read past the end of the
+  // new doc and crash. closeDoc used to do none of that.
+  function activateDoc(id) {
+    activeDocId = id;
+    saveActiveDocId(activeDocId);
+    setActiveDocObject(registry[activeDocId]);
+    History.reset();
+    clearSelection(); clearMultiPages(); multiSel = []; currentPage = 0;
+    themePresetSel = null; // #126: the picker's shown theme is per-course; don't bleed one course's choice into the next
+    return doc;
   }
-  function redo() {
-    if (redoStack.length === 0) return;
-    undoStack.push(clone(doc));
-    restoreSnapshot(redoStack.pop());
-  }
-  function updateHistoryButtons() {
-    if (undoBtn) undoBtn.disabled = undoStack.length === 0;
-    if (redoBtn) redoBtn.disabled = redoStack.length === 0;
-  }
+  function pushHistory() { History.push(); }
+  function undo() { History.undo(); }
+  function redo() { History.redo(); }
 
   function h(tag, className, text) {
     var n = document.createElement(tag);
@@ -5226,7 +5209,6 @@
     renderStructure();
     renderModelView();
     renderCommentPins();
-    updateHistoryButtons();
     if (interactMode) decorateInteractHandle();
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
@@ -19543,12 +19525,9 @@
       if (lockedCard && lockedCard.__instance && lockedCard.__instance.locked) return;
       node.classList.add("is-editable");
       node.setAttribute("spellcheck", "false");
-      node.addEventListener("focus", function () { hasPushedForFocus = false; selectFieldNode(node); if (typeof CollabChrome !== "undefined") CollabChrome.onEditFocus(collabBlockOf(node)); }); // collab: implicit lock acquire on edit-intent (server mode only)
+      node.addEventListener("focus", function () { History.beginEpisode(); selectFieldNode(node); if (typeof CollabChrome !== "undefined") CollabChrome.onEditFocus(collabBlockOf(node)); }); // collab: implicit lock acquire on edit-intent (server mode only)
       node.addEventListener("input", function () {
-        if (!hasPushedForFocus) {
-          pushHistory();
-          hasPushedForFocus = true;
-        }
+        History.pushOnce(); // one undo step per typing burst, not one per keystroke
         var rich = node.getAttribute("data-rich");
         writeModel(node, rich ? node.innerHTML : node.textContent);
         scheduleSpellcheck(); // P0: re-check typos as the author types
@@ -22459,7 +22438,6 @@
 
     restoreSelection();
     
-    updateHistoryButtons();
     renderTabs();
     refreshCanvasSelection();
     if (interactMode) decorateInteractHandle();
@@ -24423,8 +24401,6 @@
   window.addEventListener("mouseup", function (e) { if (marquee) endMarquee(e); });
   window.addEventListener("mouseup", function () { if (panning) { panning = false; canvas.classList.remove("is-panning"); } });
   document.getElementById("zoom-fit").addEventListener("click", fitCycle);
-  if (undoBtn) undoBtn.addEventListener("click", undo);
-  if (redoBtn) redoBtn.addEventListener("click", redo);
   
   var addPageBtn = document.getElementById("add-page-btn");
   if (addPageBtn) addPageBtn.addEventListener("click", addPageAfterCurrent);
@@ -25690,11 +25666,8 @@
       normalizeDoc(next); // migrate legacy doc.chrome -> doc.headerFooter on import
       stampDocUpdatedAt(next, Date.now()); // #71 recents: programmatic replace is an edit
       if (!skipHistory) pushHistory();
-      doc = next;
-      registry[activeDocId] = next;
+      applyDocSwap(next, null); // the pair-write + a full mount (+ re-binds an open tour builder)
       saveRegistry(registry);
-      mount();
-      rebindTourBuilderToLiveDoc(); // if the builder is open, re-bind it to the replaced doc (no orphaned edits)
     },
     // follow-the-edit: navigate to + highlight what a change just touched. target =
     // { blockId? , pageId? , chapterId? }. Called after setDoc (the canvas is freshly mounted),
@@ -25712,7 +25685,10 @@
       if (pi >= 0) { setActivePage(pi); focusFrame(pi); setSelection("page", pi); }
     },
     saveActiveDoc: function (updatedDoc) {
-      registry[activeDocId] = updatedDoc;
+      // persist.js's autosave hands back the object it got from getDoc(), so this is normally the
+      // same reference; routing it through the pair-write means a caller that hands back a COPY
+      // can never leave the editor holding one document while the registry persists another.
+      setActiveDocObject(updatedDoc);
       var ok = saveRegistry(registry);
       renderTabs();
       return ok;
