@@ -4659,210 +4659,14 @@
       }
     }
   }
-  // The ONE canonical footer that every element inspector ends with: a Spacing
-  // disclosure (space top / bottom) + a Block-actions icon row (move up, move
-  // down, duplicate, hide, lock, delete). The markup is identical everywhere —
-  // only the wired handlers vary, supplied via `opts` so a non-block element (a
-  // component-grid card instance) maps the SAME actions onto its own model. Call
-  // this as the LAST section of every render*Inspector.
-  // Universal per-block appearance: fill, border (colour + weight), corner
-  // radius, text colour — applied to the block's outer node. Persisted as
-  // block.box (a dedicated namespace); render.js re-applies it (so demo + export
-  // match). Live-applied to the canvas node so the panel never rebuilds.
-  function renderAppearanceSection(block) {
-    // #155: canonical taxonomy section (formerly an ad-hoc block-appearance disclosure). Buffered by
-    // the beginSections()/endSections() wrapper in renderBlockActionsSection so it orders by PanelLayout.
-    sectionGroup("Appearance", "Appearance", function (body) {
-      block.box = block.box || {};
-      var box = block.box;
-      function nodeOf() { return canvasNodeForBlock(block); }
-      // uio-F03: the live preview follows the RESOLVED value (this block's own, else the
-      // course's captured type default, else the system default) — the same ladder the row
-      // shows and the same one render.js applies, so Reset previews correctly too.
-      function effBox(prop) { return resolveScoped(blockBoxChain(block), prop, { at: "block" }).value; }
-      function setBorder() { var n = nodeOf(); if (n) n.style.border = effBox("border") ? ((effBox("borderWidth") || 1) + "px solid " + (box.borderColor || "var(--color-hair)")) : ""; }
-      // Condensed (James 2026-07-08): colours stacked, the two dimensional fields (border weight
-      // + corner radius) paired two-up with glyphs — matching the case/align/spacing language.
-      colorFieldFlat("Fill", box.fill, function (v) { var n = nodeOf(); if (v == null) { delete box.fill; if (n) n.style.background = ""; } else { box.fill = v; if (n) n.style.background = v; } renderModelView(); }, body);
-      colorFieldFlat("Text", box.textColor, function (v) { var n = nodeOf(); if (v == null) { delete box.textColor; if (n) n.style.color = ""; } else { box.textColor = v; if (n) n.style.color = v; } renderModelView(); }, body);
-      // uio-F03: Stroke resolves down System -> Course type default -> Block, and the row
-      // carries the shared inheritance tail (named scope, or dot + Reset when set here).
-      var strokeRes = resolveScoped(blockBoxChain(block), "border", { at: "block" });
-      switchRow("Stroke", function () { return !!strokeRes.value; },
-        function (v) { box.border = v; setBorder(); renderModelView(); renderInspector(); }, body, false,
-        { inherit: { res: strokeRes, format: onOffLabel, onReset: function () {
-            pushHistory(); delete box.border; setBorder(); renderModelView(); renderInspector();
-          } } });
-      if (strokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; setBorder(); renderModelView(); }, body);
-      // Stroke width + corner radius: canonical iconFields, live-applied, paired two-up.
-      var weightField = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", title: "Stroke width",
-        onchange: function (v) { pushHistory(); var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; setBorder(); renderModelView(); } }).wrap;
-      var radiusField = iconField(Icon("radius"), { value: box.radius, unit: "px", placeholder: "0", step: 1, min: 0, max: 80, datalist: "dl-gap", title: "Corner radius",
-        onchange: function (v) { pushHistory(); var n = parseFloat(v); var nd = nodeOf(); if (isNaN(n)) { delete box.radius; if (nd) nd.style.borderRadius = ""; } else { box.radius = n; if (nd) nd.style.borderRadius = n + "px"; } renderModelView(); } }).wrap;
-      var apRow = twoUp(weightField, radiusField); apRow.style.marginTop = "4px"; body.appendChild(apRow);
+  // arch-P3b-07o: the universal panel tail every block inspector ends with -- appearance plus the
+  // block actions -- and the canvas overlay bar that carries the same verbs moved to
+  // editor/block-actions.js. It owns blockToolbarSep and provides it live from there.
+  var renderBlockActionsSection = VE.bind("renderBlockActionsSection");
+  var ensureBlockToolbar = VE.bind("ensureBlockToolbar");
+  var hideBlockToolbar = VE.bind("hideBlockToolbar");
+  var positionBlockToolbar = VE.bind("positionBlockToolbar");
 
-      // #127: capture this block's look as the THEME DEFAULT for its type. Every other
-      // block of the same type with no own override then inherits it (render/export
-      // cascade: theme.blockStyles[type] is the baseline, block.box wins). Saves the
-      // EFFECTIVE appearance (what you see = type default merged with this block's box).
-      var type = block.type;
-      var bs = getBlockStyles();
-      var hasTypeDef = bs && bs[type] && Object.keys(bs[type]).length;
-      var tdBody = panelSection(body, "Theme default (" + type + ")");
-      tdBody.appendChild(h("div", "insp-hint", hasTypeDef
-        ? "Every " + type + " block inherits this captured look unless it sets its own. Capture again to update it."
-        : "Capture this look as the default for every " + type + " block in the course."));
-      var capRow = h("div", null); capRow.style.display = "flex"; capRow.style.gap = "6px"; capRow.style.marginTop = "2px";
-      var capBtn = h("button", "prop-btn", "Capture look");
-      capBtn.title = "Save this appearance as the theme default for " + type + " blocks";
-      capBtn.addEventListener("click", function () {
-        var eff = window.resolveBlockBox(bs && bs[type], block.box);
-        if (!eff || !Object.keys(eff).length) { alert("Style this block (fill / border / radius / text colour) first, then capture its look."); return; }
-        pushHistory();
-        getBlockStyles()[type] = clone(eff);
-        window.applyRenderContext({ blockStyles: getBlockStyles() });
-        scheduleSave(); mount(); renderInspector();
-      });
-      capRow.appendChild(capBtn);
-      if (hasTypeDef) {
-        var clrBtn = h("button", "prop-btn prop-btn--danger", "Clear default");
-        clrBtn.title = "Remove the captured " + type + " default (blocks fall back to their own styling)";
-        clrBtn.addEventListener("click", function () {
-          pushHistory();
-          delete getBlockStyles()[type];
-          window.applyRenderContext({ blockStyles: getBlockStyles() });
-          scheduleSave(); mount(); renderInspector();
-        });
-        capRow.appendChild(clrBtn);
-      }
-      tdBody.appendChild(capRow);
-    });
-  }
-
-  function renderBlockActionsSection(block, opts) {
-    opts = opts || {};
-    var spaceObj = opts.spaceObj || block;                 // object holding spaceTop/spaceBottom
-    var onSpace  = opts.onSpace  || function () { reapplyBlock(block); }; // PERF: single-page rebuild, not the whole world
-    var doMove   = opts.move      || function (dir) { moveBlock(block, dir); };
-    var doDup    = opts.duplicate || function () { duplicateBlock(block); };
-    var doDelete = opts.remove    || function () { deleteBlockByRef(block); };
-    var isHidden = opts.isHidden  || function () { return !!block.hidden; };
-    var doHide   = opts.toggleHidden || function () { pushHistory(); block.hidden = !block.hidden; reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, getSelectionTypeForBlock(block)); };
-    var isLocked = opts.isLocked  || function () { return !!block.locked; };
-    var doLock   = opts.toggleLock || function () { pushHistory(); block.locked = !block.locked; reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, getSelectionTypeForBlock(block)); };
-
-    // Item D — universal per-element alignment. Available on EVERY block via the
-    // canonical footer, using the canonical segmentedLive picker. Writes block.align
-    // (start|center|end); render.js maps it to alignSelf (the cross-axis in any flex
-    // parent -- headerFooter children region, columns, frame). Structural enough to rebuild
-    // so nested contexts re-render correctly; segmented click carries no text focus.
-    // #155: the universal Level-1 container sections (Layout / Spacing / Appearance) adopt the
-    // canonical sectionGroup taxonomy, buffered here and emitted by endSections() in PanelLayout
-    // order (Appearance < Layout < Spacing) with the shared collapse + Edit-layout drag behaviour.
-    // #165: if the CALLER already opened a buffer (a single-level inspector emitting its own
-    // Content/Appearance/Behaviour sections), add ours to THAT buffer and let the caller flush —
-    // so the whole panel sorts as ONE PanelLayout stream (Behaviour lands after Layout/Spacing)
-    // instead of two independently-sorted cycles. Standalone callers self-manage as before.
-    var ownBuffer = !sectionsBufferOpen();
-    if (ownBuffer) beginSections();
-    sectionGroup("Layout", "Layout", function (body) {
-      segmentedIconLive("Align", [[Icon("align-left"), "start", "Start"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "end", "End"]],
-        function (v) { return (block.align || "start") === v; },
-        function (v) {
-          if (v === "start") delete block.align; else block.align = v;
-          reapplyBlock(block); reselectBlockNode(block, getSelectionTypeForBlock(block)); // PERF: one page, not the world
-        }, body);
-      // Vertical align (Item D2): sits directly under the horizontal Align, same
-      // segmented look + vertical glyphs. Writes block.valign (top|center|bottom);
-      // render maps it to auto margins on the block's flex-column parent's main axis.
-      segmentedIconLive("Vertical", [[Icon("align-start-horizontal"), "top", "Top"], [Icon("align-center-horizontal"), "center", "Middle"], [Icon("align-end-horizontal"), "bottom", "Bottom"]],
-        function (v) { return (block.valign || "top") === v; },
-        function (v) {
-          if (v === "top") delete block.valign; else block.valign = v;
-          reapplyBlock(block); reselectBlockNode(block, getSelectionTypeForBlock(block)); // PERF: one page, not the world
-        }, body);
-      body.appendChild(h("div", "insp-hint", "Aligns this element. Center / End also position a sized element (an HTML interaction or fit-width image) within the column; a full-width block is unaffected. Vertical align centres or bottom-anchors the block when its column is taller than its content (e.g. text beside a taller image)."));
-    });
-
-    sectionGroup("Spacing", "Spacing", function (body) {
-      // Space top / Space bottom sit two-up (paired numerics).
-      var spaceRow = twoUp(
-        iconField(Icon("arrow-up-to-line"), { value: spaceObj.spaceTop == null ? "" : spaceObj.spaceTop, unit: "px", placeholder: "auto", step: 2, min: -200, max: 200, datalist: "dl-gap", noHistory: true, title: "Space top (negative pulls tighter / overlaps)",
-          onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete spaceObj.spaceTop; else spaceObj.spaceTop = n; onSpace(); } }).wrap,
-        iconField(Icon("arrow-down-to-line"), { value: spaceObj.spaceBottom == null ? "" : spaceObj.spaceBottom, unit: "px", placeholder: "auto", step: 2, min: -200, max: 200, datalist: "dl-gap", noHistory: true, title: "Space bottom (negative pulls tighter / overlaps)",
-          onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete spaceObj.spaceBottom; else spaceObj.spaceBottom = n; onSpace(); } }).wrap
-      );
-      spaceRow.style.marginTop = "4px";
-      body.appendChild(spaceRow);
-    });
-
-    // A block can own its appearance (e.g. cardReveal styles each CARD, not the
-    // grid root) and pass { appearance:false } to suppress the grid-level panel.
-    if (opts.appearance !== false) renderAppearanceSection(block);
-
-    // #155/#165: flush only the buffer WE opened; a caller that opened its own flushes it itself.
-    if (ownBuffer) endSections(inspector);
-
-    // §64: the per-block "Chapter recap" toggle was RETIRED — the chapter summary now
-    // lives in the native quiz's completion panel (the "Chapter summary" bulleted list
-    // shown after the knowledge check is passed), not scattered across arbitrary blocks.
-
-    // Block actions (move / duplicate / slice / visibility / lock / delete) now live
-    // in the STATIC canvas toolbar (single source), not the panel — fed the SAME opts
-    // so a card instance etc. still retargets correctly.
-    showBlockToolbar(block, opts);
-  }
-
-  // ---- contextual block actions, merged into the persistent canvas overlay bar ------
-  // The block actions (move / duplicate / split / hide / lock / delete) live as a
-  // contextual SEGMENT of the #canvas-overlay tools bar (grid / find / comment / zoom),
-  // appended when an element is selected and cleared on deselect — so they sit in ONE
-  // bigger canvas toolbar alongside the tools, rather than a separate floating bar. The
-  // bar itself is positioned by CSS (.canvas-overlay-bar), so there is nothing to place.
-  var blockToolbarEl = null, blockToolbarSep = null;
-  function ensureBlockToolbar() {
-    if (blockToolbarEl) return blockToolbarEl;
-    var inner = document.querySelector("#canvas-overlay .canvas-overlay-bar__inner");
-    if (!inner) return null; // bar absent (zen / preview panels hidden)
-    blockToolbarSep = h("span", "canvas-overlay-bar__sep canvas-overlay-bar__sep--actions");
-    blockToolbarEl = h("div", "canvas-overlay-bar__actions");
-    inner.appendChild(blockToolbarSep);
-    inner.appendChild(blockToolbarEl);
-    return blockToolbarEl;
-  }
-  function positionBlockToolbar() {} // the overlay bar is positioned by CSS; kept for callers
-  function hideBlockToolbar() {
-    if (blockToolbarEl) { blockToolbarEl.innerHTML = ""; blockToolbarEl.hidden = true; }
-    if (blockToolbarSep) blockToolbarSep.hidden = true;
-  }
-  function showBlockToolbar(block, opts) {
-    opts = opts || {};
-    var bar = ensureBlockToolbar();
-    if (!bar) return; // canvas overlay bar not present (panels hidden)
-    bar.innerHTML = "";
-    var doMove = opts.move || function (d) { moveBlock(block, d); };
-    var doDup = opts.duplicate || function () { duplicateBlock(block); };
-    var doDelete = opts.remove || function () { deleteBlockByRef(block); };
-    var isHidden = opts.isHidden || function () { return !!block.hidden; };
-    var doHide = opts.toggleHidden || function () { pushHistory(); block.hidden = !block.hidden; reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, getSelectionTypeForBlock(block)); };
-    var isLocked = opts.isLocked || function () { return !!block.locked; };
-    var doLock = opts.toggleLock || function () { pushHistory(); block.locked = !block.locked; reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, getSelectionTypeForBlock(block)); };
-
-    var up = iconBtn("arrowUp", "Move up"); up.addEventListener("click", function () { doMove(-1); }); bar.appendChild(up);
-    var down = iconBtn("arrowDown", "Move down"); down.addEventListener("click", function () { doMove(1); }); bar.appendChild(down);
-    var dup = iconBtn("duplicate", "Duplicate"); dup.addEventListener("click", function () { doDup(); }); bar.appendChild(dup);
-    // #174: clear content — reset this block's subtree to a blank skeleton (keeps structure).
-    var clr = iconBtn("eraser", "Clear content (keep structure)"); clr.addEventListener("click", function () { clearBlockContentAction([block]); }); bar.appendChild(clr);
-    if (canSplitAtBlock(block)) { var slice = iconBtn("slice", "Split page here"); slice.addEventListener("click", function () { splitPageAtBlock(block); }); bar.appendChild(slice); }
-    bar.appendChild(h("div", "tb-sep"));
-    var hide = iconBtn(isHidden() ? "eyeOff" : "eye", isHidden() ? "Show block" : "Hide block"); if (isHidden()) hide.classList.add("is-off"); hide.addEventListener("click", function () { doHide(); }); bar.appendChild(hide);
-    var lock = iconBtn(isLocked() ? "lock" : "unlock", isLocked() ? "Unlock block" : "Lock block"); if (isLocked()) lock.classList.add("is-on"); lock.addEventListener("click", function () { doLock(); }); bar.appendChild(lock);
-    bar.appendChild(h("div", "tb-sep"));
-    var del = iconBtn("trash", "Delete block", true); del.addEventListener("click", function () { doDelete(); }); bar.appendChild(del);
-
-    bar.hidden = false;
-    if (blockToolbarSep) blockToolbarSep.hidden = false;
-  }
 
   // ...continues in blocks.js (arch-P3b-07).
 
@@ -9530,10 +9334,10 @@
     interactMode: function () { return interactMode; },
     panelFields: function () { return panelFields; }
   });
-  // arch-P3b-07b: what the canonical control set reads. `blockToolbarSep` is minted when this file
-  // builds the canvas overlay bar, so renderContainerChrome has to read the current one.
+  // arch-P3b-07o: `blockToolbarSep` used to be provided from here, because this file built the
+  // canvas overlay bar. The bar left with the actions it carries, so block-actions.js owns the
+  // separator and provides it live from there; the two modules that read it did not change.
   window.VersoEditor.provideLive({
-    blockToolbarSep: function () { return blockToolbarSep; },
     // arch-P3b-07q: the state the context menu reads as the author works. `enteredBlock` is also
     // WRITTEN by it ("Enter group"), and a write has to cross as a function -- assigning to a
     // provided getter is a TypeError under "use strict", which is what the extraction guard caught.
@@ -9548,6 +9352,8 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    sectionsBufferOpen: sectionsBufferOpen,
+    blockBoxChain: blockBoxChain,
     renderCheckboxBody: renderCheckboxBody,
     renderLibraryInstanceBody: renderLibraryInstanceBody,
     renderComponentGridBody: renderComponentGridBody,
@@ -9960,6 +9766,7 @@
   window.VersoEditing.install(VE);   // what makes the canvas typeable
   window.VersoActions.install(VE);   // what a learner's click does
   window.VersoInspectorBlocks.install(VE);   // which panel a selected block gets
+  window.VersoBlockActions.install(VE);   // the universal panel tail and the canvas action bar
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has

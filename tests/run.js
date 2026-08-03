@@ -4667,6 +4667,7 @@ section("#126 theme presets (copy-on-apply)");
 // ---- #127: blockStyles per type + capture-from-block + render/export cascade --
 section("#127 blockStyles (per-type default appearance cascade)");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // resolveBlockBox (render.js) is the PURE cascade core: theme.blockStyles[type] is the
   // baseline, block.box overrides key-by-key. Exercise the REAL function against a stub.
@@ -4699,7 +4700,7 @@ section("#127 blockStyles (per-type default appearance cascade)");
   // Editor: capture-from-block writes doc.theme.blockStyles[type] via getBlockStyles, and
   // the theme panel edits captured defaults.
   ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?doc\.theme\.blockStyles = \{\};[\s\S]*?return doc\.theme\.blockStyles;/.test(e));
-  ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(e) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(e));
+  ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(BA) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(BA));
   ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(THEME) && /function blockStylesEditor\(intro, listHost\)/.test(THEME));
 })();
 
@@ -7172,6 +7173,7 @@ section("sequence per-step icons");
 // sub-block, column, item and question (the skeleton), and recurse the canonical subtree shape.
 section("clear content #174");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
@@ -7221,7 +7223,7 @@ section("clear content #174");
   // wiring guards: exposed on both surfaces + gated
   ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? E\.multiSel\.slice\(\) : block\); \}/.test(OUT));
   ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(ecm));
-  ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
+  ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(BA));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
   ok("#174 container-chrome acts[] includes the eraser via handlers.clearContent", /handlers\.clearContent === "function"\) acts\.push\(\["eraser", "Clear content \(keep structure\)", handlers\.clearContent, false\]\)/.test(ep));
@@ -7257,6 +7259,7 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
@@ -7363,8 +7366,8 @@ section("richer bullet lists");
   ok("reapplyPage rebuilds ONE frame's content (renderPage + fold), not the world", /function reapplyPage\(i\)[\s\S]*?frameDescs\[i\][\s\S]*?window\.renderPage\(page[\s\S]*?enableEditing\(frame\)/.test(e));
   ok("reapplyPage falls back to full rebuild for variants\/language\/missing frame", /function reapplyPage\(i\) \{[\s\S]*?if \(!fd \|\| isPreview\(\)\) \{ reapplyWorld\(\); return; \}/.test(e));
   ok("reapplyBlock resolves the block's page then rebuilds just it", /function reapplyBlock\(block\) \{[\s\S]*?findPageOfBlock\(block\)[\s\S]*?reapplyPage\(pi\)/.test(e));
-  ok("block Spacing edits use the incremental page rebuild", /var onSpace  = opts\.onSpace  \|\| function \(\) \{ reapplyBlock\(block\)/.test(e));
-  ok("block Align\/Vertical edits use the incremental page rebuild", (e.match(/reapplyBlock\(block\); reselectBlockNode\(block, getSelectionTypeForBlock\(block\)\);/g) || []).length >= 2);
+  ok("block Spacing edits use the incremental page rebuild", /var onSpace  = opts\.onSpace  \|\| function \(\) \{ reapplyBlock\(block\)/.test(BA));
+  ok("block Align\/Vertical edits use the incremental page rebuild", (BA.match(/reapplyBlock\(block\); reselectBlockNode\(block, getSelectionTypeForBlock\(block\)\);/g) || []).length >= 2);
   ok("header\/footer padding pokes live on .course-header\/.course-footer", /function pokeHeaderFooterLive\(cfg, key\)[\s\S]*?cfg === hf\.header\) \? "\.course-header"[\s\S]*?cfg === hf\.footer\) \? "\.course-footer"/.test(e));
   ok("headerFooterNum tries the live poke before a full rebuild", /if \(!pokeHeaderFooterLive\(cfg, key\)\) reapplyHeaderFooter\(\)/.test(ehf));
   // nav progress pill: author Width + Height (BACKLOG §pill P2, James 2026-07-08)
@@ -8638,11 +8641,12 @@ section("block valign render mapping");
 // ---- block valign: editor control + vertical glyphs --------------------------
 section("block valign controls");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var e = src("src/editor.js");
-  ok("Vertical segmented control writes block.valign", /segmentedIconLive\("Vertical",[\s\S]{0,400}block\.valign = v/.test(e));
-  ok("valign 'top' deletes the key (equal/default)", /if \(v === "top"\) delete block\.valign/.test(e));
+  ok("Vertical segmented control writes block.valign", /segmentedIconLive\("Vertical",[\s\S]{0,400}block\.valign = v/.test(BA));
+  ok("valign 'top' deletes the key (equal/default)", /if \(v === "top"\) delete block\.valign/.test(BA));
   ok("vertical glyphs defined (Top/Middle/Bottom)", /"align-start-horizontal":/.test(src("src/icons.js")) && /"align-center-horizontal":/.test(src("src/icons.js")) && /"align-end-horizontal":/.test(src("src/icons.js")));
-  ok("Vertical row references the vertical glyphs", /Icon\("align-start-horizontal"\), "top"[\s\S]{0,80}Icon\("align-center-horizontal"\), "center"[\s\S]{0,80}Icon\("align-end-horizontal"\), "bottom"/.test(e));
+  ok("Vertical row references the vertical glyphs", /Icon\("align-start-horizontal"\), "top"[\s\S]{0,80}Icon\("align-center-horizontal"\), "center"[\s\S]{0,80}Icon\("align-end-horizontal"\), "bottom"/.test(BA));
 })();
 
 // ---- CSVBind: M8 single-source content binding (flagship reuse feature) -----
@@ -9112,6 +9116,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
@@ -9218,7 +9223,7 @@ section("panel system v2 — layout engine");
   ok("colorField opens a 3-tab popover (Token/Custom/Per-mode; Per-mode hidden when noPerMode)", /var TABS = opts\.noPerMode \? \[\["Token", "token"\], \["Custom", "custom"\]\] : \[\["Token", "token"\], \["Custom", "custom"\], \["Per-mode", "per"\]\]/.test(ecol));
   ok("colorFieldFlat: CSS-string adapter for element colour sites (token→var, hex→hex)", /function colorFieldFlat\(labelText, cssVal, onPick, target, fopts\)[\s\S]*?if \(v\.token\) return onPick\("var\(--color-" \+ v\.token \+ "\)"\);[\s\S]*?if \(v\.hex\) return onPick\(v\.hex\)/.test(ecol));
   // Phase 3 Batch 1: frame/box appearance migrated to colorFieldFlat
-  ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
+  ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(BA) && /colorFieldFlat\("Text", box\.textColor/.test(BA) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(BA));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
   ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(IB) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(THEME));
@@ -9245,9 +9250,9 @@ section("panel system v2 — layout engine");
   ok("field inspector wraps a Type section (List folded in) via the panelLayout engine", /beginSections\(\);\s*sectionGroup\("Type", "Type", function \(secBody\)[\s\S]*?typeCluster\(inspector, s, apply[\s\S]*?endSections\(inspector\)/.test(e));
   // #155: the universal Level-1 container sections adopt the sectionGroup taxonomy. renderBlockActionsSection
   // wraps them in beginSections()/endSections(inspector); each is sectionGroup(type,...) not disclosure().
-  ok("#155: Appearance is a sectionGroup (was disclosure block-appearance)", /sectionGroup\("Appearance", "Appearance", function \(body\)/.test(e) && !/disclosure\("block-appearance"/.test(e));
-  ok("#155: Layout + Spacing are sectionGroups (was disclosure block-layout/spacing)", /sectionGroup\("Layout", "Layout", function \(body\)/.test(e) && /sectionGroup\("Spacing", "Spacing", function \(body\)/.test(e) && !/disclosure\("block-layout"/.test(e) && !/disclosure\("spacing"/.test(e));
-  ok("#155/#165: renderBlockActionsSection buffers container sections, self-managing the buffer only when the caller has none", /function renderBlockActionsSection\(block, opts\)[\s\S]*?var ownBuffer = !sectionsBufferOpen\(\);\s*if \(ownBuffer\) beginSections\(\);\s*sectionGroup\("Layout"[\s\S]*?if \(opts\.appearance !== false\) renderAppearanceSection\(block\);\s*[\s\S]*?if \(ownBuffer\) endSections\(inspector\);/.test(e));
+  ok("#155: Appearance is a sectionGroup (was disclosure block-appearance)", /sectionGroup\("Appearance", "Appearance", function \(body\)/.test(BA) && !/disclosure\("block-appearance"/.test(e));
+  ok("#155: Layout + Spacing are sectionGroups (was disclosure block-layout/spacing)", /sectionGroup\("Layout", "Layout", function \(body\)/.test(BA) && /sectionGroup\("Spacing", "Spacing", function \(body\)/.test(BA) && !/disclosure\("block-layout"/.test(e) && !/disclosure\("spacing"/.test(e));
+  ok("#155/#165: renderBlockActionsSection buffers container sections, self-managing the buffer only when the caller has none", /function renderBlockActionsSection\(block, opts\)[\s\S]*?var ownBuffer = !sectionsBufferOpen\(\);\s*if \(ownBuffer\) beginSections\(\);\s*sectionGroup\("Layout"[\s\S]*?if \(opts\.appearance !== false\) renderAppearanceSection\(block\);\s*[\s\S]*?if \(ownBuffer\) endSections\(E\.inspector\);/.test(BA));
   // #160: the three high-traffic Level-2 content inspectors emit their sections as canonical
   // sectionGroups (Content/Appearance/Behaviour/Layout/Light-Dark), each wrapped in begin/endSections.
   ok("#160 quiz content: Behaviour + Appearance(Colours) + Content(Questions) sectionGroups, no raw sub headers", /function renderQuizInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Behaviour"[\s\S]*?sectionGroup\("Appearance", "Colours"[\s\S]*?sectionGroup\("Content", "Questions"[\s\S]*?endSections\(E\.inspector\);/.test(IB) && !/sub\("Intro page"\)/.test(IB) && !/sub\("Questions"\)/.test(IB));
@@ -9525,6 +9530,7 @@ section("PERF one-page re-render");
 // ---- UI kit gallery seam ----------------------
 section("UI kit seam");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the block glyph map moved with the tree
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
@@ -9645,7 +9651,7 @@ section("UI kit seam");
   // left-rail/top-bar reorg dropped them: ensureBlockToolbar mounts a contextual segment
   // inside #canvas-overlay, and the container-chrome Actions build the split button there.
   ok("block actions mount into the canvas overlay bar segment",
-     /function ensureBlockToolbar\(\) \{[\s\S]{0,320}canvas-overlay-bar__inner[\s\S]{0,240}"canvas-overlay-bar__actions"/.test(e));
+     /function ensureBlockToolbar\(\) \{[\s\S]{0,320}canvas-overlay-bar__inner[\s\S]{0,240}"canvas-overlay-bar__actions"/.test(BA));
   ok("split page action is built into the canvas bar (not a panel section)",
      /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split/.test(ep) &&
      /acts\.forEach\(function \(a\) \{[\s\S]{0,180}bar\.appendChild\(btn\)/.test(ep));
@@ -12873,6 +12879,7 @@ section("uio-F05 escalation links (popover/menu -> sheet)");
 // inheritance path.
 section("uio-F03 scope + inheritance model");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
@@ -13014,7 +13021,7 @@ section("uio-F03 scope + inheritance model");
     return rollupOf(dirty).textContent === "2 overridden" && dirty.classList.contains("has-overrides");
   })());
   ok("real rows carry the tail at three different rungs", (function () {
-    var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
+    var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(BA);
     var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
     var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(ehf);
     return atBlock && atPage && atCourse;
