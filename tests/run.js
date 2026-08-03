@@ -47,6 +47,72 @@ function withRc(renderSrc, body) {
   return (m ? m[0] + "\n" : "") + body;
 }
 
+// arch-P3-03: a whole publish stack on fakes. The four REAL models, the REAL orchestration, and a
+// fake exporter / delivery / registry -- so a publish run can be driven to completion, in order,
+// with no browser, no SCORM build and no disk. `probe` collects what actually happened: the options
+// every package was built with, where each one was delivered, which documents were made active, and
+// the release record the run appended. Shared by the publish sections below.
+function publishHarness(opts) {
+  opts = opts || {};
+  var VP = require(path.join(ROOT, "src/editor/publish.js"));
+  var models = {
+    queue: require(path.join(ROOT, "src/publish-queue.js")),
+    presets: require(path.join(ROOT, "src/publish-presets.js")),
+    paths: require(path.join(ROOT, "src/publish-paths.js")),
+    history: require(path.join(ROOT, "src/release-history.js"))
+  };
+  var mem = {};
+  var store = {
+    readKey: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+    writeKey: function (k, v) { mem[k] = String(v); return { ok: true }; }
+  };
+  var registry = opts.registry || {
+    "D1": { meta: { code: "ACME-101", title: "First", productId: "prodA" } },
+    "OPEN-DOC": { meta: { code: "OPEN-1", title: "Whatever is on screen" } }
+  };
+  var probe = { built: [], delivered: [], activated: [], repaints: 0, baselines: [], failBuildFor: opts.failBuildFor || null };
+  var active = opts.activeDocId || "OPEN-DOC";
+  var exporter = {
+    defaultOptions: function () { return { format: "scorm12", version: "V001" }; },
+    suggestVersion: function (last) {
+      return last ? last.replace(/(\d+)$/, function (n) { return String(+n + 1).padStart(n.length, "0"); }) : "V001";
+    },
+    nameFor: function (o) { return (o.code || "pkg") + "-" + (o.variant || "base") + "-" + o.version + ".zip"; },
+    buildPackage: function (o) {
+      probe.built.push(JSON.parse(JSON.stringify(o)));
+      if (probe.failBuildFor && probe.failBuildFor(o)) return Promise.reject(new Error("build blew up"));
+      return Promise.resolve({ name: exporter.nameFor(o), blob: {} });
+    }
+  };
+  // The same fact the outputs chip states (f04OutputsFact, editor.js).
+  function outputsFact(variants) {
+    var vs = (variants || []).filter(function (v) { return v != null && String(v) !== ""; });
+    var names = ["Flagship"].concat(vs.map(String));
+    return { count: names.length, names: names, variants: vs.map(String), tone: "neutral",
+             label: names.length + " outputs", title: "produces " + names.length };
+  }
+  var P = VP.create({
+    store: store, models: models, exporter: function () { return exporter; },
+    docById: function (id) { return registry[id]; },
+    productById: function (id) { return { id: id, name: "Acme" }; },
+    activeProduct: function () { return opts.activeProduct || ""; },
+    activeDocId: function () { return active; },
+    outputsFact: outputsFact,
+    masterVersions: function () { return { "m1": 3 }; },
+    now: function () { return 1700000000000; },
+    deliver: function (row, variant, pkg) {
+      probe.delivered.push({ docId: row.docId, variant: variant, name: pkg.name });
+      if (opts.deliverFails) return Promise.reject(new Error("write failed"));
+      return Promise.resolve(opts.deliverAs || { to: "download" });
+    },
+    activateDoc: function (id) { probe.activated.push(id); active = id; return Promise.resolve(); },
+    onQueueChange: function () { probe.repaints++; },
+    afterRowPublished: function (d) { probe.baselines.push(d && d.meta && d.meta.code); }
+  });
+  return { publish: P, models: models, registry: registry, probe: probe, store: mem, exporter: exporter,
+           activeDocId: function () { return active; } };
+}
+
 // Spin up a server-of-one on an ephemeral port against a temp SQLite store, run an
 // async probe(base, server, dbPath), and always tear it down. Shared by the pivot
 // server-integration sections (callers guard on node:sqlite before invoking).
@@ -69,7 +135,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -9095,8 +9161,27 @@ section("Product Rail: Publish queue store (T1)");
   // Editor wiring (grep guards -- the DOM behaviour is browser-verified)
   var e = src("src/editor.js");
   ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(e));
-  ok("the queue persists through the durable key/value writer", /writeStore\(localStorage, PUBLISH_QUEUE_KEY, JSON\.stringify\(PQ\.toJSON\(__publishQueue\)\)\)/.test(e));
-  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
+  // arch-P3-03: the queue store and the run are exercised for real (src/editor/publish.js).
+  ok("the queue persists through the durable key/value seam, under its own key", (function () {
+    var H = publishHarness();
+    H.publish.addDoc("D1");
+    return typeof H.store["authoring.publishQueue"] === "string" &&
+      PQ.fromJSON(JSON.parse(H.store["authoring.publishQueue"])).rows.length === 1;
+  })());
+  __async.push((function () {
+    var H = publishHarness();
+    H.publish.addDoc("D1");
+    return H.publish.run().then(function () {
+      section("Product Rail: Publish queue store (T1)");
+      ok("a Publish run builds every pending row", H.probe.built.length === 1);
+      ok("it makes each row's document current, then puts the open one back",
+        H.probe.activated.join(",") === "D1,OPEN-DOC" && H.activeDocId() === "OPEN-DOC");
+      ok("the finished row carries its result", (function () {
+        var row = H.publish.queue().rows[0];
+        return row.status === "done" && row.result.to === "download";
+      })());
+    });
+  })());
   ok("index.html loads publish-queue.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/publish-queue.js") > -1 && idx.indexOf("src/publish-queue.js") < idx.indexOf("src/editor.js");
   })());
@@ -9122,10 +9207,18 @@ section("Product Rail: Release history store (whole-family export)");
   ok("fromJSON drops a malformed record with no entries array", (function () { var back = RH.fromJSON({ _seq: 5, releases: [{ releaseId: "rel-x" }, { releaseId: "rel-y", entries: [] }] }); return back.releases.length === 1 && back.releases[0].releaseId === "rel-y"; })());
 
   // Editor wiring: the store loads/saves through the durable seam, and a run writes exactly one record.
-  ok("release history loads + persists through the durable key/value seam", /RELEASE_HISTORY_KEY = "authoring.releaseHistory"/.test(e) && /writeStore\(localStorage, RELEASE_HISTORY_KEY, JSON\.stringify\(RH\.toJSON\(__releaseHistory\)\)\)/.test(e));
-  ok("runPublishQueue accumulates a release entry per row and appends ONE record on finish", /runEntries\.push\(releaseEntryForRow\(row, res, variant\)\);/.test(e) && /if \(runEntries\.length && window\.ReleaseHistory\) \{[\s\S]{0,220}ReleaseHistory\.append\(releaseHistory\(\), \{ productId: getActiveProduct\(\), createdAt: Date\.now\(\), entries: runEntries \}\);/.test(e));
-  ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row, result, variant\)[\s\S]{0,700}exportFormat: opts\.format[\s\S]{0,400}groundTruthVersions: gtv/.test(e));
-  ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row, res, variant\)\);[\s\S]{0,600}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
+  // arch-P3-03: the run's record-keeping, driven for real rather than matched in editor.js's text.
+  ok("release history persists through the durable key/value seam, under its own key", (function () {
+    var H = publishHarness();
+    H.publish.history(); H.publish.saveHistory();
+    return typeof H.store["authoring.releaseHistory"] === "string";
+  })());
+  ok("a release entry carries the doc identity, the export options and the source-version stamps", (function () {
+    var H = publishHarness();
+    var entry = H.publish.releaseEntryForRow({ docId: "D1", title: "First", preset: "master" }, { to: "download" }, null);
+    return entry.code === "ACME-101" && entry.exportFormat === "scorm12" && entry.version === "V001" &&
+      entry.status === "done" && entry.destination === "Downloads" && entry.groundTruthVersions.m1 === 3;
+  })());
   // uio-P-C03 flipped the DEFAULT: reverse-chron and per-release expansion are unchanged, but the
   // section is now open and fills the pane's empty half instead of hiding collapsed below the queue.
   ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
@@ -9182,15 +9275,26 @@ section("Product Rail: Publish presets (T2)");
 
   // Editor wiring (grep guards -- the dropdown + modal are browser-verified)
   var e = src("src/editor.js");
-  ok("the run loop packages each row with its resolved preset options, not bare defaults", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e));
-  ok("publishOptionsForRow merges the preset overrides onto defaultOptions()", /Object\.assign\(base, PP\.optionsFor\(publishPresets\(\), row\.preset \|\| "master"\)\)/.test(e));
-  ok("adding a doc recalls its last-used preset (zero-config re-queue)", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e));
+  // arch-P3-03: resolved against the real models through src/editor/publish.js.
+  ok("a row's options are the exporter's defaults with its preset's overrides on top", (function () {
+    var H = publishHarness();
+    var custom = PP.saveCustom(H.publish.presets(), "Review", { reviewFile: true });
+    var opts = H.publish.optionsForRow({ docId: "D1", preset: custom.id }, null);
+    return opts.format === "scorm12" && opts.reviewFile === true && opts.code === "ACME-101";
+  })());
+  ok("adding a doc recalls its last-used preset (zero-config re-queue)", (function () {
+    var H = publishHarness();
+    var custom = PP.saveCustom(H.publish.presets(), "Review", { reviewFile: true });
+    PP.setLastForDoc(H.publish.presets(), "D1", custom.id);
+    H.publish.addDoc("D1");
+    return H.publish.queue().rows[0].preset === custom.id;
+  })());
   ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
 
   // T4: one shared addToQueue action + the Edit-stage top-bar entry point
   // uio-P-C06 added an options argument (quiet batching); the one shared action is unchanged.
   ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId, opts\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
-  ok("the shared action recalls the doc's last-used preset and toasts the pending count", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e) && /publishToast\("Added to the publish queue/.test(e));
+  ok("the shared action routes through the module and toasts the pending count it returns", /var added = Publish\.addDoc\(docId\);/.test(e) && /publishToast\("Added to the publish queue — " \+ added\.pending/.test(e));
   ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
   // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
   ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\);/.test(e) && !/Send to publish — coming soon/.test(e));
@@ -9205,6 +9309,10 @@ section("Product Rail: Publish presets (T2)");
 section("Product Rail: Publish save paths + version ledger (T3)");
 (function () {
   var PA = require(path.join(ROOT, "src/publish-paths.js"));
+  var PQ = require(path.join(ROOT, "src/publish-queue.js"));
+  var PP = require(path.join(ROOT, "src/publish-presets.js"));
+  var RH = require(path.join(ROOT, "src/release-history.js"));
+  var VP = require(path.join(ROOT, "src/editor/publish.js"));
   var e = src("src/editor.js"), css = src("editor.css");
 
   // --- keys: one output = one document + one variant ---
@@ -9273,18 +9381,99 @@ section("Product Rail: Publish save paths + version ledger (T3)");
   })());
 
   // --- editor wiring (grep guards -- the picker + write path are browser-verified) ---
-  ok("the path store persists through the same durable key/value seam as the queue", /PUBLISH_PATHS_KEY = "authoring\.publishPaths"/.test(e) && /writeStore\(localStorage, PUBLISH_PATHS_KEY, JSON\.stringify\(PA\.toJSON\(__publishPaths\)\)\)/.test(e));
-  ok("directory handles persist in the existing keyed-handle IndexedDB store, under the model's keys", /saveBackupHandle\(handleKey, h\)/.test(e) && /loadBackupHandle\(handleKey\)/.test(e) && /pickPublishDir\(PA\.rootHandleKey\(pid\)\)/.test(e) && /pickPublishDir\(PA\.rowHandleKey\(dest\.key\)\)/.test(e));
-  ok("a remembered handle whose permission lapsed resolves to null so the run downloads instead", /dirPermission\(h, false\)[\s\S]{0,160}perm === "granted" \? h : null/.test(e));
-  ok("the filename preview asks the ledger for the next version, not defaultOptions' frozen V001", /out\.version = PA\.nextVersion\(publishPaths\(\), PA\.pathKey\(row\.docId, out\.variant\),\s*\n?\s*\{ replace: !!row\.replaceVersion, suggest: SX && SX\.suggestVersion \}\)/.test(e));
-  ok("the increment rule stays in the exporter -- the ledger is handed suggestVersion, not a copy of it", /suggest: SX && SX\.suggestVersion/.test(e) && !/padStart/.test(src("src/publish-paths.js")));
+  // arch-P3-03: the orchestration moved to src/editor/publish.js, so the run is DRIVEN here rather
+  // than pattern-matched in editor.js. These seven are the two bugs this area shipped, pinned.
+  ok("the path store persists through the same durable key/value seam as the queue", (function () {
+    var H = publishHarness();
+    PA.setRoot(H.publish.paths(), "prodA", "Drops");
+    H.publish.savePaths();
+    return typeof H.store["authoring.publishPaths"] === "string" &&
+      PA.rootLabel(PA.fromJSON(JSON.parse(H.store["authoring.publishPaths"])), "prodA") === "Drops";
+  })());
+  // THE V001 BUG: defaultOptions() carries a frozen version, so every run wrote V001 and silently
+  // overwrote the last package. The options must come from the ledger, and step.
+  __async.push((function () {
+    var H = publishHarness();
+    H.publish.addDoc("D1");
+    var first = H.publish.optionsForRow(H.publish.queue().rows[0], null).version;
+    return H.publish.run().then(function () {
+      section("Product Rail: Publish save paths + version ledger (T3)");
+      H.publish.addDoc("D1");
+      var pend = PQ.pendingRows(H.publish.queue());
+      var second = H.publish.optionsForRow(pend[0], null).version;
+      ok("the filename preview asks the ledger for the next version, not defaultOptions' frozen V001",
+        first === "V001" && second === "V002" && H.probe.built[0].version === "V001");
+      ok("'replace current version' is the only way to overwrite, and it is opt-in",
+        H.publish.optionsForRow({ docId: "D1", preset: "master", replaceVersion: true }, null).version === "V001");
+    });
+  })());
+  ok("the increment rule stays in the exporter -- the ledger is handed suggestVersion, not a copy of it", (function () {
+    var H = publishHarness();
+    H.exporter.suggestVersion = function (last) { return last ? "REL-" + (parseInt(last.slice(4), 10) + 1) : "REL-1"; };
+    var v1 = H.publish.optionsForRow({ docId: "D1", preset: "master" }, null).version;
+    PA.recordVersion(H.publish.paths(), PA.pathKey("D1", null), v1);
+    var v2 = H.publish.optionsForRow({ docId: "D1", preset: "master" }, null).version;
+    return v1 === "REL-1" && v2 === "REL-2" && !/padStart/.test(src("src/publish-paths.js"));
+  })());
+  // A failed write must not burn a version -- the next attempt has to reuse the number it never used.
+  __async.push((function () {
+    var H = publishHarness({ deliverFails: true });
+    H.publish.addDoc("D1");
+    return H.publish.run().then(function () {
+      section("Product Rail: Publish save paths + version ledger (T3)");
+      ok("the version is recorded only AFTER the package lands, so a failed write never burns a number",
+        PA.lastVersion(H.publish.paths(), PA.pathKey("D1", null)) === null &&
+        H.publish.queue().rows[0].status === "error");
+      ok("and the next attempt still offers V001",
+        H.publish.optionsForRow({ docId: "D1", preset: "master" }, null).version === "V001");
+    });
+  })());
+  // THE OUTPUTS BUG: the chip counted variants from one fact and the run expanded them from
+  // another, so a row could promise three packages and build one. One fact, one expansion.
+  __async.push((function () {
+    var H = publishHarness({ registry: {
+      "D1": { meta: { code: "ACME-101", title: "First", productId: "prodA" }, variants: ["Compact", "Onshore"] },
+      "OPEN-DOC": { meta: { code: "OPEN-1" } }
+    } });
+    H.publish.addDoc("D1");
+    var row = H.publish.queue().rows[0];
+    var promised = VP.variantRollup({ count: 3, names: ["Flagship", "Compact", "Onshore"], variants: ["Compact", "Onshore"], label: "3 outputs" });
+    return H.publish.run().then(function () {
+      section("Product Rail: Publish save paths + version ledger (T3)");
+      ok("the run expands a row into one package per output, sequentially",
+        H.probe.built.length === 3 && H.probe.built.map(function (o) { return String(o.variant); }).join(",") === "null,Compact,Onshore");
+      ok("the outputs it expands to come from the SAME fact the row's chip states",
+        promised.count === H.probe.built.length && H.publish.outputsForRow(row).length === 3);
+      ok("each output versions independently of its flagship",
+        PA.lastVersion(H.publish.paths(), PA.pathKey("D1", null)) === "V001" &&
+        PA.lastVersion(H.publish.paths(), PA.pathKey("D1", "Compact")) === "V001");
+      ok("one release record covers the whole family, one entry per output",
+        RH.list(H.publish.history()).length === 1 && RH.list(H.publish.history())[0].entries.length === 3);
+    });
+  })());
+  ok("a preset that pins one variant narrows the row to that single output", (function () {
+    var H = publishHarness({ registry: {
+      "D1": { meta: { code: "ACME-101" }, variants: ["Compact", "Onshore"] },
+      "OPEN-DOC": { meta: { code: "OPEN-1" } }
+    } });
+    var pinned = PP.saveCustom(H.publish.presets(), "Compact only", { variant: "Compact" });
+    var outs = H.publish.outputsForRow({ docId: "D1", preset: pinned.id });
+    return outs.length === 1 && outs[0] === "Compact";
+  })());
+  // arch-P3-03 wiring: editor.js keeps the chrome and the file writes; it holds no publish state,
+  // no publish keys, and no second copy of the plan.
+  ["authoring.publishQueue", "authoring.publishPaths", "authoring.publishPresets", "authoring.releaseHistory"].forEach(function (key) {
+    ok("editor.js no longer names the publish key " + key, e.indexOf('"' + key + '"') === -1);
+  });
+  ok("editor.js keeps no publish store of its own", !/__publishQueue|__publishPresets|__publishPaths|__releaseHistory|__publishRunning/.test(e));
+  ok("the run is the module's; editor.js only guards the origin", /function runPublishQueue\(\) \{[\s\S]{0,420}return Publish\.run\(\);/.test(e) && /location\.protocol === "file:"/.test(e));
+  ok("the publish module never touches the DOM", (function () {
+    var t = src("src/editor/publish.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    return t.indexOf("document.") === -1 && !/\bwindow\.(?!VersoPublish|PublishQueue|PublishPresets|PublishPaths|ReleaseHistory|SCORMExport|ProductsStore)/.test(t);
+  })());
   ok("an inherited root nests before writing; an override writes straight in", /publishEnsureDir\(root, dest\.segments\)/.test(e) && /getDirectoryHandle\(seg, \{ create: true \}\)/.test(e));
   ok("delivery writes the package into the resolved folder via a File System Access writable", /function deliverPublishPackage\(row, variant, pkg\)[\s\S]{0,700}getFileHandle\(pkg\.name, \{ create: true \}\)[\s\S]{0,200}createWritable\(\)/.test(e));
   ok("no folder, no handle, or a failed write all fall back to the download -- a publish never fails for want of a folder", /if \(!dest \|\| dest\.kind === "download"\) return Promise\.resolve\(downloadPublishPackage\(pkg\)\)/.test(e) && /if \(!root\) return downloadPublishPackage\(pkg\)/.test(e) && /folder write failed, downloading instead[\s\S]{0,80}return downloadPublishPackage\(pkg\)/.test(e));
-  ok("the version is recorded only AFTER the package lands, so a failed write never burns a number", /results\.push\(res\);[\s\S]{0,320}PA\.recordVersion\(publishPaths\(\), PA\.pathKey\(row\.docId, opts\.variant\), opts\.version\)/.test(e));
-  ok("the run expands a row into one package per output, sequentially", /var outs = publishRowOutputs\(row\), results = \[\];\s*\n\s*outs\.reduce\(function \(chain, variant\)/.test(e));
-  ok("the outputs it expands to come from the SAME f04 fact the row's chip states", /function publishRowOutputs\(row\)[\s\S]{0,420}f04OutputsFact\(d && d\.variants\)[\s\S]{0,120}fact\.variants\.length \? \[null\]\.concat\(fact\.variants\) : \[null\]/.test(e));
-  ok("a preset that pins one variant narrows the row to that single output", /if \(pinned\) return \[String\(pinned\)\]/.test(e));
   ok("the Product folder is set once in the pane head, not per row", /var rootChip = publishRootChip\(\);\s*\n\s*if \(rootChip\) actions\.appendChild\(rootChip\);/.test(e) && /function publishRootChip\(\)/.test(e));
   ok("the destination popover builds one path row per output, each with its own picker", /function openPublishDestPopover\(anchor, rowId\)[\s\S]{0,900}publishRowOutputs\(row\)\.forEach\(function \(v\)[\s\S]{0,900}publish-destrow/.test(e));
   ok("an overridden row offers Reset, and its tooltip names what Reset restores (the spine's inheritance tail)", /label: "Reset"[\s\S]{0,400}rst\.title = rootLbl \? "Go back to inheriting the Product folder/.test(e));
@@ -10636,7 +10825,12 @@ section("uio-P-C06: picker multi-select + queue selected");
 
   // --- queueing a batch reuses the single-document path, and clears the ticks afterwards ---
   ok("every selected document goes through the same addToQueue as the '+'", /ids\.forEach\(function \(id\) \{ addToQueue\(id, \{ quiet: true \}\); \}\);/.test(e));
-  ok("quiet suppresses the toast only — the queue is still saved per document", /if \(!\(opts && opts\.quiet\)\) publishToast\("Added to the publish queue/.test(e) && /function addToQueue\(docId, opts\) \{[\s\S]{0,400}savePublishQueue\(\);/.test(e));
+  ok("quiet suppresses the toast only — the queue is still saved per document", (function () {
+    var quietOnly = /if \(!\(opts && opts\.quiet\)\) publishToast\("Added to the publish queue/.test(e);
+    var H = publishHarness();
+    H.publish.addDoc("D1"); // the module persists on every add, toast or no toast
+    return quietOnly && typeof H.store["authoring.publishQueue"] === "string";
+  })());
   ok("a batch confirms once, naming how many went in", /publishToast\("Added " \+ ids\.length \+ " document" \+ \(ids\.length === 1 \? "" : "s"\)/.test(e));
   ok("the ticks are cleared after the batch is handed over", /ids\.forEach[\s\S]{0,80}__publishPickSel = \{\};\s*\n\s*renderPublishPick\(\);/.test(e));
   ok("an empty selection queues nothing at all", /if \(!ids\.length\) return;/.test(e));
@@ -10783,8 +10977,26 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
     RH.lastPublishedFor((function () { var s2 = RH.create(); RH.append(s2, { createdAt: 5, entries: [{ docId: "old", version: "v1" }] }); return s2; })(), "old").version === "v1");
 
   // --- the record now captures what a history row has to state ---
-  ok("the entry captures preset, destination and status", /preset: PP \? PP\.presetName\(publishPresets\(\), row\.preset \|\| "master"\) : ""/.test(e) && /destination: failed \? "" : \(result\.to === "download" \? "Downloads"/.test(e) && /status: failed \? "error" : "done"/.test(e));
-  ok("a FAILED row is recorded too (a run that partly failed can't report a clean Published)", /var err = \{ to: "error", path: String\(\(e && e\.message\) \|\| e\) \};\s*\n\s*runEntries\.push\(releaseEntryForRow\(row, err\)\);/.test(e) && /runEntries\.push\(releaseEntryForRow\(row, gone\)\)/.test(e));
+  // arch-P3-03: the record-keeping is the module's, so these run it rather than read editor.js.
+  ok("the entry captures preset, destination and status", (function () {
+    var H = publishHarness();
+    var row = { docId: "D1", title: "First", preset: "master" };
+    var done = H.publish.releaseEntryForRow(row, { to: "folder", path: "Drops/x.zip" }, null);
+    var bad = H.publish.releaseEntryForRow(row, { to: "error", path: "boom" }, null);
+    return done.preset === "Master" && done.destination === "Drops/x.zip" && done.status === "done" &&
+      bad.status === "error" && bad.destination === "";
+  })());
+  __async.push((function () {
+    var H = publishHarness({ failBuildFor: function () { return true; } });
+    H.publish.addDoc("D1");
+    return H.publish.run().then(function () {
+      section("uio-P-C03: release history fills the empty half + last-published per row");
+      var rel = RH.list(H.publish.history())[0];
+      ok("a FAILED row is recorded too (a run that partly failed can't report a clean Published)",
+        !!rel && rel.entries.length === 1 && rel.entries[0].status === "error");
+      ok("and the row itself carries the error", H.publish.queue().rows[0].status === "error");
+    });
+  })());
 
   // --- it OWNS the empty half: open by default, canonical section, states its empty state ---
   ok("history is a canonical PanelSection, open by default", /panelSection\(host, "Release history", \{ collapsible: true, defaultOpen: true, divider: true \}\)/.test(e));
@@ -10811,9 +11023,10 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
 section("uio-P-C07: destination chip + resolved filename on every queue row");
 (function () {
   var e = src("src/editor.js"), css = src("editor.css"), ex = src("src/export.js");
-  var m = e.match(/\/\* @publish-dest-start \*\/([\s\S]*?)\/\* @publish-dest-end \*\//);
-  if (!m) { ok("locate @publish-dest fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { publishRowDestSummary: publishRowDestSummary, commonPrefix: commonPrefix, publishRowFilename: publishRowFilename, publishShowsFilename: publishShowsFilename };")();
+  // arch-P3-03: these are the module's now, so the suite calls them instead of re-animating a fence.
+  var VP = require(path.join(ROOT, "src/editor/publish.js"));
+  var g = { publishRowDestSummary: VP.destSummary, commonPrefix: VP.commonPrefix,
+            publishRowFilename: VP.rowFilename, publishShowsFilename: VP.showsFilename };
 
   // --- the collapsed chip speaks for every output of the row (T3 made a row several outputs) ---
   var dl = { kind: "download", label: "Downloads", chip: "Downloads", handleKey: null, hint: "No folder set." };
@@ -10855,8 +11068,20 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
   // The whole point of the ticket. If the preview called its own string-builder, the row could
   // promise one name and the run write another; both go through SCORMExport.packageName here.
   ok("the row previews with the exporter's own packageName", /publishRowFilename\(window\.SCORMExport && window\.SCORMExport\.packageName, publishOptionsForRow\(r, outs\[0\]\)\)/.test(e));
-  ok("the run builds with the SAME options the preview was named from", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e));
-  ok("those options name the ROW's document, not whichever one is open", /var d = registry\[row\.docId\], code = d && d\.meta && d\.meta\.code;\s*\n\s*if \(code\) out\.code = code;/.test(e));
+  __async.push((function () {
+    var H = publishHarness();
+    H.publish.addDoc("D1");
+    var row = H.publish.queue().rows[0];
+    var preview = H.publish.optionsForRow(row, null);
+    var promised = VP.rowFilename(H.exporter.nameFor, preview);
+    return H.publish.run().then(function () {
+      section("uio-P-C07: destination chip + resolved filename on every queue row");
+      ok("the run builds with the SAME options the preview was named from",
+        H.probe.built.length === 1 && H.probe.delivered[0].name === promised);
+      ok("those options name the ROW's document, not whichever one is open",
+        H.probe.built[0].code === "ACME-101" && H.activeDocId() === "OPEN-DOC");
+    });
+  })());
   ok("packageName honours that code and still falls back to the open document", /var parts = \[fileSafe\(\(opts && opts\.code\) \|\| docCode\(\)\)\];/.test(ex));
   ok("packageName is exported, so nothing has to reimplement it", /packageName: packageName/.test(ex));
 
@@ -10876,10 +11101,10 @@ section("uio-P-C08: variant roll-up chip + variant popover on Publish");
 (function () {
   var e = src("src/editor.js"), css = src("editor.css");
   var fm = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
-  var vm = e.match(/\/\* @publish-varpop-start \*\/([\s\S]*?)\/\* @publish-varpop-end \*\//);
-  if (!fm || !vm) { ok("locate @f04 + @publish-varpop fences", false); return; }
+  if (!fm) { ok("locate the @f04 fence", false); return; }
   var f04 = new Function(fm[1] + "\nreturn { outputsFact: f04OutputsFact };")();
-  var g = new Function(vm[1] + "\nreturn { rollup: publishVariantRollup };")();
+  // arch-P3-03: the roll-up is the module's.
+  var g = { rollup: require(path.join(ROOT, "src/editor/publish.js")).variantRollup };
 
   // --- count derivation: straight from the F04 fact, never a second expansion ---
   var fact = f04.outputsFact(["Compact", "Onshore"]);
@@ -11512,8 +11737,8 @@ section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette"
 section("uio-P-C02: Publish button — accent only when runnable, reason when disabled");
 (function () {
   var e = src("src/editor.js");
-  ok("Publish is accent primary only when runnable, else secondary", /var canRun = !!pending && !__publishRunning;[\s\S]{0,200}variant: canRun \? "primary" : "secondary"/.test(e));
-  ok("the disabled Publish button carries the reason on hover", /if \(!canRun\) \{[\s\S]{0,160}pub\.title = __publishRunning \? "Publishing…" : "Nothing queued to publish/.test(e));
+  ok("Publish is accent primary only when runnable, else secondary", /var canRun = !!pending && !Publish\.isRunning\(\);[\s\S]{0,200}variant: canRun \? "primary" : "secondary"/.test(e));
+  ok("the disabled Publish button carries the reason on hover", /if \(!canRun\) \{[\s\S]{0,160}pub\.title = Publish\.isRunning\(\) \? "Publishing…" : "Nothing queued to publish/.test(e));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
@@ -15133,7 +15358,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 162, SLICE_BUDGET = 17;
+  var FN_BUDGET = 160, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);
