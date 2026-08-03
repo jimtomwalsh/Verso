@@ -541,7 +541,11 @@
     kernel.expose({
       buildHeaderBody: buildHeaderBody, buildFooterBody: buildFooterBody, buildHeaderFooterDefaultBody: buildHeaderFooterDefaultBody,
       buildLayoutBody: buildLayoutBody, makeCourseNav: makeCourseNav, headerFooterConfig: headerFooterConfig,
-      hfSectionOpts: hfSectionOpts
+      hfSectionOpts: hfSectionOpts,
+      // The nav's controls are drawn twice: once into the canvas inspector when a nav block is
+      // selected, once into the settings sheet's nested groups. Both were still calling these by
+      // name from editor.js after the region moved (arch-P3b-07).
+      courseNavControls: courseNavControls, courseNavNests: courseNavNests
     });
   }
 

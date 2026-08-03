@@ -353,7 +353,11 @@
     }
 
     kernel.expose({
-      showContextMenu: showContextMenu, closeCtxMenu: closeCtxMenu, wireContextMenu: wireContextMenu
+      showContextMenu: showContextMenu, closeCtxMenu: closeCtxMenu, wireContextMenu: wireContextMenu,
+      // The canvas block toolbar's overflow button offers the SAME verb list as a right-click, so
+      // it asks for the items rather than building a second one. It was still calling this by name
+      // from editor.js after the region moved (arch-P3b-07).
+      blockMenuItems: blockMenuItems
     });
   }
 

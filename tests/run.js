@@ -40,6 +40,43 @@ function ok(name, cond) {
 // A non-failing signal (UI kit ticket 4 conformance gate, warn-only phase).
 function warn(msg) { warnings++; console.warn("  WARN [" + sectionName + "] " + msg); }
 function slice(txt, from, to) { var a = txt.indexOf(from), b = txt.indexOf(to, a + 1); return txt.slice(a, b); }
+// JS with its comments, strings and REGEX LITERALS blanked, so a name inside one is not a call
+// site. The regex half is why this walks rather than replaces: editor.js is full of literals that
+// contain a quote (/['"]/), and a walker that only knows about quotes reads that apostrophe as the
+// start of a string and runs to the next one hundreds of lines away, blanking most of the file.
+function codeOnly(s) {
+  var out = "", i = 0, prev = "";   // prev = the last significant code character emitted
+  // A slash starts a regex when what came before it cannot END an expression: after an identifier,
+  // a number, `)` or `]` it is division; after anything else it is a literal.
+  function slashStartsRegex() { return !prev || !/[A-Za-z0-9_$)\]]/.test(prev); }
+  while (i < s.length) {
+    var c = s[i], d = s[i + 1];
+    if (c === "/" && d === "/") { var j = s.indexOf("\n", i); if (j < 0) j = s.length; out += " "; i = j; continue; }
+    if (c === "/" && d === "*") { var k = s.indexOf("*/", i + 2); k = k < 0 ? s.length : k + 2; out += " "; i = k; continue; }
+    if (c === '"' || c === "'" || c === "`") {
+      var q = c, m = i + 1;
+      while (m < s.length) { if (s[m] === "\\") { m += 2; continue; } if (s[m] === q) { m++; break; } m++; }
+      out += ' " " '; i = m; prev = '"'; continue;
+    }
+    if (c === "/" && slashStartsRegex()) {
+      var n = i + 1, cls = false, closed = false;
+      while (n < s.length) {
+        var ch = s[n];
+        if (ch === "\\") { n += 2; continue; }
+        if (ch === "\n") break;                  // unterminated: it was division after all
+        if (cls) { if (ch === "]") cls = false; n++; continue; }
+        if (ch === "[") { cls = true; n++; continue; }   // a `/` inside a class does not close it
+        if (ch === "/") { closed = true; n++; break; }
+        n++;
+      }
+      if (closed) { while (n < s.length && /[gimsuy]/.test(s[n])) n++; out += " RX "; i = n; prev = ")"; continue; }
+    }
+    out += c;
+    if (!/\s/.test(c)) prev = c;
+    i++;
+  }
+  return out;
+}
 // arch-P1: render.js resolves every per-pass hook through one rc() accessor, so a slice of any
 // render.js function that reads a hook needs that accessor in scope alongside it.
 function withRc(renderSrc, body) {
@@ -412,6 +449,107 @@ section("P3b namespace (load order)");
     ok(f.rel + " wires its sibling explicitly (use())", /function use\s*\(/.test(f.text));
   });
   ok("every module under src/editor was checked", files.length >= 12);
+})();
+
+// The check no boot performs. A moved region's functions are declared inside its install(), so a
+// call site editor.js FORGOT to rewire is a plain free identifier: not a bound forwarder, not a
+// need(), nothing the kernel audit can see. It throws only when that path runs, which is how
+// `loadBackupHandle is not defined` survived a green suite and a clean audit until an end-to-end
+// publish run hit it -- along with the tour builder's stale-block rebind, which was guarded by
+// `typeof x === "function"` and had been silently answering "no" ever since the region moved.
+section("P3b namespace (no orphaned call sites)");
+(function () {
+  // What the modules declare, one indent deeper because it sits inside install().
+  var owner = Object.create(null), mods = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, rel + f + "/");
+      else if (/\.js$/.test(f)) mods.push("src/editor/" + rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+  mods.forEach(function (rel) {
+    var t = src(rel);
+    (t.match(/^\s{4}(?:async )?function ([A-Za-z_$][\w$]*)/gm) || []).forEach(function (m) {
+      var n = m.trim().replace(/^async /, "").split(/\s+/)[1];
+      owner[n] = owner[n] || rel;
+    });
+    (t.match(/^\s{4}var ([^;\n]+)/gm) || []).forEach(function (m) {
+      m.replace(/^\s+var /, "").split(",").forEach(function (p) {
+        var n = p.trim().split(/[\s=(\[]/)[0]; if (/^[A-Za-z_$][\w$]*$/.test(n)) owner[n] = owner[n] || rel;
+      });
+    });
+  });
+
+  function orphansIn(text) {
+    var code = codeOnly(text);
+    // Every name editor.js declares ANYWHERE, plus every parameter. A local `block` inside one of
+    // its own functions is not a call into a module that happens to declare `block` too.
+    var mine = Object.create(null);
+    (code.match(/\b(?:function\s+|var\s+|let\s+|const\s+)([A-Za-z_$][\w$]*)/g) || []).forEach(function (m) {
+      mine[m.replace(/^\w+\s+/, "").trim()] = 1;
+    });
+    (code.match(/\bvar\s+([^;\n]+)/g) || []).forEach(function (m) {
+      m.replace(/^var\s+/, "").split(",").forEach(function (p) {
+        var n = p.trim().split(/[\s=(\[]/)[0]; if (/^[A-Za-z_$][\w$]*$/.test(n)) mine[n] = 1;
+      });
+    });
+    (code.match(/function[^(]*\(([^)]*)\)/g) || []).forEach(function (m) {
+      m.replace(/^function[^(]*\(|\)$/g, "").split(",").forEach(function (x) {
+        var n = x.trim(); if (/^[A-Za-z_$][\w$]*$/.test(n)) mine[n] = 1;
+      });
+    });
+    (code.match(/catch\s*\(\s*([A-Za-z_$][\w$]*)/g) || []).forEach(function (m) { mine[m.replace(/^catch\s*\(\s*/, "")] = 1; });
+    // A trailing `:` is an object-literal KEY, not a read: `{ tourMakeMarker: VE.bind(...) }` is
+    // the wiring itself, not a call into the module.
+    var out = [];
+    code.replace(/(\.?)\s*\b([A-Za-z_$][\w$]*)\b(\s*:)?/g, function (m, dot, id, key) {
+      if (!dot && !key && owner[id] && !mine[id] && out.indexOf(id) === -1) out.push(id);
+      return m;
+    });
+    return out;
+  }
+
+  var ed = src("src/editor.js");
+  var orphans = orphansIn(ed);
+  ok("editor.js declares or binds every name it calls" + (orphans.length ? " -- ORPHANED: " + orphans.join(", ") : ""), orphans.length === 0);
+  ok("the scan saw the modules at all", Object.keys(owner).length > 200);
+  // The gate has to be able to FAIL: drop one bind and the name it fed must come back as an
+  // orphan. This is the exact shape of the bug -- the call site stays, the wiring goes.
+  var doctored = ed.replace(/\n  var scheduleBackup = VE\.bind\("scheduleBackup"\);/, "\n");
+  ok("gate trips: removing a bind surfaces its call sites", doctored !== ed && orphansIn(doctored).indexOf("scheduleBackup") > -1);
+})();
+
+// The mirror of that check, on the region side. need() records the names a module ASKS for, so a
+// name it never asked for reads as plain undefined -- no unmet entry, no throw, until the call
+// site runs and says `E.setActiveVariant is not a function`. That shipped once in this phase and
+// a browser probe caught it, which is exactly the thing a suite is meant to do first.
+section("P3b namespace (every E read is a declared need)");
+(function () {
+  var mods = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, rel + f + "/");
+      else if (/\.js$/.test(f)) mods.push("src/editor/" + rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+  var checked = 0;
+  mods.forEach(function (rel) {
+    var t = src(rel);
+    var m = t.match(/kernel\.need\(([\s\S]*?)\)\s*;/);
+    if (!m) return;                       // kernel.js itself, and any module that needs nothing
+    checked++;
+    var have = Object.create(null);
+    (m[1].match(/"([A-Za-z_$][\w$]*)"/g) || []).forEach(function (q) { have[q.slice(1, -1)] = 1; });
+    var missing = [];
+    codeOnly(t).replace(/\bE\.([A-Za-z_$][\w$]*)/g, function (all, n) {
+      if (!have[n] && missing.indexOf(n) === -1) missing.push(n);
+      return all;
+    });
+    ok(rel + " reads only what it needs()" + (missing.length ? " -- UNDECLARED: " + missing.join(", ") : ""), missing.length === 0);
+  });
+  ok("every wired module was checked", checked >= 15);
 })();
 
 // ---- XX: durable-write core ----------------------------------------------
@@ -3859,6 +3997,7 @@ section("group as a single side-by-side target (#95)");
 section("customisable preview preset sizes (#42)");
 (function () {
   var e = src("src/editor.js");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   var bpClampDim = new Function("v", "def", "min", "max",
     'var n = parseInt(v,10); if (isNaN(n)) return def; return Math.max(min, Math.min(max, n));');
   ok("clamp: a valid dimension passes through", bpClampDim(800, 1200, 240, 4000) === 800);
@@ -3874,9 +4013,9 @@ section("customisable preview preset sizes (#42)");
   // stage), not fit-scaled to the monitor: zoom is cleared and demoFitScale is no longer used.
   ok("forced-device preview is exact pixels, not fit-scaled", !/demoDevice\.style\.zoom = demoFitScale/.test(e));
   ok("forced device sets exact w/h then clears zoom",
-     /demoDevice\.style\.width = dw \+ "px"[\s\S]{0,160}demoDevice\.style\.zoom = "";/.test(e));
+     /demoDevice\.style\.width = dw \+ "px"[\s\S]{0,160}demoDevice\.style\.zoom = "";/.test(DEMO));
   ok("forced device is framed (inline nav, no ghost pill without the zoom containing block)",
-     /demoDevice\.classList\.add\("demo__device--framed"\)/.test(e));
+     /demoDevice\.classList\.add\("demo__device--framed"\)/.test(DEMO));
 })();
 
 // #100: exiting preview lands the canvas on the page the preview was showing (demoPage),
@@ -3884,15 +4023,17 @@ section("customisable preview preset sizes (#42)");
 section("exit preview focuses the demo's page (#100)");
 (function () {
   var e = src("src/editor.js");
-  var body = e.slice(e.indexOf("function exitDemo()"), e.indexOf("function wireDemo()"));
-  ok("exitDemo clamps demoPage to a valid page index", /var __exitPage = clamp\(demoPage, 0, doc\.pages\.length - 1\)/.test(body));
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
+  var body = DEMO.slice(DEMO.indexOf("function exitDemo()"), DEMO.indexOf("function wireDemo()"));
+  ok("exitDemo clamps demoPage to a valid page index", /var __exitPage = clamp\(demoPage, 0, E\.doc\.pages\.length - 1\)/.test(body));
   ok("exitDemo focuses + activates + selects that page", /focusFrame\(__exitPage\); setActivePage\(__exitPage\); setSelection\("page", __exitPage\);/.test(body));
-  ok("exitDemo guards against a page-less doc", /if \(doc\.pages && doc\.pages\.length\) \{/.test(body));
+  ok("exitDemo guards against a page-less doc", /if \(E\.doc\.pages && E\.doc\.pages\.length\) \{/.test(body));
 })();
 
 // #90: native Table block — 4-file contract wiring (render / course.css / editor).
 section("table block (#90)");
 (function () {
+  var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var rn = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ic = src("src/icons.js");
   // render.js: pure renderer — editable cells (th/td by header), scroll wrapper, borders/zebra/pad/align
   ok("render defines a table renderer", /table: function \(block\) \{/.test(rn));
@@ -3909,7 +4050,7 @@ section("table block (#90)");
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
   ok("table has a Lucide glyph", /table: "table"/.test(e) && /"table":/.test(ic));
   // F&R parity: cells wired into the enumerator
-  ok("frTargets enumerates table cells", /b\.type === "table" && Array\.isArray\(b\.rows\)[\s\S]*?host: cell, key: "t"/.test(e));
+  ok("frTargets enumerates table cells", /b\.type === "table" && Array\.isArray\(b\.rows\)[\s\S]*?host: cell, key: "t"/.test(CE));
 })();
 
 // ---- #111 course-completion / exit splash --------------------------------
@@ -3937,7 +4078,7 @@ section("#111 completion screen");
   // editor.js — inspector + demo preview
   ok("editor adds a Completion screen settings section", /\{ key: "endScreen", title: "Completion screen", build: buildEndScreenBody \}/.test(ed));
   ok("editor builds the end-screen inspector body", /function buildEndScreenBody\(host\)/.test(ed) && /Show completion screen/.test(ed));
-  ok("editor demo previews the real splash on Exit", /function previewEndScreen\(\)/.test(ed) && /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(ed));
+  ok("editor demo previews the real splash on Exit", /function previewEndScreen\(\)/.test(src("src/editor/demo.js")) && /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(src("src/editor/demo.js")));
   // course.css — hidden until revealed; reduced-motion honoured
   ok("course.css hides the splash until .is-shown", /\.course-end \{[\s\S]*?display: none;[\s\S]*?\}\s*\.course-end\.is-shown \{ display: flex; \}/.test(cs));
   ok("course.css gates the check draw on prefers-reduced-motion", /prefers-reduced-motion: reduce[\s\S]*?course-end__badge-check \{ animation: none/.test(cs));
@@ -4753,25 +4894,26 @@ section("comment list (panel)");
 section("comment mode (preview)");
 (function () {
   var t = src("src/editor.js");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // surface abstraction: canvas vs demo, one shared store
-  ok("activeSurf picks demo while the preview is open", /function activeSurf\(\) \{ return \(demo && !demo\.hidden\) \? demoSurf\(\) : canvasSurf\(\); \}/.test(t));
+  ok("activeSurf picks demo while the preview is open", /function activeSurf\(\) \{ return demoIsOpen\(\) \? demoSurf\(\) : canvasSurf\(\); \}/.test(t));
   ok("demoSurf disallows world anchors (canvas-only)", /function demoSurf\(\)[\s\S]*?allowWorld: false/.test(t));
   ok("makeAnchorFromPoint is surface-scoped + drops world in preview", /var s = activeSurf\(\);[\s\S]*?s\.root\.contains\(blockEl\)[\s\S]*?if \(!s\.allowWorld\) return null;/.test(t));
   ok("anchorToScreen resolves against the active surface root", /function anchorToScreen[\s\S]*?var s = activeSurf\(\);[\s\S]*?s\.root\.querySelector/.test(t));
   // demo DOM gets data-cid (renderPage is pure -> stamp here) + pins re-projected
-  ok("renderDemo stamps cids + renders pins", /stampDemoCids\(cr\);[\s\S]*?renderCommentPins\(\);/.test(t));
-  ok("stampDemoCids stamps data-cid from __block.cid", /function stampDemoCids[\s\S]*?n\.setAttribute\("data-cid", n\.__block\.cid\)/.test(t));
+  ok("renderDemo stamps cids + renders pins", /stampDemoCids\(cr\);[\s\S]*?renderCommentPins\(\);/.test(DEMO));
+  ok("stampDemoCids stamps data-cid from __block.cid", /function stampDemoCids[\s\S]*?n\.setAttribute\("data-cid", n\.__block\.cid\)/.test(DEMO));
   // preview drop: block/page only (bails on a null anchor), shared store
   ok("preview drop uses the shared store + skips null anchors", /if \(!demoCommentMode \|\| e\.button !== 0\) return;[\s\S]*?if \(!anchor\) return;[\s\S]*?doc\.comments\.push\(c\)/.test(t));
   // C routes to the demo in preview; canvas C is guarded by demo.hidden
   ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentMode\)[\s\S]{0,80}demo has its own C/.test(t) || /&& demo\.hidden\) \{\s*e\.preventDefault\(\);\s*setCommentMode/.test(t));
   ok("preview C toggles demo comment mode", /setDemoCommentMode\(!demoCommentMode\)/.test(t));
   // exit re-projects onto the canvas surface (the round-trip)
-  ok("exitDemo re-projects pins onto the canvas", /function exitDemo[\s\S]*?demo\.hidden = true;[\s\S]{0,140}renderCommentPins\(\)/.test(t));
+  ok("exitDemo re-projects pins onto the canvas", /function exitDemo[\s\S]*?demo\.hidden = true;[\s\S]{0,140}renderCommentPins\(\)/.test(DEMO));
   // #76: authoring-only chrome must not float over the learner preview.
   // enterDemo/exitDemo toggle body.demo-open.
-  ok("enterDemo adds body.demo-open", /function enterDemo[\s\S]*?document\.body\.classList\.add\("demo-open"\)/.test(t));
-  ok("exitDemo removes body.demo-open", /function exitDemo[\s\S]*?document\.body\.classList\.remove\("demo-open"\)/.test(t));
+  ok("enterDemo adds body.demo-open", /function enterDemo[\s\S]*?document\.body\.classList\.add\("demo-open"\)/.test(DEMO));
+  ok("exitDemo removes body.demo-open", /function exitDemo[\s\S]*?document\.body\.classList\.remove\("demo-open"\)/.test(DEMO));
 })();
 
 // ---- §12 slice 5: transport primitives (identity / sidecar / threading) -----
@@ -8699,6 +8841,7 @@ section("Verso Viewer (V1 + app)");
 section("mode crossfade");
 (function () {
   var css = src("src/course.css");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // reading surfaces ease their palette; scoped to [data-mode] so no-JS first paint doesn't animate
   ok("root+text reading surfaces transition on mode flip (var-driven)", /\.course-root\[data-mode\],\s*\[data-mode\] \.course-root,\s*\[data-mode\] \.page,[\s\S]*?transition: background-color var\(--motion-mode-fade, 300ms\) ease, color var\(--motion-mode-fade, 300ms\) ease, border-color var\(--motion-mode-fade, 300ms\) ease/.test(css));
   // matches BOTH self ([data-mode] ON the root, editor canvas) AND ancestor ([data-mode] .page, preview/export where html/body carry it)
@@ -8711,8 +8854,8 @@ section("mode crossfade");
   // data-mode), NOT renderDemo() -- a rebuild recreates the DOM already in the new mode
   // so the crossfade has no old->new value to animate (the hard cut James saw in preview).
   var e = src("src/editor.js");
-  ok("demo mode-toggle re-themes in place (applyTheme on existing root), not a rebuild", /closest\("\[data-mode-toggle\]"\)[\s\S]*?demoDevice\.querySelectorAll\("\.course-root"\)[\s\S]*?window\.applyTheme\(r, __t\); r\.setAttribute\("data-mode", activeMode\)/.test(e));
-  ok("demo mode-toggle only falls back to renderDemo when nothing is mounted", /if \(__roots\.length\) \{[\s\S]*?\} else \{\s*renderDemo\(\);/.test(e));
+  ok("demo mode-toggle re-themes in place (applyTheme on existing root), not a rebuild", /closest\("\[data-mode-toggle\]"\)[\s\S]*?demoDevice\.querySelectorAll\("\.course-root"\)[\s\S]*?window\.applyTheme\(r, __t\); r\.setAttribute\("data-mode", E\.activeMode\)/.test(DEMO));
+  ok("demo mode-toggle only falls back to renderDemo when nothing is mounted", /if \(__roots\.length\) \{[\s\S]*?\} else \{\s*renderDemo\(\);/.test(DEMO));
 })();
 
 // ---- image lightbox (click-to-zoom overlay) ------------------------------
@@ -8983,6 +9126,7 @@ section("panel system v2 — layout engine");
 section("exit-course action");
 (function () {
   var r = src("src/render.js"), rt = src("src/runtime.js"), e = src("src/editor.js");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // render: exit -> data-nav-action="exit" (NOT data-goto), href stays "#"
   var nb = slice(r, "navButton: function (block) {", "modeToggle: function (block) {");
   ok("render: action.exit -> data-nav-action=exit", /if \(act\.exit\)[\s\S]{0,120}setAttribute\("data-nav-action", "exit"\)/.test(nb));
@@ -8999,7 +9143,7 @@ section("exit-course action");
   // authoring: Exit option in the On-click dropdown + non-destructive demo override
   ok("editor: EXIT_ACTION sentinel + setExitAction writes action.exit", /var EXIT_ACTION = "__exit";/.test(e) && /function setExitAction\(host\) \{ pushHistory\(\); host\.action = \{ exit: true \}; \}/.test(e));
   ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(e));
-  ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(e) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(e));
+  ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(DEMO) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(DEMO));
   // Interact-mode action picker (the "On click -> Do" list): exit is an option + targetless
   ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(e));
   ok("editor: exit is targetless (NAV_ACTIONS -> no target picker)", /var NAV_ACTIONS = \{ next: 1, prev: 1, exit: 1 \};/.test(e));
@@ -9087,7 +9231,8 @@ section("hotspot per-card size");
 // ---- FR: Find & replace pure core + variant routing ----------------------
 section("FR find/replace");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   if (a < 0 || b < 0) { ok("locate @fr fence", false); return; }
   var body = e.slice(a, b);
@@ -9263,7 +9408,7 @@ section("UI kit seam");
   // Regression (same family): entering PREVIEW / navigating in demo rebuilds fresh embed
   // iframes; renderDemo must push the theme (tokens + embedColorMap) into demoDevice or
   // the interaction shows its own default palette (colours "change" on entering preview).
-  ok("renderDemo pushes theme into preview embeds", /fitEmbedsIn\(demoDevice\); renderCommentPins\(\);[\s\S]{0,160}pushEmbedTheme\(demoDevice, activeMode, activeTheme\(\)\.color\)/.test(e));
+  ok("renderDemo pushes theme into preview embeds", /fitEmbedsIn\(demoDevice\); renderCommentPins\(\);[\s\S]{0,160}pushEmbedTheme\(demoDevice, E\.activeMode, activeTheme\(\)\.color\)/.test(src("src/editor/demo.js")));
   // arch-P3-02: the guard lives in the module now (and is tested there against a null document).
   ok("the kit gallery loads the history seam before editor.js", src("kit.html").indexOf("src/editor/history.js") < src("kit.html").indexOf("src/editor.js\""));
   ok("renderInspector no-ops in kit mode (gallery owns #inspector)", (function () {
@@ -10175,7 +10320,7 @@ section("Product Rail: Publish presets (T2)");
   ok("the shared action routes through the module and toasts the pending count it returns", /var added = Publish\.addDoc\(docId\);/.test(e) && /publishToast\("Added to the publish queue — " \+ added\.pending/.test(e));
   ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
   // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
-  ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\);/.test(e) && !/Send to publish — coming soon/.test(e));
+  ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(E\.activeDocId && registry\[E\.activeDocId\]\) addToQueue\(E\.activeDocId\);/.test(src("src/editor/demo.js")) && !/Send to publish — coming soon/.test(e));
 })();
 
 // ---- product-rail-publish-queue-t3: remembered save path + version preview ----
@@ -11131,8 +11276,10 @@ section("line diff (LineDiff)");
 // across pages / nested blocks / componentGrid instances, so a renamed key still resolves.
 (function () {
   section("version rename (name a version so it can be identified)");
-  var e = src("src/editor.js");
-  var m = e.match(/function renameVersion\(d, oldName, newName\)\s*\{[\s\S]*?\n  \}/);
+  // arch-P3b-07l: the version axis moved to src/editor/variants.js.
+  var e = src("src/editor/variants.js"), VARIANTS = e;
+  // The closing brace is one indent deeper inside install(), so the terminator widened with it.
+  var m = e.match(/function renameVersion\(d, oldName, newName\)\s*\{[\s\S]*?\n    \}/);
   if (!m) { ok("locate renameVersion", false); return; }
   var renameVersion = new Function(m[0] + "\nreturn renameVersion;")();
   function mk() {
@@ -11170,10 +11317,10 @@ section("line diff (LineDiff)");
   ok("unknown old name rejected (false)", renameVersion(d3, "vX", "vY") === false && JSON.stringify(d3) === snap);
   ok("clash with an existing version rejected (false)", renameVersion(d3, "v2", "v1") === false && JSON.stringify(d3) === snap);
   // wiring: the switcher surfaces the base name + offers a rename, and the base badge exists
-  ok("menu labels base with its name", /"Base · " \+ base/.test(e));
-  ok("menu excludes base from the pickable list", /vs\.slice\(\)\.reverse\(\)\.forEach\(function \(v\) \{\s*if \(v === base\) return;/.test(e));
-  ok("menu offers a rename action", /renameVersionPrompt\(activeVersion \|\| null\)/.test(e));
-  ok("base badge identifies the current version", /"Editing base · " \+ baseName/.test(e));
+  ok("menu labels base with its name", /"Base · " \+ base/.test(VARIANTS));
+  ok("menu excludes base from the pickable list", /vs\.slice\(\)\.reverse\(\)\.forEach\(function \(v\) \{\s*if \(v === base\) return;/.test(VARIANTS));
+  ok("menu offers a rename action", /renameVersionPrompt\(E\.activeVersion \|\| null\)/.test(VARIANTS));
+  ok("base badge identifies the current version", /"Editing base · " \+ baseName/.test(VARIANTS));
 })();
 
 // #206 editor version switcher: a SECOND top-bar glyph, parallel to the variant pill, that
@@ -11181,7 +11328,8 @@ section("line diff (LineDiff)");
 // real editor source (headless can't boot the DOM; the switcher is DOM-bound).
 (function () {
   section("#206 version switcher (editor wiring)");
-  var e = src("src/editor.js");
+  // arch-P3b-07l: the switchers moved to src/editor/variants.js; the axis STATE stays in editor.js.
+  var e = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");
   ok("activeVersion state exists (null = editable base)", /var activeVersion = null;/.test(e));
   ok("versionNames() reads doc.versions", /function versionNames\(\) \{ return \(doc\.versions \|\| \[\]\)\.slice\(\); \}/.test(e));
   // NESTING: currentDoc resolves variant (product) FIRST, then version on top (#207 routes an
@@ -11192,21 +11340,21 @@ section("line diff (LineDiff)");
   ok("setDoc drops a stale activeVersion the new doc lacks", /if \(activeVersion && \(doc\.versions \|\| \[\]\)\.indexOf\(activeVersion\) === -1\) activeVersion = null;/.test(e));
   // SWITCHER: face-up named dropdown (edit-header-ia-v2), menu, newest = default, Base entry,
   // order after the variant control.
-  ok("version switch is a face-up axis button, named axis + words (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,400}axis-btn__axis">Version<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/versionWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
-  ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(e));
-  ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(e));
-  ok("menu offers Base as the editable anchor (null activeVersion)", /active: !activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(e));
-  ok("menu lists versions newest-first", /vs\.slice\(\)\.reverse\(\)\.forEach/.test(e));
-  ok("+ New version prompt writes doc.versions (append = moving default)", /function newVersionPrompt\(then\)[\s\S]*?doc\.versions\.push\(name\)/.test(e));
+  ok("version switch is a face-up axis button, named axis + words (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,400}axis-btn__axis">Version<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(VARIANTS) && !/versionWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
+  ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(VARIANTS));
+  ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(VARIANTS));
+  ok("menu offers Base as the editable anchor (null activeVersion)", /active: !E\.activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(VARIANTS));
+  ok("menu lists versions newest-first", /vs\.slice\(\)\.reverse\(\)\.forEach/.test(VARIANTS));
+  ok("+ New version prompt writes doc.versions (append = moving default)", /function newVersionPrompt\(then\)[\s\S]*?doc\.versions\.push\(name\)/.test(VARIANTS));
   // FIX 4a: order encodes nesting — version glyph inserted AFTER the variant glyph.
-  ok("version glyph inserts after the variant glyph (outer->inner order)", /host\.insertBefore\(versionWrapEl, variantWrapEl\.nextSibling\)/.test(e));
+  ok("version glyph inserts after the variant glyph (outer->inner order)", /host\.insertBefore\(versionWrapEl, variantWrapEl\.nextSibling\)/.test(VARIANTS));
   ok("renderVersionSwitch wired into init + setDoc", (e.match(/renderVersionSwitch\(\)/g) || []).length >= 2);
   // PREVIEW: read-only badge + right-click nav back to Base.
-  ok("previewVersion sets activeVersion + re-mounts (flushing in-flight edits)", /function previewVersion\(v\) \{ flushSave\(\); activeVersion = v; syncVersionSwitch\(\); mount\(\); \}/.test(e));
-  ok("version badge distinguishes editing vs read-only (#207)", /label = editable \? \("Editing version · " \+ activeVersion\) : \("Previewing version · " \+ activeVersion \+ " · read-only"\)/.test(e));
-  ok("composed badge offsets below the variant pill (FIX 4b)", /badge\.classList\.toggle\("is-composed", !!activeVariant\)/.test(e));
-  ok("variant badge gates on the variant axis ONLY (no null badge in a version-only preview)", /var badge = document\.getElementById\("variant-preview-badge"\);\s*if \(!activeVariant\)/.test(e));
-  ok("version menu offers 'Back to Base' as the editable-anchor return", /openVersionMenu[\s\S]{0,800}"Base \(edit\)"/.test(e));
+  ok("previewVersion sets activeVersion + re-mounts (flushing in-flight edits)", /function previewVersion\(v\) \{ flushSave\(\); E\.setActiveVersion\(v\); syncVersionSwitch\(\); mount\(\); \}/.test(VARIANTS));
+  ok("version badge distinguishes editing vs read-only (#207)", /label = editable \? \("Editing version · " \+ E\.activeVersion\) : \("Previewing version · " \+ E\.activeVersion \+ " · read-only"\)/.test(VARIANTS));
+  ok("composed badge offsets below the variant pill (FIX 4b)", /badge\.classList\.toggle\("is-composed", !!E\.activeVariant\)/.test(VARIANTS));
+  ok("variant badge gates on the variant axis ONLY (no null badge in a version-only preview)", /var badge = document\.getElementById\("variant-preview-badge"\);\s*if \(!E\.activeVariant\)/.test(VARIANTS));
+  ok("version menu offers 'Back to Base' as the editable-anchor return", /openVersionMenu[\s\S]{0,800}"Base \(edit\)"/.test(VARIANTS));
   // canvas rings: teal version ring, split from the purple variant ring.
   ok("canvas toggles a distinct is-version-preview ring", /canvas\.classList\.toggle\("is-version-preview", !!activeVersion\)/.test(e));
   var css = src("editor.css");
@@ -11222,6 +11370,7 @@ section("line diff (LineDiff)");
 section("edit-header-ia-v2: single-bar three-zone editor header");
 (function () {
   var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
+  var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   // MARKUP: one bar, three zones, two hairline seps, no leftover two-row structure.
   // uio-E-C01 (EDIT-07): the doc header was merged UP into the single global .toolbar. The
   // separate editor-window bar/wrapper is gone; the three zones are now direct children of .toolbar.
@@ -11232,9 +11381,9 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   ok("standalone #mode-toggle is retired from the header", html.indexOf('id="mode-toggle"') === -1);
   ok("Build/Read toggle + axes host present in the doc zone (cell chip retired)", html.indexOf('id="editor-cell-chip"') === -1 && /id="editor-view-toggle"/.test(html) && /id="editor-doc-axes"/.test(html));
   // FACE-UP DROPDOWNS: variant is a WORDS-ONLY named axis button (no leading glyph; caret only).
-  ok("variant switch is a face-up axis button, named axis + words (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,400}axis-btn__axis">Variant<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/variantWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
-  ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(e));
-  ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(e));
+  ok("variant switch is a face-up axis button, named axis + words (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,400}axis-btn__axis">Variant<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(VARIANTS) && !/variantWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
+  ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(VARIANTS));
+  ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(VARIANTS));
   // LIGHT/DARK now lives in the Preview chevron menu (size presets + palette, divider between).
   ok("Preview chevron menu adds a Palette section with light/dark -> setMode", /head: "Palette"[\s\S]{0,220}setMode\("light"\)[\s\S]{0,120}setMode\("dark"\)/.test(e) && /function openPreviewBpMenu/.test(e));
   // DOC-SETTINGS button opens the settings modal on the Project tab + wired at boot.
@@ -11284,10 +11433,12 @@ section("uio-E-C02: text field inspector — one scroll, block chrome, no jump l
 section("uio-E-C04: labelled variant/version axes + off-base return chip");
 (function () {
   var e = src("src/editor.js"), css = src("editor.css");
-  ok("both axis buttons carry a muted axis-name caption", /axis-btn__axis">Variant</.test(e) && /axis-btn__axis">Version</.test(e) && /\.axis-btn__axis \{[^}]*color: var\(--text-tertiary\)/.test(css));
-  ok("an off-base chip appears when previewing (isPreview) with Return to base", /function syncAxisReturnChip\(\)[\s\S]{0,200}var off = isPreview\(\)/.test(e) && /axis-return-chip__btn", "Return to base"/.test(e));
-  ok("chip wording tracks the real edit mode (read-only vs editing)", /var locked = !canvasEditable\(\)[\s\S]{0,240}"Read-only"[\s\S]{0,240}"Editing "/.test(e));
-  ok("Return to base clears BOTH axes and flushes", /function returnToBase\(\) \{[\s\S]{0,160}activeVariant = null; activeVersion = null;[\s\S]{0,80}mount\(\)/.test(e));
+  var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
+  ok("both axis buttons carry a muted axis-name caption", /axis-btn__axis">Variant</.test(VARIANTS) && /axis-btn__axis">Version</.test(VARIANTS) && /\.axis-btn__axis \{[^}]*color: var\(--text-tertiary\)/.test(css));
+  ok("an off-base chip appears when previewing (isPreview) with Return to base", /function syncAxisReturnChip\(\)[\s\S]{0,200}var off = isPreview\(\)/.test(VARIANTS) && /axis-return-chip__btn", "Return to base"/.test(VARIANTS));
+  ok("chip wording tracks the real edit mode (read-only vs editing)", /var locked = !canvasEditable\(\)[\s\S]{0,240}"Read-only"[\s\S]{0,240}"Editing "/.test(VARIANTS));
+  ok("Return to base clears BOTH axes and flushes", /function returnToBase\(\) \{[\s\S]{0,200}E\.setActiveVariant\(null\); E\.setActiveVersion\(null\);[\s\S]{0,80}mount\(\)/.test(VARIANTS));
+  ok("the axis state itself still lives in editor.js, written through one setter each", /setActiveVariant: function \(v\) \{ activeVariant = v; \}/.test(e) && /setActiveVersion: function \(v\) \{ activeVersion = v; \}/.test(e));
   ok(".axis-return-chip has a locked (danger) variant + a button", /\.axis-return-chip \{/.test(css) && /\.axis-return-chip--locked \{/.test(css) && /\.axis-return-chip__btn \{/.test(css));
 })();
 
@@ -11816,7 +11967,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
     /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(e));
   ok("'preview a variant from the top-bar switcher' is gone", e.indexOf("preview a variant from the top-bar switcher)") === -1);
   ok("the image panel shows which variant is live and opens the switcher",
-    /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenu\(variantSwitchEl\)/.test(e));
+    /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenuAtSwitch\(\)/.test(e));
   ok("the cross-reference row is styled once, not per site", /\.insp-xref \{/.test(css) && /\.insp-xref__link \{/.test(css));
 
   // --- OVL-14: one verb list, two doors ----------------------------------------------
@@ -12881,7 +13032,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // versionVis tagging + a disabled inspector notice (no dead controls) while editing a version.
 (function () {
   section("#207 edit-in-version (editor wiring)");
-  var e = src("src/editor.js");
+  var e = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   // ticket 15 rewired the #207 gate through the pure collabEditGate (the "version editable only
   // when no variant, and not collaborating" semantic now lives + is tested there). versionEditable()
   // delegates to it; the standalone #207 behaviour is asserted in the "base-only editing guard" section.
@@ -12896,8 +13047,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("block context menu adds a Software version show/hide section", /var versAll = versionNames\(\);[\s\S]{0,700}toggleHiddenInVersion\(host, v\)/.test(src("src/editor/context-menu.js")));
   ok("FIX 2: editing a version disables inert block controls with a reason", /function applyVersionEditGuard\(\)[\s\S]*?is-version-readonly-panel[\s\S]*?version-edit-notice/.test(e));
   ok("FIX 2: the field (inline text) inspector stays live — only block/instance/embed are disabled", /\["block", "instance", "embed"\]\.indexOf\(selection\.type\) === -1\) return;/.test(e));
-  ok("FIX 3: switching version flushes an in-flight edit", (e.match(/flushSave\(\);/g) || []).length >= 3 && /function onVersionPick\(v\) \{\s*flushSave\(\);/.test(e));
-  ok("editable badge uses the 'type' glyph (editing this version's text)", /Ic\("type"\)/.test(e));
+  ok("FIX 3: switching version flushes an in-flight edit", (VARIANTS.match(/flushSave\(\);/g) || []).length >= 3 && /function onVersionPick\(v\) \{\s*flushSave\(\);/.test(VARIANTS));
+  ok("editable badge uses the 'type' glyph (editing this version's text)", /Ic\("type"\)/.test(VARIANTS));
   var css = src("editor.css");
   ok("editor.css disables the version-readonly inspector + styles the notice", /#inspector\.is-version-readonly-panel > \*:not\(\.version-edit-notice\)/.test(css) && /\.version-edit-notice \{/.test(css));
 })();
@@ -12906,7 +13057,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // merge add-if-missing into the target doc.
 (function () {
   section("§96 cross-file paste deps");
-  var ed = src("src/editor.js");
+  var ed = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
+  var CE96 = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var css = src("editor.css");
   var m = ed.match(/\/\* @pastedeps-start \*\/([\s\S]*?)\/\* @pastedeps-end \*\//);
   ok("pastedeps region is extractable", !!m);
@@ -12962,19 +13114,19 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   // the variant-text field placeholder shows the flagship copy with tags stripped.
   ok("switchDoc rebuilds the top-bar variant pill for the new doc", /function switchDoc[\s\S]*mount\(\);\s*renderTabs\(\);\s*renderVariantSwitch\(\);/.test(ed));
   ok("switchDoc drops a variant the new doc doesn't have", /if \(activeVariant && \(doc\.variants \|\| \[\]\)\.indexOf\(activeVariant\) === -1\) activeVariant = null;/.test(ed));
-  ok("variant-text placeholder strips flagship HTML tags", /input\.placeholder = stripToText\(baseFieldValue\(t\.host, f\)\);/.test(ed));
-  ok("variant text-bearing field is an auto-growing textarea", /var multiline = !f\.isSlot \|\| \/obj\|desc\|body\|summary\|para\|text\/i\.test\(f\.key\);[\s\S]*multiline \? h\("textarea", "prop-input prop-input--grow"\)/.test(ed));
-  ok("autoGrowVariant measures with a hidden mirror (never mutates the live field)", /function autoGrowVariant\(ta\)[\s\S]*autoGrowVariant\._mirror[\s\S]*m\.textContent = \(ta\.value \|\| ta\.placeholder \|\| ""\)/.test(ed) && !/ta\.value = ta\.placeholder/.test(ed));
-  ok("autoGrowVariant caps the height at 320px", /Math\.min\(Math\.max\(m\.scrollHeight, 32\), 320\)/.test(ed));
+  ok("variant-text placeholder strips flagship HTML tags", /input\.placeholder = stripToText\(baseFieldValue\(t\.host, f\)\);/.test(VARIANTS));
+  ok("variant text-bearing field is an auto-growing textarea", /var multiline = !f\.isSlot \|\| \/obj\|desc\|body\|summary\|para\|text\/i\.test\(f\.key\);[\s\S]*multiline \? h\("textarea", "prop-input prop-input--grow"\)/.test(VARIANTS));
+  ok("autoGrowVariant measures with a hidden mirror (never mutates the live field)", /function autoGrowVariant\(ta\)[\s\S]*autoGrowVariant\._mirror[\s\S]*m\.textContent = \(ta\.value \|\| ta\.placeholder \|\| ""\)/.test(VARIANTS) && !/ta\.value = ta\.placeholder/.test(VARIANTS));
+  ok("autoGrowVariant caps the height at 320px", /Math\.min\(Math\.max\(m\.scrollHeight, 32\), 320\)/.test(VARIANTS));
 
   // Find & replace: a variant target selector routes replacements to overrides for the
   // chosen variant (and previews it); the core is scoped on frVariant, not activeVariant.
-  ok("F&R dialog targets a chosen frVariant", /var frVariant = activeVariant \|\| "";/.test(ed) && /frCore\.write\(t, frVariant/.test(ed) && /frCore\.targets\(doc, frVariant\)/.test(ed));
-  ok("F&R variant selector previews the chosen layer on the canvas", /var vsel = dsSelect\([\s\S]*previewVariant\(frVariant \|\| null\)/.test(ed));
+  ok("F&R dialog targets a chosen frVariant", /var frVariant = E\.activeVariant \|\| "";/.test(CE96) && /frCore\.write\(t, frVariant/.test(CE96) && /frCore\.targets\(E\.doc, frVariant\)/.test(CE96));
+  ok("F&R variant selector previews the chosen layer on the canvas", /var vsel = dsSelect\([\s\S]*previewVariant\(frVariant \|\| null\)/.test(CE96));
   ok("no stray activeVariant in the F&R replace ops", !/frCore\.write\(t, activeVariant/.test(ed));
 
   // Obvious variant-preview highlight: an inset ring + a floating badge naming the variant.
-  ok("updateVariantBadge shows a canvas badge while previewing a variant", /function updateVariantBadge\(\)[\s\S]*variant-preview-badge[\s\S]*"Previewing variant · " \+ activeVariant/.test(ed));
+  ok("updateVariantBadge shows a canvas badge while previewing a variant", /function updateVariantBadge\(\)[\s\S]*variant-preview-badge[\s\S]*"Previewing variant · " \+ E\.activeVariant/.test(VARIANTS));
   ok("updateVariantBadge is called at the variant-preview toggle", /canvas\.classList\.toggle\("is-variant-preview"[\s\S]*updateVariantBadge\(\);/.test(ed));
   ok("editor.css styles the variant badge + bold preview ring", /\.variant-preview-badge\b/.test(css) && /\.canvas\.is-variant-preview \{ box-shadow:/.test(css));
 })();
@@ -13330,7 +13482,8 @@ section("inline weight on selection");
 // ---- #116 copy-editor view-state (fullscreen alternate view shell) --------
 section("#116 copy-editor shell");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var t = src("src/editor/copy-editor.js");
   // Extract the PURE view-state core (the single source of open/closed logic) and eval it.
   var block = slice(t, "window.copyEditorNextState = function", "// ===== end #116 copy-editor view-state");
   var host = {};
@@ -13351,7 +13504,7 @@ section("#116 copy-editor shell");
   ok("wiring: Close button exits", /getElementById\("copyedit-exit"\)[\s\S]{0,80}addEventListener\("click", exitCopyEditor\)/.test(t));
   ok("wiring: Escape exits when open", /if \(!copyEditorIsOpen\(\)\) return;[\s\S]{0,120}exitCopyEditor\(\)/.test(t));
   ok("wiring: exit re-focuses the active page (canvas restore)", /function exitCopyEditor\(\)[\s\S]{0,700}focusFrame\(p\); setActivePage\(p\); setSelection\("page", p\)/.test(t));
-  ok("wiring: wireCopyEditor called at boot", t.indexOf("wireCopyEditor();") !== -1);
+  ok("wiring: wireCopyEditor called at boot", src("src/editor.js").indexOf("wireCopyEditor();") !== -1);
   var html = src("index.html");
   ok("markup: copy-editor overlay is hidden by default", /<div id="copy-editor" class="copyedit" hidden>/.test(html));
   ok("side-rail-cleanup: the copy-editor rail button is retired from markup", html.indexOf('id="copy-editor-btn"') === -1);
@@ -13397,8 +13550,10 @@ section("#170/#158 shared formatting toggle-bar");
   ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
   ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
-  var cfStart = e.indexOf("function buildCopyFormatBar()");
-  var cfBody = e.slice(cfStart, cfStart + 1500);
+  // arch-P3b-07j: the copy editor's bar moved with the Read view; the field inspector's stayed.
+  var ce = src("src/editor/copy-editor.js");
+  var cfStart = ce.indexOf("function buildCopyFormatBar()");
+  var cfBody = ce.slice(cfStart, cfStart + 1500);
   ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
   ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   // exactly one config-driven toggle list in the whole file (no second duplicate copy).
@@ -13469,47 +13624,51 @@ section("#170/#33 text<->list block-type conversion");
 // ---- SPEC 7: Build/Read view toggle in the editor header (wiring) ----
 section("editor-rework Build/Read toggle");
 (function () {
+  var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var e = src("src/editor.js");
-  ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(e));
-  ok("the toggle offers Build + Read segments as GLYPHS (edit-header-ia-v2)", /options: \[\{ value: "build", icon: "square-pen", title: "Build" \}, \{ value: "read", icon: "file-text", title: "Read" \}\]/.test(e));
-  ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(e));
-  ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(e) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(e));
+  ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(CE));
+  ok("the toggle offers Build + Read segments as GLYPHS (edit-header-ia-v2)", /options: \[\{ value: "build", icon: "square-pen", title: "Build" \}, \{ value: "read", icon: "file-text", title: "Read" \}\]/.test(CE));
+  ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(CE));
+  ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(CE) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(CE));
   ok("the toggle is mounted at boot", /mountViewToggle\(\); \/\/ SPEC 7/.test(e));
   ok("the header carries the view-toggle host", /id="editor-view-toggle"/.test(src("index.html")));
 })();
 
 section("#175 copy-editor format toolbar");
 (function () {
+  var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var e = src("src/editor.js");
-  var bar = slice(e, "function buildCopyFormatBar()", "return bar;\n  }");
+  // The closing brace is one indent deeper inside install().
+  var bar = slice(CE, "function buildCopyFormatBar()", "return bar;\n    }");
   ok("toolbar built once + injected into the copy-editor bar", /getElementById\("copyedit-format"\)[\s\S]*?insertBefore\(bar, host\)/.test(bar));
   // #170/#158: B/I/U/Link now come from the ONE shared canonical toggle-bar builder
   // (buildFormatToggleBar), not a bespoke row -- wired here via io.getNode/io.onChange.
   ok("toolbar uses the shared canonical toggle-bar builder, not a bespoke B/I/U row", /var biu = buildFormatToggleBar\(\{[\s\S]{0,1200}\}\);/.test(bar));
   ok("getNode resolves the active copy row's field", /getNode: function \(\) \{ return _activeCopyRow && _activeCopyRow\.tx; \}/.test(bar));
   ok("onChange commits through commitCopyRow (-> frWrite override layer)", /onChange: function \(\) \{ if \(!_activeCopyRow\) return; commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\); \}/.test(bar));
-  ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(e));
+  ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(CE));
   ok("toolbar uses the shared dsSelect weight picker (no bespoke control)", /dsSelect\(\[\["Weight", ""\], \["Regular", "400"\][\s\S]*?applyCopyWeight/.test(bar));
   ok("weight captures the live row range on mousedown (select steals focus)", /mousedown[\s\S]*?savedRange = \(r && _activeCopyRow/.test(bar));
   // applyCopyWeight: an inline font-weight span (survives sanitizeFieldHtml) committed through commitCopyRow
-  var acw = slice(e, "function applyCopyWeight(", "\n  }\n  function buildCopyFormatBar");
+  var acw = slice(CE, "function applyCopyWeight(", "\n    }\n    function buildCopyFormatBar");
   ok("applyCopyWeight wraps the selection in a font-weight span", /span\.style\.fontWeight = weight[\s\S]*?surroundContents\(span\)/.test(acw));
   ok("applyCopyWeight falls back to whole-row when nothing is selected", /r\.selectNodeContents\(tx\)/.test(acw));
   ok("applyCopyWeight commits via commitCopyRow (variant-aware frWrite)", /commitCopyRow\(t, tx, _activeCopyRow\.variant\)/.test(acw));
   // seed-from-flagship: frValueOf falls back to the base value when a variant has no override,
   // so a first variant edit starts from the flagship's rich HTML (inline weight spans intact).
-  var fr = slice(e, "function frValueOf(t, variant)", "function frWrite");
+  var fr = slice(CE, "function frValueOf(t, variant)", "function frWrite");
   ok("frValueOf falls back to the flagship base value (seeds variant rich text)", /return t\.host\[t\.key\] != null \? String\(t\.host\[t\.key\]\) : ""/.test(fr));
   // active-row tracking + teardown
-  ok("active row tracked on focus", /addEventListener\("focus", function \(\) \{ _activeCopyRow = \{ tx: tx, t: t, variant: variant == null \? activeVariant : variant \};/.test(e));
-  ok("active row dropped when rows rebuild + on exit", /_activeCopyRow = null; refreshCopyFormatState\(\)/.test(e) && /_activeCopyRow = null; \/\/ #175/.test(e));
+  ok("active row tracked on focus", /addEventListener\("focus", function \(\) \{ _activeCopyRow = \{ tx: tx, t: t, variant: variant == null \? activeVariant : variant \};/.test(CE));
+  ok("active row dropped when rows rebuild + on exit", /_activeCopyRow = null; refreshCopyFormatState\(\)/.test(CE) && /_activeCopyRow = null; \/\/ #175/.test(CE));
   ok("invariant: toolbar is Verso UI only — no render.js leak", src("src/render.js").indexOf("copyedit__format") === -1 && src("src/render.js").indexOf("applyCopyWeight") === -1);
 })();
 
 // ---- #117 copy-editor read-only document (frTargets + roles + page groups) ----
 section("#117 copy-editor read-only doc");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   // real frTargets + frValueOf (the writable spine) from the F&R fence
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   var fr = new Function(e.slice(a, b) + "\nreturn { targets: frTargets, valueOf: frValueOf };")();
@@ -13559,18 +13718,20 @@ section("#117 copy-editor read-only doc");
 
   // wiring: enter paints the doc; a VIEW over frValueOf, never a store
   ok("wiring: enterCopyEditor renders the doc", /function enterCopyEditor\(\)[\s\S]{0,320}renderCopyEditorDoc\(\)/.test(e));
-  ok("wiring: builder reads frTargets + frValueOf (model, not store)", /frTargets\(doc, listVariant\)\.map[\s\S]{0,140}frValueOf\(t, listVariant\)/.test(e));
+  ok("wiring: builder reads frTargets + frValueOf (model, not store)", /frTargets\(E\.doc, listVariant\)\.map[\s\S]{0,140}frValueOf\(t, listVariant\)/.test(e));
   ok("wiring: rows carry a role tag + preserved inline HTML", /copyedit-row__role[\s\S]{0,220}tx\.innerHTML = row\.html/.test(e));
-  ok("wiring: read-only chapter/page location header", /copyedit-loc__chapter[\s\S]{0,160}pageDisplayName\(page, doc\)/.test(e));
+  ok("wiring: read-only chapter/page location header", /copyedit-loc__chapter[\s\S]{0,160}pageDisplayName\(page, E\.doc\)/.test(e));
 })();
 
 // ---- #118 copy-editor two-way editing (write-back + rich-preserving + variant) ----
 section("#118 copy-editor two-way editing");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  // sanitizeFieldHtml stayed in editor.js, so this section reads both files.
+  var e = src("src/editor/copy-editor.js"), ed = src("src/editor.js");
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   var fr = new Function(e.slice(a, b) + "\nreturn { targets: frTargets, valueOf: frValueOf, write: frWrite };")();
-  var sm = e.match(/\/\* @sanitize-field-start \*\/([\s\S]*?)\/\* @sanitize-field-end \*\//);
+  var sm = ed.match(/\/\* @sanitize-field-start \*\/([\s\S]*?)\/\* @sanitize-field-end \*\//);
   var san = new Function(sm[1] + "\nreturn sanitizeFieldHtml;")();
 
   // BASE write-back: an edit writes host[key] on the ONE doc (no parallel store)
@@ -13610,14 +13771,15 @@ section("#118 copy-editor two-way editing");
 // ---- #119 copy-editor tools (word count + spellcheck + F&R reuse) ---------
 section("#119 copy-editor tools");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   var fr = new Function(e.slice(a, b) + "\nreturn { targets: frTargets, valueOf: frValueOf, words: frWords };")();
   // the header count reuses the SAME base-scope formula the F&R panel shows (#78)
   var d = { pages: [{ id: "p", blocks: [{ type: "heading", text: "One two three" }, { type: "paragraph", text: "four five" }] }] };
   var frTotal = fr.targets(d, "").reduce(function (n, t) { return n + fr.words(fr.valueOf(t, "")); }, 0);
   ok("fixture F&R word total is 5", frTotal === 5);
-  ok("wiring: word count reuses frWords over frTargets base scope (matches F&R)", /function copyEditorWordTotal\(\) \{\s*return frTargets\(doc, ""\)\.reduce\(function \(n, t\) \{ return n \+ frWords\(frValueOf\(t, ""\)\); \}, 0\);/.test(e));
+  ok("wiring: word count reuses frWords over frTargets base scope (matches F&R)", /function copyEditorWordTotal\(\) \{\s*return frTargets\(E\.doc, ""\)\.reduce\(function \(n, t\) \{ return n \+ frWords\(frValueOf\(t, ""\)\); \}, 0\);/.test(e));
   ok("wiring: header shows word count + Find & replace", /copyedit-wordcount[\s\S]{0,1800}"Find & replace"/.test(e)); // #104: the Single|Side-by-side toggle now sits between them
   ok("wiring: native spellcheck ON for editable rows", /tx\.setAttribute\("spellcheck", "true"\)/.test(e));
   ok("wiring: Find & replace opens the EXISTING modal (reuse)", /find\.addEventListener\("click", function \(\) \{ openFindReplace\(\); \}\)/.test(e));
@@ -13629,7 +13791,8 @@ section("#119 copy-editor tools");
 // ---- #104 copy-editor Side-by-side variant columns -----------------------
 section("#104 copy-editor variant columns");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   var css = src("editor.css");
   // real frTargets/frValueOf/frWrite + the new frHasOverride from the F&R fence
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
@@ -13664,7 +13827,7 @@ section("#104 copy-editor variant columns");
   ok("create-from-flagship seeds the override from base", fr.valueOf(t2, "V1") === "Flagship copy" && d2.pages[0].blocks[0].text === "Flagship copy");
 
   // wiring: gated toggle, sbs render branch, per-cell lock + create, transient unlock
-  ok("wiring: Single|Side-by-side toggle gated on doc.variants", /if \(\(doc\.variants \|\| \[\]\)\.length\) \{[\s\S]{0,260}\["Single", false\], \["Side by side", true\]/.test(e));
+  ok("wiring: Single|Side-by-side toggle gated on doc.variants", /if \(\(E\.doc\.variants \|\| \[\]\)\.length\) \{[\s\S]{0,260}\["Single", false\], \["Side by side", true\]/.test(e));
   ok("wiring: toggle uses the canonical prop-toggle-row (SegmentedControl)", /h\("div", "prop-toggle-row copyedit-modeseg"\)/.test(e));
   ok("wiring: render branches to side-by-side when on + course has variants", /var sbs = copyEditSbs && cols\.length;/.test(e) && /if \(sbs\) \{ host\.appendChild\(buildSbsRow\(row, cols, tmpl\)\); return; \}/.test(e));
   ok("wiring: one column header, not per page group", (e.match(/h\("div", "copyedit-colhead"\)/g) || []).length === 1);
@@ -14196,7 +14359,10 @@ section("editor-rework source insert + two-way jump");
   ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(cx, cy\)/.test(e));
   ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
   ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
-  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
+  // arch-P3b-07: the stage owns that state, so the jump asks it to open the topic (which persists
+  // it for the next refresh) rather than writing the stage's variable from outside.
+  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}openSourceTopicId\(topicId\);[\s\S]{0,120}setStage\("source"\)/.test(e));
+  ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
 })();
 
 // ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
@@ -16127,14 +16293,16 @@ section("arch-P1 render-context");
   ok("export.js assigns no render hook directly" + (strayExport.length ? " -- STRAY: " + strayExport.join(", ") : ""), strayExport.length === 0);
 
   ok("the editor canvas builds its context from the doc it is about to render", /window\.applyRenderContext\(window\.buildRenderContext\(renderDoc\)\)/.test(ed));
-  ok("the editor preview builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ed));
+  ok("the editor preview builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(E\.doc\)\)/.test(src("src/editor/demo.js")));
   ok("the export builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ex));
 
   // Same call SHAPE on both sides: one argument, the doc. A caller that starts passing its own
   // opts is a caller that can diverge, so it fails here rather than in a shipped package.
-  var callShapes = (ed + ex).match(/buildRenderContext\([^)]*\)/g) || [];
+  // arch-P3b-07j: the preview is its own file now, and reads the live document through the
+  // namespace, so `E.doc` is a doc reference like any other here.
+  var callShapes = (ed + ex + src("src/editor/demo.js")).match(/buildRenderContext\([^)]*\)/g) || [];
   ok("every caller passes the doc and nothing else (no per-caller opts)",
-    callShapes.length >= 3 && callShapes.every(function (c) { return /^buildRenderContext\([A-Za-z_$][\w$]*\)$/.test(c); }));
+    callShapes.length >= 3 && callShapes.every(function (c) { return /^buildRenderContext\((?:E\.)?[A-Za-z_$][\w$]*\)$/.test(c); }));
 
   // render.js reads through the one accessor, so the set of things render depends on stays
   // enumerable -- and dropping the globals is a one-function change.

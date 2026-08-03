@@ -2930,7 +2930,7 @@
     } else {
       mount();
     }
-    if (typeof rebindTourBuilderToLiveDoc === "function") rebindTourBuilderToLiveDoc(); // keep an open builder bound to the restored doc
+    rebindTourBuilderToLiveDoc(); // keep an open builder bound to the restored doc
   }
   // Making a different course the active one. Tab click, tab close, course delete: all three
   // move the id, the live doc and the registry entry together, drop the outgoing course's undo
@@ -6546,7 +6546,7 @@
     crossRefRow({
       label: "Previewing", value: activeVariant || "Flagship", linkLabel: "Variant switcher",
       title: "Open the top-bar variant switcher",
-      onNavigate: function () { if (variantSwitchEl) openVariantMenu(variantSwitchEl); }
+      onNavigate: function () { openVariantMenuAtSwitch(); }
     });
     names.forEach(function (V) {
       var own = imgVariantSrc(block, V);
@@ -6954,6 +6954,7 @@
   var tourBoardIsOpen = VE.bind("tourBoardIsOpen");
   var syncTourBoard = VE.bind("syncTourBoard");
   var maybeReopenTourBuilder = VE.bind("maybeReopenTourBuilder");
+  var rebindTourBuilderToLiveDoc = VE.bind("rebindTourBuilderToLiveDoc");   // arch-P3b-07
 
   // A section built for an imperative caller: appends it to `host` and hands back the BODY, so
   // the rows that follow append into the section rather than beside it. uio-O-W2 (OVL-07): this
@@ -7238,6 +7239,13 @@
   var backupSlug = VE.bind("backupSlug");
   var backupMode = VE.bind("backupMode");
   var connectBackupFolder = VE.bind("connectBackupFolder");
+  // arch-P3b-07: these five stayed as bare call sites when the region moved, so they threw the
+  // moment their path ran -- the publish destination handles and the two folder buttons.
+  var loadBackupHandle = VE.bind("loadBackupHandle");
+  var saveBackupHandle = VE.bind("saveBackupHandle");
+  var bindProjectFolder = VE.bind("bindProjectFolder");
+  var reconnectBackupFolder = VE.bind("reconnectBackupFolder");
+  var backupHandleSet = VE.bind("backupHandleSet");
 
   function renderPipelineButtons(container) {
     container.innerHTML = "";
@@ -7554,6 +7562,14 @@
   var unifiableTopicsFor = VE.bind("unifiableTopicsFor");
   var updateSourceDocBar = VE.bind("updateSourceDocBar");
   var pushSourceAlternate = VE.bind("pushSourceAlternate");
+  // arch-P3b-07: the base-edit warning and the two-way jump kept reading the stage's state by
+  // name after it moved. They ask through these instead.
+  var sourceDocModel = VE.bind("sourceDocModel");
+  var setSourceDocModel = VE.bind("setSourceDocModel");
+  var sourceActiveTopicId = VE.bind("sourceActiveTopicId");
+  var openSourceTopicId = VE.bind("openSourceTopicId");
+  var lockSourceEditing = VE.bind("lockSourceEditing");
+  var clearSourceEditSession = VE.bind("clearSourceEditSession");
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {
@@ -8328,7 +8344,7 @@
   function buildBackupBody(c) {
     c.appendChild(h("div", "insp-hint", "Auto-save a durable copy of this course to a real folder (e.g. its OneDrive project folder) on every change. Writes a self-contained " + backupSlug() + ".json (fully restorable, images included) + " + backupSlug() + ".schema.csv, plus timestamped snapshots. The live app storage is not a file — this is your hard backup."));
     var bound = !!(doc && doc.backup);
-    var connected = bound && (backupMode() === "native" ? !!doc.backup.folderPath : !!backupHandle);
+    var connected = bound && (backupMode() === "native" ? !!doc.backup.folderPath : backupHandleSet());
     var row = h("div", "insp-row");
     var lbl = h("span", "insp-row__label"); lbl.style.flex = "1 1 auto";
     lbl.textContent = bound
@@ -8569,6 +8585,9 @@
   var makeCourseNav = VE.bind("makeCourseNav");
   var headerFooterConfig = VE.bind("headerFooterConfig");
   var hfSectionOpts = VE.bind("hfSectionOpts");
+  // arch-P3b-07: the nav's controls are drawn from two places here and neither was bound.
+  var courseNavControls = VE.bind("courseNavControls");
+  var courseNavNests = VE.bind("courseNavNests");
 
 
   // ---- theme controls (collapsible Theme section) --------------------------
@@ -12764,7 +12783,7 @@
   // On unlock: snapshot each link mark's current wording (so "fork" can freeze it) + the whole model
   // (so "cancel" can revert the edits). Only when the doc actually carries link marks.
   function snapshotSourceLinkBase() {
-    var SD = window.SourceDoc, model = __sourceDocModel;
+    var SD = window.SourceDoc, model = sourceDocModel();
     __sourceLinkOldText = null; __sourcePreEditModelJson = null;
     if (!SD || !model || !(model.marks || []).some(function (m) { return m.type === "link"; })) return;
     __sourceLinkOldText = {};
@@ -12773,15 +12792,15 @@
   }
   // The blast radius of the just-finished edit session: base-showing locations of edited link marks.
   function sourceBaseEditImpact() {
-    var SD = window.SourceDoc, model = __sourceDocModel;
+    var SD = window.SourceDoc, model = sourceDocModel();
     if (!SD || !model || !__sourceLinkOldText) return { affected: [], pinned: [], editedMarks: [] };
-    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(__sourceActiveTopicId, null));
+    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(sourceActiveTopicId(), null));
   }
   // "Keep as-is (fork)": freeze each edited link mark's OLD wording as an alternate on the master,
   // and pin every affected (base-showing) location -- in whatever document uses it -- to that
   // alternate. The source base then moves on; those placements keep the old words.
   function forkAffectedToAlternate(impact) {
-    var SD = window.SourceDoc, model = __sourceDocModel, reg = registry, byMark = {};
+    var SD = window.SourceDoc, model = sourceDocModel(), reg = registry, byMark = {};
     impact.affected.forEach(function (loc) { (byMark[loc.markId] = byMark[loc.markId] || []).push(loc); });
     Object.keys(byMark).forEach(function (markId) {
       var link = SD.markById(model, markId); if (!link) return;
@@ -12793,16 +12812,16 @@
   }
   function finalizeSourceLock(topic, opts) {
     flushSourceEditSession(topic, { prompt: opts.prompt });
-    __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    lockSourceEditing(); __sourceLinkOldText = null; __sourcePreEditModelJson = null;
     applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
   }
   function revertSourceEditSession(topic) {
     var SD = window.SourceDoc;
     if (SD && __sourcePreEditModelJson && topic) {
-      __sourceDocModel = SD.fromJSON(__sourcePreEditModelJson); __sourceDocModelTopicId = topic.id;
-      persistSourceDocModel(topic, __sourceDocModel);
+      setSourceDocModel(SD.fromJSON(__sourcePreEditModelJson), topic.id);
+      persistSourceDocModel(topic, sourceDocModel());
     }
-    __sourceEditSession = null; __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    clearSourceEditSession(); lockSourceEditing(); __sourceLinkOldText = null; __sourcePreEditModelJson = null;
     renderSourceArticle();
     sourceToast("Edit cancelled.");
   }
@@ -12853,8 +12872,7 @@
   // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
   function jumpToSourceTopic(topicId) {
     if (!topicId) return;
-    __sourceActiveTopicId = topicId;
-    try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, topicId); } catch (e) {}
+    openSourceTopicId(topicId);
     setStage("source");
   }
   // Two-way link, direction 1: open the doc, land in Edit, and select the exact linked block.
@@ -13162,7 +13180,7 @@
     } else if (e.key === "." && !meta && !isTextTarget(e.target)) {
       e.preventDefault();
       fitSelection();
-    } else if ((e.key === "c" || e.key === "C") && !meta && !e.shiftKey && !isTextTarget(e.target) && demo.hidden) {
+    } else if ((e.key === "c" || e.key === "C") && !meta && !e.shiftKey && !isTextTarget(e.target) && !demoIsOpen()) {
       e.preventDefault();
       setCommentMode(!commentMode); // §12: toggle canvas comment mode (demo has its own C)
     } else if (e.key === "Escape" && !isTextTarget(e.target)) {
@@ -13651,15 +13669,15 @@
       inMode: function () { return commentMode; } };
   }
   function demoSurf() {
-    return { name: "demo", root: demoDevice, layerParent: demoStage,
+    return { name: "demo", root: demoDeviceEl(), layerParent: demoStageEl(),
       getLayer: function () { if (!demoPinLayer) demoPinLayer = h("div", "comment-pin-layer"); return demoPinLayer; },
-      rect: function () { return demoStage.getBoundingClientRect(); }, allowWorld: false,
+      rect: function () { return demoStageEl().getBoundingClientRect(); }, allowWorld: false,
       worldToPx: function () { return null; }, // world/general pins are canvas-only
       inMode: function () { return demoCommentMode; } };
   }
   // Demo is the active surface WHENEVER the preview overlay is open (pins are shown
   // there in read mode too); demoCommentMode only gates DROPPING new pins.
-  function activeSurf() { return (demo && !demo.hidden) ? demoSurf() : canvasSurf(); }
+  function activeSurf() { return demoIsOpen() ? demoSurf() : canvasSurf(); }
 
   function setCommentMode(on) {
     on = !!on;
@@ -13923,7 +13941,7 @@
       try { reapplyStructural(loc.pi); } catch (e) { try { mount(); } catch (e2) {} } // re-render just that page (mount() if previewing)
       // a remote block.change swaps the block OBJECT -> if the tour builder is open on that same
       // block, its captured reference just went stale; re-bind it to the live doc (same guard as undo/setDoc).
-      if (typeof rebindTourBuilderToLiveDoc === "function") { try { rebindTourBuilderToLiveDoc(); } catch (e) {} }
+      try { rebindTourBuilderToLiveDoc(); } catch (e) {}
       reproject();
     }
     function flushPending() {
@@ -14561,7 +14579,7 @@
     on = !!on;
     if (demoCommentMode === on) return;
     demoCommentMode = on;
-    demoStage.classList.toggle("is-comment-mode", demoCommentMode);
+    demoStageEl().classList.toggle("is-comment-mode", demoCommentMode);
     if (demoCommentBtn) demoCommentBtn.classList.toggle("is-active", demoCommentMode);
     if (!demoCommentMode) closeCommentPopover();
     renderCommentPins();
@@ -14589,7 +14607,7 @@
   // While commenting, swallow preview clicks so a note-drop never triggers nav.
   if (_demoDeviceEl) _demoDeviceEl.addEventListener("click", function (e) { if (demoCommentMode) { e.preventDefault(); e.stopPropagation(); } }, true);
   // Content scrolls inside the device -> re-project pins to follow it.
-  if (_demoStageEl) _demoStageEl.addEventListener("scroll", function () { if (demo && !demo.hidden) renderCommentPins(); }, true);
+  if (_demoStageEl) _demoStageEl.addEventListener("scroll", function () { if (demoIsOpen()) renderCommentPins(); }, true);
 
   canvas.addEventListener("mousedown", function (e) {
     var onBg = e.target === canvas || e.target === world || (e.target.classList && e.target.classList.contains("connectors"));
@@ -14772,675 +14790,23 @@
   }
 
   // ---- demo mode (fullscreen, simulates the real learner experience) -------
-  // A real device viewport (breakpoint-sized) with REAL scroll, its own
-  // breakpoint toggle and page prev/next. This is where scrolling belongs;
-  // the authoring canvas stays full-length + fold marker.
-  var demo = document.getElementById("demo");
-  var demoStage = document.getElementById("demo-stage");
-  var demoScaler = document.getElementById("demo-scaler");
-  var demoDevice = document.getElementById("demo-device");
-  // Item X — learner mode-toggle preview parity. In demo the toggle is a real
-  // control (editing is off, so the click fires instead of editing the label). One
-  // delegated listener flips the demo course-root's data-mode + re-pushes the theme
-  // into embeds, mirroring the exported runtime's toggleTheme(). demoDevice persists
-  // across renderDemo() (its children are replaced, not the node), so bind once.
-  demoDevice.addEventListener("click", function (e) {
-    if (!e.target.closest("[data-mode-toggle]")) return;
-    e.preventDefault();
-    activeMode = activeMode === "dark" ? "light" : "dark";
-    persistTheme();
-    // Re-theme the EXISTING demo course-root in place (rewrite the inline --color-*
-    // tokens + re-stamp data-mode + CSS-driven glyph swap), mirroring the editor
-    // CANVAS's reapplyTheme -- NOT a renderDemo() rebuild. A rebuild tears the DOM
-    // down (demoDevice.innerHTML="") and recreates it already painted in the new
-    // mode, so there is no old->new value change for the [data-mode] crossfade to
-    // animate (the §1 hard-cut James saw in preview). Mutating in place changes the
-    // consuming background-color/color, so the course.css transition fades -- and it
-    // also preserves the live QuizRuntime/gate state across a mode flip (no re-seed).
-    var __t = activeTheme();
-    var __roots = demoDevice.querySelectorAll(".course-root");
-    if (__roots.length) {
-      Array.prototype.forEach.call(__roots, function (r) { window.applyTheme(r, __t); r.setAttribute("data-mode", activeMode); });
-      demoDevice.style.backgroundColor = __t.color.bg; // device backdrop behind the (filling) root
-    } else {
-      renderDemo(); // nothing mounted yet -> full render
-    }
-    if (window.pushEmbedTheme) window.pushEmbedTheme(demoDevice, activeMode, __t.color);
-  });
-  var demoTitle = document.getElementById("demo-title");
-  var demoBpBtns = [];
-  var demoBp = "auto", demoPage = 0;
-  // Chapter-change fade in the DEMO: renderDemo() re-creates the runtime every nav, so
-  // the runtime's own lastChapter (a closure var) resets each time and never detects a
-  // crossing — track the previous chapter HERE (survives the rebuild) so the fade fires
-  // in preview too, matching the export. undefined = first render (no fade). (Bug 2026-07-08.)
-  var demoPrevChapter;
-  // Interaction runtime for preview parity (SPEC §7): the SAME CourseRuntime the
-  // exported package runs, fed buildInteractionMap(doc), over a nav adapter that
-  // re-renders the demo page. `demoStore` persists visited/watched/checked across
-  // per-page re-renders so gate state survives navigation.
-  var demoRuntime = null;
-  var demoStore = { visited: {}, watched: {}, checked: {} };
-  function demoNavAdapter() {
-    return {
-      count: function () { return doc.pages.length; },
-      pageIds: function () { return doc.pages.map(function (p) { return p.id; }); },
-      currentPageId: function () { return doc.pages[demoPage] ? doc.pages[demoPage].id : null; },
-      goto: function (id) { var i = pageIndexById(id); if (i < 0) return false; if (i !== demoPage) { demoPage = i; renderDemo(); } return true; },
-      next: function () { var i = clamp(demoPage + 1, 0, doc.pages.length - 1); if (i !== demoPage) { demoPage = i; renderDemo(); } },
-      prev: function () { var i = clamp(demoPage - 1, 0, doc.pages.length - 1); if (i !== demoPage) { demoPage = i; renderDemo(); } }
-    };
-  }
+  // arch-P3b-07j: the preview -- the device frame, the breakpoint picker, the fit-scale and the
+  // end screen -- moved to editor/demo.js. It owns its elements; four accessors cross.
+  var enterDemo = VE.bind("enterDemo");
+  var exitDemo = VE.bind("exitDemo");
+  var wireDemo = VE.bind("wireDemo");
+  var demoIsOpen = VE.bind("demoIsOpen");
+  var demoStageEl = VE.bind("demoStageEl");
+  var demoDeviceEl = VE.bind("demoDeviceEl");
+  var demoRuntimeNow = VE.bind("demoRuntimeNow");
 
-  // Which breakpoint an actual width maps to (Auto mode = real responsive).
-  function bpForWidth(w) { if (w < 600) return "mobile"; if (w < 1000) return "tablet"; return "desktop"; }
+  // arch-P3b-07j: the Read view and the find & replace it is a list-shaped version of both moved
+  // to editor/copy-editor.js. They were 900 lines apart here and share one write path.
+  var openFindReplace = VE.bind("openFindReplace");
+  var frWords = VE.bind("frWords");
+  var wireCopyEditor = VE.bind("wireCopyEditor");
+  var mountViewToggle = VE.bind("mountViewToggle");
 
-  // Scale a forced-device screen (dw x dh) to FIT the stage, keeping its ratio,
-  // so it fills the available space (enlarges when the device is smaller than the
-  // stage, shrinks when larger). Vertical fit unless width is the tighter bound.
-  function demoFitScale(dw, dh) {
-    return Math.min(demoStage.clientWidth / dw, demoStage.clientHeight / dh);
-  }
-  // Transient centred notice over the preview device (editor chrome). Used by the
-  // demo onExit override so an "Exit course" click gives visible feedback without
-  // ending a SCORM session or closing the window (neither exists / is wanted here).
-  function flashDemoNotice(msg) {
-    var host = demoStage || demoDevice;
-    if (!host) return;
-    var n = h("div", "demo-notice", msg);
-    n.style.cssText = "position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;" +
-      "background:rgba(20,22,26,0.92);color:#fff;padding:12px 18px;border-radius:10px;" +
-      "font-size:13px;max-width:70%;text-align:center;box-shadow:0 6px 24px rgba(0,0,0,0.35);pointer-events:none;";
-    host.appendChild(n);
-    setTimeout(function () { if (n.parentNode) n.parentNode.removeChild(n); }, 2200);
-  }
-  // #111 preview: render the real completion splash over the demo stage on "Exit course",
-  // with meta filled from the demo's visited state (mirrors the export boot's fillEndMeta).
-  // Click it to return to the course. Editor-only (Demo is the author's learner preview).
-  function previewEndScreen() {
-    if (!(window.renderEndScreen && (!window.endScreenOn || window.endScreenOn(doc)))) {
-      flashDemoNotice("Exit course — ends the SCORM session in the LMS.");
-      return;
-    }
-    var host = window.renderEndScreen(doc);
-    var total = parseInt(host.getAttribute("data-modules-total"), 10) || 0;
-    var vis = (demoStore && demoStore.visited) || {};
-    var done = total, mapAttr = host.getAttribute("data-modules-map");
-    if (mapAttr) { try { done = JSON.parse(mapAttr).filter(function (ids) { return ids.length && ids.every(function (id) { return !!vis[id]; }); }).length; } catch (e) {} }
-    else { var c = 0; for (var k in vis) if (vis[k]) c++; done = total ? Math.min(c, total) : c; }
-    var mval = host.querySelector('[data-end-chip="modules"] .course-end__chip-val');
-    if (mval) { if (total > 0) mval.textContent = done + " / " + total; else { var mc = host.querySelector('[data-end-chip="modules"]'); if (mc) mc.setAttribute("data-end-empty", "1"); } }
-    var dval = host.querySelector('[data-end-chip="date"] .course-end__chip-val');
-    if (dval) { try { dval.textContent = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); } catch (e) {} }
-    host.setAttribute("data-mode", activeMode);
-    host.setAttribute("data-bp", demoBp === "auto" ? bpForWidth(demoStage.clientWidth) : demoBp);
-    host.setAttribute("data-env", "runtime");
-    host.style.cursor = "pointer"; host.title = "Preview of the learner exit screen — click to return to the course";
-    (host.querySelector(".course-end") || host).classList.add("is-shown");
-    host.addEventListener("click", function () { renderDemo(); });
-    demoDevice.innerHTML = ""; demoDevice.appendChild(host);
-  }
-  function renderDemo() {
-    demoDevice.innerHTML = "";
-    demoDevice.style.backgroundColor = activeTheme().color.bg;
-    if (demoBp === "auto") {
-      // Auto = view through the author's actual monitor: fill the whole stage.
-      demoDevice.style.width = "100%"; demoDevice.style.maxWidth = "none"; demoDevice.style.height = "100%";
-      demoDevice.style.zoom = ""; // auto: no zoom, fills the real monitor
-      demoDevice.classList.remove("demo__device--framed");
-    } else {
-      // Forced device = the breakpoint's EXACT pixel size (no fit-scaling): a fixed
-      // w x h window floating in the black stage. The .demo__scaler centres it and
-      // scrolls when it is larger than the stage; content scrolls INSIDE the device.
-      // So #42's custom preview sizes render 1:1 (a 1440px desktop shows at 1440px),
-      // instead of being shrunk to the author's monitor height.
-      var dw = BREAKPOINTS[demoBp].w, dh = (BREAKPOINTS[demoBp] && BREAKPOINTS[demoBp].h) || demoStage.clientHeight;
-      demoDevice.style.width = dw + "px"; demoDevice.style.maxWidth = "none"; demoDevice.style.height = dh + "px";
-      demoDevice.style.zoom = ""; // exact pixels — do NOT scale the device to the stage
-      // Without the zoom containing block, a runtime position:fixed nav would escape to
-      // the app viewport (ghost pill), so EVERY forced device is framed (inline nav +
-      // subtle edge), desktop included (it no longer fills the viewport at 1:1).
-      demoDevice.classList.add("demo__device--framed");
-    }
-    var __rmDemo = (window.resolveMedia && window.AssetStore) ? window.resolveMedia(doc, editorAssetResolve) : null;
-    var cr;
-    // arch-P1: preview renders through the same one render context as the canvas and the export.
-    window.applyRenderContext(window.buildRenderContext(doc));
-    try { cr = window.renderPage(doc.pages[demoPage], activeTheme(), window.resolveHeaderFooter(doc, doc.pages[demoPage])); }
-    finally { if (__rmDemo) __rmDemo(); }
-    var __demoBp = demoBp === "auto" ? bpForWidth(demoStage.clientWidth) : demoBp;
-    cr.setAttribute("data-bp", __demoBp);
-    cr.setAttribute("data-mode", activeMode);
-    cr.setAttribute("data-env", "runtime"); // VVVV: preview is a learner runtime -> footer floats as pills (canvas stays inline)
-    applyLayoutVars(cr, doc.pages[demoPage]);
-    // Auto scales to the real monitor (stage height); a forced device uses its
-    // fixed fold height (set on demoDevice above), so content scrolls inside it.
-    var devH = demoBp === "auto" ? demoStage.clientHeight : ((BREAKPOINTS[demoBp] && BREAKPOINTS[demoBp].h) || demoStage.clientHeight);
-    cr.style.setProperty("--vp-h", devH + "px");
-    demoDevice.appendChild(cr);
-    // §2 chapter-change fade (preview parity): on a page whose chapter differs from the
-    // last rendered one, re-trigger the .is-chapter-enter opacity fade on the fresh demo
-    // box. CSS owns the duration (--motion-chapter-fade) + the prefers-reduced-motion skip.
-    var __demoCh = doc.pages[demoPage] && doc.pages[demoPage].chapterId;
-    if (demoPrevChapter !== undefined && __demoCh && __demoCh !== demoPrevChapter) {
-      cr.classList.remove("is-chapter-enter"); void cr.offsetWidth; cr.classList.add("is-chapter-enter");
-    }
-    demoPrevChapter = __demoCh;
-    if (window.QuizRuntime) window.QuizRuntime.init(cr); // play the quiz for real in demo
-    // interaction runtime (parity with the exported package): bind click actions,
-    // media/checkbox emitters + reactive gates. Re-seed persisted state so gates
-    // that were satisfied on other pages stay satisfied.
-    if (window.CourseRuntime) {
-      demoRuntime = window.CourseRuntime.create({
-        root: cr,
-        interactions: window.buildInteractionMap(doc),
-        nav: demoNavAdapter(),
-        // "Exit course" DO-action in PREVIEW: the real behaviour ends the SCORM
-        // session + closes the window, neither of which should touch the editor.
-        // Override with a transient notice so the author sees the action fired
-        // without leaving the app. Editor chrome only (inline styled, not shipped).
-        onExit: function () { previewEndScreen(); },
-        onStateChange: function (st) {
-          ["visited", "watched", "checked"].forEach(function (k) {
-            Object.keys(st[k]).forEach(function (id) { demoStore[k][id] = st[k][id]; });
-          });
-        }
-      });
-      ["watched", "checked"].forEach(function (k) {
-        Object.keys(demoStore[k]).forEach(function (id) { if (demoStore[k][id]) demoRuntime.setState(k, id, true); });
-      });
-    }
-    demoTitle.textContent = doc.pages[demoPage].name;
-    demoBpBtns.forEach(function (b) { b.classList.toggle("is-active", b.getAttribute("data-bp") === demoBp); });
-    // §12 slice 4: the demo renders via the PURE renderPage (no data-cid), so stamp
-    // the comment-anchor ids here (editor chrome, same as enableEditing does on the
-    // canvas) and re-project the shared pins onto the preview.
-    stampDemoCids(cr);
-    // Push the active theme (tokens + each block's embedColorMap) INTO the preview's
-    // embed iframes. renderDemo rebuilds fresh iframes every entry / page-nav, and the
-    // canvas reapplyTheme / boot push only target `canvas`, never demoDevice — so
-    // without this the preview shows each interaction on its OWN default palette (the
-    // author's mapped colours "change" on entering preview). pushEmbedTheme binds a
-    // per-frame load listener, so iframes still loading get themed when they finish.
-    requestAnimationFrame(function () {
-      fitEmbedsIn(demoDevice); renderCommentPins();
-      if (window.pushEmbedTheme) window.pushEmbedTheme(demoDevice, activeMode, activeTheme().color);
-    });
-  }
-  // §12 slice 4: stamp data-cid on the demo course-root's blocks for hit-testing.
-  function stampDemoCids(cr) {
-    if (!cr) return;
-    Array.prototype.forEach.call(cr.querySelectorAll(".canvas-block"), function (n) {
-      if (n.__block && n.__block.cid) n.setAttribute("data-cid", n.__block.cid);
-    });
-  }
-  // resized while in demo: in Auto, re-evaluate the breakpoint live (no iframe
-  // reload — just swap data-bp + re-fit embeds)
-  function onDemoResize() {
-    if (demo.hidden) return;
-    var cr = demoDevice.querySelector(".course-root");
-    if (!cr) return;
-    // Only Auto tracks the live monitor size on resize; a forced device stays a
-    // fixed screen.
-    if (demoBp === "auto") {
-      var rbp = bpForWidth(demoStage.clientWidth);
-      if (cr.getAttribute("data-bp") !== rbp) cr.setAttribute("data-bp", rbp);
-      demoDevice.style.height = "100%";
-      cr.style.setProperty("--vp-h", demoStage.clientHeight + "px");
-    } else {
-      // Forced device is a fixed-pixel window; resizing the app just re-centres/scrolls
-      // it (handled by .demo__scaler) — nothing to rescale, exact pixels are preserved.
-      demoDevice.style.zoom = "";
-    }
-    fitEmbedsIn(demoDevice);
-  }
-  function stepDemo(d) { demoPage = clamp(demoPage + d, 0, doc.pages.length - 1); renderDemo(); }
-  // Set the preview screen size (Auto/desktop/tablet/mobile) -- used by the demo
-  // toolbar buttons AND the 1/2/3/4 keys.
-  function setDemoBp(bp) { if (demoBp === bp) return; demoBp = bp; renderDemo(); }
-  function enterDemo() {
-    // NOTE: do not force browser fullscreen — that locks the window size and you
-    // couldn't resize to test breakpoints. The overlay is fixed/inset:0 so it
-    // already fills the app window; fullscreen is an opt-in button.
-    demoBp = "auto"; demoPage = currentPage || 0;
-    demoStore = { visited: {}, watched: {}, checked: {} }; // fresh run each session
-    demoCommentMode = false; demoStage.classList.remove("is-comment-mode"); // §12: start in read mode
-    if (demoCommentBtn) demoCommentBtn.classList.remove("is-active");
-    demo.hidden = false;
-    document.body.classList.add("demo-open"); // #76: hide authoring-only chrome while previewing
-    renderDemo();
-    requestAnimationFrame(onDemoResize); // correct bp once the stage has laid out
-  }
-  function toggleDemoFullscreen() {
-    if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
-    else if (demo.requestFullscreen) demo.requestFullscreen().catch(function () {});
-  }
-  function exitDemo() {
-    if (document.fullscreenElement) { document.exitFullscreen().catch(function () {}); }
-    setDemoCommentMode(false); closeCommentPopover();
-    demo.hidden = true;
-    renderCommentPins(); // §12: back on the canvas surface — re-project the shared pins
-    document.body.classList.remove("demo-open"); // #76: restore authoring chrome on the editing canvas
-    // issue 100: land the canvas on the page the preview was showing at exit (demoPage),
-    // not wherever the canvas happened to be before preview. Same focus idiom as
-    // clicking a page (focus frame + active-page + select). Runs last so the canvas is
-    // laid out again (demo hidden, demo-open removed) before focusFrame measures it.
-    if (doc.pages && doc.pages.length) {
-      var __exitPage = clamp(demoPage, 0, doc.pages.length - 1);
-      focusFrame(__exitPage); setActivePage(__exitPage); setSelection("page", __exitPage);
-    }
-  }
-  // ===== #116 copy-editor view-state (pure; extracted + eval'd by tests/run.js) =====
-  // The full-screen copy editor is an alternate view over the layout canvas (same enter/exit
-  // shell as Demo) — one view at a time. This is the SINGLE SOURCE of the open/closed logic:
-  // enter -> open, exit -> closed, toggle flips; `restoreCanvas` fires only on a real close
-  // (was open, now closed) so the layout canvas is re-focused exactly as demo's exit does.
-  window.copyEditorNextState = function (cur, action) {
-    cur = cur || { open: false };
-    var open = action === "enter" ? true : action === "exit" ? false : !cur.open;
-    return { open: open, hidden: !open, bodyOpen: open, restoreCanvas: !!(cur.open && !open) };
-  };
-  // #117 (slice 2): a clean, dim ROLE TAG derived from a frTargets `label`
-  // ("<type> · <key>", "option", "table cell", …). Pure — drives the read-only view.
-  window.copyEditorRole = function (label) {
-    label = String(label || "");
-    var parts = label.split(" · "); // " · "
-    var type = parts[0], key = parts[parts.length - 1];
-    if (type === "card") return "card";
-    if (label === "sort card") return "card";
-    if (label === "table cell") return "table cell";
-    if (label === "option") return "option";
-    if (label === "sort category") return "category";
-    if (label === "item title") return "title";
-    if (type === "question") {
-      if (key === "prompt" || key === "stemBefore" || key === "stemAfter") return "quiz stem";
-      if (key === "feedbackCorrect" || key === "feedbackIncorrect") return "feedback";
-      if (key === "methodLabel") return "label";
-      return "quiz";
-    }
-    if (label.indexOf("quiz") === 0) return "quiz";
-    if (key === "caption") return "caption";
-    if (key === "kicker") return "kicker";
-    if (key === "title") return "title";
-    if (key === "label") return "label";
-    if (type === "heading") return "heading";
-    if (key === "text") return "paragraph";
-    return key || "text";
-  };
-  // #117 (slice 2): group the resolved copy list (each { pageIndex, label, value })
-  // into per-page sections IN ORDER, skipping truly-empty values (tags/nbsp only),
-  // tagging each surviving row with a role. Pure — a VIEW over the model, never a
-  // store. The DOM builder adds the read-only chapter/page location headers.
-  window.copyEditorModel = function (list) {
-    var groups = [], byPage = {};
-    (list || []).forEach(function (it) {
-      if (!it) return;
-      var v = it.value == null ? "" : String(it.value);
-      if (!v.replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").trim()) return; // empty after stripping tags/nbsp
-      var pi = it.pageIndex;
-      var g = byPage[pi];
-      if (!g) { g = byPage[pi] = { pageIndex: pi, rows: [] }; groups.push(g); }
-      g.rows.push({ role: window.copyEditorRole(it.label), html: v, ref: it.ref }); // ref = frTarget (slice 3 write-back)
-    });
-    return groups;
-  };
-  // #104 side-by-side: the column spine for the variant view — flagship first (""),
-  // then every declared variant in order. Pure over the doc; empty (no columns worth
-  // showing) when the course has no variants, which is how the mode toggle stays hidden.
-  window.copyEditorSbsColumns = function (doc) {
-    var vs = (doc && doc.variants) || [];
-    return vs.length ? [""].concat(vs.slice()) : [];
-  };
-  // ===== end #116 copy-editor view-state =====
-
-  function copyEditorEl() { return document.getElementById("copy-editor"); }
-  function copyEditorIsOpen() { var el = copyEditorEl(); return !!(el && !el.hidden); }
-  function applyCopyEditorState(st) {
-    var el = copyEditorEl(); if (!el) return;
-    el.hidden = st.hidden;
-    document.body.classList.toggle("copyedit-open", st.bodyOpen); // hide authoring-only chrome behind the view
-  }
-  // #117 (slice 2): paint ALL course copy into the shell as a READ-ONLY document —
-  // every frTargets entry (the writable spine) as a flat row with a dim role tag,
-  // grouped under read-only chapter/page location headers, in reading order, empties
-  // skipped, inline HTML preserved. A VIEW over the model (frValueOf), never a store;
-  // two-way editing arrives in slice 3.
-  // #118 (slice 3): the copy editor is now EDITABLE. Each row is bound through the same
-  // sanitize -> write -> save path the layout canvas uses (writeModel), but keyed on the
-  // frTargets {host,key} and routed via frWrite (base, or the active variant's override
-  // layer — F&R's existing rule; no new variant logic). RICH-PRESERVING: we commit the
-  // field's innerHTML (inline bold/italic/links/weight spans survive sanitizeFieldHtml),
-  // never flattening to plain text (the inline-HTML data-loss landmine — see ADR 0001).
-  var copyEditDirty = false; // an edit here needs a canvas rebuild (mount) on toggle-back
-  // #175: the row the format toolbar acts on. Set on focus; the toolbar (B/I/U + inline
-  // weight) applies to THIS row's selection and commits through the same frWrite path, so
-  // a variant-active edit lands on overrides[variant] (rich-preserving) — letting an author
-  // re-apply/repair the flagship's inline-weight boundary (e.g. lighter 'Rf') on variant text.
-  var _activeCopyRow = null;
-  // #104: the copy-editor Side-by-side (variant columns) mode + which variant cells the
-  // author has UNLOCKED for editing this session. Unlock is transient UI (never persisted
-  // to the doc); keyed by host+key+variant since frTargets rebuilds fresh {host,key}
-  // wrappers each render (the host object is the stable identity).
-  var copyEditSbs = false;
-  var _unlockedCells = [];
-  function cellUnlocked(t, variant) {
-    for (var i = 0; i < _unlockedCells.length; i++) {
-      var u = _unlockedCells[i];
-      if (u.host === t.host && u.key === t.key && u.variant === variant) return true;
-    }
-    return false;
-  }
-  function setCellUnlocked(t, variant) {
-    if (!cellUnlocked(t, variant)) _unlockedCells.push({ host: t.host, key: t.key, variant: variant });
-  }
-  // #104: commit a cell to a SPECIFIC variant layer ("" = flagship/base). The single-view
-  // rows pass activeVariant (unchanged); the side-by-side flagship/variant cells pass their
-  // own column variant so each writes the correct override layer via frWrite.
-  function commitCopyRow(t, tx, variant) {
-    frWrite(t, variant == null ? activeVariant : variant, sanitizeText(sanitizeFieldHtml(tx.innerHTML)));
-    copyEditDirty = true;
-    scheduleSave();
-    scheduleSpellcheck(); // P0: re-check typos in the copy-editor view as the author types
-  }
-  function bindCopyRow(tx, t, variant) {
-    tx.setAttribute("contenteditable", "true");
-    tx.setAttribute("spellcheck", "true"); // #119: native browser spellcheck (red squiggles) in the copy view
-    tx.classList.add("is-editable");
-    tx.addEventListener("input", function () { commitCopyRow(t, tx, variant); });
-    // #175: remember which row (+ its frTarget) the format toolbar should act on, and
-    // reflect the selection's B/I/U state in the toolbar as the caret/selection moves.
-    tx.addEventListener("focus", function () { _activeCopyRow = { tx: tx, t: t, variant: variant == null ? activeVariant : variant }; refreshCopyFormatState(); });
-    tx.addEventListener("keyup", refreshCopyFormatState);
-    tx.addEventListener("mouseup", refreshCopyFormatState);
-    // Paste as PLAIN TEXT (mirrors the canvas): the browser default drags the source's
-    // rich HTML into the field; strip to text/plain so pasted words inherit the field.
-    tx.addEventListener("paste", function (e) {
-      e.preventDefault();
-      var text = "";
-      try { text = (e.clipboardData || window.clipboardData).getData("text/plain"); } catch (_) {}
-      if (window.__sanitizeText) text = window.__sanitizeText(text);
-      if (text) document.execCommand("insertText", false, text);
-    });
-    // v1: one logical edit per field — Enter/Escape commit + blur (no contenteditable
-    // <div>/<br> injection into fields the canvas renders inline). Structural/multiline
-    // changes stay on the layout canvas; existing inline markup is preserved on write.
-    tx.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); tx.blur(); }
-    });
-    tx.addEventListener("blur", function () { flushSave(); renderCopyEditorTools(); }); // #119: refresh word count after an edit
-  }
-  // #119 (slice 4): the view header tools — REUSE only.
-  //  - word count via frCore.words over frTargets (the same base-scope metric F&R shows, #78)
-  //  - Find & replace opens the EXISTING modal (already targets frTargets); it appears above
-  // the copy-editor overlay and, after a replace, we re-paint the view + count.
-  function copyEditorWordTotal() {
-    return frTargets(doc, "").reduce(function (n, t) { return n + frWords(frValueOf(t, "")); }, 0);
-  }
-  function renderCopyEditorTools() {
-    var host = document.getElementById("copyedit-tools"); if (!host) return;
-    host.innerHTML = "";
-    var n = copyEditorWordTotal();
-    var wc = h("span", "copyedit-wordcount", String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",") + " word" + (n === 1 ? "" : "s"));
-    host.appendChild(wc);
-    // #104: Single | Side by side — the variant-columns mode toggle. Canonical
-    // SegmentedControl (prop-toggle-row), shown ONLY when the course declares variants
-    // (else there is nothing to place beside a block). Flipping it re-paints the doc.
-    if ((doc.variants || []).length) {
-      var seg = h("div", "prop-toggle-row copyedit-modeseg");
-      [["Single", false], ["Side by side", true]].forEach(function (o) {
-        var b = h("button", "prop-toggle" + (copyEditSbs === o[1] ? " is-on" : ""), o[0]);
-        b.title = o[1] ? "Show each variant's copy beside the flagship" : "One column of flagship copy";
-        b.addEventListener("click", function () {
-          if (copyEditSbs === o[1]) return;
-          copyEditSbs = o[1];
-          renderCopyEditorDoc(); renderCopyEditorTools();
-        });
-        seg.appendChild(b);
-      });
-      host.appendChild(seg);
-    }
-    var find = h("button", "copyedit-tool", "Find & replace");
-    find.title = "Find & replace across all course copy (Cmd/Ctrl+F)";
-    find.addEventListener("click", function () { openFindReplace(); });
-    host.appendChild(find);
-  }
-  // #175: inline rich-formatting toolbar for the copy editor — B / I / U + inline
-  // Weight, the SAME controls (and the same weight surroundContents mechanic) the
-  // flagship field inspector uses (typeCluster / the "Style" B-I-U row). Acts on the
-  // focused row (_activeCopyRow) and commits via commitCopyRow -> frWrite, so with a
-  // variant active the formatting lands on overrides[variant] (rich-preserving). This
-  // is the missing control the reporter needed: re-apply/repair the flagship's inline
-  // weight boundary (e.g. lighter 'Rf') on shortened variant text. Built from canonical
-  // prop-toggle buttons + the shared dsSelect weight picker (no bespoke controls).
-  var _copyFormatBar = null; // the shared toggle-bar instance (has .refresh()) once built
-  function refreshCopyFormatState() { if (_copyFormatBar) _copyFormatBar.refresh(); }
-  // Apply an inline font-weight span to the active row's selection (or the whole row when
-  // nothing is selected) — mirrors the field inspector's applyWeightToSelection: raw
-  // font-weight span => literal HTML that survives sanitizeFieldHtml and round-trips
-  // render/export. surroundContents throws across element boundaries -> extract+insert.
-  function applyCopyWeight(weight, savedRange) {
-    if (!weight || !_activeCopyRow) return;
-    var tx = _activeCopyRow.tx, t = _activeCopyRow.t;
-    tx.focus();
-    var sel = window.getSelection();
-    var r = savedRange && tx.contains(savedRange.commonAncestorContainer) ? savedRange : ((sel && sel.rangeCount) ? sel.getRangeAt(0) : null);
-    if (!r || r.collapsed || !tx.contains(r.commonAncestorContainer)) { r = document.createRange(); r.selectNodeContents(tx); }
-    sel.removeAllRanges(); sel.addRange(r);
-    pushHistory();
-    var span = document.createElement("span"); span.style.fontWeight = weight;
-    try { r.surroundContents(span); }
-    catch (e) { span.appendChild(r.extractContents()); r.insertNode(span); }
-    commitCopyRow(t, tx, _activeCopyRow.variant);
-  }
-  function buildCopyFormatBar() {
-    var bar = document.getElementById("copyedit-format");
-    if (bar) return bar; // built once, persists across re-enters
-    var host = document.getElementById("copyedit-tools");
-    if (!host || !host.parentNode) return null;
-    bar = h("div", "copyedit__format"); bar.id = "copyedit-format";
-    // #170/#158/#33: the shared canonical toggle-bar builder (B/I/U/Link/List) -- the same
-    // one the field inspector's Style row uses. The copy editor gains Link as a side effect
-    // of sharing one implementation (it had none before); same execCommand/createLink
-    // mechanic. List converts the FOCUSED row's underlying block type in place -- only
-    // shown when that row is a genuine top-level text-content block (t.host.type in
-    // TEXT_CONTENT_TYPES), never a quiz sub-field row (t.host has no .type). This bar is
-    // built ONCE and persists across every row focus, so visibility/state re-derive on
-    // every bar.refresh() (via refreshCopyFormatState, already wired to focus/keyup/mouseup).
-    var biu = buildFormatToggleBar({
-      getNode: function () { return _activeCopyRow && _activeCopyRow.tx; },
-      onChange: function () { if (!_activeCopyRow) return; commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant); },
-      isListToggleable: function () { return !!(_activeCopyRow && _activeCopyRow.t.key === "text" && _activeCopyRow.t.host && _activeCopyRow.t.host.type && TEXT_CONTENT_TYPES[_activeCopyRow.t.host.type]); },
-      isListBlock: function () { return !!(_activeCopyRow && _activeCopyRow.t.host.type === "list"); },
-      toggleListBlock: function () {
-        if (!_activeCopyRow) return;
-        pushHistory();
-        convertTextListBlockType(_activeCopyRow.t.host);
-        copyEditDirty = true; scheduleSave();
-        renderCopyEditorDoc(); renderCopyEditorTools(); // rows rebuild -- the converted row now reflects the new content/type
-      }
-    });
-    _copyFormatBar = biu;
-    bar.appendChild(biu);
-    // Inline weight — capture the row's live range on mousedown (opening the select steals
-    // focus + collapses the selection, same trick the field inspector's Weight uses).
-    var savedRange = null;
-    var wt = dsSelect([["Weight", ""], ["Regular", "400"], ["Medium", "500"], ["Semibold", "600"], ["Bold", "700"], ["Extra", "800"]], "", function (weight) {
-      var r = savedRange; savedRange = null;
-      applyCopyWeight(weight, r);
-      wt.value = ""; // reset to the placeholder so re-picking the same weight fires change again
-    });
-    wt.addEventListener("mousedown", function () {
-      var sel = window.getSelection();
-      var r = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
-      savedRange = (r && _activeCopyRow && _activeCopyRow.tx.contains(r.commonAncestorContainer)) ? r.cloneRange() : null;
-    });
-    bar.appendChild(wt);
-    host.parentNode.insertBefore(bar, host);
-    return bar;
-  }
-  function renderCopyEditorDoc() {
-    var host = document.getElementById("copyedit-doc"); if (!host) return;
-    host.innerHTML = "";
-    _activeCopyRow = null; refreshCopyFormatState(); // rows are rebuilt -> drop the stale ref
-    // #104: Side-by-side variant columns. Row presence keys off the FLAGSHIP value (variant
-    // ""); each variant then gets a cell beside it. Single mode is the pre-#104 behaviour.
-    var cols = window.copyEditorSbsColumns(doc);
-    var sbs = copyEditSbs && cols.length;
-    var listVariant = sbs ? "" : activeVariant;
-    var list = frTargets(doc, listVariant).map(function (t) {
-      return { pageIndex: t.pageIndex, label: t.label, value: frValueOf(t, listVariant), ref: t };
-    });
-    var groups = window.copyEditorModel(list);
-    if (!groups.length) { host.appendChild(h("div", "copyedit-empty", "No course copy yet.")); return; }
-    host.classList.toggle("copyedit__doc--sbs", !!sbs);
-    // A single column-header row (frontend gate item 4: header once, not per page group),
-    // aligned to the same grid template every row uses.
-    var tmpl = sbs ? ("var(--copyedit-role-w, 96px) repeat(" + cols.length + ", minmax(0, 1fr))") : null;
-    if (sbs) {
-      var chead = h("div", "copyedit-colhead");
-      chead.style.gridTemplateColumns = tmpl;
-      chead.appendChild(h("span", "copyedit-colhead__cell", "")); // above the role tag
-      cols.forEach(function (v) { chead.appendChild(h("span", "copyedit-colhead__cell", v === "" ? "Flagship" : v)); });
-      host.appendChild(chead);
-    }
-    groups.forEach(function (g) {
-      var page = doc.pages[g.pageIndex];
-      var chapter = page && (doc.chapters || []).filter(function (c) { return c.id === page.chapterId; })[0];
-      var head = h("div", "copyedit-loc");
-      if (chapter) head.appendChild(h("span", "copyedit-loc__chapter", chapter.name || "Chapter"));
-      head.appendChild(h("span", "copyedit-loc__page", pageDisplayName(page, doc)));
-      host.appendChild(head);
-      g.rows.forEach(function (row) {
-        if (sbs) { host.appendChild(buildSbsRow(row, cols, tmpl)); return; }
-        var r = h("div", "copyedit-row");
-        r.appendChild(h("span", "copyedit-row__role", row.role));
-        var tx = h("div", "copyedit-row__text");
-        tx.innerHTML = row.html; // preserve inline HTML markup (rich-preserving edit target)
-        if (row.ref) bindCopyRow(tx, row.ref); // slice 3: two-way editing keyed on {host,key}
-        r.appendChild(tx);
-        host.appendChild(r);
-      });
-    });
-  }
-  // #104: one side-by-side row = role tag + flagship cell + one cell per variant. The
-  // flagship cell edits base copy (as in Single mode); each variant cell is READ-ONLY behind
-  // a lock until unlocked (variant copy is derived/precious — mirrors the read-only variant
-  // canvas preview, #207), or offers a quiet "+ from flagship" create affordance when the
-  // variant holds no override. Non-overridable targets (table/quiz) get a truly empty cell.
-  function copyGlyphBtn(name, cls, title, onClick) {
-    var b = h("button", "copyedit-cellbtn " + cls);
-    if (window.Icon) b.innerHTML = window.Icon(name);
-    b.title = title; b.setAttribute("aria-label", title);
-    b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // don't steal caret from any focused cell
-    b.addEventListener("click", onClick);
-    return b;
-  }
-  function buildSbsRow(row, cols, tmpl) {
-    var t = row.ref;
-    var r = h("div", "copyedit-row copyedit-row--sbs");
-    r.style.gridTemplateColumns = tmpl;
-    r.appendChild(h("span", "copyedit-row__role", row.role));
-    cols.forEach(function (v) {
-      var cell = h("div", "copyedit-cell");
-      if (v === "") { // flagship column — editable base copy, as Single mode
-        var fx = h("div", "copyedit-row__text");
-        fx.innerHTML = row.html;
-        if (t) bindCopyRow(fx, t, "");
-        cell.appendChild(fx);
-        r.appendChild(cell); return;
-      }
-      // variant column
-      if (!t || !t.overridable) { cell.classList.add("copyedit-cell--na"); r.appendChild(cell); return; }
-      if (frHasOverride(t, v)) {
-        var unlocked = cellUnlocked(t, v);
-        var vx = h("div", "copyedit-row__text");
-        vx.innerHTML = frValueOf(t, v);
-        if (unlocked) bindCopyRow(vx, t, v); else vx.classList.add("copyedit-cell--locked");
-        cell.appendChild(vx);
-        cell.appendChild(copyGlyphBtn(unlocked ? "lock-open" : "lock", "copyedit-lock",
-          unlocked ? "Lock" : "Unlock to edit",
-          function () {
-            if (cellUnlocked(t, v)) { _unlockedCells = _unlockedCells.filter(function (u) { return !(u.host === t.host && u.key === t.key && u.variant === v); }); }
-            else setCellUnlocked(t, v);
-            renderCopyEditorDoc();
-          }));
-        if (unlocked) cell.classList.add("copyedit-cell--editing");
-      } else { // no override yet — create from flagship
-        cell.classList.add("copyedit-cell--empty");
-        cell.appendChild(copyGlyphBtn("plus", "copyedit-create", "Create variant copy from flagship",
-          function () {
-            pushHistory();
-            frWrite(t, v, frValueOf(t, "")); // seed the override from the flagship copy
-            setCellUnlocked(t, v);
-            copyEditDirty = true; scheduleSave();
-            renderCopyEditorDoc();
-          }));
-      }
-      r.appendChild(cell);
-    });
-    return r;
-  }
-  function enterCopyEditor() {
-    copyEditDirty = false;
-    copyEditSbs = false; _unlockedCells = []; // #104: open in Single; unlock state is transient
-    applyCopyEditorState(window.copyEditorNextState({ open: copyEditorIsOpen() }, "enter"));
-    buildCopyFormatBar(); // #175: inline B/I/U + weight toolbar (built once)
-    renderCopyEditorDoc(); // slices 2-3: paint + bind the course copy
-    renderCopyEditorTools(); // slice 4: word count + Find & replace
-    scheduleSpellcheck(); // P0: mark typos across the whole copy document
-    syncViewToggle(); // reflect Read in the header Build/Read control
-  }
-  function exitCopyEditor() {
-    var st = window.copyEditorNextState({ open: copyEditorIsOpen() }, "exit");
-    applyCopyEditorState(st);
-    _activeCopyRow = null; // #175: drop the format-toolbar target
-    if (st.restoreCanvas) {
-      // #118: an edit here wrote through to the one doc — rebuild the layout canvas from it
-      // (the mount()/setDoc round-trip) so it shows the copy-editor edits. Then re-focus the
-      // active page (canvas laid out + selected), the same idiom as exitDemo.
-      if (copyEditDirty) { copyEditDirty = false; mount(); }
-      if (doc.pages && doc.pages.length) {
-        var p = clamp(currentPage || 0, 0, doc.pages.length - 1);
-        focusFrame(p); setActivePage(p); setSelection("page", p);
-      }
-    }
-    syncViewToggle(); // reflect Build in the header Build/Read control
-  }
-  function toggleCopyEditor() { if (copyEditorIsOpen()) exitCopyEditor(); else enterCopyEditor(); }
-  // SPEC 7 (decision 14): a Build/Read segmented control in the editor header is the in-flow
-  // way to switch between the authoring canvas (Build) and the per-doc copy view (Read = the
-  // copy editor). It stays in sync however the copy editor is opened/closed (rail button, Esc).
-  // Preview stays its own separate glyph.
-  function currentViewMode() { return copyEditorIsOpen() ? "read" : "build"; }
-  function mountViewToggle() {
-    if (typeof document === "undefined") return;
-    var host = document.getElementById("editor-view-toggle"); if (!host) return;
-    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
-    host.innerHTML = "";
-    host.appendChild(U.SegmentedControl({
-      size: "sm",
-      // edit-header-ia-v2 (feedback): glyphs, not words. Build = authoring canvas (square-pen);
-      // Read = the copy/read view (file-text). Titles carry the words for tooltip + a11y.
-      options: [{ value: "build", icon: "square-pen", title: "Build" }, { value: "read", icon: "file-text", title: "Read" }],
-      value: currentViewMode(),
-      onChange: function (v) {
-        if (v === "read") { if (!copyEditorIsOpen()) enterCopyEditor(); }
-        else if (copyEditorIsOpen()) exitCopyEditor();
-      }
-    }));
-  }
-  function syncViewToggle() { mountViewToggle(); } // re-render so the active segment reflects the real state
-  function wireCopyEditor() {
-    // side-rail-cleanup: the #copy-editor-btn rail button is retired; Read view is entered via the
-    // editor header's Build/Read toggle. Only the in-view exit + Escape are wired here now.
-    var exit = document.getElementById("copyedit-exit");
-    if (exit) exit.addEventListener("click", exitCopyEditor);
-    document.addEventListener("keydown", function (e) {
-      if (!copyEditorIsOpen()) return;
-      if (e.key === "Escape" && !isTextTarget(e.target)) { e.preventDefault(); exitCopyEditor(); }
-    });
-  }
-  window.__copyEditor = { enter: enterCopyEditor, exit: exitCopyEditor, toggle: toggleCopyEditor, isOpen: copyEditorIsOpen };
 
   // #44: LIGHT MODE for the tool's OWN UI (editor chrome) — distinct from the learner
   // course light/dark. `.theme-light` on <html> swaps the vendored DS chrome tokens
@@ -15535,57 +14901,8 @@
     ]);
   }, true);
 
-  function wireDemo() {
-    demoBpBtns = Array.prototype.slice.call(document.querySelectorAll("#demo-bp .bp-btn"));
-    demoBpBtns.forEach(function (b) { b.addEventListener("click", function () { demoBp = b.getAttribute("data-bp"); renderDemo(); }); });
-    document.getElementById("demo-enter").addEventListener("click", enterDemo);
-    // SPEC 7 (send-to-publish-wire): the editor-header glyph adds the active document to the standing
-    // publish queue via the ONE shared addToQueue -- its remembered preset (T2), no configure step,
-    // re-arming (never duplicating) a row that already exists, and toasting the running pending count.
-    var sendPub = document.getElementById("send-to-publish-btn");
-    if (sendPub && !sendPub.__wired) {
-      sendPub.__wired = true;
-      sendPub.addEventListener("click", function () {
-        if (activeDocId && registry[activeDocId]) addToQueue(activeDocId);
-        else publishToast("Open a document first to send it to the publish queue.");
-      });
-    }
-    syncSendToPublishCount(); // uio-E-C08: seed the pending count from the persisted queue at boot
-    document.getElementById("demo-exit").addEventListener("click", exitDemo);
-    document.getElementById("demo-prev").addEventListener("click", function () { stepDemo(-1); });
-    document.getElementById("demo-next").addEventListener("click", function () { stepDemo(1); });
-    document.getElementById("demo-fs").addEventListener("click", toggleDemoFullscreen);
-    // real learner navigation: CourseRuntime now owns click nav + gates (parity
-    // with export). Only fall back to this direct data-goto handler if the shared
-    // runtime is unavailable, so the two never both re-render.
-    demoDevice.addEventListener("click", function (e) {
-      if (window.CourseRuntime) return; // runtime handles data-id + data-goto
-      var t = e.target.closest("[data-goto]");
-      if (!t) return;
-      e.preventDefault();
-      var idx = pageIndexById(t.getAttribute("data-goto"));
-      if (idx >= 0) { demoPage = idx; renderDemo(); }
-    });
-    document.addEventListener("keydown", function (e) {
-      if (demo.hidden) return;
-      if ((e.key === "c" || e.key === "C") && !e.metaKey && !e.ctrlKey && !isTextTarget(e.target)) { e.preventDefault(); setDemoCommentMode(!demoCommentMode); return; }
-      if (isTextTarget(e.target)) return; // typing in a comment note: arrows/numbers/Esc belong to the box
-      // §12: Escape steps back — close an open note, then exit comment mode, then exit the preview.
-      if (e.key === "Escape") {
-        if (openCommentId) { closeCommentPopover(); renderCommentPins(); return; }
-        if (demoCommentMode) { setDemoCommentMode(false); return; }
-        exitDemo();
-      }
-      else if (e.key === "ArrowRight") stepDemo(1);
-      else if (e.key === "ArrowLeft") stepDemo(-1);
-      // 1/2/3/4 cycle the preview screen size.
-      else if (e.key === "1") { e.preventDefault(); setDemoBp("auto"); }
-      else if (e.key === "2") { e.preventDefault(); setDemoBp("desktop"); }
-      else if (e.key === "3") { e.preventDefault(); setDemoBp("tablet"); }
-      else if (e.key === "4") { e.preventDefault(); setDemoBp("mobile"); }
-    });
-    window.addEventListener("resize", onDemoResize);
-  }
+  // ...continues in demo.js (arch-P3b-07).
+
 
   // ---- Asset store seam glue (YY) ------------------------------------------
   var ASSET_SCHEMA = 1;
@@ -15963,7 +15280,7 @@
       selectBlock: function (pi, bi) { selectBlock(pi, bi); },
       enterDemo: function () { enterDemo(); },
       exitDemo: function () { exitDemo(); },
-      demoRuntime: function () { return demoRuntime; },
+      demoRuntime: function () { return demoRuntimeNow(); },
       interactionMap: function () { return window.buildInteractionMap(doc); }
     },
     // Snap-zone DnD test/automation hooks: drive the REAL handleDrop /
@@ -16121,492 +15438,30 @@
   var showContextMenu = VE.bind("showContextMenu");
   var closeCtxMenu = VE.bind("closeCtxMenu");
   var wireContextMenu = VE.bind("wireContextMenu");
+  var blockMenuItems = VE.bind("blockMenuItems");   // arch-P3b-07: the overflow button's verb list
 
 
   // ---- variant model mutations ----
-  function newVariantPrompt(then) {
-    promptModal("New variant", "Variant name (e.g. Wideband, Standard, Lite)", "", function (v) {
-      var name = (v || "").trim();
-      if (!name) return;
-      if (!doc.variants) doc.variants = [];
-      if (doc.variants.indexOf(name) === -1) { pushHistory(); doc.variants.push(name); }
-      renderVariantSwitch();
-      if (then) then(name);
-    });
-  }
-  // The set of vary-able FIELDS for a right-click. Prefer the exact text the user
-  // clicked (fieldNode); else every slot of a card; else a plain block's `text`.
-  // A field = { key, label, isSlot }. This is the fix for the "wrong slot / looks
-  // mirrored" bug — we no longer guess a single "primary" slot (which was `number`).
-  function slotLabel(target, key) {
-    var comp = target.block && target.block.component;
-    var def = comp && resolveComponentDef(comp); // incl. shared library
-    if (def && def.slots) { for (var i = 0; i < def.slots.length; i++) if (def.slots[i].key === key) return def.slots[i].label || key; }
-    return key;
-  }
-  function fieldsFor(target, fieldNode) {
-    var out = [];
-    if (fieldNode) {
-      var k = fieldNode.getAttribute("data-edit");
-      var inSlot = !!(target.instance && fieldNode.closest("[data-instance]"));
-      out.push({ key: k, label: inSlot ? slotLabel(target, k) : k, isSlot: inSlot });
-      return out;
-    }
-    if (target.instance) {
-      Object.keys(target.instance.slots || {}).forEach(function (k) { out.push({ key: k, label: slotLabel(target, k), isSlot: true }); });
-      return out;
-    }
-    if (target.block && typeof target.block.text === "string") out.push({ key: "text", label: "text", isSlot: false });
-    return out;
-  }
-  function baseFieldValue(host, field) {
-    if (field.isSlot) return (host.slots && host.slots[field.key] != null) ? host.slots[field.key] : "";
-    return host[field.key] != null ? host[field.key] : "";
-  }
-  function ovFieldValue(host, variant, field) {
-    var o = host.overrides && host.overrides[variant];
-    if (field.isSlot) { if (o && o.slots && o.slots[field.key] != null) return o.slots[field.key]; }
-    else if (o && o[field.key] != null) return o[field.key];
-    return baseFieldValue(host, field);
-  }
-  function isFieldOverridden(host, variant, field) {
-    return !!(host.overrides && host.overrides[variant] && ovFieldValue(host, variant, field) !== baseFieldValue(host, field));
-  }
-  function setVariantCopyField(host, field, variant) {
-    promptModal("Variant copy", "“" + variant + "” · " + field.label, ovFieldValue(host, variant, field), function (next) {
-      pushHistory();
-      host.overrides = host.overrides || {};
-      var o = host.overrides[variant] || (host.overrides[variant] = {});
-      if (next.trim() === "") {
-        if (field.isSlot) { if (o.slots) delete o.slots[field.key]; } else delete o[field.key];
-      } else {
-        if (field.isSlot) { o.slots = o.slots || {}; o.slots[field.key] = next; } else o[field.key] = next;
-      }
-      // prune empties so an inherited field carries no override object
-      if (o.slots && !Object.keys(o.slots).length) delete o.slots;
-      if (!Object.keys(o).length) delete host.overrides[variant];
-      if (host.overrides && !Object.keys(host.overrides).length) delete host.overrides;
-      mount();
-    }, "Leave blank to inherit the flagship.");
-  }
-  // ---- variant editing in the PROPERTY PANEL (live, no prompt) --------------
-  function slotLabelC(block, key) {
-    var comp = block && block.component;
-    var docComps = window.Editor && window.Editor.getDoc && window.Editor.getDoc().components;
-    var def = comp && ((docComps && docComps[comp]) || (window.COMPONENTS || {})[comp]);
-    if (def && def.slots) for (var i = 0; i < def.slots.length; i++) if (def.slots[i].key === key) return def.slots[i].label || key;
-    return key;
-  }
-  // the host (base block/instance) + its vary-able fields for the current selection
-  function variantTargetForSelection() {
-    if (selection.type === "instance" && selection.instance) {
-      var inst = selection.instance;
-      return { host: inst, fields: Object.keys(inst.slots || {}).map(function (k) { return { key: k, label: slotLabelC(selection.block, k), isSlot: true }; }) };
-    }
-    var b = selection.block;
-    if (b && b.type && typeof b.text === "string" && (selection.type === "field" || selection.type === "navButton" || selection.type === "block")) {
-      return { host: b, fields: [{ key: "text", label: "Text", isSlot: false }] };
-    }
-    return null;
-  }
-  function ovRaw(host, variant, field) {
-    var o = host.overrides && host.overrides[variant];
-    if (!o) return "";
-    if (field.isSlot) return (o.slots && o.slots[field.key] != null) ? o.slots[field.key] : "";
-    return o[field.key] != null ? o[field.key] : "";
-  }
-  function writeVariantField(host, variant, field, value) {
-    host.overrides = host.overrides || {};
-    var o = host.overrides[variant] || (host.overrides[variant] = {});
-    if (value === "" || value == null) {
-      if (field.isSlot) { if (o.slots) delete o.slots[field.key]; } else delete o[field.key];
-    } else {
-      if (field.isSlot) { o.slots = o.slots || {}; o.slots[field.key] = value; } else o[field.key] = value;
-    }
-    if (o.slots && !Object.keys(o.slots).length) delete o.slots;
-    if (!Object.keys(o).length) delete host.overrides[variant];
-    if (host.overrides && !Object.keys(host.overrides).length) delete host.overrides;
-    renderModelView();
-  }
+  // arch-P3b-07l: both axes a course varies along -- the variant/version model, the live override
+  // panel and the two toolbar switchers -- moved to editor/variants.js.
+  var newVariantPrompt = VE.bind("newVariantPrompt");
+  var renderVariantOverrides = VE.bind("renderVariantOverrides");
+  var previewVariant = VE.bind("previewVariant");
+  var renderVariantSwitch = VE.bind("renderVariantSwitch");
+  var syncVariantSwitch = VE.bind("syncVariantSwitch");
+  var updateVariantBadge = VE.bind("updateVariantBadge");
+  var openVariantMenu = VE.bind("openVariantMenu");
+  var openVariantMenuAtSwitch = VE.bind("openVariantMenuAtSwitch");
+  var renderVersionSwitch = VE.bind("renderVersionSwitch");
+  var syncVersionSwitch = VE.bind("syncVersionSwitch");
+  var updateVersionBadge = VE.bind("updateVersionBadge");
 
-  // ==========================================================================
-  // Find & replace (BACKLOG §3, grilled 2026-07-09) — author-side find/replace
-  // over ALL text copy in the CURRENT canvas only. Case-SENSITIVE, EXACT match
-  // as typed. Two modes: step-through (find-next → replace/skip) and replace-all.
-  // Variant safety (the whole point): a replace while previewing a variant goes
-  // through the SAME override layer the per-field variant edit uses
-  // (block.overrides[<variant>]) and NEVER mutates the base — so editing Variant
-  // 1 leaves Flagship untouched. On Flagship it edits the base directly.
-  // // Only BLOCK-level fields (text/label/title/kicker) + component-INSTANCE slots
-  // are variant-overridable (that is exactly what render.js `applyOverride`
-  // consumes); nested quiz/intro/done/item copy has NO per-variant path, so it is
-  // enumerated for Flagship editing only and EXCLUDED when a variant is active
-  // (matching it there would silently rewrite the shared base). htmlEmbed srcdoc
-  // is deliberately out of scope (string-replacing markup is unsafe).
-  // The core below is PURE + fenced for the headless suite.
-  /* @fr-start */
-  function frCount(value, needle) {
-    if (!needle) return 0;
-    var s = value == null ? "" : String(value), n = 0, i = 0;
-    while ((i = s.indexOf(needle, i)) !== -1) { n++; i += needle.length; }
-    return n;
-  }
-  function frReplaceAll(value, needle, rep) {
-    if (!needle) return value == null ? "" : String(value);
-    return (value == null ? "" : String(value)).split(needle).join(rep == null ? "" : rep);
-  }
-  // #78: word count for a single copy string. Rich-text fields (list/summary) store
-  // inline HTML, so strip tags + fold entities to whitespace before counting, then
-  // count whitespace-delimited runs. PURE — used for the F&R total-copy metric and
-  // guarded in tests/run.js.
-  function frWords(value) {
-    var s = value == null ? "" : String(value);
-    s = s.replace(/<[^>]+>/g, " ");                 // drop inline tags
-    s = s.replace(/&nbsp;/gi, " ").replace(/&[a-z0-9#]+;/gi, ""); // nbsp -> space, other entities -> glued
-    var m = s.match(/\S+/g);
-    return m ? m.length : 0;
-  }
-  // Enumerate every text-copy target in the doc. When `variant` is set, only the
-  // variant-overridable targets are returned. Each target = { host, key, isSlot,
-  // overridable, label, pageIndex }. PURE (no closure deps).
-  function frTargets(doc, variant) {
-    var out = [];
-    function push(t) { if (variant && !t.overridable) return; out.push(t); }
-    function nested(obj, key, pageIndex, label) {
-      if (obj && typeof obj[key] === "string") push({ host: obj, key: key, isSlot: false, overridable: false, label: label, pageIndex: pageIndex });
-    }
-    function addBlock(b, pageIndex) {
-      if (!b || typeof b !== "object") return;
-      // block-level direct copy (variant-overridable via applyOverride top-level keys)
-      ["text", "label", "title", "kicker", "caption"].forEach(function (k) {
-        if (typeof b[k] === "string") push({ host: b, key: k, isSlot: false, overridable: true, label: (b.type || "block") + " · " + k, pageIndex: pageIndex });
-      });
-      // component instances — slot copy (variant-overridable via slots merge)
-      if (b.type === "componentGrid" && Array.isArray(b.instances)) {
-        b.instances.forEach(function (ins) {
-          if (ins && ins.slots) Object.keys(ins.slots).forEach(function (key) {
-            if (typeof ins.slots[key] === "string") push({ host: ins, key: key, isSlot: true, overridable: true, label: "card · " + key, pageIndex: pageIndex });
-          });
-        });
-      }
-      // #90: table cell copy (base-only) — each cell is a { t } object
-      if (b.type === "table" && Array.isArray(b.rows)) {
-        b.rows.forEach(function (row) { (row || []).forEach(function (cell) {
-          if (cell && typeof cell.t === "string") push({ host: cell, key: "t", isSlot: false, overridable: false, label: "table cell", pageIndex: pageIndex });
-        }); });
-      }
-      // nested quiz copy (base-only, no per-variant path)
-      if (b.intro) { nested(b.intro, "body", pageIndex, "quiz intro"); nested(b.intro, "startLabel", pageIndex, "quiz start"); }
-      if (b.done) {
-        nested(b.done, "title", pageIndex, "quiz done · title"); nested(b.done, "body", pageIndex, "quiz done · body"); nested(b.done, "summary", pageIndex, "quiz summary");
-        if (b.done.retry) nested(b.done.retry, "label", pageIndex, "quiz retry");
-      }
-      if (Array.isArray(b.questions)) b.questions.forEach(function (q) {
-        if (!q) return;
-        ["methodLabel", "stemBefore", "stemAfter", "prompt", "feedbackCorrect", "feedbackIncorrect"].forEach(function (k) { nested(q, k, pageIndex, "question · " + k); });
-        if (Array.isArray(q.options)) q.options.forEach(function (opt) { nested(opt, "text", pageIndex, "option"); });
-        if (Array.isArray(q.cards)) q.cards.forEach(function (card) { nested(card, "text", pageIndex, "sort card"); });
-        if (Array.isArray(q.cats)) q.cats.forEach(function (cat) { nested(cat, "label", pageIndex, "sort category"); });
-      });
-    }
-    var pages = (doc && doc.pages) || [];
-    pages.forEach(function (page, pi) {
-      (function walk(blocks) {
-        (blocks || []).forEach(function (b) {
-          if (!b || typeof b !== "object") return;
-          addBlock(b, pi);
-          if (Array.isArray(b.children)) walk(b.children);
-          if (Array.isArray(b.columns)) b.columns.forEach(walk);
-          if (Array.isArray(b.items)) b.items.forEach(function (it) {
-            if (!it) return;
-            nested(it, "title", pi, "item title"); // accordion / sequence step title (base-only)
-            if (Array.isArray(it.children)) walk(it.children);
-            if (Array.isArray(it.front)) walk(it.front);
-          });
-          // #215: screens[].markers[].blocks — inlined so the tests' F&R slice stays standalone
-          if (Array.isArray(b.screens)) b.screens.forEach(function (s) { if (s && Array.isArray(s.markers)) s.markers.forEach(function (m) { if (m && Array.isArray(m.blocks)) walk(m.blocks); }); });
-        });
-      })(page && page.blocks);
-    });
-    return out;
-  }
-  // Effective current value of a target (the override wins when previewing a
-  // variant that has one, else the base) — the string F&R searches + replaces in.
-  function frValueOf(t, variant) {
-    if (variant && t.overridable) {
-      var o = t.host.overrides && t.host.overrides[variant];
-      if (o) {
-        if (t.isSlot) { if (o.slots && o.slots[t.key] != null) return String(o.slots[t.key]); }
-        else if (o[t.key] != null) return String(o[t.key]);
-      }
-    }
-    if (t.isSlot) return (t.host.slots && t.host.slots[t.key] != null) ? String(t.host.slots[t.key]) : "";
-    return t.host[t.key] != null ? String(t.host[t.key]) : "";
-  }
-  // Write a target's value to the correct layer: the variant override (when a
-  // variant is active + the target is overridable), else the base. Mirrors
-  // writeVariantField's prune-on-empty so an inherited field carries no override.
-  function frWrite(t, variant, value) {
-    if (variant && t.overridable) {
-      var host = t.host;
-      host.overrides = host.overrides || {};
-      var o = host.overrides[variant] || (host.overrides[variant] = {});
-      if (value === "" || value == null) { if (t.isSlot) { if (o.slots) delete o.slots[t.key]; } else delete o[t.key]; }
-      else { if (t.isSlot) { o.slots = o.slots || {}; o.slots[t.key] = value; } else o[t.key] = value; }
-      if (o.slots && !Object.keys(o.slots).length) delete o.slots;
-      if (!Object.keys(o).length) delete host.overrides[variant];
-      if (host.overrides && !Object.keys(host.overrides).length) delete host.overrides;
-    } else {
-      if (t.isSlot) { t.host.slots = t.host.slots || {}; t.host.slots[t.key] = value; }
-      else t.host[t.key] = value;
-    }
-  }
-  // #104 side-by-side: does target `t` HOLD a variant override for `variant`?
-  // (overridable target + a stored value on host.overrides[variant] for its key).
-  // Pure over the host — drives which copy-editor variant cells are "held" (locked,
-  // editable on unlock) vs "empty" (offer create-from-flagship). Mirrors frValueOf's
-  // override lookup exactly so the two never disagree.
-  function frHasOverride(t, variant) {
-    if (!t || !t.overridable || !variant) return false;
-    var o = t.host && t.host.overrides && t.host.overrides[variant];
-    if (!o) return false;
-    return t.isSlot ? !!(o.slots && o.slots[t.key] != null) : (o[t.key] != null);
-  }
-  // Total occurrences across every target, for the live count.
-  function frTotal(targets, variant, needle) {
-    return targets.reduce(function (n, t) { return n + frCount(frValueOf(t, variant), needle); }, 0);
-  }
-  // The next match at-or-after `after` = { tIndex, pos }, wrapping ONCE to the top.
-  // Returns { tIndex, start } or null.
-  function frNext(targets, variant, needle, after) {
-    if (!needle || !targets.length) return null;
-    var startT = after ? after.tIndex : 0, startPos = after ? after.pos : 0;
-    for (var i = startT; i < targets.length; i++) {
-      var val = frValueOf(targets[i], variant);
-      var idx = val.indexOf(needle, i === startT ? startPos : 0);
-      if (idx !== -1) return { tIndex: i, start: idx };
-    }
-    for (var j = 0; j <= startT && j < targets.length; j++) { // wrap
-      var v2 = frValueOf(targets[j], variant);
-      var i2 = v2.indexOf(needle, 0);
-      if (i2 !== -1) return { tIndex: j, start: i2 };
-    }
-    return null;
-  }
-  /* @fr-end */
-  window.__frCore = { count: frCount, replaceAll: frReplaceAll, targets: frTargets, valueOf: frValueOf, write: frWrite, total: frTotal, next: frNext, words: frWords, hasOverride: frHasOverride };
-  var frCore = window.__frCore; // in-app alias the dialog composes from
 
-  var frOpen = false;
-  function openFindReplace() {
-    if (frOpen) return; frOpen = true;
-    var modal = h("div", "modal-overlay fr-overlay");
-    var box = h("div", "modal-box fr-box"); modal.appendChild(box);
-    // Which layer replacements target: "" = Flagship (base), "<name>" = a variant
-    // override. Defaults to whatever is being previewed; a selector below lets you
-    // aim replacements at a variant WITHOUT leaving Flagship (it previews it for you).
-    var frVariant = activeVariant || "";
-    var variants = (doc.variants || []);
-    function scopeSub() { return frVariant ? ("Editing “" + frVariant + "” — replacements are saved as a variant override; Flagship copy is untouched.") : "Editing Flagship — replacements edit the base copy."; }
-    modalHead(box, "Find & replace", scopeSub());
-    var scopeNote = null;
-    if (variants.length) {
-      var vr = modalField(box, "Apply to");
-      // Picking a target ALSO previews it on the canvas, so replacements are visible
-      // and the highlighted-variant canvas matches the scope you're editing.
-      var vpairs = [["Flagship (base copy)", ""]].concat(variants.map(function (v) { return ["Variant · " + v, v]; }));
-      var vsel = dsSelect(vpairs, frVariant || "", function (v) {
-        frVariant = v;
-        previewVariant(frVariant || null);
-        if (scopeNote) scopeNote.textContent = scopeSub();
-        searchFrom = { tIndex: 0, pos: 0 }; cur = null; refresh();
-      });
-      vsel.classList.add("modal-field__control"); // keep the modal field layout on the DS select
-      vr.appendChild(vsel);
-      scopeNote = h("div", "fr-scope-note", scopeSub());
-      box.appendChild(scopeNote);
-    }
-    // #78: total word count across course copy. Doc copy is synchronous (frTargets over
-    // the Flagship base — a course-level metric, so it ignores the active variant scope).
-    var wordCount = h("div", "fr-wordcount");
-    box.appendChild(wordCount);
-    var docWords = frCore.targets(doc, "").reduce(function (n, t) { return n + frCore.words(frCore.valueOf(t, "")); }, 0);
-    function fmtNum(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
-    wordCount.textContent = fmtNum(docWords) + " word" + (docWords === 1 ? "" : "s") + " in course copy";
-    var findInput = modalText(box, "Find", "", "Case-sensitive, exact");
-    var replaceInput = modalText(box, "Replace", "", "Replacement text");
-    var status = h("div", "fr-status", "Type to search.");
-    box.appendChild(status);
-    var preview = h("div", "fr-preview"); preview.style.display = "none";
-    box.appendChild(preview);
+  // ...continues in copy-editor.js (arch-P3b-07).
 
-    var cur = null;        // current highlighted match { tIndex, start }
-    var searchFrom = null; // { tIndex, pos } to resume from
 
-    function ts() { return frCore.targets(doc, frVariant); }
-    function needle() { return findInput.value; }
+  // ...continues in variants.js (arch-P3b-07).
 
-    function showPreview() {
-      if (!cur) { preview.style.display = "none"; return; }
-      var arr = ts(); var t = arr[cur.tIndex]; if (!t) { preview.style.display = "none"; return; }
-      var val = frCore.valueOf(t, frVariant), n = needle();
-      var a = Math.max(0, cur.start - 24), b = Math.min(val.length, cur.start + n.length + 24);
-      var pre = (a > 0 ? "…" : "") + val.slice(a, cur.start);
-      var mid = val.slice(cur.start, cur.start + n.length);
-      var post = val.slice(cur.start + n.length, b) + (b < val.length ? "…" : "");
-      preview.textContent = "";
-      var loc = h("div", "fr-preview__loc", "Page " + (t.pageIndex + 1) + " · " + t.label);
-      var snip = h("div", "fr-preview__snip");
-      snip.appendChild(document.createTextNode(pre));
-      snip.appendChild(h("mark", "fr-hit", mid));
-      snip.appendChild(document.createTextNode(post));
-      preview.appendChild(loc); preview.appendChild(snip);
-      preview.style.display = "";
-    }
-    function refresh() {
-      var arr = ts(), n = needle();
-      if (!n) { status.textContent = "Type to search."; cur = null; showPreview(); return; }
-      var total = frCore.total(arr, frVariant, n);
-      status.textContent = total ? (total + " match" + (total === 1 ? "" : "es")) : "No matches.";
-      showPreview();
-    }
-    function findNext() {
-      var arr = ts(), n = needle();
-      if (!n) { refresh(); return; }
-      cur = frCore.next(arr, frVariant, n, searchFrom || { tIndex: 0, pos: 0 });
-      if (cur) searchFrom = { tIndex: cur.tIndex, pos: cur.start + n.length };
-      else searchFrom = { tIndex: 0, pos: 0 };
-      var total = frCore.total(arr, frVariant, n);
-      status.textContent = total ? ((cur ? "Match found — " : "") + total + " match" + (total === 1 ? "" : "es")) : "No matches.";
-      showPreview();
-    }
-    function replaceOne() {
-      var n = needle(); if (!n) return;
-      if (!cur) { findNext(); return; }
-      var arr = ts(), t = arr[cur.tIndex]; if (!t) { cur = null; findNext(); return; }
-      var val = frCore.valueOf(t, frVariant);
-      if (val.substr(cur.start, n.length) !== n) { cur = null; findNext(); return; } // stale — re-find
-      var nv = val.slice(0, cur.start) + replaceInput.value + val.slice(cur.start + n.length);
-      pushHistory();
-      frCore.write(t, frVariant, nv);
-      mount();
-      if (copyEditorIsOpen()) { renderCopyEditorDoc(); renderCopyEditorTools(); } // #119: reflect the replace in the open copy view
-      searchFrom = { tIndex: cur.tIndex, pos: cur.start + replaceInput.value.length };
-      cur = null;
-      findNext();
-      findInput.focus();
-    }
-    function replaceAll() {
-      var n = needle(); if (!n) return;
-      var arr = ts(), rep = replaceInput.value, hits = 0;
-      var changed = arr.filter(function (t) { return frCore.count(frCore.valueOf(t, frVariant), n) > 0; });
-      if (!changed.length) { status.textContent = "No matches."; return; }
-      pushHistory();
-      changed.forEach(function (t) {
-        var val = frCore.valueOf(t, frVariant);
-        hits += frCore.count(val, n);
-        frCore.write(t, frVariant, frCore.replaceAll(val, n, rep));
-      });
-      mount();
-      if (copyEditorIsOpen()) { renderCopyEditorDoc(); renderCopyEditorTools(); } // #119: reflect the replace in the open copy view
-      cur = null; searchFrom = { tIndex: 0, pos: 0 };
-      status.textContent = "Replaced " + hits + " match" + (hits === 1 ? "" : "es") + ".";
-      preview.style.display = "none";
-      findInput.focus();
-    }
-
-    findInput.addEventListener("input", function () { searchFrom = { tIndex: 0, pos: 0 }; cur = null; refresh(); });
-    var findNextBtn = h("button", "prop-btn", "Find next");
-    findNextBtn.addEventListener("click", function () { findNext(); findInput.focus(); });
-    var replaceBtn = h("button", "prop-btn", "Replace");
-    replaceBtn.addEventListener("click", replaceOne);
-    var replaceAllBtn = h("button", "prop-btn prop-btn--accent", "Replace all");
-    replaceAllBtn.addEventListener("click", replaceAll);
-    function close() { modal.remove(); frOpen = false; document.removeEventListener("keydown", onKey, true); }
-    var actions = h("div", "modal-actions");
-    var cancel = h("button", "prop-btn prop-btn--danger", "Close");
-    cancel.addEventListener("click", close);
-    actions.appendChild(findNextBtn); actions.appendChild(replaceBtn);
-    actions.appendChild(cancel); actions.appendChild(replaceAllBtn);
-    box.appendChild(actions);
-
-    function onKey(e) {
-      if (!frOpen) return;
-      if (e.key === "Escape") { e.preventDefault(); close(); return; }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        if (e.target === replaceInput) replaceOne(); else findNext();
-      }
-    }
-    document.addEventListener("keydown", onKey, true);
-    document.body.appendChild(modal);
-    // seed Find with the current text selection when there is one
-    var selText = window.getSelection ? String(window.getSelection()) : "";
-    if (selText && selText.length <= 80 && selText.indexOf("\n") === -1) { findInput.value = selText; refresh(); }
-    findInput.focus(); if (findInput.select) findInput.select();
-  }
-  window.__openFindReplace = openFindReplace; // test + toolbar hook
-
-  // Size a variant-text textarea to its content (the override value, or the flagship
-  // placeholder when the field is empty) so the box scales with the block's copy. Uses
-  // a hidden MIRROR div for the measurement — it never touches ta.value/selection/focus,
-  // so it can't interfere with typing or highlighting in the live field. Capped at
-  // 320px; past that the textarea scrolls (overflow-y:auto in .prop-input--grow).
-  function autoGrowVariant(ta) {
-    var w = ta.clientWidth;
-    if (!w) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 320) + "px"; return; } // not laid out yet
-    var m = autoGrowVariant._mirror || (autoGrowVariant._mirror = document.createElement("div"));
-    var cs = getComputedStyle(ta), s = m.style;
-    s.position = "absolute"; s.visibility = "hidden"; s.left = "-9999px"; s.top = "0";
-    s.whiteSpace = "pre-wrap"; s.wordWrap = "break-word"; s.boxSizing = "border-box";
-    s.width = w + "px"; s.font = cs.font; s.lineHeight = cs.lineHeight;
-    s.paddingTop = cs.paddingTop; s.paddingBottom = cs.paddingBottom;
-    s.paddingLeft = cs.paddingLeft; s.paddingRight = cs.paddingRight;
-    s.borderTopWidth = cs.borderTopWidth; s.borderBottomWidth = cs.borderBottomWidth;
-    m.textContent = (ta.value || ta.placeholder || "") + "\n"; // trailing newline reserves the caret row
-    if (!m.parentNode) document.body.appendChild(m);
-    ta.style.height = Math.min(Math.max(m.scrollHeight, 32), 320) + "px";
-  }
-  function renderVariantOverrides() {
-    var vs = variantNames();
-    if (!vs.length) return;
-    var t = variantTargetForSelection();
-    if (!t) return;
-    var _varRoot = inspector;
-    inspector = panelSection(_varRoot, "Variant text");
-    if (activeVariant) {
-      inspector.appendChild(h("div", "insp-hint", "Previewing “" + activeVariant + "”. Switch to Flagship (top bar) to edit variant text."));
-      inspector = _varRoot;
-      return;
-    }
-    inspector.appendChild(h("div", "insp-hint", "An alternate for a variant. Blank = inherit the flagship."));
-    vs.forEach(function (v) {
-      inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", v));
-      t.fields.forEach(function (f) {
-        var row = h("div", "insp-row");
-        row.appendChild(h("span", "insp-row__label", f.label));
-        // Text-bearing fields (a block's `text`, or a long content slot) get an
-        // auto-growing textarea so the box scales with the block's copy; short slots
-        // (title/number) stay single-line.
-        var multiline = !f.isSlot || /obj|desc|body|summary|para|text/i.test(f.key);
-        var input = multiline ? h("textarea", "prop-input prop-input--grow") : h("input", "prop-text");
-        if (!multiline) input.type = "text";
-        input.spellcheck = false;
-        input.setAttribute("data-variant-field", v + ":" + f.key);
-        input.value = ovRaw(t.host, v, f);
-        // Placeholder = the flagship copy as a hint, tags stripped (rich text stores
-        // <div>…</div>; showing raw markup here read as "must I type HTML?" — no).
-        input.placeholder = stripToText(baseFieldValue(t.host, f));
-        var pushed = false;
-        input.addEventListener("focus", function () { pushed = false; });
-        input.addEventListener("input", function () { if (!pushed) { pushHistory(); pushed = true; } writeVariantField(t.host, v, f, input.value); if (multiline) autoGrowVariant(input); });
-        row.appendChild(input);
-        inspector.appendChild(row);
-        if (multiline) requestAnimationFrame(function () { autoGrowVariant(input); }); // size to content once in the DOM
-      });
-    });
-    inspector = _varRoot;
-  }
 
   function isHiddenIn(node, variant) { var vv = node.variantVis; return !!(vv && vv.hide && vv.hide.indexOf(variant) !== -1); }
   function toggleHiddenIn(node, variant) {
@@ -16658,284 +15513,8 @@
     else { clearSelection(); reapplyStructural(pi); } // PERF: one page, not the world
   }
 
-  // ---- toolbar variant switcher ----
-  var variantSwitchEl = null;
-  var variantWrapEl = null;
-  // #80 — condensed to a glyph-only trigger (was a labelled VersoUI.Select pill).
-  // The dropdown lives BEHIND the "layers" glyph: click opens a context menu of
-  // variants (active one marked). Reclaims fixed pixels from the crowded right
-  // group (the #79 overflow mitigation) while matching the sibling .tool aesthetic.
-  // Selection/override behaviour is unchanged — this is a control swap, not a re-wire.
-  function onVariantPick(v) {
-    if (v === "__new__") { newVariantPrompt(function (name) { activeVariant = name; syncVariantSwitch(); mount(); }); syncVariantSwitch(); return; }
-    activeVariant = v || null; mount();
-  }
-  function openVariantMenu(anchor) {
-    var items = [{ head: "Variant" }];
-    items.push({ label: "Flagship", active: !activeVariant, onClick: function () { onVariantPick(""); } });
-    variantNames().forEach(function (v) { items.push({ label: v, active: activeVariant === v, onClick: function () { onVariantPick(v); } }); });
-    items.push({ sep: true });
-    items.push({ label: "New variant…", onClick: function () { onVariantPick("__new__"); } });
-    var r = anchor.getBoundingClientRect();
-    showContextMenu(r.left, r.bottom + 6, items);
-  }
-  // SPEC 7: the variant (outer axis) + version (inner axis) glyphs live at the left of the
-  // editor-window toolbar row (#editor-doc-axes). Fall back to the global bar's right group
-  // if the editor header isn't present (defensive; the header is static in index.html).
-  function axisSwitchHost() {
-    return document.getElementById("editor-doc-axes") || document.querySelector(".toolbar__group--right");
-  }
-  // edit-header-ia-v2: face-up NAMED dropdown (was a glyph-only trigger). Shows the active
-  // variant name ("Flagship" = base) at a glance; the name truncates with ellipsis (full name
-  // in the menu + title tooltip). Same click -> openVariantMenu; a control re-shape, not a re-wire.
-  function renderVariantSwitch() {
-    var host = axisSwitchHost();
-    if (!host) return;
-    var Ic = window.Icon;
-    if (!variantWrapEl) {
-      variantWrapEl = h("button", "tool editor-window__axis-btn variant-glyph"); variantWrapEl.type = "button";
-      // uio-E-C04 (EDIT-08): the axis is NAMED in the bar (a muted "Variant" caption) so the two
-      // dropdowns aren't unlabelled twins; the value + caret follow.
-      variantWrapEl.innerHTML =
-        '<span class="axis-btn__axis">Variant</span>' +
-        '<span class="axis-btn__label"></span>' +
-        '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
-      variantWrapEl.addEventListener("click", function () { openVariantMenu(variantWrapEl); });
-      host.insertBefore(variantWrapEl, host.firstChild);
-    }
-    variantSwitchEl = variantWrapEl;
-    syncVariantSwitch();
-  }
-  function syncVariantSwitch() {
-    if (!variantWrapEl) return;
-    var cur = activeVariant || "";
-    var lbl = variantWrapEl.querySelector(".axis-btn__label");
-    if (lbl) lbl.textContent = cur || "Flagship";
-    variantWrapEl.classList.toggle("is-active", !!cur);
-    variantWrapEl.setAttribute("aria-label", "Variant");
-    variantWrapEl.title = cur
-      ? ("Variant: " + cur + " (previewing) — switch or return to Flagship")
-      : "Variant: Flagship — preview a variant";
-    syncAxisReturnChip();
-  }
-  // uio-E-C04 (EDIT-08): surface the off-base state in the BAR (not only a canvas badge). A chip
-  // appears the moment either axis leaves base; its wording tracks the real mode -- "Read-only"
-  // when the canvas is locked (variant preview, or a version preview while collaborating), or
-  // "Editing <version>" for the editable dynamic-flagship case (#207). One click returns to base.
-  var axisReturnChipEl = null;
-  function returnToBase() {
-    flushSave(); // commit any in-flight edit before dropping the active version/variant
-    activeVariant = null; activeVersion = null;
-    syncVariantSwitch(); syncVersionSwitch();
-    mount();
-  }
-  function syncAxisReturnChip() {
-    var host = axisSwitchHost();
-    if (!host) return;
-    var off = isPreview();
-    if (!off) { if (axisReturnChipEl) { axisReturnChipEl.remove(); axisReturnChipEl = null; } return; }
-    if (!axisReturnChipEl) {
-      axisReturnChipEl = h("span", "axis-return-chip");
-      var txt = h("span", "axis-return-chip__label");
-      var btn = h("button", "axis-return-chip__btn", "Return to base"); btn.type = "button";
-      btn.addEventListener("click", returnToBase);
-      axisReturnChipEl.appendChild(txt); axisReturnChipEl.appendChild(btn);
-      host.appendChild(axisReturnChipEl); // after the two axis buttons
-    }
-    var locked = !canvasEditable();
-    axisReturnChipEl.classList.toggle("axis-return-chip--locked", locked);
-    var label = axisReturnChipEl.querySelector(".axis-return-chip__label");
-    if (locked) { label.textContent = "Read-only"; axisReturnChipEl.title = "Previewing off base — the canvas is read-only. Return to base to edit."; }
-    else { label.textContent = "Editing " + (activeVersion || "version"); axisReturnChipEl.title = "Editing a software version off base. Return to base to edit the base document."; }
-  }
-  function previewVariant(v) { activeVariant = v; syncVariantSwitch(); mount(); }
-  // Floating "Previewing variant · X" badge on the canvas — makes it obvious you're
-  // looking at a variant (paired with the .is-variant-preview inset ring). Re-created
-  // each render (mount clears the canvas), removed on Flagship.
-  function updateVariantBadge() {
-    var badge = document.getElementById("variant-preview-badge");
-    if (!activeVariant) { if (badge) badge.remove(); return; } // gate on the variant axis ONLY (a version-only preview keeps this off)
-    if (!badge) { badge = h("div", "variant-preview-badge"); badge.id = "variant-preview-badge"; canvas.appendChild(badge); }
-    badge.textContent = "Previewing variant · " + activeVariant;
-  }
+  // ...continues in variants.js (arch-P3b-07).
 
-  // ==========================================================================
-  // #206 Software-version SWITCHER — the twin of the variant switcher, for the
-  // THIRD orthogonal axis. A second glyph-only
-  // top-bar trigger ("history") opens a menu to add / name / preview versions.
-  // Preview is READ-ONLY here (edit-in-place is #207). Base (activeVersion null)
-  // is the editable anchor; newest is tagged the shipping default. The two axes
-  // nest (product resolves, then version) — see currentDoc().
-  // ==========================================================================
-  var versionWrapEl = null;
-  // add / name a version (mirrors newVariantPrompt). Newest = last-created = the moving default.
-  function newVersionPrompt(then) {
-    promptModal("New software version", "Version name (e.g. v1.3, v2.0, 2026.1)", "", function (v) {
-      var name = (v || "").trim();
-      if (!name) return;
-      if (!doc.versions) doc.versions = [];
-      if (doc.versions.indexOf(name) === -1) { pushHistory(); doc.versions.push(name); }
-      renderVersionSwitch();
-      if (then) then(name);
-    });
-  }
-  // Rename a software version end-to-end: the doc.versions entry PLUS every per-node
-  // reference to that key — versionVis only/hide arrays + versionOverrides object keys —
-  // across pages, all nested blocks (children / columns / accordion+cardReveal items /
-  // hotspot card blocks) and componentGrid instances. PURE (mutates the passed doc, no
-  // editor state), so it is regression-guarded in tests/run.js. Returns true on a real
-  // rename, false on a no-op / invalid (empty new name, unknown old, or a clash with a
-  // DIFFERENT existing version). The base is doc.versions[0]; renaming it is an ordinary
-  // key rename (identity stays at index 0).
-  function renameVersion(d, oldName, newName) {
-    newName = (newName == null ? "" : String(newName)).trim();
-    if (!d || !oldName || !newName || oldName === newName) return false;
-    var vs = d.versions || [];
-    var oi = vs.indexOf(oldName);
-    if (oi === -1 || vs.indexOf(newName) !== -1) return false;
-    vs[oi] = newName;
-    function fixNode(n) {
-      if (!n || typeof n !== "object") return;
-      var vv = n.versionVis;
-      if (vv) ["only", "hide"].forEach(function (k) {
-        if (Array.isArray(vv[k])) vv[k] = vv[k].map(function (x) { return x === oldName ? newName : x; });
-      });
-      var ov = n.versionOverrides;
-      if (ov && Object.prototype.hasOwnProperty.call(ov, oldName)) { ov[newName] = ov[oldName]; delete ov[oldName]; }
-    }
-    function walk(nodes) {
-      (nodes || []).forEach(function (b) {
-        if (!b) return;
-        fixNode(b);
-        if (Array.isArray(b.children)) walk(b.children);
-        if (Array.isArray(b.columns)) b.columns.forEach(function (col) { if (Array.isArray(col)) walk(col); });
-        if (Array.isArray(b.items)) b.items.forEach(function (it) { if (it) { if (Array.isArray(it.children)) walk(it.children); if (Array.isArray(it.front)) walk(it.front); } });
-        // #215: screen/marker nodes carry their own versionOverrides (entry visual) —
-        // fix THEM as nodes, then recurse the card blocks. Inlined (renameVersion is
-        // regex-extracted standalone by tests/run.js, so no outside helper).
-        if (Array.isArray(b.screens)) b.screens.forEach(function (s) {
-          if (!s) return;
-          fixNode(s);
-          if (Array.isArray(s.markers)) s.markers.forEach(function (m) { if (m) { fixNode(m); if (Array.isArray(m.blocks)) walk(m.blocks); } });
-        });
-        if (Array.isArray(b.instances)) walk(b.instances);
-      });
-    }
-    (d.pages || []).forEach(function (p) { fixNode(p); walk(p.blocks); });
-    return true;
-  }
-  window.__renameVersion = renameVersion; // regression-guard hook (tests/run.js)
-  // Rename (or first-time NAME) a version so it can be identified. target null/"" => the
-  // BASE: rename doc.versions[0], or CREATE it if the axis has no versions yet (naming the
-  // base for the first time). Keeps the active view pinned to the renamed version.
-  function renameVersionPrompt(target) {
-    var isBase = !target;
-    var cur = isBase ? ((doc.versions && doc.versions[0]) || "") : target;
-    var title = isBase ? (cur ? "Rename base version" : "Name the base version") : "Rename version";
-    promptModal(title, "Version name (e.g. v1.3, v2.0, 2026.1)", cur, function (v) {
-      var name = (v || "").trim();
-      if (!name || name === cur) return;
-      if ((doc.versions || []).indexOf(name) !== -1) { window.alert("A version named \"" + name + "\" already exists."); return; }
-      pushHistory();
-      if (isBase && !cur) { doc.versions = doc.versions || []; doc.versions.unshift(name); } // seed the base identity
-      else { renameVersion(doc, cur, name); if (activeVersion === cur) activeVersion = name; }
-      renderVersionSwitch(); mount();
-    });
-  }
-  function onVersionPick(v) {
-    flushSave(); // #207 FIX 3: commit any in-flight edit before switching the active version
-    if (v === "__new__") { newVersionPrompt(function (name) { activeVersion = name; syncVersionSwitch(); mount(); }); syncVersionSwitch(); return; }
-    activeVersion = v || null; syncVersionSwitch(); mount();
-  }
-  function openVersionMenu(anchor) {
-    var vs = versionNames();
-    var base = vs.length ? vs[0] : null;               // identity = editable anchor
-    var def = vs.length ? vs[vs.length - 1] : null;    // newest = the shipping default
-    var items = [{ head: "Software version" }];
-    // Base = the editable identity (doc.versions[0]); show its NAME so it is identifiable,
-    // and do NOT also list it as a pickable name-row below — picking base-by-name set
-    // activeVersion to the identity key, a pseudo-editable state whose overrides the pure
-    // resolver ignores (editor != export). "Base (edit)" (activeVersion null) is the one path.
-    items.push({ label: base ? ("Base · " + base + (base === def ? "  · default" : "")) : "Base (edit)", active: !activeVersion, onClick: function () { onVersionPick(""); } });
-    // newest-first so the default sits at the top of the list; base is already shown above.
-    vs.slice().reverse().forEach(function (v) {
-      if (v === base) return;
-      items.push({ label: v + (v === def ? "  · default" : ""), active: activeVersion === v, onClick: function () { onVersionPick(v); } });
-    });
-    items.push({ sep: true });
-    // Name / rename the version you are on (base included) so it can be identified.
-    items.push({
-      label: activeVersion ? ("Rename “" + activeVersion + "”…")
-           : (base ? ("Rename base “" + base + "”…") : "Name the base version…"),
-      onClick: function () { renameVersionPrompt(activeVersion || null); }
-    });
-    items.push({ label: "+ New version…", onClick: function () { onVersionPick("__new__"); } });
-    var r = anchor.getBoundingClientRect();
-    showContextMenu(r.left, r.bottom + 6, items);
-  }
-  // edit-header-ia-v2: face-up NAMED dropdown twin of the variant switch. Shows the active
-  // version name, or the base version's name, or "Base" when the axis has none yet.
-  function renderVersionSwitch() {
-    var host = axisSwitchHost();
-    if (!host) return;
-    var Ic = window.Icon;
-    if (!versionWrapEl) {
-      versionWrapEl = h("button", "tool editor-window__axis-btn version-glyph"); versionWrapEl.type = "button";
-      // uio-E-C04 (EDIT-08): named axis caption ("Version") + value + caret, twin of the variant switch.
-      versionWrapEl.innerHTML =
-        '<span class="axis-btn__axis">Version</span>' +
-        '<span class="axis-btn__label"></span>' +
-        '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
-      versionWrapEl.addEventListener("click", function () { openVersionMenu(versionWrapEl); });
-      // FIX 4a: order encodes nesting — variant (outer axis) then version (inner axis),
-      // left->right. Insert AFTER the variant glyph if present, else at the group head.
-      if (variantWrapEl && variantWrapEl.parentNode === host) host.insertBefore(versionWrapEl, variantWrapEl.nextSibling);
-      else host.insertBefore(versionWrapEl, host.firstChild);
-    }
-    syncVersionSwitch();
-  }
-  function syncVersionSwitch() {
-    if (!versionWrapEl) return;
-    var cur = activeVersion || "";
-    var vs = versionNames(); var base = vs.length ? vs[0] : "";
-    var lbl = versionWrapEl.querySelector(".axis-btn__label");
-    if (lbl) lbl.textContent = cur || base || "Base";
-    versionWrapEl.classList.toggle("is-active", !!cur);
-    versionWrapEl.setAttribute("aria-label", "Software version");
-    versionWrapEl.title = cur
-      ? ("Software version: " + cur + " (previewing, read-only) — switch or return to Base to edit")
-      : "Software version: Base — preview a version";
-    syncAxisReturnChip();
-  }
-  function previewVersion(v) { flushSave(); activeVersion = v; syncVersionSwitch(); mount(); } // #207 FIX 3: flush an in-flight edit before switching so nothing is lost mid-caret
-  // Floating teal version badge. #207 (FIX 1): the wording signals the MODE, not just the axis —
-  // "Editing version · X" (with a pencil glyph) when the version is the sole active axis (the
-  // editable flagship), vs "Previewing version · X · read-only" only when composed with a variant
-  // preview. Colour = axis; text + glyph = editable vs read-only. FIX 4b: offset below the purple
-  // variant pill when composed so both read at once.
-  function updateVersionBadge() {
-    var badge = document.getElementById("version-preview-badge");
-    if (!activeVersion) {
-      // Base view: once the version axis is in use, badge WHICH version base is (its
-      // doc.versions[0] name) so the current version is identifiable on-canvas, parity
-      // with the "Editing version" badge below. No axis (no versions) -> no badge.
-      var baseName = (doc.versions && doc.versions[0]) || null;
-      if (!baseName) { if (badge) badge.remove(); return; }
-      if (!badge) { badge = h("div", "version-preview-badge"); badge.id = "version-preview-badge"; canvas.appendChild(badge); }
-      badge.classList.remove("is-composed"); badge.classList.add("is-editing");
-      var Icb = window.Icon;
-      badge.innerHTML = (Icb ? Icb("type") : "") + "<span>" + ("Editing base · " + baseName).replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>";
-      return;
-    }
-    if (!badge) { badge = h("div", "version-preview-badge"); badge.id = "version-preview-badge"; canvas.appendChild(badge); }
-    var editable = versionEditable();
-    badge.classList.toggle("is-composed", !!activeVariant);
-    badge.classList.toggle("is-editing", editable);
-    var Ic = window.Icon;
-    var glyph = (editable && Ic) ? Ic("type") : ""; // "type" (text A-glyph) = you are editing this version's text
-    var label = editable ? ("Editing version · " + activeVersion) : ("Previewing version · " + activeVersion + " · read-only");
-    badge.innerHTML = glyph + "<span>" + label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>";
-  }
 
   // ...continues in context-menu.js (arch-P3b-07).
 
@@ -17019,6 +15598,19 @@
   window.VersoEditor.provideLive({
     activeMode: function () { return activeMode; }
   });
+  // arch-P3b-07j: the preview flips light/dark for real, so it writes this one back. Entering the
+  // preview also drops comment mode WITHOUT the side effects of the full setter -- it is about to
+  // rebuild the surface anyway -- so that write crosses as its own narrow function.
+  window.VersoEditor.provide({
+    setActiveMode: function (m) { activeMode = m; },
+    resetDemoCommentMode: function () { demoCommentMode = false; }
+  });
+  // Both are flipped as the author works: comment mode inside the preview, and which comment's
+  // popover is open. A captured value would leave the preview drawing the last state.
+  window.VersoEditor.provideLive({
+    demoCommentMode: function () { return demoCommentMode; },
+    openCommentId: function () { return openCommentId; }
+  });
   // arch-P3b-07b: what the canonical control set reads. `blockToolbarSep` is minted when this file
   // builds the canvas overlay bar, so renderContainerChrome has to read the current one.
   window.VersoEditor.provideLive({
@@ -17039,6 +15631,30 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    syncSendToPublishCount: syncSendToPublishCount,
+    publishToast: publishToast,
+    addToQueue: addToQueue,
+    applyLayoutVars: applyLayoutVars,
+    persistTheme: persistTheme,
+    closeCommentPopover: closeCommentPopover,
+    demoCommentBtn: demoCommentBtn,
+    fitEmbedsIn: fitEmbedsIn,
+    pageIndexById: pageIndexById,
+    setDemoCommentMode: setDemoCommentMode,
+    BREAKPOINTS: BREAKPOINTS,
+    modalHead: modalHead,
+    isTextTarget: isTextTarget,
+    convertTextListBlockType: convertTextListBlockType,
+    TEXT_CONTENT_TYPES: TEXT_CONTENT_TYPES,
+    buildFormatToggleBar: buildFormatToggleBar,
+    sanitizeFieldHtml: sanitizeFieldHtml,
+    sanitizeText: sanitizeText,
+    scheduleSpellcheck: scheduleSpellcheck,
+    versionEditable: versionEditable,
+    canvasEditable: canvasEditable,
+    isPreview: isPreview,
+    stripToText: stripToText,
+    resolveComponentDef: resolveComponentDef,
     persistLayout: persistLayout,
     eyeRow: eyeRow,
     clearHeaderFooterDefault: clearHeaderFooterDefault,
@@ -17132,6 +15748,11 @@
     // it does not matter that colour installs first.
     colourControl: colourControl,
     setInspector: function (el) { inspector = el; },
+    // arch-P3b-07l: the two axes stay owned here, because the canvas, the outliner, the export and
+    // the publish rail all read them. variants.js reads them through the live getters above and
+    // writes them through these two, so switching axis still goes through one place.
+    setActiveVariant: function (v) { activeVariant = v; },
+    setActiveVersion: function (v) { activeVersion = v; },
     // stable: function declarations this file never reassigns
     iconBtn: iconBtn, activeTheme: activeTheme, SVGNS: SVGNS,
     flushSave: flushSave, scheduleSave: scheduleSave, ensureId: ensureId, mintId: mintId,
@@ -17202,6 +15823,9 @@
   window.VersoContextMenu.install(VE);   // right-click, everywhere
   window.VersoModals.install(VE);   // the canonical dialog every editor modal composes from
   window.VersoHeaderFooter.install(VE);   // the global course chrome and the learner nav
+  window.VersoVariants.install(VE);   // the variant and version axes
+  window.VersoCopyEditor.install(VE);   // the Read view and its find & replace
+  window.VersoDemo.install(VE);   // the fullscreen learner preview
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has
