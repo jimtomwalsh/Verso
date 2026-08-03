@@ -1939,7 +1939,13 @@
       closeTourBuilder: closeTourBuilder,
       tourBoardIsOpen: tourBoardIsOpen,
       syncTourBoard: syncTourBoard,
-      maybeReopenTourBuilder: maybeReopenTourBuilder
+      maybeReopenTourBuilder: maybeReopenTourBuilder,
+      // arch-P3b-06: the hotspots editor drives these three when an edit made on the canvas
+      // has to show up on an open board. They were a plain call inside one file; now they are
+      // the board's contract with its sibling.
+      tourMakeMarker: tourMakeMarker,
+      renderTourNodes: renderTourNodes,
+      renderTourInspector: renderTourInspector
     });
     return VersoTourBoard;
   }
