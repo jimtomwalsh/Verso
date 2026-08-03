@@ -22,6 +22,9 @@
   // by index.html before this file.
   var CV = window.VersoCanvasView;
   var SEL = window.VersoSelection;
+  // arch-P3b-01: the editor namespace. This file provides the host surface a moved region reads,
+  // and binds the entry points those regions expose. Both sides are at the bottom of the file.
+  var VE = window.VersoEditor;
   // arch-P3-08: the drop resolver + block-tree surgery, and the screen-graph read accessors.
   var DND = window.VersoDnd;
   var HS = window.VersoHotspots;
@@ -4627,304 +4630,30 @@
     try { localStorage.setItem(STYLE_AUDIT_KEY, styleAuditOn ? "1" : "0"); } catch (e) {}
     decorateStyleAudit();
   }
-  // eased zoom (smooths chunky mouse-wheel deltas; lower ZOOM_SENS = gentler).
-  // ~1.8x faster than the original for a snappier trackpad feel; the rAF ease
-  // (zoomStep) keeps it smooth despite the higher gain.
-  var ZOOM_SENS = 0.008; // trackpad zoom gain (James: responsive trackpad feel). Tunable.
-  // Perf (#172): below this zoom the whole multi-page world is on-screen and body text is a
-  // sub-pixel smudge; while a gesture is in motion we drop the page CONTENT paint (see the
-  // .world--far CSS) so the compositor only moves the plain frame boxes. Tunable in one place.
-  var FAR_ZOOM = 0.5;
-
-  // Perf (#151): native-snapshot gesture proxy. Replaces the "content disappears while moving"
-  // LOD (#150 media cull / #172 plain-page cull) with a REAL cached bitmap of the page. In the
-  // packaged WKWebView app `window.webkit.messageHandlers.nativeSnapshot` rasterises a screen
-  // rect (real fonts, no taint -- the SVG-foreignObject route can't load @font-face in image
-  // mode); we show that bitmap over the viewport while pan/zooming so the compositor scales ONE
-  // texture instead of re-rasterising the whole multi-page DOM each frame, then swap back to the
-  // live DOM on settle. Feature-detected: no bridge (a plain browser) -> the CSS LOD still runs.
-  // Editor chrome only -- render()/doc/export never learn about it.
-  var _snapReq = 0, _snapPending = {};
-  window.__nativeSnapshotReply = function (reqId, dataUrl) {
-    var res = _snapPending[reqId]; if (!res) return; delete _snapPending[reqId]; res(dataUrl || null);
-  };
-  function hasNativeSnapshot() {
-    return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nativeSnapshot);
-  }
-  function nativeSnapshot(rect) {
-    if (!hasNativeSnapshot()) return Promise.resolve(null);
-    var reqId = "s" + (++_snapReq);
-    return new Promise(function (resolve) {
-      _snapPending[reqId] = resolve;
-      try { window.webkit.messageHandlers.nativeSnapshot.postMessage({ reqId: reqId, x: rect.x, y: rect.y, w: rect.w, h: rect.h }); }
-      catch (e) { delete _snapPending[reqId]; resolve(null); return; }
-      setTimeout(function () { if (_snapPending[reqId]) { delete _snapPending[reqId]; resolve(null); } }, 1000); // watchdog
-    });
-  }
-  window.__nativeSnapshot = nativeSnapshot; // explicit API + headless test seam
-
-  // The proxy overlay lives in `canvas` (the clip viewport), a SIBLING of `world`, so hiding the
-  // live world doesn't hide it. Affine tracking: a screen pixel captured at gesture start maps to
-  // s = A*s0 + B where A = zoom/startZoom and B = view.xy - startXY*A (canvas-local coords).
-  // Default OFF: WKWebView's takeSnapshot proved flaky in the packaged app (returned a BLACK
-  // frame + flickered on a large course). Kept behind a runtime flag for an opt-in retry once the
-  // snapshot is fixed (afterScreenUpdates + onload-gated hide, below); OFF falls back to the
-  // #172/#150 CSS LOD. Toggle from the console: window.__canvasProxy(true|false).
-  var CANVAS_PROXY = false;
-  window.__canvasProxy = function (on) { CANVAS_PROXY = !!on; if (!CANVAS_PROXY) proxyEnd(); return CANVAS_PROXY; };
-  var _proxy = { epoch: 0, img: null, pending: false, sx: 0, sy: 0, sz: 1 };
-  function proxyActive() { return !!_proxy.img; }
-  function proxyBegin() {
-    // Only where the live path is worst + where the LOD would otherwise blank content (far zoom),
-    // and only when the native rasteriser exists. Re-entrancy guard: skip while a snapshot is
-    // already installed (active) or in flight (pending) -- markNavigating fires every motion frame.
-    if (!CANVAS_PROXY || proxyActive() || _proxy.pending || !world || !canvas) return;
-    if (!(view.zoom < FAR_ZOOM) || !hasNativeSnapshot()) return;
-    var r = canvas.getBoundingClientRect();
-    var epoch = ++_proxy.epoch;
-    _proxy.pending = true;
-    _proxy.sx = view.x; _proxy.sy = view.y; _proxy.sz = view.zoom;
-    nativeSnapshot({ x: r.left, y: r.top, w: r.width, h: r.height }).then(function (dataUrl) {
-      if (epoch !== _proxy.epoch) { _proxy.pending = false; return; } // superseded by settle/new gesture
-      _proxy.pending = false;
-      if (!dataUrl) return; // failed snapshot -> leave the live DOM up (CSS LOD covers this gesture)
-      var img = document.createElement("img");
-      img.className = "canvas-proxy";
-      img.style.cssText = "position:absolute;left:0;top:0;width:" + r.width + "px;height:" + r.height +
-        "px;transform-origin:0 0;pointer-events:none;z-index:20;";
-      // Only hide the live world ONCE the bitmap has actually decoded + is ready to paint --
-      // hiding before that is what caused the flash-to-nothing / flicker. Abort on a bad image.
-      img.onload = function () {
-        if (epoch !== _proxy.epoch || proxyActive()) { return; } // gesture ended before decode
-        if (!img.naturalWidth || !img.naturalHeight) return;     // empty/black snapshot -> don't hide
-        canvas.appendChild(img);
-        _proxy.img = img;
-        world.style.visibility = "hidden"; // the bitmap now stands in for the whole live world
-        proxyTrackView();
-      };
-      img.onerror = function () { /* keep the live DOM up */ };
-      img.src = dataUrl;
-    });
-  }
-  function proxyTrackView() {
-    if (!_proxy.img) return;
-    var A = view.zoom / (_proxy.sz || 1);
-    var bx = view.x - _proxy.sx * A, by = view.y - _proxy.sy * A;
-    _proxy.img.style.transform = "translate(" + bx + "px," + by + "px) scale(" + A + ")";
-  }
-  function proxyEnd() {
-    _proxy.epoch++; _proxy.pending = false; // invalidate any snapshot still in flight
-    if (_proxy.img) { if (_proxy.img.parentNode) _proxy.img.parentNode.removeChild(_proxy.img); _proxy.img = null; }
-    if (world) world.style.visibility = ""; // live DOM (now at the final crisp transform) returns
-  }
-
-  // Perf (#151 lever 1): native-scroll pan. Instead of moving the world with a transform
-  // translate (which re-rasterises the whole DOM when the layer is too big to GPU-cache), the
-  // world lives inside an overflow:auto SIZER and panning is native scrolling -- the browser
-  // moves already-painted GPU tiles, so content NEVER blanks and pan stays buttery even zoomed
-  // out. Zoom stays a `scale()` transform (that half is lever 2's snapshot problem). Mapping:
-  // the world sits at (SCROLL_PAD, SCROLL_PAD) in the sizer, so world origin renders at
-  // canvas-local x = SCROLL_PAD - scrollLeft; the existing `view.x` (world origin's canvas-local
-  // x) therefore equals SCROLL_PAD - scrollLeft. Backing `view.x/y` off scroll that way keeps
-  // EVERY screen<->world read (select, marquee, drag, pins) working unchanged; only the writers
-  // (pan/zoom/fit) reroute to scroll. Default OFF (flag) + a console toggle for A/B on hardware.
-  var NS_KEY = "authoring.nativeScroll";
-  var NATIVE_SCROLL = false;
-  try { NATIVE_SCROLL = localStorage.getItem(NS_KEY) === "1"; } catch (e) {} // persist across Cmd+R (testing footgun)
-  var SCROLL_PAD = 2000; // breathing room around the content so panning feels free (not a huge void)
-  var scrollSizer = null, _scrollSync = false;
-  function attachWorld() {
-    // Used by every canvas.appendChild(world) site so the structure follows the flag.
-    if (NATIVE_SCROLL) {
-      if (!scrollSizer) scrollSizer = h("div", "canvas-scroll");
-      scrollSizer.innerHTML = ""; scrollSizer.appendChild(world);
-      canvas.appendChild(scrollSizer);
-      canvas.classList.add("native-scroll");
-    } else {
-      if (world) { world.style.left = ""; world.style.top = ""; }
-      canvas.appendChild(world);
-      canvas.classList.remove("native-scroll");
-    }
-  }
-  window.__nativeScroll = function (on) {
-    var was = NATIVE_SCROLL; NATIVE_SCROLL = (on == null) ? NATIVE_SCROLL : !!on; // no arg = query
-    try { localStorage.setItem(NS_KEY, NATIVE_SCROLL ? "1" : "0"); } catch (e) {}
-    if (was !== NATIVE_SCROLL && world && canvas) {
-      attachWorld();
-      if (!NATIVE_SCROLL) { canvas.scrollLeft = 0; canvas.scrollTop = 0; }
-      applyView();
-    }
-    if (window.console) console.log("[native-scroll] " + (NATIVE_SCROLL ? "ON (persists across reload)" : "OFF"));
-    return NATIVE_SCROLL;
-  };
-
-  var targetZoom = 1, zoomAnchor = null, zooming = false;
-  function applyView() {
-    if (!world) return;
-    var _pt0 = perfOn ? performance.now() : 0;
-    if (NATIVE_SCROLL && scrollSizer) {
-      // A programmatic view change (fit / restore / toggle) is authoritative + instant: cancel
-      // any in-flight compositor zoom transition + its settle so they can't fight this write.
-      world.style.transition = "";
-      if (_zoomSettleT) { clearTimeout(_zoomSettleT); _zoomSettleT = null; zooming = false; }
-      // Pan is native scroll; the transform carries ZOOM only. Size the sizer to the scaled
-      // world + pad so scrollbars have the right range, then drive scroll from view.x/y and
-      // reconcile view from the CLAMPED scroll the browser accepted (keeps reads exact).
-      world.style.left = SCROLL_PAD + "px"; world.style.top = SCROLL_PAD + "px";
-      world.style.transform = "scale(" + view.zoom + ")";
-      scrollSizer.style.width = (worldW() * view.zoom + SCROLL_PAD * 2) + "px";
-      scrollSizer.style.height = ((worldH || FRAME_H) * view.zoom + SCROLL_PAD * 2) + "px";
-      _scrollSync = true;
-      canvas.scrollLeft = SCROLL_PAD - view.x; canvas.scrollTop = SCROLL_PAD - view.y;
-      _scrollSync = false;
-      view.x = SCROLL_PAD - canvas.scrollLeft; view.y = SCROLL_PAD - canvas.scrollTop;
-    } else {
-      world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.zoom + ")";
-    }
-    // Perf (#172): flag zoomed-out so the nav-lod (in-motion) rule can collapse pages to
-    // cheap boxes. A class toggle only -- reflects the CURRENT zoom every frame; the actual
-    // paint drop is gated on .nav-lod so it only bites WHILE moving, snapping back on settle.
-    world.classList.toggle("world--far", view.zoom < FAR_ZOOM);
-    if (proxyActive()) proxyTrackView(); // #151: keep the cached bitmap glued to the live transform
-    zoomLevelEl.textContent = Math.round(view.zoom * 100) + "%";
-    persistView();
-    if (typeof renderCommentPins === "function") renderCommentPins(); // §12: pins track pan/zoom
-    if (perfOn) { _perfViewJs += performance.now() - _pt0; _perfViewN++; }
-  }
-  // Native-scroll pan (#151): a user scroll IS the pan. Sync view.x/y from the scroll offset and
-  // reproject pins -- but do NOT re-run applyView (would re-set scroll -> loop) and do NOT tag
-  // nav-lod (native scroll never re-rasterises, so content stays fully live/crisp = the win).
-  // Guarded off _scrollSync so applyView's own scroll write doesn't re-enter.
-  canvas.addEventListener("scroll", function () {
-    if (!NATIVE_SCROLL || _scrollSync) return;
-    view.x = SCROLL_PAD - canvas.scrollLeft; view.y = SCROLL_PAD - canvas.scrollTop;
-    if (proxyActive()) proxyTrackView();
-    persistView();
-    if (typeof renderCommentPins === "function") renderCommentPins();
-  }, { passive: true });
-  // Perf (#150): the canvas is paint/compositing-bound -- pan/zoom re-rasterises every
-  // page, SVG and embed on screen each frame (measured 7 FPS zoomed out). While a gesture
-  // is IN MOTION we tag the world `nav-lod`; CSS then stops painting the heavy leaf content
-  // (images / inline SVGs / embeds / video), so the GPU only moves cheap boxes -> smooth
-  // motion. A settle timer clears it ~120ms after the last movement, snapping full detail
-  // back. Editor chrome only (a class on the editor-built world) -- render()/doc/export are
-  // untouched, and this is opt-in motion behaviour, never a persistent blank.
-  var _navSettleT = null;
-  function markNavigating() {
-    // #151: with native-scroll pan on, pan never re-rasterises (no LOD needed) and we want ZOOM
-    // to show LIVE content too (the blanking is what read as "pages go black on zoom"). So skip
-    // the paint-suppression classes entirely -- zoom paints live. If live zoom janks, a
-    // cached-layer zoom is the next step.
-    if (NATIVE_SCROLL) return;
-    if (world) world.classList.add("nav-lod");
-    proxyBegin(); // (interim path) on gesture start; no-op if already proxying / not far-zoom / no native bridge
-    if (_navSettleT) clearTimeout(_navSettleT);
-    _navSettleT = setTimeout(function () { if (world) world.classList.remove("nav-lod"); proxyEnd(); }, 120);
-  }
-  // Fit the view to an arbitrary WORLD-space rect (used by "." zoom-to-selection).
-  function fitWorldRect(wx, wy, ww, wh) {
-    if (!(ww > 0) || !(wh > 0)) return;
-    var rect = canvas.getBoundingClientRect(), pad = 80;
-    var z = clamp(Math.min((rect.width - pad * 2) / ww, (rect.height - pad * 2) / wh), 0.05, 2);
-    zooming = false; targetZoom = z; zoomAnchor = null;
-    view.zoom = z;
-    view.x = rect.width / 2 - (wx + ww / 2) * z;
-    view.y = rect.height / 2 - (wy + wh / 2) * z;
-    view.ready = true; applyView();
-  }
-  function zoomStep() {
-    var z = view.zoom + (targetZoom - view.zoom) * 0.22; // ease toward target
-    if (Math.abs(targetZoom - z) < 0.001) { z = targetZoom; zooming = false; }
-    view.zoom = z;
-    if (zoomAnchor) { view.x = zoomAnchor.sx - zoomAnchor.wx * z; view.y = zoomAnchor.sy - zoomAnchor.wy * z; }
-    markNavigating();
-    applyView();
-    if (zooming) requestAnimationFrame(zoomStep);
-  }
-  // Every zoom entry point (wheel / buttons / keys) sets targetZoom + zoomAnchor then calls
-  // startZoom(). Non-native: the eased rAF zoomStep (re-rasterises each frame). Native-scroll:
-  // route to a COMPOSITOR zoom instead -- animate the world transform with a CSS transition so
-  // WebKit scales the ALREADY-PAINTED layer (smooth + content-visible at any page count, brief
-  // blur) rather than re-rasterising every page per frame; bake to a crisp scale-only transform
-  // + scroll on settle. This is the fix for "zoom slows down at 6+ pages". #151 lever 2, done
-  // right (the browser's own layer, no flaky snapshot API).
-  var _zoomSettleT = null, _zoomBase = 1;
-  var _zoomDur = 80, _zoomSettle = 95; // compositor-zoom transition + settle (ms), live-tunable
-  // Dial the zoom feel from the console without a rebuild, e.g. __zoomTune({sens:0.01, dur:60}).
-  window.__zoomTune = function (o) {
-    o = o || {};
-    if (o.sens != null) ZOOM_SENS = o.sens;
-    if (o.dur != null) _zoomDur = o.dur;
-    if (o.settle != null) _zoomSettle = o.settle;
-    return { sens: ZOOM_SENS, dur: _zoomDur, settle: _zoomSettle };
-  };
-  function startZoom() {
-    if (!NATIVE_SCROLL || !scrollSizer || !world) {
-      if (!zooming) { zooming = true; requestAnimationFrame(zoomStep); }
-      return;
-    }
-    if (!zooming) { zooming = true; _zoomBase = view.zoom; } // capture committed base once per gesture
-    var z = targetZoom, a = zoomAnchor;
-    // Keep the anchor world point under the cursor while scaling, WITHOUT moving scroll:
-    // translate = anchorWorld * (base - z) (derivation in canvas-perf-151-spec).
-    var t = CV.zoomTranslate(_zoomBase, z, a), tx = t.tx, ty = t.ty;
-    // linear (not ease-out) so rapid continuous notches don't pulse/accel-decel each segment;
-    // short so the composited-blur window is brief and it crisps quickly.
-    world.style.transition = "transform " + _zoomDur + "ms linear";
-    world.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + z + ")";
-    if (zoomLevelEl) zoomLevelEl.textContent = Math.round(z * 100) + "%";
-    if (_zoomSettleT) clearTimeout(_zoomSettleT);
-    // bake right after the transition finishes (single blur->crisp settle; was 160 -> a second,
-    // visibly-doubled re-bake 50ms after the transition already crisped).
-    _zoomSettleT = setTimeout(function () { bakeZoom(z, a); }, _zoomSettle);
-  }
-  function bakeZoom(z, a) {
-    _zoomSettleT = null; zooming = false;
-    if (!NATIVE_SCROLL || !scrollSizer) return;
-    var sl = canvas.scrollLeft, st = canvas.scrollTop;
-    var t = CV.zoomTranslate(_zoomBase, z, a);
-    // Fold the transient translate into scroll so the crisp re-render lands in the SAME place.
-    var baked = CV.bakeView(SCROLL_PAD, { left: sl, top: st }, t);
-    view.zoom = z;
-    view.x = baked.x; view.y = baked.y;
-    world.style.transition = "";
-    applyView(); // sizes the sizer + scale-only transform + drives scroll(=sl-tx) + reconciles view
-  }
-  function worldW() { return colX(Math.max(0, _numCols - 1)) + FRAME_W; }
-  // The fit/focus maths is src/editor/canvas-view.js (arch-P3-07); these apply what it returns.
-  function fitAll() {
-    var v = CV.fitWorld(canvas.getBoundingClientRect(), { w: worldW(), h: worldH }, LABEL_H);
-    view.zoom = v.zoom; view.x = v.x; view.y = v.y;
-    view.ready = true; applyView();
-  }
-  // JJJJ: 2D fit helpers + a page->chapter->grid cycle on the zoom-fit button.
-  function fitToRect(x, y, w, h) {
-    var v = CV.fitRect(canvas.getBoundingClientRect(), { x: x, y: y, w: w, h: h });
-    view.zoom = v.zoom; view.x = v.x; view.y = v.y;
-    view.ready = true; applyView();
-  }
-  function fitChapter(col) {
-    var bottom = 0;
-    frameDescs.forEach(function (f) { if (framePos[f.i] && framePos[f.i].col === col) { var b = framePos[f.i].y + LABEL_H + (f.h || 0); if (b > bottom) bottom = b; } });
-    fitToRect(colX(col), 0, FRAME_W, bottom || FRAME_H);
-  }
-  var fitMode = 2; // starts at the last mode so the FIRST click lands on page
-  function fitCycle() {
-    fitMode = CV.nextFitMode(fitMode);
-    var col = (framePos[currentPage] && framePos[currentPage].col) || 0;
-    var mode = CV.fitModeName(fitMode);
-    if (mode === "page") focusFrame(currentPage);
-    else if (mode === "chapter") fitChapter(col);
-    else fitAll();
-  }
-  function focusFrame(i) {
-    currentPage = i;
-    var fh = frameDescs[i] ? frameDescs[i].frame.offsetHeight : FRAME_H;
-    // JJJJ: the frame's Y is its position in its own chapter column.
-    var v = CV.focusRect(canvas.getBoundingClientRect(), { x: frameX(i), y: frameY(i), w: FRAME_W, h: fh }, LABEL_H);
-    view.zoom = v.zoom; view.x = v.x; view.y = v.y;
-    applyView();
-  }
+  // ---- the canvas view region -> src/editor/canvas-view.js (arch-P3b-02) ---
+  // The transform write, the eased + compositor zoom, native-scroll pan, the WKWebView snapshot
+  // proxy and the fit/focus drivers all live in the module now, beside the maths P3-07 moved
+  // there. What stayed here is the state they read -- view, world, currentPage, frameDescs,
+  // framePos, the frame geometry -- because roughly 250 other lines in this file read the same
+  // things. These are the entry points, bound before the module installs, so every call site
+  // below is unchanged.
+  var applyView = VE.bind("applyView");
+  var markNavigating = VE.bind("markNavigating");
+  var attachWorld = VE.bind("attachWorld");
+  var nativeScroll = VE.bind("nativeScroll");   // the NATIVE_SCROLL flag, as a read
+  var worldW = VE.bind("worldW");
+  var fitAll = VE.bind("fitAll");
+  var fitToRect = VE.bind("fitToRect");
+  var fitChapter = VE.bind("fitChapter");
+  var fitCycle = VE.bind("fitCycle");
+  var fitWorldRect = VE.bind("fitWorldRect");
+  var focusFrame = VE.bind("focusFrame");
+  var wheelZoom = VE.bind("wheelZoom");
+  var zoomIn = VE.bind("zoomIn");
+  var zoomOut = VE.bind("zoomOut");
+  var zoomTo100 = VE.bind("zoomTo100");
+  var panBy = VE.bind("panBy");
+  var panDrag = VE.bind("panDrag");
 
   // ---- model write path ----------------------------------------------------
   // #207: capture an inline edit into base.versionOverrides[version][field], DIFFED against the
@@ -21618,21 +21347,12 @@
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       var rect = canvas.getBoundingClientRect();
-      var mx = e.clientX - rect.left, my = e.clientY - rect.top;
-      if (!zooming) targetZoom = view.zoom; // sync if zoom was set elsewhere (fit/focus)
-      zoomAnchor = { sx: mx, sy: my, wx: (mx - view.x) / view.zoom, wy: (my - view.y) / view.zoom };
-      // normalise wheel delta (lines/pages -> px) and cap it so one chunky mouse
-      // notch can't jump the zoom; ease toward the target in zoomStep
-      var dy = e.deltaY;
-      if (e.deltaMode === 1) dy *= 16; else if (e.deltaMode === 2) dy *= 100;
-      dy = Math.max(-60, Math.min(60, dy));
-      targetZoom = clamp(targetZoom * Math.exp(-dy * ZOOM_SENS), 0.05, 4);
-      startZoom();
-    } else if (NATIVE_SCROLL) {
+      wheelZoom(e.clientX - rect.left, e.clientY - rect.top, e.deltaY, e.deltaMode);
+    } else if (nativeScroll()) {
       return; // #151: let the browser scroll the container -- GPU tiles move, content never blanks
     } else {
       e.preventDefault();
-      view.x -= e.deltaX; view.y -= e.deltaY; markNavigating(); applyView();
+      panBy(e.deltaX, e.deltaY);
     }
   }, { passive: false });
 
@@ -21734,20 +21454,10 @@
       redo();
     } else if (meta && (e.key === "=" || e.key === "+")) {
       e.preventDefault();
-      var rect = canvas.getBoundingClientRect();
-      var mx = rect.width / 2, my = rect.height / 2;
-      if (!zooming) targetZoom = view.zoom;
-      zoomAnchor = { sx: mx, sy: my, wx: (mx - view.x) / view.zoom, wy: (my - view.y) / view.zoom };
-      targetZoom = clamp(targetZoom * 1.25, 0.05, 4);
-      startZoom();
+      zoomIn();
     } else if (meta && e.key === "-") {
       e.preventDefault();
-      var rect = canvas.getBoundingClientRect();
-      var mx = rect.width / 2, my = rect.height / 2;
-      if (!zooming) targetZoom = view.zoom;
-      zoomAnchor = { sx: mx, sy: my, wx: (mx - view.x) / view.zoom, wy: (my - view.y) / view.zoom };
-      targetZoom = clamp(targetZoom / 1.25, 0.05, 4);
-      startZoom();
+      zoomOut();
     } else if (meta && e.key === "0") {
       e.preventDefault();
       fitAll();
@@ -22027,13 +21737,6 @@
     pushHistory();
     Object.keys(styleClipboard).forEach(function (k) { block[k] = clone(styleClipboard[k]); });
     mount(); return true;
-  }
-  function zoomTo100() {
-    var rect = canvas.getBoundingClientRect();
-    var mx = rect.width / 2, my = rect.height / 2;
-    var wx = (mx - view.x) / view.zoom, wy = (my - view.y) / view.zoom;
-    zooming = false; targetZoom = 1; zoomAnchor = null;
-    view.zoom = 1; view.x = mx - wx; view.y = my - wy; view.ready = true; applyView();
   }
   // ---- uio-F06: one index, one palette (Cmd-K) -----------------------------
   // The spine's keyboard contract: Cmd-K is find-anything over ONE index -- settings, actions,
@@ -23481,12 +23184,7 @@
     if (!panning) return;
     var dx = e.clientX - last.x, dy = e.clientY - last.y;
     last = { x: e.clientX, y: e.clientY };
-    if (NATIVE_SCROLL && scrollSizer) {
-      // #151: drive native scroll; the scroll listener syncs view.x/y + pins (no re-raster).
-      canvas.scrollLeft -= dx; canvas.scrollTop -= dy;
-    } else {
-      view.x += dx; view.y += dy; markNavigating(); applyView();
-    }
+    panDrag(dx, dy);
   });
   window.addEventListener("mouseup", function (e) { if (marquee) endMarquee(e); });
   window.addEventListener("mouseup", function () { if (panning) { panning = false; canvas.classList.remove("is-panning"); } });
@@ -26126,9 +25824,39 @@
     doc: function () { return doc; },
     selection: function () { return selection; }
   });
+  // arch-P3b-02: what the canvas view region reads. The five below are REPLACED wholesale every
+  // time buildWorld runs, so they are live -- a captured `world` would leave the module animating
+  // the previous one, silently, and only on the second course you open.
+  window.VersoEditor.provideLive({
+    world: function () { return world; },
+    worldH: function () { return worldH; },
+    frameDescs: function () { return frameDescs; },
+    framePos: function () { return framePos; },
+    numCols: function () { return _numCols; },
+    currentPage: function () { return currentPage; },
+    perfOn: function () { return perfOn; }
+  });
+  window.VersoEditor.provide({
+    canvas: canvas,
+    view: view,                 // mutated in place, never reassigned -- the object itself is stable
+    zoomLevelEl: zoomLevelEl,
+    colX: colX, frameX: frameX, frameY: frameY,
+    FRAME_W: FRAME_W, FRAME_H: FRAME_H, LABEL_H: LABEL_H,
+    clamp: clamp,
+    persistView: persistView,
+    renderCommentPins: renderCommentPins,
+    // focusFrame sets the current page, and the perf HUD counts applyView's JS cost. Both are
+    // writes INTO this file, so they cross as functions rather than as exposed variables.
+    setCurrentPage: function (i) { currentPage = i; },
+    noteViewJs: function (ms) { _perfViewJs += ms; _perfViewN++; }
+  });
   // This list grows as regions move and ask for more -- deliberately, one binding at a time, so
   // the surface stays a record of what is actually depended on rather than a guess. audit().unmet
   // names anything a region asked for that nobody here supplies.
+  //
+  // Regions install last, once the surface above is complete. Each one reads what it needs and
+  // exposes its entry points, which the bind()s further up this file are already pointing at.
+  CV.install(VE);
 
   // ---- init ----------------------------------------------------------------
   // Skipped in kit mode (kit.html only needs the primitives defined above, not a

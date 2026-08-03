@@ -47,8 +47,19 @@ function makeNode(tag) {
     getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(node.attributes, k) ? node.attributes[k] : null; },
     removeAttribute: function (k) { delete node.attributes[k]; },
     hasAttribute: function (k) { return Object.prototype.hasOwnProperty.call(node.attributes, k); },
-    addEventListener: function () {},
-    removeEventListener: function () {},
+    // Listeners are RECORDED, not just swallowed. A moved editor region binds its own handlers as
+    // it installs (the canvas scroll sync, arch-P3b-02), and the only way to check one from here is
+    // to fire it. Still no real event model: no bubbling, no default actions, no target chain.
+    listeners: {},
+    addEventListener: function (type, fn) { (node.listeners[type] || (node.listeners[type] = [])).push(fn); },
+    removeEventListener: function (type, fn) {
+      var a = node.listeners[type]; if (!a) return;
+      var i = a.indexOf(fn); if (i !== -1) a.splice(i, 1);
+    },
+    dispatch: function (type, ev) {
+      (node.listeners[type] || []).slice().forEach(function (fn) { fn(ev || { type: type }); });
+      return node;
+    },
     querySelector: function () { return null; },
     querySelectorAll: function () { return []; },
     closest: function () { return null; },
