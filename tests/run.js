@@ -7310,13 +7310,17 @@ section("embed align centering");
 // ---- font preview picker (Part B) ----------------------------
 section("font preview picker");
 (function () {
+  var FONTS = src("src/editor/fonts.js");   // arch-P3b-07
   var r = src("src/render.js"), e = src("src/editor.js"), css = src("editor.css");
   ok("render exposes fontStackFor (known stack or quoted family)", /window\.fontStackFor = function \(name\) \{ return name \? \(FONT_STACKS\[name\] \|\| \("'" \+ name \+ "', sans-serif"\)\) : ""; \}/.test(r));
   // the picker renders each option in its own font + exposes .value + fires change (attachFontWarn stays compatible)
-  ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(e));
+  ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(FONTS));
   ok("picker exposes .value + dispatches change", /Object\.defineProperty\(wrap, "value"[\s\S]*?wrap\.dispatchEvent\(new Event\("change"\)\)/.test(e) || /wrap\.dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
   // all 3 plain <select> font pickers replaced by the shared component
-  ok("all 3 font selects use buildFontPicker", (e.match(/buildFontPicker\(/g) || []).length >= 3);
+  // arch-P3b-07/07f: the three pickers now sit in three files -- two inspectors here, the Theme
+  // panel's in theme.js -- so the claim counts across the chrome rather than within one file.
+  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js")).match(/[^_.]buildFontPicker\(/g) || [];
+  ok("all 3 font selects use buildFontPicker", pickerSites.length >= 3);
   ok("no plain <select> font list remains", !/h\("select"[\s\S]{0,80}FONT_LIST\.map/.test(e));
   ok("picker CSS: popup listbox present", /\.font-picker__pop \{[\s\S]*?position: absolute/.test(css) && /\.font-picker__opt \{/.test(css));
 })();
@@ -7324,28 +7328,30 @@ section("font preview picker");
 // ---- Google Fonts source + Arial -----------------------------------------
 section("google fonts + arial");
 (function () {
+  var FONTS = src("src/editor/fonts.js");   // arch-P3b-07
   var r = src("src/render.js"), e = src("src/editor.js");
   // Arial is a directly-pickable, air-gap-safe system font
   ok("Arial in FONT_STACKS", /"Arial": "Arial, Helvetica, sans-serif"/.test(r));
   ok("Arial in the air-gap-safe (embeddable) set", /EMBEDDABLE_FONTS = \["Exo 2", "System", "Arial"/.test(r));
   // curated Google set incl. popular families
-  ok("curated Google set defined (popular families)", /var CURATED_GOOGLE_FONTS = \[[\s\S]*?"Roboto", "Open Sans", "Lato", "Montserrat", "Poppins"/.test(e));
+  ok("curated Google set defined (popular families)", /var CURATED_GOOGLE_FONTS = \[[\s\S]*?"Roboto", "Open Sans", "Lato", "Montserrat", "Poppins"/.test(FONTS));
   // fetch-at-author-time -> embed via the existing doc.fonts pipeline (no runtime CDN link ships)
-  ok("Google font fetch embeds woff2(s) into doc.fonts (source:google)", /function fetchAndEmbedGoogleFont\(family\)[\s\S]*?fonts\.googleapis\.com\/css2[\s\S]*?\.woff2[\s\S]*?doc\.fonts\.push\(\{ family: family, src: assetRef\(f\.dataUrl[\s\S]*?format: "woff2", weight: parseInt\(f\.weight, 10\), source: "google"/.test(e));
+  ok("Google font fetch embeds woff2(s) into doc.fonts (source:google)", /function fetchAndEmbedGoogleFont\(family\)[\s\S]*?fonts\.googleapis\.com\/css2[\s\S]*?\.woff2[\s\S]*?doc\.fonts\.push\(\{ family: family, src: assetRef\(f\.dataUrl[\s\S]*?format: "woff2", weight: parseInt\(f\.weight, 10\), source: "google"/.test(FONTS));
   // multi-weight: pick one woff2 per weight (400 + 700) so bold is a real cut
-  ok("Google fetch embeds a real cut per weight (400 + 700)", /byWeight\[w\][\s\S]*?wanted = weights\.filter\(function \(w\) \{ return w === "400" \|\| w === "700"; \}\)/.test(e));
-  ok("buildFontFaceCss emits font-weight when present", /var wt = f\.weight \? "font-weight:" \+ f\.weight \+ ";" : "";/.test(e));
+  ok("Google fetch embeds a real cut per weight (400 + 700)", /byWeight\[w\][\s\S]*?wanted = weights\.filter\(function \(w\) \{ return w === "400" \|\| w === "700"; \}\)/.test(FONTS));
+  ok("buildFontFaceCss emits font-weight when present", /var wt = f\.weight \? "font-weight:" \+ f\.weight \+ ";" : "";/.test(FONTS));
   // in-app Help: a toolbar button opens the User Guide (#81 — in-app modal, not a
   // new-tab window.open that no-ops in the desktop shell).
   ok("toolbar has a Help button", /id="help-btn"/.test(src("index.html")));
   ok("Help opens the in-app guide modal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(src("src/editor/help.js")));
-  ok("fetch is overridable for tests + air-gap note in the UI", /var doFetch = window\.__fontFetch \|\| window\.fetch/.test(e) && /downloaded and EMBEDDED now/.test(e));
+  ok("fetch is overridable for tests + air-gap note in the UI", /var doFetch = window\.__fontFetch \|\| window\.fetch/.test(FONTS) && /downloaded and EMBEDDED now/.test(FONTS));
 })();
 
 // ---- KKK: buildFontFaceCss for uploaded custom fonts -----------------------
 section("KKK custom-fonts");
 (function () {
-  var etxt = src("src/editor.js");
+  // arch-P3b-07: the font embedding moved to src/editor/fonts.js.
+  var etxt = src("src/editor/fonts.js");
   var s = etxt.indexOf("function resolveFontDataUrl(src)");
   var e = etxt.indexOf("};", etxt.indexOf("window.buildFontFaceCss = function")) + 2;
   var win = {};
