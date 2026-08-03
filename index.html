@@ -331,6 +331,8 @@
   <script src="src/editor/board/layout.js"></script>
   <script src="src/editor/board/harvest.js"></script>
   <!-- arch-P3b-04 tour builder: window.VersoTourBoard — the board overlay itself (node cards, pin/port drags, loop frames, the source-video scrubber and the re-hosted hotspot inspector). Must precede editor.js, which installs it after providing its host surface. -->
+  <!-- arch-P3b-06 hotspots editor: window.VersoHotspotsEditor — the canvas marker overlay, the layer actions and renderHotspotInspector. OWNS the hotspot selection (hotspotEditId / hotspotEditScreenId) the tour builder reads, so it must precede editor.js like the rest. -->
+  <script src="src/editor/hotspots-editor.js"></script>
   <script src="src/editor/board/builder.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>

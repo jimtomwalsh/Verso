@@ -3461,6 +3461,8 @@ section("hotspot marker viewed recolour");
 // ---- #146: base-image sizing + full-width stage + margin-aware popover -------
 section("#146 hotspot base-image size + margin popover");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var r = src("src/render.js");
   // Stage stays full width; image + markers move into a sized, centred .hotspot-frame.
   ok("render: introduces a .hotspot-frame inside the stage", /var frame = el\("div", "hotspot-frame"\);[\s\S]*?stage\.appendChild\(frame\);/.test(r));
@@ -3481,11 +3483,13 @@ section("#146 hotspot base-image size + margin popover");
 
   var e = src("src/editor.js");
   ok("editor: marker drag is relative to the frame (correct at any width)", /mk\.closest && mk\.closest\("\.hotspot-frame"\) \|\| stage\)\.getBoundingClientRect\(\)/.test(e));
-  ok("editor: inspector exposes a base-image width control writing block.imgWidth", /if \(isNaN\(n\) \|\| n >= 100\) delete block\.imgWidth; else block\.imgWidth = Math\.max\(20, n\)/.test(e));
+  ok("editor: inspector exposes a base-image width control writing block.imgWidth", /if \(isNaN\(n\) \|\| n >= 100\) delete block\.imgWidth; else block\.imgWidth = Math\.max\(20, n\)/.test(eh));
 })();
 
 section("#48 box (region) hotspot marker");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
   var r = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ecss = src("editor.css");
@@ -3497,7 +3501,7 @@ section("#48 box (region) hotspot marker");
   ok("css: .hotspot-marker--box is transparent with an accent border", /\.hotspot-marker--box \{[^}]*border: 2px solid var\(--hotspot-color\);[^}]*background: transparent;/.test(css));
   ok("css: box viewed recolours the outline only (no fill)", /\.hotspot-marker--box\.is-viewed \{ background: transparent; border-color: var\(--hotspot-viewed/.test(css));
   // editor: inspector Shape control + W/H fields; box seeds default 20x12.
-  ok("editor: inspector Shape control writes marker.shape=box + seeds w/h", /segmentedLive\("Shape", \[\["Point", "point"\], \["Box \(region\)", "box"\]\][\s\S]*?active\.shape = "box"; if \(active\.w == null\) active\.w = 20; if \(active\.h == null\) active\.h = 12;/.test(e));
+  ok("editor: inspector Shape control writes marker.shape=box + seeds w/h", /segmentedLive\("Shape", \[\["Point", "point"\], \["Box \(region\)", "box"\]\][\s\S]*?active\.shape = "box"; if \(active\.w == null\) active\.w = 20; if \(active\.h == null\) active\.h = 12;/.test(eh));
   // editor: both resize surfaces write m.w/m.h (tour board) and hs.w/hs.h (canvas), doubled from centre.
   ok("editor: tour-board box resize sets m.w/m.h from centre", /function tourBeginPinResize[\s\S]*?m\.w = Math\.max\(2, Math\.min\(100, Math\.round\(\(px - cx\) \* 2\)\)\);/.test(eb));
   ok("editor: on-canvas box resize handle sets hs.w/hs.h", /hs\.shape === "box" && !mk\.querySelector\("\.hotspot-resize"\)[\s\S]*?hs\.w = Math\.max\(2, Math\.min\(100, Math\.round\(\(px - cx\) \* 2\)\)\);/.test(e));
@@ -3506,16 +3510,18 @@ section("#48 box (region) hotspot marker");
 
 section("#49 mix card + navigate hotspots (per-marker action)");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
   // per-hotspot Action toggle in the Selected-hotspot inspector (the real truth).
-  ok("editor: per-hotspot Action segmented control sets marker.action", /segmentedLive\("Action", \[\["Card popover", "card"\], \["Navigate", "navigate"\]\][\s\S]*?active\.action = \(v === "navigate"\) \? "navigate" : "card";/.test(e));
+  ok("editor: per-hotspot Action segmented control sets marker.action", /segmentedLive\("Action", \[\["Card popover", "card"\], \["Navigate", "navigate"\]\][\s\S]*?active\.action = \(v === "navigate"\) \? "navigate" : "card";/.test(eh));
   // block.mode demoted to a default-only hint: switching it must NOT bulk-rewrite markers.
-  ok("editor: mode is 'Default for new hotspots' (relabelled)", /insp-row__label--stacked", "Default for new hotspots"/.test(e));
+  ok("editor: mode is 'Default for new hotspots' (relabelled)", /insp-row__label--stacked", "Default for new hotspots"/.test(eh));
   ok("editor: switching the default no longer rewrites every marker.action", !/if \(v === "screen"\) block\.mode = "screen"; else delete block\.mode;\s*\n\s*curScreen\.markers\.forEach\(function \(m\) \{ if \(m\) m\.action =/.test(e));
   // nav chrome + card appearance show for a MIXED tour (any nav marker / any card marker),
   // not only when the block default matches.
-  ok("editor: nav chrome shows when any hotspot navigates", /var hasNavMarker = \(block\.screens[\s\S]*?if \(block\.mode === "screen" \|\| hasNavMarker\) \{/.test(e));
-  ok("editor: overlay-card appearance shows when any hotspot is a card", /var hasCardMarker = \(block\.screens[\s\S]*?if \(block\.mode !== "screen" \|\| hasCardMarker\) \{/.test(e));
+  ok("editor: nav chrome shows when any hotspot navigates", /var hasNavMarker = \(block\.screens[\s\S]*?if \(block\.mode === "screen" \|\| hasNavMarker\) \{/.test(eh));
+  ok("editor: overlay-card appearance shows when any hotspot is a card", /var hasCardMarker = \(block\.screens[\s\S]*?if \(block\.mode !== "screen" \|\| hasCardMarker\) \{/.test(eh));
   // render + runtime already honour per-marker action (no block.mode read) -> mixing works live.
   var r = src("src/render.js");
   ok("render: marker data-action comes from the marker, not block.mode", /mk\.setAttribute\("data-action", hs\.action === "navigate" \? "navigate" : "card"\)/.test(r));
@@ -3535,6 +3541,8 @@ section("#52 tour nav + progress outside the screen frame");
 
 section("#53 reveal hotspots after a play-once video ends");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
   var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
@@ -3545,7 +3553,7 @@ section("#53 reveal hotspots after a play-once video ends");
   ok("runtime: video 'ended' reveals gated markers in the video's host", /function hsRevealGated\(\)[\s\S]*?qsAll\(host, "\.hotspot-marker--gated"\)\.forEach\(function \(m\) \{ m\.classList\.add\("is-revealed"\); \}\)/.test(rt));
   ok("runtime: reveals gated markers on 'ended' AND up front for reduced motion", /v\.addEventListener\("ended", function \(\) \{[\s\S]*?hsRevealGated\(\);[\s\S]*?if \(hsReduce\(\)\) hsRevealGated\(\);/.test(rt));
   // editor: inspector toggle (once-only) + poster seeks to the LAST frame.
-  ok("editor: inspector offers a reveal-after-end toggle for play-once video", /switchRow\("Reveal hotspots after it ends", function \(\) \{ return !!curScreen\.revealAfterEnd;/.test(e));
+  ok("editor: inspector offers a reveal-after-end toggle for play-once video", /switchRow\("Reveal hotspots after it ends", function \(\) \{ return !!curScreen\.revealAfterEnd;/.test(eh));
   ok("editor: tour poster seeks to the last frame before capture", /var last = Math\.max\(0, dur - 0\.05\);[\s\S]*?v\.currentTime = last;/.test(eb));
   // authoring visibility: gated markers are opacity:0 at runtime but must be visible (dimmed) on
   // the editing canvas so the author can place them -- scoped to #canvas-viewport so it does not
@@ -3591,6 +3599,8 @@ section("WYSIWYG: tour board renders the REAL learner marker");
 
 section("hotspot chrome: caption + video progress + nav toggle + counter placement");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
   var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
@@ -3610,8 +3620,8 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   ok("render: counter goes in the top band (above the screen), not the chrome band", /topbar\.appendChild\(counter\)/.test(r) && !/chrome\.appendChild\(counter\)/.test(r));
   ok("css: .hotspot-topbar right-aligns above the screen", /\.hotspot-topbar \{ display: flex; justify-content: flex-end;/.test(css));
   // editor: nav toggle + per-screen caption fields (inspector + board node).
-  ok("editor: External nav buttons toggle writes block.hideNav", /switchRow\("External nav buttons", function \(\) \{ return !block\.hideNav;/.test(e));
-  ok("editor: Caption field (inspector) writes curScreen.caption", /textLine\("Caption", function \(\) \{ return curScreen\.caption;/.test(e));
+  ok("editor: External nav buttons toggle writes block.hideNav", /switchRow\("External nav buttons", function \(\) \{ return !block\.hideNav;/.test(eh));
+  ok("editor: Caption field (inspector) writes curScreen.caption", /textLine\("Caption", function \(\) \{ return curScreen\.caption;/.test(eh));
   ok("editor: board node has a secondary caption field writing s.caption", /h\("input", "tourb-node__caption"\)[\s\S]*?if \(capIn\.value\) s\.caption = capIn\.value; else delete s\.caption;/.test(eb));
   // restart glyph: centred, hidden, shown when the interaction finishes; click restarts.
   ok("render: hidden restart glyph emitted for tours + play-once video screens", /screenMode \|\| screens\.some\(function \(s\) \{ return s && s\.kind === "video" && s\.playback === "once"; \}\)[\s\S]*?el\("button", "hotspot-restart"\)[\s\S]*?frame\.appendChild\(rstb\)/.test(r));
@@ -3627,7 +3637,7 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   // canvas video screens pin to the final frame (editor only) so marker targeting isn't blind.
   ok("editor: canvas hotspot videos pinned to the final frame (not grey)", /v\.__canvasPinned = true;[\s\S]*?function pinLast\(\) \{ var d = v\.duration; if \(d && isFinite\(d\) && d > 0\) \{ try \{ v\.currentTime = Math\.max\(0, d - 0\.05\);/.test(e));
   // canvas screen cycler (editor chrome): prev/next buttons flank a multi-screen hotspot.
-  ok("editor: hsCanvasCycle steps hotspotEditScreenId + re-shows + re-renders", /function hsCanvasCycle\(node, block, dir\)[\s\S]*?hotspotEditScreenId = next\.id; hotspotEditId = null;\s*renderInspector\(\);\s*showEditScreen\(node, next\.id\);/.test(e));
+  ok("editor: hsCanvasCycle steps hotspotEditScreenId + re-shows + re-renders", /function hsCanvasCycle\(node, block, dir\)[\s\S]*?hotspotEditScreenId = next\.id; hotspotEditId = null;\s*renderInspector\(\);\s*showEditScreen\(node, next\.id\);/.test(eh));
   ok("editor: wireHotspotNode injects the prev/next canvas nav for multi-screen only", /\(block\.screens \|\| \[\]\)\.filter\(Boolean\)\.length > 1 && !node\.querySelector\("\.hotspot-canvas-nav"\)[\s\S]*?hsCanvasCycle\(node, block, d\[1\]\)/.test(e));
   ok("editor.css: .hotspot-canvas-nav flanks the interaction (left/right, centred)", /\.hotspot-canvas-nav--prev \{ left: 8px; \}/.test(src("editor.css")) && /\.hotspot-canvas-nav--next \{ right: 8px; \}/.test(src("editor.css")));
 })();
@@ -3639,8 +3649,9 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
 section("split-page tool wired into the two-level Actions row");
 (function () {
   var t = src("src/editor.js");
+  // arch-P3b-06: blockChromeHandlers moved with the hotspots editor.
   ok("blockChromeHandlers exposes split gated on canSplitAtBlock",
-    /split:\s*canSplitAtBlock\(block\)\s*\?\s*function\s*\(\)\s*\{\s*splitPageAtBlock\(block\);\s*\}\s*:\s*null/.test(t));
+    /split:\s*canSplitAtBlock\(block\)\s*\?\s*function\s*\(\)\s*\{\s*splitPageAtBlock\(block\);\s*\}\s*:\s*null/.test(src("src/editor/hotspots-editor.js")));
   ok("Actions row adds the slice button when handlers.split is a function",
     /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split, false\]\)/.test(t));
   ok("split button sits before Delete in the Actions row",
@@ -3690,14 +3701,16 @@ section("outliner: items[] containers expose their nested blocks");
 // the Markers section is rendered directly ABOVE the Hotspots list (not up top).
 section("hotspot inspector: markers consolidated with the list (#45)");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
-  ok("renderMarkersSection is defined", /function renderMarkersSection\(\) \{/.test(e));
+  ok("renderMarkersSection is defined", /function renderMarkersSection\(\) \{/.test(eh));
   // #160: Markers is an Appearance sectionGroup and the hotspot list a Content sectionGroup;
   // the Markers call site still sits beside the Hotspots section (marker + list config together).
-  ok("Markers is an Appearance sectionGroup wrapping renderMarkersSection", /sectionGroup\("Appearance", "Markers", function \(_msb\)[\s\S]{0,200}renderMarkersSection\(\);/.test(e));
+  ok("Markers is an Appearance sectionGroup wrapping renderMarkersSection", /sectionGroup\("Appearance", "Markers", function \(_msb\)[\s\S]{0,200}renderMarkersSection\(\);/.test(eh));
   ok("Hotspots list is a Content sectionGroup rendered right after Markers", (function () {
-    var markers = e.indexOf('sectionGroup("Appearance", "Markers"');
-    var list = e.indexOf('sectionGroup("Content", "Hotspots"');
+    var markers = eh.indexOf('sectionGroup("Appearance", "Markers"');
+    var list = eh.indexOf('sectionGroup("Content", "Hotspots"');
     return markers !== -1 && list !== -1 && list > markers; // list section immediately follows the markers section
   })());
 })();
@@ -4590,7 +4603,21 @@ section("#159/#163 frontend conformance gate");
   // record it here so the count target accounts for it. This is the single escape hatch.
   var DIALOG_ALLOWLIST = [];
 
-  var e = src("src/editor.js");
+  // arch-P3b: the gate is about the editor CHROME, not about one file. As regions leave editor.js
+  // for src/editor/, their sections leave with them -- measuring editor.js alone would read every
+  // move as a collapse in adoption and lock the restructure out. The subject is the chrome: this
+  // file plus every module the phase has carved off it.
+  var e = [src("src/editor.js")].concat((function () {
+    var acc = [];
+    (function walk(d) {
+      fs.readdirSync(d).forEach(function (f) {
+        var full = path.join(d, f);
+        if (fs.statSync(full).isDirectory()) walk(full);
+        else if (/\.js$/.test(f)) acc.push(fs.readFileSync(full, "utf8"));
+      });
+    })(path.join(ROOT, "src/editor"));
+    return acc;
+  })()).join("\n");
   var m = measure(e);
   function passes(key, val) { var b = BASE[key]; return b.dir === "up" ? val >= b.base : val <= b.base; }
 
@@ -6849,6 +6876,8 @@ section("sequence per-step icons");
 // sub-block, column, item and question (the skeleton), and recurse the canonical subtree shape.
 section("clear content #174");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
   var s = e.indexOf("var TEXT_CONTENT_TYPES = {");
   var end = e.indexOf("window.__clearBlockContent");
@@ -6895,7 +6924,7 @@ section("clear content #174");
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
   ok("#174 container-chrome acts[] includes the eraser via handlers.clearContent", /handlers\.clearContent === "function"\) acts\.push\(\["eraser", "Clear content \(keep structure\)", handlers\.clearContent, false\]\)/.test(e));
-  ok("#174 blockChromeHandlers exposes clearContent -> clearBlockContentAction([block])", /clearContent: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(e));
+  ok("#174 blockChromeHandlers exposes clearContent -> clearBlockContentAction([block])", /clearContent: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(eh));
   ok("#174 clear action is confirm-gated + pushes history (destructive, undoable)", /confirmModal\("Clear content",[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}list\.forEach\(clearBlockContent\)/.test(e));
   ok("#174 eraser glyph vendored in icons.js", /"eraser":/.test(src("src/icons.js")));
 })();
@@ -7344,6 +7373,8 @@ section("resolveVariant (variants)");
 // ---- #148: image variant-version authoring helpers (editor) ------------------
 section("#148 per-variant image versions (authoring)");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
   // extract the two pure helpers and exercise the round-trip + prune.
   var s = e.slice(e.indexOf("function imgVariantSrc(block, variant)"), e.indexOf("function uploadImageVariant"));
@@ -7374,7 +7405,7 @@ section("#148 per-variant image versions (authoring)");
   // slice 3: the SAME mechanism generalises to the hotspot base image (block.src) —
   // one type gate (IMG_VERSION_TYPES = image + hotspot) drives all three UI surfaces.
   ok("slice 3: image + hotspot both carry per-variant base-image versions", /var IMG_VERSION_TYPES = \{ image: 1, hotspot: 1 \};/.test(e));
-  ok("slice 3: hotspot inspector renders the variant-versions section", /#148 slice 3[\s\S]{0,460}if \(isEntryScreen && entry\.visual\) renderImageVariantVersions\(block\);/.test(e)); // #215/#216: base = entry.visual, entry screen only
+  ok("slice 3: hotspot inspector renders the variant-versions section", /#148 slice 3[\s\S]{0,460}if \(isEntryScreen && entry\.visual\) renderImageVariantVersions\(block\);/.test(eh)); // #215/#216: base = entry.visual, entry screen only
   ok("slice 3: canvas cycle swaps the hotspot base image too (.hotspot-image)", /versionBaseEl[\s\S]*?querySelector\("img\.block-image__img, img\.hotspot-image/.test(e));
 })();
 
@@ -7442,6 +7473,8 @@ section("#145 text-role auto-styling");
 // block.blendMode. Data on the block, so it round-trips through export unchanged.
 section("#152 image blend mode");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var r = src("src/render.js");
   var c = src("src/course.css");
   var e = src("src/editor.js");
@@ -7476,7 +7509,7 @@ section("#152 image blend mode");
   // .hotspot-image reads it, and the inspector exposes the same canonical Blend select.
   ok("hotspot render sets --img-blend on the frame from block.blendMode", /block\.blendMode && block\.blendMode !== "normal"\) frame\.style\.setProperty\("--img-blend", block\.blendMode\)/.test(r));
   ok("course.css applies mix-blend-mode to .hotspot-image", /\.hotspot-image \{[^}]*mix-blend-mode: var\(--img-blend, normal\)/.test(c));
-  ok("hotspot inspector exposes the canonical Blend select writing block.blendMode", /hsBlend = dsSelect\(/.test(e) && /hsBlend\.title = "Blend the base image/.test(e));
+  ok("hotspot inspector exposes the canonical Blend select writing block.blendMode", /hsBlend = dsSelect\(/.test(eh) && /hsBlend\.title = "Blend the base image/.test(eh));
 })();
 
 // ---- SCORM manifest (imsmanifest.xml — Moodle's first gate) ----------------
@@ -8709,6 +8742,8 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
   // arch-P3b-03: the engine moved to src/editor/inspector/sections.js, which means PanelLayout is
   // a plain `require` now instead of a regex that pulled its IIFE out of editor.js's text and
@@ -8802,7 +8837,7 @@ section("panel system v2 — layout engine");
   // Phase 3 Batch 1: frame/box appearance migrated to colorFieldFlat
   ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
-  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(e) && /colorFieldFlat\("Pill fill"/.test(e));
+  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(e));
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(e));
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
@@ -8834,7 +8869,7 @@ section("panel system v2 — layout engine");
   // sectionGroups (Content/Appearance/Behaviour/Layout/Light-Dark), each wrapped in begin/endSections.
   ok("#160 quiz content: Behaviour + Appearance(Colours) + Content(Questions) sectionGroups, no raw sub headers", /function renderQuizInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Behaviour"[\s\S]*?sectionGroup\("Appearance", "Colours"[\s\S]*?sectionGroup\("Content", "Questions"[\s\S]*?endSections\(inspector\);/.test(e) && !/sub\("Intro page"\)/.test(e) && !/sub\("Questions"\)/.test(e));
   ok("#160 image content: Content/Layout/Appearance/Behaviour/Light-Dark sectionGroups", /function renderImageContent\(block\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Image"[\s\S]*?sectionGroup\("Layout", "Layout"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Behaviour", "Behaviour"[\s\S]*?sectionGroup\("Light\/Dark", "Light & dark"[\s\S]*?endSections\(inspector\);/.test(e));
-  ok("#160 hotspot content: Content(Base/Screen image)/Behaviour(Interaction)/Appearance(Overlay card+Markers)/Content(Screens+Hotspots) sectionGroups", /function renderHotspotInspector\(block\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", isEntryScreen \? "Base image" : "Screen image"[\s\S]*?sectionGroup\("Behaviour", "Interaction"[\s\S]*?sectionGroup\("Appearance", "Overlay card"[\s\S]*?sectionGroup\("Appearance", "Markers"[\s\S]*?sectionGroup\("Content", "Screens"[\s\S]*?sectionGroup\("Content", "Hotspots"[\s\S]*?endSections\(inspector\);/.test(e)); // #216: + Screens
+  ok("#160 hotspot content: Content(Base/Screen image)/Behaviour(Interaction)/Appearance(Overlay card+Markers)/Content(Screens+Hotspots) sectionGroups", /function renderHotspotInspector\(block\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", isEntryScreen \? "Base image" : "Screen image"[\s\S]*?sectionGroup\("Behaviour", "Interaction"[\s\S]*?sectionGroup\("Appearance", "Overlay card"[\s\S]*?sectionGroup\("Appearance", "Markers"[\s\S]*?sectionGroup\("Content", "Screens"[\s\S]*?sectionGroup\("Content", "Hotspots"[\s\S]*?endSections\(E\.inspector\);/.test(eh)); // #216: + Screens
   // #161: the remaining Level-2 + single-level inspectors adopt the canonical sectionGroup taxonomy.
   ok("#161 accordion: Behaviour(Display)/Appearance/Content(Sections) sectionGroups", /function renderAccordionInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Display"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Content", "Sections"[\s\S]*?endSections\(inspector\);/.test(e));
   ok("#161 cardReveal: Behaviour(Reveal)/Layout(Grid)/Appearance/Content(Cards) sectionGroups", /function renderCardRevealInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Reveal"[\s\S]*?sectionGroup\("Layout", "Grid"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Content", "Cards"[\s\S]*?endSections\(inspector\);/.test(e));
@@ -8912,17 +8947,19 @@ section("interact contextual connectors");
 // set a card min-height. Blank inherits the block default. Ships in SCORM.
 section("hotspot per-card size");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
   var r = src("src/render.js");
   ok("render: per-hotspot cardW -> width, cardH -> min-height (after applyPopoverStyle)", /applyPopoverStyle\(pop, block\.cardStyle\);[\s\S]{0,300}if \(hs\.cardW\) pop\.style\.width = hs\.cardW \+ "px";[\s\S]{0,120}if \(hs\.cardH\) pop\.style\.minHeight = hs\.cardH \+ "px";/.test(r));
-  ok("editor: Selected-hotspot section adds per-card Width + Height (popover mode only)", /iconField\("W", \{ value: active\.cardW[\s\S]{0,200}delete active\.cardW; else active\.cardW = n;/.test(e) && /iconField\("H", \{ value: active\.cardH[\s\S]{0,200}delete active\.cardH; else active\.cardH = n;/.test(e));
-  ok("editor: per-card size guarded to card markers (#215 action !== 'navigate')", /if \(active\.action !== "navigate"\) \{\s*\/\/ Per-hotspot popover-card size\./.test(e));
+  ok("editor: Selected-hotspot section adds per-card Width + Height (popover mode only)", /iconField\("W", \{ value: active\.cardW[\s\S]{0,200}delete active\.cardW; else active\.cardW = n;/.test(eh) && /iconField\("H", \{ value: active\.cardH[\s\S]{0,200}delete active\.cardH; else active\.cardH = n;/.test(eh));
+  ok("editor: per-card size guarded to card markers (#215 action !== 'navigate')", /if \(active\.action !== "navigate"\) \{\s*\/\/ Per-hotspot popover-card size\./.test(eh));
   // centre-overlay placement: card centred on the image, arrow hidden, X/outside/Esc close
   var rt = src("src/runtime.js");
   var css = src("src/course.css");
   ok("runtime: place='center' centres the card in the stage + data-side=center (no arrow anchor)", /if \(place === "center"\) \{[\s\S]{0,200}left = \(sw - pw\) \/ 2;[\s\S]{0,120}top = \(sh - ph\) \/ 2;[\s\S]{0,260}pop\.setAttribute\("data-side", "center"\);/.test(rt));
   ok("css: centre overlay hides the pointer arrow", /\.hotspot-popover\[data-side="center"\]::after \{ display: none; \}/.test(css));
-  ok("editor: placement segmented offers Centre -> 'center'", /\["Centre", "center"\]/.test(e));
+  ok("editor: placement segmented offers Centre -> 'center'", /\["Centre", "center"\]/.test(eh));
   // drag/paste INTO the popover card: hotspots[].blocks must be a first-class child
   // list in every tree walker + the insert-location resolver (else drops/paste no-op
   // or land at page bottom). Mirrors the accordion/cardReveal items[].children fix.
@@ -8946,7 +8983,7 @@ section("hotspot per-card size");
   ok("editor: popover children are unconditionally drop targets (no inPopover skip)", !/inPopover/.test(e) && /Hotspot popover-card content is a FULL editing container/.test(e));
   // the open card must survive edits: mount re-reveals it when the selection/paste
   // lands inside a card, and delete reselects the owning hotspot block.
-  ok("editor: mount() re-reveals an open hotspot card (keepHotspotCardOpen)", /requestAnimationFrame\(keepHotspotCardOpen\);/.test(e) && /function keepHotspotCardOpen\(\)[\s\S]{0,400}hotspotOwnerOf\(candidates\[i\]\)[\s\S]{0,320}revealHotspot\(canvasNodeForBlock\(owner\.block\), owner\.block, owner\.hs\.id\);/.test(e));
+  ok("editor: mount() re-reveals an open hotspot card (keepHotspotCardOpen)", /requestAnimationFrame\(keepHotspotCardOpen\);/.test(e) && /function keepHotspotCardOpen\(\)[\s\S]{0,400}hotspotOwnerOf\(candidates\[i\]\)[\s\S]{0,320}revealHotspot\(canvasNodeForBlock\(owner\.block\), owner\.block, owner\.hs\.id\);/.test(eh));
   ok("editor: hotspotOwnerOf resolves the card a block lives in (#215 marker)", (function () {
     var HS = require(path.join(ROOT, "src/editor/hotspots.js"));
     function walk(list, fn) {
@@ -8964,7 +9001,7 @@ section("hotspot per-card size");
     return !!owner && owner.block === hotspot && owner.hs === marker &&
       HS.ownerOf([{ blocks: [hotspot] }], { type: "orphan" }, walk) === null;
   })());
-  ok("editor: deleting a card child keeps the card open (reselect owner hotspot block)", /var hsOwner = hotspotOwnerOf\(block\);[\s\S]{0,520}if \(hsOwner\) \{ hotspotEditId = hsOwner\.hs\.id; clearSelection\(\); mount\(\); reselectBlockNode\(hsOwner\.block, "block"\); \}/.test(e));
+  ok("editor: deleting a card child keeps the card open (reselect owner hotspot block)", /var hsOwner = hotspotOwnerOf\(block\);[\s\S]{0,520}if \(hsOwner\) \{ setHotspotEditId\(hsOwner\.hs\.id\); clearSelection\(\); mount\(\); reselectBlockNode\(hsOwner\.block, "block"\); \}/.test(e));
   // PERF: a plain (non-hotspot) block delete rebuilds only its page, not the world.
   ok("editor: plain block delete uses reapplyStructural(pi), not mount", /else \{ clearSelection\(\); reapplyStructural\(pi\); \}/.test(e));
 })();
@@ -9094,6 +9131,8 @@ section("PERF one-page re-render");
 // ---- UI kit gallery seam ----------------------
 section("UI kit seam");
 (function () {
+  // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
+  var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
   // window.__kit exposes the canonical primitives so kit.html renders from real source.
   ok("editor.js exposes window.__kit", /window\.__kit\s*=\s*\{/.test(e));
@@ -9240,8 +9279,8 @@ section("UI kit seam");
     /renderLayerCrumbs\(block, label\);\s*var prov = renderSourceLinkProvenance\(block\);\s*if \(prov\) inspector\.appendChild\(prov\);[\s\S]{0,400}var chromeDecl = \(atContent && decl && decl\.pureContent\) \? ACTIONS_ONLY_DECL : decl;\s*renderContainerChrome\(inspector, chromeDecl[\s\S]{0,200}if \(atContent\) \{\s*renderContent\(node\);[\s\S]{0,200}Edit " \+ \(label/.test(e));
   // #160: the depth-pure decls + actions-only swap exist.
   ok("#160 depth-pure decls (CONTENT_PURE_DECL / IMAGE_PURE_DECL / ACTIONS_ONLY_DECL)", /var CONTENT_PURE_DECL = \{ fill: false, stroke: false, radius: false, pureContent: true \};/.test(e) && /var IMAGE_PURE_DECL = \{ fill: false, stroke: true, radius: false, pureContent: true \};/.test(e) && /var ACTIONS_ONLY_DECL = \{ align: false, valign: false, width: false, padding: false, gap: false, spacing: false, fill: false, stroke: false, radius: false, actions: true \};/.test(e));
-  ok("layer breadcrumb: page + container ancestry, each crumb selects that layer", /function blockAncestry\(block\)/.test(e) && /function renderLayerCrumbs\(block, label\)/.test(e) && /kind: "page"/.test(e));
-  ok("container actions wired to real ops (move/duplicate/delete)", /function blockChromeHandlers[\s\S]{0,200}moveBlock\(block, -1\)[\s\S]{0,200}duplicateBlock\(block\)[\s\S]{0,120}deleteBlockByRef\(block\)/.test(e));
+  ok("layer breadcrumb: page + container ancestry, each crumb selects that layer", /function blockAncestry\(block\)/.test(eh) && /function renderLayerCrumbs\(block, label\)/.test(e) && /kind: "page"/.test(e));
+  ok("container actions wired to real ops (move/duplicate/delete)", /function blockChromeHandlers[\s\S]{0,200}moveBlock\(block, -1\)[\s\S]{0,200}duplicateBlock\(block\)[\s\S]{0,120}deleteBlockByRef\(block\)/.test(eh));
   ok("enteredBlock content-level state + exit-on-reselect", (function () {
     var SEL = require(path.join(ROOT, "src/editor/selection.js"));
     var b1 = { type: "frame" }, b2 = { type: "image" };
@@ -9249,7 +9288,7 @@ section("UI kit seam");
       SEL.exitsEnteredBlock(b1, b2) === true && SEL.exitsEnteredBlock(b1, b1) === false &&
       SEL.exitsEnteredBlock(null, b2) === false && SEL.exitsEnteredBlock(b1, null) === true;
   })());
-  ok("hotspot asset: handle hidden (internal ref not author-facing)", /var isAssetSrc = typeof curScreen\.visual === "string" && curScreen\.visual\.indexOf\("asset:"\) === 0;/.test(e)); // #216: base = current screen visual
+  ok("hotspot asset: handle hidden (internal ref not author-facing)", /var isAssetSrc = typeof curScreen\.visual === "string" && curScreen\.visual\.indexOf\("asset:"\) === 0;/.test(eh)); // #216: base = current screen visual
   // Ticket 6 (2/2) — sequence steps on repeatedList + the rowExtras extension.
   ok("repeatedList supports optional compact rowExtras (icons between field + trash)", /if \(opts\.rowExtras\) \{[\s\S]{0,220}row\.appendChild\(n\)/.test(e) && /row\.appendChild\(grip\); row\.appendChild\(field\);/.test(e));
   ok("image glyph is canonical Lucide (icons.js, for the step marker upload)", /"image":/.test(src("src/icons.js")) && /image: "image"/.test(e));
@@ -9265,7 +9304,7 @@ section("UI kit seam");
   // exposed (IMAGE_DECL) with an io mapping it to block.box so a border can be removed.
   ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(e));
   ok("#88 IMAGE_DECL exposes the box stroke (fill/radius stay off)", /var IMAGE_DECL = \{ fill: false, stroke: true, radius: false \};/.test(e));
-  ok("#88 imageChromeIo maps hasStroke/colour/width to block.box + clears legacy border", /function imageChromeIo\(block\)[\s\S]{0,400}return !!\(block\.box && block\.box\.border\)[\s\S]{0,900}block\.box\.border = true;[\s\S]{0,200}delete block\.box\.border; delete block\.box\.borderColor; delete block\.box\.borderWidth;[\s\S]{0,120}delete block\.border;/.test(e));
+  ok("#88 imageChromeIo maps hasStroke/colour/width to block.box + clears legacy border", /function imageChromeIo\(block\)[\s\S]{0,400}return !!\(block\.box && block\.box\.border\)[\s\S]{0,900}block\.box\.border = true;[\s\S]{0,200}delete block\.box\.border; delete block\.box\.borderColor; delete block\.box\.borderWidth;[\s\S]{0,120}delete block\.border;/.test(eh));
   ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,1100}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
   // Ticket 7 (2/n) — text blocks (heading/paragraph/note) two-level.
   ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(e));
