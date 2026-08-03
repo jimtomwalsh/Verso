@@ -158,6 +158,45 @@ function railHarness(opts) {
   return { PR: PR, rail: rail, registry: registry, library: library, products: products, storage: mem };
 }
 
+// arch-P3-08: drive a real drop against a plain document. The drag payload, the four-zone hover
+// and the repaint are the editor's; everything this touches is model surgery, so a drop can be
+// resolved end to end with no browser and no drag.
+function dropIn(doc, payload, target, zone, opts) {
+  var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
+  opts = opts || {};
+  var edits = 0;
+  function walkBlocks(list, fn) {
+    (function rec(bs) {
+      (bs || []).forEach(function (b) {
+        if (!b) return;
+        fn(b);
+        ["children", "columns", "items", "blocks", "cells", "front"].forEach(function (k) {
+          if (Array.isArray(b[k])) b[k].forEach(function (x) { Array.isArray(x) ? rec(x) : rec([x]); });
+        });
+      });
+    })(list);
+  }
+  var res = DND.resolveDrop({
+    doc: doc, payload: payload, target: target, zone: zone,
+    currentPage: opts.currentPage || 0,
+    make: opts.make || function () { return { type: "paragraph", text: "new" }; },
+    beginEdit: function () { edits++; },
+    findPageOfBlock: function (b) {
+      for (var i = 0; i < doc.pages.length; i++) {
+        var hit = false;
+        walkBlocks(doc.pages[i].blocks, function (x) { if (x === b) hit = true; });
+        if (hit) return i;
+      }
+      return -1;
+    },
+    walkBlocks: walkBlocks,
+    clone: function (o) { return JSON.parse(JSON.stringify(o)); },
+    cleanupColumns: DND.cleanupColumns
+  });
+  res.historyPushes = edits;
+  return res;
+}
+
 // Spin up a server-of-one on an ephemeral port against a temp SQLite store, run an
 // async probe(base, server, dbPath), and always tear it down. Shared by the pivot
 // server-integration sections (callers guard on node:sqlite before invoking).
@@ -180,7 +219,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/canvas-view.js", "src/editor/selection.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/hotspots.js", "src/editor/dnd.js", "src/editor/canvas-view.js", "src/editor/selection.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -3488,46 +3527,56 @@ section("columns palette block (#94)");
   var e = src("src/editor.js"), rn = src("src/render.js");
   ok("Columns palette entry makes an EXPLICIT empty 2-column block", /label: "Columns", make: function \(\) \{ return \{ type: "columns", explicit: true, columns: \[\[\], \[\]\] \}/.test(e));
   // an explicit palette Columns block must NOT be collapsed/unwrapped by cleanupColumns
-  ok("cleanupColumns preserves an explicit Columns block", /if \(b\.explicit\) continue;/.test(e));
+  var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
+  ok("cleanupColumns preserves an explicit Columns block", (function () {
+    var blocks = [{ type: "columns", explicit: true, columns: [[], [{ type: "heading" }]] }];
+    DND.cleanupColumns(blocks);
+    return blocks.length === 1 && blocks[0].columns.length === 2 && blocks[0].columns[0].length === 0;
+  })());
   (function () {
-    // reconstruct cleanupColumns (self-contained) and prove an explicit 2-col block with
-    // one filled + one empty column survives intact (regression for the browser-caught collapse)
-    var cleanupColumns = new Function("blocks", [
-      'function cc(blocks){',
-      '  for (var i = blocks.length - 1; i >= 0; i--) {',
-      '    var b = blocks[i];',
-      '    if (b.type === "columns" && b.columns) {',
-      '      for (var c = 0; c < b.columns.length; c++) cc(b.columns[c]);',
-      '      if (b.explicit) continue;',
-      '      b.columns = b.columns.filter(function (col) { return col.length > 0; });',
-      '      if (b.columns.length === 0) blocks.splice(i, 1);',
-      '      else if (b.columns.length === 1) blocks.splice.apply(blocks, [i, 1].concat(b.columns[0]));',
-      '    }',
-      '  }',
-      '} cc(blocks);'
-    ].join("\n"));
+    // arch-P3-08: the real cleanupColumns, not a reconstruction of it.
     var explicitBlocks = [{ type: "columns", explicit: true, columns: [[], [{ type: "heading" }]] }];
-    cleanupColumns(explicitBlocks);
+    DND.cleanupColumns(explicitBlocks);
     ok("explicit columns keeps its empty column (no collapse)", explicitBlocks.length === 1 && explicitBlocks[0].type === "columns" && explicitBlocks[0].columns.length === 2 && explicitBlocks[0].columns[0].length === 0);
     var implicitBlocks = [{ type: "columns", columns: [[], [{ type: "heading" }]] }];
-    cleanupColumns(implicitBlocks);
+    DND.cleanupColumns(implicitBlocks);
     ok("implicit columns still collapses an emptied column (unchanged)", implicitBlocks.length === 1 && implicitBlocks[0].type === "heading");
   })();
-  ok("appendIntoColumn targets a specific column", /function appendIntoColumn\(cont, ci, blk\)[\s\S]*?cont\.columns\[ci\]\.push\(blk\)/.test(e));
-  ok("handleDrop routes intoColumn to appendIntoColumn", /target\.intoColumn\) \{\s*appendIntoColumn\(target\.intoColumn\.block, target\.intoColumn\.index, draggedBlock\)/.test(e));
+  ok("appendIntoColumn targets a specific column", (function () {
+    var col = { type: "columns", columns: [[], []] };
+    DND.appendIntoColumn(col, 1, { type: "paragraph" });
+    return col.columns[0].length === 0 && col.columns[1].length === 1;
+  })());
+  ok("handleDrop routes intoColumn to appendIntoColumn", (function () {
+    var col = { type: "columns", explicit: true, columns: [[], []] };
+    var doc = { pages: [{ blocks: [col] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { intoColumn: { block: col, index: 1 } }, null);
+    return res.ok && col.columns[1].length === 1 && col.columns[0].length === 0;
+  })());
   ok("empty columns wired as drop targets", /function attachEmptyColumnDrops[\s\S]*?intoColumn: \{ block: b, index: i \}/.test(e) && /attachEmptyColumnDrops\(node, block\)/.test(e));
-  ok("cycle guard also covers an intoColumn move", /target\.intoColumn && target\.intoColumn\.block/.test(e));
+  ok("cycle guard also covers an intoColumn move", (function () {
+    // dropping a columns block into one of its OWN columns would nest it inside itself
+    var col = { type: "columns", explicit: true, columns: [[], []] };
+    var doc = { pages: [{ blocks: [col] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: col }, { intoColumn: { block: col, index: 0 } }, null);
+    return res.ok === false && res.reason === "cycle" && doc.pages[0].blocks.length === 1;
+  })());
   ok("render emits a targetable empty-column placeholder (pure)", /if \(!colBlocks\.length\) col\.appendChild\(el\("div", "layout-column__empty"/.test(rn));
   // BOTH paths still produce a valid columns model:
-  ok("implicit side-by-side wrap still produces columns", /type: "columns",\s*columns: \[ \[draggedBlock\], \[target\.targetBlock\] \]/.test(e));
+  ok("implicit side-by-side wrap still produces columns", (function () {
+    var target = { type: "heading" };
+    var doc = { pages: [{ blocks: [target] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: target }, "left");
+    var wrap = doc.pages[0].blocks[0];
+    return res.ok && wrap.type === "columns" && !wrap.explicit &&
+      wrap.columns[0][0] === res.block && wrap.columns[1][0] === target;
+  })());
   // behavioural: a targeted drop lands in the right column only, and the palette make() is valid
   (function () {
-    var appendIntoColumn = new Function("cont", "ci", "blk",
-      'if (!cont || cont.type !== "columns") return; cont.columns = cont.columns || []; cont.columns[ci] = cont.columns[ci] || []; cont.columns[ci].push(blk);');
     var col = { type: "columns", columns: [[], []] };            // the palette make() shape
-    appendIntoColumn(col, 1, { type: "paragraph", text: "x" });
+    DND.appendIntoColumn(col, 1, { type: "paragraph", text: "x" });
     ok("drop into column 1 lands only in that column", col.columns.length === 2 && col.columns[0].length === 0 && col.columns[1].length === 1 && col.columns[1][0].type === "paragraph");
-    appendIntoColumn(col, 0, { type: "image" });
+    DND.appendIntoColumn(col, 0, { type: "image" });
     ok("drop into column 0 is independent", col.columns[0].length === 1 && col.columns[1].length === 1);
   })();
 })();
@@ -3537,9 +3586,8 @@ section("columns palette block (#94)");
 section("group as a single side-by-side target (#95)");
 (function () {
   var e = src("src/editor.js");
-  var a = e.indexOf("/* @groupparent-start */"), b = e.indexOf("/* @groupparent-end */");
-  if (a < 0 || b < 0) { ok("locate @groupparent fence", false); return; }
-  var groupParentOf = new Function(e.slice(a, b) + "\nreturn groupParentOf;")();
+  // arch-P3-08: groupParentOf is src/editor/dnd.js now.
+  var groupParentOf = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js"))).groupParentOf;
   var child = { type: "image" };
   var grp = { type: "group", children: [{ type: "heading" }, child] };
   ok("resolves the group holding a direct child", groupParentOf([grp], child) === grp);
@@ -3550,11 +3598,40 @@ section("group as a single side-by-side target (#95)");
   var innerChild = { type: "image" };
   var inner = { type: "group", children: [innerChild] };
   ok("innermost group wins for nested groups", groupParentOf([{ type: "group", children: [inner] }], innerChild) === inner);
-  ok("handleDrop retargets a left/right group-child drop to the group", /groupParentOf\(activePage\.blocks, target\.targetBlock\)[\s\S]*?target = \{ targetBlock: grp \}/.test(e));
+  ok("handleDrop retargets a left/right group-child drop to the group", (function () {
+    var kid = { type: "image" };
+    var group = { type: "group", children: [{ type: "heading" }, kid] };
+    var doc = { pages: [{ blocks: [group] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: kid }, "left");
+    var top = doc.pages[0].blocks[0];
+    // the WHOLE group became one column, and the child is still inside it
+    return res.ok && top.type === "columns" && top.columns[1][0] === group && group.children.length === 2;
+  })());
+  ok("a before/after drop on a group child still reorders INSIDE the group", (function () {
+    var kid = { type: "image" };
+    var group = { type: "group", children: [{ type: "heading" }, kid] };
+    var doc = { pages: [{ blocks: [group] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: kid }, "before");
+    return res.ok && doc.pages[0].blocks[0] === group && group.children.length === 3 && group.children[1] === res.block;
+  })());
   // #141: a targetBlock drop resolves the target's OWN page (findPageOfBlock), not the
   // selected page — else a cross-page drop no-ops (findBlockParent null). currentPage follows.
-  ok("handleDrop #141 resolves the target block's own page, not currentPage", /var destPi141 = findPageOfBlock\(target\.targetBlock\);\s*var activePage = destPi141 >= 0 \? doc\.pages\[destPi141\] : doc\.pages\[currentPage\];/.test(e));
-  ok("handleDrop #141 follows the drop to the resolved page", /if \(destLoc\) \{\s*if \(destPi141 >= 0\) currentPage = destPi141;/.test(e));
+  // #141: a cross-page drop lands on the TARGET's page and takes the active page with it. Under
+  // the old assumption (use whatever page is selected) findBlockParent returned null and the drop
+  // silently did nothing.
+  ok("handleDrop #141 resolves the target block's own page, not currentPage", (function () {
+    var far = { type: "heading" };
+    var doc = { pages: [{ blocks: [{ type: "paragraph" }] }, { blocks: [far] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: far }, "after", { currentPage: 0 });
+    return res.ok && doc.pages[1].blocks.length === 2 && doc.pages[1].blocks[1] === res.block &&
+      doc.pages[0].blocks.length === 1;
+  })());
+  ok("handleDrop #141 follows the drop to the resolved page", (function () {
+    var far = { type: "heading" };
+    var doc = { pages: [{ blocks: [{ type: "paragraph" }] }, { blocks: [far] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: far }, "after", { currentPage: 0 });
+    return res.currentPage === 1 && res.affected.join(",") === "1";
+  })());
 })();
 
 // #42: author-editable pixel dimensions behind the desktop/tablet/mobile preview buttons.
@@ -6275,7 +6352,13 @@ section("nested items[].children traversal");
   var e = src("src/editor.js");
   var r = src("src/render.js");
   // findBlockParent recurses into items[].children (fixes delete + drag-move + drop)
-  ok("findBlockParent walks items[].children", /function findBlockParent[\s\S]*?Array\.isArray\(b\.items\)[\s\S]*?b\.items\[it\]\s*&&\s*b\.items\[it\]\.children[\s\S]*?findBlockParent\(kids, targetBlock\)/.test(e));
+  ok("findBlockParent walks items[].children", (function () {
+    var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
+    var panel = { type: "paragraph" };
+    var acc = { type: "accordion", items: [{ children: [{ type: "heading" }, panel] }] };
+    var loc = DND.findBlockParent([acc], panel);
+    return !!loc && loc.parentArray === acc.items[0].children && loc.index === 1 && loc.ownerBlock === null;
+  })());
   // walkPageBlocks (cycle-detection + full-tree ops) walks items[].children
   ok("walkPageBlocks walks items[].children", /function walkPageBlocks[\s\S]*?b\.items\.forEach\(function \(item\) \{ if \(!item\) return; if \(item\.children\) walkPageBlocks\(item\.children, fn\)/.test(e));
   // render walkBlocks (interaction map) walks items[].children so interactive blocks
@@ -6283,7 +6366,13 @@ section("nested items[].children traversal");
   ok("render walkBlocks walks items[].children", /function walkBlocks[\s\S]*?Array\.isArray\(b\.items\)[\s\S]*?item\.children[\s\S]*?walkBlocks\(item\.children, fn\)/.test(r));
   // flip fronts (items[].front) are a first-class block list in the same traversals —
   // missing any of these re-opens the nested-children silent-data-loss class for Side 1.
-  ok("findBlockParent walks items[].front", /function findBlockParent[\s\S]*?b\.items\[it\]\s*&&\s*b\.items\[it\]\.front[\s\S]*?findBlockParent\(fkids, targetBlock\)/.test(e));
+  ok("findBlockParent walks items[].front", (function () {
+    var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
+    var face = { type: "heading" };
+    var card = { type: "cardReveal", items: [{ front: [face], children: [{ type: "paragraph" }] }] };
+    var loc = DND.findBlockParent([card], face);
+    return !!loc && loc.parentArray === card.items[0].front && loc.index === 0 && loc.ownerBlock === null;
+  })());
   ok("walkPageBlocks walks items[].front", /function walkPageBlocks[\s\S]*?if \(Array\.isArray\(item\.front\)\) walkPageBlocks\(item\.front, fn\)/.test(e));
   ok("render walkBlocks walks items[].front", /function walkBlocks[\s\S]*?Array\.isArray\(item\.front\)\) walkBlocks\(item\.front, fn\)/.test(r));
   ok("remintIds walks items[].front (duplicate never shares ids)", /function remintIds[\s\S]*?Array\.isArray\(it\.front\)\) it\.front\.forEach\(remintIds\)/.test(e));
@@ -6366,9 +6455,22 @@ section("card deck block");
   // OLD path keyed off activePage.blocks.indexOf(target.targetBlock), which is -1 for
   // any nested target -> silent no-op. Guard: the wrap must use parentArray/index and
   // must NOT reintroduce the indexOf lookup.
-  ok("left/right column-wrap uses destLoc.parentArray[destLoc.index] (works in containers, #55)",
-    /destLoc\.ownerBlock === null\) \{[\s\S]*?destLoc\.parentArray\[destLoc\.index\] = \{\s*\n\s*type: "columns",\s*\n\s*columns: \[ \[draggedBlock\], \[target\.targetBlock\] \]/.test(e) &&
-    /destLoc\.parentArray\[destLoc\.index\] = \{\s*\n\s*type: "columns",\s*\n\s*columns: \[ \[target\.targetBlock\], \[draggedBlock\] \]/.test(e));
+  // arch-P3-08: #55 is the bug where a side-drop inside a container silently did nothing, because
+  // the wrap keyed off the PAGE's block list. Driven for real, inside a card body.
+  ok("left/right column-wrap uses the block's real parent array (works in containers, #55)", (function () {
+    var inCard = { type: "paragraph", text: "in a card" };
+    var card = { type: "cardDeck", items: [{ children: [inCard] }] };
+    var doc = { pages: [{ blocks: [card] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: inCard }, "left");
+    var wrapped = card.items[0].children[0];
+    var leftOk = res.ok && wrapped.type === "columns" && wrapped.columns[0][0] === res.block && wrapped.columns[1][0] === inCard;
+    var inCard2 = { type: "paragraph" };
+    var card2 = { type: "cardDeck", items: [{ children: [inCard2] }] };
+    var doc2 = { pages: [{ blocks: [card2] }] };
+    var res2 = dropIn(doc2, { kind: "insert", makeIndex: 0 }, { targetBlock: inCard2 }, "right");
+    var w2 = card2.items[0].children[0];
+    return leftOk && res2.ok && w2.type === "columns" && w2.columns[0][0] === inCard2 && w2.columns[1][0] === res2.block;
+  })());
   ok("left/right column-wrap no longer keys off activePage.blocks.indexOf (the nested no-op, #55)",
     !/activePage\.blocks\.indexOf\(target\.targetBlock\)/.test(e));
 })();
@@ -6781,9 +6883,8 @@ section("KKK custom-fonts");
 // ---- TTT: appendIntoContainer (drop a block into a group/frame/columns) -----
 section("TTT into-container");
 (function () {
-  var etxt = src("src/editor.js");
-  var body = etxt.slice(etxt.indexOf("function appendIntoContainer(cont, blk)"), etxt.indexOf("\n  }", etxt.indexOf("function appendIntoContainer(cont, blk)")) + 4);
-  var appendIntoContainer = new Function(body + "\nreturn appendIntoContainer;")();
+  // arch-P3-08: appendIntoContainer is src/editor/dnd.js now.
+  var appendIntoContainer = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js"))).appendIntoContainer;
   var blk = { type: "heading", text: "x" };
   var frame = { type: "frame", children: [{ type: "paragraph" }] };
   appendIntoContainer(frame, blk);
@@ -7253,8 +7354,21 @@ section("columns colWidths render");
 section("columns colWidths guards");
 (function () {
   var e = src("src/editor.js");
-  ok("cleanup drops colWidths on column-count mismatch", /b\.colWidths && b\.colWidths\.length !== b\.columns\.length\) delete b\.colWidths/.test(e));
-  ok("adding a column reverts to equal (delete colWidths)", (e.match(/delete destLoc\.ownerBlock\.colWidths/g) || []).length === 2);
+  // arch-P3-08: stale per-column widths misalign the row, so both paths that change the column
+  // count drop them. Run, not matched.
+  ok("cleanup drops colWidths on column-count mismatch", (function () {
+    var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
+    var blocks = [{ type: "columns", columns: [[], [{ type: "heading" }], [{ type: "note" }]], colWidths: [1, 1, 1] }];
+    DND.cleanupColumns(blocks);
+    return blocks[0].columns.length === 2 && blocks[0].colWidths === undefined;
+  })());
+  ok("adding a column reverts to equal (delete colWidths)", (function () {
+    var a = { type: "heading" }, b = { type: "note" };
+    var row = { type: "columns", explicit: true, columns: [[a], [b]], colWidths: [30, 70] };
+    var doc = { pages: [{ blocks: [row] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: a }, "left");
+    return res.ok && row.columns.length === 3 && row.colWidths === undefined;
+  })());
   ok("resize drag redistributes only the adjacent pair (total held)", /var nj = drag\.total - ni/.test(e) && /COL_MIN_PX/.test(e));
   ok("resize handle attached in the columns decorate branch", /attachColumnResizers\(node, block\)/.test(e));
   var css = src("editor.css");
@@ -8346,7 +8460,16 @@ section("hotspot per-card size");
   // list in every tree walker + the insert-location resolver (else drops/paste no-op
   // or land at page bottom). Mirrors the accordion/cardReveal items[].children fix.
   ok("editor: walkPageBlocks descends hotspot card blocks (#215 screens[].markers[].blocks)", /hotspotCardArrays\(b\)\.forEach\(function \(arr\) \{ walkPageBlocks\(arr, fn\); \}\);/.test(e));
-  ok("editor: findBlockParent resolves hotspot card-block children (#215)", /var hArrs = hotspotCardArrays\(b\);[\s\S]{0,160}findBlockParent\(hArrs\[hz\], targetBlock\)/.test(e));
+  // arch-P3-08: run it. A block inside a hotspot card must be resolvable, or it is undeletable
+  // and a drop onto it silently no-ops.
+  ok("editor: findBlockParent resolves hotspot card-block children (#215)", (function () {
+    var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
+    var deep = { type: "paragraph" };
+    var hotspot = { type: "hotspot", screens: [{ id: "s1", markers: [{ id: "m1", blocks: [{ type: "heading" }, deep] }] }] };
+    var loc = DND.findBlockParent([hotspot], deep);
+    return !!loc && loc.index === 1 && loc.ownerBlock === null &&   // null -> a left/right drop wraps IN PLACE
+      loc.parentArray === hotspot.screens[0].markers[0].blocks;
+  })());
   ok("editor: remintIds descends hotspot card blocks (#215)", /if \(Array\.isArray\(node\.screens\)\) node\.screens\.forEach\(function \(s\) \{\s*\n\s*if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) m\.blocks\.forEach\(remintIds\); \}\);/.test(e));
   ok("editor: insertLoc resolves the selected block's own container via findBlockParent", /function insertLoc\(\) \{[\s\S]{0,200}var loc = findBlockParent\(page\.blocks, selection\.block\);[\s\S]{0,120}return \{ array: loc\.parentArray, index: loc\.index \+ 1 \};/.test(e));
   ok("editor: insertBlock (default path) + pasteClipboard use insertLoc (not top-level-only)", /L = insertLoc\(\);\s*\}\s*L\.array\.splice\(L\.index, 0, block\);/.test(e) && /var L = insertLoc\(\);[\s\S]{0,260}L\.array\.splice\(L\.index \+ i, 0, c\);/.test(e));
@@ -8357,7 +8480,23 @@ section("hotspot per-card size");
   // the open card must survive edits: mount re-reveals it when the selection/paste
   // lands inside a card, and delete reselects the owning hotspot block.
   ok("editor: mount() re-reveals an open hotspot card (keepHotspotCardOpen)", /requestAnimationFrame\(keepHotspotCardOpen\);/.test(e) && /function keepHotspotCardOpen\(\)[\s\S]{0,400}hotspotOwnerOf\(candidates\[i\]\)[\s\S]{0,320}revealHotspot\(canvasNodeForBlock\(owner\.block\), owner\.block, owner\.hs\.id\);/.test(e));
-  ok("editor: hotspotOwnerOf resolves the card a block lives in (#215 marker)", /function hotspotOwnerOf\(target\)[\s\S]{0,420}Array\.isArray\(b\.screens\)[\s\S]{0,560}found = \{ block: b, hs: m \};/.test(e));
+  ok("editor: hotspotOwnerOf resolves the card a block lives in (#215 marker)", (function () {
+    var HS = require(path.join(ROOT, "src/editor/hotspots.js"));
+    function walk(list, fn) {
+      (function rec(bs) {
+        (bs || []).forEach(function (b) {
+          if (!b) return; fn(b);
+          ["children", "blocks", "items"].forEach(function (k) { if (Array.isArray(b[k])) rec(b[k]); });
+        });
+      })(list);
+    }
+    var deep = { type: "paragraph" };
+    var marker = { id: "m1", blocks: [deep] };
+    var hotspot = { type: "hotspot", screens: [{ id: "s1", markers: [marker] }] };
+    var owner = HS.ownerOf([{ blocks: [hotspot] }], deep, walk);
+    return !!owner && owner.block === hotspot && owner.hs === marker &&
+      HS.ownerOf([{ blocks: [hotspot] }], { type: "orphan" }, walk) === null;
+  })());
   ok("editor: deleting a card child keeps the card open (reselect owner hotspot block)", /var hsOwner = hotspotOwnerOf\(block\);[\s\S]{0,520}if \(hsOwner\) \{ hotspotEditId = hsOwner\.hs\.id; clearSelection\(\); mount\(\); reselectBlockNode\(hsOwner\.block, "block"\); \}/.test(e));
   // PERF: a plain (non-hotspot) block delete rebuilds only its page, not the world.
   ok("editor: plain block delete uses reapplyStructural(pi), not mount", /else \{ clearSelection\(\); reapplyStructural\(pi\); \}/.test(e));
@@ -8461,7 +8600,20 @@ section("PERF one-page re-render");
   // next save (e.g. closeTourBuilder -> flushSave) persisted the pre-undo doc, dropping any
   // edits made after the undo. The pair-write is now one function, and the only one.
   ok("the doc/registry pair-write is a single named function", /function setActiveDocObject\(next\) \{\s*doc = next;\s*registry\[activeDocId\] = next;/.test(e));
-  ok("handleDrop rebuilds source+dest pages, not the world", /var destPi = findPageOfBlock\(draggedBlock\);[\s\S]{0,320}reapplyStructural\(affected\.length \? affected : -1\);/.test(e));
+  // arch-P3-08: the resolver reports which pages changed, and a cross-page MOVE reports both.
+  ok("handleDrop rebuilds source+dest pages, not the world", (function () {
+    var moving = { type: "image" }, landing = { type: "heading" };
+    var doc = { pages: [{ blocks: [moving] }, { blocks: [landing] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: moving }, { targetBlock: landing }, "after");
+    var wired = /reapplyStructural\(res\.affected\.length \? res\.affected : -1\);/.test(e);
+    return wired && res.ok && res.affected.slice().sort().join(",") === "0,1";
+  })());
+  ok("an Alt-drag duplicate reports only the page it landed on", (function () {
+    var moving = { type: "image" }, landing = { type: "heading" };
+    var doc = { pages: [{ blocks: [moving] }, { blocks: [landing] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, duplicate: true, block: moving }, { targetBlock: landing }, "after");
+    return res.ok && res.affected.join(",") === "1" && doc.pages[0].blocks.length === 1;
+  })());
   // #171: deletePage re-anchors the viewport by page IDENTITY (keepId -> pageIndexById),
   // so deleting a page BEFORE the active one no longer jumps the view to a random page.
   ok("deletePage #171 re-anchors by page identity, not raw index", /var keepId = pi === currentPage[\s\S]{0,200}doc\.pages\.splice\(pi, 1\);\s*var ni = keepId \? pageIndexById\(keepId\) : -1;\s*currentPage = ni >= 0 \? ni : Math\.min\(currentPage, doc\.pages\.length - 1\);/.test(e));
@@ -12926,8 +13078,20 @@ section("#134 cards as drop containers");
   var rev = ccg({ type: "cardReveal", items: [{}] });
   ok("non-flip card exposes a children group", rev.length === 1 && rev[0].arrayKey === "children");
   // wiring
-  ok("handleDrop pushes into the card body array", /target\.intoBlocks && target\.intoBlocks\.arrayRef[\s\S]{0,80}target\.intoBlocks\.arrayRef\.push\(draggedBlock\)/.test(e));
-  ok("cycle guard covers the intoBlocks owner", /target\.intoBlocks && target\.intoBlocks\.ownerBlock/.test(e));
+  ok("handleDrop pushes into the card body array", (function () {
+    var body = [];
+    var card = { type: "cardDeck", items: [{ children: body }] };
+    var doc = { pages: [{ blocks: [card] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { intoBlocks: { arrayRef: body, ownerBlock: card } }, null);
+    return res.ok && body.length === 1 && body[0] === res.block;
+  })());
+  ok("cycle guard covers the intoBlocks owner", (function () {
+    var body = [];
+    var card = { type: "cardDeck", items: [{ children: body }] };
+    var doc = { pages: [{ blocks: [card] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: card }, { intoBlocks: { arrayRef: body, ownerBlock: card } }, null);
+    return res.ok === false && res.reason === "cycle" && body.length === 0 && res.historyPushes === 0;
+  })());
   ok("canvas wires each card/side body (incl. front) as a drop target", /function wireItemBodyDrops\(root\)[\s\S]{0,900}card-reveal__front[\s\S]{0,120}"front"/.test(e));
   ok("canvas wiring is called from enableEditing", /wireItemBodyDrops\(root\); \/\/ #134/.test(e));
   ok("outliner cap rows drop into the item array", /if \(g\.arrayOwner\) \{[\s\S]{0,240}intoBlocks: \{ arrayRef: arr, ownerBlock: blk \}/.test(e));
@@ -15776,6 +15940,101 @@ section("arch-P3-07 canvas view");
   })());
 })();
 
+// ---- arch-P3-08: the drop's guards and its history contract --------------
+// Six rules, each one a bug that shipped, none of them reachable by a test while they lived inside
+// a drag handler. The two that cost data are first.
+section("arch-P3-08 drop resolution");
+(function () {
+  var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
+  var e = src("src/editor.js");
+
+  // A non-duplicate self-drop would splice the block out and then fail to re-find it.
+  ok("dropping a block onto itself is refused before anything is touched", (function () {
+    var blk = { type: "image" };
+    var doc = { pages: [{ blocks: [{ type: "heading" }, blk] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: blk }, { targetBlock: blk }, "before");
+    return res.ok === false && res.reason === "self-drop" &&
+      doc.pages[0].blocks.length === 2 && doc.pages[0].blocks[1] === blk && res.historyPushes === 0;
+  })());
+  // A container into its own descendant would nest a block inside itself.
+  ok("a container cannot be dropped into its own descendant", (function () {
+    var inner = { type: "frame", children: [] };
+    var outer = { type: "group", children: [inner] };
+    var doc = { pages: [{ blocks: [outer] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: outer }, { intoContainer: inner }, null);
+    return res.ok === false && res.reason === "cycle" &&
+      inner.children.length === 0 && doc.pages[0].blocks[0] === outer && res.historyPushes === 0;
+  })());
+  ok("...but a container CAN be dropped into an unrelated one", (function () {
+    var mover = { type: "group", children: [] };
+    var host = { type: "frame", children: [] };
+    var doc = { pages: [{ blocks: [mover, host] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: mover }, { intoContainer: host }, null);
+    return res.ok && host.children[0] === mover && doc.pages[0].blocks.length === 1;
+  })());
+
+  // History is pushed once, and only for a drop that will really happen.
+  ok("a real drop pushes history exactly once", (function () {
+    var t = { type: "heading" };
+    var doc = { pages: [{ blocks: [t] }] };
+    return dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: t }, "after").historyPushes === 1;
+  })());
+  ok("a drop whose source has vanished pushes no history and inserts nothing", (function () {
+    var ghost = { type: "image" };                       // never in the document
+    var t = { type: "heading" };
+    var doc = { pages: [{ blocks: [t] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: ghost }, { targetBlock: t }, "after");
+    return res.ok === false && res.reason === "source-gone" && res.historyPushes === 0 && doc.pages[0].blocks.length === 1;
+  })());
+
+  // The ordinary placements.
+  ok("before / after place either side of the target", (function () {
+    var t = { type: "heading" };
+    var doc = { pages: [{ blocks: [t] }] };
+    var before = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: t }, "before");
+    var after = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: t }, "after");
+    var b = doc.pages[0].blocks;
+    return b.length === 3 && b[0] === before.block && b[1] === t && b[2] === after.block;
+  })());
+  ok("a move reorders without duplicating", (function () {
+    var a = { type: "a" }, b = { type: "b" };
+    var doc = { pages: [{ blocks: [a, b] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, block: a }, { targetBlock: b }, "after");
+    return res.ok && doc.pages[0].blocks.length === 2 && doc.pages[0].blocks[0] === b && doc.pages[0].blocks[1] === a;
+  })());
+  ok("an Alt-drag duplicate leaves the original in place", (function () {
+    var a = { type: "a", text: "keep" }, b = { type: "b" };
+    var doc = { pages: [{ blocks: [a, b] }] };
+    var res = dropIn(doc, { kind: "move", page: 0, duplicate: true, block: a }, { targetBlock: b }, "after");
+    return res.ok && doc.pages[0].blocks.length === 3 && doc.pages[0].blocks[0] === a &&
+      res.block !== a && res.block.text === "keep";
+  })());
+  ok("an append drop lands at the end of its page", (function () {
+    var doc = { pages: [{ blocks: [{ type: "a" }] }, { blocks: [] }] };
+    var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { append: true, pageIndex: 1 }, null);
+    return res.ok && doc.pages[1].blocks.length === 1 && res.currentPage === 1;
+  })());
+
+  // ---- the wiring ----
+  ok("editor.js keeps the payload, the history push and the repaint, and nothing else",
+    /DND\.resolveDrop\(\{/.test(e) && /beginEdit: pushHistory/.test(e) &&
+    /dragPayload = null;\s*\n\s*if \(!res\.ok\) \{ if \(res\.reason === "cycle"\) clearDropMarks\(\); return; \}/.test(e));
+  ok("editor.js holds no block-tree surgery of its own",
+    !/function findBlockParent\(blocks, targetBlock\) \{\s*\n\s*for /.test(e) &&
+    !/function cleanupColumns\(blocks\) \{\s*\n\s*for /.test(e));
+  ok("both modules are DOM-free", ["src/editor/dnd.js", "src/editor/hotspots.js"].every(function (f) {
+    var t = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    return !/document\.[A-Za-z$_]+\s*\(/.test(t);
+  }));
+  // ADR-0003: the screen-graph MIGRATION stays in render.js, so the editor and the shipped course
+  // can never disagree about what a hotspot block is. The editor module only READS.
+  ok("the hotspots module reads the graph and never migrates it", (function () {
+    var t = src("src/editor/hotspots.js");
+    return !/migrateHotspotBlock|normalizeHotspotLoops/.test(t.replace(/\/\/.*$/gm, "")) &&
+      /window\.migrateHotspotBlock = function/.test(src("src/render.js"));
+  })());
+})();
+
 // ---- arch-P2-04: the slice ratchet ----------------------------------------
 // The suite reconstitutes source text with `new Function` 166 times and with its own
 // three-argument string-slice helper 17 times. Those numbers may fall; they may not rise. A new test
@@ -15786,7 +16045,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 152, SLICE_BUDGET = 17;
+  var FN_BUDGET = 148, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);
