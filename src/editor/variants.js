@@ -36,7 +36,9 @@
       "h", "mount", "pushHistory", "promptModal", "flushSave", "canvas",
       "variantNames", "showContextMenu", "versionNames", "resolveComponentDef", "renderModelView", "panelSection",
       "stripToText", "isPreview", "canvasEditable", "versionEditable", "doc", "activeVersion",
-      "activeVariant", "selection", "inspector"
+      "activeVariant", "selection", "inspector",
+      // The writes back: the axis state and the panel host both live in editor.js.
+      "setActiveVariant", "setActiveVersion", "setInspector"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.

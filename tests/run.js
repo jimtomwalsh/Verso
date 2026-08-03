@@ -520,6 +520,38 @@ section("P3b namespace (no orphaned call sites)");
   ok("gate trips: removing a bind surfaces its call sites", doctored !== ed && orphansIn(doctored).indexOf("scheduleBackup") > -1);
 })();
 
+// The mirror of that check, on the region side. need() records the names a module ASKS for, so a
+// name it never asked for reads as plain undefined -- no unmet entry, no throw, until the call
+// site runs and says `E.setActiveVariant is not a function`. That shipped once in this phase and
+// a browser probe caught it, which is exactly the thing a suite is meant to do first.
+section("P3b namespace (every E read is a declared need)");
+(function () {
+  var mods = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, rel + f + "/");
+      else if (/\.js$/.test(f)) mods.push("src/editor/" + rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+  var checked = 0;
+  mods.forEach(function (rel) {
+    var t = src(rel);
+    var m = t.match(/kernel\.need\(([\s\S]*?)\)\s*;/);
+    if (!m) return;                       // kernel.js itself, and any module that needs nothing
+    checked++;
+    var have = Object.create(null);
+    (m[1].match(/"([A-Za-z_$][\w$]*)"/g) || []).forEach(function (q) { have[q.slice(1, -1)] = 1; });
+    var missing = [];
+    codeOnly(t).replace(/\bE\.([A-Za-z_$][\w$]*)/g, function (all, n) {
+      if (!have[n] && missing.indexOf(n) === -1) missing.push(n);
+      return all;
+    });
+    ok(rel + " reads only what it needs()" + (missing.length ? " -- UNDECLARED: " + missing.join(", ") : ""), missing.length === 0);
+  });
+  ok("every wired module was checked", checked >= 15);
+})();
+
 // ---- XX: durable-write core ----------------------------------------------
 // arch-P3-01: the durable-write core, the adapter swap and the StorageBackend all moved to
 // src/editor/storage.js, so these three sections call the shipping code instead of slicing
