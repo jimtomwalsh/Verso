@@ -4479,6 +4479,7 @@ section("#124 doc.theme (per-course theme)");
 // ---- #125: full-token editing in Settings (font/space/radius/size) -----------
 section("#125 full-token theme editing");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // fontNameFromStack (render.js) is the pure reverse of fontStackFor -- it drives the
   // font-family picker's preselect from a stored doc.theme.font stack. Exercise the REAL
   // pair against a stub (no fakes), covering roundtrip + the seeded defaults + custom.
@@ -4513,17 +4514,18 @@ section("#125 full-token theme editing");
   // and the font control writes a resolved STACK (fontStackFor), never a bare name (which
   // would emit an unquoted --font-heading and break the family).
   var e = src("src/editor.js");
-  ok("editor: setSharedToken helper present", /function setSharedToken\(group, key, val\)/.test(e));
+  ok("editor: setSharedToken helper present", /function setSharedToken\(group, key, val\)/.test(THEME));
   ok("editor: Typography section wired to font picker + fontStackFor",
-    /panelSection\(c, "Typography"\)/.test(e) && /setSharedToken\("font", key, name \? window\.fontStackFor\(name\)/.test(e));
+    /panelSection\(c, "Typography"\)/.test(THEME) && /setSharedToken\("font", key, name \? window\.fontStackFor\(name\)/.test(THEME));
   ok("editor: Spacing/Radius/Text-size groups wired via sharedPx",
-    /panelSection\(c, "Spacing"\)/.test(e) && /panelSection\(c, "Radius"\)/.test(e) && /panelSection\(c, "Text sizes"\)/.test(e) && /function sharedPx\(group, key, glyph, title\)/.test(e));
-  ok("editor: Reset restores the shared groups too", /doc\.theme\.space = clone\(window\.THEMES\[nm\]\.space\)/.test(e));
+    /panelSection\(c, "Spacing"\)/.test(THEME) && /panelSection\(c, "Radius"\)/.test(THEME) && /panelSection\(c, "Text sizes"\)/.test(THEME) && /function sharedPx\(group, key, glyph, title\)/.test(THEME));
+  ok("editor: Reset restores the shared groups too", /doc\.theme\.space = clone\(window\.THEMES\[nm\]\.space\)/.test(THEME));
 })();
 
 // ---- #126: cross-course theme presets (copy-on-apply + merge-by-name) --------
 section("#126 theme presets (copy-on-apply)");
 (function () {
+  var THEME = src("src/editor/theme.js"), t = src("src/editor.js");   // arch-P3b-07f
   var tw = {};
   tw = LOAD.load("src/theme.js", { window: tw });
   // arch-P3-09: the preset library folded back into src/theme.js, beside the tokens it copies.
@@ -4602,18 +4604,19 @@ section("#126 theme presets (copy-on-apply)");
     return Object.keys(TP.load(bad)).length === 0 && Object.keys(TP.load(wrong)).length === 0 &&
       Object.keys(TP.load(thrower)).length === 0;
   })());
-  ok("applyThemePreset is undoable (pushHistory) + repaints (mount)", /function applyThemePreset\(name\)[\s\S]*?pushHistory\(\)[\s\S]*?applyThemePresetToDoc\(doc, p\)[\s\S]*?syncWorkingFromDoc\(\)[\s\S]*?mount\(\)/.test(t));
+  ok("applyThemePreset is undoable (pushHistory) + repaints (mount)", /function applyThemePreset\(name\)[\s\S]*?pushHistory\(\)[\s\S]*?applyThemePresetToDoc\(E\.doc, p\)[\s\S]*?syncWorkingFromDoc\(\)[\s\S]*?mount\(\)/.test(THEME));
   // Picker dropdown fixes (James report): the placeholder option must NOT echo the selected
   // name (else the chosen theme rendered twice), and the per-course selection must reset on a
   // course switch (copy-on-apply keeps no live link, so it must not bleed across courses).
-  ok("picker placeholder is neutral (no duplicate option)", /placeholder: names\.length \? "Saved themes…" : "No saved themes yet"/.test(t));
-  ok("switchDoc resets themePresetSel (no cross-course bleed)", /function switchDoc\(id\)[\s\S]*?themePresetSel = null;/.test(t));
-  ok("every active-doc change resets themePresetSel (arch-P3-02: one owner, activateDoc)", /function activateDoc\(id\)[\s\S]{0,700}themePresetSel = null;/.test(t) && !/themePresetSel = null;/.test(t.slice(t.indexOf("function closeTab("), t.indexOf("function switchDoc("))));
+  ok("picker placeholder is neutral (no duplicate option)", /placeholder: names\.length \? "Saved themes…" : "No saved themes yet"/.test(THEME));
+  ok("switchDoc resets themePresetSel (no cross-course bleed)", /function switchDoc\(id\)[\s\S]*?clearThemePresetChoice\(\);/.test(t) && /function clearThemePresetChoice\(\) \{ themePresetSel = null; \}/.test(THEME));
+  ok("every active-doc change resets themePresetSel (arch-P3-02: one owner, activateDoc)", /function activateDoc\(id\)[\s\S]{0,700}clearThemePresetChoice\(\);/.test(t) && !/clearThemePresetChoice();/.test(t.slice(t.indexOf("function closeTab("), t.indexOf("function switchDoc("))));
 })();
 
 // ---- #127: blockStyles per type + capture-from-block + render/export cascade --
 section("#127 blockStyles (per-type default appearance cascade)");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // resolveBlockBox (render.js) is the PURE cascade core: theme.blockStyles[type] is the
   // baseline, block.box overrides key-by-key. Exercise the REAL function against a stub.
   var rw = {};
@@ -4646,7 +4649,7 @@ section("#127 blockStyles (per-type default appearance cascade)");
   // the theme panel edits captured defaults.
   ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?doc\.theme\.blockStyles = \{\};[\s\S]*?return doc\.theme\.blockStyles;/.test(e));
   ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(e) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(e));
-  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(e) && /function blockStylesEditor\(intro, listHost\)/.test(e));
+  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(THEME) && /function blockStylesEditor\(intro, listHost\)/.test(THEME));
 })();
 
 // ---- #128: document + version the doc.theme design-spec contract (ADR 0002) --
@@ -5384,6 +5387,7 @@ section("WWW apply-style colour");
 section("theme-aware style colour");
 (function () {
   var rtxt = src("src/render.js");
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f: the Edit-style dialog moved with the panel
   var body = rtxt.slice(rtxt.indexOf("function applyTextStyle("), rtxt.indexOf("window.applyTextStyle"));
   var applyTextStyle = new Function("FONT_STACKS", body + "\nreturn applyTextStyle;")({});
   var n1 = { style: {} }; applyTextStyle(n1, { colorToken: "ink" });
@@ -5412,17 +5416,17 @@ section("theme-aware style colour");
   ok("MM: word-spacing emits px", n8.style.wordSpacing === "4px");
   ok("MM: unset word-spacing -> empty", n7.style.wordSpacing === "");
   ok("Edit-style dialog offers a Justify align option", /\[Icon\("align-right"\), "right", "Right"\], \[Icon\("align-justify"\), "justify", "Justify"\]/.test(src("src/editor.js")));
-  ok("Edit-style dialog saves word-spacing", /if \(draft\.wordSpacing == null \|\| isNaN\(draft\.wordSpacing\)\) delete s\.wordSpacing; else s\.wordSpacing = draft\.wordSpacing/.test(src("src/editor.js")));
+  ok("Edit-style dialog saves word-spacing", /if \(draft\.wordSpacing == null \|\| isNaN\(draft\.wordSpacing\)\) delete s\.wordSpacing; else s\.wordSpacing = draft\.wordSpacing/.test(THEME));
   // resolveBlockStyle: a per-block override of ONE colour form drops the named style's OTHER form
   ok("resolveBlockStyle: hex override drops the style's token", /if \(ov\.color != null && ov\.color !== ""\) delete merged\.colorToken/.test(rtxt));
   ok("resolveBlockStyle: token override drops the style's hex", /else if \(ov\.colorToken\) delete merged\.color/.test(rtxt));
   // editor dialog: token XOR hex on save + specimen resolves the var
   var etxt = src("src/editor.js");
-  ok("Edit-style dialog saves colorToken (token clears hex)", /s\.colorToken = draft\.colorToken; delete s\.color/.test(etxt));
+  ok("Edit-style dialog saves colorToken (token clears hex)", /s\.colorToken = draft\.colorToken; delete s\.color/.test(THEME));
   ok("Edit-style dialog offers theme-token options", /COLOUR_TOKENS = \[\["Ink", "ink"\]/.test(etxt));
-  ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(etxt));
+  ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(THEME));
   ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(etxt) && /"First-line indent"/.test(etxt));
-  ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(etxt));
+  ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(THEME));
   // body paragraphs default to full ink (matching .body-list), not ink-soft — else a
   // colourless text style leaves paragraphs a shade lighter than lists (James's mismatch).
   var ccss = src("src/course.css");
@@ -8958,6 +8962,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07c: the modal builders moved to src/editor/modals.js.
@@ -9062,8 +9067,8 @@ section("panel system v2 — layout engine");
   ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
   ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
-  ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(e));
-  ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
+  ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(THEME));
+  ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(THEME) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(THEME));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
   // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
   // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
@@ -9116,9 +9121,9 @@ section("panel system v2 — layout engine");
   ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(e));
   // Phase 2c: the SAME typeCluster mounted in BOTH the field inspector and the style dialog
   ok("field inspector mounts typeCluster (reference adopter)", /typeCluster\(inspector, s, apply/.test(e));
-  ok("Edit-Text-Style dialog mounts the SAME typeCluster", /typeCluster\(box, draft, syncSpecimen\)/.test(e));
+  ok("Edit-Text-Style dialog mounts the SAME typeCluster", /typeCluster\(box, draft, syncSpecimen\)/.test(THEME));
   ok("field inspector no longer hand-rolls a colour row (colorField via typeCluster)", !/colourControl\("Colour", s\.color/.test(e));
-  ok("dialog persists per-mode text colour (forward-compat)", /else if \(draft\.colorLight \|\| draft\.colorDark\) \{ s\.colorLight = draft\.colorLight; s\.colorDark = draft\.colorDark;/.test(e));
+  ok("dialog persists per-mode text colour (forward-compat)", /else if \(draft\.colorLight \|\| draft\.colorDark\) \{ s\.colorLight = draft\.colorLight; s\.colorDark = draft\.colorDark;/.test(THEME));
 })();
 // ---- "Exit course" DO-action (SCORM LMS exit) ----------------------------
 // A navButton with action.exit ends the SCORM session instead of navigating.
@@ -9359,6 +9364,7 @@ section("PERF one-page re-render");
 // ---- UI kit gallery seam ----------------------
 section("UI kit seam");
 (function () {
+  var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
@@ -9407,7 +9413,7 @@ section("UI kit seam");
   // caller of pushEmbedTheme (+ binds the theme-shim-ready re-push for late iframes).
   // Without it a fresh load leaves each interaction on its own default palette, so an
   // author's block.embedColorMap never applies until the mode toggle fires.
-  ok("boot pushes theme into embeds (reapplyTheme after boot mount)", /\bmount\(\);[\s\S]{0,900}\breapplyTheme\(\);/.test(e) && /function reapplyTheme[\s\S]{0,600}pushEmbedTheme\(canvas/.test(e));
+  ok("boot pushes theme into embeds (reapplyTheme after boot mount)", /\bmount\(\);[\s\S]{0,900}\breapplyTheme\(\);/.test(e) && /function reapplyTheme[\s\S]{0,600}pushEmbedTheme\(canvas/.test(THEME));
   // Regression (same family): entering PREVIEW / navigating in demo rebuilds fresh embed
   // iframes; renderDemo must push the theme (tokens + embedColorMap) into demoDevice or
   // the interaction shows its own default palette (colours "change" on entering preview).
