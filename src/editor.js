@@ -9261,14 +9261,14 @@
   var tourHotMarker = null;       // marker whose card + leader wire are highlighted (select/hover)
   var tourLinkSel = null;         // T5b: the SELECTED edge (its source marker id) — decoupled from
                                   // hotspotEditId, which the re-hosted inspector always pins to a marker
-  var TOUR_NODE_W = 300, TOUR_THUMB_H = 169; // board-space node metrics (16:9 thumb; larger for precise pin placement, #224 QA)
-  var TOUR_SOURCE_W = 440, TOUR_SOURCE_H = 248; // source-video scratch node (larger — it's the harvest surface)
-  var TOUR_NOMINAL_W = 1280; // WYSIWYG: assumed learner screen width (landscape tablet) used to scale fixed-px point markers to the thumb; box markers are %-sized so they need no scaling
-  var TOUR_NODE_H = TOUR_THUMB_H + 44;       // approx full card height (thumb + title) for marquee hit
+  // Board geometry -> src/editor/board/layout.js (arch-P3-06). The metrics and every position
+  // derived from them are the module's; these are the names the DOM code already uses.
+  var BL = window.VersoBoardLayout;
+  var TOUR_NODE_W = BL.METRICS.NODE_W, TOUR_THUMB_H = BL.METRICS.THUMB_H;
+  var TOUR_SOURCE_W = BL.METRICS.SOURCE_W, TOUR_SOURCE_H = BL.METRICS.SOURCE_H;
+  var TOUR_NOMINAL_W = BL.METRICS.NOMINAL_W;   // assumed learner screen width, for scaling point markers
+  var TOUR_NODE_H = BL.METRICS.NODE_H;
   var tourLoopSel = null;         // #224 T6: the SELECTED loop frame id (its own selection lane)
-  // Loop-frame geometry (board px): the frame owns its members' in-box grid; it auto-fits.
-  var LOOP_PAD = 20, LOOP_HEADER = 34, LOOP_GAP = 22, LOOP_COLS_MAX = 4;
-  var LOOP_CELL_H = TOUR_NODE_H + 24, LOOP_MIN_W = TOUR_NODE_W + LOOP_PAD * 2, LOOP_EMPTY_H = LOOP_HEADER + LOOP_PAD * 2 + 90;
 
   function tourBoardIsOpen() { return !!(tourUI && !tourUI.overlay.hidden); }
   // #224 QA: an ISOLATED preview of just this tour, so the author can test navigation +
@@ -9332,68 +9332,31 @@
   function screenLoop(sid) { var ls = tourLoops(); for (var i = 0; i < ls.length; i++) if (ls[i] && (ls[i].screens || []).indexOf(sid) >= 0) return ls[i]; return null; }
   function tourLoopMembers(loop) { return (loop && loop.screens || []).map(tourScreenById).filter(Boolean); }
   function tourLoopLabel(loop, i) { return (loop && loop.name) || ("Loop " + ((i == null ? tourLoops().indexOf(loop) : i) + 1)); }
-  function loopCols(n) { return Math.max(1, Math.min(LOOP_COLS_MAX, n || 1)); }
-  // Auto-fit size (board px) for a loop's member grid + header. Members lay out row-major.
-  function loopSize(loop) {
-    var n = (loop.screens || []).length; if (!n) return { w: LOOP_MIN_W, h: LOOP_EMPTY_H };
-    var cols = loopCols(n), rows = Math.ceil(n / cols);
-    return { w: LOOP_PAD * 2 + cols * TOUR_NODE_W + (cols - 1) * LOOP_GAP,
-             h: LOOP_HEADER + LOOP_PAD * 2 + rows * LOOP_CELL_H + (rows - 1) * LOOP_GAP };
-  }
-  // Board-space top-left of the member at grid index idx within loop.
-  function loopSlotPos(loop, idx) {
-    var cols = loopCols((loop.screens || []).length), col = idx % cols, row = Math.floor(idx / cols);
-    return { x: (loop.bx || 0) + LOOP_PAD + col * (TOUR_NODE_W + LOOP_GAP),
-             y: (loop.by || 0) + LOOP_HEADER + LOOP_PAD + row * (LOOP_CELL_H + LOOP_GAP) };
-  }
-  function loopRect(loop) { var sz = loopSize(loop); return { x: loop.bx || 0, y: loop.by || 0, w: sz.w, h: sz.h }; }
-  function ptInRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
+  function loopSize(loop) { return BL.loopSize(loop); }
+  function loopSlotPos(loop, idx) { return BL.loopSlotPos(loop, idx); }
+  function loopRect(loop) { return BL.loopRect(loop); }
+  function ptInRect(px, py, r) { return BL.ptInRect(px, py, r); }
   // #224 QA: Cmd/Ctrl+T -> tidy. Snap the free (non-member) screen nodes into a clean grid
   // in their CURRENT rough reading order (row-banded by y, then x), then stack the loop
   // frames below. Members auto-arrange inside their frame, so they follow. Preserves the
   // author's general arrangement while removing overlap/drift.
+  // #224 QA: Cmd/Ctrl+T -> tidy. The arrangement is planned by the module (a value, so the suite
+  // can assert it); this pushes history, writes it and repaints.
   function tourTidyLayout() {
     if (!tourBlock) return;
-    // If nodes are box-selected, tidy JUST those (in place, anchored at their current
-    // top-left corner); otherwise tidy the whole board. Loop members are excluded (they
-    // auto-arrange inside their frame). #224 QA.
-    var freeAll = tourScreens().filter(function (s) { return s && !screenLoop(s.id); });
-    var selecting = tourNodeSel.length > 0;
-    var subset = selecting ? freeAll.filter(function (s) { return tourNodeSel.indexOf(s.id) >= 0; }) : freeAll;
-    if (!subset.length) return;
+    var plan = BL.tidyPlan(tourScreens(), tourLoops(), tourNodeSel);
+    if (!plan.screens.length) return;
     pushHistory();
-    var band = TOUR_THUMB_H + 60, gapX = TOUR_NODE_W + 90, gapY = TOUR_THUMB_H + 130, perRow = 4;
-    var x0 = selecting ? Math.min.apply(null, subset.map(function (s) { return s.bx || 0; })) : 80;
-    var y0 = selecting ? Math.min.apply(null, subset.map(function (s) { return s.by || 0; })) : 60;
-    subset.sort(function (a, b) { var ra = Math.round((a.by || 0) / band), rb = Math.round((b.by || 0) / band); return ra !== rb ? ra - rb : (a.bx || 0) - (b.bx || 0); });
-    subset.forEach(function (s, i) { var c = i % perRow, r = Math.floor(i / perRow); s.bx = x0 + c * gapX; s.by = y0 + r * gapY; });
-    if (!selecting) { // whole-board tidy also stacks the loop frames below the grid
-      var ly = y0 + (Math.ceil(subset.length / perRow) || 0) * gapY + 40;
-      tourLoops().slice().sort(function (a, b) { return (a.by || 0) - (b.by || 0) || (a.bx || 0) - (b.bx || 0); }).forEach(function (loop) { loop.bx = x0; loop.by = ly; ly += loopSize(loop).h + 60; });
-    }
-    scheduleSave(); renderTourNodes(); if (!selecting) requestAnimationFrame(tourFit);
+    BL.applyTidyPlan(plan, tourScreens(), tourLoops());
+    scheduleSave(); renderTourNodes(); if (!plan.selecting) requestAnimationFrame(tourFit);
   }
   // Map every loop member's screen id -> its slot top-left, so renderTourNodes positions
   // members inside their frame (not at their own bx/by). Non-members use bx/by as before.
-  function tourMemberSlots() {
-    var map = {};
-    tourLoops().forEach(function (loop) { (loop.screens || []).forEach(function (sid, i) { map[sid] = loopSlotPos(loop, i); }); });
-    return map;
-  }
+  function tourMemberSlots() { return BL.memberSlots(tourLoops()); }
 
   // Any screen missing board coords gets a grid slot, so an old block (or one authored
   // purely inline) lays out sensibly the first time the board opens.
-  function autoLayoutTourCoords() {
-    var ss = tourScreens(), gapX = TOUR_NODE_W + 90, gapY = TOUR_THUMB_H + 130, perRow = 4, col = 0, row = 0, placed = 0;
-    // keep already-placed nodes; only fill blanks into free-ish grid cells after them
-    ss.forEach(function (s) { if (s && typeof s.bx === "number" && typeof s.by === "number") placed++; });
-    var start = placed;
-    ss.forEach(function (s) {
-      if (!s || (typeof s.bx === "number" && typeof s.by === "number")) return;
-      var idx = start++; col = idx % perRow; row = Math.floor(idx / perRow);
-      s.bx = 80 + col * gapX; s.by = 60 + row * gapY;
-    });
-  }
+  function autoLayoutTourCoords() { return BL.autoLayoutCoords(tourScreens()); }
 
   function ensureTourBuilder() {
     if (tourUI) return tourUI;
@@ -9801,7 +9764,7 @@
     var id = "loop-" + Math.random().toString(36).slice(2, 8); while (tourLoopById(id)) id += "x";
     // drop it into view: to the right of the current node spread, vertically centred-ish
     var maxX = 80; tourScreens().forEach(function (s) { if (s) maxX = Math.max(maxX, (s.bx || 0) + TOUR_NODE_W); });
-    var loop = { id: id, screens: [], bx: maxX + 80, by: 80, bw: LOOP_MIN_W, bh: LOOP_EMPTY_H };
+    var loop = { id: id, screens: [], bx: maxX + 80, by: 80, bw: BL.LOOP.MIN_W, bh: BL.LOOP.EMPTY_H };
     tourBlock.loops.push(loop);
     tourSelectLoop(loop);
     scheduleSave(); renderTourNodes();
@@ -9918,98 +9881,20 @@
     card.addEventListener("pointermove", mv); card.addEventListener("pointerup", up);
   }
 
-  /* __TOUR_MEDIA_PURE__ start (pure helpers; extracted verbatim by tests/run.js) */
-  function tourFormatTime(sec) {
-    sec = Math.max(0, Math.floor(sec || 0));
-    var m = Math.floor(sec / 60), s = sec % 60;
-    return m + ":" + (s < 10 ? "0" : "") + s;
-  }
-  // Marking an in/out point at time t. Keep 0 <= in < out; a mark that would cross the
-  // other end DROPS that other end (it's no longer valid) rather than silently reordering.
-  // cur = { in, out } (either may be null/undefined). Returns a fresh { in, out }.
-  function tourApplyMark(kind, t, cur) {
-    cur = cur || {};
-    var inP = (cur.in == null) ? null : cur.in, outP = (cur.out == null) ? null : cur.out;
-    if (kind === "in") { inP = t; if (outP != null && outP <= t) outP = null; }
-    else { outP = t; if (inP != null && inP >= t) inP = null; }
-    return { in: inP, out: outP };
-  }
-  // Resolve a normalised crop {x,y,w,h} (0-1 fractions of the source) against the video's
-  // natural pixels -> a source rect {sx,sy,sw,sh} and the output {w,h}. Clamped in-bounds
-  // with a 1% min so a harvest is never zero-sized. No crop -> the full frame.
-  function tourCropRect(crop, natW, natH) {
-    var c = crop || { x: 0, y: 0, w: 1, h: 1 };
-    var x = Math.max(0, Math.min(1, c.x == null ? 0 : c.x));
-    var y = Math.max(0, Math.min(1, c.y == null ? 0 : c.y));
-    var w = Math.max(0.01, Math.min(1 - x, c.w == null ? 1 : c.w));
-    var hh = Math.max(0.01, Math.min(1 - y, c.h == null ? 1 : c.h));
-    var sw = Math.max(1, Math.round(w * natW)), sh = Math.max(1, Math.round(hh * natH));
-    return { sx: Math.round(x * natW), sy: Math.round(y * natH), sw: sw, sh: sh, w: sw, h: sh };
-  }
-  // A segment is harvestable only when both ends are marked and the NET kept length is > 0
-  // (cuts may punch the middle out; a cut swallowing the whole clip -> not ready). cuts optional.
-  function tourSegReady(inP, outP, cuts) { return inP != null && outP != null && tourNetLength(inP, outP, cuts) > 0; }
-  // Speed preset -> the value to persist on provenance. 1x (or invalid) is the default and stores
-  // as NO field (clean provenance, ignored by render like bx/by); any other rate stores the number.
-  function tourSpeedField(speed) { var n = parseFloat(speed); return (n && n !== 1 && isFinite(n)) ? n : null; }
-
-  // ---- Ripple cuts (T1): pure model + logic ---------------------------------
-  // A segment is [in,out] with zero or more removed CUT ranges punched out of the middle;
-  // the kept clip is [in,out] minus the cuts, its pieces stitched. All helpers are pure +
-  // side-effect-free (mirror tourApplyMark) — no DOM, no bake, no provenance here.
-
-  // Commit a pending cut: given a pending cut-in and the playhead t, form the removed range.
-  // Mirrors the outer-mark crossing guard — a cut-out at/before the cut-in is invalid -> null
-  // (the caller keeps the pending open or cancels). `cuts` is accepted for call-site parity with
-  // tourApplyMark; committing/merging into the list is the caller's separate step (tourMergeCuts).
-  function tourApplyCut(pending, t, cuts) {
-    if (pending == null || t == null) return null;
-    if (!(t > pending)) return null; // cut-out must land strictly after cut-in
-    return { start: pending, end: t };
-  }
-  // Sort ascending by start and auto-merge overlapping OR adjacent ranges (end === next.start)
-  // into a clean, non-overlapping list so the rail reads as one band per removed region.
-  function tourMergeCuts(cuts) {
-    var list = (cuts || []).filter(function (c) { return c && c.end > c.start; })
-      .map(function (c) { return { start: c.start, end: c.end }; })
-      .sort(function (a, b) { return a.start - b.start; });
-    var out = [];
-    for (var i = 0; i < list.length; i++) {
-      var c = list[i], last = out[out.length - 1];
-      if (last && c.start <= last.end) { if (c.end > last.end) last.end = c.end; }
-      else out.push(c);
-    }
-    return out;
-  }
-  // Drop cuts fully outside [in,out]; trim cuts that straddle a bound. Called when in/out moves.
-  // Returns a merged, in-bounds list.
-  function tourClipCutsToBounds(cuts, inP, outP) {
-    if (inP == null || outP == null || !(outP > inP)) return [];
-    var trimmed = [];
-    (cuts || []).forEach(function (c) {
-      if (!c || !(c.end > c.start)) return;
-      var s = Math.max(inP, c.start), e = Math.min(outP, c.end);
-      if (e > s) trimmed.push({ start: s, end: e });
-    });
-    return tourMergeCuts(trimmed);
-  }
-  // Decompose [in,out] minus the cuts into the surviving kept pieces, in order. Returns
-  // [{in,out}...] (same shape as an outer segment) so the stitched bake (T2) can walk them.
-  function tourKeptRanges(inP, outP, cuts) {
-    if (inP == null || outP == null || !(outP > inP)) return [];
-    var cs = tourClipCutsToBounds(cuts, inP, outP), ranges = [], cursor = inP;
-    for (var i = 0; i < cs.length; i++) {
-      if (cs[i].start > cursor) ranges.push({ in: cursor, out: cs[i].start });
-      cursor = Math.max(cursor, cs[i].end);
-    }
-    if (cursor < outP) ranges.push({ in: cursor, out: outP });
-    return ranges;
-  }
-  // Net kept length = sum of kept ranges (drives the readout + the ＋Segment bake gate).
-  function tourNetLength(inP, outP, cuts) {
-    return tourKeptRanges(inP, outP, cuts).reduce(function (n, r) { return n + (r.out - r.in); }, 0);
-  }
-  /* __TOUR_MEDIA_PURE__ end */
+  // Source-video segment math -> src/editor/board/harvest.js (arch-P3-06). Marks, cuts, the ripple
+  // merge, the kept ranges and the net length are arithmetic; these are the names the transport UI
+  // below already calls.
+  var HV = window.VersoHarvest;
+  function tourFormatTime(sec) { return HV.formatTime(sec); }
+  function tourApplyMark(kind, t, cur) { return HV.applyMark(kind, t, cur); }
+  function tourCropRect(crop, natW, natH) { return HV.cropRect(crop, natW, natH); }
+  function tourSegReady(inP, outP, cuts) { return HV.segReady(inP, outP, cuts); }
+  function tourSpeedField(speed) { return HV.speedField(speed); }
+  function tourApplyCut(pending, t, cuts) { return HV.applyCut(pending, t, cuts); }
+  function tourMergeCuts(cuts) { return HV.mergeCuts(cuts); }
+  function tourClipCutsToBounds(cuts, inP, outP) { return HV.clipCutsToBounds(cuts, inP, outP); }
+  function tourKeptRanges(inP, outP, cuts) { return HV.keptRanges(inP, outP, cuts); }
+  function tourNetLength(inP, outP, cuts) { return HV.netLength(inP, outP, cuts); }
 
   var tourPlayingVideo = null; // only one source plays at a time
   var tourCropEditSrc = null;  // id of the source whose crop overlay is open (one at a time)
@@ -10626,10 +10511,10 @@
     }
     if (!tgt && cur) { var i = cur.screens.indexOf(s.id); if (i >= 0) cur.screens.splice(i, 1); return true; }
     if (tgt && tgt === cur) { // reorder within the frame by drop position
-      var cols = loopCols(cur.screens.length);
-      var relX = cx - ((cur.bx || 0) + LOOP_PAD), relY = cy - ((cur.by || 0) + LOOP_HEADER + LOOP_PAD);
-      var col = clamp(Math.round(relX / (TOUR_NODE_W + LOOP_GAP)), 0, cols - 1);
-      var row = Math.max(0, Math.round(relY / (LOOP_CELL_H + LOOP_GAP)));
+      var cols = BL.loopCols(cur.screens.length);
+      var relX = cx - ((cur.bx || 0) + BL.LOOP.PAD), relY = cy - ((cur.by || 0) + BL.LOOP.HEADER + BL.LOOP.PAD);
+      var col = clamp(Math.round(relX / (TOUR_NODE_W + BL.LOOP.GAP)), 0, cols - 1);
+      var row = Math.max(0, Math.round(relY / (BL.LOOP.CELL_H + BL.LOOP.GAP)));
       var to = clamp(row * cols + col, 0, cur.screens.length - 1), from = cur.screens.indexOf(s.id);
       if (from >= 0 && from !== to) { cur.screens.splice(from, 1); cur.screens.splice(to, 0, s.id); return true; }
     }

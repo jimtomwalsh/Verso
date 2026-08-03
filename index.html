@@ -317,6 +317,9 @@
   <script src="src/editor/inspector/dispatch.js"></script>
   <!-- arch-P3-05 Product Rail facts: window.VersoProductRail — alignment, drift, where-used and outputs, the four facts every stage reads. DOM-free. Must precede editor.js. -->
   <script src="src/editor/product-rail.js"></script>
+  <!-- arch-P3-06 tour board: window.VersoBoardLayout (node/loop geometry + the tidy plan) and window.VersoHarvest (the source-video segment math). Both pure. Must precede editor.js. -->
+  <script src="src/editor/board/layout.js"></script>
+  <script src="src/editor/board/harvest.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->
