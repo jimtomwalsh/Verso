@@ -1225,10 +1225,14 @@ section("platform-pivot 11 presence chrome");
 section("platform-pivot 26 review round-trip");
 (function () {
   var t = src("src/editor/comments.js");   // arch-P3b-07: the review round-trip moved with them
-  // The guest-identity fence stayed in editor.js, beside the rest of the identity plumbing.
-  var m = src("src/editor.js").match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
+  // arch-P3b-07z: the guest-identity fence moved to comments.js with the model. It no longer
+  // encloses `walkBlocks` -- the doc walker is substrate every module borrows and stayed in
+  // editor.js -- so the eval is handed it, the same way the other extracted bodies are.
+  var m = src("src/editor/comments.js").match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
   if (!m) { ok("locate @comment-guest fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
+  var wb = src("src/editor.js");
+  var wbBody = wb.slice(wb.indexOf("function walkBlocks(doc, visit)"), wb.indexOf("\n  }", wb.indexOf("function walkBlocks(doc, visit)")) + 4);
+  var g = new Function(wbBody + m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
 
   ok("commentIsGuest: source guest-link OR guest flag", g.commentIsGuest({ source: "guest-link" }) === true && g.commentIsGuest({ guest: true }) === true && g.commentIsGuest({ author: "Me" }) === false);
   var doc = { pages: [ { blocks: [ { cid: "c1", type: "para" }, { cid: "c2", type: "group", children: [ { cid: "c3" } ] } ] } ] };
@@ -4432,7 +4436,8 @@ section("AAA doc-migration");
   var kc = migrate({ schemaVersion: 2, chapters: [{ id: "c", name: "X", order: 0 }], pages: [], comments: [{ id: "cm_1", body: "hi" }] });
   ok("existing doc.comments preserved (idempotent)", kc.comments.length === 1 && kc.comments[0].id === "cm_1");
   // factory shape (schema carries author/colour/replies for the additive slice 5)
-  var et = src("src/editor.js");
+  // arch-P3b-07z: the comment MODEL lives in editor/comments.js now.
+  var et = src("src/editor/comments.js");
   ok("makeComment mints the full schema", /function makeComment\(anchor, body\)[\s\S]*?id: "cm_"[\s\S]*?done: false[\s\S]*?author: id\.name[\s\S]*?colour: id\.colour[\s\S]*?replies: \[\]/.test(et));
 
   // ---- #196 pin taxonomy (task vs receipt pins) — additive, no migration ----
@@ -5025,7 +5030,7 @@ section("comment transport (slice 5)");
 (function () {
   var t = src("src/editor/comments.js");   // arch-P3b-07
   ok("author identity is stored + colour is deterministic", /function commentIdentity\(\)[\s\S]*?COMMENT_AUTHOR_KEY/.test(t) && /function colourForName/.test(t));
-  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(src("src/editor.js")));
+  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(src("src/editor/comments.js")));
   ok("sidecar export writes a typed payload, never into the course", /type: "verso-comments"[\s\S]*?comments: E\.doc\.comments/.test(t));
   ok("import merges (never replaces) the store", /function importComments[\s\S]*?mergeComments\(list\)/.test(t));
   ok("replies are threaded via makeReply", /function makeReply[\s\S]*?rp_[\s\S]*?c\.replies\.push\(makeReply/.test(t));
@@ -5786,10 +5791,11 @@ section("#24 where-used + impact preview + push-update");
   var etxt = src("src/editor.js");
 
   // 1. PURE: libraryWhereUsed against a fixture multi-course registry. Extracted as TWO
-  // pieces (walkBlocks, then the @where-used fence) so the concatenation skips the
-  // @comment-guest fence's own window.__commentModel line sitting between them.
+  // pieces, walkBlocks then the @where-used fence, because the walker is shared substrate
+  // and the counters are fenced. arch-P3b-07z took the comment model that used to sit
+  // between them, so walkBlocks now ends at its own closing brace.
   var wbStart = etxt.indexOf("function walkBlocks(doc, visit)");
-  var wbEnd = etxt.indexOf("function docCids(doc, acc)");
+  var wbEnd = etxt.indexOf("\n  }", wbStart) + 4;
   var wuStart = etxt.indexOf("/* @where-used-start */");
   var wuEnd = etxt.indexOf("/* @where-used-end */");
   var pureBody = etxt.slice(wbStart, wbEnd) + etxt.slice(wuStart, wuEnd);

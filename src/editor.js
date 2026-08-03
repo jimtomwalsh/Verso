@@ -2975,39 +2975,23 @@
   // export byte-unaffected; the editor stamps `data-cid` on mount for hit-testing.
   function mintCid() { return "c_" + Math.random().toString(36).slice(2, 8); }
   window.__mintCid = mintCid;
-  // §12 slice 1: a comment object. `anchor` is one of the 3 tiers (block/page/
-  // general — see makeAnchorFromPoint). `author`/`colour`/`replies` are in the
-  // schema now so multi-user colours + threading (slice 5) are ADDITIVE — no
-  // migration. Build 1 is flat + `done`.
-  function makeComment(anchor, body) {
-    var id = (typeof commentIdentity === "function") ? commentIdentity() : { name: null, colour: null };
-    return { id: "cm_" + Math.random().toString(36).slice(2, 8), anchor: anchor, body: body || "",
-      done: false, author: id.name || null, colour: id.colour || null, createdAt: Date.now(), replies: [] };
-  }
-  window.__makeComment = makeComment;
-  // §12 / #196: pin taxonomy. A comment is one of two KINDS:
-  // - "task"    (default): a human-authored instruction — appears in the right-panel queue,
-  // open|done via `.done`.
-  // - "receipt": a nested CHANGE record under its task via `.parentId`, carrying the before/after
-  // text (`.original`/`.changed`) so the author can review + revert. Never appears in
-  // the queue; it belongs to its task.
-  // Additive to the makeComment schema (exactly like author/colour/replies before it) — NO migration:
-  // a legacy comment with no `.kind` reads as a task (see commentIsTask). This is the model + the
-  // pure classifiers the list/pin UIs consume.
-  // Pure classifiers — no Date/Math/identity deps, so they are asserted headlessly. A comment with
-  // no `.kind` is a task (back-compat). Receipts are excluded from the queue and grouped by parent.
-  function commentIsReceipt(c) { return !!(c && c.kind === "receipt"); }
-  function commentIsTask(c) { return !!c && !commentIsReceipt(c); }
-  function taskComments(doc) { return ((doc && doc.comments) || []).filter(commentIsTask); }
-  function receiptsFor(doc, taskId) { return ((doc && doc.comments) || []).filter(function (c) { return commentIsReceipt(c) && c.parentId === taskId; }); }
-  function openTasks(doc) { return taskComments(doc).filter(function (c) { return !c.done; }); }
-  function doneTasks(doc) { return taskComments(doc).filter(function (c) { return !!c.done; }); }
-  // ticket 26 (review-links round-trip): guest-vs-internal + orphaned-anchor classifiers. Both are
-  // pure + additive over the SHIPPED comment object (no new store, no migration) -- a guest comment
-  // is an ordinary doc.comments entry with source:"guest-link"; an orphaned one is a block-anchored
-  // note whose target block (by stable cid) the author has since deleted. Surfaced, never dropped.
-  /* @comment-guest-start */
-  function commentIsGuest(c) { return !!(c && (c.source === "guest-link" || c.guest === true)); }
+  // arch-P3b-07z: the comment MODEL -- makeComment, the task/receipt and guest/orphan
+  // classifiers, the cid scans and the server-envelope bridge -- moved to editor/comments.js,
+  // which is the only thing that consumes it. The @comment-guest fence went with it. What is
+  // left here is the doc walker those scans borrow, which is substrate, not comment code.
+  var makeComment = VE.bind("makeComment");
+  var commentIsReceipt = VE.bind("commentIsReceipt");
+  var commentIsTask = VE.bind("commentIsTask");
+  var taskComments = VE.bind("taskComments");
+  var receiptsFor = VE.bind("receiptsFor");
+  var openTasks = VE.bind("openTasks");
+  var doneTasks = VE.bind("doneTasks");
+  var commentIsGuest = VE.bind("commentIsGuest");
+  var commentIsOrphaned = VE.bind("commentIsOrphaned");
+  var commentFromEnv = VE.bind("commentFromEnv");
+  var docCids = VE.bind("docCids");
+  var blockCidById = VE.bind("blockCidById");
+  var blockIdByCid = VE.bind("blockIdByCid");
   // walk every block in the doc (incl. nested containers), calling visit(block). The ONE place that
   // knows the container-child keys, shared by the cid scans below (kills the duplicated walkers).
   function walkBlocks(doc, visit) {
@@ -3018,58 +3002,6 @@
     }
     ((doc && doc.pages) || []).forEach(function (p) { (p.blocks || []).forEach(walk); });
   }
-  function docCids(doc, acc) {
-    acc = acc || {};
-    walkBlocks(doc, function (b) { if (typeof b.cid === "string") acc[b.cid] = true; });
-    return acc;
-  }
-  function commentIsOrphaned(c, doc) {
-    var a = c && c.anchor;
-    if (!a || !a.blockId) return false; // only block-anchored notes orphan (page/world resolve differently)
-    return !docCids(doc)[a.blockId];
-  }
-  // ticket 26 id-space bridge: the server anchors review comments by the STABLE block id (block.id),
-  // but the client comment mode pins by CID (data-cid). Map a server block.id -> its client cid so a
-  // guest comment resolves onto the live block. Returns the cid, or null (-> surfaces as orphaned,
-  // never mis-anchored). Pure; walks nested containers like docCids.
-  function blockCidById(doc, id) {
-    if (id == null) return null;
-    var found = null;
-    walkBlocks(doc, function (b) { if (found == null && b.id === id && typeof b.cid === "string") found = b.cid; });
-    return found;
-  }
-  // inverse of blockCidById: a client cid -> the server STABLE block id, so an author's reply/resolve
-  // can be fanned back to the server (which anchors by block.id). Null if unmapped. Pure.
-  function blockIdByCid(doc, cid) {
-    if (cid == null) return null;
-    var found = null;
-    walkBlocks(doc, function (b) { if (found == null && b.cid === cid && b.id != null) found = b.id; });
-    return found;
-  }
-  // ticket 26: map a server->client `comment.added` ENVELOPE (blockId + author live on the envelope;
-  // {id, threadId, body, kind} in payload -- see server/sync.js) into a client comment shaped like
-  // makeComment, anchored by cid so the shipped pins/panel render it. Guest notes carry source. Pure
-  // (colourFn injected). -> a client comment, or null if the envelope has no comment id.
-  function commentFromEnv(env, doc, colourFn) {
-    if (!env) return null;
-    var p = env.payload || {};
-    if (!p.id) return null;
-    var cid = blockCidById(doc, env.blockId);
-    return {
-      id: p.id,
-      anchor: { blockId: cid || env.blockId }, // cid resolves the pin; a raw id falls through to orphaned
-      body: p.body || "",
-      author: env.author || null,
-      colour: env.author ? colourFn(env.author) : null,
-      done: false,
-      source: (p.kind === "guest") ? "guest-link" : null,
-      threadId: p.threadId || p.id,
-      createdAt: env.ts || 0,
-      replies: []
-    };
-  }
-  /* @comment-guest-end */
-  window.__commentModel = { isReceipt: commentIsReceipt, isTask: commentIsTask, tasks: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks, isGuest: commentIsGuest, isOrphaned: commentIsOrphaned };
   // #24: where-used for a shared library master -- courses = how many courses in the
   // registry reference it at all, instances = total libraryInstance placements across
   // all of them. Reuses walkBlocks (not a 4th near-duplicate walker) since every
