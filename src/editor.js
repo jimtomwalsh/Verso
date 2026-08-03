@@ -1232,6 +1232,40 @@
   window.ProductsStore = loadProducts();
   function saveProducts() { Store.saveProducts(window.ProductsStore); }
 
+  // ---- Product Rail facts -> src/editor/product-rail.js (arch-P3-05) ---------------------------
+  // Alignment, drift, where-used, outputs: the four facts that follow a document across Source,
+  // Edit and Publish. The layer INVENTS nothing -- it turns the primitives below into one phrasing
+  // and one tone every surface renders identically. Drawing them (f04Badge, f04AlignmentMeter, the
+  // Product picker) stays here; a fact carries a label, a tone and a title, and that is chrome's
+  // whole input. Every callback is deferred, so this binds before the helpers are declared.
+  var PR = window.VersoProductRail;
+  var ProductRail = PR.create({
+    storage: localStorage,                                   // the Product scope is a per-client UI pref
+    docById: function (id) { return registry[id]; },
+    allDocIds: function () { return Object.keys(registry); },
+    walkBlocks: function (d, visit) { return walkBlocks(d, visit); },
+    countWords: function (html) { return frWords(html); },
+    libraryComponents: function () { return (typeof libComponents === "function" && libComponents()) || {}; },
+    productsStore: function () { return window.ProductsStore || {}; },
+    // Is there approved source to align this document against at all? A document tagged to a
+    // Product with no source document can never score, so it reads "Not indexed" rather than 0%.
+    sourceIndexedFor: function (d) {
+      var pid = d && d.meta && d.meta.productId;
+      if (!pid) return true;                                 // untagged: fall back to "has prose" alone
+      if (typeof sourceMasterFor !== "function") return true;
+      return !!sourceMasterFor(pid) || (typeof unifiableTopicsFor === "function" && unifiableTopicsFor(pid).length > 0);
+    },
+    whereUsed: function (masterId) {
+      return (typeof sourceLinkWhereUsed === "function") ? sourceLinkWhereUsed(masterId, null) : [];
+    },
+    // Has this document ever actually gone out? Straight from the release log, the same record the
+    // picker's "Last published" line reads.
+    published: function (docId) {
+      var RH = window.ReleaseHistory;
+      return !!(RH && RH.lastPublishedFor && RH.lastPublishedFor(releaseHistory(), docId));
+    }
+  });
+
   // ---- Publish orchestration -> src/editor/publish.js (arch-P3-03) -----------------------------
   // The four stores (queue / paths / presets / release history), the plan every row expands into,
   // and the run that drains the queue all live in the module. It is DOM-free: it resolves
@@ -1503,76 +1537,19 @@
   // we snapshot every linked master's stamp into doc.meta.lastPublishedGroundTruthVersions; the
   // staleness count is how many linked masters have changed since that baseline. UI-only, never a
   // gate. All four helpers are pure (fixture-testable in tests/run.js).
-  /* @gt-staleness-start */
-  function docLinkedMasterIds(doc) {
-    var ids = {};
-    walkBlocks(doc, function (b) { if (b && b.sourceLink && b.sourceLink.masterId) ids[b.sourceLink.masterId] = 1; });
-    return Object.keys(ids);
-  }
-  // WHICH linked masters have changed since the doc's last-published baseline. Returns null when the
-  // doc links NO Ground Truth content -> no badge (not a misleading "0 changed"). A master absent from
-  // the baseline (newly linked, or a doc never yet exported) counts as changed.
-  // uio-F04: this is the ONE staleness computation. The count below and every F04 surface derive from
-  // it, so a drift badge and a drift list can never disagree.
-  function driftedMasterIds(doc, currentVersions) {
-    if (!doc) return null;
-    var ids = docLinkedMasterIds(doc);
-    if (!ids.length) return null;
-    var baseline = (doc.meta && doc.meta.lastPublishedGroundTruthVersions) || {};
-    return ids.filter(function (id) { return baseline[id] !== (currentVersions || {})[id]; });
-  }
-  // Count of the above. Same null contract.
-  function groundTruthStaleCount(doc, currentVersions) {
-    var drifted = driftedMasterIds(doc, currentVersions);
-    return drifted === null ? null : drifted.length;
-  }
-  // Current stamp map from the live LibraryStore (masterId -> updatedAt).
-  function currentMasterVersions() {
-    var comps = (typeof libComponents === "function" && libComponents()) || {}, out = {};
-    Object.keys(comps).forEach(function (k) { if (comps[k]) out[k] = comps[k].updatedAt; });
-    return out;
-  }
-  // Baseline reset: record every linked master's current stamp as this doc's new "last published"
-  // point -- the instant a document finishes exporting (solo or whole-family), its badge -> 0.
-  function snapshotGroundTruthBaseline(doc) {
-    if (!doc) return;
-    var cur = currentMasterVersions(), snap = {};
-    docLinkedMasterIds(doc).forEach(function (id) { snap[id] = cur[id]; });
-    doc.meta = doc.meta || {};
-    doc.meta.lastPublishedGroundTruthVersions = snap;
-  }
-  /* @gt-staleness-end */
+  function docLinkedMasterIds(doc) { return ProductRail.linkedMasterIds(doc); }
+  function driftedMasterIds(doc, versions) { return ProductRail.driftedMasterIds(doc, versions); }
+  function groundTruthStaleCount(doc, versions) { return ProductRail.staleCount(doc, versions); }
+  function currentMasterVersions() { return ProductRail.currentMasterVersions(); }
+  function snapshotGroundTruthBaseline(doc) { return ProductRail.snapshotBaseline(doc); }
 
   // ---- Product Rail: source-alignment metric (linked-to-approved-source vs novel) ----
   // What share of a document's prose is linked to approved source vs authored novel here. A whole
   // source-linked block (block.sourceLink) counts all its words as linked; an inline `<span
   // data-source-link>` counts the words inside it. Reuses frWords (the shared HTML-stripping word
   // counter). Pure -> fixture-testable. Surfaced live in the Edit header + on the Publish rows.
-  /* @src-align-start */
-  function sourceLinkedSpanWords(html) {
-    var s = String(html == null ? "" : html), linked = 0, re = /<span\b[^>]*\bdata-source-link\b[^>]*>([\s\S]*?)<\/span>/gi, m;
-    while ((m = re.exec(s))) linked += frWords(m[1]);
-    return linked;
-  }
-  function sourceAlignment(doc) {
-    var linked = 0, total = 0;
-    walkBlocks(doc, function (b) {
-      if (!b || typeof b.text !== "string") return;
-      var w = frWords(b.text);
-      if (!w) return;
-      total += w;
-      if (b.sourceLink && b.sourceLink.markId) linked += w;       // whole-block linked
-      else linked += sourceLinkedSpanWords(b.text);               // inline linked spans
-    });
-    return { linkedWords: linked, totalWords: total, ratio: total ? linked / total : 0 };
-  }
-  // Format the ratio as a rounded percent string, or null when the doc has no prose to measure.
-  function sourceAlignmentPct(doc) {
-    var a = sourceAlignment(doc);
-    if (!a.totalWords) return null;
-    return Math.round(a.ratio * 100);
-  }
-  /* @src-align-end */
+  function sourceAlignment(doc) { return ProductRail.sourceAlignment(doc); }
+  function sourceAlignmentPct(doc) { return ProductRail.sourceAlignmentPct(doc); }
 
   // ---- uio-F04: cross-stage data surfacing (the READ layer over the Product Rail) ----------------
   // Four facts follow a document (and a source topic) across Source, Edit and Publish: how much of it
@@ -1588,183 +1565,22 @@
   //
   // The fenced part is pure (plain values in, plain fact objects out) so tests/run.js can fixture it
   // directly; the adapters below the fence do the binding to the live stores.
-  /* @f04-start */
-  // One band scale, everywhere. >=85 verified · 60-84 mixed · <60 mostly novel.
-  var F04_BANDS = [
-    { key: "verified", min: 85, label: "Verified" },
-    { key: "mixed", min: 60, label: "Mixed" },
-    { key: "novel", min: 0, label: "Mostly novel" }
-  ];
-  // Tones read as fact, not as scolding: novel copy is a legitimate authoring choice, so the bottom
-  // band is neutral rather than red. Red is reserved for something actually wrong.
-  var F04_BAND_TONE = { verified: "success", mixed: "warning", novel: "neutral" };
-  function f04Band(pct) {
-    if (pct == null) return null;
-    for (var i = 0; i < F04_BANDS.length; i++) if (pct >= F04_BANDS[i].min) return F04_BANDS[i];
-    return F04_BANDS[F04_BANDS.length - 1];
-  }
-  // ALIGNMENT. `alignment` is whatever sourceAlignment() returned ({linkedWords,totalWords}); pass
-  // `indexed:false` when there is no approved source to measure against at all. Both no-source and
-  // no-prose resolve to the SAME honest "Not indexed" state rather than a 0% that blames the author.
-  function f04AlignmentFact(alignment, indexed) {
-    var total = (alignment && alignment.totalWords) || 0;
-    var linked = (alignment && alignment.linkedWords) || 0;
-    if (indexed === false || !total) {
-      return {
-        indexed: false, pct: null, band: null, bandLabel: "Not indexed", tone: "neutral",
-        label: "Not indexed",
-        title: indexed === false
-          ? "Not indexed - there is no approved source document to measure this against yet."
-          : "Not indexed - there is no prose here to measure."
-      };
-    }
-    var pct = Math.round(linked / total * 100), band = f04Band(pct);
-    return {
-      indexed: true, pct: pct, band: band.key, bandLabel: band.label, tone: F04_BAND_TONE[band.key],
-      linkedWords: linked, totalWords: total,
-      label: pct + "% aligned",
-      title: pct + "% of these " + total + " words are linked to approved source (" + band.label.toLowerCase() +
-        "). The rest is novel copy authored here."
-    };
-  }
-  // Roll-up: several documents as ONE alignment number, by summing the same word counts the per-document
-  // fact uses. With a single document the roll-up IS that document's number, which is exactly why the
-  // Source top bar and a Publish row can never disagree.
-  function f04RollUpAlignment(alignments) {
-    var linked = 0, total = 0, indexed = false;
-    (alignments || []).forEach(function (a) {
-      if (!a) return;
-      linked += a.linkedWords || 0; total += a.totalWords || 0;
-      if (a.indexed !== false) indexed = true;
-    });
-    return f04AlignmentFact({ linkedWords: linked, totalWords: total }, indexed && total > 0);
-  }
-  // DRIFT. `driftedIds` is driftedMasterIds()'s answer (null = links no source at all); `published` is
-  // whether ReleaseHistory has ever recorded this document going out. A never-published document has
-  // nothing to have drifted FROM, so it reports "unpublished" instead of counting every linked topic as
-  // changed -- the misreading the raw count invited.
-  function f04DriftFact(driftedIds, published) {
-    if (driftedIds == null) {
-      return { state: "unlinked", count: 0, ids: [], tone: "neutral", label: "",
-        title: "This document links no approved source." };
-    }
-    if (!published) {
-      return { state: "unpublished", count: 0, ids: [], tone: "neutral", label: "",
-        title: "Never published, so there is no earlier version to have drifted from." };
-    }
-    if (!driftedIds.length) {
-      return { state: "current", count: 0, ids: [], tone: "neutral", label: "",
-        title: "Every linked source passage is as it was when this document was last published." };
-    }
-    var n = driftedIds.length;
-    return { state: "drifted", count: n, ids: driftedIds.slice(), tone: "warning",
-      label: n + " changed",
-      title: n + " linked source document" + (n === 1 ? "" : "s") + " changed since this document was last published." };
-  }
-  // WHERE-USED. `places` is sourceLinkWhereUsed()'s list of placements ({docCode,...}); this counts the
-  // distinct documents behind them, because "linked in 3 documents" is the fact an author acts on.
-  function f04WhereUsedFact(places) {
-    var docs = {}, n = 0;
-    (places || []).forEach(function (p) { if (p && p.docCode != null) docs[p.docCode] = 1; });
-    var codes = Object.keys(docs); n = codes.length;
-    return {
-      docs: n, docCodes: codes, places: (places || []).length, tone: "neutral",
-      label: n ? ("Linked in " + n) : "Not linked",
-      title: n
-        ? ("Used in " + n + " document" + (n === 1 ? "" : "s") + " across " + (places || []).length + " place" + ((places || []).length === 1 ? "" : "s") + ".")
-        : "Not currently linked in any document."
-    };
-  }
-  // VARIANTS AS OUTPUTS. One document with N variants is N+1 packages; the queue treats it as one row,
-  // which is why the real output count is invisible today. Flagship always leads the list.
-  function f04OutputsFact(variants) {
-    var vs = (variants || []).filter(function (v) { return v != null && String(v) !== ""; });
-    var names = ["Flagship"].concat(vs.map(String));
-    return {
-      count: names.length, names: names, variants: vs.map(String), tone: "neutral",
-      label: names.length + " outputs",
-      title: names.length === 1
-        ? "Publishing this document produces one package (Flagship)."
-        : "Publishing this document produces " + names.length + " packages: " + names.join(", ") + "."
-    };
-  }
-  // uio-P-C01 (PUB-01): the meter's pure model. The meter EXPLAINS the alignment number, so every
-  // part of it -- fill, tone, value text, band name -- comes from the fact object, never a second
-  // computation. A not-indexed fact yields a meter with no fill and the words instead of a 0%.
-  function f04AlignmentMeterModel(fact) {
-    if (!fact || fact.indexed === false || fact.pct == null) {
-      return { indexed: false, pct: null, tone: "neutral", value: "Not indexed",
-        bandLabel: "Not indexed", title: (fact && fact.title) || "Not indexed." };
-    }
-    var band = f04Band(fact.pct);
-    return { indexed: true, pct: fact.pct, tone: F04_BAND_TONE[band.key], value: fact.pct + "%",
-      bandLabel: band.label, title: fact.title };
-  }
-  /* @f04-end */
+  var F04_BANDS = PR.BANDS;
+  function f04Band(pct) { return PR.band(pct); }
+  function f04AlignmentFact(alignment, indexed) { return PR.alignmentFact(alignment, indexed); }
+  function f04RollUpAlignment(alignments) { return PR.rollUpAlignment(alignments); }
+  function f04DriftFact(driftedIds, published) { return PR.driftFact(driftedIds, published); }
+  function f04WhereUsedFact(places) { return PR.whereUsedFact(places); }
+  function f04OutputsFact(variants) { return PR.outputsFact(variants); }
+  function f04AlignmentMeterModel(fact) { return PR.alignmentMeterModel(fact); }
 
-  // ---- uio-F04 adapters: bind the pure resolver above to the live Product Rail stores --------------
-  // Nothing here computes a fact; each one only fetches an existing input and hands it over.
-  // Is there approved source to align this document against at all? A document tagged to a Product with
-  // no source document can never score, so it reads "Not indexed" rather than 0%.
-  function f04SourceIndexed(d) {
-    var pid = d && d.meta && d.meta.productId;
-    if (!pid) return true;                                    // untagged: fall back to "has prose" alone
-    if (typeof sourceMasterFor !== "function") return true;
-    return !!sourceMasterFor(pid) || (typeof unifiableTopicsFor === "function" && unifiableTopicsFor(pid).length > 0);
-  }
-  // Has this document ever actually gone out? Straight from the release log, the same record the
-  // picker's "Last published" line reads.
-  function f04Published(docId) {
-    var RH = window.ReleaseHistory;
-    return !!(RH && RH.lastPublishedFor && RH.lastPublishedFor(releaseHistory(), docId));
-  }
+  // ---- uio-F04 adapters -> src/editor/product-rail.js (arch-P3-05) --------------------------------
+  // Nothing here computes a fact; the binding to the live stores is the env handed to
+  // VersoProductRail.create above, and these are the names the surfaces already call.
   // The three document-scoped facts, for any surface, from one call.
-  function f04DocFacts(docId, versions) {
-    var d = registry[docId]; if (!d) return null;
-    var vers = versions || currentMasterVersions();
-    return {
-      docId: docId,
-      title: (d.meta && d.meta.title) || docId,
-      alignment: f04AlignmentFact(sourceAlignment(d), f04SourceIndexed(d)),
-      drift: f04DriftFact(driftedMasterIds(d, vers), f04Published(docId)),
-      outputs: f04OutputsFact(d.variants)
-    };
-  }
-  // Documents belonging to a Product (the same meta.productId tag the browser + picker scope by).
-  function f04ProductDocIds(pid) {
-    if (!pid) return [];
-    return Object.keys(registry).filter(function (code) {
-      var d = registry[code];
-      return !!(d && d.meta && d.meta.productId === pid);
-    });
-  }
-  // Product-scoped roll-up, plus (when a source topic is given) that topic's where-used and how many
-  // of the Product's published documents are behind it.
-  function f04ProductFacts(pid, masterId) {
-    var vers = currentMasterVersions();
-    var ids = f04ProductDocIds(pid);
-    var each = ids.map(function (id) { return f04DocFacts(id, vers); }).filter(Boolean);
-    var outputs = 0;
-    each.forEach(function (f) { outputs += f.outputs.count; });
-    var behind = masterId ? each.filter(function (f) {
-      return f.drift.state === "drifted" && f.drift.ids.indexOf(masterId) !== -1;
-    }) : [];
-    return {
-      productId: pid,
-      docIds: ids,
-      docs: each,
-      alignment: f04RollUpAlignment(each.map(function (f) { return f.alignment; })),
-      outputs: { count: outputs, tone: "neutral", label: outputs + " outputs",
-        title: outputs + " package" + (outputs === 1 ? "" : "s") + " across " + ids.length + " document" + (ids.length === 1 ? "" : "s") + "." },
-      whereUsed: masterId && typeof sourceLinkWhereUsed === "function"
-        ? f04WhereUsedFact(sourceLinkWhereUsed(masterId, null)) : null,
-      behind: { count: behind.length, tone: behind.length ? "warning" : "neutral",
-        label: behind.length ? (behind.length + " behind") : "",
-        title: behind.length
-          ? (behind.length + " published document" + (behind.length === 1 ? " is" : "s are") + " older than this source.")
-          : "Every published document here is up to date with this source." }
-    };
-  }
+  function f04DocFacts(docId, versions) { return ProductRail.docFacts(docId, versions); }
+  function f04ProductDocIds(pid) { return ProductRail.productDocIds(pid); }
+  function f04ProductFacts(pid, masterId) { return ProductRail.productFacts(pid, masterId); }
   // The ONE way an F04 fact is drawn: the canonical DS Badge, quiet (these repeat down lists), small,
   // carrying the fact's own tone + tooltip. Returns null for a fact with nothing to say, so a surface
   // never has to decide when to hide one.
@@ -2667,17 +2483,7 @@
   // untagged doc has no productId, so it only ever shows under All products -- the same rule
   // Product Rail uses everywhere else (an untagged doc is never silently attributed to a
   // filter). PURE (no DOM) so tests/run.js exercises the predicate headlessly.
-  /* @pure-tabscope-start */
-  function visibleTabIds(openIds, reg, activeProduct) {
-    var pid = activeProduct || "";
-    return (openIds || []).filter(function (id) {
-      var d = reg && reg[id];
-      if (!d) return false;
-      if (!pid) return true; // All products
-      return !!(d.meta && d.meta.productId === pid);
-    });
-  }
-  /* @pure-tabscope-end */
+  function visibleTabIds(openIds, reg, activeProduct) { return PR.visibleTabIds(openIds, reg, activeProduct); }
 
   // tab-doctype-glyph: map a document's geometry cell -> {glyph, label} for the tab's leading
   // doc-type marker. Keyed on geo (the doc-type spine the file-picker already groups by), so the
@@ -12197,28 +12003,9 @@
   // Persistent top-bar product context (Product Rail): "" = All products. Persisted across
   // refresh (mirrors STAGE_PERSIST_KEY) so a chosen product scope survives a reload on every
   // stage; every stage reads it through window.__productRail.getActiveProduct().
-  var PRODUCT_PERSIST_KEY = "verso.activeProduct";
-  var __activeProduct = "";
-  var __productRestored = false;
-  function setActiveProduct(id) {
-    __activeProduct = id || "";
-    try {
-      if (__activeProduct) localStorage.setItem(PRODUCT_PERSIST_KEY, __activeProduct);
-      else localStorage.removeItem(PRODUCT_PERSIST_KEY); // "All products" clears the pref
-    } catch (e) {}
-  }
-  function getActiveProduct() { return __activeProduct; }
-  // Restore once at first mount (ProductsStore is loaded by then). Validate the stored id still
-  // exists -> a deleted Product falls back cleanly to "All products" (and clears the stale pref).
-  function restoreActiveProduct() {
-    if (__productRestored) return;
-    __productRestored = true;
-    try {
-      var saved = localStorage.getItem(PRODUCT_PERSIST_KEY);
-      if (saved && window.ProductsStore && window.ProductsStore[saved]) __activeProduct = saved;
-      else if (saved) { try { localStorage.removeItem(PRODUCT_PERSIST_KEY); } catch (e2) {} }
-    } catch (e) {}
-  }
+  function setActiveProduct(id) { ProductRail.setActiveProduct(id); }
+  function getActiveProduct() { return ProductRail.getActiveProduct(); }
+  function restoreActiveProduct() { ProductRail.restoreActiveProduct(); }
   function mountProductPicker() {
     if (typeof document === "undefined") return;
     restoreActiveProduct(); // first mount = boot; restore the persisted scope before building the Select
@@ -12227,7 +12014,7 @@
     var U = window.VersoUI; if (!U || !U.Select) return;
     host.appendChild(U.Select({
       options: productSelectOptions(window.ProductsStore),
-      value: __activeProduct,
+      value: ProductRail.getActiveProduct(),
       onChange: function (v) { setActiveProduct(v); renderSourceStage(); reconcileActiveTabToScope(); } // re-resolve the Product's document + re-scope the Edit tabs
     }));
     // new-product-button: a "+" beside the picker creates an empty Product from scratch (the only
@@ -12595,7 +12382,7 @@
         // Before the saved scope is restored (boot), auto-pick in memory ONLY -- persisting here would
         // overwrite the author's saved Product with a default before restoreActiveProduct reads it,
         // which is exactly the "refresh resets the dropdown" bug.
-        if (__productRestored) setActiveProduct(keys[i]); else __activeProduct = keys[i];
+        if (ProductRail.hasRestoredActiveProduct()) setActiveProduct(keys[i]); else ProductRail.adoptActiveProduct(keys[i]);
         return keys[i];
       }
     }
