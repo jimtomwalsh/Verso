@@ -388,6 +388,8 @@
   <script src="src/editor/editing.js"></script>
   <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->
   <script src="src/editor/actions.js"></script>
+  <!-- arch-P3b-07x block panels: window.VersoInspectorBlocks — the block-type -> inspector table and the panels for the blocks whose settings are structural (quiz, accordion, sequence, card deck, card reveal, learner nav, embed). Must precede editor.js. -->
+  <script src="src/editor/inspector/blocks.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->
