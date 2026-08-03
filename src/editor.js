@@ -4237,57 +4237,10 @@
     return fresh;
   }
 
-  // ---- Shared palette colour-row (SVG image palette + HTML-interaction palette) ------
-  // ONE row = swatch + label + [BG | Text | Keep] toggles + a ⋯ twirl holding the full
-  // token dropdown + a "Switch to colour" custom picker. Used identically by both the
-  // image SVG palette and the interaction palette so they look + behave the same.
-  // BG -> the page-bg token, Text -> ink, Keep -> the authored colour.
-  var PALETTE_ROLE_TOKEN = { bg: "bg", text: "ink", keep: "keep" };
-  function paletteColorRow(host, o) {
-    var map = o.map, key = o.key, tokens = o.tokens || [];
-    var explicit = map.hasOwnProperty(key) ? map[key] : null;
-    var isCustom = !!explicit && explicit !== "surface" && explicit !== "ink" && explicit !== "keep" && explicit !== "bg";
-    var isHexMap = !!explicit && /^(#|rgb)/i.test(String(explicit));
-    var role = o.roleOf ? o.roleOf(key) : "keep";
-    // Persist the map write NOW (debounced), not only on the 4s autosave tick. Every
-    // mutation below routes through apply(), and WKWebView does NOT fire beforeunload
-    // on Cmd+R, so without this a colour mapping made just before a hard refresh is
-    // lost (reverts) — the same gap the text-edit path closed with scheduleSave. This
-    // is the single choke for all three palette consumers (embed / SVG image / glossary).
-    function apply() { o.refresh(); scheduleSave(); }
-    // Line 1: swatch + label, with a ⋯ advanced-token toggle at the far right.
-    var head = h("div", "insp-row");
-    var lbl = h("span", "insp-row__label"); lbl.style.flex = "1 1 auto";
-    var sw = h("span", "insp-swatch");
-    sw.style.cssText = "display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:6px;vertical-align:middle;border:1px solid var(--color-hair);background:" + o.swatchColor;
-    lbl.appendChild(sw); lbl.appendChild(document.createTextNode(o.label)); lbl.title = o.label;
-    head.appendChild(lbl);
-    var advRow = h("div", "insp-row"); advRow.style.marginTop = "5px"; advRow.style.display = isCustom ? "" : "none";
-    advRow.appendChild(h("span", "insp-row__label", "Token"));
-    var selOpts = [["Auto", "auto"], ["Keep as-is", "keep"]].concat(tokens.map(function (t) { return [t, t]; }));
-    if (isHexMap) selOpts.unshift(["Custom colour", "__custom"]);
-    var selCurrent = explicit == null ? "auto" : (isHexMap ? "__custom" : explicit);
-    var sel = dsSelect(selOpts, selCurrent, function (v) { if (v === "__custom") return; pushHistory(); if (v === "auto") delete map[key]; else map[key] = v; apply(); });
-    advRow.appendChild(sel);
-    colourControl("Switch to colour", isHexMap ? explicit : null, function (v) { pushHistory(); if (v == null) delete map[key]; else map[key] = v; apply(); }, advRow);
-    var advBtn = h("button", null, "⋯");
-    advBtn.type = "button"; advBtn.title = "Advanced — map this colour to a specific theme token";
-    advBtn.style.cssText = "flex:0 0 auto;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:13px;line-height:1;color:var(--text-secondary);border:1px solid var(--border-subtle);background:" + (isCustom ? "var(--surface-raised)" : "transparent") + ";";
-    advBtn.addEventListener("click", function () { advRow.style.display = advRow.style.display === "none" ? "" : "none"; });
-    head.appendChild(advBtn);
-    host.appendChild(head);
-    // Line 2: full-width role toggles — their own row so labels never truncate.
-    var roleRow = h("div", "prop-toggle-row"); roleRow.style.marginTop = "5px";
-    [["BG", "bg"], ["Text", "text"], ["Keep", "keep"]].forEach(function (ro) {
-      var b = h("button", "prop-toggle" + (!isCustom && role === ro[1] ? " is-on" : ""), ro[0]);
-      b.type = "button";
-      b.title = ro[1] === "bg" ? "Background — follows the theme (light in light mode, dark in dark mode)" : ro[1] === "text" ? "Text — follows the theme (contrasts the background per mode)" : "Keep this colour exactly as authored (brand/accent)";
-      b.addEventListener("click", function () { pushHistory(); map[key] = PALETTE_ROLE_TOKEN[ro[1]]; apply(); });
-      roleRow.appendChild(b);
-    });
-    host.appendChild(roleRow);
-    host.appendChild(advRow);
-  }
+  // arch-P3b-07y: the shared palette colour-row moved to editor/inspector/primitives.js, with the
+  // rest of the canonical control set. Both palettes that place it -- the SVG image palette here,
+  // the HTML-interaction palette in inspector/blocks.js -- read it from there now.
+  var paletteColorRow = VE.bind("paletteColorRow");
 
   // arch-P3b-07x: the block-type -> panel table and the six panels it names (quiz, accordion,
   // sequence, card deck, card reveal, learner nav) plus the embed panel moved to

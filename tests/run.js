@@ -6691,6 +6691,7 @@ section("quiz per-field styles");
 // ---- SVG colour switching: a detected colour can be switched to a fixed custom colour ----
 section("svg colour switching");
 (function () {
+  var ep = src("src/editor/inspector/primitives.js");   // arch-P3b-07y
   var r = src("src/render.js");
   var e = src("src/editor.js");
   // isColorLiteral distinguishes a literal colour from a theme-token key
@@ -6702,8 +6703,8 @@ section("svg colour switching");
   ok("toCssColor maps token->var and literal->as-is", /function toCssColor\(tok\) \{ return isColorLiteral\(tok\) \? tok\.trim\(\) : "var\(--color-" \+ kebabToken\(tok\) \+ "\)"; \}/.test(r));
   ok("recolorNode uses toCssColor for both attr + inline forms", /setStyleProp\(style, attr, toCssColor\(tok\)\)/.test(r) && /prop \+ ":" \+ toCssColor\(tok\)/.test(r));
   // editor: a per-colour "Switch to colour" picker writes a fixed hex into colorMap
-  ok("inspector exposes a Switch-to-colour picker", /colourControl\("Switch to colour", isHexMap \? explicit : null/.test(e));
-  ok("custom hex round-trips: reflected as a Custom-colour select option", /if \(isHexMap\) selOpts\.unshift\(\["Custom colour", "__custom"\]\)/.test(e) && /if \(v === "__custom"\) return;/.test(e));
+  ok("inspector exposes a Switch-to-colour picker", /colourControl\("Switch to colour", isHexMap \? explicit : null/.test(ep));
+  ok("custom hex round-trips: reflected as a Custom-colour select option", /if \(isHexMap\) selOpts\.unshift\(\["Custom colour", "__custom"\]\)/.test(ep) && /if \(v === "__custom"\) return;/.test(ep));
 })();
 
 // ---- Inline hyperlinks in text (external URL, new tab, theme-aware) ---------------
@@ -6810,6 +6811,7 @@ section("vimeo hash");
 // ---- HTML-interaction palette linking (Phase 2): map an interaction's own vars to theme ----
 section("embed palette linking");
 (function () {
+  var ep = src("src/editor/inspector/primitives.js");   // arch-P3b-07y
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
@@ -6840,7 +6842,7 @@ section("embed palette linking");
   // palette writes must persist NOW (scheduleSave), not only on the 4s autosave tick —
   // else a colour mapping made just before a hard refresh is lost (WKWebView skips
   // beforeunload on Cmd+R). One choke for embed / SVG-image / glossary palettes.
-  ok("paletteColorRow persists the map on every write (scheduleSave)", /function apply\(\) \{ o\.refresh\(\); scheduleSave\(\); \}/.test(e));
+  ok("paletteColorRow persists the map on every write (scheduleSave)", /function apply\(\) \{ o\.refresh\(\); scheduleSave\(\); \}/.test(ep));
   // #85: opening the inspector + every palette re-render decoded + regex-parsed the
   // full interaction markup with no caching (a 2-3s freeze). Detection is now cached
   // per block, keyed on its html/src, and the palette reads through the cache.
@@ -9291,7 +9293,7 @@ section("panel system v2 — layout engine");
   ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(IB) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(THEME));
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(THEME) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(THEME));
-  ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(IB));
+  ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(ep) && /colourControl\("Fill \(dark/.test(IB));
   // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
   // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
   // control plus an overflow of the outbound actions, and Source took the imports.
