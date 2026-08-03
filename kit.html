@@ -191,6 +191,8 @@
   <script src="src/editor/documents.js"></script>
   <!-- arch-P3b-07tabs: window.VersoTabs — the open-document tab strip: which courses are open, which is active, the Product-scope filter, and the wholesale document swap switchDoc performs. Must precede editor.js. -->
   <script src="src/editor/tabs.js"></script>
+  <!-- arch-P3b-07shell: window.VersoShell — the frame around the work: the top bar, the left rail, the Source/Edit/Publish stage switch, the Product picker and the matrix-cell chip. Must precede editor.js. -->
+  <script src="src/editor/shell.js"></script>
   <!-- arch-P3b-07n editing: window.VersoEditing — what makes the canvas typeable: contentEditable on copy fields (selected first, editable second), drop targets, column resizers, the embed shield, and the collaboration edit lifecycle. Nothing it adds may leak into render(). Must precede editor.js. -->
   <script src="src/editor/editing.js"></script>
   <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->

@@ -2851,7 +2851,7 @@ section("editor-rework file-picker grouping");
   // the browser is product-scoped + auto-opens on a zero-tab Edit landing
   // arch-P3b-07k: both claims are about the browser, which is editor/home.js now.
   ok("the browser filters by the product scope (docMatchesProductStage)", /courseMatchesQuery\(registry\[id\], browserQuery\) && docMatchesProductStage\(registry\[id\], scope, null\)/.test(src("src/editor/home.js")));
-  ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(t));
+  ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(src("src/editor/shell.js")));
   ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(src("src/editor/home.js")) && /cell\.interactive \? "Interactive" : "Static"/.test(src("src/editor/home.js")));
 })();
 
@@ -2966,6 +2966,7 @@ section("editor-rework static-fallback palette filter");
 // ---- SPEC 7: cell switcher + tiered mutability (wiring) ----
 section("editor-rework cell switcher");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   var html = src("index.html");
@@ -2974,11 +2975,11 @@ section("editor-rework cell switcher");
   ok("the cell chip is retired from the header bar", html.indexOf('id="editor-cell-chip"') === -1);
   ok("Document type is a settings section (first in the Project tab)", /\{ key: "docType", title: "Document type", build: buildDocTypeBody \}/.test(SS));
   ok("buildDocTypeBody offers the three geometries + an Interactive toggle (reusing the cell model)", /function buildDocTypeBody\(host\)[\s\S]{0,400}segmentedLive\("Geometry"[\s\S]{0,260}setCellGeo\(v\)[\s\S]{0,160}switchRow\("Interactive"[\s\S]{0,80}setCellInteractive\(on\)/.test(SS));
-  ok("interactivity toggles are IMMEDIATE (no warning)", /function setCellInteractive\(on\)[\s\S]{0,200}applyCellChange\(c\.geo, on\); \/\/ immediate, no warning/.test(e));
-  ok("a geometry-mode change is GUARDED by a reflow warning", /function setCellGeo\(geo\)[\s\S]{0,320}confirmModal\("Change layout mode\?"/.test(e));
-  ok("the geometry change re-renders the canvas via applyCellChange -> mount", /function applyCellChange\(geo, interactive\)[\s\S]{0,220}tagDocCell\(doc, geo, interactive\);[\s\S]{0,80}mount\(\);/.test(e));
-  ok("the change writes the cell through the pure doc-type model, then saves", /window\.__docType\.tagDocCell\(doc, geo, interactive\);\s*\n\s*saveRegistry\(registry\);/.test(e));
-  ok("a geometry change re-renders the open Document settings so the segmented reflects it", /if \(sm && !sm\.hidden && typeof renderSettingsBody === "function"\) renderSettingsBody\(\);/.test(e));
+  ok("interactivity toggles are IMMEDIATE (no warning)", /function setCellInteractive\(on\)[\s\S]{0,200}applyCellChange\(c\.geo, on\); \/\/ immediate, no warning/.test(SHELL));
+  ok("a geometry-mode change is GUARDED by a reflow warning", /function setCellGeo\(geo\)[\s\S]{0,320}confirmModal\("Change layout mode\?"/.test(SHELL));
+  ok("the geometry change re-renders the canvas via applyCellChange -> mount", /function applyCellChange\(geo, interactive\)[\s\S]{0,220}tagDocCell\(E\.doc, geo, interactive\);[\s\S]{0,80}mount\(\);/.test(SHELL));
+  ok("the change writes the cell through the pure doc-type model, then saves", /window\.__docType\.tagDocCell\(E\.doc, geo, interactive\);\s*\n\s*saveRegistry\(registry\);/.test(SHELL));
+  ok("a geometry change re-renders the open Document settings so the segmented reflects it", /if \(sm && !sm\.hidden && typeof renderSettingsBody === "function"\) renderSettingsBody\(\);/.test(SHELL));
 })();
 
 // ---- SPEC 7: capability inspector (Document context) ----
@@ -7354,6 +7355,7 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
@@ -7397,7 +7399,7 @@ section("richer bullet lists");
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
   ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
-  ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(e));
+  ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(SHELL));
   var ecss = src("editor.css");
   ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
   ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(SS));
@@ -9218,6 +9220,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var LIB = src("src/editor/library.js");   // arch-P3b-07lib
   var WORLD = src("src/editor/world.js");   // arch-P3b-07world
   var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
@@ -9336,8 +9339,8 @@ section("panel system v2 — layout engine");
   // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
   // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
   // control plus an overflow of the outbound actions, and Source took the imports.
-  ok("renderToolbarPipeline renders into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
-  ok("the overflow lists every OUTBOUND pipeline action + Publish to Viewer", /var items = outbound\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
+  ok("renderToolbarPipeline renders into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)/.test(SHELL) && !/getElementById\("pipeline-actions"\)/.test(e));
+  ok("the overflow lists every OUTBOUND pipeline action + Publish to Viewer", /var items = outbound\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(SHELL));
   ok("#pipeline-actions is gone from the rail (relocated to the Publish stage)", !/id="pipeline-actions"/.test(src("index.html")) && !/left-rail__pipeline/.test(src("index.html")));
   ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,600}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
@@ -10251,11 +10254,13 @@ section("ui-kit #10 DS control set");
 // ---- product-rail-left-rail-and-topbar-3-stage: rail segment switch + product context ----
 section("Product Rail: 3-stage rail + product dropdown");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var DOCS = src("src/editor/documents.js");   // arch-P3b-07doc
   // arch-P3b-07k: the course browser moved to src/editor/home.js.
   var ehm = src("src/editor/home.js");
   var e = src("src/editor.js");
-  var m = e.match(/\/\* @stage-rail-start \*\/([\s\S]*?)\/\* @stage-rail-end \*\//);
+  // arch-P3b-07shell: the fence moved to editor/shell.js with the stage model it fences.
+  var m = SHELL.match(/\/\* @stage-rail-start \*\/([\s\S]*?)\/\* @stage-rail-end \*\//);
   if (!m) { ok("locate @stage-rail fence", false); return; }
   var g = new Function(m[1] + "\nreturn { isValidStage: isValidStage, stageWorkspaceClass: stageWorkspaceClass, productSelectOptions: productSelectOptions };")();
 
@@ -10293,7 +10298,7 @@ section("Product Rail: 3-stage rail + product dropdown");
     var dropped = stale.rail.restoreActiveProduct() === "" && stale.storage["verso.activeProduct"] === undefined;
     return kept && dropped;
   })());
-  ok("mountProductPicker restores the persisted scope on first mount (boot)", /function mountProductPicker\(\)[\s\S]{0,120}restoreActiveProduct\(\);/.test(e));
+  ok("mountProductPicker restores the persisted scope on first mount (boot)", /function mountProductPicker\(\)[\s\S]{0,120}restoreActiveProduct\(\);/.test(SHELL));
 
   // index.html wiring: exactly 3 rail segments (Source/Edit/Publish free-form, no
   // gating), Edit active by default (preserves today's boot-straight-into-canvas
@@ -10310,11 +10315,11 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(src("editor.css")));
   ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
   // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
-  ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(e) && /function mountProductPicker/.test(e));
-  ok("newProductPrompt creates a Product then selects it (create + setActiveProduct + rebuild)", /function newProductPrompt\(\)[\s\S]{0,260}createProduct\(name\);[\s\S]{0,120}setActiveProduct\(prod\.id\);[\s\S]{0,80}mountProductPicker\(\);/.test(e));
+  ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(SHELL) && /function mountProductPicker/.test(SHELL));
+  ok("newProductPrompt creates a Product then selects it (create + setActiveProduct + rebuild)", /function newProductPrompt\(\)[\s\S]{0,260}createProduct\(name\);[\s\S]{0,120}setActiveProduct\(prod\.id\);[\s\S]{0,80}mountProductPicker\(\);/.test(SHELL));
   // new-product-empty-landing: '+ New Product' lands on the Edit-stage document browser (empty for a
   // Product with zero docs, since renderBrowserGrid filters by the active product scope).
-  ok("newProductPrompt lands on the Edit-stage document browser (setStage edit + openBrowser)", /function newProductPrompt\(\)[\s\S]{0,900}setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(e));
+  ok("newProductPrompt lands on the Edit-stage document browser (setStage edit + openBrowser)", /function newProductPrompt\(\)[\s\S]{0,900}setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(SHELL));
   ok("the browser header carries a 'New Product' action wired to newProductPrompt", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,120}newProductPrompt\(\);/.test(ehm));
   ok("the document browser is scoped to the active product (empty state for a zero-doc Product)", /function renderBrowserGrid\(\)[\s\S]{0,400}getActiveProduct\(\)[\s\S]{0,300}docMatchesProductStage\(registry\[id\], scope, null\)/.test(ehm));
   ok("a document created from the browser pre-stamps the active Product (createBlankDoc gets its id)", /var newDocProduct = \(typeof getActiveProduct === "function"\) \? getActiveProduct\(\) : "";/.test(DOCS) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(DOCS));
@@ -10323,13 +10328,13 @@ section("Product Rail: 3-stage rail + product dropdown");
 
   // setStage()/mountLeftRail() wiring: source-string checks (mirrors the ui-kit-#10
   // "drop-in wiring" style above) since these functions are DOM-bound, not pure.
-  ok("setStage() gates on isValidStage before touching the DOM", /function setStage\(stage\) \{\s*if \(!isValidStage\(stage\)\) return;/.test(e));
-  ok("setStage() toggles is-active across all 3 rail-tab buttons", /STAGE_IDS\.forEach\(function \(s\) \{\s*var btn = document\.getElementById\("rail-tab-" \+ s\);/.test(e));
-  ok("setStage() shows/hides both placeholder regions", /document\.getElementById\("stage-source"\); if \(srcEl\) srcEl\.hidden = stage !== "source";/.test(e) && /document\.getElementById\("stage-publish"\); if \(pubEl\) pubEl\.hidden = stage !== "publish";/.test(e));
-  ok("mountLeftRail() reconciles to __activeStage on mount (single source of truth)", /setStage\(__activeStage\);/.test(e));
-  ok("mountProductPicker() builds a VersoUI.Select from ProductsStore", /U\.Select\(\{\s*options: productSelectOptions\(window\.ProductsStore\)/.test(e));
+  ok("setStage() gates on isValidStage before touching the DOM", /function setStage\(stage\) \{\s*if \(!isValidStage\(stage\)\) return;/.test(SHELL));
+  ok("setStage() toggles is-active across all 3 rail-tab buttons", /STAGE_IDS\.forEach\(function \(s\) \{\s*var btn = document\.getElementById\("rail-tab-" \+ s\);/.test(SHELL));
+  ok("setStage() shows/hides both placeholder regions", /document\.getElementById\("stage-source"\); if \(srcEl\) srcEl\.hidden = stage !== "source";/.test(SHELL) && /document\.getElementById\("stage-publish"\); if \(pubEl\) pubEl\.hidden = stage !== "publish";/.test(SHELL));
+  ok("mountLeftRail() reconciles to __activeStage on mount (single source of truth)", /setStage\(__activeStage\);/.test(SHELL));
+  ok("mountProductPicker() builds a VersoUI.Select from ProductsStore", /U\.Select\(\{\s*options: productSelectOptions\(window\.ProductsStore\)/.test(SHELL));
   ok("boot mounts the product picker alongside the left rail", /mountLeftRail\(\);[\s\S]{0,160}mountProductPicker\(\);/.test(e));
-  ok("__productRail exposes the shared product-context getter/setter (read by every stage)", /window\.__productRail\.getActiveProduct = getActiveProduct;/.test(e) && /window\.__productRail\.setActiveProduct = setActiveProduct;/.test(e));
+  ok("__productRail exposes the shared product-context getter/setter (read by every stage)", /window\.__productRail\.getActiveProduct = getActiveProduct;/.test(SHELL) && /window\.__productRail\.setActiveProduct = setActiveProduct;/.test(SHELL));
 
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
   var renderJs = src("src/render.js");
@@ -10341,6 +10346,7 @@ section("Product Rail: 3-stage rail + product dropdown");
 // ---- product-rail-source-stage-nav-article: Source stage left-nav + flowing article ----
 section("Product Rail: Source stage nav + article");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
@@ -10427,8 +10433,8 @@ section("Product Rail: Source stage nav + article");
 
   // Wiring: setStage("source") triggers a render; the topic list re-renders on both
   // search input and the shared product-context change (Epic 1's dropdown).
-  ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
-  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(e));
+  ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(SHELL));
+  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(SHELL));
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(es));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("div", "vbrowser__search source-stage__search-field"\)/.test(es));
   // (facet SegmentedControl + per-section MarkdownLite column rendering retired with the section-cells path)
@@ -10446,6 +10452,7 @@ section("Product Rail: Source stage nav + article");
 // loop mount on top and are browser-verified. This section guards the pure store + the wiring.
 section("Product Rail: Publish queue store (T1)");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var PQ = require(path.join(ROOT, "src/publish-queue.js"));
   var q = PQ.create();
   ok("create() is an empty queue", q.rows.length === 0 && q._seq === 0);
@@ -10479,7 +10486,7 @@ section("Product Rail: Publish queue store (T1)");
 
   // Editor wiring (grep guards -- the DOM behaviour is browser-verified)
   var e = src("src/editor.js");
-  ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(e));
+  ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(SHELL));
   // arch-P3-03: the queue store and the run are exercised for real (src/editor/publish.js).
   ok("the queue persists through the durable key/value seam, under its own key", (function () {
     var H = publishHarness();
@@ -10948,6 +10955,7 @@ section("Product Rail: Source stage variant columns");
 // console-free path this whole ticket exists for ----
 section("Product Rail: New Topic / Import from Markdown UI");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
@@ -10960,7 +10968,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
   ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,900}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
-  ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
+  ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(SHELL) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(SHELL));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(es) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(es));
   // uio-P-C05: the Import button now opens the whole inbound menu (Markdown + the registered
   // import pipelines that used to sit on the Publish pane); Markdown is still its first entry.
@@ -11668,6 +11676,7 @@ section("line diff (LineDiff)");
 // opens the settings modal's Project tab.
 section("edit-header-ia-v2: single-bar three-zone editor header");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
   var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
@@ -11687,7 +11696,7 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   // LIGHT/DARK now lives in the Preview chevron menu (size presets + palette, divider between).
   ok("Preview chevron menu adds a Palette section with light/dark -> setMode", /head: "Palette"[\s\S]{0,220}setMode\("light"\)[\s\S]{0,120}setMode\("dark"\)/.test(e) && /function openPreviewBpMenu/.test(e));
   // DOC-SETTINGS button opens the settings modal on the Project tab + wired at boot.
-  ok("mountDocSettingsBtn opens the settings modal on the Project tab", /function mountDocSettingsBtn\(\)[\s\S]{0,240}openSettingsModal\("project"\)/.test(e));
+  ok("mountDocSettingsBtn opens the settings modal on the Project tab", /function mountDocSettingsBtn\(\)[\s\S]{0,240}openSettingsModal\("project"\)/.test(SHELL));
   ok("mountDocSettingsBtn is wired at boot", /mountDocSettingsBtn\(\); \/\/ edit-header-ia-v2/.test(e));
   // CSS: single-row bar + zones + face-up axis button + hairline sep.
   ok("editor.css shows the doc zones only in Edit (.toolbar--edit)", /\.editor-window__zone \{/.test(css) && /\.toolbar\.toolbar--edit \.editor-window__zone \{ display: flex; \}/.test(css));
@@ -11695,7 +11704,7 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
   ok("editor.css defines the low-contrast hairline sep (border-subtle)", /\.editor-window__sep \{[^}]*background: var\(--border-subtle\)/.test(css));
   // TAB OVERFLOW (feedback): a long tab list scrolls INSIDE the tabs zone; the doc + output zones
   // stay put. The bar never scrolls; the tabs zone shrinks (min-width:0) + its strip scrolls.
-  ok("setStage toggles toolbar--edit so doc zones show in Edit only", /classList\.toggle\("toolbar--edit", stage === "edit"\)/.test(e) && /\.toolbar \{[\s\S]{0,200}var\(--toolbar-height/.test(css));
+  ok("setStage toggles toolbar--edit so doc zones show in Edit only", /classList\.toggle\("toolbar--edit", stage === "edit"\)/.test(SHELL) && /\.toolbar \{[\s\S]{0,200}var\(--toolbar-height/.test(css));
   ok("the tabs zone shrinks + its strip scrolls internally", /\.editor-window__zone--tabs \{[^}]*min-width: 0/.test(css) && /\.editor-window__zone--tabs \.toolbar-tabs \{[^}]*min-width: 0; overflow-x: auto/.test(css));
   ok("doc + output zones are fixed-size (never pushed by tabs)", /\.editor-window__zone--doc, \.editor-window__zone--output \{ flex: 0 0 auto; \}/.test(css));
 })();
@@ -11824,6 +11833,7 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
 // lists the unavailable formats once with a "soon" state.
 section("uio-P-C05: format control on Publish, import on Source");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
@@ -11861,27 +11871,27 @@ section("uio-P-C05: format control on Publish, import on Source");
   ok("unavailable formats carry a plain 'Soon' state, not a renamed label", rowsF[1].hint === "Soon" && rowsF[1].label === "SCORM 2004" && rowsF[1].available === false);
   ok("the exporter's own list stopped gluing '(soon)' into the names", /\{ value: "scorm2004", label: "SCORM 2004", enabled: false \}/.test(x) && !/label: "[^"]*\(soon\)"/.test(x));
   ok("the export modal still says 'soon' where it renders the option", /f\.label \+ \(f\.enabled \? "" : " \(soon\)"\)/.test(x));
-  ok("the format list is published once, for every surface to read", /function formats\(\)/.test(x) && /formats: formats,/.test(x) && /SX\.formats\(\)/.test(e));
+  ok("the format list is published once, for every surface to read", /function formats\(\)/.test(x) && /formats: formats,/.test(x) && /SX\.formats\(\)/.test(SHELL));
 
   // --- the stated format is READ from the presets; it is never a second setting ---
   ok("an empty queue states the default format", g.publishFormatSummary(fmts, [], "scorm12").label === "SCORM 1.2");
   ok("rows that agree state that one format", g.publishFormatSummary(fmts, ["scorm12", "scorm12"], "scorm12").label === "SCORM 1.2");
   ok("rows whose presets disagree read Mixed, rather than picking a winner", g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").mixed === true && g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").label === "Mixed");
   ok("an unknown format id still states something, not a blank", g.publishFormatSummary(fmts, ["mystery"], "scorm12").label === "mystery");
-  ok("the summary is derived from each row's resolved preset options", /var values = rows\.map\(function \(r\) \{ return publishOptionsForRow\(r\)\.format \|\| base; \}\);/.test(e));
-  ok("the Publish pane sets no format of its own (the menu only states where it is set)", /items\.push\(\{ head: "Set by the output preset on each queued document\." \}\);/.test(e) && !/opts\.format =/.test(e));
+  ok("the summary is derived from each row's resolved preset options", /var values = rows\.map\(function \(r\) \{ return publishOptionsForRow\(r\)\.format \|\| base; \}\);/.test(SHELL));
+  ok("the Publish pane sets no format of its own (the menu only states where it is set)", /items\.push\(\{ head: "Set by the output preset on each queued document\." \}\);/.test(SHELL) && !/opts\.format =/.test(e));
 
   // --- the pane's control ---
-  ok("#publish-io holds a Format control stating the selected format", /var fmtLabel = "Format: " \+ summary\.label;/.test(e) && /label: fmtLabel, title: fmtTitle, onClick: function \(\) \{ openPublishFormatMenu\(btn\); \}/.test(e));
+  ok("#publish-io holds a Format control stating the selected format", /var fmtLabel = "Format: " \+ summary\.label;/.test(SHELL) && /label: fmtLabel, title: fmtTitle, onClick: function \(\) \{ openPublishFormatMenu\(btn\); \}/.test(SHELL));
   ok("the 'Import & export' button is gone from the Publish pane", !/label: "Import & export"/.test(e));
-  ok("the outbound leftovers keep a home in a quiet overflow, not the named control", /var outbound = pipelineByDirection\(pipelineButtons, "export"\);/.test(e) && /label: "Other export actions"/.test(e));
+  ok("the outbound leftovers keep a home in a quiet overflow, not the named control", /var outbound = pipelineByDirection\(pipelineButtons, "export"\);/.test(SHELL) && /label: "Other export actions"/.test(SHELL));
   ok("the head lays the Format control out beside its overflow", /\.publish-io \{ display: inline-flex; align-items: center; gap: 4px; \}/.test(css));
 
   // --- import now lives on Source, routed to the SAME handlers (no second importer) ---
   ok("the Source rail's one Import button opens the inbound menu", /label: "Import…", onClick: function \(ev\)[\s\S]{0,220}openSourceImportMenu\(r\.left, r\.bottom \+ 4\)/.test(es));
   ok("the menu leads with Markdown, then every registered import", /function openSourceImportMenu\(x, y\) \{[\s\S]{0,120}label: "Markdown…", onClick: importMarkdownModal[\s\S]{0,220}pipelineByDirection\(pipelineButtons, "import"\)/.test(es));
   ok("it reuses each registered handler rather than rebuilding an importer", /items\.push\(\{ label: importMenuLabel\(b\.label\), onClick: b\.onClick \}\)/.test(es));
-  ok("an import registered after boot still reaches the Source menu", /if \(__activeStage === "source"\) renderSourceToolbar\(\);/.test(e));
+  ok("an import registered after boot still reaches the Source menu", /if \(activeStage\(\) === "source"\) renderSourceToolbar\(\);/.test(e) && /function activeStage\(\) \{ return __activeStage; \}/.test(src("src/editor/shell.js")));
 
   // --- the menu primitive grew the states this needs, per the DS contract ---
   ok("showContextMenu supports disabled + a trailing hint", /\(it\.disabled \? " ctx-item--disabled" : ""\)/.test(ecm) && /if \(it\.hint\) el\.appendChild\(h\("span", "ctx-item__hint", it\.hint\)\);/.test(ecm));
@@ -15967,6 +15977,7 @@ section("Source import: robust markdown -> rich nodes (tables, comments, inline)
 // ---- Source/Editor feedback batch: UI regression guards ---------------------------------------
 section("Source/Editor feedback batch (UI wiring guards)");
 (function () {
+  var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
@@ -15991,7 +16002,7 @@ section("Source/Editor feedback batch (UI wiring guards)");
     return wired && notPersisted && restoredToSaved;
   })());
   // Editor: entering Edit reframes the canvas once it is actually visible.
-  ok("entering Edit frames the canvas the first time it is visible", /stage === "edit" && !__framedWhileVisible[\s\S]{0,500}view\.ready = false; fitAll\(\); __framedWhileVisible = true/.test(e));
+  ok("entering Edit frames the canvas the first time it is visible", /stage === "edit" && !__framedWhileVisible[\s\S]{0,500}view\.ready = false; fitAll\(\); __framedWhileVisible = true/.test(SHELL));
   // Editor: a source-linked image counts as having an image (full inspector shows).
   ok("a source-linked image gets the full image inspector", /var hasImage = !!\(block\.src \|\| block\.srcLight \|\| block\.srcDark \|\| \(block\.sourceLink && block\.sourceLink\.markId\)\)/.test(e));
 })();
