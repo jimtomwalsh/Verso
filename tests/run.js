@@ -21,6 +21,11 @@ var cp = require("child_process");
 
 var ROOT = path.join(__dirname, "..");
 function src(rel) { return fs.readFileSync(path.join(ROOT, rel), "utf8"); }
+// arch-P2: the behavioural test seam. LOAD.load(rel, opts) runs one of the app's classic scripts
+// in a node:vm context with a stub window/document and returns what it published -- for the files
+// a plain `require` cannot reach (DOM at load, or an activation gate that must be seeded first).
+// See tests/_load.js. Prefer `require` where the file's dual-mode footer already works.
+var LOAD = require(path.join(__dirname, "_load.js"));
 
 var total = 0, failed = 0, warnings = 0;
 // Async assertions (awaited bridge/backup paths) register their promise here; the
@@ -1750,9 +1755,11 @@ section("#8 docs auto-maintenance");
 // clock and a seeded RNG so timestamp-/random-suffixed ids reproduce across runs.
 section("#26 docs capture mode");
 (function () {
-  var srcTxt = src("src/capture-mode.js");
   var realRandom = Math.random;
-  function runCapture(win, loc) {
+  // arch-P2: capture-mode is ACTIVATION-GATED -- it returns early unless the flag is already on
+  // window when it loads. A plain `require` cannot seed that, so this runs it through the tier-2
+  // loader with the flag (and an observable document) planted first. Behaviour, not source text.
+  function runCapture(seed, loc) {
     var htmlAttrs = {}, injected = [];
     var fakeDoc = {
       readyState: "complete",
@@ -1763,15 +1770,15 @@ section("#26 docs capture mode");
       querySelectorAll: function () { return []; },
       addEventListener: function () {}
     };
-    var fakePerf = { now: function () { return 0; } };
-    var fn = new Function("window", "document", "location", "performance", "URLSearchParams", srcTxt);
-    fn(win, fakeDoc, loc, fakePerf, URLSearchParams);
+    var seeded = { document: fakeDoc, location: loc, performance: { now: function () { return 0; } }, URLSearchParams: URLSearchParams };
+    Object.keys(seed).forEach(function (k) { seeded[k] = seed[k]; });
+    var win = LOAD.load("src/capture-mode.js", { window: seeded });
     var randomSeq = [], nowSeq = [];
     for (var i = 0; i < 5; i++) randomSeq.push(Math.random());
     for (var j = 0; j < 5; j++) nowSeq.push(win.Date ? win.Date.now() : NaN);
     return { htmlAttrs: htmlAttrs, injected: injected, CaptureMode: win.CaptureMode, randomSeq: randomSeq, nowSeq: nowSeq, capDate: win.Date };
   }
-  // ON via window.__captureMode
+  // ON via the capture flag
   var r1 = runCapture({ __captureMode: true }, { search: "" });
   var r2 = runCapture({ __captureMode: true }, { search: "" });
   ok("#26 sets data-capture=on", r1.htmlAttrs["data-capture"] === "on");
@@ -1930,8 +1937,11 @@ section("#29 annotation overlay");
     querySelector: function () { return null; }, querySelectorAll: function () { return []; },
     addEventListener: function () {}
   };
-  var win = { __captureMode: true };
-  new Function("window", "document", "location", "performance", "URLSearchParams", srcTxt)(win, fakeDoc, { search: "" }, { now: function () { return 0; } }, URLSearchParams);
+  // arch-P2: run the real file through the tier-2 loader with the capture gate opened and an
+  // observable document planted, then assert on the interface it publishes.
+  var win = LOAD.load("src/capture-mode.js", {
+    window: { __captureMode: true, document: fakeDoc, location: { search: "" }, performance: { now: function () { return 0; } }, URLSearchParams: URLSearchParams }
+  });
   Math.random = realRandom;
   var CM = win.CaptureMode;
   ok("#29 CaptureMode exposes annotate + clearAnnotations", CM && typeof CM.annotate === "function" && typeof CM.clearAnnotations === "function");
@@ -2348,8 +2358,8 @@ section("product-rail ProductsStore");
 section("#67 .verso format");
 (function () {
   var t = src("src/verso-format.js");
-  var win = {};
-  new Function("window", t)(win);
+  // arch-P2: load the real file through the tier-2 loader and read its published interface.
+  var win = LOAD.load("src/verso-format.js");
   var VF = win.VersoFormat;
   if (!VF || !VF.buildPackage || !VF.readPackage) { ok("VersoFormat loaded", false); return; }
   ok("VersoFormat loaded", true);
@@ -2387,8 +2397,8 @@ section("#67 .verso format");
 section("#69 migration cutover");
 (function () {
   var t = src("src/migration.js");
-  var win = {};
-  new Function("window", t)(win);
+  // arch-P2: load the real file through the tier-2 loader and read its published interface.
+  var win = LOAD.load("src/migration.js");
   var M = win.Migration;
   if (!M || !M.run || !M.verifyRegistries) { ok("Migration loaded", false); return; }
   ok("Migration loaded", true);
@@ -2635,7 +2645,7 @@ section("#69 migration cutover");
   (function () {
     // No bridge -> the adapter is never installed (browser backend only).
     var w1 = {};
-    new Function("window", src("src/store-native.js"))(w1);
+    w1 = LOAD.load("src/store-native.js", { window: w1 });
     ok("store-native inert without bridge (no __storageAdapter)", !w1.__storageAdapter);
     // With a fake bridge -> a 'file' adapter that posts storePutRegistry + confirms.
     var posted = [];
@@ -2644,7 +2654,7 @@ section("#69 migration cutover");
       __versoDiskRegistryB64: null,
       TextDecoder: TextDecoder, TextEncoder: TextEncoder, atob: function (b) { return Buffer.from(b, "base64").toString("binary"); }, btoa: function (s) { return Buffer.from(s, "binary").toString("base64"); }
     };
-    new Function("window", src("src/store-native.js"))(w2);
+    w2 = LOAD.load("src/store-native.js", { window: w2 });
     ok("store-native installs a 'file' adapter with a bridge", !!w2.__storageAdapter && w2.__storageAdapter.name === "file");
     // REGRESSION (real load order): editor.js installs its OWN __versoBackupReply AFTER
     // store-native. It MUST chain, not clobber, or every native-store reply is lost and the
@@ -2671,7 +2681,7 @@ section("#69 migration cutover");
       __versoBackupReply: function (id, o) { w3.__seen = id; },
       TextDecoder: TextDecoder, TextEncoder: TextEncoder, atob: w2.atob, btoa: w2.btoa
     };
-    new Function("window", src("src/store-native.js"))(w3);
+    w3 = LOAD.load("src/store-native.js", { window: w3 });
     w3.__versoBackupReply("someOtherOp:1", { ok: true });
     ok("store-native chains a prior __versoBackupReply owner", w3.__seen === "someOtherOp:1");
 
@@ -2755,7 +2765,7 @@ section("#19 stable-id master snapshot");
   // 5. .verso EXPORT/IMPORT STABILITY: a doc-local composed component's nested ids
   // survive VersoFormat.buildPackage/readPackage untouched (no id processing there).
   var vfWin = {};
-  new Function("window", src("src/verso-format.js"))(vfWin);
+  vfWin = LOAD.load("src/verso-format.js", { window: vfWin });
   var VF = vfWin.VersoFormat;
   if (!VF) { ok("VersoFormat loaded for #19 round-trip", false); }
   else {
@@ -3494,7 +3504,7 @@ section("CCC safe-import");
 section("BBB round-trip + clone");
 (function () {
   var win = {};
-  new Function("window", src("src/model.js"))(win);
+  win = LOAD.load("src/model.js", { window: win });
   var doc = win.SAMPLE_DOC;
   var clone = new Function("o", "return JSON.parse(JSON.stringify(o));");
   // remintIds (editor.js) with a deterministic unique mintId
@@ -3565,7 +3575,7 @@ section("AAA doc-migration");
   // #124: normalizeDoc now seeds doc.theme via window.makeDocTheme/defaultDocTheme/
   // normalizeDocTheme (theme.js). Eval the real theme.js against the stub so the harness
   // exercises the real per-doc theme migration wiring, not a fake.
-  new Function("window", src("src/theme.js")).call(null, winStub);
+  winStub = LOAD.load("src/theme.js", { window: winStub });
   var migrate = new Function("window", body + "\nreturn normalizeDoc;").call(null, winStub);
   var d1 = migrate({ chrome: { header: { on: true } }, pages: [{ id: "p1" }, { id: "p2" }] });
   ok("v0 chrome -> headerFooter", d1.headerFooter && d1.headerFooter.header && d1.headerFooter.header.on === true);
@@ -3735,7 +3745,7 @@ section("#124 doc.theme (per-course theme)");
 (function () {
   // Real theme.js against a bare stub — exercises the actual helpers, not fakes.
   var tw = {};
-  new Function("window", src("src/theme.js")).call(null, tw);
+  tw = LOAD.load("src/theme.js", { window: tw });
   ok("THEME_SCHEMA_VERSION exposed", tw.THEME_SCHEMA_VERSION === 1);
 
   // normalizeDocTheme: backfills every group + stamps the schema version, idempotently.
@@ -3786,7 +3796,7 @@ section("#124 doc.theme (per-course theme)");
   var win = {};
   new Function("window", rtxt.slice(rtxt.indexOf("window.migrateToChapters ="), rtxt.indexOf("// ---- Asset-reference resolution"))).call(null, win);
   new Function("window", rtxt.slice(rtxt.indexOf("window.resortColumnMajor ="), rtxt.indexOf("window.chapterInsertIndex ="))).call(null, win);
-  new Function("window", src("src/theme.js")).call(null, win);
+  win = LOAD.load("src/theme.js", { window: win });
   var normalize = new Function("window", body + "\nreturn normalizeDoc;").call(null, win);
   var docA = normalize({ pages: [], chapters: [{ id: "c", name: "X", order: 0 }] });
   var docB = normalize({ pages: [], chapters: [{ id: "c", name: "X", order: 0 }] });
@@ -3813,7 +3823,7 @@ section("#125 full-token theme editing");
     rw.FONT_LIST.every(function (n) { return nameFrom(stackFor(n)) === n; }));
   // the SEEDED theme defaults (theme.js BASE.font) resolve to a real family, not "".
   var tw = {};
-  new Function("window", src("src/theme.js")).call(null, tw);
+  tw = LOAD.load("src/theme.js", { window: tw });
   var baseFont = tw.defaultDocTheme().font;
   ok("seeded default heading stack resolves to Exo 2", nameFrom(baseFont.heading) === "Exo 2");
   ok("seeded default body stack resolves to System", nameFrom(baseFont.body) === "System");
@@ -3848,7 +3858,7 @@ section("#125 full-token theme editing");
 section("#126 theme presets (copy-on-apply)");
 (function () {
   var tw = {};
-  new Function("window", src("src/theme.js")).call(null, tw);
+  tw = LOAD.load("src/theme.js", { window: tw });
   // Extract the two PURE preset helpers from editor.js and exercise them for real.
   var t = src("src/editor.js");
   var slice = t.slice(t.indexOf("function mergeTextStyles"), t.indexOf("function snapshotThemePreset"));
@@ -3943,7 +3953,7 @@ section("#128 doc.theme contract (ADR 0002)");
   var m = adr.match(/<!--\s*SCHEMA_VERSION:\s*(\d+)\s*-->/);
   ok("ADR carries a machine-readable SCHEMA_VERSION marker", !!m);
   var tw = {};
-  new Function("window", src("src/theme.js")).call(null, tw);
+  tw = LOAD.load("src/theme.js", { window: tw });
   ok("ADR SCHEMA_VERSION matches window.THEME_SCHEMA_VERSION (no drift)", !!m && Number(m[1]) === tw.THEME_SCHEMA_VERSION);
   // Completeness: every group + resolution hook the implemented shape uses is named.
   ["schemaVersion", "color", "font", "space", "radius", "size", "button", "textStyles",
@@ -7445,7 +7455,7 @@ section("block valign controls");
 section("CSVBind (M8)");
 (function () {
   var win = { Editor: { registerPipelineButton: function () {} } };
-  new Function("window", src("src/csv.js"))(win);
+  win = LOAD.load("src/csv.js", { window: win });
   var CB = win.CSVBind;
   var slots = [{ key: "number", label: "Number" }, { key: "title", label: "Title" }, { key: "objective", label: "Objective" }];
   // parseCSV
@@ -7537,7 +7547,7 @@ section("schema round-trip");
   ok("comma/quote/newline in values survive CSV", rt.pages[0].blocks[0].text === 'He said "hi"\nline2' && rt.pages[0].name === "One, Two");
   ok("nested columns/children rebuilt", rt.pages[0].blocks[1].columns[1][0].children[0].text === "b");
   // the real course
-  var w = {}; new Function("window", src("src/model.js"))(w);
+  var w = LOAD.load("src/model.js");
   ok("SAMPLE_DOC round-trips lossless", JSON.stringify(roundtrip(w.SAMPLE_DOC)) === JSON.stringify(w.SAMPLE_DOC));
 })();
 
@@ -14706,6 +14716,169 @@ section("arch-P1 render-context");
   // Load order: the builder must exist before either caller runs.
   var iRc = html.indexOf("src/render-context.js"), iEd = html.indexOf("src/editor.js"), iEx = html.indexOf("src/export.js");
   ok("index.html loads the render context before both callers", iRc > -1 && iRc < iEd && iRc < iEx);
+})();
+
+// ---- arch-P2: the behavioural test seam -----------------------------------
+// This suite used to reconstitute pure cores by reading source text and handing it to
+// `new Function`, on the stated premise that "the app is one classic-script IIFE per file, so
+// there is nothing to import". The repo already disproved that -- a dozen files carried a
+// dual-mode footer and were required directly. The split tracked who had added a footer, not
+// what was testable, and it made the harness the thing forbidding a restructure: you could not
+// move a line without the tests noticing the wrong thing.
+//
+// Two tiers now. TIER 1: a file publishes onto `window`, which in node binds to a local
+// stand-in, and the footer hands that namespace to module.exports -- a plain `require` returns
+// the real interface. TIER 2 (tests/_load.js): a node:vm context with a stub window/document,
+// for files that touch the DOM as they load or are activation-gated and must be seeded first.
+// TIER 3 (string-slicing) is retained only for what is genuinely textual: CSS regions,
+// index.html load order, "this file must never mention that".
+section("arch-P2 test seam");
+(function () {
+  // ---- tier 1: every dual-mode file returns its real interface from a plain require ----
+  var TIER1 = {
+    "src/model.js": ["SAMPLE_DOC"],
+    "src/theme.js": ["THEMES", "THEME", "TEXT_STYLES", "TEXT_ROLES", "applyTheme", "normalizeDocTheme", "makeDocTheme", "defaultDocTheme"],
+    "src/schema.js": ["__schemaCsv"],
+    "src/csv.js": ["CSVBind"],
+    "src/verso-format.js": ["VersoFormat"],
+    "src/migration.js": ["Migration"],
+    "src/persist.js": ["AssetStore", "__validateImportedDoc", "storageAdvisory"],
+    "src/quiz-runtime.js": ["QuizRuntime"],
+    "src/sync-client.js": ["VersoSync"],
+    "src/spellcheck.js": ["VersoSpell"],
+    "src/render-context.js": ["DOC_HOOKS", "build", "apply"],
+    "src/source-doc.js": ["fromJSON", "toJSON"],
+    "src/publish-queue.js": [], "src/publish-presets.js": [], "src/publish-paths.js": [],
+    "src/release-history.js": [], "src/line-diff.js": [], "src/markdown-lite.js": [],
+    "src/markdown-import.js": [], "src/icons.js": [], "src/ui-kit.js": [], "src/source-marks.js": []
+  };
+  Object.keys(TIER1).forEach(function (f) {
+    var mod = null, err = null;
+    try { mod = require(path.join(ROOT, f)); } catch (e) { err = (e && e.message) || String(e); }
+    ok("require " + f + (err ? " -- " + err : ""), !!mod);
+    if (!mod) return;
+    var missing = TIER1[f].filter(function (k) { return mod[k] === undefined; });
+    ok(f + " exposes its interface" + (missing.length ? " -- MISSING: " + missing.join(", ") : ""), missing.length === 0);
+  });
+
+  // ---- tier 2: the vm loader reaches what require cannot ----
+  // Files that touch the DOM as they load, and files that are ACTIVATION-GATED -- they return
+  // early unless something is already on window, which a require can never seed in time.
+  var TIER2 = [
+    { file: "src/render.js", expect: ["renderPage", "render", "chaptersToNavSections", "groupPagesByChapter"] },
+    { file: "src/runtime.js", expect: ["CourseRuntime"] },
+    { file: "src/components.js", expect: ["COMPONENTS"] },
+    { file: "src/store-http.js", expect: ["__storageAdapter", "__versoHttpApi"], seed: { __versoServerUrl: "http://127.0.0.1:9999" } },
+    { file: "src/store-native.js", expect: ["__nativeStore", "__storageAdapter"], seed: { webkit: { messageHandlers: { versoBackup: { postMessage: function () {} } } } } },
+    { file: "src/capture-mode.js", expect: ["CaptureMode"], seed: { __captureMode: true } }
+  ];
+  TIER2.forEach(function (t) {
+    var r = LOAD.tryLoad(t.file, { window: t.seed || {} });
+    ok("load " + t.file + (r.error ? " -- " + r.error : ""), !!r.win);
+    if (!r.win) return;
+    var missing = t.expect.filter(function (k) { return r.win[k] === undefined; });
+    ok(t.file + " publishes its interface" + (missing.length ? " -- MISSING: " + missing.join(", ") : ""), missing.length === 0);
+  });
+
+  // A seeded gate must genuinely be the thing that opens it -- otherwise the tier-2 tests above
+  // would pass against a file that ignores its own activation flag.
+  ok("an activation-gated file stays inert when its gate is not seeded",
+    LOAD.load("src/store-http.js").__versoHttpApi === undefined &&
+    LOAD.load("src/capture-mode.js").CaptureMode === undefined);
+
+  // ---- the payoff: behaviour that source-text assertions could not reach ----
+  // components.js had NO test coverage at all. It is 63 lines defining the master/instance
+  // contract the whole editor is built on, and it was never once executed by this suite.
+  var COMPONENTS = LOAD.load("src/components.js").COMPONENTS;
+  var card = COMPONENTS["chapter-card"];
+  ok("the component registry defines chapter-card with a name", !!card && card.name === "Chapter Card");
+  ok("its slots are declared in properties-panel order", card.slots.map(function (s) { return s.key; }).join(",") === "number,title,objective");
+  ok("the objective slot is the multiline one", card.slots.filter(function (s) { return s.multiline; }).map(function (s) { return s.key; }).join(",") === "objective");
+  ok("status is a style-swap variant defaulting to incomplete", card.variants.status.default === "incomplete" && card.variants.status.options.join(",") === "incomplete,complete");
+
+  // Render it for real, through a ctx shaped like the one render.js supplies.
+  function makeCtx(bound) {
+    return {
+      el: function (tag, cls, text) { var n = LOAD.makeNode(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; },
+      slot: function (tag, cls, instance, key) {
+        var n = LOAD.makeNode(tag); n.className = cls; n.textContent = (instance.slots && instance.slots[key]) || "";
+        bound.push(key); return n;
+      }
+    };
+  }
+  var bound = [];
+  var out = card.render.call(card, { slots: { number: "01", title: "Getting started", objective: "Know the basics" } }, makeCtx(bound));
+  ok("render binds every declared slot, in order", bound.join(",") === "number,title,objective");
+  ok("render emits the card with its four children (num, title, rule, objective)", out.childNodes.length === 4 && out.className === "chapter-card");
+  ok("slot values reach the DOM", out.childNodes[1].textContent === "Getting started" && out.childNodes[3].textContent === "Know the basics");
+  ok("an unset status renders the incomplete variant", out.classList.contains("is-incomplete") && !out.classList.contains("is-complete"));
+  var done = card.render.call(card, { status: "complete", slots: {} }, makeCtx([]));
+  ok("status=complete swaps the class, not the structure", done.classList.contains("is-complete") && done.childNodes.length === 4);
+  ok("the rule element carries no slot binding (it is structure, not content)", out.childNodes[2].className === "chapter-card__rule" && out.childNodes[2].textContent === "");
+
+  // theme.js: applyTheme flattens named tokens onto an element as CSS custom properties. Every
+  // component reads tokens rather than literals, so this is the mechanism the whole theme system
+  // rests on -- previously asserted only by matching its source text.
+  var THEME = require(path.join(ROOT, "src/theme.js"));
+  var el = LOAD.makeNode("div");
+  THEME.applyTheme(el, THEME.THEMES.dark);
+  ok("applyTheme writes colour tokens as custom properties", el.style.getPropertyValue("--color-bg") === THEME.THEMES.dark.color.bg);
+  ok("applyTheme writes the non-colour tokens too", !!el.style.getPropertyValue("--font-heading") && !!el.style.getPropertyValue("--radius-card"));
+  ok("light and dark differ in colour but share the base tokens",
+    THEME.THEMES.light.color.bg !== THEME.THEMES.dark.color.bg && THEME.THEMES.light.font.heading === THEME.THEMES.dark.font.heading);
+  ok("a fresh doc theme carries every token group plus its schema version", (function () {
+    var t = THEME.defaultDocTheme();
+    return !!t && t.schemaVersion === THEME.THEME_SCHEMA_VERSION &&
+      ["color", "font", "space", "radius", "size", "button", "textStyles", "blockStyles"].every(function (k) { return !!t[k]; });
+  })());
+  ok("a doc theme splits back into the two render modes", (function () {
+    var m = THEME.docThemeToModes(THEME.defaultDocTheme());
+    return !!m && !!m.light && !!m.dark && m.light.color.bg !== m.dark.color.bg;
+  })());
+
+  // ---- the load-time guards must never become false in the browser ----
+  // schema.js, csv.js and persist.js each register pipeline buttons as they load, which needs a
+  // live editor. Those calls are now guarded so the files can be loaded on their own. The guard
+  // is only safe because index.html loads editor.js FIRST -- reorder the tags and the app would
+  // silently lose Export Schema / Import CSV / Export JSON / Reset Workspace, and the autosave
+  // poll with them. This is the ratchet on that.
+  var html = src("index.html");
+  var iEditor = html.indexOf("src/editor.js");
+  ["src/schema.js", "src/csv.js", "src/persist.js"].forEach(function (f) {
+    var guarded = /if \(window\.Editor && window\.Editor\.registerPipelineButton\) \{/.test(src(f));
+    ok(f + " guards its pipeline registration on a live editor", guarded);
+    ok("index.html loads editor.js before " + f, iEditor > -1 && iEditor < html.indexOf(f));
+  });
+  ok("persist.js keeps the autosave poll inside that guard (a bare load must not start a timer)",
+    /if \(window\.Editor && window\.Editor\.registerPipelineButton\) \{[\s\S]{0,1400}setInterval\(autosave, AUTOSAVE_MS\)/.test(src("src/persist.js")));
+
+  // spellcheck.js: the pure core, executed rather than pattern-matched.
+  var SPELL = require(path.join(ROOT, "src/spellcheck.js")).VersoSpell;
+  ok("tokenize splits words and reports their offsets", (function () {
+    var toks = SPELL._core.tokenize("the quick brown");
+    return toks.length === 3 && toks[1].word === "quick" && toks[1].start === 4;
+  })());
+  ok("tokenize ignores digits and punctuation runs", SPELL._core.tokenize("a1 -- b").every(function (t) { return /^[A-Za-z']+$/.test(t.word); }));
+})();
+
+// ---- arch-P2-04: the slice ratchet ----------------------------------------
+// The suite reconstitutes source text with `new Function` 166 times and with its own
+// three-argument string-slice helper 17 times. Those numbers may fall; they may not rise. A new test
+// gets the interface, not the source -- and where genuinely textual assertions are still right
+// (CSS regions, load order, "this file must never mention that"), they do not use either
+// mechanism, so the budget is not in their way.
+section("arch-P2 slice ratchet");
+(function () {
+  var suite = src("tests/run.js");
+  // Built from strings so the ratchet's own patterns are not counted by the ratchet.
+  var FN_BUDGET = 166, SLICE_BUDGET = 17;
+  var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
+  var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
+  ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);
+  ok("string-slice reconstitutions do not rise (" + sliceCount + " of " + SLICE_BUDGET + ")", sliceCount <= SLICE_BUDGET);
+  if (fnCount < FN_BUDGET || sliceCount < SLICE_BUDGET) {
+    warn("the reconstitution budget has fallen to " + fnCount + "/" + sliceCount + " -- lower FN_BUDGET/SLICE_BUDGET in tests/run.js to lock the gain in");
+  }
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

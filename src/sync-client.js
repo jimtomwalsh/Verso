@@ -11,6 +11,16 @@
  * long-poll fallback) that is browser-verified. No dependencies; classic-script global.
  */
 (function () {
+  // arch-P2 (the test seam): in the browser this binds to the REAL window, so every
+  // `window.X = ...` below publishes globally exactly as it did before -- no behaviour change.
+  // Under `require` in node there is no window, so it binds to a local stand-in and the footer
+  // hands that same namespace to module.exports. The file's interface becomes the test surface,
+  // instead of the suite string-slicing its source text back into life.
+  // The node stand-in inherits its no-op listeners from a prototype, so `module.exports` carries
+  // this file's OWN published names and nothing else.
+  var window = (typeof globalThis !== "undefined" && globalThis.window)
+    || Object.create({ addEventListener: function () {}, removeEventListener: function () {} });
+
   "use strict";
 
   function serverUrl() { return (typeof window !== "undefined" && window.__versoServerUrl) || null; }
@@ -212,4 +222,9 @@
       helloMsg: helloMsg, changeMsg: changeMsg, lockMsg: lockMsg, heartbeatMsg: heartbeatMsg, commentMsg: commentMsg, handoffMsg: handoffMsg, notifyMsg: notifyMsg, cursorMsg: cursorMsg, resolveMsg: resolveMsg },
     _WsClient: WsClient, _LongPollClient: LongPollClient, _DurableBuffer: DurableBuffer
   };
+
+  // arch-P2 (the test seam): under `require`, the `window` above is this file's OWN namespace --
+  // exactly what it publishes and nothing else. In the browser `module` is undefined, so this
+  // line does nothing at all.
+  if (typeof module !== "undefined" && module.exports) module.exports = window;
 })();
