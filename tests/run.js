@@ -2988,7 +2988,8 @@ section("editor-rework capability inspector");
 // ---- SPEC 7: canvas geometry helpers (pure) ----
 section("editor-rework canvas geometry");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07world: the fence moved to editor/world.js with the loop it describes.
+  var t = src("src/editor/world.js");
   var m = t.match(/\/\* @pure-geo-canvas-start \*\/([\s\S]*?)\/\* @pure-geo-canvas-end \*\//);
   if (!m) { ok("locate @pure-geo-canvas fence", false); return; }
   var g = new Function(m[1] + "\nreturn { worldGeoClass: worldGeoClass, frameContentOverflows: frameContentOverflows };")();
@@ -5208,7 +5209,7 @@ section("P2 auto page-naming");
   renumber(solo, "s1");
   ok("renumberSplitFamily collapses a lone page back to the clean base", solo.pages[0].name === "Base");
   // wiring guards: display routes through the helper; rename writes page.title, not page.name
-  ok("frame-label uses pageDisplayName", /frame-label__name", pageDisplayName\(page, doc\)/.test(etxt));
+  ok("frame-label uses pageDisplayName", /frame-label__name", pageDisplayName\(page, E\.doc\)/.test(src("src/editor/world.js")));
   // uio-E-C07 (EDIT-12): the outliner row splits the derived number into its own column; the name
   // shows only the title part (frame-label on the canvas keeps the combined pageDisplayName).
   ok("outliner tree row has a number column + title-only name", /tree-page__num", pageNumberOf\(page, E\.doc\)/.test(src("src/editor/outliner.js")) && /tree-page__name"[\s\S]{0,140}pageTitlePart\(page\)/.test(src("src/editor/outliner.js")));
@@ -8655,13 +8656,16 @@ section("offscreen-frame culling (#150 slice B)");
   var e = src("src/editor.js");
   ok("FRAME_CULL is a content-visibility feature-detect switch",
     /var FRAME_CULL = \("contentVisibility" in/.test(e));
-  var lc = e.slice(e.indexOf("function layoutColumns()"), e.indexOf("function layoutColumns()") + 2600);
+  // arch-P3b-07world: layoutColumns moved to editor/world.js, where the world element and the
+  // measured frame list are read through E. The feature-detect above stayed: it is a boot probe.
+  var WORLD = src("src/editor/world.js");
+  var lc = WORLD.slice(WORLD.indexOf("function layoutColumns()"), WORLD.indexOf("function layoutColumns()") + 2600);
   ok("culling is applied AFTER the world height is set (heights already measured)",
-    lc.indexOf("world.style.height = worldH") < lc.indexOf("frame--cull"));
+    lc.indexOf("E.world.style.height = E.worldH") < lc.indexOf("frame--cull"));
   ok("contain-intrinsic-size is seeded from the measured height f.h",
-    /containIntrinsicSize = FRAME_W \+ "px " \+ Math\.round\(f\.h/.test(lc));
+    /containIntrinsicSize = E\.FRAME_W \+ "px " \+ Math\.round\(f\.h/.test(lc));
   ok("the cull pass is gated by FRAME_CULL and adds frame--cull",
-    /if \(FRAME_CULL\) frameDescs\.forEach/.test(lc) && /classList\.add\("frame--cull"\)/.test(lc));
+    /if \(FRAME_CULL\) E\.frameDescs\.forEach/.test(lc) && /classList\.add\("frame--cull"\)/.test(lc));
   var css = src("editor.css");
   ok("CSS enables content-visibility:auto only on culled frames",
     /\.frame\.frame--cull \{ content-visibility: auto; \}/.test(css));
@@ -9187,6 +9191,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var WORLD = src("src/editor/world.js");   // arch-P3b-07world
   var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var ACT = src("src/editor/actions.js");   // arch-P3b-07
@@ -9315,7 +9320,7 @@ section("panel system v2 — layout engine");
   ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(emd)
     && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(emd));
   ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(emd));
-  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(e) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(e));
+  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(WORLD) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(e));
   ok("only the 2-mode import-merge stays raw confirm (semantics don't map to OK/Cancel)", (e.match(/window\.(prompt|confirm)\(/g) || []).length === 1);
   // Phase 7 (D3): the flagship field inspector adopts the sectionGroup taxonomy (Type + Content)
   ok("field inspector wraps a Type section (List folded in) via the panelLayout engine", /beginSections\(\);\s*sectionGroup\("Type", "Type", function \(secBody\)[\s\S]*?typeCluster\(inspector, s, apply[\s\S]*?endSections\(inspector\)/.test(e));
@@ -9395,12 +9400,13 @@ section("exit-course action");
 // every selection change via refreshCanvasSelection (interact-mode only).
 section("interact contextual connectors");
 (function () {
+  var WORLD = src("src/editor/world.js");   // arch-P3b-07world
   var INT = src("src/editor/interact.js");   // arch-P3b-07s
   var e = src("src/editor.js");
   ok("showAllConnectors state defaults OFF + persisted", /var showAllConnectors = false;/.test(INT) && /var SHOW_ALL_CONNECTORS_KEY = "authoring\.showAllConnectors";/.test(INT) && /showAllConnectors = localStorage\.getItem\(SHOW_ALL_CONNECTORS_KEY\) === "1"/.test(INT));
-  ok("drawConnectors has a blockInSelection helper (single + multi)", /function blockInSelection\(b\)[\s\S]{0,220}multiSel\.indexOf\(b\) !== -1/.test(e));
-  ok("action-links skip non-selected links unless Show all", /if \(!showAllConnectorsOn\(\) && !\(selection\.node === lk\.elm \|\| blockInSelection\(lk\.block\)\)\) return;/.test(e));
-  ok("gate-links skip unless gated/source selected or Show all", /if \(!showAllConnectorsOn\(\) && !gatedSel && !srcSel\) return;/.test(e));
+  ok("drawConnectors has a blockInSelection helper (single + multi)", /function blockInSelection\(b\)[\s\S]{0,220}multiSel\.indexOf\(b\) !== -1/.test(WORLD));
+  ok("action-links skip non-selected links unless Show all", /if \(!showAllConnectorsOn\(\) && !\(E\.selection\.node === lk\.elm \|\| blockInSelection\(lk\.block\)\)\) return;/.test(WORLD));
+  ok("gate-links skip unless gated/source selected or Show all", /if \(!showAllConnectorsOn\(\) && !gatedSel && !srcSel\) return;/.test(WORLD));
   // arch-P3b-07i: the one choke point every selection change routes through moved with the tree.
   ok("connectors redraw on selection change (refreshCanvasSelection, interact-only)", /function refreshCanvasSelection\(\)[\s\S]*?if \(E\.interactMode\) drawConnectors\(\);\s*\}/.test(src("src/editor/outliner.js")));
   ok("Interact inspector exposes a Show all connections toggle", /switchRow\("Show all connections", function \(\) \{ return showAllConnectors; \}/.test(INT));
@@ -13171,6 +13177,7 @@ section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette"
 // otherwise it's a quiet disabled secondary that states the reason on hover.
 section("uio-P-C02: Publish button — accent only when runnable, reason when disabled");
 (function () {
+  var WORLD = src("src/editor/world.js");   // arch-P3b-07world
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
@@ -13558,19 +13565,20 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 (function () {
   section("#62 page-gap affordance");
   var e = src("src/editor.js"), css = src("editor.css"), ic = src("src/icons.js");
-  ok("buildGapAffordances only spans same-column adjacent pages", /function buildGapAffordances[\s\S]*?framePos\[i\]\.col !== framePos\[i \+ 1\]\.col\) continue/.test(e));
-  ok("gap Add wired to addPageAfter(pi)", /addBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); addPageAfter\(pi\); \}\)/.test(e));
-  ok("gap Merge wired to mergePageWithNext(pi)", /mergeBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); mergePageWithNext\(pi\); \}\)/.test(e));
-  ok("gap affordances suppressed in variant/language preview", /function buildGapAffordances[\s\S]*?if \(isPreview\(\)\) return;/.test(e));
-  ok("gap affordances build in BOTH modes (before the Interact-only return)", /layoutColumns\(\);[\s\S]*?buildGapAffordances\(\);[\s\S]*?if \(!interactModeOn\(\)\) return;/.test(e));
+  var WORLD = src("src/editor/world.js");   // arch-P3b-07world
+  ok("buildGapAffordances only spans same-column adjacent pages", /function buildGapAffordances[\s\S]*?E\.framePos\[i\]\.col !== E\.framePos\[i \+ 1\]\.col\) continue/.test(src("src/editor/world.js")));
+  ok("gap Add wired to addPageAfter(pi)", /addBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); addPageAfter\(pi\); \}\)/.test(WORLD));
+  ok("gap Merge wired to mergePageWithNext(pi)", /mergeBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); mergePageWithNext\(pi\); \}\)/.test(WORLD));
+  ok("gap affordances suppressed in variant/language preview", /function buildGapAffordances[\s\S]*?if \(isPreview\(\)\) return;/.test(WORLD));
+  ok("gap affordances build in BOTH modes (before the Interact-only return)", /layoutColumns\(\);[\s\S]*?buildGapAffordances\(\);[\s\S]*?if \(!interactModeOn\(\)\) return;/.test(WORLD));
   ok("addPageAfter inherits the reference page's chapter", /function addPageAfter\(pi\)[\s\S]*?if \(ref && ref\.chapterId != null\) newPage\.chapterId = ref\.chapterId/.test(e));
   ok("addPageAfterCurrent delegates to addPageAfter", /function addPageAfterCurrent\(\) \{ addPageAfter\(currentPage\); \}/.test(e));
   ok("page-gap css: hidden tools revealed on hover", /\.page-gap__tools \{[\s\S]*?opacity: 0;[\s\S]*?\}\s*\.page-gap:hover \.page-gap__tools \{ opacity: 1;/.test(css));
   ok("fold-vertical merge glyph present", /"fold-vertical":/.test(ic));
   // spacing consistency: per-frame ResizeObserver re-stacks the column on height change
-  ok("observeFrames wires a ResizeObserver to every frame", /function observeFrames\(\)[\s\S]*?new ResizeObserver\(scheduleRestack\)[\s\S]*?frameDescs\.forEach\(function \(f\) \{ if \(f\.frame\) frameRO\.observe\(f\.frame\)/.test(e));
-  ok("restack is coalesced to one animation frame", /function scheduleRestack\(\)[\s\S]*?if \(restackRaf\) return;[\s\S]*?requestAnimationFrame\(function \(\) \{[\s\S]*?drawConnectors\(\)/.test(e));
-  ok("buildWorld observes frames after building them", /observeFrames\(\); \/\/ re-stack the column/.test(e));
+  ok("observeFrames wires a ResizeObserver to every frame", /function observeFrames\(\)[\s\S]*?new ResizeObserver\(scheduleRestack\)[\s\S]*?frameDescs\.forEach\(function \(f\) \{ if \(f\.frame\) frameRO\.observe\(f\.frame\)/.test(WORLD));
+  ok("restack is coalesced to one animation frame", /function scheduleRestack\(\)[\s\S]*?if \(restackRaf\) return;[\s\S]*?requestAnimationFrame\(function \(\) \{[\s\S]*?drawConnectors\(\)/.test(WORLD));
+  ok("buildWorld observes frames after building them", /observeFrames\(\); \/\/ re-stack the column/.test(WORLD));
   ok("mount re-stacks after fitEmbeds (embed heights change post-measure)", /fitEmbeds\(\);[\s\S]*?re-stack so the pages[\s\S]*?drawConnectors\(\);\s*\n\s*renderStructure\(\);/.test(e));
 })();
 
@@ -14637,7 +14645,7 @@ section("left-panel Components reorg");
                              (src("src/editor/context-menu.js").match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length;
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (src("src/editor/outliner.js").match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length +
-                       (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
+                       (src("src/editor/world.js").match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
 })();
 
@@ -16596,7 +16604,8 @@ section("arch-P1 render-context");
   ok("editor.js assigns no render hook directly" + (strayEditor.length ? " -- STRAY: " + strayEditor.join(", ") : ""), strayEditor.length === 0);
   ok("export.js assigns no render hook directly" + (strayExport.length ? " -- STRAY: " + strayExport.join(", ") : ""), strayExport.length === 0);
 
-  ok("the editor canvas builds its context from the doc it is about to render", /window\.applyRenderContext\(window\.buildRenderContext\(renderDoc\)\)/.test(ed));
+  // arch-P3b-07world: buildWorld is editor/world.js now; the doc it renders is a local there.
+  ok("the editor canvas builds its context from the doc it is about to render", /window\.applyRenderContext\(window\.buildRenderContext\(renderDoc\)\)/.test(src("src/editor/world.js")));
   ok("the editor preview builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(E\.doc\)\)/.test(src("src/editor/demo.js")));
   ok("the export builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ex));
 
@@ -16604,7 +16613,7 @@ section("arch-P1 render-context");
   // opts is a caller that can diverge, so it fails here rather than in a shipped package.
   // arch-P3b-07j: the preview is its own file now, and reads the live document through the
   // namespace, so `E.doc` is a doc reference like any other here.
-  var callShapes = (ed + ex + src("src/editor/demo.js")).match(/buildRenderContext\([^)]*\)/g) || [];
+  var callShapes = (ed + ex + src("src/editor/demo.js") + src("src/editor/world.js")).match(/buildRenderContext\([^)]*\)/g) || [];
   ok("every caller passes the doc and nothing else (no per-caller opts)",
     callShapes.length >= 3 && callShapes.every(function (c) { return /^buildRenderContext\((?:E\.)?[A-Za-z_$][\w$]*\)$/.test(c); }));
 

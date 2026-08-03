@@ -388,6 +388,8 @@
   <script src="src/editor/interact.js"></script>
   <!-- arch-P3b-07r pages: window.VersoPages — chapters and which one a page belongs to: the chapter ops (create / reorder / delete without losing pages) and the drag-a-page-into-another-column gesture. Must precede editor.js. -->
   <script src="src/editor/pages.js"></script>
+  <!-- arch-P3b-07world: window.VersoWorld — the canvas render loop: buildWorld, the measure-then-stack column pass, the restack observer, the connector painter and the gap affordances. Must precede editor.js. -->
+  <script src="src/editor/world.js"></script>
   <!-- arch-P3b-07n editing: window.VersoEditing — what makes the canvas typeable: contentEditable on copy fields (selected first, editable second), drop targets, column resizers, the embed shield, and the collaboration edit lifecycle. Nothing it adds may leak into render(). Must precede editor.js. -->
   <script src="src/editor/editing.js"></script>
   <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->
