@@ -3268,8 +3268,10 @@ section("#69 migration cutover");
    ["getOpenDocIds", "Store.getOpenDocIds("], ["saveOpenDocIds", "Store.saveOpenDocIds("],
    ["getActiveDocId", "Store.getActiveDocId("], ["saveActiveDocId", "Store.saveActiveDocId("]
   ].forEach(function (pair) {
-    var i = ed.indexOf("function " + pair[0] + "(");
-    ok(pair[0] + " routes through the storage module", i !== -1 && ed.indexOf(pair[1], i) !== -1 && ed.indexOf(pair[1], i) - i < 400);
+    // arch-P3b-07lib: the two library accessors left with the library.
+    var where = (pair[0] === "loadLibrary" || pair[0] === "saveLibrary") ? src("src/editor/library.js") : ed;
+    var i = where.indexOf("function " + pair[0] + "(");
+    ok(pair[0] + " routes through the storage module", i !== -1 && where.indexOf(pair[1], i) !== -1 && where.indexOf(pair[1], i) - i < 400);
   });
   // The keys themselves left with the module. editor.js naming one again is a call site that has
   // reached around the seam -- the exact drift that put storage logic in a 27k-line closure.
@@ -3406,7 +3408,9 @@ section("#69 migration cutover");
 // ---- #19: component-library stable-id master snapshot model ---------------
 section("#19 stable-id master snapshot");
 (function () {
-  var etxt = src("src/editor.js");
+  // arch-P3b-07lib: capture, "Copy to course" and "Save to library" are editor/library.js now,
+  // and the promote path reads the live document through E.
+  var etxt = src("src/editor/library.js");
 
   // 1. CAPTURE mints ids ONCE: saveBlockAsComponent's template is remintIds(clone(block)).
   // From that moment the ids are the component's permanent identity.
@@ -3419,7 +3423,7 @@ section("#19 stable-id master snapshot");
   var copyIdx = etxt.indexOf("getComponents()[k] = clone(comp); saveRegistry(registry); mount();");
   ok("'Copy to course' handler found", copyIdx !== -1);
   ok("'Copy to course' preserves ids (no remint)", copyIdx !== -1 && etxt.slice(copyIdx - 20, copyIdx + 80).indexOf("remintIds") === -1);
-  var saveIdx = etxt.indexOf("var promoted = clone(doc.components[selectedKey]);");
+  var saveIdx = etxt.indexOf("var promoted = clone(E.doc.components[selectedKey]);");
   ok("'Save to library' handler found", saveIdx !== -1);
   ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 220).indexOf("remintIds") === -1);
   // Product Rail: the SAME handler is the sole content-mutation site, so it's where both
@@ -3427,11 +3431,11 @@ section("#19 stable-id master snapshot");
   // lands in the shared store.
   var psaveBody = etxt.slice(saveIdx, saveIdx + 700);
   ok("'Save to library' stamps the version BEFORE the master lands in the shared store", /stampMasterVersion\(promoted, Date\.now\(\)\)[\s\S]{0,600}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
-  ok("'Save to library' also stamps the owner-Product tag BEFORE the master lands", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)[\s\S]{0,300}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
+  ok("'Save to library' also stamps the owner-Product tag BEFORE the master lands", /stampOwnerProductTag\(promoted, E\.doc\.meta && E\.doc\.meta\.productId\)[\s\S]{0,300}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
 
   // 3. The contract is documented at remintIds' own definition, so #20/#21/#24 don't
   // add a 5th call site that touches library-resident content.
-  ok("remintIds documents the #19 library-preservation contract", /NEVER call remintIds on content already\s*\n\s*\/\/ resident in doc\.components or LibraryStore\.components/.test(etxt));
+  ok("remintIds documents the #19 library-preservation contract", /NEVER call remintIds on content already\s*\n\s*\/\/ resident in doc\.components or LibraryStore\.components/.test(src("src/editor.js")));
 
   // 4. ROUND-TRIP STABILITY (JSON save/load, e.g. through the #18 storage seam): a
   // captured component's nested block ids survive byte-identical.
@@ -5705,10 +5709,12 @@ section("product-rail tag vocabulary");
 
   // 2. editor.js wiring: promotion to the shared library stamps the reserved tag from
   // THIS course's Product context (doc.meta.productId), exactly once, at promotion time.
-  var doSaveIdx = etxt.indexOf("function doSave() {\n          pushHistory();\n          // #19: plain clone()");
+  // arch-P3b-07lib: promotion is editor/library.js now, one indent deeper inside install().
+  var LIB = src("src/editor/library.js");
+  var doSaveIdx = LIB.indexOf("function doSave() {");
   ok("promote-to-library doSave() found", doSaveIdx !== -1);
-  var doSaveBody = etxt.slice(doSaveIdx, doSaveIdx + 1200);
-  ok("stamps the reserved owning-Product tag from doc.meta.productId at promotion time", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)/.test(doSaveBody));
+  var doSaveBody = LIB.slice(doSaveIdx, doSaveIdx + 1200);
+  ok("stamps the reserved owning-Product tag from doc.meta.productId at promotion time", /stampOwnerProductTag\(promoted, E\.doc\.meta && E\.doc\.meta\.productId\)/.test(doSaveBody));
   var stampIdx = doSaveBody.indexOf("stampOwnerProductTag(promoted");
   var storeIdx = doSaveBody.indexOf("window.LibraryStore.components[selectedKey] = promoted;");
   ok("stamping happens BEFORE the master lands in the shared store", stampIdx !== -1 && storeIdx !== -1 && stampIdx < storeIdx);
@@ -5791,15 +5797,17 @@ section("#24 where-used + impact preview + push-update");
 (function () {
   var etxt = src("src/editor.js");
 
-  // 1. PURE: libraryWhereUsed against a fixture multi-course registry. Extracted as TWO
-  // pieces, walkBlocks then the @where-used fence, because the walker is shared substrate
-  // and the counters are fenced. arch-P3b-07z took the comment model that used to sit
-  // between them, so walkBlocks now ends at its own closing brace.
+  // 1. PURE: libraryWhereUsed against a fixture multi-course registry. Still extracted as TWO
+  // pieces, and now from two FILES: arch-P3b-07lib took the @where-used fence to
+  // editor/library.js with the panel that asks it, while `walkBlocks` stayed in editor.js
+  // because four unrelated callers share it. The counters are pure either way -- they take the
+  // registry as data -- so handing them the walker is all the seam needs.
   var wbStart = etxt.indexOf("function walkBlocks(doc, visit)");
   var wbEnd = etxt.indexOf("\n  }", wbStart) + 4;
-  var wuStart = etxt.indexOf("/* @where-used-start */");
-  var wuEnd = etxt.indexOf("/* @where-used-end */");
-  var pureBody = etxt.slice(wbStart, wbEnd) + etxt.slice(wuStart, wuEnd);
+  var LIBSRC = src("src/editor/library.js");
+  var wuStart = LIBSRC.indexOf("/* @where-used-start */");
+  var wuEnd = LIBSRC.indexOf("/* @where-used-end */");
+  var pureBody = etxt.slice(wbStart, wbEnd) + LIBSRC.slice(wuStart, wuEnd);
   var mod = new Function(pureBody + "\nreturn { libraryWhereUsed: libraryWhereUsed, libraryWhereUsedDetail: libraryWhereUsedDetail };")();
   ok("libraryWhereUsed extracted", typeof mod.libraryWhereUsed === "function");
   ok("libraryWhereUsedDetail extracted", typeof mod.libraryWhereUsedDetail === "function");
@@ -5836,8 +5844,9 @@ section("#24 where-used + impact preview + push-update");
   ok("a ref used nowhere -> empty list, never throws", mod.libraryWhereUsedDetail("nothing-here", registryTitled).length === 0);
 
   // 2. WIRING: the Component Library panel shows the where-used count per master.
-  var lStart = etxt.indexOf("function buildLibraryBody(c)");
-  var lBody = etxt.slice(lStart, lStart + 11200);
+  // arch-P3b-07lib: the panel is editor/library.js now, beside the counters it calls.
+  var lStart = LIBSRC.indexOf("function buildLibraryBody(c)");
+  var lBody = LIBSRC.slice(lStart, lStart + 11200);
   ok("buildLibraryBody computes where-used per master via the registry", /var usage = libraryWhereUsed\(k, getRegistry\(\)\)/.test(lBody));
   ok("shows a 'Used in N course(s) / M instance(s)' meta line", /"Used in " \+ usage\.courses/.test(lBody));
   ok("shows 'Not placed anywhere yet' when usage is zero", /Not placed anywhere yet/.test(lBody));
@@ -5850,7 +5859,9 @@ section("#24 where-used + impact preview + push-update");
 
   // 4. WIRING: impact preview on the two places a master's blast radius actually matters
   // — overwriting it (the one place its content changes) and removing it.
-  ok("'Save to library' overwrite confirm shows an impact preview", /libraryWhereUsed\(selectedKey, getRegistry\(\)\)[\s\S]{0,400}confirmModal\("Overwrite component"/.test(lBody));
+  // The overwrite confirm is the tail of buildLibraryBody. Inside install() every line of that
+  // body carries two more spaces, so the fixed window has to grow with it (arch-P3b-07lib).
+  ok("'Save to library' overwrite confirm shows an impact preview", /libraryWhereUsed\(selectedKey, getRegistry\(\)\)[\s\S]{0,400}confirmModal\("Overwrite component"/.test(LIBSRC.slice(lStart, lStart + 14000)));
   ok("'Remove' confirm shows the current usage before a destructive action", /var impact = libraryWhereUsed\(k, getRegistry\(\)\)[\s\S]{0,400}confirmModal\("Remove component"/.test(lBody));
 })();
 
@@ -6027,7 +6038,7 @@ section("#22 section + page library masters");
   ok("detach resolves axis, THEN overrides, THEN remints -- same order as blocks (#21/#23)", dpAxisIdx !== -1 && dpOvIdx !== -1 && dpRemintIdx !== -1 && dpAxisIdx < dpOvIdx && dpOvIdx < dpRemintIdx);
   ok("detach leaves a __linkedFrom breadcrumb (no page-level Relink in this ticket's scope)", /page\.__linkedFrom = ref/.test(dpBody));
 
-  ok("libraryWhereUsed also counts PAGE instances, not just libraryInstance blocks", /if \(p && p\.libraryRef === ref\) count\+\+/.test(etxt));
+  ok("libraryWhereUsed also counts PAGE instances, not just libraryInstance blocks", /if \(p && p\.libraryRef === ref\) count\+\+/.test(src("src/editor/library.js")));
 
   // 4. editor.js wiring: the page Inspector's Library section (mirrors renderLibraryInstanceBody).
   var piStart = etxt.indexOf("function renderPageInspector(pi)");
@@ -6037,8 +6048,10 @@ section("#22 section + page library masters");
   ok("offers Detach when linked, Save-to-library when not", /pDetachB\.disabled = !pdef/.test(piBody) && /pSaveB\.addEventListener\("click", function \(\) \{ savePageAsLibraryMaster\(pi\); \}\)/.test(piBody));
 
   // 5. Library panel lists pages separately, typed/labelled per the acceptance criteria.
-  var lStart = etxt.indexOf("function buildLibraryBody(c)");
-  var lBody = etxt.slice(lStart, lStart + 12000);
+  // arch-P3b-07lib: the panel is editor/library.js now.
+  var LIBSRC = src("src/editor/library.js");
+  var lStart = LIBSRC.indexOf("function buildLibraryBody(c)");
+  var lBody = LIBSRC.slice(lStart, lStart + 12000);
   ok("block-master list excludes page-kind entries", /var keys = Object\.keys\(lib\)\.filter\(function \(k\) \{ return lib\[k\]\.kind !== "page"; \}\)/.test(lBody));
   ok("a separate 'Pages' panelSection lists page-kind masters", /var pageSecBody = panelSection\(c, "Pages"\)/.test(lBody));
   ok("page rows offer Insert page (not Copy to course)", /"prop-btn prop-btn--accent", "Insert page"/.test(lBody));
@@ -9191,6 +9204,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var LIB = src("src/editor/library.js");   // arch-P3b-07lib
   var WORLD = src("src/editor/world.js");   // arch-P3b-07world
   var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
@@ -9320,8 +9334,13 @@ section("panel system v2 — layout engine");
   ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(emd)
     && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(emd));
   ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(emd));
-  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(WORLD) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(e));
-  ok("only the 2-mode import-merge stays raw confirm (semantics don't map to OK/Cancel)", (e.match(/window\.(prompt|confirm)\(/g) || []).length === 1);
+  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(WORLD) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(LIB));
+  // arch-P3b-07lib: the one survivor is the library import-merge, and it left with the library.
+  // The claim is the same and stronger stated across both files: exactly one raw dialog, and
+  // editor.js itself now has none.
+  ok("only the 2-mode import-merge stays raw confirm (semantics don't map to OK/Cancel)",
+    (e.match(/window\.(prompt|confirm)\(/g) || []).length === 0 &&
+    (LIB.match(/window\.(prompt|confirm)\(/g) || []).length === 1);
   // Phase 7 (D3): the flagship field inspector adopts the sectionGroup taxonomy (Type + Content)
   ok("field inspector wraps a Type section (List folded in) via the panelLayout engine", /beginSections\(\);\s*sectionGroup\("Type", "Type", function \(secBody\)[\s\S]*?typeCluster\(inspector, s, apply[\s\S]*?endSections\(inspector\)/.test(e));
   // #155: the universal Level-1 container sections adopt the sectionGroup taxonomy. renderBlockActionsSection
