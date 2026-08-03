@@ -376,6 +376,8 @@
   <script src="src/editor/comments.js"></script>
   <!-- arch-P3b-07i outliner: window.VersoOutliner — the Structure tree (chapters to pages to blocks to containers), sharing one selection with the canvas, plus reorder and reparent drags and the tree's right-click menu. Must precede editor.js. -->
   <script src="src/editor/outliner.js"></script>
+  <!-- arch-P3b-07 clipboard: window.VersoClipboard — delete, duplicate, select-all, copy, paste and the style-only pair, with the dependency collection and merge that stops a cross-course paste landing broken. Must precede editor.js. -->
+  <script src="src/editor/clipboard.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->

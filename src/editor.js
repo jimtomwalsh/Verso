@@ -9252,7 +9252,7 @@
         focusFrame(pi); setActivePage(pi); setSelection("page", pi);
         var items = [{ head: pg.name || "Page" }];
         items.push({ label: "Copy page", onClick: function () { setSelection("page", pi); copySelection(); } });
-        if (pageClipboard) items.push({ label: "Paste page after", onClick: function () { currentPage = pi; pastePage(); } });
+        if (pageClipboardNow()) items.push({ label: "Paste page after", onClick: function () { currentPage = pi; pastePage(); } });
         items.push({ label: "Duplicate page", onClick: function () { duplicatePage(pi); } });
         if (hasMergeableNext(pi)) items.push({ label: "Merge with next page", onClick: function () { mergePageWithNext(pi); } });
         items.push({ label: "Save page to library…", onClick: function () { savePageAsLibraryMaster(pi); } });
@@ -10031,226 +10031,25 @@
       if (deleteSelection()) e.preventDefault();
     }
   });
-  // Delete the current selection (multi-selected blocks, or a single selected
-  // block/embed/nav button). Pages and component instances are left to their
-  // inspector's explicit delete (more destructive / needs confirmation).
-  function deleteSelection() {
-    if (multiSel.length) {
-      pushHistory();
-      // ref-based removal (via findBlockParent) so NESTED blocks — inside columns /
-      // group / frame children — delete too, not just top-level (multi-select now spans
-      // containers + pages). Re-resolve per block so sibling index shifts don't matter.
-      multiSel.slice().forEach(function (b) {
-        for (var pi = 0; pi < doc.pages.length; pi++) {
-          var res = findBlockParent(doc.pages[pi].blocks, b);
-          if (res) { res.parentArray.splice(res.index, 1); break; }
-        }
-      });
-      doc.pages.forEach(function (page) { cleanupColumns(page.blocks); });
-      clearAllMulti(); clearSelection(); mount();
-      return true;
-    }
-    if ((selection.type === "block" || selection.type === "embed" || selection.type === "navButton") && selection.block) {
-      deleteBlockByRef(selection.block);
-      return true;
-    }
-    // SSS two-state: a text FIELD selected but NOT being edited (contenteditable off)
-    // deletes its block — same as any other selected block. (In the default mode the
-    // field is always contenteditable, so this never fires and text-delete is normal.)
-    if (selection.type === "field" && selection.block && selection.node &&
-        selection.node.getAttribute && selection.node.getAttribute("contenteditable") !== "true") {
-      deleteBlockByRef(selection.block);
-      return true;
-    }
-    return false;
-  }
-  // a single selected block, whatever the selection flavour it arrived as
-  function selectedSingleBlock() {
-    if ((selection.type === "block" || selection.type === "embed" || selection.type === "navButton" || selection.type === "field") && selection.block) return selection.block;
-    return null;
-  }
-  function selectAllOnPage() {
-    var p = doc.pages[currentPage]; if (!p) return;
-    clearSelection(); clearMultiPages();
-    multiSel = (p.blocks || []).filter(function (b) { return !b.locked; });
-    renderStructure(); refreshCanvasSelection(); renderInspector(); // #131: surface the multi inspector + floating bar on select-all
-  }
-  function duplicateSelection() {
-    if (multiSel.length) {
-      pushHistory();
-      var news = [];
-      multiSel.slice().forEach(function (b) { var loc = getBlockPageIndexAndIndex(b); if (loc) { var c = remintIds(clone(b)); doc.pages[loc.pageIndex].blocks.splice(loc.blockIndex + 1, 0, c); news.push(c); } });
-      multiSel = news; mount(); return;
-    }
-    var b = selectedSingleBlock(); if (b) duplicateBlock(b);
-  }
-  // §96 slice 1: cross-FILE paste dependency carry. switchDoc keeps the in-memory
-  // clipboard (it's an in-app swap, not a reload), so a block copied in doc A can be
-  // pasted into doc B — but the block may reference named text styles (styleRef) or a
-  // component def (componentGrid.component) that is CUSTOM to doc A. Without carrying
-  // those, the pasted block loses its named style or renders "[unknown component]".
-  // We snapshot ONLY the referenced defs at COPY time (source doc still current) and
-  // merge the MISSING ones into the target at paste. STANDARD styles/components need no
-  // carry — both docs seed the same globals (TEXT_STYLES / COMPONENTS), so a shared name
-  // already resolves; and a same-named def the TARGET owns wins (the paste adopts the
-  // target's house style — the normal cross-doc named-style contract). Pure + testable.
-  /* @pastedeps-start */
-  function collectPasteDeps(blocks, srcStyles, srcComponents) {
-    var styleNames = {}, compKeys = {};
-    (function walk(v) {
-      if (Array.isArray(v)) { for (var i = 0; i < v.length; i++) walk(v[i]); return; }
-      if (v && typeof v === "object") {
-        if (typeof v.styleRef === "string" && v.styleRef) styleNames[v.styleRef] = true;
-        if (v.type === "componentGrid" && typeof v.component === "string" && v.component) compKeys[v.component] = true;
-        for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) walk(v[k]);
-      }
-    })(blocks);
-    var out = { styles: {}, components: {} };
-    Object.keys(styleNames).forEach(function (n) { if (srcStyles && srcStyles[n] != null) out.styles[n] = clone(srcStyles[n]); });
-    Object.keys(compKeys).forEach(function (k) { if (srcComponents && srcComponents[k] != null) out.components[k] = clone(srcComponents[k]); });
-    return out;
-  }
-  // Merge captured deps into the target style/component maps, ADD-IF-MISSING only.
-  // Returns the names actually added (paste toast + tests); never clobbers a target def.
-  function mergePasteDeps(deps, tgtStyles, tgtComponents) {
-    var added = { styles: [], components: [] };
-    if (deps && deps.styles) Object.keys(deps.styles).forEach(function (n) {
-      if (tgtStyles && tgtStyles[n] == null) { tgtStyles[n] = clone(deps.styles[n]); added.styles.push(n); }
-    });
-    if (deps && deps.components) Object.keys(deps.components).forEach(function (k) {
-      if (tgtComponents && tgtComponents[k] == null) { tgtComponents[k] = clone(deps.components[k]); added.components.push(k); }
-    });
-    return added;
-  }
-  /* @pastedeps-end */
-  window.__pasteDeps = { collect: collectPasteDeps, merge: mergePasteDeps }; // headless test hook
+  // arch-P3b-07: the selection verbs -- delete, duplicate, select-all, copy, paste and the
+  // style-only pair -- moved to editor/clipboard.js. They share the hard part: what a block
+  // DEPENDS on, and how those dependencies merge into the course you paste into.
+  var deleteSelection = VE.bind("deleteSelection");
+  var selectedSingleBlock = VE.bind("selectedSingleBlock");
+  var selectAllOnPage = VE.bind("selectAllOnPage");
+  var duplicateSelection = VE.bind("duplicateSelection");
+  var copySelection = VE.bind("copySelection");
+  var pastePage = VE.bind("pastePage");
+  var pasteClipboard = VE.bind("pasteClipboard");
+  var copyBlockStyle = VE.bind("copyBlockStyle");
+  var pasteBlockStyle = VE.bind("pasteBlockStyle");
+  var collectPasteDeps = VE.bind("collectPasteDeps");
+  var mergePasteDeps = VE.bind("mergePasteDeps");
+  var stripFormattingDeep = VE.bind("stripFormattingDeep");
+  var pageClipboardNow = VE.bind("pageClipboardNow");
+  var clipboardNow = VE.bind("clipboardNow");
+  var styleClipboardNow = VE.bind("styleClipboardNow");
 
-  var clipboard = []; // cloned blocks (Cmd+C / Cmd+V)
-  var clipboardDeps = { styles: {}, components: {} }; // §96: styles/components the clipboard blocks reference
-  var pageClipboard = null; // §96 slice 2: a whole page + its deps (same-doc + cross-file)
-  function copySelection() {
-    // §96 slice 2: a PAGE is selected -> copy the whole page (blocks + page props + deps).
-    // Cmd+V then pastes the page after the current one; routing keys off pageClipboard.
-    if (selection.type === "page" && selection.node != null) {
-      var pg = doc.pages[selection.node];
-      if (!pg) return false;
-      pageClipboard = { page: clone(pg), deps: collectPasteDeps(pg.blocks || [], doc.styles, doc.components) };
-      clipboard = []; // route the next paste to the page path
-      return true;
-    }
-    var items = [];
-    if (multiSel.length) items = multiSel.map(clone);
-    else { var b = selectedSingleBlock(); if (b) items = [clone(b)]; }
-    if (!items.length) return false;
-    clipboard = items;
-    clipboardDeps = collectPasteDeps(items, doc.styles, doc.components); // capture NOW (source doc is current)
-    pageClipboard = null; // a block copy supersedes any held page
-    return true;
-  }
-  // §96 slice 2: paste the held page AFTER the current page (same-doc or cross-file).
-  // Mirrors duplicatePage (fresh page + block ids, courseNav section sync) but also
-  // carries custom styles/components into THIS doc and re-homes the page into the insert
-  // anchor's chapter (the source's chapterId is meaningless in another file).
-  function pastePage() {
-    if (!pageClipboard) return false;
-    if (!doc.pages) return false;
-    pushHistory();
-    var copy = clone(pageClipboard.page);
-    copy.id = "page-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-    (copy.blocks || []).forEach(remintIds);
-    mergePasteDeps(pageClipboard.deps, getTextStyles(), getComponents()); // add-if-missing
-    window.applyRenderContext({ docStyles: getTextStyles() });
-    var at = (currentPage != null && currentPage >= 0 && currentPage < doc.pages.length) ? currentPage : doc.pages.length - 1;
-    var anchor = doc.pages[at];
-    copy.chapterId = anchor ? (anchor.chapterId || null) : ((doc.pages[0] && doc.pages[0].chapterId) || null);
-    doc.pages.splice(at + 1, 0, copy);
-    eachCourseNav(function (nav) {
-      (nav.sections || []).forEach(function (sec) {
-        var i = anchor ? (sec.pageIds || []).indexOf(anchor.id) : -1;
-        if (i >= 0 && sec.pageIds.indexOf(copy.id) < 0) sec.pageIds.splice(i + 1, 0, copy.id);
-      });
-    });
-    currentPage = at + 1;
-    mount();
-    setActivePage(at + 1);
-    focusFrame(at + 1);
-    setSelection("page", at + 1);
-    return true;
-  }
-  // Paste-without-formatting (Cmd+Shift+V): strip block-level style + inline text formatting
-  // from the pasted subtree so it inherits the theme / target defaults. Recurses into nested
-  // children. SKIPS raw embed / asset markup (html/svg/src + full documents) so an interaction
-  // keeps its own styling. Deletes style/styleRef on every node; removes inline formatting
-  // tags (b/i/span/font/…) + style="" attrs from rich text, keeping structural tags (li/p/br).
-  function stripFormattingDeep(v) {
-    if (Array.isArray(v)) { for (var i = 0; i < v.length; i++) stripFormattingDeep(v[i]); return; }
-    if (v && typeof v === "object") {
-      delete v.style; delete v.styleRef;
-      for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k)) {
-        var val = v[k];
-        if (typeof val === "string") {
-          if (k === "html" || k === "svg" || k === "src") continue;
-          if (/<!doctype|<html[\s>]/i.test(val)) continue;
-          v[k] = val.replace(/<\/?(?:b|i|u|s|span|font|strong|em|sub|sup|mark|small)(?:\s[^>]*)?>/gi, "").replace(/\sstyle="[^"]*"/gi, "");
-        } else stripFormattingDeep(val);
-      }
-    }
-  }
-  window.__stripFormattingDeep = stripFormattingDeep; // headless test hook
-  function pasteClipboard(strip) {
-    if (pageClipboard && !clipboard.length) return pastePage(); // §96 slice 2: a page is held
-    if (!clipboard.length) return false;
-    var p = doc.pages[currentPage]; if (!p) return false;
-    pushHistory();
-    // §96: carry any CUSTOM styles/components the clipboard references into THIS doc
-    // (add-if-missing) so a cross-file paste keeps its named style + resolves its
-    // component. No-op for a same-doc paste / standard defs. Skip carrying styles when
-    // stripping (paste-without-formatting drops styleRef anyway).
-    if (!strip) mergePasteDeps(clipboardDeps, getTextStyles(), getComponents());
-    else mergePasteDeps({ styles: {}, components: clipboardDeps.components }, getTextStyles(), getComponents());
-    window.applyRenderContext({ docStyles: getTextStyles() }); // render resolves the newly-carried styles this pass
-    var news = clipboard.map(function (b) { var c = remintIds(clone(b)); if (strip) stripFormattingDeep(c); return c; });
-    var L = insertLoc(); // FFFF: paste after the selected block (into its own container — incl. a hotspot card), else bottom
-    news.forEach(function (c, i) { L.array.splice(L.index + i, 0, c); });
-    clearSelection(); clearMultiPages(); multiSel = news.slice();
-    // PERF: paste lands on ONE page (the selection's / currentPage); rebuild just it.
-    // If the pasted blocks somehow span pages, findPageOfBlock(news[0]) still isolates
-    // the first; a not-found (-1) falls back to a full mount inside reapplyStructural.
-    reapplyStructural(findPageOfBlock(news[0])); return true;
-  }
-  // §96 browser-verify hook: drive the real cross-FILE flow (copy in A -> switchDoc B ->
-  // paste) through the actual paste + dependency-carry wiring, not a reimplementation.
-  window.__xfer = {
-    registry: function () { return registry; },
-    currentDoc: function () { return doc; },
-    addDoc: function (d) { registry[d.meta.code] = d; },
-    switchDoc: switchDoc,
-    loadClipboard: function (items, srcStyles, srcComponents) { clipboard = items.map(clone); clipboardDeps = collectPasteDeps(clipboard, srcStyles, srcComponents); pageClipboard = null; },
-    loadPageClipboard: function (pg, srcStyles, srcComponents) { pageClipboard = { page: clone(pg), deps: collectPasteDeps(pg.blocks || [], srcStyles, srcComponents) }; clipboard = []; },
-    clipboardDeps: function () { return clipboardDeps; },
-    paste: function (strip) { return pasteClipboard(strip); },
-    setPage: function (i) { currentPage = i; }
-  };
-
-  // Copy Style / Paste Style: lift ONLY presentation keys off a block (never content or
-  // identity) so pasting pushes the LOOK onto another block. render ignores keys that don't
-  // apply to the target type (a paragraph has no box/colorMap), so it's safe across types +
-  // additive (only the source's keys are written).
-  var STYLE_KEYS = ["style", "styleRef", "box", "cardBox", "colorMap", "embedColorMap", "embedBg", "coverColor", "coverOpacity", "coverBlur", "cardH", "cols", "gap", "fit", "fitH", "fitFill", "padding", "maxWidth", "border", "borderColor", "borderWidth", "radius", "height", "spaceTop", "spaceBottom", "autoTint", "themeFallback", "align"];
-  var styleClipboard = null;
-  function copyBlockStyle(block) {
-    if (!block) return false;
-    var out = {};
-    STYLE_KEYS.forEach(function (k) { if (block[k] !== undefined) out[k] = clone(block[k]); });
-    if (!Object.keys(out).length) return false;
-    styleClipboard = out; return true;
-  }
-  function pasteBlockStyle(block) {
-    if (!styleClipboard || !block) return false;
-    pushHistory();
-    Object.keys(styleClipboard).forEach(function (k) { block[k] = clone(styleClipboard[k]); });
-    mount(); return true;
-  }
   // ---- uio-F06: one index, one palette (Cmd-K) -----------------------------
   // arch-P3b-07p: the index and the Cmd-K overlay moved to editor/palette.js. Most of what it
   // reads from this file are the COMMANDS it dispatches to -- that is what a palette is, and the
@@ -11256,7 +11055,6 @@
     multiSel: function () { return multiSel; },
     multiSelPages: function () { return multiSelPages; },
     // arch-P3b-07i: the page the author last copied, offered as "Paste page after" in the tree.
-    pageClipboard: function () { return pageClipboard; },
     // arch-P3b-07: what the comment layer reads as the author works. The pin dropper runs in the
     // capture phase and has to know whether a pan or a marquee already owns this gesture, and the
     // comment panel writes its fields into the shared field map like any other panel.
@@ -11277,8 +11075,6 @@
     enteredBlock: function () { return enteredBlock; },
     activeVariant: function () { return activeVariant; },
     activeVersion: function () { return activeVersion; },
-    clipboard: function () { return clipboard; },
-    styleClipboard: function () { return styleClipboard; },
     // arch-P3b-07d: which document is open. Reassigned on every tab switch, and the backup writer
     // keys its folder and its debounce off it -- a captured value would keep backing up the course
     // the author closed.
@@ -11287,6 +11083,12 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    currentDoc: currentDoc,
+    insertLoc: insertLoc,
+    eachCourseNav: eachCourseNav,
+    renderStructure: renderStructure,
+    clearMultiPages: clearMultiPages,
+    remintIds: remintIds,
     // arch-P3b-07: the comment panel clears the shared field map like any other panel does.
     resetPanelFields: function () { panelFields = {}; },
     pageNumberOf: pageNumberOf, pageTitlePart: pageTitlePart,
@@ -11616,6 +11418,7 @@
   window.VersoSettingsSheet.install(VE);   // the settings sheet and the one Escape contract
   window.VersoComments.install(VE);   // review comments and the presence chrome
   window.VersoOutliner.install(VE);   // the document seen as a list
+  window.VersoClipboard.install(VE);   // the verbs that act on a selection
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has

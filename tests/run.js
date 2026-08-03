@@ -5983,8 +5983,10 @@ section("outliner multi-select any-scope");
   // the pre-existing filter that dropped nested blocks on re-render is now nesting-aware
   ok("renderStructure keeps nested selections (findBlockParent, not top-level-only)", /E\.setMultiSel\(E\.multiSel\.filter\(function \(b\) \{\s*\n\s*for \(var pi = 0; pi < E\.doc\.pages\.length/.test(OUT));
   // actions on the whole set: delete + group resolve nested via findBlockParent
-  var del = etxt.slice(etxt.indexOf("function deleteSelection"), etxt.indexOf("function deleteSelection") + 900);
-  ok("multi-delete removes NESTED blocks too (findBlockParent)", /if \(multiSel\.length\)[\s\S]*?findBlockParent\(doc\.pages\[pi\]\.blocks, b\)[\s\S]*?parentArray\.splice/.test(del));
+  // arch-P3b-07: the selection verbs moved to src/editor/clipboard.js.
+  var CLIPD = src("src/editor/clipboard.js");
+  var del = CLIPD.slice(CLIPD.indexOf("function deleteSelection"), CLIPD.indexOf("function deleteSelection") + 900);
+  ok("multi-delete removes NESTED blocks too (findBlockParent)", /if \(E\.multiSel\.length\)[\s\S]*?findBlockParent\(E\.doc\.pages\[pi\]\.blocks, b\)[\s\S]*?parentArray\.splice/.test(del));
   var grp = OUT.slice(OUT.indexOf("function groupMulti"), OUT.indexOf("function groupMulti") + 1100);
   ok("groupMulti resolves by ref + needs one shared parent", /findBlockParent[\s\S]*?parentArray !== pa/.test(grp));
   // selection must persist through PAN (middle-click / space+left) — the deselect handler
@@ -6635,18 +6637,20 @@ section("inline links");
 // ---- Copy Style / Paste Style: lift presentation keys, never content -----------
 section("copy/paste style");
 (function () {
+  var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
-  var _sk = (e.match(/var STYLE_KEYS = (\[[^\]]*\]);/) || [])[1] || "";
-  ok("copyBlockStyle lifts only presentation keys from STYLE_KEYS", /"box"/.test(_sk) && /"styleRef"/.test(_sk) && /"colorMap"/.test(_sk) && /function copyBlockStyle\(block\)[\s\S]*?STYLE_KEYS\.forEach\(function \(k\) \{ if \(block\[k\] !== undefined\) out\[k\] = clone\(block\[k\]\)/.test(e));
+  var _sk = (CLIP.match(/var STYLE_KEYS = (\[[^\]]*\]);/) || [])[1] || "";   // arch-P3b-07
+  ok("copyBlockStyle lifts only presentation keys from STYLE_KEYS", /"box"/.test(_sk) && /"styleRef"/.test(_sk) && /"colorMap"/.test(_sk) && /function copyBlockStyle\(block\)[\s\S]*?STYLE_KEYS\.forEach\(function \(k\) \{ if \(block\[k\] !== undefined\) out\[k\] = clone\(block\[k\]\)/.test(CLIP));
   ok("STYLE_KEYS excludes content/identity", !/STYLE_KEYS = \[[^\]]*"(text|html|src|children|items|type|id|questions)"/.test(e));
-  ok("pasteBlockStyle writes the clipboard keys onto the target + mounts", /function pasteBlockStyle\(block\)[\s\S]*?Object\.keys\(styleClipboard\)\.forEach\(function \(k\) \{ block\[k\] = clone\(styleClipboard\[k\]\); \}\);[\s\S]*?mount\(\)/.test(e));
+  ok("pasteBlockStyle writes the clipboard keys onto the target + mounts", /function pasteBlockStyle\(block\)[\s\S]*?Object\.keys\(styleClipboard\)\.forEach\(function \(k\) \{ block\[k\] = clone\(styleClipboard\[k\]\); \}\);[\s\S]*?mount\(\)/.test(CLIP));
   ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(ecm) && /if \(E\.styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(ecm));
 })();
 
 section("ctx copy/paste");
 (function () {
+  var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
@@ -6656,9 +6660,9 @@ section("ctx copy/paste");
   // §84 paste-without-formatting
   ok("both menus offer Paste without formatting", (ecm.match(/label: "Paste without formatting", onClick: function \(\) \{ pasteClipboard\(true\); \}/g) || []).length >= 2);
   ok("Cmd+Shift+V passes the strip flag to pasteClipboard", /if \(pasteClipboard\(e\.shiftKey\)\) e\.preventDefault\(\)/.test(e));
-  ok("pasteClipboard strips formatting when asked", /clipboard\.map\(function \(b\) \{ var c = remintIds\(clone\(b\)\); if \(strip\) stripFormattingDeep\(c\)/.test(e));
+  ok("pasteClipboard strips formatting when asked", /clipboard\.map\(function \(b\) \{ var c = remintIds\(clone\(b\)\); if \(strip\) stripFormattingDeep\(c\)/.test(CLIP));
   // stripFormattingDeep: clears style/styleRef + inline formatting, keeps structural tags, skips embeds
-  var body = e.slice(e.indexOf("function stripFormattingDeep("), e.indexOf("window.__stripFormattingDeep"));
+  var body = CLIP.slice(CLIP.indexOf("function stripFormattingDeep("), CLIP.indexOf("window.__stripFormattingDeep"));
   var strip = new Function("window", body + "\nreturn stripFormattingDeep;")({});
   var blk = { type: "paragraph", styleRef: "Body 1", style: { color: "#f00" }, text: '<span style="color:red"><b>Hi</b></span> there', children: [{ type: "note", styleRef: "Callout", text: '<i>x</i>' }] };
   strip(blk);
@@ -6711,7 +6715,7 @@ section("vimeo hash");
   // absent falls back to the CSS theme var. embedBg is a copyable style key.
   ok("embedBg paints the embed--video wrapper when set", /block\.embedBg\) wrap\.style\.background = block\.embedBg/.test(webBody));
   ok("applyEmbedStyle applies embedBg to the media element", /if \(block\.embedBg\) node\.style\.background = block\.embedBg/.test(r));
-  ok("embedBg is a copyable style key", /"embedColorMap", "embedBg"/.test(src("src/editor.js")));
+  ok("embedBg is a copyable style key", /"embedColorMap", "embedBg"/.test(src("src/editor/clipboard.js")));   // arch-P3b-07
 })();
 
 // ---- HTML-interaction palette linking (Phase 2): map an interaction's own vars to theme ----
@@ -9265,6 +9269,7 @@ section("interact contextual connectors");
 // set a card min-height. Blank inherits the block default. Ships in SCORM.
 section("hotspot per-card size");
 (function () {
+  var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
@@ -9295,7 +9300,7 @@ section("hotspot per-card size");
   })());
   ok("editor: remintIds descends hotspot card blocks (#215)", /if \(Array\.isArray\(node\.screens\)\) node\.screens\.forEach\(function \(s\) \{\s*\n\s*if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) m\.blocks\.forEach\(remintIds\); \}\);/.test(e));
   ok("editor: insertLoc resolves the selected block's own container via findBlockParent", /function insertLoc\(\) \{[\s\S]{0,200}var loc = findBlockParent\(page\.blocks, E\.selection\.block\);[\s\S]{0,120}return \{ array: loc\.parentArray, index: loc\.index \+ 1 \};/.test(ASSETS));
-  ok("editor: insertBlock (default path) + pasteClipboard use insertLoc (not top-level-only)", /L = insertLoc\(\);\s*\}\s*L\.array\.splice\(L\.index, 0, block\);/.test(ASSETS) && /var L = insertLoc\(\);[\s\S]{0,260}L\.array\.splice\(L\.index \+ i, 0, c\);/.test(e));
+  ok("editor: insertBlock (default path) + pasteClipboard use insertLoc (not top-level-only)", /L = insertLoc\(\);\s*\}\s*L\.array\.splice\(L\.index, 0, block\);/.test(ASSETS) && /var L = insertLoc\(\);[\s\S]{0,260}L\.array\.splice\(L\.index \+ i, 0, c\);/.test(CLIP));
   ok("render: walkBlocks descends hotspot card blocks (#215 screens[].markers[].blocks)", /if \(Array\.isArray\(b\.screens\)\) b\.screens\.forEach\(function \(s\) \{ if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) walkBlocks\(m\.blocks, fn\); \}\); \}\);/.test(r));
   // the old inPopover exclusion (children not drop targets / not draggable) is GONE
   // — popover cards are full editing containers now.
@@ -9413,6 +9418,7 @@ section("FR find/replace");
 // ---- PERF: block edits rebuild one page, not the whole world -------------
 section("PERF one-page re-render");
 (function () {
+  var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
   var edui = src("src/editor/dnd-ui.js");
@@ -9446,7 +9452,7 @@ section("PERF one-page re-render");
   ok("deletePage #171 re-anchors by page identity, not raw index", /var keepId = pi === currentPage[\s\S]{0,200}doc\.pages\.splice\(pi, 1\);\s*var ni = keepId \? pageIndexById\(keepId\) : -1;\s*currentPage = ni >= 0 \? ni : Math\.min\(currentPage, doc\.pages\.length - 1\);/.test(e));
   ok("duplicateBlock + moveBlock rebuild one page", /reapplyStructural\(pi\); \/\/ PERF: one page/.test(e));
   ok("insertBlock rebuilds only the block's page", /L\.array\.splice\(L\.index, 0, block\);\s*reapplyStructural\(findPageOfBlock\(block\)\);/.test(ASSETS));
-  ok("pasteClipboard rebuilds only the paste page", /reapplyStructural\(findPageOfBlock\(news\[0\]\)\); return true;/.test(e));
+  ok("pasteClipboard rebuilds only the paste page", /reapplyStructural\(findPageOfBlock\(news\[0\]\)\); return true;/.test(CLIP));
   ok("image max-width edit uses reapplyBlock (not mount)", /block\.maxWidth = n; reapplyBlock\(block\); reselectBlockNode/.test(e));
   ok("image light/dark contrast toggle uses reapplyBlock (not mount)", /delete block\.autoTint; \/\/ auto\s*reapplyBlock\(block\); reselectBlockNode\(block, "block"\);/.test(e));
 })();
@@ -13169,8 +13175,10 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   section("§96 cross-file paste deps");
   var ed = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   var CE96 = src("src/editor/copy-editor.js");   // arch-P3b-07j
+  var CLIP96 = src("src/editor/clipboard.js");   // arch-P3b-07
   var css = src("editor.css");
-  var m = ed.match(/\/\* @pastedeps-start \*\/([\s\S]*?)\/\* @pastedeps-end \*\//);
+  // arch-P3b-07: the paste-dependency core moved with the clipboard verbs.
+  var m = src("src/editor/clipboard.js").match(/\/\* @pastedeps-start \*\/([\s\S]*?)\/\* @pastedeps-end \*\//);
   ok("pastedeps region is extractable", !!m);
   var clone = function (o) { return JSON.parse(JSON.stringify(o)); };
   var api = new Function("clone", m[1] + "\nreturn { collect: collectPasteDeps, merge: mergePasteDeps };")(clone);
@@ -13204,10 +13212,10 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("merge still adds the other missing style", tS2.BrandSub && added2.styles.indexOf("BrandSub") >= 0);
 
   // slice 2 wiring: a held PAGE routes Cmd+V to pastePage; block copy clears the page hold.
-  ok("copySelection copies a whole page on a page selection", /selection\.type === "page"[\s\S]*pageClipboard = \{ page: clone\(pg\)/.test(ed));
-  ok("pasteClipboard routes to pastePage when a page is held", /if \(pageClipboard && !clipboard\.length\) return pastePage\(\);/.test(ed));
-  ok("pastePage re-homes the page into the anchor's chapter", /copy\.chapterId = anchor \?/.test(ed));
-  ok("pastePage carries custom styles\/components (add-if-missing)", /function pastePage[\s\S]*mergePasteDeps\(pageClipboard\.deps/.test(ed));
+  ok("copySelection copies a whole page on a page selection", /selection\.type === "page"[\s\S]*pageClipboard = \{ page: clone\(pg\)/.test(CLIP96));
+  ok("pasteClipboard routes to pastePage when a page is held", /if \(pageClipboard && !clipboard\.length\) return pastePage\(\);/.test(CLIP96));
+  ok("pastePage re-homes the page into the anchor's chapter", /copy\.chapterId = anchor \?/.test(CLIP96));
+  ok("pastePage carries custom styles\/components (add-if-missing)", /function pastePage[\s\S]*mergePasteDeps\(pageClipboard\.deps/.test(CLIP96));
 
   // CSV-import HF fix: the house header/footer default wins over the CSV's HF; but only
   // when a default exists (forNewDoc returns null otherwise, leaving the CSV HF alone).
