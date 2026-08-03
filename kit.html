@@ -169,6 +169,8 @@
   <script src="src/editor/settings-sheet.js"></script>
   <!-- arch-P3b-07 comments: window.VersoComments — review pins as editor chrome (never exported), three-tier anchoring so a note survives an edit, one store across the canvas and the preview, and a file-based sidecar so a review round-trips air-gapped. Must precede editor.js. -->
   <script src="src/editor/comments.js"></script>
+  <!-- arch-P3b-07review: window.VersoReviewExchange — the reviewer round trip: the frozen review snapshot, the shared exchange folder, the poll and the ingest that merges returning comments. Must precede editor.js. -->
+  <script src="src/editor/review-exchange.js"></script>
   <!-- arch-P3b-07i outliner: window.VersoOutliner — the Structure tree (chapters to pages to blocks to containers), sharing one selection with the canvas, plus reorder and reparent drags and the tree's right-click menu. Must precede editor.js. -->
   <script src="src/editor/outliner.js"></script>
   <!-- arch-P3b-07 clipboard: window.VersoClipboard — delete, duplicate, select-all, copy, paste and the style-only pair, with the dependency collection and merge that stops a cross-course paste landing broken. Must precede editor.js. -->

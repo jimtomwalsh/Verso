@@ -8442,7 +8442,8 @@ section("background-pause power governor (#179)");
     /window\.__autosaveGov = \{/.test(p) && /pause: function \(\) \{ if \(_autosaveTimer\) \{ autosave\(\);/.test(p));
   ok("pause FLUSHES (calls autosave) before clearing the interval -- no lost edit",
     /pause: function \(\)[\s\S]*?autosave\(\);[\s\S]*?clearInterval\(_autosaveTimer\)/.test(p));
-  var e = src("src/editor.js");
+  // arch-P3b-07review: the visibilitychange governor moved with the review poll it pauses.
+  var e = src("src/editor/review-exchange.js");
   ok("editor pauses both polls + drops will-change when document.hidden",
     /visibilitychange[\s\S]*?document\.hidden[\s\S]*?__autosaveGov\.pause\(\)[\s\S]*?stopReviewPoll\(\)[\s\S]*?willChange = "auto"/.test(e));
   ok("editor resumes autosave + (conditionally) the review poll + restores will-change on return",
@@ -9074,7 +9075,9 @@ section("note callout container");
 // ---- §12 Verso Viewer: V1 publish snapshot + the standalone app -----------
 section("Verso Viewer (V1 + app)");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07review: the publish snapshot, the folder handle, the poll and the ingest are
+  // editor/review-exchange.js now. The Viewer app itself is unchanged.
+  var t = src("src/editor/review-exchange.js");
   ok("snapshot freezes a verso-pub with comments stripped", /function snapshotBlob\(versionOverride\)[\s\S]*?delete frozen\.comments[\s\S]*?type: "verso-pub"/.test(t));
   // §12a: the frozen snapshot bakes AssetStore refs into self-contained base64 (the Viewer has no AssetStore)
   ok("snapshot resolves asset refs into base64 data-URIs (renders standalone in the Viewer)", /function snapshotBlob\(versionOverride\)[\s\S]*?window\.resolveMedia\(frozen, function \(id\) \{\s*var a = window\.AssetStore\.get\(id\);\s*return a \? a\.dataUrl : window\.AssetStore\.placeholder;/.test(t));
@@ -9083,7 +9086,7 @@ section("Verso Viewer (V1 + app)");
   ok("export defaultOptions has reviewFile", /defaultOptions[\s\S]*?reviewFile: false/.test(ex));
   ok("export modal offers the review-file toggle", /toggle\("Also publish review file", "reviewFile"\)/.test(ex));
   ok("export emits the review snapshot when toggled (same version)", /function alsoPublishReview[\s\S]*?window\.Editor\.publishReviewFile\(opts\.version\)/.test(ex));
-  ok("editor exposes publishReviewFile on window.Editor", /publishReviewFile: function \(version\) \{ return publishToViewer\(version, true\); \}/.test(t));
+  ok("editor exposes publishReviewFile on window.Editor", /publishReviewFile: function \(version\) \{ return publishToViewer\(version, true\); \}/.test(src("src/editor.js")));   // the window.Editor seam is the host's, not the module's
   ok("Publish writes to the review folder (FSA) with a download fallback", /async function publishToViewer[\s\S]*?ensureReviewFolder\(\)[\s\S]*?getFileHandle\(f\.name[\s\S]*?createWritable/.test(t));
   ok("scanAndMerge reads review-*.json + merges (conflict-free)", /async function scanAndMerge\(dir\)[\s\S]*?review-.*\\\.json[\s\S]*?mergeComments\(list\)/.test(t));
   ok("folder handle is persisted in IndexedDB (survives restart)", /function saveReviewDir[\s\S]*?objectStore\("h"\)\.put\(handle, "dir"\)/.test(t) && /function loadReviewDir/.test(t));
