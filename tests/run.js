@@ -35,6 +35,12 @@ function ok(name, cond) {
 // A non-failing signal (UI kit ticket 4 conformance gate, warn-only phase).
 function warn(msg) { warnings++; console.warn("  WARN [" + sectionName + "] " + msg); }
 function slice(txt, from, to) { var a = txt.indexOf(from), b = txt.indexOf(to, a + 1); return txt.slice(a, b); }
+// arch-P1: render.js resolves every per-pass hook through one rc() accessor, so a slice of any
+// render.js function that reads a hook needs that accessor in scope alongside it.
+function withRc(renderSrc, body) {
+  var m = renderSrc.match(/function rc\(name\) \{[\s\S]*?\}/);
+  return (m ? m[0] + "\n" : "") + body;
+}
 
 // Spin up a server-of-one on an ephemeral port against a temp SQLite store, run an
 // async probe(base, server, dbPath), and always tear it down. Shared by the pivot
@@ -58,7 +64,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -2942,8 +2948,10 @@ section("assetSrc hook");
 (function () {
   var t = src("src/render.js");
   var m = t.match(/function assetSrc\(v\)\s*\{[\s\S]*?\n  \}/);
+  // arch-P1: assetSrc reads its resolver through the rc() accessor, so the slice needs it too.
+  var rcFn = t.match(/function rc\(name\) \{[\s\S]*?\}/);
   var win = {};
-  var fn = new Function("window", m[0] + "\nreturn assetSrc;")(win);
+  var fn = new Function("window", rcFn[0] + "\n" + m[0] + "\nreturn assetSrc;")(win);
   ok("no resolver -> ref unchanged", fn("asset:ABC") === "asset:ABC");
   win.__assetResolver = function (id) { return "URL:" + id; };
   ok("maps asset:id", fn("asset:ABC") === "URL:ABC");
@@ -3902,17 +3910,19 @@ section("#127 blockStyles (per-type default appearance cascade)");
   var td = { fill: "#111" }; var mergedE = resolve(td, { radius: 4 });
   ok("cascade: does not mutate the source type default", td.fill === "#111" && !("radius" in td) && mergedE.radius === 4);
 
-  // render.js applies the resolved box: the type default reaches the DOM via __blockStyles.
-  ok("render: applyBlockAppearance resolves via __blockStyles + resolveBlockBox",
-    /var typeDef = \(block && block\.type && window\.__blockStyles && window\.__blockStyles\[block\.type\]\)/.test(rtxt) &&
+  // render.js applies the resolved box: the type default reaches the DOM via the blockStyles hook.
+  ok("render: applyBlockAppearance resolves via the blockStyles hook + resolveBlockBox",
+    /var typeDef = \(block && block\.type && rc\("blockStyles"\) && rc\("blockStyles"\)\[block\.type\]\)/.test(rtxt) &&
     /var b = resolveBlockBox\(typeDef, block && block\.box\)/.test(rtxt));
 
-  // The __blockStyles per-pass hook is set on EVERY render surface (editor canvas + preview
-  // + export) so editor == export -- never editor state; always from doc.theme.blockStyles.
+  // arch-P1: blockStyles reaches EVERY render surface (editor canvas + preview + export) from the
+  // one render-context builder, so editor == export by construction -- never editor state; always
+  // from doc.theme.blockStyles. The three call sites are asserted in the arch-P1 section.
   var e = src("src/editor.js"), ex = src("src/export.js");
-  ok("hook: editor canvas render sets __blockStyles from renderDoc.theme", /window\.__blockStyles = \(renderDoc\.theme && renderDoc\.theme\.blockStyles\) \|\| null;/.test(e));
-  ok("hook: editor preview sets __blockStyles from doc.theme", /window\.__blockStyles = \(doc\.theme && doc\.theme\.blockStyles\) \|\| null;.*preview/.test(e));
-  ok("hook: export bakes __blockStyles from doc.theme (editor == export)", /window\.__blockStyles = \(doc\.theme && doc\.theme\.blockStyles\) \|\| null;.*export/.test(ex));
+  var RCM = require(path.join(ROOT, "src/render-context.js"));
+  ok("hook: blockStyles is a declared render-context field", RCM.DOC_HOOKS.indexOf("blockStyles") !== -1);
+  ok("hook: the one builder derives it from doc.theme.blockStyles",
+    RCM.build({ theme: { blockStyles: { note: { fill: "#eee" } } } }).blockStyles.note.fill === "#eee" && RCM.build({}).blockStyles === null);
 
   // Editor: capture-from-block writes doc.theme.blockStyles[type] via getBlockStyles, and
   // the theme panel edits captured defaults.
@@ -4981,13 +4991,13 @@ section("#23 axis-owning library masters");
   // overrides (axis first, instance override wins on top -- the agreed precedence).
   var libStart = rtxt.indexOf("libraryInstance: function (block)");
   var libBody2 = rtxt.slice(libStart, libStart + 1300);
-  ok("axis-resolves via the per-pass hook before applying instance overrides", /content = resolveLibraryAxisContent\(content, window\.__libraryAxisContext\);[\s\S]{0,150}if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody2));
+  ok("axis-resolves via the per-pass hook before applying instance overrides", /content = resolveLibraryAxisContent\(content, rc\("libraryAxisContext"\)\);[\s\S]{0,150}if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody2));
 
   // 3. editor.js wiring: currentDoc() keeps the hook in sync (variant never null --
   // falls back to hero/identity; version null when the doc has no version axis).
   var cdStart = etxt.indexOf("function currentDoc()");
   var cdBody = etxt.slice(cdStart, cdStart + 1200);
-  ok("currentDoc sets window.__libraryAxisContext", /window\.__libraryAxisContext = \{/.test(cdBody));
+  ok("currentDoc sets the axis context through the render-context gate", /window\.applyRenderContext\(\{\s*libraryAxisContext: \{/.test(cdBody));
   ok("variant falls back to hero/identity, never null", /variant: activeVariant \|\| \(d\.heroVariant \|\| "hero"\)/.test(cdBody));
   ok("version falls back to the doc's base version, or null if none", /version: activeVersion \|\| \(d\.versions && d\.versions\[0\]\) \|\| null/.test(cdBody));
 
@@ -5002,7 +5012,7 @@ section("#23 axis-owning library masters");
 
   // 5. export.js wiring: both build paths (variant N-packages, per-version bake-into-one)
   // keep the hook in sync with the EFFECTIVE key being built for.
-  ok("buildPackage sets the variant half of the hook (never null)", /window\.__libraryAxisContext = \{ variant: opts\.variant \|\| \(baseDoc\.heroVariant \|\| "hero"\), version: null \}/.test(extxt));
+  ok("buildPackage sets the variant half of the hook (never null)", /applyRenderContext\(\{ libraryAxisContext: \{ variant: opts\.variant \|\| \(baseDoc\.heroVariant \|\| "hero"\), version: null \} \}\)/.test(extxt));
   ok("serializeVersionedPages sets version per-pass in the multi-version loop", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = v; \/\/ #23/.test(extxt));
   ok("serializeVersionedPages sets version on the no-wrapper (<2 versions) path too", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = \(versions && versions\[0\]\) \|\| null;/.test(extxt));
 })();
@@ -5087,7 +5097,7 @@ section("#22 section + page library masters");
   ok("resolvePageLibraryContent found", rpStart !== -1);
   var rpBody = rtxt.slice(rpStart, rpStart + 800);
   ok("resolves doc override -> shared library (page kind)", /docComps && docComps\[page\.libraryRef\]\) \|\| libComps\[page\.libraryRef\]/.test(rpBody));
-  ok("resolves axis content THEN instance overrides per block (same precedence as #23)", /content = resolveLibraryAxisContent\(content, window\.__libraryAxisContext\);[\s\S]{0,80}if \(page\.overrides\) applyInstanceOverrides\(content, page\.overrides\)/.test(rpBody));
+  ok("resolves axis content THEN instance overrides per block (same precedence as #23)", /content = resolveLibraryAxisContent\(content, rc\("libraryAxisContext"\)\);[\s\S]{0,80}if \(page\.overrides\) applyInstanceOverrides\(content, page\.overrides\)/.test(rpBody));
   var bpStart = rtxt.indexOf("function buildPageSection(page)");
   var bpBody = rtxt.slice(bpStart, bpStart + 1600);
   ok("buildPageSection marks a page instance for the editor-only opacity rule", /data-library-page-instance/.test(bpBody));
@@ -5264,10 +5274,12 @@ section("chapter-progression");
 section("auto-gate all interactions");
 (function () {
   var rt = src("src/runtime.js"), rn = src("src/render.js"), ed = src("src/editor.js");
-  // setting -> per-pass hook -> render flag
-  ok("editor sets __gateAllInteractions on export", /window\.__gateAllInteractions = renderDoc\.gateAllInteractions \|\| null/.test(ed));
-  ok("editor sets __gateAllInteractions on preview", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ed));
-  ok("render stamps data-gate-all from the hook", /if \(window\.__gateAllInteractions\) root\.setAttribute\("data-gate-all", "1"\)/.test(rn));
+  // setting -> per-pass hook -> render flag. arch-P1: the hook is derived once, by the shared
+  // render-context builder, so the canvas, the preview and the export cannot disagree about it.
+  var RCG = require(path.join(ROOT, "src/render-context.js"));
+  ok("the gate flag is a declared render-context field, derived from the doc",
+    RCG.DOC_HOOKS.indexOf("gateAllInteractions") !== -1 && RCG.build({ gateAllInteractions: true }).gateAllInteractions === true && RCG.build({}).gateAllInteractions === null);
+  ok("render stamps data-gate-all from the hook", /if \(rc\("gateAllInteractions"\)\) root\.setAttribute\("data-gate-all", "1"\)/.test(rn));
   // uio-F03: the switch now reads the RESOLVED value down the scope ladder (System -> Course)
   // and clears the course flag on Reset; the stored data is unchanged.
   ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
@@ -5287,7 +5299,7 @@ section("auto-gate all interactions");
   ok("hotspot without markers excluded", /if \(!qsAll\(st, "\.hotspot-marker"\)\.length\) return;/.test(rt));
   // enforcement: Next gate + completion both require the auto-gates
   ok("pageGates keys off the PER-PAGE data-gate-page=1 (not course root)", /function pageGates\(pageEl\) \{ return !!\(pageEl && pageEl\.getAttribute && pageEl\.getAttribute\("data-gate-page"\) === "1"\)/.test(rt));
-  ok("render stamps data-gate-page per page (course default + per-page override)", /if \(__gp === true \|\| \(__gp == null && window\.__gateAllInteractions\)\) section\.setAttribute\("data-gate-page", "1"\)/.test(rn));
+  ok("render stamps data-gate-page per page (course default + per-page override)", /if \(__gp === true \|\| \(__gp == null && rc\("gateAllInteractions"\)\)\) section\.setAttribute\("data-gate-page", "1"\)/.test(rn));
   ok("autoGatePass fail-OPEN when the page isn't gated", /function autoGatePass\(pageEl\) \{\s*if \(!pageGates\(pageEl\)\) return true;/.test(rt));
   ok("gateFooterNav also requires autoGatePass", /var autoOk = autoGatePass\(pageEl\);[\s\S]*?pass = pass && autoOk;/.test(rt));
   // checkbox gates are LIVE (not sticky): re-locks Next when a box reads unchecked on return
@@ -5321,7 +5333,7 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   ok("nudgeGatedNext shakes the button + flashes the hint", /function nudgeGatedNext\(btn\)[\s\S]*?is-nudge[\s\S]*?data-gate-hint[\s\S]*?is-flash/.test(rt));
   // render emits the hidden reminder element (pure; runtime only toggles it)
   ok("render emits the gate-hint element with default copy", /course-nav__gate-hint[\s\S]*?data-gate-hint[\s\S]*?Complete the interactions on this page to continue/.test(rn));
-  ok("gate-hint copy is author-overridable via __gateMessage", /window\.__gateMessage \|\| "Complete the interactions on this page to continue\."/.test(rn));
+  ok("gate-hint copy is author-overridable via the gateMessage hook", /rc\("gateMessage"\) \|\| "Complete the interactions on this page to continue\."/.test(rn));
   // CSS makes the gated Next grey but STILL clickable (overriding aria-disabled's pointer-events:none)
   ok("gated Next is greyed but pointer-events:auto (clickable to intercept)", /\.course-nav__next\.is-nav-gated \{ opacity: 0\.45; cursor: not-allowed; pointer-events: auto; \}/.test(css));
   ok("gate-hint + nudge honour prefers-reduced-motion", /prefers-reduced-motion: reduce\) \{ \.course-nav__next\.is-nudge, \.course-nav__gate-hint\.is-flash \{ animation: none; \}/.test(css));
@@ -5330,9 +5342,13 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   ok("accordion emits accordion-complete once every section opened", /dispatchEvent\(new CustomEvent\("accordion-complete", \{ bubbles: true \}\)\)/.test(rt) && /Object\.keys\(opened\)\.length >= count/.test(rt));
   ok("engine listens for sequence-complete/accordion-complete", /addEventListener\("sequence-complete", function \(e\) \{ markDone\("sequenceDone"[\s\S]*?addEventListener\("accordion-complete", function \(e\) \{ markDone\("accordionDone"/.test(rt));
   ok("gate ids pre-stamped before binders (bind-time completion isn't lost)", /qsAll\(root, "video, iframe\[src\*='vimeo\.com'\], \.hotspot-stage, \.card-reveal, \.seq, \[data-accordion\], \[data-quiz\]"\)\.forEach\(function \(el\) \{\s*ensureGateId/.test(rt));
-  // export ships the flags (was relying on a stale editor global) + the message
-  ok("export sets __gateAllInteractions (no longer stale-global)", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ex));
-  ok("export sets __gateMessage", /window\.__gateMessage = doc\.gateMessage \|\| null/.test(ex));
+  // The export ships the flags + the message. arch-P1: it gets them from the same builder the
+  // canvas uses, so "the export forgot a hook" is no longer a thing that can happen quietly.
+  var RCX = require(path.join(ROOT, "src/render-context.js"));
+  ok("the export builds its render context from the shared builder", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ex));
+  ok("that builder carries the gate flag and the gate message",
+    RCX.build({ gateAllInteractions: true, gateMessage: "Do the thing" }).gateAllInteractions === true &&
+    RCX.build({ gateAllInteractions: true, gateMessage: "Do the thing" }).gateMessage === "Do the thing");
   // authoring: per-page override in the page inspector + course-level message field
   // uio-F03: still tri-state DATA (true / false / absent = inherit), but the picker's explicit
   // "inherit" option is gone — the switch shows the resolved value and Reset clears the page flag.
@@ -5394,7 +5410,7 @@ section("glossary");
 
   // render: the glossary button + a static, searchable term/def popover (no image path).
   var rsrc = src("src/render.js");
-  ok("render reads window.__glossaryTerms (not the old image hook)", /var gterms = window\.__glossaryTerms;/.test(rsrc) && !/window\.__glossary\b(?!Terms)/.test(rsrc));
+  ok("render reads the glossaryTerms hook (not the old image hook)", /var gterms = rc\("glossaryTerms"\);/.test(rsrc) && !/window\.__glossary\b(?!Terms)/.test(rsrc));
   ok("render emits the glossary popover with a live filter input", /el\("div", "glossary-pop"\)/.test(rsrc) && /data-glossary-filter/.test(rsrc));
   ok("each term row carries a lowercased term+def haystack for the filter", /grow\.setAttribute\("data-term", \(trm \+ " " \+ def\)\.toLowerCase\(\)\)/.test(rsrc));
   ok("render emits the empty state", /el\("div", "glossary-pop__empty", "No matching terms\."\)/.test(rsrc));
@@ -5404,9 +5420,16 @@ section("glossary");
   ok("runtime filters rows by substring over data-term", /\(r\.getAttribute\("data-term"\) \|\| ""\)\.indexOf\(q\) !== -1/.test(rt));
   ok("runtime shows the empty state only when nothing matches", /empty\.hidden = shown !== 0/.test(rt));
 
-  // wiring: editor (render + preview) and export all ship the terms list.
-  ok("editor sets window.__glossaryTerms on render + preview", (etxt.match(/window\.__glossaryTerms = glossaryTerms\(/g) || []).length === 2);
-  ok("export ships window.__glossaryTerms", /window\.__glossaryTerms = \(window\.__glossaryTermsFn && window\.__glossaryTermsFn\(doc\)\) \|\| null/.test(src("src/export.js")));
+  // wiring: editor (render + preview) and export all ship the terms list. arch-P1: they get it
+  // from the one render-context builder, which resolves the term list through the SAME
+  // glossary function for every caller -- so no surface can ship a different glossary.
+  var RCT = require(path.join(ROOT, "src/render-context.js"));
+  ok("glossary terms are a declared render-context field", RCT.DOC_HOOKS.indexOf("glossaryTerms") !== -1);
+  ok("the builder resolves them through the app's one glossary function",
+    /helper\(opts, "glossaryTerms", "__glossaryTermsFn"\)/.test(src("src/render-context.js")) &&
+    /window\.__glossaryTermsFn = glossaryTerms;/.test(etxt));
+  ok("an empty term list normalises to null (no empty popover ships)",
+    RCT.build({}, { glossaryTerms: function () { return []; } }).glossaryTerms === null);
 
   // settings: canonical repeatedList table + CSV import (no image upload left).
   ok("glossary settings build the canonical repeatedList term table", /repeatedList\(c, "Terms", \{/.test(etxt));
@@ -5515,11 +5538,14 @@ section("global motion");
   var r = src("src/render.js");
   var rt = src("src/runtime.js");
   var e = src("src/editor.js");
-  // config plumbed via the __motion per-pass hook at all 3 render entry points
-  ok("__motion hook set in export + editor render + preview", (src("src/export.js").match(/window\.__motion =/g) || []).length === 1 && (e.match(/window\.__motion =/g) || []).length === 2);
+  // arch-P1: motion is plumbed through the shared render context, so all three render entry
+  // points (export, editor canvas, editor preview) get the same durations by construction.
+  var RCMo = require(path.join(ROOT, "src/render-context.js"));
+  ok("motion is a declared render-context field, carried through untouched",
+    RCMo.DOC_HOOKS.indexOf("motion") !== -1 && RCMo.build({ motion: { modeMs: 300, chapterMs: 450 } }).motion.chapterMs === 450 && RCMo.build({}).motion === null);
   // render stamps the fade-duration vars + data-chapter-id
-  ok("render stamps --motion-mode-fade from __motion", /window\.__motion\.modeMs != null\) root\.style\.setProperty\("--motion-mode-fade", window\.__motion\.modeMs \+ "ms"\)/.test(r));
-  ok("render stamps --motion-chapter-fade from __motion", /window\.__motion\.chapterMs != null\) root\.style\.setProperty\("--motion-chapter-fade", window\.__motion\.chapterMs \+ "ms"\)/.test(r));
+  ok("render stamps --motion-mode-fade from the motion hook", /rc\("motion"\)\.modeMs != null\) root\.style\.setProperty\("--motion-mode-fade", rc\("motion"\)\.modeMs \+ "ms"\)/.test(r));
+  ok("render stamps --motion-chapter-fade from the motion hook", /rc\("motion"\)\.chapterMs != null\) root\.style\.setProperty\("--motion-chapter-fade", rc\("motion"\)\.chapterMs \+ "ms"\)/.test(r));
   ok("render stamps data-chapter-id from page.chapterId", /page\.chapterId\) root\.setAttribute\("data-chapter-id", page\.chapterId\)/.test(r));
   // CSS: mode fade is the var-driven [data-mode] transition (shared with the crossfade section);
   // chapter-enter is a separate keyframe animation under prefers-reduced-motion:no-preference.
@@ -5532,8 +5558,12 @@ section("global motion");
   // editor: Motion disclosure + clamped setMotion
   ok("editor has a Motion document panel", /\{ key: "motion", title: "Motion", build: buildMotionBody \}/.test(e));
   ok("editor setMotion clamps 0-2000 + prunes empty", /doc\.motion\[key\] = Math\.max\(0, Math\.min\(2000, n\)\)/.test(e) && /if \(!Object\.keys\(doc\.motion\)\.length\) delete doc\.motion;/.test(e));
-  // export cleanRoot must KEEP the root-level --motion-* override vars (not strip them as theme tokens)
-  ok("export keeps --motion-* root vars", /indexOf\("--page-"\) !== 0 && p\.indexOf\("--motion-"\) !== 0/.test(src("src/export.js")));
+  // export cleanRoot must KEEP the author's root-level override vars (not strip them as theme
+  // tokens). --img-radius joined the list once arch-P1 exposed that the master image radius
+  // rounded images on the canvas and then never shipped.
+  ok("export keeps the author's root override vars, --img-radius included",
+    /var KEEP_ROOT_VARS = \["--page-", "--motion-", "--img-radius"\];/.test(src("src/export.js")) &&
+    /!KEEP_ROOT_VARS\.some\(function \(k\) \{ return p\.indexOf\(k\) === 0; \}\)/.test(src("src/export.js")));
 })();
 
 // ---- §74: select-first (progressive drill) is now the DEFAULT --------------
@@ -6601,7 +6631,7 @@ section("LLL resolveBlockStyle");
   var t = src("src/render.js");
   var body = t.slice(t.indexOf("function resolveBlockStyle(obj)"), t.indexOf("window.resolveBlockStyle ="));
   var win = {};
-  var resolve = new Function("window", body + "\nreturn resolveBlockStyle;")(win);
+  var resolve = new Function("window", withRc(t, body) + "\nreturn resolveBlockStyle;")(win);
   win.__docStyles = { H1: { font: "Exo 2", size: 40, weight: "700" } };
   ok("no styleRef -> obj.style unchanged", JSON.stringify(resolve({ style: { size: 12 } })) === JSON.stringify({ size: 12 }));
   ok("styleRef -> named style", (function () { var r = resolve({ styleRef: "H1", style: {} }); return r.size === 40 && r.font === "Exo 2"; })());
@@ -6841,7 +6871,7 @@ section("SCORM manifest");
 section("resolveHeaderFooter");
 (function () {
   var t = src("src/render.js");
-  var body = t.slice(t.indexOf("window.resolveHeaderFooter = function (doc, page)"), t.indexOf("window.render = function (doc, theme)"));
+  var body = t.slice(t.indexOf("window.resolveHeaderFooter = function (doc, page)"), t.indexOf("window.render = function (doc, theme"));
   var win = {};
   new Function("window", body)(win);
   var resolve = win.resolveHeaderFooter;
@@ -7782,9 +7812,13 @@ section("image lightbox");
   ok("css: image radius reads --img-radius with --radius-card default", /\.block-image__img \{[^}]*border-radius: var\(--img-radius, var\(--radius-card\)\)/.test(css));
   // Master image radius: doc.imageRadius -> --img-radius on the ROOT (per-pass hook); the
   // per-image figure var overrides it via CSS specificity. 0 must be a valid value.
-  ok("render sets root --img-radius from the __imageRadius master hook", /window\.__imageRadius != null\) root\.style\.setProperty\("--img-radius", window\.__imageRadius \+ "px"\)/.test(r));
+  ok("render sets root --img-radius from the imageRadius master hook", /rc\("imageRadius"\) != null\) root\.style\.setProperty\("--img-radius", rc\("imageRadius"\) \+ "px"\)/.test(r));
   ok("editor: settings write doc.imageRadius (master control)", /doc\.imageRadius = n; mount\(\); scheduleSave\(\)/.test(e) || /delete doc\.imageRadius; else doc\.imageRadius = n/.test(e));
-  ok("editor: __imageRadius hook keeps 0 (not ||null)", /window\.__imageRadius = \(renderDoc\.imageRadius != null \? renderDoc\.imageRadius : null\)/.test(e));
+  // arch-P1: the hook is derived once by the shared builder, where 0 (square corners) is a real
+  // value and must not collapse to "unset" -- the one field in the context with a falsy trap.
+  ok("the imageRadius hook keeps 0 (square), and reports null only when truly unset",
+    require(path.join(ROOT, "src/render-context.js")).build({ imageRadius: 0 }).imageRadius === 0 &&
+    require(path.join(ROOT, "src/render-context.js")).build({}).imageRadius === null);
   ok("render carries the caption (falls back to alt) on the figure", /var capText = block\.caption \|\| block\.alt \|\| "";\s*if \(capText\) fig\.setAttribute\("data-caption", capText\)/.test(r));
   // runtime: bind fn exists, clones media, wires close, and is called in create (export + demo)
   ok("runtime defines bindImageLightbox cloning media into a shared overlay", /function bindImageLightbox\(root\)[\s\S]*?qsAll\(fig, "img, svg"\)[\s\S]*?cloneNode\(true\)/.test(rt));
@@ -11816,10 +11850,11 @@ section("#120 inline styles: render + sanitize");
   var r = src("src/render.js");
   var m = r.match(/\/\* @inline-style-start \*\/([\s\S]*?)\/\* @inline-style-end \*\//);
   if (!m) { ok("locate @inline-style fence", false); return; }
-  // prelude: the two fns close over FONT_STACKS + window.__docStyles — inject stubs.
+  // prelude: the two fns close over FONT_STACKS + the docStyles hook (read through arch-P1's
+  // rc() accessor, which the slice needs alongside it) — inject stubs.
   var prelude = "var FONT_STACKS = { 'Exo 2': \"'Exo 2', sans-serif\" };\n" +
     "var window = { __docStyles: null };\n";
-  var g = new Function(prelude + m[1] + "\nreturn { applyInlineTextStyle: applyInlineTextStyle, resolveInlineStyles: resolveInlineStyles, setDocStyles: function (s) { window.__docStyles = s; } };")();
+  var g = new Function(prelude + withRc(r, m[1]) + "\nreturn { applyInlineTextStyle: applyInlineTextStyle, resolveInlineStyles: resolveInlineStyles, setDocStyles: function (s) { window.__docStyles = s; } };")();
   function makeStyle() { var s = {}; s.removeProperty = function (k) { delete s[k]; }; s.setProperty = function (k, v) { s[k] = v; }; return s; }
   function fakeNode() { return { style: makeStyle() }; }
   var apply = g.applyInlineTextStyle;
@@ -14547,6 +14582,130 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("the search mounts a Replace field + Replace / Replace all (unified doc only)", /var repRow = h\("div", "source-replace"\);[\s\S]{0,1100}replaceCurrentSourceMatch\(\)[\s\S]{0,200}replaceAllSourceMatches\(\)/.test(e) && /"replace"/.test(src("src/icons.js")));
   ok("replace-current is unlock-gated + replaces the current match via replaceRange (owned undo)", /function replaceCurrentSourceMatch\(\)[\s\S]{0,200}if \(!__sourceUnlocked\) \{ sourceToast[\s\S]{0,200}__sourceFindMatches\[__sourceFindIndex\][\s\S]{0,160}SD\.replaceRange\(__sourceDocModel, \{ nodeKey: m\.nodeKey, start: m\.start, len: m\.len \}, __sourceReplaceQuery\)/.test(e));
   ok("replace-all is unlock-gated + calls SD.replaceAll, then re-renders + toasts the count", /function replaceAllSourceMatches\(\)[\s\S]{0,300}if \(!__sourceUnlocked\)[\s\S]{0,300}SD\.replaceAll\(__sourceDocModel, q, __sourceReplaceQuery\)[\s\S]{0,300}Replaced " \+ n/.test(e));
+})();
+
+// ---- arch-P1: render-context (the editor/export divergence seam) ----------
+// The law in CONTRIBUTING -- "if a change would make the editor and the export diverge, it's
+// wrong" -- used to be enforced by two files staying in sync by eye. Ten window.__* hooks were
+// assigned by hand in editor.js and export.js independently, and no test crossed the seam: add
+// an eleventh, wire it in one file, forget the other, and the canvas and the shipped course
+// render differently with a green suite. This section is that missing test. It checks the
+// builder is a pure function of the doc, that both callers go through it with the same call
+// shape, and that neither can reach past it to a global.
+section("arch-P1 render-context");
+(function () {
+  var RC;
+  try { RC = require(path.join(ROOT, "src/render-context.js")); }
+  catch (e) { ok("require src/render-context.js", false); return; }
+
+  var EXPECTED_DOC_HOOKS = ["navSections", "docStyles", "blockStyles", "contentMaxWidth", "imageRadius",
+    "gatedProgression", "gateAllInteractions", "gateMessage", "motion", "glossaryTerms"];
+
+  ok("the ten doc-derived hooks are declared, by name", RC.DOC_HOOKS.slice().sort().join(",") === EXPECTED_DOC_HOOKS.slice().sort().join(","));
+  ok("the environment hooks (per-caller by design) are declared separately", RC.ENV_HOOKS.slice().sort().join(",") === "assetResolver,libraryAxisContext");
+  ok("the hooks render.js owns are recorded, so all sixteen are accounted for", RC.RENDER_OWNED_HOOKS.length === 4 && RC.RENDER_OWNED_HOOKS.indexOf("repairMojibake") !== -1);
+  ok("a context field maps to its global by one rule", RC.globalFor("motion") === "__motion");
+
+  // A doc that exercises every field, including the ones with a non-obvious falsy case.
+  var FIXTURE = {
+    pages: [{ id: "p1", chapterId: "c1", blocks: [] }],
+    chapters: [{ id: "c1", title: "One" }],
+    styles: { Lead: { size: 24 } },
+    theme: { blockStyles: { note: { fill: "#eee" } } },
+    contentMaxWidth: 960,
+    imageRadius: 0,               // 0 is a real radius (square), not "unset"
+    gatedProgression: true,
+    gateAllInteractions: true,
+    gateMessage: "Finish the interactions",
+    motion: { modeMs: 300, chapterMs: 450 }
+  };
+
+  var ctx = RC.build(FIXTURE);
+  ok("the built context carries exactly the declared fields -- no extras, none missing",
+    Object.keys(ctx).slice().sort().join(",") === RC.DOC_HOOKS.slice().sort().join(","));
+  ok("doc fields land on the context", ctx.docStyles === FIXTURE.styles && ctx.blockStyles === FIXTURE.theme.blockStyles &&
+    ctx.contentMaxWidth === 960 && ctx.gateMessage === "Finish the interactions" && ctx.motion === FIXTURE.motion);
+  ok("imageRadius 0 survives as 0 (square corners), not null", ctx.imageRadius === 0);
+  ok("a doc with imageRadius unset reports null", RC.build({}).imageRadius === null);
+  ok("an empty doc yields every field null, never undefined", RC.DOC_HOOKS.every(function (k) { return RC.build({})[k] === null; }));
+  ok("no doc at all is survivable (null in, all-null context out)", RC.build(null).motion === null);
+
+  // The builder is pure: same doc in, structurally identical context out, every time.
+  ok("the builder is a pure function of the doc", RC.diff(RC.build(FIXTURE), RC.build(FIXTURE)).length === 0);
+  ok("a differing field is reported by name, not as a wall of JSON",
+    RC.diff(RC.build(FIXTURE), RC.build(Object.assign({}, FIXTURE, { contentMaxWidth: 720 }))).join(",") === "contentMaxWidth");
+
+  // Injected helpers: both callers leave these unset, so both get the same function. Proving
+  // the injection point works is what lets the suite trust that "unset on both sides" is safe.
+  var navCtx = RC.build(FIXTURE, { chaptersToNavSections: function (d) { return [{ id: d.chapters[0].id, label: "One", pages: ["p1"] }]; } });
+  ok("nav sections come from the injected chapter helper", navCtx.navSections.length === 1 && navCtx.navSections[0].id === "c1");
+  var glossCtx = RC.build(FIXTURE, { glossaryTerms: function () { return [{ term: "AGL", def: "Above ground level" }]; } });
+  ok("glossary terms come from the injected glossary helper", glossCtx.glossaryTerms.length === 1);
+  ok("a glossary helper returning an empty result normalises to null", RC.build(FIXTURE, { glossaryTerms: function () { return null; } }).glossaryTerms === null);
+
+  // THE DIVERGENCE TEST. Build the context the way the editor's canvas does and the way the
+  // export does, against the SAME document, and assert they agree field by field.
+  var editorSide = RC.build(FIXTURE);
+  var exportSide = RC.build(FIXTURE);
+  var divergence = RC.diff(editorSide, exportSide);
+  ok("editor and export build an identical render context from the same doc" +
+    (divergence.length ? " -- DIVERGED ON: " + divergence.join(", ") : ""), divergence.length === 0);
+
+  // applyRenderContext is the compatibility layer: it writes the context out to the globals
+  // render.js still reads. Partial application must refresh one field without blanking siblings
+  // (that is how the editor's mid-edit style refreshes work), and an unknown key must not be
+  // able to invent a render hook.
+  var priorWindow = Object.prototype.hasOwnProperty.call(global, "window") ? global.window : undefined;
+  var hadWindow = typeof priorWindow !== "undefined";
+  global.window = {};
+  try {
+    RC.apply(ctx);
+    ok("applying the context writes every declared global", RC.DOC_HOOKS.every(function (k) { return global.window["__" + k] === ctx[k]; }));
+    ok("the applied globals read back as the same context", RC.diff(RC.read(), ctx).length === 0);
+    RC.apply({ docStyles: { Lead: { size: 32 } } });
+    ok("a one-field refresh updates that field", global.window.__docStyles.Lead.size === 32);
+    ok("a one-field refresh leaves its siblings alone", global.window.__motion === FIXTURE.motion && global.window.__contentMaxWidth === 960);
+    RC.apply({ notAHook: 1 });
+    ok("an unknown key cannot invent a render hook", global.window.__notAHook === undefined && global.window.notAHook === undefined);
+    RC.apply({ assetResolver: function () { return "x"; }, libraryAxisContext: { variant: "hero", version: null } });
+    ok("the environment hooks travel through the same gate", typeof global.window.__assetResolver === "function" && global.window.__libraryAxisContext.variant === "hero");
+  } finally {
+    if (hadWindow) global.window = priorWindow; else delete global.window;
+  }
+  ok("the builder is DOM-free (callable with no window at all)", typeof global.window === "undefined" && RC.build(FIXTURE).contentMaxWidth === 960);
+
+  // ---- the ratchets: neither caller may reach past the builder ----
+  var ed = src("src/editor.js"), ex = src("src/export.js"), rn = src("src/render.js"), html = src("index.html");
+  var ALL_HOOKS = RC.DOC_HOOKS.concat(RC.ENV_HOOKS);
+
+  var strayEditor = ALL_HOOKS.filter(function (k) { return new RegExp("window\\.__" + k + "\\s*=[^=]").test(ed); });
+  var strayExport = ALL_HOOKS.filter(function (k) { return new RegExp("window\\.__" + k + "\\s*=[^=]").test(ex); });
+  ok("editor.js assigns no render hook directly" + (strayEditor.length ? " -- STRAY: " + strayEditor.join(", ") : ""), strayEditor.length === 0);
+  ok("export.js assigns no render hook directly" + (strayExport.length ? " -- STRAY: " + strayExport.join(", ") : ""), strayExport.length === 0);
+
+  ok("the editor canvas builds its context from the doc it is about to render", /window\.applyRenderContext\(window\.buildRenderContext\(renderDoc\)\)/.test(ed));
+  ok("the editor preview builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ed));
+  ok("the export builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ex));
+
+  // Same call SHAPE on both sides: one argument, the doc. A caller that starts passing its own
+  // opts is a caller that can diverge, so it fails here rather than in a shipped package.
+  var callShapes = (ed + ex).match(/buildRenderContext\([^)]*\)/g) || [];
+  ok("every caller passes the doc and nothing else (no per-caller opts)",
+    callShapes.length >= 3 && callShapes.every(function (c) { return /^buildRenderContext\([A-Za-z_$][\w$]*\)$/.test(c); }));
+
+  // render.js reads through the one accessor, so the set of things render depends on stays
+  // enumerable -- and dropping the globals is a one-function change.
+  var strayRender = ALL_HOOKS.filter(function (k) { return new RegExp("window\\.__" + k + "\\b").test(rn); });
+  ok("render.js reads no hook global directly" + (strayRender.length ? " -- STRAY: " + strayRender.join(", ") : ""), strayRender.length === 0);
+  ok("render.js resolves every hook through the rc() accessor", /function rc\(name\) \{ return window\["__" \+ name\]; \}/.test(rn) &&
+    ALL_HOOKS.every(function (k) { return rn.indexOf('rc("' + k + '")') !== -1; }));
+  ok("renderPage accepts an explicit context and applies it for the pass",
+    /window\.renderPage = function \(page, theme, headerFooter, ctx\) \{\s*if \(ctx && window\.applyRenderContext\) window\.applyRenderContext\(ctx\);/.test(rn));
+  ok("render(doc, theme, ctx) forwards the context", /window\.render = function \(doc, theme, ctx\)[\s\S]{0,160}resolveHeaderFooter\(doc, doc\.pages\[0\]\), ctx\)/.test(rn));
+
+  // Load order: the builder must exist before either caller runs.
+  var iRc = html.indexOf("src/render-context.js"), iEd = html.indexOf("src/editor.js"), iEx = html.indexOf("src/export.js");
+  ok("index.html loads the render context before both callers", iRc > -1 && iRc < iEd && iRc < iEx);
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

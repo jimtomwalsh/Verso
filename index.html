@@ -284,6 +284,9 @@
   <script src="src/theme.js"></script>
   <script src="src/components.js"></script>
   <script src="src/render.js"></script>
+  <!-- arch-P1: the per-pass render context both the editor and the export build from. Must
+       precede editor.js and export.js, which route every render hook through it. -->
+  <script src="src/render-context.js"></script>
   <script src="src/runtime.js"></script>
   <script src="src/quiz-runtime.js"></script>
   <script src="src/model.js"></script>

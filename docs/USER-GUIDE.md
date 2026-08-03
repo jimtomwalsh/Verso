@@ -327,7 +327,8 @@ Every block you can insert, grouped by type. Software tours have their own secti
 
 - **Image** — paste a URL or upload. Set max width, alt text, and a caption; give it a per-mode
   light/dark source; toggle **Click-to-zoom** (on by default) to open it in a full-screen
-  lightbox.
+  lightbox. Corner rounding comes from the course-wide image radius in document settings (0 for
+  square); a per-image radius overrides it. Both apply on the canvas and in the exported course.
 - **HTML Interaction** — embed a self-contained interactive HTML file; it's themed to match and
   ships inside the package.
 - **Web Embed** — responsive embedded media, such as video.

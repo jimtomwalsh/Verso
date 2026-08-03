@@ -5,10 +5,15 @@
  * Pure function of (page/doc, theme): no editor chrome, no side effects.
  *
  * Public entry points:
- *   window.renderPage(page, theme) -> a themed .course-root for ONE page
- *   window.render(doc, theme)      -> convenience: renders doc.pages[0]
+ *   window.renderPage(page, theme, headerFooter, ctx) -> a themed .course-root for ONE page
+ *   window.render(doc, theme, ctx)                    -> convenience: renders doc.pages[0]
  * The editor uses renderPage per page to build the multi-frame canvas (M4); the
  * export loops every page through renderPage the same way.
+ *
+ * `ctx` (optional) is the per-pass render context from src/render-context.js: the nav sections,
+ * named styles, gate flags, motion timings and glossary this pass needs. One builder serves both
+ * the editor and the export, which is what keeps the canvas and the shipped package identical.
+ * Everything render reads from it goes through the rc() accessor below.
  *
  * Blocks:
  *   { type:"heading", text }
@@ -28,6 +33,14 @@
     return node;
   }
 
+  // arch-P1: everything render needs from its caller beyond (page, theme, headerFooter) is read
+  // through here. src/render-context.js builds that context; both the editor and the export get
+  // it from that one builder, so they cannot hand render different state. The context still
+  // travels as `window.__<name>` globals for one release, which makes this function the single
+  // place that changes when they are dropped -- and the single list of what render actually
+  // depends on. The set is DOC_HOOKS + ENV_HOOKS in render-context.js.
+  function rc(name) { return window["__" + name]; }
+
   // YY: resolve an "asset:<id>" ref to a real src via the host's resolver hook
   // (editor -> objectURL / data: URL; export -> inlined base64). Non-asset
   // strings (http/data/blob URLs, empty) pass straight through. This is the
@@ -35,8 +48,8 @@
   // individual call sites, no path (e.g. a single-block re-render) can miss it
   // and emit a raw "asset:<id>" as an <img src> (which renders blank).
   function assetSrc(v) {
-    if (typeof v === "string" && v.slice(0, 6) === "asset:" && typeof window.__assetResolver === "function") {
-      var r = window.__assetResolver(v.slice(6), v);
+    if (typeof v === "string" && v.slice(0, 6) === "asset:" && typeof rc("assetResolver") === "function") {
+      var r = rc("assetResolver")(v.slice(6), v);
       return (r == null) ? v : r;
     }
     return v;
@@ -857,12 +870,12 @@
   }
   window.applyTextStyle = applyTextStyle;
   // LLL: a text block can REFERENCE a named style (obj.styleRef) instead of copying
-  // it. The named style resolves at render from window.__docStyles (set per pass by
-  // the consumer, like __navSections), with per-block obj.style as OVERRIDES that
+  // it. The named style resolves at render from rc("docStyles") (set per pass by
+  // the consumer, like navSections), with per-block obj.style as OVERRIDES that
   // win. So editing the named style live-updates every referencing block on re-mount
   // (reference, not copy). No styleRef -> unchanged (obj.style path).
   function resolveBlockStyle(obj) {
-    var named = obj && obj.styleRef && window.__docStyles && window.__docStyles[obj.styleRef];
+    var named = obj && obj.styleRef && rc("docStyles") && rc("docStyles")[obj.styleRef];
     if (!named) return (obj && obj.style) || null;
     var merged = Object.assign({}, named, (obj && obj.style) || {});
     // colour precedence: a per-block override of ONE colour form beats the named style's
@@ -913,7 +926,7 @@
   // reads only the doc's HTML string + __docStyles, never editor state.
   function resolveInlineStyles(node) {
     if (!node || !node.querySelectorAll) return;
-    var styles = window.__docStyles;
+    var styles = rc("docStyles");
     if (!styles) return;
     var spans = node.querySelectorAll("span[data-style-ref]");
     for (var i = 0; i < spans.length; i++) {
@@ -1813,11 +1826,11 @@
       if (block.btnText) wrap.style.setProperty("--nav-btn-text", block.btnText);
       if (block.btnHover) wrap.style.setProperty("--nav-btn-hover", block.btnHover);
       // JJJJ: prefer chapter-derived sections (set per render pass via
-      // window.__navSections by the editor/export, which have the whole doc), so
+      // rc("navSections") by the editor/export, which have the whole doc), so
       // the nav selector + progress reflect real chapters; fall back to the
       // block's manually-authored sections when not provided.
-      var secs = (window.__navSections && window.__navSections.length)
-        ? window.__navSections.map(function (s) { return { id: s.id, label: s.label || "", pages: (s.pages || []).slice() }; })
+      var secs = (rc("navSections") && rc("navSections").length)
+        ? rc("navSections").map(function (s) { return { id: s.id, label: s.label || "", pages: (s.pages || []).slice() }; })
         : (block.sections || []).map(function (s) { return { id: s.id, label: s.label || "", pages: (s.pageIds || []).slice() }; });
       wrap.setAttribute("data-nav-map", JSON.stringify(secs));
       wrap.setAttribute("data-nav-menu-label", block.menuLabel || "Menu");
@@ -1936,16 +1949,16 @@
         gh.setAttribute("data-gate-hint", "1");
         gh.hidden = true;
         gh.appendChild(el("span", "course-nav__gate-hint-icon", "!"));
-        gh.appendChild(el("span", "course-nav__gate-hint-text", window.__gateMessage || "Complete the interactions on this page to continue."));
+        gh.appendChild(el("span", "course-nav__gate-hint-text", rc("gateMessage") || "Complete the interactions on this page to continue."));
         wrap.appendChild(gh);
       }
       // §1 glossary: a doc-wide term/definition list, opened from a button IN the
       // footer pill. Rendered only when the author added glossary terms
-      // (window.__glossaryTerms, an array of {term,def} set per render pass). The
+      // (rc("glossaryTerms"), an array of {term,def} set per render pass). The
       // list + live filter input are emitted as STATIC DOM; runtime.js owns the
       // open/close + case-insensitive filter (the pure-render invariant holds — no
       // behaviour here). Ships self-contained (plain text) in the air-gapped package.
-      var gterms = window.__glossaryTerms;
+      var gterms = rc("glossaryTerms");
       if (gterms && gterms.length) {
         var gbtn = el("button", "course-nav__glossary course-nav__glossary--icon");
         gbtn.type = "button";
@@ -2694,7 +2707,7 @@
       // for the HOST course's current axis selection, BEFORE instance overrides -- an
       // instance override is the most specific layer and always wins (see
       // resolveLibraryAxisContent below for why this needs a per-pass hook at all).
-      content = resolveLibraryAxisContent(content, window.__libraryAxisContext);
+      content = resolveLibraryAxisContent(content, rc("libraryAxisContext"));
       if (block.overrides) applyInstanceOverrides(content, block.overrides);
       var node = renderBlock(content);
       // Editor-only marker (harmless, inert in the shipped course): scopes the
@@ -2813,7 +2826,7 @@
   }
   window.resolveBlockBox = resolveBlockBox; // headless guard hook
   function applyBlockAppearance(node, block) {
-    var typeDef = (block && block.type && window.__blockStyles && window.__blockStyles[block.type]) || null;
+    var typeDef = (block && block.type && rc("blockStyles") && rc("blockStyles")[block.type]) || null;
     var b = resolveBlockBox(typeDef, block && block.box);
     if (!b) return;
     if (b.fill) node.style.background = b.fill;
@@ -2847,7 +2860,7 @@
     if (!def || !def.template || !Array.isArray(def.template.blocks)) return null;
     return def.template.blocks.map(function (b) {
       var content = cloneData(b);
-      content = resolveLibraryAxisContent(content, window.__libraryAxisContext);
+      content = resolveLibraryAxisContent(content, rc("libraryAxisContext"));
       if (page.overrides) applyInstanceOverrides(content, page.overrides);
       return content;
     });
@@ -2865,7 +2878,7 @@
     // the course default (doc.gateAllInteractions via the __gateAllInteractions per-pass hook).
     // Pure: render only stamps the flag; runtime observes completion + disables Next.
     var __gp = page.gateInteractions;
-    if (__gp === true || (__gp == null && window.__gateAllInteractions)) section.setAttribute("data-gate-page", "1");
+    if (__gp === true || (__gp == null && rc("gateAllInteractions"))) section.setAttribute("data-gate-page", "1");
     var blocks = page.libraryRef ? resolvePageLibraryContent(page) : (page.blocks || []);
     if (page.libraryRef) {
       // Editor-only marker (harmless, inert in the shipped course): scopes the same
@@ -2987,7 +3000,12 @@
     if (page.padY != null) root.style.setProperty("--page-pad-y", page.padY + "px");
   }
   window.applyPagePadding = applyPagePadding;
-  window.renderPage = function (page, theme, headerFooter) {
+  // arch-P1: `ctx` is the optional per-pass render context from buildRenderContext. Passing it
+  // is how a caller renders with an explicit context instead of assigning ten globals by hand.
+  // Omit it and the pass uses whatever context was last applied -- which is what every existing
+  // caller does, so this is additive.
+  window.renderPage = function (page, theme, headerFooter, ctx) {
+    if (ctx && window.applyRenderContext) window.applyRenderContext(ctx);
     var root = el("div", "course-root");
     // Auto vertical spacing DEFAULT: the course-root fills the viewport (--vp-h,
     // or 100vh in the shipped course) and flexes so the page area takes the
@@ -2997,26 +3015,26 @@
     applyPagePadding(root, page);
     // master content-width cap (doc.contentMaxWidth via the __contentMaxWidth per-pass
     // hook, set by editor/export/demo like __navSections). Inherits to .page.
-    if (window.__contentMaxWidth) root.style.setProperty("--page-max-width", window.__contentMaxWidth + "px");
+    if (rc("contentMaxWidth")) root.style.setProperty("--page-max-width", rc("contentMaxWidth") + "px");
     // master image corner radius (doc.imageRadius via the __imageRadius per-pass hook):
     // sets --img-radius on the root so every image rounds from one control; a per-image
     // block.radius sets --img-radius on its own figure and WINS (more specific). 0 = square.
-    if (window.__imageRadius != null) root.style.setProperty("--img-radius", window.__imageRadius + "px");
+    if (rc("imageRadius") != null) root.style.setProperty("--img-radius", rc("imageRadius") + "px");
     // §2 chapter progression (foundation): opt-in gated-progression flag, stamped via a
     // per-pass hook so the runtime can key linear KC-unlock off it. Ungated = no attr.
-    if (window.__gatedProgression) root.setAttribute("data-gated-progression", "1");
+    if (rc("gatedProgression")) root.setAttribute("data-gated-progression", "1");
     // auto-gate ALL interactions: a single course-level flag (doc.gateAllInteractions via the
     // per-pass hook). When set, the runtime requires every DETECTABLE interaction on a page
     // (quiz pass / all hotspots viewed / video watched / checkbox / all cards revealed) before
     // Next enables. Pure: render only stamps the flag; the runtime observes completion.
-    if (window.__gateAllInteractions) root.setAttribute("data-gate-all", "1");
+    if (rc("gateAllInteractions")) root.setAttribute("data-gate-all", "1");
     // global motion (doc.motion via the __motion per-pass hook): author fade durations for the
     // light/dark transition + chapter-change fade. Overrides the CSS defaults; prefers-reduced-
     // motion always wins (the CSS gates the transition/animation behind it). data-chapter-id lets
     // the runtime detect a chapter boundary to fade the incoming page.
-    if (window.__motion) {
-      if (window.__motion.modeMs != null) root.style.setProperty("--motion-mode-fade", window.__motion.modeMs + "ms");
-      if (window.__motion.chapterMs != null) root.style.setProperty("--motion-chapter-fade", window.__motion.chapterMs + "ms");
+    if (rc("motion")) {
+      if (rc("motion").modeMs != null) root.style.setProperty("--motion-mode-fade", rc("motion").modeMs + "ms");
+      if (rc("motion").chapterMs != null) root.style.setProperty("--motion-chapter-fade", rc("motion").chapterMs + "ms");
     }
     if (page.chapterId) root.setAttribute("data-chapter-id", page.chapterId);
     window.applyTheme(root, theme);
@@ -3035,8 +3053,8 @@
     };
   };
 
-  window.render = function (doc, theme) {
-    return window.renderPage(doc.pages[0], theme, window.resolveHeaderFooter(doc, doc.pages[0]));
+  window.render = function (doc, theme, ctx) {
+    return window.renderPage(doc.pages[0], theme, window.resolveHeaderFooter(doc, doc.pages[0]), ctx);
   };
   // #223 (tour builder T5c): render ONE block in isolation, so the editor's
   // "Cards face-up" board can re-host a marker's popover child blocks (its live
@@ -3205,7 +3223,7 @@
   // flow on a ordinary block BEFORE it's captured into the library -- capture is a plain
   // JSON clone, so those fields already survive it untouched, no new authoring UI needed)
   // has to be resolved separately, right here, fed by a per-render-pass hook
-  // (window.__libraryAxisContext = {variant, version}) since render.js's axis functions
+  // (the libraryAxisContext field, {variant, version}) since render.js's axis functions
   // are otherwise pure with no ambient "current key" concept. Callers (editor.js's
   // currentDoc(), export.js's buildPackage()/serializeVersionedPages()) set the hook to
   // the EFFECTIVE key (never null for variant -- always falls back to hero/identity, same

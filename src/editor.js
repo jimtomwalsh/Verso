@@ -5258,7 +5258,7 @@
     var presets = loadThemePresets(); var p = presets[name]; if (!p) return false;
     pushHistory(); // theme + styles are doc data now -> an apply is undoable
     applyThemePresetToDoc(doc, p);
-    window.__docStyles = getTextStyles(); // render reads the text-style hook
+    window.applyRenderContext({ docStyles: getTextStyles() }); // render reads the text-style hook
     syncWorkingFromDoc();
     saveRegistry(registry);
     reapplyTheme(); mount(); renderInspector();
@@ -6189,7 +6189,7 @@
       inspector.appendChild(h("div", "insp-hint", "No text blocks in the selection. Delete or group it from the right-click menu."));
       return;
     }
-    function batch(mut) { pushHistory(); textBlocks.forEach(function (b) { mut(b); }); window.__docStyles = getTextStyles(); mount(); }
+    function batch(mut) { pushHistory(); textBlocks.forEach(function (b) { mut(b); }); window.applyRenderContext({ docStyles: getTextStyles() }); mount(); }
     // #161: the batch text controls (style / colour / alignment) live in one canonical Type
     // section, matching the single-selection field inspector's Type grammar.
     beginSections();
@@ -7477,7 +7477,7 @@
         if (!eff || !Object.keys(eff).length) { alert("Style this block (fill / border / radius / text colour) first, then capture its look."); return; }
         pushHistory();
         getBlockStyles()[type] = clone(eff);
-        window.__blockStyles = getBlockStyles();
+        window.applyRenderContext({ blockStyles: getBlockStyles() });
         scheduleSave(); mount(); renderInspector();
       });
       capRow.appendChild(capBtn);
@@ -7487,7 +7487,7 @@
         clrBtn.addEventListener("click", function () {
           pushHistory();
           delete getBlockStyles()[type];
-          window.__blockStyles = getBlockStyles();
+          window.applyRenderContext({ blockStyles: getBlockStyles() });
           scheduleSave(); mount(); renderInspector();
         });
         capRow.appendChild(clrBtn);
@@ -17597,7 +17597,7 @@
     (function blockStylesEditor(intro, listHost) {
       var bstyles = getBlockStyles();
       var types = Object.keys(bstyles);
-      function commit() { window.__blockStyles = getBlockStyles(); scheduleSave(); mount(); }
+      function commit() { window.applyRenderContext({ blockStyles: getBlockStyles() }); scheduleSave(); mount(); }
       if (!types.length) { intro.appendChild(h("div", "insp-hint", "No block defaults captured yet.")); return; }
       types.forEach(function (type) {
         var box = bstyles[type];
@@ -19176,7 +19176,7 @@
           var stripped = stripInlineColor(obj[field]);
           if (stripped !== obj[field]) { obj[field] = stripped; node.innerHTML = stripped; }
         }
-        window.__docStyles = getTextStyles();
+        window.applyRenderContext({ docStyles: getTextStyles() });
         window.applyTextStyle(node, window.resolveBlockStyle(host)); renderModelView();
         renderInspector(); // clears + rebuilds (renderFieldInspector alone would append a 2nd copy)
       });
@@ -20370,16 +20370,10 @@
     // JJJJ: group pages into chapter COLUMNS; each page's column X is known now
     // (its row Y is set after measure in layoutColumns). page.id -> {col,row}.
     var chapters = (window.groupPagesByChapter ? window.groupPagesByChapter(renderDoc) : [{ pages: renderDoc.pages }]);
-    if (window.chaptersToNavSections) window.__navSections = window.chaptersToNavSections(renderDoc); // JJJJ: chapter-aware nav
-    window.__docStyles = renderDoc.styles || null; // LLL: named text styles resolve in render
-    window.__blockStyles = (renderDoc.theme && renderDoc.theme.blockStyles) || null; // #127: per-type default appearance
-    window.__contentMaxWidth = renderDoc.contentMaxWidth || null; // B: master content-width cap
-    window.__imageRadius = (renderDoc.imageRadius != null ? renderDoc.imageRadius : null); // master image corner radius (0 valid)
-    window.__gatedProgression = renderDoc.gatedProgression || null; // §2: opt-in linear chapter unlock
-    window.__gateAllInteractions = renderDoc.gateAllInteractions || null; // §5: require every detectable interaction before Next
-    window.__gateMessage = renderDoc.gateMessage || null; // §5: author-overridable gate reminder copy
-    window.__motion = renderDoc.motion || null; // global motion: light/dark + chapter-transition fade durations
-    window.__glossaryTerms = glossaryTerms(renderDoc); // §1: doc-wide glossary term/def list (or null)
+    // arch-P1: the whole per-pass render context (nav, styles, gates, motion, glossary) comes
+    // from ONE builder the export calls too, so the canvas and the shipped package cannot
+    // disagree about what render sees. src/render-context.js.
+    window.applyRenderContext(window.buildRenderContext(renderDoc));
     _numCols = Math.max(1, chapters.length);
     framePos = [];
     var colRowById = {};
@@ -23030,7 +23024,7 @@
     copy.id = "page-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
     (copy.blocks || []).forEach(remintIds);
     mergePasteDeps(pageClipboard.deps, getTextStyles(), getComponents()); // add-if-missing
-    window.__docStyles = getTextStyles();
+    window.applyRenderContext({ docStyles: getTextStyles() });
     var at = (currentPage != null && currentPage >= 0 && currentPage < doc.pages.length) ? currentPage : doc.pages.length - 1;
     var anchor = doc.pages[at];
     copy.chapterId = anchor ? (anchor.chapterId || null) : ((doc.pages[0] && doc.pages[0].chapterId) || null);
@@ -23079,7 +23073,7 @@
     // stripping (paste-without-formatting drops styleRef anyway).
     if (!strip) mergePasteDeps(clipboardDeps, getTextStyles(), getComponents());
     else mergePasteDeps({ styles: {}, components: clipboardDeps.components }, getTextStyles(), getComponents());
-    window.__docStyles = getTextStyles(); // render resolves the newly-carried styles this pass
+    window.applyRenderContext({ docStyles: getTextStyles() }); // render resolves the newly-carried styles this pass
     var news = clipboard.map(function (b) { var c = remintIds(clone(b)); if (strip) stripFormattingDeep(c); return c; });
     var L = insertLoc(); // FFFF: paste after the selected block (into its own container — incl. a hotspot card), else bottom
     news.forEach(function (c, i) { L.array.splice(L.index + i, 0, c); });
@@ -24881,16 +24875,8 @@
     }
     var __rmDemo = (window.resolveMedia && window.AssetStore) ? window.resolveMedia(doc, editorAssetResolve) : null;
     var cr;
-    if (window.chaptersToNavSections) window.__navSections = window.chaptersToNavSections(doc); // JJJJ: chapter-aware nav in preview
-    window.__docStyles = doc.styles || null; // LLL: named text styles resolve in render
-    window.__blockStyles = (doc.theme && doc.theme.blockStyles) || null; // #127: per-type default appearance (preview)
-    window.__contentMaxWidth = doc.contentMaxWidth || null; // B: master content-width cap (preview)
-    window.__imageRadius = (doc.imageRadius != null ? doc.imageRadius : null); // master image corner radius (preview; 0 valid)
-    window.__gatedProgression = doc.gatedProgression || null; // §2: opt-in linear chapter unlock (preview)
-    window.__gateAllInteractions = doc.gateAllInteractions || null; // §5: require every detectable interaction before Next (preview)
-    window.__gateMessage = doc.gateMessage || null; // §5: author-overridable gate reminder copy (preview)
-    window.__motion = doc.motion || null; // global motion: light/dark + chapter-transition fade durations (preview)
-    window.__glossaryTerms = glossaryTerms(doc); // §1: doc-wide glossary term/def list (preview)
+    // arch-P1: preview renders through the same one render context as the canvas and the export.
+    window.applyRenderContext(window.buildRenderContext(doc));
     try { cr = window.renderPage(doc.pages[demoPage], activeTheme(), window.resolveHeaderFooter(doc, doc.pages[demoPage])); }
     finally { if (__rmDemo) __rmDemo(); }
     var __demoBp = demoBp === "auto" ? bpForWidth(demoStage.clientWidth) : demoBp;
@@ -25737,7 +25723,7 @@
   // inspector) shows media -- not just the ones wrapped in resolveMedia. Export
   // overrides doc media to base64 before it serialises, so this editor
   // (objectURL) resolver never leaks into the shipped package.
-  window.__assetResolver = editorAssetResolve;
+  window.applyRenderContext({ assetResolver: editorAssetResolve });
   // Upload sites call this instead of storing base64 on the doc: store the blob,
   // get back an "asset:<id>" ref. If the store is absent or the write fails
   // (quota), fall back to the inline data: URL so the media still shows (and XX's
@@ -25831,7 +25817,7 @@
     // Returns the count stamped; refreshes render + saves when anything changed.
     applyTextRolesByType: function () {
       var n = applyTextRolesByType();
-      if (n) { window.__docStyles = getTextStyles(); saveRegistry(registry); mount(); }
+      if (n) { window.applyRenderContext({ docStyles: getTextStyles() }); saveRegistry(registry); mount(); }
       return n;
     },
     // #73 home / file browser — open the course wall (also the Home top-bar button).
@@ -26085,10 +26071,12 @@
     // pass. Variant is never null (falls back to hero/identity, same as resolveAxis's
     // own identity handling) so axis-tagged master content correctly filters even in
     // flagship/base view; version is null when the doc carries no version axis at all.
-    window.__libraryAxisContext = {
-      variant: activeVariant || (d.heroVariant || "hero"),
-      version: activeVersion || (d.versions && d.versions[0]) || null
-    };
+    window.applyRenderContext({
+      libraryAxisContext: {
+        variant: activeVariant || (d.heroVariant || "hero"),
+        version: activeVersion || (d.versions && d.versions[0]) || null
+      }
+    });
     return d;
   }
   function currentPages() { return currentDoc().pages; }

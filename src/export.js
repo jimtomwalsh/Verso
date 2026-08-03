@@ -203,12 +203,22 @@
   // file exists. opts.webVideo = "package" | "link".
   function cleanRoot(root, ctx, opts) {
     // drop inline THEME token custom properties so theme.css (and the runtime toggle)
-    // governs colour/type/spacing. KEEP layout vars (--page-pad-*, --page-max-width) AND
-    // motion vars (--motion-mode-fade / --motion-chapter-fade): those are per-page padding,
-    // master content-width, and global-motion author overrides that are MEANT to ship inline
-    // and win over the course.css defaults. (--vp-h is still dropped so auto-spacing -> 100vh.)
+    // governs colour/type/spacing. KEEP layout vars (--page-pad-*, --page-max-width,
+    // --img-radius) AND motion vars (--motion-mode-fade / --motion-chapter-fade): those are
+    // per-page padding, master content-width, master image radius, and global-motion author
+    // overrides that are MEANT to ship inline and win over the course.css defaults.
+    // (--vp-h is still dropped so auto-spacing -> 100vh.)
+    //
+    // arch-P1 found --img-radius missing from this list: the author's master image radius
+    // rounded images on the canvas and then never shipped, because render set it on the root
+    // and the export quietly stripped it. Exactly the editor/export divergence the render
+    // context exists to make visible.
+    var KEEP_ROOT_VARS = ["--page-", "--motion-", "--img-radius"];
     var props = [];
-    for (var i = 0; i < root.style.length; i++) { var p = root.style[i]; if (p.indexOf("--") === 0 && p.indexOf("--page-") !== 0 && p.indexOf("--motion-") !== 0) props.push(p); }
+    for (var i = 0; i < root.style.length; i++) {
+      var p = root.style[i];
+      if (p.indexOf("--") === 0 && !KEEP_ROOT_VARS.some(function (k) { return p.indexOf(k) === 0; })) props.push(p);
+    }
     props.forEach(function (p) { root.style.removeProperty(p); });
     if (!root.getAttribute("style")) root.removeAttribute("style");
 
@@ -273,16 +283,10 @@
     // `doc` is already variant-resolved (overrides baked, excluded pages dropped),
     // so render its pages directly with the pure renderer + current theme/headerFooter.
     var theme = window.Editor.getTheme();
-    if (window.chaptersToNavSections) window.__navSections = window.chaptersToNavSections(doc); // JJJJ: chapter-aware nav in the shipped course
-    window.__docStyles = doc.styles || null; // LLL: named text styles resolve in render
-    window.__blockStyles = (doc.theme && doc.theme.blockStyles) || null; // #127: per-type default appearance ships in export
-    window.__contentMaxWidth = doc.contentMaxWidth || null; // B: master content-width cap ships in export
-    window.__imageRadius = (doc.imageRadius != null ? doc.imageRadius : null); // master image corner radius ships in export (0 valid)
-    window.__gatedProgression = doc.gatedProgression || null; // §2: opt-in linear chapter unlock
-    window.__gateAllInteractions = doc.gateAllInteractions || null; // §5: course-default per-page interaction gate (was relying on a stale editor global -> now set for export)
-    window.__gateMessage = doc.gateMessage || null; // §5: author-overridable "finish the interactions" reminder copy
-    window.__motion = doc.motion || null; // global motion: light/dark + chapter-transition fade durations
-    window.__glossaryTerms = (window.__glossaryTermsFn && window.__glossaryTermsFn(doc)) || null; // §1: doc-wide glossary term/def list ships in export
+    // arch-P1: one builder, both callers. The shipped package gets exactly the context the
+    // canvas renders with -- nav, styles, gates, motion, glossary -- because there is now a
+    // single place that derives it. src/render-context.js.
+    window.applyRenderContext(window.buildRenderContext(doc));
     // YY: inline every "asset:<id>" ref as base64 (air-gap safe), then restore --
     // the hero `doc` is the LIVE registry object, so we must not leave it mutated.
     // §286: prefer an optimised (downscaled/recompressed) dataUrl when the media
@@ -804,7 +808,7 @@
     // hero/identity, same as resolveVariant's own default) -- keep the library-axis hook
     // in sync so a libraryInstance placement's master template resolves the SAME variant.
     // version is set per-pass by serializeVersionedPages below.
-    window.__libraryAxisContext = { variant: opts.variant || (baseDoc.heroVariant || "hero"), version: null };
+    window.applyRenderContext({ libraryAxisContext: { variant: opts.variant || (baseDoc.heroVariant || "hero"), version: null } });
     var themes = window.Editor.getThemes();
     opts._activeMode = (window.Editor.getTheme() === themes.light) ? "light" : "dark";
     var ctx = { net: [], dropped: [] };
