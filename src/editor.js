@@ -42,58 +42,20 @@
   var _numCols = 1;
   var CHAPTER_HEADER_H = 46; // space above each chapter column for its header bar
 
-  // ---- Chapter ops (JJJJ) ---------------------------------------------------
-  function createChapter(name) {
-    if (!Array.isArray(doc.chapters)) doc.chapters = [];
-    var id = "chap-" + Date.now() + "-" + Math.floor(Math.random() * 1e4);
-    var maxOrder = doc.chapters.reduce(function (m, c) { return Math.max(m, (c.order || 0) + 1); }, 0);
-    doc.chapters.push({ id: id, name: name || ("Chapter " + (doc.chapters.length + 1)), order: maxOrder });
-    return id;
-  }
-  // Reassign page index `pi` to a chapter, re-sort doc.pages column-major, return
-  // the moved page's NEW index (so the caller can keep it selected/current).
-  function moveToChapter(pi, chapterId) {
-    var pages = doc.pages || [];
-    var page = pages[pi];
-    if (!page) return pi;
-    pages.splice(pi, 1);            // pull it out of its current spot
-    page.chapterId = chapterId;
-    var at = window.chapterInsertIndex ? window.chapterInsertIndex(pages, chapterId, doc.chapters) : pages.length;
-    pages.splice(at, 0, page);      // drop it at the END of the target chapter (addition order)
-    return at;
-  }
-  function chapterPos(id) {
-    var sorted = (doc.chapters || []).slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
-    for (var i = 0; i < sorted.length; i++) if (sorted[i].id === id) return { sorted: sorted, pos: i };
-    return { sorted: sorted, pos: -1 };
-  }
-  // Swap a chapter with its neighbour (dir -1 left / +1 right); re-sort pages.
-  function reorderChapter(id, dir) {
-    var r = chapterPos(id), pos = r.pos, swap = pos + dir;
-    if (pos < 0 || swap < 0 || swap >= r.sorted.length) return false;
-    var t = r.sorted[pos].order; r.sorted[pos].order = r.sorted[swap].order; r.sorted[swap].order = t;
-    // Keep the chapters ARRAY canonical (sorted by order, order re-indexed to position) so
-    // array-index == c.order — otherwise array-index consumers diverge from the outline and
-    // Next skips a chapter. (Fix 2026-07-08.)
-    if (Array.isArray(doc.chapters)) {
-      doc.chapters.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
-      doc.chapters.forEach(function (c, i) { c.order = i; });
-    }
-    if (window.resortColumnMajor) doc.pages = window.resortColumnMajor(doc.pages, doc.chapters);
-    return true;
-  }
-  // Delete a chapter; its pages move to the previous chapter (or the next if it
-  // was the first). Refuses the last chapter.
-  function deleteChapter(id) {
-    var chs = doc.chapters || [];
-    if (chs.length <= 1) { window.alert("A course needs at least one chapter."); return false; }
-    var r = chapterPos(id); if (r.pos < 0) return false;
-    var target = r.sorted[r.pos > 0 ? r.pos - 1 : 1];
-    (doc.pages || []).forEach(function (p) { if (p.chapterId === id) p.chapterId = target.id; });
-    doc.chapters = chs.filter(function (c) { return c.id !== id; });
-    if (window.resortColumnMajor) doc.pages = window.resortColumnMajor(doc.pages, doc.chapters);
-    return true;
-  }
+  // arch-P3b-07r: the chapter ops and the page drag-reparent gesture moved to editor/pages.js.
+  // They are one concern: both end in `page.chapterId` plus a column-major resort, and the canvas
+  // draws one column per chapter. The world BUILDER that shared the drag banner did NOT move --
+  // it is the render loop, and it goes with the canvas geometry.
+  var createChapter = VE.bind("createChapter");
+  var moveToChapter = VE.bind("moveToChapter");
+  var chapterPos = VE.bind("chapterPos");
+  var reorderChapter = VE.bind("reorderChapter");
+  var deleteChapter = VE.bind("deleteChapter");
+  var pointerCol = VE.bind("pointerCol");
+  var dropPageToCol = VE.bind("dropPageToCol");
+  var wirePageDrag = VE.bind("wirePageDrag");
+  var pageDragSuppressed = VE.bind("pageDragSuppressed");
+
 
   // M6: explicit breakpoints (Captivate-style, not fluid). Each is a fixed device
   // frame size; the active one drives frame dimensions + a data-bp attr on every
@@ -6984,48 +6946,8 @@
 
   // ---- build the multi-frame world -----------------------------------------
   // Frames render at FULL content length (no internal scroll). A fold marker
-  // ---- JJJJ: page drag-reparent (drag a page by its label into a column) ----
-  var pageDragSuppressClick = false;
-  function pointerCol(clientX) {
-    var r = canvas.getBoundingClientRect();
-    var worldX = (clientX - r.left - view.x) / view.zoom;
-    return Math.floor(worldX / (FRAME_W + GAP_X));
-  }
-  function dropPageToCol(pi, col) {
-    var sorted = (doc.chapters || []).slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
-    var page = doc.pages[pi]; if (!page) return;
-    var targetId;
-    if (col >= sorted.length) targetId = createChapter();      // dropped on the "+ Chapter" slot -> new chapter
-    else if (col >= 0) targetId = sorted[col].id;
-    else return;
-    if (page.chapterId === targetId) { mount(); setSelection("page", doc.pages.indexOf(page)); return; }
-    pushHistory();
-    var np = moveToChapter(pi, targetId);
-    mount(); setActivePage(np); setSelection("page", np);
-  }
-  function wirePageDrag(label, pi) {
-    label.addEventListener("mousedown", function (e) {
-      if (e.button !== 0) return;
-      var sx = e.clientX, sy = e.clientY, dragging = false, indicator = null, dropCol = 0;
-      function onMove(ev) {
-        if (!dragging) {
-          if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 6) return;
-          dragging = true; document.body.classList.add("is-dragging-page");
-          indicator = h("div", "page-drop-col"); world.appendChild(indicator);
-        }
-        var maxCol = (doc.chapters || []).length; // last index = the "+ Chapter" slot
-        dropCol = Math.max(0, Math.min(pointerCol(ev.clientX), maxCol));
-        indicator.style.left = colX(dropCol) + "px"; indicator.style.width = FRAME_W + "px";
-      }
-      function onUp() {
-        document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp);
-        document.body.classList.remove("is-dragging-page");
-        if (indicator && indicator.parentNode) indicator.parentNode.removeChild(indicator);
-        if (dragging) { pageDragSuppressClick = true; setTimeout(function () { pageDragSuppressClick = false; }, 0); dropPageToCol(pi, dropCol); }
-      }
-      document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp);
-    });
-  }
+  // ...continues in pages.js (arch-P3b-07).
+
 
   // shows the device viewport line so you can gauge how much content sits below
   // the fold. Real scrolling lives in demo mode, not the authoring canvas.
@@ -7076,7 +6998,7 @@
       wrap.style.left = framePos[i].x + "px"; wrap.style.top = "0px"; wrap.style.width = FRAME_W + "px";
       var label = h("div", "frame-label" + (i === currentPage ? " is-active" : ""));
       label.appendChild(h("span", "frame-label__name", pageDisplayName(page, doc)));
-      label.addEventListener("click", function () { if (pageDragSuppressClick) return; focusFrame(i); setActivePage(i); setSelection("page", i); });
+      label.addEventListener("click", function () { if (pageDragSuppressed()) return; focusFrame(i); setActivePage(i); setSelection("page", i); });
       label.addEventListener("contextmenu", (function (pi, pg) { return function (e) {
         e.preventDefault(); e.stopPropagation();
         // Previewing a variant shows resolved clones -> don't mutate page structure.
@@ -8621,6 +8543,7 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    GAP_X: GAP_X,
     buildTargetPicker: buildTargetPicker,
     renderOnClickSection: renderOnClickSection,
     setGoto: setGoto,
@@ -9036,6 +8959,7 @@
   window.VersoDiagnostics.install(VE);   // the frame-cadence readout
   window.VersoDrill.install(VE);   // select-first drill-in and zoom-to-fit
   window.VersoInteract.install(VE);   // Interact mode; before actions.js, which aliases ACTION_TYPES
+  window.VersoPages.install(VE);   // chapters, and which one a page belongs to
   window.VersoEditing.install(VE);   // what makes the canvas typeable
   window.VersoActions.install(VE);   // what a learner's click does
   window.VersoInspectorBlocks.install(VE);   // which panel a selected block gets
