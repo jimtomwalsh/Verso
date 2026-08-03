@@ -13,6 +13,16 @@
  * Do NOT edit editor.js / render.js / index.html.
  */
 (function () {
+  // arch-P2 (the test seam): in the browser this binds to the REAL window, so every
+  // `window.X = ...` below publishes globally exactly as it did before -- no behaviour change.
+  // Under `require` in node there is no window, so it binds to a local stand-in and the footer
+  // hands that same namespace to module.exports. The file's interface becomes the test surface,
+  // instead of the suite string-slicing its source text back into life.
+  // The node stand-in inherits its no-op listeners from a prototype, so `module.exports` carries
+  // this file's OWN published names and nothing else.
+  var window = (typeof globalThis !== "undefined" && globalThis.window)
+    || Object.create({ addEventListener: function () {}, removeEventListener: function () {} });
+
   "use strict";
 
   var AUTOSAVE_MS = 4000;
@@ -334,31 +344,41 @@
     location.reload();
   }
 
-  // --- register pipeline buttons ---------------------------------------------
-  window.Editor.registerPipelineButton("Export JSON", save);
-  window.Editor.registerPipelineButton("Reset Workspace", resetWorkspace);
+  // --- boot: pipeline buttons, the autosave poll, asset hydration --------------
+  // All of this needs a live editor and a real browser, so it is skipped when the file is
+  // loaded on its own (arch-P2's node test seam) -- otherwise the autosave interval would
+  // keep a bare `require` alive forever. The pure persistence logic above is unaffected.
+  if (window.Editor && window.Editor.registerPipelineButton) {
+    window.Editor.registerPipelineButton("Export JSON", save);
+    window.Editor.registerPipelineButton("Reset Workspace", resetWorkspace);
 
-  // Power (#179): the 4s autosave poll fires forever, even when the window is occluded /
-  // minimised -- a constant CPU wake that helps defeat macOS App Nap. Expose a governor so
-  // the editor's visibilitychange handler can PAUSE it while hidden (flushing first, so a
-  // hidden-then-killed app never loses the latest edit) and RESUME on return.
-  var _autosaveTimer = setInterval(autosave, AUTOSAVE_MS);
-  window.__autosaveGov = {
-    pause: function () { if (_autosaveTimer) { autosave(); clearInterval(_autosaveTimer); _autosaveTimer = 0; } },
-    resume: function () { if (!_autosaveTimer) _autosaveTimer = setInterval(autosave, AUTOSAVE_MS); },
-    running: function () { return !!_autosaveTimer; }
-  };
-  window.addEventListener("beforeunload", autosave);
+    // Power (#179): the 4s autosave poll fires forever, even when the window is occluded /
+    // minimised -- a constant CPU wake that helps defeat macOS App Nap. Expose a governor so
+    // the editor's visibilitychange handler can PAUSE it while hidden (flushing first, so a
+    // hidden-then-killed app never loses the latest edit) and RESUME on return.
+    var _autosaveTimer = setInterval(autosave, AUTOSAVE_MS);
+    window.__autosaveGov = {
+      pause: function () { if (_autosaveTimer) { autosave(); clearInterval(_autosaveTimer); _autosaveTimer = 0; } },
+      resume: function () { if (!_autosaveTimer) _autosaveTimer = setInterval(autosave, AUTOSAVE_MS); },
+      running: function () { return !!_autosaveTimer; }
+    };
+    window.addEventListener("beforeunload", autosave);
 
-  // Hydrate the asset store from IndexedDB (async), THEN hoist any legacy inline
-  // base64 media in the registry into it and re-mount so media resolves. Done in
-  // the callback because IndexedDB open/load is async -- migrating/mounting before
-  // the map is populated would render assets blank.
-  hydrateAssets(function () {
-    if (window.Editor.migrateAssets) window.Editor.migrateAssets();
-  });
-  // Mark-sweep orphaned blobs on the way out (union of all open docs' refs).
-  window.addEventListener("beforeunload", function () {
-    if (window.Editor.sweepAssets) window.Editor.sweepAssets();
-  });
+    // Hydrate the asset store from IndexedDB (async), THEN hoist any legacy inline
+    // base64 media in the registry into it and re-mount so media resolves. Done in
+    // the callback because IndexedDB open/load is async -- migrating/mounting before
+    // the map is populated would render assets blank.
+    hydrateAssets(function () {
+      if (window.Editor.migrateAssets) window.Editor.migrateAssets();
+    });
+    // Mark-sweep orphaned blobs on the way out (union of all open docs' refs).
+    window.addEventListener("beforeunload", function () {
+      if (window.Editor.sweepAssets) window.Editor.sweepAssets();
+    });
+  }
+
+  // arch-P2 (the test seam): under `require`, the `window` above is this file's OWN namespace --
+  // exactly what it publishes and nothing else. In the browser `module` is undefined, so this
+  // line does nothing at all.
+  if (typeof module !== "undefined" && module.exports) module.exports = window;
 })();
