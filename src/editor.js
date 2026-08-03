@@ -6080,29 +6080,46 @@
   }
   window.__panelV2 = { beginSections: beginSections, sectionGroup: sectionGroup, endSections: endSections, setEditMode: function (v) { panelEditMode = v; }, getEditMode: function () { return panelEditMode; } }; // test hook
 
-  function renderInspector() {
-    if (window.__KIT_MODE) return; // kit.html owns #inspector as a static gallery; don't let internal re-renders wipe it
-    inspector.innerHTML = ""; panelFields = {};
-    hideBlockToolbar(); // element inspectors re-show it via renderBlockActionsSection; page/document/none leave it hidden
-    if (commentMode) { renderCommentList(); return; } // §12 slice 3: panel = the comment list
-    if (interactMode) { renderInteractInspector(); return; }
-    // A multi-selection (>=2) shows the batch inspector regardless of the single selection type.
-    if (multiSel.length >= 2) { renderMultiInspector(); renderVariantOverrides(); showMultiToolbar(); return; }
-    if (selection.type === "instance") renderInstanceInspector(selection.node);
-    else if (selection.type === "field") renderFieldInspector(selection.node);
-    else if (selection.type === "embed") renderBlockTwoLevel(selection.node, selection.node.__block.type === "htmlEmbed" ? "HTML Interaction" : "Web Embed", CONTENT_PURE_DECL, renderEmbedInspector); // SPEC-ui-kit ticket 8: two-level (#161: depth-pure content)
-    else if (selection.type === "navButton") renderNavButtonInspector(selection.node);
-    else if (selection.type === "page") renderPageInspector(selection.node);
-    else if (selection.type === "block") renderBlockInspector(selection.node);
-    else renderDocumentInspector();
-    renderVariantOverrides();
-    maybeRenderLayoutBar(); // D3: Edit-layout bar, only if this panel uses v2 sections
-    refreshSettingsPanes(); // keep the ⚙ modal in sync if an in-modal control re-rendered
-    applyVersionEditGuard(); // #207 FIX 2: disable non-persisting block controls while editing a version
+  // What each row of the dispatch table (src/editor/inspector/dispatch.js) names. The table decides
+  // WHICH panel and WHAT runs after it; these are the implementations, and a ratchet fails a name
+  // with nothing behind it.
+  var INSPECTOR_PANELS = {
+    renderCommentList: function () { renderCommentList(); },              // §12 slice 3: panel = the comment list
+    renderInteractInspector: function () { renderInteractInspector(); },
+    renderMultiInspector: function () { renderMultiInspector(); },
+    renderInstanceInspector: function () { renderInstanceInspector(selection.node); },
+    renderFieldInspector: function () { renderFieldInspector(selection.node); },
+    // SPEC-ui-kit ticket 8: two-level (#161: depth-pure content)
+    renderEmbedPanel: function () {
+      renderBlockTwoLevel(selection.node, selection.node.__block.type === "htmlEmbed" ? "HTML Interaction" : "Web Embed",
+        CONTENT_PURE_DECL, renderEmbedInspector);
+    },
+    renderNavButtonInspector: function () { renderNavButtonInspector(selection.node); },
+    renderPageInspector: function () { renderPageInspector(selection.node); },
+    renderBlockInspector: function () { renderBlockInspector(selection.node); },
+    renderDocumentInspector: function () { renderDocumentInspector(); }
+  };
+  var INSPECTOR_STEPS = {
+    variantOverrides: function () { renderVariantOverrides(); },
+    multiToolbar: function () { showMultiToolbar(); },
+    layoutBar: function () { maybeRenderLayoutBar(); },                   // D3: only if this panel uses v2 sections
+    settingsPanes: function () { refreshSettingsPanes(); },               // keep the ⚙ modal in sync if an in-modal control re-rendered
+    versionGuard: function () { applyVersionEditGuard(); },               // #207 FIX 2
     // #221 tour builder: when the spatial board overlay is open, mirror every edit
     // (canvas drag, inspector change, undo) back onto the board + its re-hosted inspector.
-    if (typeof tourBoardIsOpen === "function" && tourBoardIsOpen()) syncTourBoard();
-    wireScrollEdges(document.querySelector(".panel--right .panel-scroll")); // uio-O-W1 (OVL-10)
+    tourBoard: function () { if (typeof tourBoardIsOpen === "function" && tourBoardIsOpen()) syncTourBoard(); },
+    scrollEdges: function () { wireScrollEdges(document.querySelector(".panel--right .panel-scroll")); } // uio-O-W1 (OVL-10)
+  };
+  function renderInspector() {
+    var rule = window.VersoInspector.pick({
+      kitMode: !!window.__KIT_MODE, commentMode: commentMode, interactMode: interactMode,
+      multiSelCount: multiSel.length, selectionType: selection.type
+    });
+    if (!rule.render) return; // kit.html owns #inspector as a static gallery
+    inspector.innerHTML = ""; panelFields = {};
+    hideBlockToolbar(); // element inspectors re-show it via renderBlockActionsSection; page/document/none leave it hidden
+    INSPECTOR_PANELS[rule.render]();
+    rule.after.forEach(function (step) { INSPECTOR_STEPS[step](); });
   }
   // #207 FIX 2 (interaction-feel §3 "no dead controls"): while editing a NON-BASE software version,
   // per-version appearance/structure overrides are not captured yet, so an element inspector's block
