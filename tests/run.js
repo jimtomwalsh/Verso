@@ -3893,6 +3893,7 @@ section("exit preview focuses the demo's page (#100)");
 // #90: native Table block — 4-file contract wiring (render / course.css / editor).
 section("table block (#90)");
 (function () {
+  var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var rn = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ic = src("src/icons.js");
   // render.js: pure renderer — editable cells (th/td by header), scroll wrapper, borders/zebra/pad/align
   ok("render defines a table renderer", /table: function \(block\) \{/.test(rn));
@@ -3909,7 +3910,7 @@ section("table block (#90)");
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
   ok("table has a Lucide glyph", /table: "table"/.test(e) && /"table":/.test(ic));
   // F&R parity: cells wired into the enumerator
-  ok("frTargets enumerates table cells", /b\.type === "table" && Array\.isArray\(b\.rows\)[\s\S]*?host: cell, key: "t"/.test(e));
+  ok("frTargets enumerates table cells", /b\.type === "table" && Array\.isArray\(b\.rows\)[\s\S]*?host: cell, key: "t"/.test(CE));
 })();
 
 // ---- #111 course-completion / exit splash --------------------------------
@@ -9087,7 +9088,8 @@ section("hotspot per-card size");
 // ---- FR: Find & replace pure core + variant routing ----------------------
 section("FR find/replace");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   if (a < 0 || b < 0) { ok("locate @fr fence", false); return; }
   var body = e.slice(a, b);
@@ -12913,6 +12915,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 (function () {
   section("§96 cross-file paste deps");
   var ed = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
+  var CE96 = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var css = src("editor.css");
   var m = ed.match(/\/\* @pastedeps-start \*\/([\s\S]*?)\/\* @pastedeps-end \*\//);
   ok("pastedeps region is extractable", !!m);
@@ -12975,8 +12978,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 
   // Find & replace: a variant target selector routes replacements to overrides for the
   // chosen variant (and previews it); the core is scoped on frVariant, not activeVariant.
-  ok("F&R dialog targets a chosen frVariant", /var frVariant = activeVariant \|\| "";/.test(ed) && /frCore\.write\(t, frVariant/.test(ed) && /frCore\.targets\(doc, frVariant\)/.test(ed));
-  ok("F&R variant selector previews the chosen layer on the canvas", /var vsel = dsSelect\([\s\S]*previewVariant\(frVariant \|\| null\)/.test(ed));
+  ok("F&R dialog targets a chosen frVariant", /var frVariant = E\.activeVariant \|\| "";/.test(CE96) && /frCore\.write\(t, frVariant/.test(CE96) && /frCore\.targets\(E\.doc, frVariant\)/.test(CE96));
+  ok("F&R variant selector previews the chosen layer on the canvas", /var vsel = dsSelect\([\s\S]*previewVariant\(frVariant \|\| null\)/.test(CE96));
   ok("no stray activeVariant in the F&R replace ops", !/frCore\.write\(t, activeVariant/.test(ed));
 
   // Obvious variant-preview highlight: an inset ring + a floating badge naming the variant.
@@ -13336,7 +13339,8 @@ section("inline weight on selection");
 // ---- #116 copy-editor view-state (fullscreen alternate view shell) --------
 section("#116 copy-editor shell");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var t = src("src/editor/copy-editor.js");
   // Extract the PURE view-state core (the single source of open/closed logic) and eval it.
   var block = slice(t, "window.copyEditorNextState = function", "// ===== end #116 copy-editor view-state");
   var host = {};
@@ -13357,7 +13361,7 @@ section("#116 copy-editor shell");
   ok("wiring: Close button exits", /getElementById\("copyedit-exit"\)[\s\S]{0,80}addEventListener\("click", exitCopyEditor\)/.test(t));
   ok("wiring: Escape exits when open", /if \(!copyEditorIsOpen\(\)\) return;[\s\S]{0,120}exitCopyEditor\(\)/.test(t));
   ok("wiring: exit re-focuses the active page (canvas restore)", /function exitCopyEditor\(\)[\s\S]{0,700}focusFrame\(p\); setActivePage\(p\); setSelection\("page", p\)/.test(t));
-  ok("wiring: wireCopyEditor called at boot", t.indexOf("wireCopyEditor();") !== -1);
+  ok("wiring: wireCopyEditor called at boot", src("src/editor.js").indexOf("wireCopyEditor();") !== -1);
   var html = src("index.html");
   ok("markup: copy-editor overlay is hidden by default", /<div id="copy-editor" class="copyedit" hidden>/.test(html));
   ok("side-rail-cleanup: the copy-editor rail button is retired from markup", html.indexOf('id="copy-editor-btn"') === -1);
@@ -13403,8 +13407,10 @@ section("#170/#158 shared formatting toggle-bar");
   ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
   ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
-  var cfStart = e.indexOf("function buildCopyFormatBar()");
-  var cfBody = e.slice(cfStart, cfStart + 1500);
+  // arch-P3b-07j: the copy editor's bar moved with the Read view; the field inspector's stayed.
+  var ce = src("src/editor/copy-editor.js");
+  var cfStart = ce.indexOf("function buildCopyFormatBar()");
+  var cfBody = ce.slice(cfStart, cfStart + 1500);
   ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
   ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   // exactly one config-driven toggle list in the whole file (no second duplicate copy).
@@ -13475,47 +13481,51 @@ section("#170/#33 text<->list block-type conversion");
 // ---- SPEC 7: Build/Read view toggle in the editor header (wiring) ----
 section("editor-rework Build/Read toggle");
 (function () {
+  var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var e = src("src/editor.js");
-  ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(e));
-  ok("the toggle offers Build + Read segments as GLYPHS (edit-header-ia-v2)", /options: \[\{ value: "build", icon: "square-pen", title: "Build" \}, \{ value: "read", icon: "file-text", title: "Read" \}\]/.test(e));
-  ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(e));
-  ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(e) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(e));
+  ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(CE));
+  ok("the toggle offers Build + Read segments as GLYPHS (edit-header-ia-v2)", /options: \[\{ value: "build", icon: "square-pen", title: "Build" \}, \{ value: "read", icon: "file-text", title: "Read" \}\]/.test(CE));
+  ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(CE));
+  ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(CE) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(CE));
   ok("the toggle is mounted at boot", /mountViewToggle\(\); \/\/ SPEC 7/.test(e));
   ok("the header carries the view-toggle host", /id="editor-view-toggle"/.test(src("index.html")));
 })();
 
 section("#175 copy-editor format toolbar");
 (function () {
+  var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var e = src("src/editor.js");
-  var bar = slice(e, "function buildCopyFormatBar()", "return bar;\n  }");
+  // The closing brace is one indent deeper inside install().
+  var bar = slice(CE, "function buildCopyFormatBar()", "return bar;\n    }");
   ok("toolbar built once + injected into the copy-editor bar", /getElementById\("copyedit-format"\)[\s\S]*?insertBefore\(bar, host\)/.test(bar));
   // #170/#158: B/I/U/Link now come from the ONE shared canonical toggle-bar builder
   // (buildFormatToggleBar), not a bespoke row -- wired here via io.getNode/io.onChange.
   ok("toolbar uses the shared canonical toggle-bar builder, not a bespoke B/I/U row", /var biu = buildFormatToggleBar\(\{[\s\S]{0,1200}\}\);/.test(bar));
   ok("getNode resolves the active copy row's field", /getNode: function \(\) \{ return _activeCopyRow && _activeCopyRow\.tx; \}/.test(bar));
   ok("onChange commits through commitCopyRow (-> frWrite override layer)", /onChange: function \(\) \{ if \(!_activeCopyRow\) return; commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\); \}/.test(bar));
-  ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(e));
+  ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(CE));
   ok("toolbar uses the shared dsSelect weight picker (no bespoke control)", /dsSelect\(\[\["Weight", ""\], \["Regular", "400"\][\s\S]*?applyCopyWeight/.test(bar));
   ok("weight captures the live row range on mousedown (select steals focus)", /mousedown[\s\S]*?savedRange = \(r && _activeCopyRow/.test(bar));
   // applyCopyWeight: an inline font-weight span (survives sanitizeFieldHtml) committed through commitCopyRow
-  var acw = slice(e, "function applyCopyWeight(", "\n  }\n  function buildCopyFormatBar");
+  var acw = slice(CE, "function applyCopyWeight(", "\n    }\n    function buildCopyFormatBar");
   ok("applyCopyWeight wraps the selection in a font-weight span", /span\.style\.fontWeight = weight[\s\S]*?surroundContents\(span\)/.test(acw));
   ok("applyCopyWeight falls back to whole-row when nothing is selected", /r\.selectNodeContents\(tx\)/.test(acw));
   ok("applyCopyWeight commits via commitCopyRow (variant-aware frWrite)", /commitCopyRow\(t, tx, _activeCopyRow\.variant\)/.test(acw));
   // seed-from-flagship: frValueOf falls back to the base value when a variant has no override,
   // so a first variant edit starts from the flagship's rich HTML (inline weight spans intact).
-  var fr = slice(e, "function frValueOf(t, variant)", "function frWrite");
+  var fr = slice(CE, "function frValueOf(t, variant)", "function frWrite");
   ok("frValueOf falls back to the flagship base value (seeds variant rich text)", /return t\.host\[t\.key\] != null \? String\(t\.host\[t\.key\]\) : ""/.test(fr));
   // active-row tracking + teardown
-  ok("active row tracked on focus", /addEventListener\("focus", function \(\) \{ _activeCopyRow = \{ tx: tx, t: t, variant: variant == null \? activeVariant : variant \};/.test(e));
-  ok("active row dropped when rows rebuild + on exit", /_activeCopyRow = null; refreshCopyFormatState\(\)/.test(e) && /_activeCopyRow = null; \/\/ #175/.test(e));
+  ok("active row tracked on focus", /addEventListener\("focus", function \(\) \{ _activeCopyRow = \{ tx: tx, t: t, variant: variant == null \? activeVariant : variant \};/.test(CE));
+  ok("active row dropped when rows rebuild + on exit", /_activeCopyRow = null; refreshCopyFormatState\(\)/.test(CE) && /_activeCopyRow = null; \/\/ #175/.test(CE));
   ok("invariant: toolbar is Verso UI only — no render.js leak", src("src/render.js").indexOf("copyedit__format") === -1 && src("src/render.js").indexOf("applyCopyWeight") === -1);
 })();
 
 // ---- #117 copy-editor read-only document (frTargets + roles + page groups) ----
 section("#117 copy-editor read-only doc");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   // real frTargets + frValueOf (the writable spine) from the F&R fence
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   var fr = new Function(e.slice(a, b) + "\nreturn { targets: frTargets, valueOf: frValueOf };")();
@@ -13565,18 +13575,20 @@ section("#117 copy-editor read-only doc");
 
   // wiring: enter paints the doc; a VIEW over frValueOf, never a store
   ok("wiring: enterCopyEditor renders the doc", /function enterCopyEditor\(\)[\s\S]{0,320}renderCopyEditorDoc\(\)/.test(e));
-  ok("wiring: builder reads frTargets + frValueOf (model, not store)", /frTargets\(doc, listVariant\)\.map[\s\S]{0,140}frValueOf\(t, listVariant\)/.test(e));
+  ok("wiring: builder reads frTargets + frValueOf (model, not store)", /frTargets\(E\.doc, listVariant\)\.map[\s\S]{0,140}frValueOf\(t, listVariant\)/.test(e));
   ok("wiring: rows carry a role tag + preserved inline HTML", /copyedit-row__role[\s\S]{0,220}tx\.innerHTML = row\.html/.test(e));
-  ok("wiring: read-only chapter/page location header", /copyedit-loc__chapter[\s\S]{0,160}pageDisplayName\(page, doc\)/.test(e));
+  ok("wiring: read-only chapter/page location header", /copyedit-loc__chapter[\s\S]{0,160}pageDisplayName\(page, E\.doc\)/.test(e));
 })();
 
 // ---- #118 copy-editor two-way editing (write-back + rich-preserving + variant) ----
 section("#118 copy-editor two-way editing");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  // sanitizeFieldHtml stayed in editor.js, so this section reads both files.
+  var e = src("src/editor/copy-editor.js"), ed = src("src/editor.js");
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   var fr = new Function(e.slice(a, b) + "\nreturn { targets: frTargets, valueOf: frValueOf, write: frWrite };")();
-  var sm = e.match(/\/\* @sanitize-field-start \*\/([\s\S]*?)\/\* @sanitize-field-end \*\//);
+  var sm = ed.match(/\/\* @sanitize-field-start \*\/([\s\S]*?)\/\* @sanitize-field-end \*\//);
   var san = new Function(sm[1] + "\nreturn sanitizeFieldHtml;")();
 
   // BASE write-back: an edit writes host[key] on the ONE doc (no parallel store)
@@ -13616,14 +13628,15 @@ section("#118 copy-editor two-way editing");
 // ---- #119 copy-editor tools (word count + spellcheck + F&R reuse) ---------
 section("#119 copy-editor tools");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   var fr = new Function(e.slice(a, b) + "\nreturn { targets: frTargets, valueOf: frValueOf, words: frWords };")();
   // the header count reuses the SAME base-scope formula the F&R panel shows (#78)
   var d = { pages: [{ id: "p", blocks: [{ type: "heading", text: "One two three" }, { type: "paragraph", text: "four five" }] }] };
   var frTotal = fr.targets(d, "").reduce(function (n, t) { return n + fr.words(fr.valueOf(t, "")); }, 0);
   ok("fixture F&R word total is 5", frTotal === 5);
-  ok("wiring: word count reuses frWords over frTargets base scope (matches F&R)", /function copyEditorWordTotal\(\) \{\s*return frTargets\(doc, ""\)\.reduce\(function \(n, t\) \{ return n \+ frWords\(frValueOf\(t, ""\)\); \}, 0\);/.test(e));
+  ok("wiring: word count reuses frWords over frTargets base scope (matches F&R)", /function copyEditorWordTotal\(\) \{\s*return frTargets\(E\.doc, ""\)\.reduce\(function \(n, t\) \{ return n \+ frWords\(frValueOf\(t, ""\)\); \}, 0\);/.test(e));
   ok("wiring: header shows word count + Find & replace", /copyedit-wordcount[\s\S]{0,1800}"Find & replace"/.test(e)); // #104: the Single|Side-by-side toggle now sits between them
   ok("wiring: native spellcheck ON for editable rows", /tx\.setAttribute\("spellcheck", "true"\)/.test(e));
   ok("wiring: Find & replace opens the EXISTING modal (reuse)", /find\.addEventListener\("click", function \(\) \{ openFindReplace\(\); \}\)/.test(e));
@@ -13635,7 +13648,8 @@ section("#119 copy-editor tools");
 // ---- #104 copy-editor Side-by-side variant columns -----------------------
 section("#104 copy-editor variant columns");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
+  var e = src("src/editor/copy-editor.js");
   var css = src("editor.css");
   // real frTargets/frValueOf/frWrite + the new frHasOverride from the F&R fence
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
@@ -13670,7 +13684,7 @@ section("#104 copy-editor variant columns");
   ok("create-from-flagship seeds the override from base", fr.valueOf(t2, "V1") === "Flagship copy" && d2.pages[0].blocks[0].text === "Flagship copy");
 
   // wiring: gated toggle, sbs render branch, per-cell lock + create, transient unlock
-  ok("wiring: Single|Side-by-side toggle gated on doc.variants", /if \(\(doc\.variants \|\| \[\]\)\.length\) \{[\s\S]{0,260}\["Single", false\], \["Side by side", true\]/.test(e));
+  ok("wiring: Single|Side-by-side toggle gated on doc.variants", /if \(\(E\.doc\.variants \|\| \[\]\)\.length\) \{[\s\S]{0,260}\["Single", false\], \["Side by side", true\]/.test(e));
   ok("wiring: toggle uses the canonical prop-toggle-row (SegmentedControl)", /h\("div", "prop-toggle-row copyedit-modeseg"\)/.test(e));
   ok("wiring: render branches to side-by-side when on + course has variants", /var sbs = copyEditSbs && cols\.length;/.test(e) && /if \(sbs\) \{ host\.appendChild\(buildSbsRow\(row, cols, tmpl\)\); return; \}/.test(e));
   ok("wiring: one column header, not per page group", (e.match(/h\("div", "copyedit-colhead"\)/g) || []).length === 1);

@@ -356,6 +356,8 @@
   <script src="src/editor/board/builder.js"></script>
   <!-- arch-P3b-07l variants: window.VersoVariants — the variant and version axes: the override model, the live property-panel editor and the two toolbar switchers with their preview badges. Must precede editor.js. -->
   <script src="src/editor/variants.js"></script>
+  <!-- arch-P3b-07j copy editor: window.VersoCopyEditor — the Read view (every text field of the course, page by page, beside its variants) and the find & replace that shares its variant-safe write path. Must precede editor.js. -->
+  <script src="src/editor/copy-editor.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->
