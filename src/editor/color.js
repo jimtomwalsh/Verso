@@ -144,6 +144,12 @@
       setTimeout(function () { document.addEventListener("mousedown", __colourPopDown, true); }, 0);
     }
 
+    // A unified colour control: native swatch + hex field, applied LIVE (no panel
+    // rebuild, so selection is kept). onPick(value) on edit, onPick(null) when the
+    // field is cleared (revert to default). Used for fill / text / stroke colours.
+    // target defaults to the global inspector; pass a disclosure body for the
+    // headerFooter/theme sections. noHistory skips pushHistory for state that lives
+    // outside doc (canvas bg, theme tokens) and so is not on the undo stack.
     function colourControl(labelText, current, onPick, target, noHistory) {
       var host = target || E.inspector;
       if (labelText) host.appendChild(h("div", "insp-row__label insp-row__label--stacked", labelText)); // omit an empty label so a swatch can sit on one line under its section header

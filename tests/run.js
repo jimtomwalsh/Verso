@@ -3667,10 +3667,12 @@ section("split-page tool wired into the two-level Actions row");
   // arch-P3b-06: blockChromeHandlers moved with the hotspots editor.
   ok("blockChromeHandlers exposes split gated on canSplitAtBlock",
     /split:\s*canSplitAtBlock\(block\)\s*\?\s*function\s*\(\)\s*\{\s*splitPageAtBlock\(block\);\s*\}\s*:\s*null/.test(src("src/editor/hotspots-editor.js")));
+  // arch-P3b-07b: the Actions row is renderContainerChrome, now in inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   ok("Actions row adds the slice button when handlers.split is a function",
-    /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split, false\]\)/.test(t));
+    /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split, false\]\)/.test(ep));
   ok("split button sits before Delete in the Actions row",
-    /acts\.push\(\["slice"[\s\S]*?acts\.push\(\["trash", "Delete"/.test(t));
+    /acts\.push\(\["slice"[\s\S]*?acts\.push\(\["trash", "Delete"/.test(ep));
 })();
 
 // Outliner exposes items[]-based container contents (cardDeck / cardReveal / accordion /
@@ -6126,6 +6128,8 @@ section("#169 pin-to-gutters preview");
 
 section("nav pill cleanup");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   var css = src("src/course.css");
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -6142,12 +6146,12 @@ section("nav pill cleanup");
   ok("css pill bg uses color-mix with --nav-pill-opacity", /background: color-mix\(in srgb, var\(--nav-pill-fill[^)]*\)[^,]*\) var\(--nav-pill-opacity, 100%\), transparent\);/.test(css));
   ok("render sets --nav-pill-opacity from block.pillOpacity", /block\.pillOpacity != null\) wrap\.style\.setProperty\("--nav-pill-opacity", block\.pillOpacity \+ "%"\)/.test(r));
   ok("editor has an Opacity iconField writing pillOpacity (clamped 0-100)", /child\.pillOpacity = Math\.max\(0, Math\.min\(100, n\)\)/.test(e));
-  ok("pillOpacity in NAV_PILL_KEYS (override-dot/reset)", /NAV_PILL_KEYS = \[[^\]]*"pillOpacity"/.test(e));
+  ok("pillOpacity in NAV_PILL_KEYS (override-dot/reset)", /NAV_PILL_KEYS = \[[^\]]*"pillOpacity"/.test(ep));
   // author pill LAYER BLUR: backdrop-filter behind the pill, default 0
   ok("css pill has backdrop-filter blur var (default 0)", /backdrop-filter: blur\(var\(--nav-pill-blur, 0px\)\);/.test(css) && /-webkit-backdrop-filter: blur\(var\(--nav-pill-blur, 0px\)\);/.test(css));
   ok("render sets --nav-pill-blur from block.pillBlur", /block\.pillBlur != null\) wrap\.style\.setProperty\("--nav-pill-blur", block\.pillBlur \+ "px"\)/.test(r));
   ok("editor has a Blur iconField writing pillBlur (clamped 0-40)", /child\.pillBlur = Math\.max\(0, Math\.min\(40, n\)\)/.test(e));
-  ok("pillBlur in NAV_PILL_KEYS", /NAV_PILL_KEYS = \[[^\]]*"pillBlur"/.test(e));
+  ok("pillBlur in NAV_PILL_KEYS", /NAV_PILL_KEYS = \[[^\]]*"pillBlur"/.test(ep));
 })();
 
 // ---- global motion: light/dark fade + chapter-change fade ------------------
@@ -6893,6 +6897,8 @@ section("sequence per-step icons");
 // sub-block, column, item and question (the skeleton), and recurse the canonical subtree shape.
 section("clear content #174");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
@@ -6940,7 +6946,7 @@ section("clear content #174");
   ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
-  ok("#174 container-chrome acts[] includes the eraser via handlers.clearContent", /handlers\.clearContent === "function"\) acts\.push\(\["eraser", "Clear content \(keep structure\)", handlers\.clearContent, false\]\)/.test(e));
+  ok("#174 container-chrome acts[] includes the eraser via handlers.clearContent", /handlers\.clearContent === "function"\) acts\.push\(\["eraser", "Clear content \(keep structure\)", handlers\.clearContent, false\]\)/.test(ep));
   ok("#174 blockChromeHandlers exposes clearContent -> clearBlockContentAction([block])", /clearContent: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(eh));
   ok("#174 clear action is confirm-gated + pushes history (destructive, undoable)", /confirmModal\("Clear content",[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}list\.forEach\(clearBlockContent\)/.test(e));
   ok("#174 eraser glyph vendored in icons.js", /"eraser":/.test(src("src/icons.js")));
@@ -6973,6 +6979,8 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   var r = src("src/render.js");
   var css = src("src/course.css");
   var e = src("src/editor.js");
@@ -7074,12 +7082,12 @@ section("richer bullet lists");
   ok("render pipes pillWidth/pillHeight -> --nav-pill-width/-height + --pill-scale", /block\.pillWidth != null\) wrap\.style\.setProperty\("--nav-pill-width", block\.pillWidth \+ "px"\)[\s\S]*?block\.pillHeight != null\) \{[\s\S]*?setProperty\("--nav-pill-height", block\.pillHeight \+ "px"\)[\s\S]*?setProperty\("--pill-scale"/.test(rjs));
   ok("css pill forces width + height from the vars (border-box)", /box-sizing: border-box[\s\S]*?width: var\(--nav-pill-width, auto\); max-width: var\(--nav-pill-width, 460px\)[\s\S]*?height: var\(--nav-pill-height, auto\)/.test(ccss));
   ok("pill Width + Height iconFields in the Progress-pill nest", /iconField\("W", \{ value: child\.pillWidth/.test(e) && /iconField\("H", \{ value: child\.pillHeight/.test(e));
-  ok("pillWidth/pillHeight in NAV_PILL_KEYS (override-dot + reset)", /NAV_PILL_KEYS = \[[^\]]*"pillWidth", "pillHeight"/.test(e));
+  ok("pillWidth/pillHeight in NAV_PILL_KEYS (override-dot + reset)", /NAV_PILL_KEYS = \[[^\]]*"pillWidth", "pillHeight"/.test(ep));
   // nav pill drop shadow (James 2026-07-08)
   ok("render composes --nav-pill-shadow (off -> none, else offset/blur/spread/colour+opacity)", /block\.pillShadow === false\) wrap\.style\.setProperty\("--nav-pill-shadow", "none"\)[\s\S]*?color-mix\(in srgb, " \+ _scol \+ " " \+ _sop \+ "%, transparent\)/.test(rjs));
   ok("pill box-shadow reads the author var (base rule, single source)", /box-shadow: var\(--nav-pill-shadow, 0 10px 30px rgba\(0, 0, 0, 0\.35\)\)/.test(ccss));
   ok("Drop shadow controls in the Progress-pill nest", /panelSection\(h0, "Drop shadow"\)[\s\S]*?switchRow\("Drop shadow"[\s\S]*?child\.pillShadowX[\s\S]*?child\.pillShadowOpacity/.test(e));
-  ok("shadow keys in NAV_PILL_KEYS", /"pillShadow", "pillShadowX", "pillShadowY", "pillShadowBlur", "pillShadowSpread", "pillShadowColor", "pillShadowOpacity"/.test(e));
+  ok("shadow keys in NAV_PILL_KEYS", /"pillShadow", "pillShadowX", "pillShadowY", "pillShadowBlur", "pillShadowSpread", "pillShadowColor", "pillShadowOpacity"/.test(ep));
 })();
 
 
@@ -8496,10 +8504,11 @@ section("SVG polarity classifier");
 section("panel-standards");
 (function () {
   var t = src("src/editor.js");
-  // canonical primitives exist
+  // arch-P3b-07b: the canonical primitives are the module's job now, so that is where they must be.
+  var ep = src("src/editor/inspector/primitives.js");
   ["function subDisclosure", "function switchEl", "function switchRow", "function eyeRow",
    "function segmentedIconLive", "function nestOverridden", "function nestReset"
-  ].forEach(function (sig) { ok("primitive present: " + sig, t.indexOf(sig) !== -1); });
+  ].forEach(function (sig) { ok("primitive present: " + sig, ep.indexOf(sig) !== -1); });
   // open-state persisted (decision 2)
   ok("openSections persisted to localStorage", /authoring\.panels-open/.test(t) && /function saveOpenSections/.test(t));
   // Header & Footer is converted: switch + icon-align + eye, NO word-boolean segments.
@@ -8760,6 +8769,8 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-07: colourControl, colorField and colorFieldFlat moved to src/editor/color.js.
@@ -8901,7 +8912,7 @@ section("panel system v2 — layout engine");
   // RETIRED 2026-07-08 (James): iconField wheel scroll-to-fine-tune removed (accidental value
   // changes while scrolling the panel). Assert the wheel-to-change handler is GONE; the glyph
   // drag-scrub (makeScrubbable) remains the deliberate quick-adjust.
-  ok("iconField no longer changes value on wheel (retired)", !/wrap\.addEventListener\("wheel"/.test(e) && /makeScrubbable\(g, i,/.test(e));
+  ok("iconField no longer changes value on wheel (retired)", !/wrap\.addEventListener\("wheel"/.test(e) && /makeScrubbable\(g, i,/.test(ep));
   ok("token pane stores {token}; custom stores {hex}+recents; per stores {light,dark}", /doPick\(\{ token: t\[1\] \}\)/.test(ecol) && /doPick\(\{ hex: hx \}\); colorRecents\(hx\)/.test(ecol) && /doPick\(\{ light: lightV, dark: darkV \}\)/.test(ecol));
   ok("colorField pushes undo history once per open (debounced; skipped when noHistory)", /function doPick\(v\) \{ if \(!pushed\) \{ if \(!opts\.noHistory\) \{ try \{ pushHistory\(\); \} catch \(e\) \{\} \} pushed = true; \} onPick\(v\); \}/.test(ecol));
   ok("colorField has eyedropper (reuses eyeDropperAvailable/pickScreenColor)", /if \(eyeDropperAvailable\(\)\) \{ var ed[\s\S]*?pickScreenColor\(\)/.test(ecol));
@@ -9151,6 +9162,8 @@ section("PERF one-page re-render");
 // ---- UI kit gallery seam ----------------------
 section("UI kit seam");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
@@ -9218,30 +9231,30 @@ section("UI kit seam");
   ok("kit-gallery.js renders from window.__kit (not copied markup)", /window\.__kit/.test(gal) && /K\.Icon/.test(gal));
 
   // Ticket 2 — collapsed-optional row primitive.
-  ok("optionalRow primitive defined", /function optionalRow\(host, title, opts\) \{/.test(e));
-  ok("optionalRow OFF = greyed row + add that enables + repaints", /opt-sec__off[\s\S]{0,700}opts\.set\(true\); paint\(\);/.test(e));
-  ok("optionalRow ON = header + remove that disables + repaints", /opt-sec__remove[\s\S]{0,600}opts\.set\(false\); paint\(\);/.test(e));
-  ok("optionalRow repaints in place (no mount/renderInspector)", /function optionalRow[\s\S]{0,1200}\}/.test(e) && !/function optionalRow[\s\S]{0,1200}(mount\(\)|renderInspector\(\))/.test(e));
+  ok("optionalRow primitive defined", /function optionalRow\(host, title, opts\) \{/.test(ep));
+  ok("optionalRow OFF = greyed row + add that enables + repaints", /opt-sec__off[\s\S]{0,700}opts\.set\(true\); paint\(\);/.test(ep));
+  ok("optionalRow ON = header + remove that disables + repaints", /opt-sec__remove[\s\S]{0,600}opts\.set\(false\); paint\(\);/.test(ep));
+  ok("optionalRow repaints in place (no mount/renderInspector)", /function optionalRow[\s\S]{0,1200}\}/.test(ep) && !/function optionalRow[\s\S]{0,1200}(mount\(\)|renderInspector\(\))/.test(e));
   ok("__kit exposes optionalRow", /window\.__kit[\s\S]{0,900}\boptionalRow\s*:/.test(e));
   ok("kit-gallery demos optionalRow (collapsed + expanded)", /K\.optionalRow\(/.test(gal));
 
   // Ticket 3 — repeated-item row primitive.
-  ok("repeatedList primitive defined", /function repeatedList\(host, title, opts\) \{/.test(e));
-  ok("repeatedList row = grip + full-width field + trash (reuses iconBtn)", /rep-row__grip[\s\S]{0,1600}rep-row__field[\s\S]{0,800}iconBtn\("trash"/.test(e));
-  ok("repeatedList + above adds via propHeader", /propHeader\(title, function \(\) \{ commit\(function \(\) \{ opts\.add\(\); \}\); \}/.test(e));
-  ok("repeatedList grip drag reorders via opts.move", /dragstart[\s\S]{0,1000}drop[\s\S]{0,300}opts\.move\(from, i\)/.test(e));
-  ok("repeatedList trash removes via opts.remove", /iconBtn\("trash"[\s\S]{0,200}opts\.remove\(i\)/.test(e));
-  ok("repeatedList field edit is live, no repaint (keeps focus)", /field\.addEventListener\("change", function \(\) \{ if \(!opts\.noHistory\) pushHistory\(\); opts\.setValue\(item, field\.value\);/.test(e));
+  ok("repeatedList primitive defined", /function repeatedList\(host, title, opts\) \{/.test(ep));
+  ok("repeatedList row = grip + full-width field + trash (reuses iconBtn)", /rep-row__grip[\s\S]{0,1600}rep-row__field[\s\S]{0,800}iconBtn\("trash"/.test(ep));
+  ok("repeatedList + above adds via propHeader", /propHeader\(title, function \(\) \{ commit\(function \(\) \{ opts\.add\(\); \}\); \}/.test(ep));
+  ok("repeatedList grip drag reorders via opts.move", /dragstart[\s\S]{0,1000}drop[\s\S]{0,300}opts\.move\(from, i\)/.test(ep));
+  ok("repeatedList trash removes via opts.remove", /iconBtn\("trash"[\s\S]{0,200}opts\.remove\(i\)/.test(ep));
+  ok("repeatedList field edit is live, no repaint (keeps focus)", /field\.addEventListener\("change", function \(\) \{ if \(!opts\.noHistory\) pushHistory\(\); opts\.setValue\(item, field\.value\);/.test(ep));
   ok("grip glyph is canonical (Lucide grip-vertical via ICON_ALIAS, not inline one-off)", /grip: "grip-vertical"/.test(e) && /"grip-vertical":/.test(src("src/icons.js")));
   ok("__kit exposes repeatedList", /window\.__kit[\s\S]{0,900}\brepeatedList\s*:/.test(e));
   ok("kit-gallery demos repeatedList", /K\.repeatedList\(/.test(gal));
 
   // Ticket 4 — renderContainerChrome (invariant Block-level chrome).
-  ok("renderContainerChrome defined", /function renderContainerChrome\(host, decl, io, handlers\) \{/.test(e));
-  ok("container row order is fixed + declared", /var CONTAINER_ROW_ORDER = \["align", "width", "padding", "gap", "fill", "stroke", "radius", "spacing", "actions"\]/.test(e));
-  ok("chrome uses collapsed-optional fill/stroke + iconField dims + iconBtn actions", /optionalRow\(ap, "Fill"[\s\S]{0,1200}optionalRow\(ap, "Stroke"[\s\S]{0,2600}iconBtn\(a\[0\], a\[1\], a\[3\]\)/.test(e));
-  ok("chrome hides omitted rows behind want() (never reorders)", /function want\(k, def\) \{ return decl\[k\] === undefined \? def : !!decl\[k\]; \}/.test(e));
-  ok("colourControl omits an empty label (single-line appearance)", /if \(labelText\) host\.appendChild\(h\("div", "insp-row__label insp-row__label--stacked", labelText\)\);/.test(e));
+  ok("renderContainerChrome defined", /function renderContainerChrome\(host, decl, io, handlers\) \{/.test(ep));
+  ok("container row order is fixed + declared", /var CONTAINER_ROW_ORDER = \["align", "width", "padding", "gap", "fill", "stroke", "radius", "spacing", "actions"\]/.test(ep));
+  ok("chrome uses collapsed-optional fill/stroke + iconField dims + iconBtn actions", /optionalRow\(ap, "Fill"[\s\S]{0,1200}optionalRow\(ap, "Stroke"[\s\S]{0,2600}iconBtn\(a\[0\], a\[1\], a\[3\]\)/.test(ep));
+  ok("chrome hides omitted rows behind want() (never reorders)", /function want\(k, def\) \{ return decl\[k\] === undefined \? def : !!decl\[k\]; \}/.test(ep));
+  ok("colourControl omits an empty label (single-line appearance)", /if \(labelText\) host\.appendChild\(h\("div", "insp-row__label insp-row__label--stacked", labelText\)\);/.test(ep));
   ok("__kit exposes renderContainerChrome", /window\.__kit[\s\S]{0,900}\brenderContainerChrome\s*:/.test(e));
   ok("kit-gallery demos renderContainerChrome (full frame + minimal spacer)", (gal.match(/K\.renderContainerChrome\(/g) || []).length >= 2);
 
@@ -9257,21 +9270,21 @@ section("UI kit seam");
   ok("#14: alignSeg builds a DS FieldRow + VersoUI.SegmentedControl (inline-labelled align)",
      /function alignSeg\(label, current, options, onPick\)[\s\S]{0,260}window\.VersoUI\.SegmentedControl\(\{[\s\S]{0,180}window\.VersoUI\.FieldRow\(\{ label: label/.test(e));
   ok("#14: container chrome emits sections via panelSection (not the flat sub/insp-sub header)",
-     /function section\(title, opts\) \{[\s\S]{0,220}return panelSection\(host, title, opts\)/.test(e) && !/function sectionHead\(/.test(e));
+     /function section\(title, opts\) \{[\s\S]{0,220}return panelSection\(host, title, opts\)/.test(ep) && !/function sectionHead\(/.test(e));
   ok("#14: container chrome Position uses alignSeg for horizontal + vertical",
-     /var pos = section\("Position"\)[\s\S]{0,600}alignSeg\("Horizontal"[\s\S]{0,600}alignSeg\("Vertical"/.test(e));
+     /var pos = section\("Position"\)[\s\S]{0,600}alignSeg\("Horizontal"[\s\S]{0,600}alignSeg\("Vertical"/.test(ep));
   ok("#14: container chrome hosts Layout/Appearance rows into section bodies; Actions render into the canvas overlay bar",
-     /var lay = section\("Layout"\)/.test(e) && /var ap = section\("Appearance"\)/.test(e) && /if \(want\("actions", true\)\) \{\s*var bar = ensureBlockToolbar\(\)/.test(e));
+     /var lay = section\("Layout"\)/.test(ep) && /var ap = section\("Appearance"\)/.test(ep) && /if \(want\("actions", true\)\) \{\s*var bar = ensureBlockToolbar\(\)/.test(ep));
   // Split-page (+ move/duplicate/delete) reinstated onto the canvas overlay bar after the
   // left-rail/top-bar reorg dropped them: ensureBlockToolbar mounts a contextual segment
   // inside #canvas-overlay, and the container-chrome Actions build the split button there.
   ok("block actions mount into the canvas overlay bar segment",
      /function ensureBlockToolbar\(\) \{[\s\S]{0,320}canvas-overlay-bar__inner[\s\S]{0,240}"canvas-overlay-bar__actions"/.test(e));
   ok("split page action is built into the canvas bar (not a panel section)",
-     /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split/.test(e) &&
-     /acts\.forEach\(function \(a\) \{[\s\S]{0,180}bar\.appendChild\(btn\)/.test(e));
+     /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split/.test(ep) &&
+     /acts\.forEach\(function \(a\) \{[\s\S]{0,180}bar\.appendChild\(btn\)/.test(ep));
   ok("#14: layer breadcrumb routes through the canonical VersoUI.Breadcrumb",
-     /if \(window\.VersoUI && window\.VersoUI\.Breadcrumb\) \{[\s\S]{0,320}window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(e));
+     /if \(window\.VersoUI && window\.VersoUI\.Breadcrumb\) \{[\s\S]{0,320}window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(ep));
   ok("#14: DS PanelSection wrappers stay OUT of the PanelLayout drag set (no data-section-type)",
      /E\.inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(src("src/editor/inspector/sections.js")));
   // (Retired) the old "chrome not yet wired" seam guard: renderContainerChrome is now fully
@@ -9279,14 +9292,14 @@ section("UI kit seam");
   // inspector too. See the "uio-E-C02" section for the field-inspector wiring assertions.
   // P0 code-review fixes.
   ok("plus/minus glyphs are canonical Lucide (icons.js, not inline one-offs)", /"plus":/.test(src("src/icons.js")) && /"minus":/.test(src("src/icons.js")));
-  ok("propHeader/optionalRow reuse Icon(\"plus\") / Icon(\"minus\") (no inline glyph)", /add\.innerHTML = Icon\("plus"\)/.test(e) && /rm\.innerHTML = Icon\("minus"\)/.test(e));
-  ok("CONTAINER_IO_KEYS io contract defined + exposed", /var CONTAINER_IO_KEYS = \["align", "width", "padX"/.test(e) && /window\.__kit[\s\S]{0,900}\bCONTAINER_IO_KEYS\s*:/.test(e));
+  ok("propHeader/optionalRow reuse Icon(\"plus\") / Icon(\"minus\") (no inline glyph)", /add\.innerHTML = Icon\("plus"\)/.test(ep) && /rm\.innerHTML = Icon\("minus"\)/.test(ep));
+  ok("CONTAINER_IO_KEYS io contract defined + exposed", /var CONTAINER_IO_KEYS = \["align", "width", "padX"/.test(ep) && /window\.__kit[\s\S]{0,900}\bCONTAINER_IO_KEYS\s*:/.test(e));
   ok("kit-gallery shows the Icon glyph set", /K\.Icon\.names\(\)/.test(gal));
 
   // Ticket 5 (foundation) — inspector breadcrumb.
-  ok("breadcrumb primitive defined", /function breadcrumb\(host, trail, onNavigate\) \{/.test(e));
-  ok("breadcrumb last crumb = current (non-button), others navigate", /insp-crumbs__cur[\s\S]{0,300}insp-crumbs__crumb[\s\S]{0,200}onNavigate\(level\)/.test(e));
-  ok("breadcrumb separator uses canonical Icon(\"chevron-right\") (not inline)", /insp-crumbs__sep[\s\S]{0,160}Icon\("chevron-right"\)/.test(e) && /"chevron-right":/.test(src("src/icons.js")));
+  ok("breadcrumb primitive defined", /function breadcrumb\(host, trail, onNavigate\) \{/.test(ep));
+  ok("breadcrumb last crumb = current (non-button), others navigate", /insp-crumbs__cur[\s\S]{0,300}insp-crumbs__crumb[\s\S]{0,200}onNavigate\(level\)/.test(ep));
+  ok("breadcrumb separator uses canonical Icon(\"chevron-right\") (not inline)", /insp-crumbs__sep[\s\S]{0,160}Icon\("chevron-right"\)/.test(ep) && /"chevron-right":/.test(src("src/icons.js")));
   ok("__kit exposes breadcrumb", /window\.__kit[\s\S]{0,900}\bbreadcrumb\s*:/.test(e));
   ok("kit-gallery demos breadcrumb", /K\.breadcrumb\(/.test(gal));
 
@@ -9310,12 +9323,12 @@ section("UI kit seam");
   })());
   ok("hotspot asset: handle hidden (internal ref not author-facing)", /var isAssetSrc = typeof curScreen\.visual === "string" && curScreen\.visual\.indexOf\("asset:"\) === 0;/.test(eh)); // #216: base = current screen visual
   // Ticket 6 (2/2) — sequence steps on repeatedList + the rowExtras extension.
-  ok("repeatedList supports optional compact rowExtras (icons between field + trash)", /if \(opts\.rowExtras\) \{[\s\S]{0,220}row\.appendChild\(n\)/.test(e) && /row\.appendChild\(grip\); row\.appendChild\(field\);/.test(e));
+  ok("repeatedList supports optional compact rowExtras (icons between field + trash)", /if \(opts\.rowExtras\) \{[\s\S]{0,220}row\.appendChild\(n\)/.test(ep) && /row\.appendChild\(grip\); row\.appendChild\(field\);/.test(ep));
   ok("image glyph is canonical Lucide (icons.js, for the step marker upload)", /"image":/.test(src("src/icons.js")) && /image: "image"/.test(e));
   ok("sequence Content has no duplicate footer (spacing+actions at Block level)", /no renderBlockActionsSection here/.test(e));
   // Ticket 8 (1/n) — frame/group two-level via renderContainerChrome.
   ok("frame/group dispatched to the two-level shell", /if \(block\.type === "frame" \|\| block\.type === "group"\) \{ renderFrameOrGroupTwoLevel\(node\); return; \}/.test(e));
-  ok("renderContainerChrome supports stroke:\"switch\" (on/off, no dead colour/width)", /if \(decl\.stroke === "switch"\) \{\s*switchRow\("Stroke"/.test(e));
+  ok("renderContainerChrome supports stroke:\"switch\" (on/off, no dead colour/width)", /if \(decl\.stroke === "switch"\) \{\s*switchRow\("Stroke"/.test(ep));
   ok("frame Block level = container decl (padding/gap/radius/fill/stroke-switch)", /renderBlockTwoLevel\(node, "Card", \{ padding: true, gap: true, radius: true, fill: true, stroke: "switch" \}/.test(e));
   ok("group Block level = CONTENT_DECL (invisible, spacing+actions)", /renderBlockTwoLevel\(node, "Group", CONTENT_DECL, renderFrameContent\)/.test(e));
   ok("frame io maps padding/background/border to the real fields", /if \(k === "padX"\)[\s\S]{0,80}block\.padding[\s\S]{0,400}block\.background[\s\S]{0,200}block\.border = true/.test(e));
@@ -9445,17 +9458,19 @@ section("uio-SK06 UI-spine save-contract ratchet (HARD FAIL)");
 // divergent switch-row anatomy). The tail/overflow are slots only (uio-F03 fills them).
 section("uio-F01 shared settings row anatomy");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js");
   var css = src("editor.css");
   var tokens = src("design-system/tokens/spacing.css");
   var dts = src("design-system/components/controls/FieldRow.d.ts");
   // The one shared-row primitive exists and is test-exposed.
-  ok("settingsRow primitive defined", /function settingsRow\(opts\)/.test(e));
-  ok("settingsRow exposed for tests (window.__settingsRow)", /window\.__settingsRow\s*=\s*settingsRow/.test(e));
+  ok("settingsRow primitive defined", /function settingsRow\(opts\)/.test(ep));
+  ok("settingsRow exposed for tests (window.__settingsRow)", /window\.__settingsRow\s*=\s*settingsRow/.test(ep));
   // fieldRow / switchRow / eyeRow route through it — no hand-rolled row wrapper.
-  ok("fieldRow routes through settingsRow", /function fieldRow\([\s\S]{0,900}?settingsRow\(/.test(e));
-  ok("switchRow uses the shared row (toggle variant)", /function switchRow\([\s\S]{0,400}?insp-row--toggle/.test(e));
-  ok("eyeRow uses the shared row (toggle variant)", /function eyeRow\([\s\S]{0,900}?insp-row--toggle/.test(e));
+  ok("fieldRow routes through settingsRow", /function fieldRow\([\s\S]{0,900}?settingsRow\(/.test(ep));
+  ok("switchRow uses the shared row (toggle variant)", /function switchRow\([\s\S]{0,400}?insp-row--toggle/.test(ep));
+  ok("eyeRow uses the shared row (toggle variant)", /function eyeRow\([\s\S]{0,900}?insp-row--toggle/.test(ep));
   ok("no editor.js helper builds the divergent switch-row wrapper", e.indexOf('h("div", "switch-row")') === -1);
   // One tokenized fixed label column, shared with the DS FieldRow contract.
   ok("DS defines the shared label-width token (--field-label-w: 76px)", /--field-label-w:\s*76px/.test(tokens));
@@ -9727,7 +9742,8 @@ section("ui-kit #10 DS control set");
 
   // Drop-in wiring: editor.js switchEl delegates to VersoUI.Switch (identical
   // uiswitch DOM) so the 27 switchRow sites re-skin onto the DS automatically.
-  var ed = src("src/editor.js");
+  // arch-P3b-07b: switchEl moved to editor/inspector/primitives.js with the rest of the set.
+  var ed = src("src/editor/inspector/primitives.js");
   ok("switchEl drops in onto VersoUI.Switch", /window\.VersoUI && window\.VersoUI\.Switch\)\s*\{\s*return window\.VersoUI\.Switch\(\{ checked: !!on, onChange: onToggle \}\);/.test(ed));
   ok("switchEl keeps a local fallback (library-absent safety)", /b\.appendChild\(h\("span", "uiswitch__knob"\)\);/.test(ed));
 
@@ -11703,6 +11719,8 @@ section("uio-P-C06: picker multi-select + queue selected");
 // menu definition; and help prose gets one small typographic system instead of inventing sizes.
 section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu, help type)");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js"), css = src("editor.css"), typo = src("design-system/tokens/typography.css");
 
   // --- OVL-09: the fake Done is gone; the surface states its contract ------------------
@@ -11724,8 +11742,8 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   ok("one spelling of the modifier key, so printed shortcuts never disagree", /var MOD_KEY = \(function \(\) \{/.test(e));
 
   // --- OVL-06: cross-references are links, not instructions ---------------------------
-  ok("there is ONE cross-reference row, built on the shared settings row", /function crossRefRow\(opts\)[\s\S]{0,900}return settingsRow\(\{ label: opts\.label/.test(e));
-  ok("it always carries a live value slot and a navigating link", /insp-xref__value/.test(e) && /insp-xref__link/.test(e) && /link\.addEventListener\("click", function \(\) \{ if \(opts\.onNavigate\) opts\.onNavigate\(\); \}\)/.test(e));
+  ok("there is ONE cross-reference row, built on the shared settings row", /function crossRefRow\(opts\)[\s\S]{0,900}return settingsRow\(\{ label: opts\.label/.test(ep));
+  ok("it always carries a live value slot and a navigating link", /insp-xref__value/.test(ep) && /insp-xref__link/.test(ep) && /link\.addEventListener\("click", function \(\) \{ if \(opts\.onNavigate\) opts\.onNavigate\(\); \}\)/.test(ep));
   // uio-F05: with no nav rail to highlight, landing means EXPANDING the named section and
   // scrolling it into view inside the one scroll.
   ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}revealSettingsSection\(sectionKey\)/.test(e)
@@ -12160,10 +12178,12 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
     && /The switch and the chevron are independent/.test(src("design-system/readme.md")));
 
   // The summary itself is pure, so it runs here as real source.
-  var m = e.match(/(function headerFooterSummary\(cfg, isHeader\)[\s\S]*?\n  \})/);
+  // arch-P3b-07b: these live in editor/inspector/primitives.js, one indent deeper inside install().
+  var ep = src("src/editor/inspector/primitives.js");
+  var m = ep.match(/(function headerFooterSummary\(cfg, isHeader\)[\s\S]*?\n    \})/);
   if (!m) { ok("locate headerFooterSummary", false); return; }
   var summary = new Function(m[1] + "; return headerFooterSummary;")();
-  var withSwitch = e.match(/(function sectionSummary\(opts, enabled\)[\s\S]*?\n  \})/);
+  var withSwitch = ep.match(/(function sectionSummary\(opts, enabled\)[\s\S]*?\n    \})/);
   var sectionSummary = withSwitch ? new Function(withSwitch[1] + "; return sectionSummary;")() : null;
 
   ok("an untouched section says nothing rather than reciting defaults", summary({}, true) === "");
@@ -12185,6 +12205,8 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
 // section, and sections nest one deep: a group that wants a third level is promoted.
 section("uio-O-W2 one section notation, two levels (OVL-07)");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js"), ecss = src("editor.css"), ex = src("src/export.js");
 
   // --- one notation: the rivals are gone, and the survivors are adapters, not chromes ---
@@ -12193,7 +12215,7 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
     ecss.indexOf(".insp-sub") === -1 && ecss.indexOf(".subdisc") === -1 && ecss.indexOf(".disc__head") === -1);
   ok("panelSection is an adapter over the one section", /function panelSection\(host, title, opts\)[\s\S]{0,400}sectionGroup\(null, title/.test(e));
   ok("subDisclosure is an adapter that only adds a switch + summary",
-    /function subDisclosure\(key, title, buildBody, opts\)[\s\S]{0,400}return sectionGroup\(null, title, buildBody, \{[\s\S]{0,220}toggle: opts\.toggle/.test(e));
+    /function subDisclosure\(key, title, buildBody, opts\)[\s\S]{0,400}return sectionGroup\(null, title, buildBody, \{[\s\S]{0,220}toggle: opts\.toggle/.test(ep));
   ok("disclosure is an adapter that only names its open-state key",
     /function disclosure\(key, title, buildBody\) \{\s*\n\s*return sectionGroup\(null, title, buildBody, \{ key: key, defaultOpen: false \}\);/.test(e));
   ok("the export dialog groups its rows the same way, not with its own header",
@@ -12435,12 +12457,15 @@ section("uio-F05 escalation links (popover/menu -> sheet)");
 // inheritance path.
 section("uio-F03 scope + inheritance model");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js");
   var css = src("editor.css");
   var tokens = src("design-system/tokens/spacing.css");
   var ds = src("design-system/readme.md");
   var dts = src("design-system/components/panels/PanelSection.d.ts");
-  var m = e.match(/\/\* @f03-start \*\/([\s\S]*?)\/\* @f03-end \*\//);
+  // arch-P3b-07b: the @f03 fence moved with the scope ladder it fences.
+  var m = src("src/editor/inspector/primitives.js").match(/\/\* @f03-start \*\/([\s\S]*?)\/\* @f03-end \*\//);
   if (!m) { ok("locate @f03 fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { SCOPE_LADDER: SCOPE_LADDER, NOT_SET: NOT_SET, scopeRung: scopeRung, scopeChain: scopeChain," +
@@ -12550,9 +12575,9 @@ section("uio-F03 scope + inheritance model");
     !/gap|border|gateInteractions|theme|blockStyles/.test(m[1]));
 
   // --- the wiring: the tail fills uio-F01's slot, no second row anatomy ---
-  ok("settingsRow fills its tail slot from `inherit` (no second row builder)", /var tailNode = opts\.tail \|\| \(opts\.inherit \? inheritanceTail\(opts\.inherit\) : null\)/.test(e));
-  ok("the tail renders inherited scope OR dot + Reset, nothing else", /function inheritanceTail\([\s\S]{0,900}?insp-row__override-dot[\s\S]{0,400}?insp-row__reset[\s\S]{0,400}?insp-row__scope/.test(e));
-  ok("switchRow can carry the tail without a divergent row", /function switchRow\(labelText, get, set, target, noHistory, rowOpts\)/.test(e));
+  ok("settingsRow fills its tail slot from `inherit` (no second row builder)", /var tailNode = opts\.tail \|\| \(opts\.inherit \? inheritanceTail\(opts\.inherit\) : null\)/.test(ep));
+  ok("the tail renders inherited scope OR dot + Reset, nothing else", /function inheritanceTail\([\s\S]{0,900}?insp-row__override-dot[\s\S]{0,400}?insp-row__reset[\s\S]{0,400}?insp-row__scope/.test(ep));
+  ok("switchRow can carry the tail without a divergent row", /function switchRow\(labelText, get, set, target, noHistory, rowOpts\)/.test(ep));
   // arch-P3b-03: the roll-up is written by sectionGroup, now in src/editor/inspector/sections.js.
   // Driven: a section whose body resolves two overridden values must say so on its header, and a
   // parent must count what its nested sections resolved too.
@@ -15664,6 +15689,8 @@ section("Source rewrite: variant per-node divergence, model layer (Epic 2b)");
 // gate: if these fail, marks/variants would silently break on migration.
 section("Source v2: concatChapters unify topics -> one document (spec 2c)");
 (function () {
+  // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
+  var ep = src("src/editor/inspector/primitives.js");
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
@@ -15892,7 +15919,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(es) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(es));
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(es));
   ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(es));
-  ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(e) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(es));
+  ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(ep) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(es));
   ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(es));
   ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(es));
   ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(es) && /it\.classList\.toggle\("is-selected", on\)/.test(es));
