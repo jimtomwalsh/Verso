@@ -106,6 +106,8 @@
   <script src="src/editor/storage.js"></script>
   <!-- arch-P3-02 history seam: window.VersoHistory — undo/redo stacks + the document-swap rule. DOM-free. Must precede editor.js, which creates its History at load. -->
   <script src="src/editor/history.js"></script>
+  <!-- arch-P3-03 publish seam: window.VersoPublish — the four publish stores, the plan each queue row expands into, and the run that drains the queue. DOM-free. Must precede editor.js. -->
+  <script src="src/editor/publish.js"></script>
   <script src="src/editor.js"></script>
   <script src="kit-gallery.js"></script>
 </body>
