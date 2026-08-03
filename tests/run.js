@@ -261,6 +261,7 @@ section("syntax");
 // never added), so a syntax error in any of them would have shipped. A new region file is now
 // checked the moment it exists.
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var acc = [];
   (function walk(d, rel) {
@@ -4042,6 +4043,7 @@ section("group as a single side-by-side target (#95)");
 // #42: author-editable pixel dimensions behind the desktop/tablet/mobile preview buttons.
 section("customisable preview preset sizes (#42)");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
@@ -7425,7 +7427,9 @@ section("font preview picker");
   // all 3 plain <select> font pickers replaced by the shared component
   // arch-P3b-07/07f: the three pickers now sit in three files -- two inspectors here, the Theme
   // panel's in theme.js -- so the claim counts across the chrome rather than within one file.
-  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js")).match(/[^_.]buildFontPicker\(/g) || [];
+  // arch-P3b-07n/07: the three pickers now sit in three files again -- the nav-button one moved
+  // with the actions panel, the header/footer one stayed, the Theme panel has its own.
+  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js") + src("src/editor/actions.js") + src("src/editor/header-footer.js")).match(/[^_.]buildFontPicker\(/g) || [];
   ok("all 3 font selects use buildFontPicker", pickerSites.length >= 3);
   ok("no plain <select> font list remains", !/h\("select"[\s\S]{0,80}FONT_LIST\.map/.test(e));
   ok("picker CSS: popup listbox present", /\.font-picker__pop \{[\s\S]*?position: absolute/.test(css) && /\.font-picker__opt \{/.test(css));
@@ -8398,6 +8402,7 @@ section("native-snapshot gesture proxy (#151)");
 // only writers (pan/zoom/fit) reroute to scroll. Default OFF behind a flag + console toggle.
 section("native-scroll pan (#151 lever 1)");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-02: all of this moved to src/editor/canvas-view.js. The flag is a real runtime switch,
   // so the whole section is driven now -- boot with it on, boot with it off, and read what the
@@ -9093,6 +9098,7 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
@@ -9149,6 +9155,7 @@ section("panel system v2 — layout engine");
   // arch-P3b-03: driven against the booted editor -- the section engine is DOM code, and a regex
   // over it proved the call existed, never that the element came out right.
   (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
     var K = EDITOR_BOOT.boot().VersoEditor;
     var sectionGroup = K.bind("sectionGroup");
@@ -9237,7 +9244,7 @@ section("panel system v2 — layout engine");
   ok("#161 embed: Content(HTML code)/Layout/Light-Dark/Appearance sectionGroups; loadSource targets secBody", /function renderEmbedInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "HTML code"[\s\S]*?secBody\.appendChild\(codeIn\)[\s\S]*?sectionGroup\("Layout", "Layout"[\s\S]*?sectionGroup\("Light\/Dark", "On light & dark"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?endSections\(inspector\);/.test(e));
   // #165: the shared footer is buffered INTO the nav inspector's open cycle, then flushed once —
   // one PanelLayout-sorted stream (Behaviour after Layout/Spacing), not two independent sorts.
-  ok("#161/#165 navButton: Content(Label)/Appearance(Style)/Behaviour(On click) then renderBlockActionsSection buffered, endSections once", /function renderNavButtonInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Label"[\s\S]*?sectionGroup\("Appearance", "Style"[\s\S]*?sectionGroup\("Behaviour", "On click"[\s\S]*?renderBlockActionsSection\(block\);\s*endSections\(inspector\);/.test(e));
+  ok("#161/#165 navButton: Content(Label)/Appearance(Style)/Behaviour(On click) then renderBlockActionsSection buffered, endSections once", /function renderNavButtonInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Label"[\s\S]*?sectionGroup\("Appearance", "Style"[\s\S]*?sectionGroup\("Behaviour", "On click"[\s\S]*?renderBlockActionsSection\(block\);\s*endSections\(E\.inspector\);/.test(ACT));
   ok("#161 multiSelect batch: one canonical Type sectionGroup", /function renderMultiInspector\(\)[\s\S]*?beginSections\(\);\s*sectionGroup\("Type", "Text — applies to all "[\s\S]*?endSections\(inspector\);/.test(e));
   // RETIRED 2026-07-08 (James): iconField wheel scroll-to-fine-tune removed (accidental value
   // changes while scrolling the panel). Assert the wheel-to-change handler is GONE; the glyph
@@ -9265,6 +9272,7 @@ section("panel system v2 — layout engine");
 // last option of the "On click" dropdown. Demo overrides onExit (no real exit).
 section("exit-course action");
 (function () {
+  var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var r = src("src/render.js"), rt = src("src/runtime.js"), e = src("src/editor.js");
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // render: exit -> data-nav-action="exit" (NOT data-goto), href stays "#"
@@ -9281,8 +9289,8 @@ section("exit-course action");
   var sa = src("export/scorm-api.js");
   ok("scorm-api: quit(exitType) sets cmi.core.exit from the arg", /function quit\(exitType\)[\s\S]{0,200}set\("cmi\.core\.exit", exitType \|\| ""\)/.test(sa));
   // authoring: Exit option in the On-click dropdown + non-destructive demo override
-  ok("editor: EXIT_ACTION sentinel + setExitAction writes action.exit", /var EXIT_ACTION = "__exit";/.test(e) && /function setExitAction\(host\) \{ pushHistory\(\); host\.action = \{ exit: true \}; \}/.test(e));
-  ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(e));
+  ok("editor: EXIT_ACTION sentinel + setExitAction writes action.exit", /var EXIT_ACTION = "__exit";/.test(ACT) && /function setExitAction\(host\) \{ pushHistory\(\); host\.action = \{ exit: true \}; \}/.test(ACT));
+  ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(ACT));
   ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(DEMO) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(DEMO));
   // Interact-mode action picker (the "On click -> Do" list): exit is an option + targetless
   ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(e));

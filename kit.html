@@ -181,6 +181,8 @@
   <script src="src/editor/drill.js"></script>
   <!-- arch-P3b-07n editing: window.VersoEditing — what makes the canvas typeable: contentEditable on copy fields (selected first, editable second), drop targets, column resizers, the embed shield, and the collaboration edit lifecycle. Nothing it adds may leak into render(). Must precede editor.js. -->
   <script src="src/editor/editing.js"></script>
+  <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->
+  <script src="src/editor/actions.js"></script>
   <script src="src/editor.js"></script>
   <script src="kit-gallery.js"></script>
 </body>
