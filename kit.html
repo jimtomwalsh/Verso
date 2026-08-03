@@ -112,6 +112,8 @@
   <script src="src/editor/publish.js"></script>
   <!-- arch-P3-04 inspector dispatch: window.VersoInspector — which panel the right inspector shows and what runs after it. Pure data + predicates. Must precede editor.js. -->
   <script src="src/editor/inspector/dispatch.js"></script>
+  <!-- arch-P3b-03 inspector sections: window.VersoInspectorSections — THE section wrapper (34 adopters), the two-level depth rule and the PanelLayout ranking store. Publishes window.PanelLayout. Must precede editor.js, which installs it after providing its host surface. -->
+  <script src="src/editor/inspector/sections.js"></script>
   <!-- arch-P3-05 Product Rail facts: window.VersoProductRail — alignment, drift, where-used and outputs, the four facts every stage reads. DOM-free. Must precede editor.js. -->
   <script src="src/editor/product-rail.js"></script>
   <!-- arch-P3-06 tour board: window.VersoBoardLayout (node/loop geometry + the tidy plan) and window.VersoHarvest (the source-video segment math). Both pure. Must precede editor.js. -->

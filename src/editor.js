@@ -5034,276 +5034,18 @@
     endSections(inspector);
   }
   // ---- contextual inspector ------------------------------------------------
-  // Panel System v2 — the panelLayout engine. A per-author,
-  // localStorage-backed GLOBAL ranking + collapse of inspector SECTION TYPES. Editor chrome
-  // ONLY — never touches doc/export. Panels opt in via a section wrapper (later phase); this
-  // module is the pure, fully-testable core (order / collapse / persist / reset).
-  window.PanelLayout = (function () {
-    var KEY = "verso.panelLayout";
-    var TAXONOMY = ["Type", "Content", "Appearance", "Layout", "Spacing", "Behaviour", "Light/Dark", "Advanced"];
-    // #164 (panel-ia §5 / interaction-feel §1 — shallow by default): advanced/optional section
-    // types open COLLAPSED on first paint, revealed on intent. Core types (Type…Behaviour) stay
-    // open. The author's explicit open/close still wins (recorded for these types, see setCollapsed).
-    var DEFAULT_COLLAPSED = { "Light/Dark": true, "Advanced": true };
-    // uio-F05: the settings sheet is ONE scroll of sections (it lost its nav rail), so its
-    // sections open COLLAPSED — a 15-section wall is the "pre-expanded wall" the spine forbids.
-    // Collapsed headers ARE the browse affordance; openSettingsSection expands the one you asked
-    // for. Prefix rule rather than 15 map entries, so a new settings section inherits it.
-    function defaultCollapsed(type) { return !!DEFAULT_COLLAPSED[type] || /^settings:/.test(type); }
-    function load() {
-      var st = { order: TAXONOMY.slice(), collapsed: {} };
-      try {
-        var raw = JSON.parse(localStorage.getItem(KEY) || "null");
-        if (raw && Array.isArray(raw.order)) {
-          // keep only KNOWN types, then append any taxonomy types added since the save
-          var known = raw.order.filter(function (t) { return TAXONOMY.indexOf(t) !== -1; });
-          TAXONOMY.forEach(function (t) { if (known.indexOf(t) === -1) known.push(t); });
-          st.order = known;
-        }
-        if (raw && raw.collapsed && typeof raw.collapsed === "object") st.collapsed = raw.collapsed;
-      } catch (e) {}
-      return st;
-    }
-    function save(st) { try { localStorage.setItem(KEY, JSON.stringify({ order: st.order, collapsed: st.collapsed })); } catch (e) {} }
-    function reset() { try { localStorage.removeItem(KEY); } catch (e) {} }
-    function rank(type) { var i = load().order.indexOf(type); return i === -1 ? 999 : i; }
-    // STABLE-sort a list of {type,…} sections by the global ranking; unknown types keep their
-    // relative order at the end. Sections a panel lacks are simply absent (skipped).
-    function orderSections(sections) {
-      return sections.map(function (s, i) { return { s: s, i: i, r: rank(s.type) }; })
-        .sort(function (a, b) { return a.r - b.r || a.i - b.i; })
-        .map(function (x) { return x.s; });
-    }
-    // #164: a stored state (true/false) always wins; an UNSET default-collapsed type reads collapsed.
-    function isCollapsed(type) {
-      var c = load().collapsed;
-      if (Object.prototype.hasOwnProperty.call(c, type)) return !!c[type];
-      return defaultCollapsed(type);
-    }
-    // For a default-collapsed type, record BOTH open + closed explicitly so an author's "open"
-    // sticks (deleting would fall back to the collapsed default). Others: store true, clear on open.
-    function setCollapsed(type, v) {
-      var st = load();
-      if (defaultCollapsed(type)) st.collapsed[type] = !!v;
-      else if (v) st.collapsed[type] = true; else delete st.collapsed[type];
-      save(st);
-    }
-    function reorder(newOrder) {
-      var known = (newOrder || []).filter(function (t) { return TAXONOMY.indexOf(t) !== -1; });
-      TAXONOMY.forEach(function (t) { if (known.indexOf(t) === -1) known.push(t); });
-      var st = load(); st.order = known; save(st); return known;
-    }
-    function move(type, toIndex) {
-      var st = load(); var from = st.order.indexOf(type); if (from === -1) return st.order;
-      var arr = st.order.slice(); arr.splice(from, 1);
-      arr.splice(Math.max(0, Math.min(toIndex, arr.length)), 0, type); st.order = arr; save(st); return arr;
-    }
-    return { TAXONOMY: TAXONOMY, load: load, save: save, reset: reset, rank: rank, orderSections: orderSections, isCollapsed: isCollapsed, setCollapsed: setCollapsed, reorder: reorder, move: move };
-  })();
-
-  // Panel System v2 (D3) — section wrapper + buffer. A v2 panel wraps each section in
-  // sectionGroup(type,title,buildFn); beginSections()/endSections() buffer them and emit in
-  // the author's global ranking (PanelLayout), applying collapse. Non-adopted panels are
-  // unaffected (they still append directly). Edit-layout mode adds drag handles.
-  var panelEditMode = false; // "Edit panel layout" mode: reorder sections by drag
-  var _sectionBuf = null;    // active buffer during a v2 panel render
-  function beginSections() { _sectionBuf = []; }
-  // uio-O-W2 (OVL-07): THE section. Every group of rows in every settings surface is this one
-  // function -- a chevron, a title, an optional switch, an optional one-line summary when
-  // collapsed, and a body of plain rows. The three other header styles are retired: a plain bold
-  // heading with no affordance (`sub()`), a bullet-prefixed twirl (`.disc`) and a second nested
-  // twirl (`.subdisc`) all shared one pane, so the same glyph meant "section" in one panel and
-  // "sub-section" in another, and which headers could be opened was something you learned by
-  // clicking. `panelSection`/`subDisclosure`/`disclosure` are now thin adapters over this.
-  //
-  // TWO LEVELS, NEVER THREE. Depth is counted while building, not declared: a section built
-  // inside another section's body is level 2 -- same header, quieter and indented. A group that
-  // would nest a third time is not a sub-sub-group; it is a section that belongs beside its
-  // parent, so promote it. The guard below still renders a too-deep section as level 2 (nothing
-  // disappears) and records where it came from, so the depth cannot creep back unnoticed.
-  //
-  //   type              PanelLayout taxonomy key -- reorderable, collapse persisted per type.
-  //                     Null for a section outside the reorderable set.
-  //   opts.key          openSections key: open/closed persists across rebuilds and reloads.
-  //   opts.defaultOpen  first-run state when neither store knows this section.
-  //   opts.toggle       {get,set} -- a switch in the header, independent of the chevron (OVL-08).
-  //   opts.summary      fn -> string: the collapsed one-liner ("On - centred, bottom rule").
-  //   opts.overridden   fn -> bool: the section-level override dot; opts.onReset enables Reset.
-  //   opts.actions      element (or array) pinned to the right of the title.
-  var _sectionDepth = 0;
-  // Published so a browser probe can NAME an offender instead of the depth quietly creeping
-  // back: a static test can read the source, but only a real render knows how deep a panel
-  // actually nests once every builder has run.
-  var _sectionDepthViolations = window.__sectionDepth3 = [];
-  /* @ovl07-start */
-  // Depth is observed two ways, because sections are built two ways: a `buildFn` nests while it
-  // runs (the counter sees that), and an imperative caller appends into a body it already holds
-  // (only the DOM sees that). Either signal makes this a level-2 section. Past that the section
-  // is STILL DRAWN, at level 2 — dropping rows to enforce a rule would hide an author's settings
-  // — and reported, so the offender gets promoted rather than the depth quietly returning.
-  // `counterDepth` = how many buildFn calls are on the stack. `hostBodies` = how many section
-  // bodies the host sits inside, itself included. They OVERLAP by one whenever a caller appends
-  // into the very body being built, so that one is subtracted rather than counted twice; the
-  // rest of `hostBodies` is real extra nesting the counter cannot see, and the counter in turn
-  // sees the nesting the DOM cannot (a section still detached from its parent while it builds).
-  function sectionDepthOf(counterDepth, hostBodies) {
-    var extra = Math.max(0, (hostBodies || 0) - (counterDepth > 0 ? 1 : 0));
-    var depth = counterDepth + extra;
-    return { level: depth === 0 ? 1 : 2, tooDeep: depth > 1 };
-  }
-  /* @ovl07-end */
-  function sectionGroup(type, title, buildFn, opts) {
-    opts = opts || {};
-    var d = sectionDepthOf(_sectionDepth, opts.hostBodies);
-    var level = d.level;
-    if (d.tooDeep) _sectionDepthViolations.push(title);
-    var keyed = opts.key != null;
-    var collapsed = keyed
-      ? !(openSections[opts.key] == null ? opts.defaultOpen !== false : openSections[opts.key])
-      : (type != null ? window.PanelLayout.isCollapsed(type) : opts.defaultOpen === false);
-    var enabled = opts.toggle ? !!opts.toggle.get() : true;
-    var over = !!(opts.overridden && opts.overridden());
-    var sec = h("div", "insp-section" + (level === 2 ? " insp-section--l2" : "") +
-      (collapsed ? " is-collapsed" : "") + (enabled ? "" : " is-inactive") +
-      (opts.divider === false ? " insp-section--no-divider" : ""));
-    if (type != null) sec.setAttribute("data-section-type", type);
-    var head = h("div", "insp-section__head");
-    var twirl = h("span", "insp-section__twirl" + (collapsed ? "" : " is-open"));
-    var titleEl = h("span", "insp-section__title", title);
-    var handle = h("span", "insp-section__drag"); handle.textContent = "∷"; handle.title = "Drag to reorder";
-    // uio-F03 roll-up: the header counts the rows in this section that carry their own value
-    // instead of inheriting one ("3 overridden"). Filled after buildFn, from the tally the
-    // inheritance tails push into. Empty (and invisible) when nothing is overridden.
-    var rollup = h("span", "insp-section__rollup");
-    head.appendChild(twirl); head.appendChild(titleEl);
-    if (over) { var dot = h("span", "insp-section__dot"); dot.title = "Customized from theme default"; head.appendChild(dot); }
-    // The one-line summary, shown only while collapsed: what this section will actually do.
-    // With a switch it always leads with On/Off, so "collapsed" never has to mean "unknown".
-    var summaryText = sectionSummary(opts, enabled);
-    if (summaryText) { var sum = h("span", "insp-section__summary", summaryText); sum.title = summaryText; head.appendChild(sum); }
-    head.appendChild(rollup);
-    var ctrls = h("div", "insp-section__ctrls");
-    if (over && opts.onReset) {
-      var rb = h("button", "insp-section__reset", "Reset"); rb.type = "button"; rb.title = "Reset this section to the theme default";
-      rb.addEventListener("click", function (e) { e.stopPropagation(); pushHistory(); opts.onReset(); renderInspector(); });
-      ctrls.appendChild(rb);
-    }
-    if (opts.toggle) {
-      ctrls.appendChild(switchEl(enabled, function (v) {
-        pushHistory();
-        opts.toggle.set(v);   // the switch NEVER moves the disclosure (OVL-08)
-        renderInspector();
-      }));
-    }
-    if (opts.actions) [].concat(opts.actions).forEach(function (a) { if (a) ctrls.appendChild(a); });
-    head.appendChild(ctrls);
-    head.appendChild(handle);
-    var body = h("div", "insp-section__body");
-    head.addEventListener("click", function () {
-      if (panelEditMode) return; // in edit mode the header is a drag grip, not a collapse toggle
-      var nowCollapsed = !sec.classList.contains("is-collapsed");
-      sec.classList.toggle("is-collapsed", nowCollapsed); twirl.classList.toggle("is-open", !nowCollapsed);
-      if (keyed) { openSections[opts.key] = !nowCollapsed; saveOpenSections(); }
-      else if (type != null) window.PanelLayout.setCollapsed(type, nowCollapsed);
-    });
-    // Assembled BEFORE the body is built, so a nested section can see the chain it is being
-    // appended into (sectionBodiesAbove walks the tree even while the panel is still detached).
-    sec.appendChild(head); sec.appendChild(body);
-    // Nested sections must not land in the panel's own ordering buffer (they belong to their
-    // parent's body), so the buffer is suspended for the duration of the build.
-    var prevTally = _scopeTally; _scopeTally = [];
-    var prevBuf = _sectionBuf; _sectionBuf = null;
-    _sectionDepth++;
-    try { buildFn(body); } catch (e) {}
-    _sectionDepth--;
-    _sectionBuf = prevBuf;
-    var childTally = _scopeTally; _scopeTally = prevTally;
-    // A parent counts what its nested sections resolved too, so the roll-up on a level-1 header
-    // is the truth for everything folded underneath it.
-    if (_scopeTally) [].push.apply(_scopeTally, childTally);
-    var overrides = overrideCount(childTally);
-    rollup.textContent = rollupLabel(overrides);
-    if (overrides) {
-      sec.classList.add("has-overrides");
-      rollup.title = overrides + (overrides === 1 ? " value in this section is" : " values in this section are") +
-        " set here instead of inherited";
-    }
-    if (_sectionBuf) _sectionBuf.push({ type: type, el: sec });
-    return sec;
-  }
-  function endSections(container) {
-    if (!_sectionBuf) return;
-    window.PanelLayout.orderSections(_sectionBuf).forEach(function (o) { container.appendChild(o.el); });
-    if (panelEditMode) wireSectionDrag(container);
-    _sectionBuf = null;
-  }
-  function wireSectionDrag(container) {
-    Array.prototype.forEach.call(container.querySelectorAll(".insp-section"), function (sec) {
-      sec.setAttribute("draggable", "true");
-      sec.addEventListener("dragstart", function (e) { sec.classList.add("is-dragging"); try { e.dataTransfer.setData("text/plain", sec.getAttribute("data-section-type")); } catch (_) {} });
-      sec.addEventListener("dragend", function () { sec.classList.remove("is-dragging"); });
-      sec.addEventListener("dragover", function (e) { e.preventDefault(); });
-      sec.addEventListener("drop", function (e) {
-        e.preventDefault();
-        var dragged = ""; try { dragged = e.dataTransfer.getData("text/plain"); } catch (_) {}
-        var target = sec.getAttribute("data-section-type");
-        if (!dragged || dragged === target) return;
-        var order = window.PanelLayout.load().order;
-        window.PanelLayout.move(dragged, order.indexOf(target));
-        renderInspector();
-      });
-    });
-  }
-  // uio-E-C05 (EDIT-09): section reordering is a once-in-a-while GLOBAL preference, so its entry
-  // point moved OFF the top of the inspector into the panel overflow menu ("Reorder inspector
-  // sections…"). This bar is now only the MODE BANNER while reordering is on: it states the scope
-  // (every block's inspector) + Done/Reset, so you always know what the drag is rearranging.
-  function renderPanelLayoutBar() {
-    if (!panelEditMode) return; // off: no top-of-panel control; the ⋯ menu is the entry point
-    var bar = h("div", "insp-layout-bar is-editing");
-    bar.appendChild(h("span", "insp-layout-bar__scope", "Reordering sections for every block’s inspector — saved for you, not the course."));
-    var done = h("button", "insp-layout-bar__btn"); done.type = "button";
-    done.textContent = "Done"; done.title = "Finish reordering";
-    done.addEventListener("click", function () { panelEditMode = false; renderInspector(); });
-    bar.appendChild(done);
-    var reset = h("button", "insp-layout-bar__btn insp-layout-bar__btn--reset"); reset.type = "button";
-    reset.textContent = "Reset"; reset.title = "Restore the default section order + collapse";
-    reset.addEventListener("click", function () { window.PanelLayout.reset(); renderInspector(); });
-    bar.appendChild(reset);
-    inspector.insertBefore(bar, inspector.firstChild); // pin to the very top of the panel
-  }
-  // uio-E-C05 (EDIT-09): the panel overflow (⋯) menu. Holds the demoted "Reorder inspector
-  // sections…" entry, shown only when the current inspector actually has reorderable sections.
-  function panelHasReorderableSections() { return !!inspector.querySelector(".insp-section[data-section-type]"); }
-  function openPanelOverflowMenu(anchor) {
-    // The ⋯ button only shows when there ARE reorderable sections (see maybeRenderLayoutBar), so
-    // the menu always carries the reorder entry.
-    var items = [{ label: panelEditMode ? "Done reordering sections" : "Reorder inspector sections…",
-      onClick: function () { panelEditMode = !panelEditMode; renderInspector(); } }];
-    if (panelEditMode) items.push({ label: "Reset section order", onClick: function () { window.PanelLayout.reset(); renderInspector(); } });
-    var r = anchor.getBoundingClientRect();
-    showContextMenu(r.right - 4, r.bottom + 6, items);
-  }
-  function mountPanelOverflow() {
-    var btn = document.getElementById("panel-overflow-btn");
-    if (!btn || btn.__wired) return;
-    btn.__wired = true;
-    btn.addEventListener("click", function () { openPanelOverflowMenu(btn); });
-  }
-  // Show the Edit-layout bar only on panels that actually use v2 sections (else it's a dead control).
-  // Only the PanelLayout-managed sections (sectionGroup -> data-section-type) are
-  // drag-reorderable, so the Edit-layout bar shows only when THOSE exist. The DS
-  // PanelSection wrappers (issue #14, no data-section-type) are plain collapsibles
-  // and must not summon the bar on every block inspector.
-  function maybeRenderLayoutBar() {
-    var has = panelHasReorderableSections();
-    // uio-E-C05 (EDIT-09): the ⋯ entry point shows only where reordering applies; the banner shows
-    // only while reordering is on. If a re-render drops the sections, leave edit mode so no orphan banner.
-    var ov = document.getElementById("panel-overflow-btn"); if (ov) ov.hidden = !has;
-    if (!has) { panelEditMode = false; return; }
-    renderPanelLayoutBar();
-  }
-  window.__panelV2 = { beginSections: beginSections, sectionGroup: sectionGroup, endSections: endSections, setEditMode: function (v) { panelEditMode = v; }, getEditMode: function () { return panelEditMode; } }; // test hook
+  // The section engine -> src/editor/inspector/sections.js (arch-P3b-03). THE section wrapper
+  // (34 adopters), the two-level depth rule, the drag-reorder mode and the PanelLayout store all
+  // live there now. What stayed here is what the region READS rather than owns: `inspector`, the
+  // panel host this file swaps in and out as a render target at thirty-odd sites, and the
+  // `_scopeTally` the inheritance tails push into from another banner entirely.
+  var beginSections = VE.bind("beginSections");
+  var sectionsBufferOpen = VE.bind("sectionsBufferOpen");
+  var sectionGroup = VE.bind("sectionGroup");
+  var endSections = VE.bind("endSections");
+  var panelHasReorderableSections = VE.bind("panelHasReorderableSections");
+  var mountPanelOverflow = VE.bind("mountPanelOverflow");
+  var maybeRenderLayoutBar = VE.bind("maybeRenderLayoutBar");
 
   // What each row of the dispatch table (src/editor/inspector/dispatch.js) names. The table decides
   // WHICH panel and WHAT runs after it; these are the implementations, and a ratchet fails a name
@@ -6338,7 +6080,7 @@
     // Content/Appearance/Behaviour sections), add ours to THAT buffer and let the caller flush —
     // so the whole panel sorts as ONE PanelLayout stream (Behaviour lands after Layout/Spacing)
     // instead of two independently-sorted cycles. Standalone callers self-manage as before.
-    var ownBuffer = _sectionBuf === null;
+    var ownBuffer = !sectionsBufferOpen();
     if (ownBuffer) beginSections();
     sectionGroup("Layout", "Layout", function (body) {
       segmentedIconLive("Align", [[Icon("align-left"), "start", "Start"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "end", "End"]],
@@ -25850,6 +25592,28 @@
     setCurrentPage: function (i) { currentPage = i; },
     noteViewJs: function (ms) { _perfViewJs += ms; _perfViewN++; }
   });
+  // arch-P3b-03: what the inspector section engine reads. `inspector` is the panel host, and this
+  // file reassigns it as a render target at thirty-odd sites (`var _ins = inspector; inspector =
+  // secBody; try { … } finally { inspector = _ins; }`), so it has to be live -- the section engine
+  // must draw into whichever body is current, not the one that was current when it installed.
+  window.VersoEditor.provideLive({
+    inspector: function () { return inspector; },
+    scopeTally: function () { return _scopeTally; }
+  });
+  window.VersoEditor.provide({
+    openSections: openSections,   // mutated by key, never reassigned
+    saveOpenSections: saveOpenSections,
+    pushHistory: pushHistory,
+    showContextMenu: showContextMenu,
+    sectionSummary: sectionSummary,
+    overrideCount: overrideCount,
+    rollupLabel: rollupLabel,
+    switchEl: switchEl,
+    renderInspector: renderInspector,
+    // sectionGroup borrows the tally for the duration of a build and hands it back, so this one
+    // crosses in both directions.
+    setScopeTally: function (v) { _scopeTally = v; }
+  });
   // This list grows as regions move and ask for more -- deliberately, one binding at a time, so
   // the surface stays a record of what is actually depended on rather than a guess. audit().unmet
   // names anything a region asked for that nobody here supplies.
@@ -25857,6 +25621,7 @@
   // Regions install last, once the surface above is complete. Each one reads what it needs and
   // exposes its entry points, which the bind()s further up this file are already pointing at.
   CV.install(VE);
+  window.VersoInspectorSections.install(VE);
 
   // ---- init ----------------------------------------------------------------
   // Skipped in kit mode (kit.html only needs the primitives defined above, not a

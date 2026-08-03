@@ -6981,8 +6981,14 @@ section("richer bullet lists");
   ok("Source and Publish hand back the last column so they are squeezed too", /\.workspace\.has-sheet > \.source-stage,\s*\n\.workspace\.has-sheet > \.publish-stage \{ grid-column: 2 \/ 4; \}/.test(ecss));
   ok("the sheet width is a DS structural token, beside the other dock widths", /--panel-sheet-width: 400px;/.test(src("design-system/tokens/spacing.css")));
   ok("a docked surface takes the panel title token, not the modal one", /\.settings-title \{ font: var\(--type-panel-title\)/.test(ecss));
+  // arch-P3b-03: the collapse default moved to src/editor/inspector/sections.js, so the prefix rule
+  // is exercised rather than matched -- a NEW settings section has to inherit it without anyone
+  // adding a map entry, and that is the only thing worth asserting here.
   ok("the content pane still scrolls, and sections are collapsed by default", /\.settings-content \{[\s\S]{0,120}overflow-y: auto/.test(ecss)
-    && /function defaultCollapsed\(type\) \{ return !!DEFAULT_COLLAPSED\[type\] \|\| \/\^settings:\/\.test\(type\); \}/.test(e));
+    && (function () {
+      var PL = LOAD.load("src/editor/inspector/sections.js").PanelLayout;
+      return PL.isCollapsed("settings:anything-new") === true && PL.isCollapsed("Content") === false;
+    })());
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
   ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(e));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
@@ -8684,19 +8690,37 @@ section("neon-pink empty placeholders");
 section("panel system v2 — layout engine");
 (function () {
   var e = src("src/editor.js");
-  ok("PanelLayout engine defined (localStorage, editor-chrome)", /window\.PanelLayout = \(function \(\) \{[\s\S]*?var KEY = "verso\.panelLayout"/.test(e));
-  ok("8-type taxonomy (Type first)", /var TAXONOMY = \["Type", "Content", "Appearance", "Layout", "Spacing", "Behaviour", "Light\/Dark", "Advanced"\]/.test(e));
-  ok("load() self-heals unknown + appends new taxonomy types", /var known = raw\.order\.filter\(function \(t\) \{ return TAXONOMY\.indexOf\(t\) !== -1; \}\);[\s\S]*?TAXONOMY\.forEach\(function \(t\) \{ if \(known\.indexOf\(t\) === -1\) known\.push\(t\); \}\)/.test(e));
-  ok("orderSections stable-sorts by global rank", /function orderSections\(sections\)[\s\S]*?\.sort\(function \(a, b\) \{ return a\.r - b\.r \|\| a\.i - b\.i; \}\)/.test(e));
-  ok("exposes order/collapse/reset API", /return \{ TAXONOMY: TAXONOMY, load: load, save: save, reset: reset, rank: rank, orderSections: orderSections, isCollapsed: isCollapsed, setCollapsed: setCollapsed, reorder: reorder, move: move \}/.test(e));
-  // #164: default-collapse advanced section types. Extract + RUN the PanelLayout IIFE against a
-  // fake localStorage so the collapse defaults are exercised, not just pattern-matched.
+  // arch-P3b-03: the engine moved to src/editor/inspector/sections.js, which means PanelLayout is
+  // a plain `require` now instead of a regex that pulled its IIFE out of editor.js's text and
+  // rebuilt it with `new Function`. Every one of these runs the shipping object.
+  var SECTIONS = LOAD.load("src/editor/inspector/sections.js");
+  var PANEL = SECTIONS.PanelLayout;
+  ok("PanelLayout engine defined (localStorage, editor-chrome)", !!PANEL && typeof PANEL.load === "function");
+  ok("8-type taxonomy (Type first)",
+    PANEL.TAXONOMY.join(",") === "Type,Content,Appearance,Layout,Spacing,Behaviour,Light/Dark,Advanced");
+  ok("load() self-heals unknown + appends new taxonomy types", (function () {
+    var win = LOAD.load("src/editor/inspector/sections.js");
+    // a stored order carrying a retired type, and missing two current ones
+    win.localStorage.setItem("verso.panelLayout", JSON.stringify({ order: ["Spacing", "Gone", "Type"], collapsed: {} }));
+    var order = win.PanelLayout.load().order;
+    return order.indexOf("Gone") === -1 &&                                    // unknown dropped
+      order.slice(0, 2).join(",") === "Spacing,Type" &&                       // the author's order kept
+      win.PanelLayout.TAXONOMY.every(function (t) { return order.indexOf(t) !== -1; }); // the rest appended
+  })());
+  ok("orderSections stable-sorts by global rank", (function () {
+    var win = LOAD.load("src/editor/inspector/sections.js");
+    win.localStorage.setItem("verso.panelLayout", JSON.stringify({ order: ["Spacing", "Type"], collapsed: {} }));
+    var out = win.PanelLayout.orderSections([
+      { type: "Type", n: 1 }, { type: "Spacing", n: 2 },
+      { type: "zzz", n: 3 }, { type: "zzz", n: 4 }        // unknown types keep their relative order
+    ]).map(function (s) { return s.n; }).join(",");
+    return out === "2,1,3,4";
+  })());
+  ok("exposes order/collapse/reset API", ["TAXONOMY", "load", "save", "reset", "rank", "orderSections",
+    "isCollapsed", "setCollapsed", "reorder", "move"].every(function (k) { return PANEL[k] !== undefined; }));
+  // #164: default-collapse advanced section types.
   (function () {
-    var pm = e.match(/window\.PanelLayout = (\(function \(\) \{[\s\S]*?move: move \};\s*\}\)\(\));/);
-    ok("#164: PanelLayout IIFE extractable for functional test", !!pm);
-    if (!pm) return;
-    var fakeLS = (function () { var s = {}; return { getItem: function (k) { return s[k] == null ? null : s[k]; }, setItem: function (k, v) { s[k] = String(v); }, removeItem: function (k) { delete s[k]; } }; })();
-    var PL = new Function("localStorage", "return " + pm[1] + ";")(fakeLS);
+    var PL = LOAD.load("src/editor/inspector/sections.js").PanelLayout;
     ok("#164: Light/Dark + Advanced default-collapsed on first paint", PL.isCollapsed("Light/Dark") === true && PL.isCollapsed("Advanced") === true);
     ok("#164: core types (Content/Appearance/Layout) default-open", PL.isCollapsed("Content") === false && PL.isCollapsed("Appearance") === false && PL.isCollapsed("Layout") === false);
     PL.setCollapsed("Light/Dark", false);
@@ -8706,16 +8730,50 @@ section("panel system v2 — layout engine");
     PL.reset();
     ok("#164: reset restores the collapsed defaults", PL.isCollapsed("Light/Dark") === true && PL.isCollapsed("Appearance") === false);
   })();
-  // Phase 1b: sectionGroup wrapper + buffer emit in ranked order; edit-mode drag; layout bar
-  ok("sectionGroup tags section type + collapse from PanelLayout", /function sectionGroup\(type, title, buildFn, opts\)[\s\S]*?window\.PanelLayout\.isCollapsed\(type\)[\s\S]*?setAttribute\("data-section-type", type\)/.test(e));
-  ok("endSections emits in PanelLayout order", /function endSections\(container\)[\s\S]*?window\.PanelLayout\.orderSections\(_sectionBuf\)\.forEach/.test(e));
-  ok("collapse toggle persists via setCollapsed", /window\.PanelLayout\.setCollapsed\(type, nowCollapsed\)/.test(e));
-  ok("edit-mode wires section drag → PanelLayout.move + re-render", /function wireSectionDrag\(container\)[\s\S]*?window\.PanelLayout\.move\(dragged, order\.indexOf\(target\)\);\s*renderInspector\(\)/.test(e));
+  // Phase 1b: sectionGroup wrapper + buffer emit in ranked order; edit-mode drag; layout bar.
+  // arch-P3b-03: driven against the booted editor -- the section engine is DOM code, and a regex
+  // over it proved the call existed, never that the element came out right.
+  (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor;
+    var sectionGroup = K.bind("sectionGroup");
+    var sec = sectionGroup("Advanced", "Advanced", function () {});
+    ok("sectionGroup tags section type + collapse from PanelLayout",
+      sec.getAttribute("data-section-type") === "Advanced" && /is-collapsed/.test(sec.className));
+    var core = sectionGroup("Content", "Content", function () {});
+    ok("a core type comes out open", !/is-collapsed/.test(core.className));
+    // The buffer emits in the author's ranking, not the order the panel happened to build in.
+    var win2 = EDITOR_BOOT.boot();
+    win2.localStorage.setItem("verso.panelLayout", JSON.stringify({ order: ["Spacing", "Type", "Content"], collapsed: {} }));
+    var K2 = win2.VersoEditor, host = LOAD.makeNode("div");
+    K2.bind("beginSections")();
+    K2.bind("sectionGroup")("Type", "Type", function () {});
+    K2.bind("sectionGroup")("Spacing", "Spacing", function () {});
+    K2.bind("endSections")(host);
+    ok("endSections emits in PanelLayout order",
+      host.childNodes.map(function (n) { return n.getAttribute("data-section-type"); }).join(",") === "Spacing,Type");
+    // Clicking the header collapses AND records it, so the state survives the next rebuild.
+    var win3 = EDITOR_BOOT.boot();
+    var s3 = win3.VersoEditor.bind("sectionGroup")("Content", "Content", function () {});
+    s3.childNodes[0].dispatch("click");
+    ok("collapse toggle persists via setCollapsed",
+      /is-collapsed/.test(s3.className) && win3.PanelLayout.isCollapsed("Content") === true);
+  })();
+  ok("edit-mode wires section drag → PanelLayout.move + re-render",
+    /function wireSectionDrag\(container\)[\s\S]*?PanelLayout\.move\(dragged, order\.indexOf\(target\)\);\s*E\.renderInspector\(\)/.test(src("src/editor/inspector/sections.js")));
   // uio-E-C05 (EDIT-09): the reorder entry moved to the panel ⋯ menu; the bar is now the on-state
   // banner only. maybeRenderLayoutBar toggles the ⋯ visibility + renders the banner only where
   // reorderable sections exist (panelHasReorderableSections reads .insp-section[data-section-type]).
-  ok("Edit-layout entry + banner gate on panels with v2 sections", /function panelHasReorderableSections\(\) \{ return !!inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(e) && /function maybeRenderLayoutBar\(\) \{[\s\S]{0,600}panelHasReorderableSections\(\)[\s\S]{0,400}renderPanelLayoutBar\(\)/.test(e));
-  ok("layout bar has Edit + Reset (reset → PanelLayout.reset)", /reset\.addEventListener\("click", function \(\) \{ window\.PanelLayout\.reset\(\); renderInspector\(\); \}\)/.test(e));
+  ok("Edit-layout entry + banner gate on panels with v2 sections", (function () {
+    var win = EDITOR_BOOT.boot();
+    var K = win.VersoEditor, insp = K.get("inspector");
+    var found = null;
+    insp.querySelector = function (sel) { return sel === ".insp-section[data-section-type]" ? found : null; };
+    ok("no reorderable sections -> the panel reports none", K.bind("panelHasReorderableSections")() === false);
+    found = LOAD.makeNode("div");
+    return K.bind("panelHasReorderableSections")() === true;
+  })());
+  ok("layout bar has Edit + Reset (reset → PanelLayout.reset)",
+    /reset\.addEventListener\("click", function \(\) \{ PanelLayout\.reset\(\); E\.renderInspector\(\); \}\)/.test(src("src/editor/inspector/sections.js")));
   // Phase 2a: unified colorField (D5) — normalized value + resolver + token/custom/per-mode + recents
   ok("resolveColorField: token→var, per-mode→mode value, else hex", /window\.resolveColorField = function \(v, mode\) \{[\s\S]*?if \(v\.token\) return "var\(--color-" \+ v\.token \+ "\)";[\s\S]*?if \(v\.light \|\| v\.dark\) return \(mode === "dark" \? v\.dark : v\.light\)/.test(e));
   ok("normColorField coerces legacy flat hex → {hex}", /function normColorField\(v\)[\s\S]*?if \(typeof v === "string"\) return isHex\(v\) \? \{ hex: v \} : null;/.test(e));
@@ -8751,7 +8809,7 @@ section("panel system v2 — layout engine");
   // wraps them in beginSections()/endSections(inspector); each is sectionGroup(type,...) not disclosure().
   ok("#155: Appearance is a sectionGroup (was disclosure block-appearance)", /sectionGroup\("Appearance", "Appearance", function \(body\)/.test(e) && !/disclosure\("block-appearance"/.test(e));
   ok("#155: Layout + Spacing are sectionGroups (was disclosure block-layout/spacing)", /sectionGroup\("Layout", "Layout", function \(body\)/.test(e) && /sectionGroup\("Spacing", "Spacing", function \(body\)/.test(e) && !/disclosure\("block-layout"/.test(e) && !/disclosure\("spacing"/.test(e));
-  ok("#155/#165: renderBlockActionsSection buffers container sections, self-managing the buffer only when the caller has none", /function renderBlockActionsSection\(block, opts\)[\s\S]*?var ownBuffer = _sectionBuf === null;\s*if \(ownBuffer\) beginSections\(\);\s*sectionGroup\("Layout"[\s\S]*?if \(opts\.appearance !== false\) renderAppearanceSection\(block\);\s*[\s\S]*?if \(ownBuffer\) endSections\(inspector\);/.test(e));
+  ok("#155/#165: renderBlockActionsSection buffers container sections, self-managing the buffer only when the caller has none", /function renderBlockActionsSection\(block, opts\)[\s\S]*?var ownBuffer = !sectionsBufferOpen\(\);\s*if \(ownBuffer\) beginSections\(\);\s*sectionGroup\("Layout"[\s\S]*?if \(opts\.appearance !== false\) renderAppearanceSection\(block\);\s*[\s\S]*?if \(ownBuffer\) endSections\(inspector\);/.test(e));
   // #160: the three high-traffic Level-2 content inspectors emit their sections as canonical
   // sectionGroups (Content/Appearance/Behaviour/Layout/Light-Dark), each wrapped in begin/endSections.
   ok("#160 quiz content: Behaviour + Appearance(Colours) + Content(Questions) sectionGroups, no raw sub headers", /function renderQuizInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Behaviour"[\s\S]*?sectionGroup\("Appearance", "Colours"[\s\S]*?sectionGroup\("Content", "Questions"[\s\S]*?endSections\(inspector\);/.test(e) && !/sub\("Intro page"\)/.test(e) && !/sub\("Questions"\)/.test(e));
@@ -9136,7 +9194,7 @@ section("UI kit seam");
   ok("#14: layer breadcrumb routes through the canonical VersoUI.Breadcrumb",
      /if \(window\.VersoUI && window\.VersoUI\.Breadcrumb\) \{[\s\S]{0,320}window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(e));
   ok("#14: DS PanelSection wrappers stay OUT of the PanelLayout drag set (no data-section-type)",
-     /inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(e));
+     /E\.inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(src("src/editor/inspector/sections.js")));
   // (Retired) the old "chrome not yet wired" seam guard: renderContainerChrome is now fully
   // wired via renderBlockTwoLevel (every block inspector) and, since uio-E-C02, the text field
   // inspector too. See the "uio-E-C02" section for the field-inspector wiring assertions.
@@ -11072,9 +11130,11 @@ section("uio-E-C05: JSON model behind Developer tools + reorder in the panel ove
   ok("a Developer tools switch lives in system settings", /switchRow\("Developer tools", function \(\) \{ return devToolsOn\(\); \}/.test(e));
   ok("the model view is enforced hidden at boot", /applyDevToolsVisibility\(\); \/\/ enforce the default-off state at boot/.test(e));
   // EDIT-09: reorder demoted to the panel overflow menu; banner states scope.
-  ok("the panel has an overflow (⋯) button, hidden until it applies", /id="panel-overflow-btn"[^>]*hidden/.test(html) && /var ov = document\.getElementById\("panel-overflow-btn"\); if \(ov\) ov\.hidden = !has/.test(e));
-  ok("the overflow menu carries the demoted Reorder entry", /openPanelOverflowMenu[\s\S]{0,400}"Reorder inspector sections…"/.test(e));
-  ok("the layout bar is now an on-state banner stating the scope", /if \(!panelEditMode\) return;[\s\S]{0,200}insp-layout-bar__scope"/.test(e));
+  // arch-P3b-03: the ⋯ menu and the banner moved to src/editor/inspector/sections.js.
+  var SEC_SRC = src("src/editor/inspector/sections.js");
+  ok("the panel has an overflow (⋯) button, hidden until it applies", /id="panel-overflow-btn"[^>]*hidden/.test(html) && /var ov = document\.getElementById\("panel-overflow-btn"\); if \(ov\) ov\.hidden = !has/.test(SEC_SRC));
+  ok("the overflow menu carries the demoted Reorder entry", /openPanelOverflowMenu[\s\S]{0,400}"Reorder inspector sections…"/.test(SEC_SRC));
+  ok("the layout bar is now an on-state banner stating the scope", /if \(!panelEditMode\) return;[\s\S]{0,200}insp-layout-bar__scope"/.test(SEC_SRC));
 })();
 
 // uio-E-C08 (EDIT-15): the rail names its three stages (icon over a caption), and "Send to publish"
@@ -11961,14 +12021,21 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
   var e = src("src/editor.js"), ecss = src("editor.css");
   // Retargeted by OVL-07: these behaviours now live on the ONE section (`.insp-section`),
   // not on the second twirl chrome they were first built in — the claims are unchanged.
-  ok("the chevron alone decides collapsed, so the switch no longer folds the section",
-    /var collapsed = keyed[\s\S]{0,400}var enabled = opts\.toggle \? !!opts\.toggle\.get\(\) : true;/.test(e)
-    && /"insp-section"[\s\S]{0,200}\(collapsed \? " is-collapsed" : ""\)[\s\S]{0,80}\(enabled \? "" : " is-inactive"\)/.test(e));
-  ok("turning a section ON no longer opens it", !/if \(v\) openSections\[key\] = true;/.test(e)
-    && /opts\.toggle\.set\(v\);\s+\/\/ the switch NEVER moves the disclosure/.test(e));
-  ok("an OFF section still builds its rows, so they stay reachable",
-    /_sectionDepth\+\+;\s*\n\s*try \{ buildFn\(body\); \} catch \(e\) \{\}/.test(e)
-    && !/if \(open\) \{ var body/.test(e));
+  // arch-P3b-03: sectionGroup moved to src/editor/inspector/sections.js, and the OVL-08 claim is
+  // about BEHAVIOUR -- an off section is dimmed, not folded, and its rows still get built. Driven
+  // against the booted editor, which is what the claim was always about.
+  (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor, sectionGroup = K.bind("sectionGroup");
+    var on = false, built = 0;
+    var sec = sectionGroup("Content", "Behaviour", function () { built++; }, { toggle: { get: function () { return on; }, set: function (v) { on = v; } } });
+    ok("the chevron alone decides collapsed, so the switch no longer folds the section",
+      sec.classList.contains("is-inactive") && !sec.classList.contains("is-collapsed"));
+    ok("an OFF section still builds its rows, so they stay reachable", built === 1);
+    // Flip the switch: it sets the value and never touches the disclosure.
+    var switchNode = sec.childNodes[0].childNodes.filter(function (n) { return n.className === "insp-section__ctrls"; })[0].childNodes[0];
+    ["change", "click"].forEach(function (t) { if (switchNode.listeners[t]) switchNode.dispatch(t); });
+    ok("turning a section ON no longer opens it", !sec.classList.contains("is-collapsed"));
+  })();
   ok("off dims but never disables — no pointer-events trap on an inactive section",
     /\.insp-section\.is-inactive > \.insp-section__body \{ opacity: 0\.6; \}/.test(ecss)
     && !/\.insp-section\.is-inactive[^{]*\{[^}]*pointer-events: none/.test(ecss));
@@ -12022,9 +12089,10 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
     /\.caret \{/.test(ecss) && ecss.indexOf(".disc__caret") === -1 && /details\[open\] \.caret/.test(ecss));
 
   // --- two levels: the rule is computed, and the too-deep case is reported not dropped ---
-  var m = e.match(/\/\* @ovl07-start \*\/([\s\S]*?)\/\* @ovl07-end \*\//);
-  if (!m) { ok("locate the @ovl07 depth fence", false); return; }
-  var depthOf = new Function(m[1] + "; return sectionDepthOf;")();
+  // arch-P3b-03: the depth rule moved to src/editor/inspector/sections.js and is PUBLISHED, so it
+  // is a plain require rather than a fence sliced out of editor.js and rebuilt with `new Function`.
+  var depthOf = require(path.join(ROOT, "src/editor/inspector/sections.js")).sectionDepthOf;
+  ok("the @ovl07 depth rule is reachable without reconstituting source", typeof depthOf === "function");
   ok("a section at the panel root is level 1", depthOf(0, 0).level === 1 && depthOf(0, 0).tooDeep === false);
   ok("a section built inside another section's buildFn is level 2", depthOf(1, 0).level === 2 && depthOf(1, 0).tooDeep === false);
   ok("appending into a body that is already nested is level 2 as well", depthOf(0, 1).level === 2 && depthOf(0, 1).tooDeep === false);
@@ -12032,7 +12100,17 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
   ok("a third level is flagged, never a third style",
     depthOf(2, 0).tooDeep === true && depthOf(0, 2).tooDeep === true && depthOf(1, 2).tooDeep === true);
   ok("a flagged section is still drawn at level 2, so no rows are lost", depthOf(3, 2).level === 2);
-  ok("the offenders are published, so a probe can name them", /window\.__sectionDepth3 = \[\]/.test(e));
+  // arch-P3b-03: driven. A third level is still DRAWN (dropping rows would hide an author's
+  // settings) at level 2, and its title is recorded so a browser probe can name the offender.
+  ok("the offenders are published, so a probe can name them", (function () {
+    var win = EDITOR_BOOT.boot();
+    var sectionGroup = win.VersoEditor.bind("sectionGroup"), deepest = null;
+    sectionGroup("Content", "L1", function () {
+      sectionGroup("Spacing", "L2", function () { deepest = sectionGroup(null, "L3-too-deep", function () {}); });
+    });
+    return Array.isArray(win.__sectionDepth3) && win.__sectionDepth3.indexOf("L3-too-deep") >= 0 &&
+      !!deepest && deepest.classList.contains("insp-section--l2");   // drawn, at level 2, not dropped
+  })());
   ok("level 2 is the same header, quieter and indented", /\.insp-section--l2 > \.insp-section__body \{[^}]*padding: 2px 0 6px 14px/.test(ecss)
     && /\.insp-section--l2 > \.insp-section__head \.insp-section__title \{[^}]*font-size: var\(--text-xs\)/.test(ecss));
 
@@ -12050,12 +12128,31 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
     /key: "nav", title: "Learner nav"[\s\S]{0,300}value: "Not added"/.test(e));
 
   // --- the mechanics a nested section needs ---
-  ok("a nested section stays in its parent's body, out of the panel's ordering buffer",
-    /var prevBuf = _sectionBuf; _sectionBuf = null;[\s\S]{0,200}_sectionBuf = prevBuf;/.test(e));
-  ok("a parent's roll-up counts what its nested sections resolved",
-    /if \(_scopeTally\) \[\]\.push\.apply\(_scopeTally, childTally\);/.test(e));
-  ok("the body is attached before it is built, so a nested section can see the chain",
-    /sec\.appendChild\(head\); sec\.appendChild\(body\);[\s\S]{0,420}try \{ buildFn\(body\); \}/.test(e));
+  // arch-P3b-03: driven against the booted editor rather than matched in editor.js's text. Every
+  // one of these is about where an element ENDS UP, which a regex could never see.
+  (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor;
+    var sectionGroup = K.bind("sectionGroup"), host = LOAD.makeNode("div");
+    var childRef = null, bodyAttachedWhileBuilding = false;
+    K.bind("beginSections")();
+    var parent = sectionGroup("Content", "Parent", function (body) {
+      // the body is already hung off its section, so a nested builder can walk the chain up
+      bodyAttachedWhileBuilding = !!(body.parentNode && body.parentNode.getAttribute("data-section-type") === "Content");
+      childRef = sectionGroup("Spacing", "Child", function () {
+        K.get("scopeTally").push({ overridden: true });
+      });
+      body.appendChild(childRef);
+    });
+    K.bind("endSections")(host);
+    ok("a nested section stays in its parent's body, out of the panel's ordering buffer",
+      host.childNodes.length === 1 && host.childNodes[0] === parent &&
+      parent.childNodes[1].childNodes.indexOf(childRef) >= 0);
+    var rollup = parent.childNodes[0].childNodes.filter(function (n) { return n.className === "insp-section__rollup"; })[0];
+    ok("a parent's roll-up counts what its nested sections resolved", rollup.textContent === "1 overridden");
+    ok("the body is attached before it is built, so a nested section can see the chain",
+      bodyAttachedWhileBuilding &&
+      /sec\.appendChild\(head\); sec\.appendChild\(body\);[\s\S]{0,420}try \{ buildFn\(body\); \}/.test(src("src/editor/inspector/sections.js")));
+  })();
   ok("the DS states the rule the code is built to",
     /One notation, two levels, never three/.test(src("design-system/readme.md"))
     && /level\?: 1 \| 2;/.test(src("design-system/components/panels/PanelSection.d.ts")));
@@ -12343,7 +12440,22 @@ section("uio-F03 scope + inheritance model");
   ok("settingsRow fills its tail slot from `inherit` (no second row builder)", /var tailNode = opts\.tail \|\| \(opts\.inherit \? inheritanceTail\(opts\.inherit\) : null\)/.test(e));
   ok("the tail renders inherited scope OR dot + Reset, nothing else", /function inheritanceTail\([\s\S]{0,900}?insp-row__override-dot[\s\S]{0,400}?insp-row__reset[\s\S]{0,400}?insp-row__scope/.test(e));
   ok("switchRow can carry the tail without a divergent row", /function switchRow\(labelText, get, set, target, noHistory, rowOpts\)/.test(e));
-  ok("the section header counts its own overrides", /rollup\.textContent = rollupLabel\(overrides\)/.test(e));
+  // arch-P3b-03: the roll-up is written by sectionGroup, now in src/editor/inspector/sections.js.
+  // Driven: a section whose body resolves two overridden values must say so on its header, and a
+  // parent must count what its nested sections resolved too.
+  ok("the section header counts its own overrides", (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor, sectionGroup = K.bind("sectionGroup");
+    var clean = sectionGroup("Content", "Clean", function () {});
+    var rollupOf = function (sec) {
+      return sec.childNodes[0].childNodes.filter(function (n) { return n.className === "insp-section__rollup"; })[0];
+    };
+    if (rollupOf(clean).textContent !== "") return false;
+    // Two rows in the body resolve to their own value rather than an inherited one.
+    var dirty = sectionGroup("Content", "Dirty", function () {
+      K.get("scopeTally").push({ overridden: true }, { overridden: true });
+    });
+    return rollupOf(dirty).textContent === "2 overridden" && dirty.classList.contains("has-overrides");
+  })());
   ok("real rows carry the tail at three different rungs", (function () {
     var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
     var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
@@ -15873,7 +15985,9 @@ section("arch-P2 test seam");
   var bound = [];
   var out = card.render.call(card, { slots: { number: "01", title: "Getting started", objective: "Know the basics" } }, makeCtx(bound));
   ok("render binds every declared slot, in order", bound.join(",") === "number,title,objective");
-  ok("render emits the card with its four children (num, title, rule, objective)", out.childNodes.length === 4 && out.className === "chapter-card");
+  // arch-P3b-03: className and classList are one store in the stub now, as they are in a browser,
+  // so the card's status modifier shows up here too -- it always did on the page.
+  ok("render emits the card with its four children (num, title, rule, objective)", out.childNodes.length === 4 && out.classList.contains("chapter-card"));
   ok("slot values reach the DOM", out.childNodes[1].textContent === "Getting started" && out.childNodes[3].textContent === "Know the basics");
   ok("an unset status renders the incomplete variant", out.classList.contains("is-incomplete") && !out.classList.contains("is-complete"));
   var done = card.render.call(card, { status: "complete", slots: {} }, makeCtx([]));
@@ -16434,7 +16548,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 147, SLICE_BUDGET = 17;
+  var FN_BUDGET = 145, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);
