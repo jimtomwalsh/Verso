@@ -217,6 +217,83 @@
   // A fresh doc.theme seeded from the built-in THEMES (brand-new docs, no prior theme).
   window.defaultDocTheme = function () { return window.makeDocTheme(window.THEMES); };
 
+  // ---- theme presets (#126): the cross-course library, COPY-ON-APPLY ------------------------
+  // arch-P3-09 folds this back in beside the tokens it copies. A preset is a cross-course snapshot
+  // { theme:<doc.theme>, textStyles:<doc.styles> } kept in localStorage rather than the per-doc
+  // registry, so it is shared across projects.
+  //
+  // COPY-ON-APPLY is the whole design, and it is the opposite of #99's by-reference styles: applying
+  // a preset deep-clones its tokens onto THIS document. There is no live link, so a course stays
+  // self-contained and portable, and editing a preset never retro-changes a course that used it.
+  // See ADR-0002 and the #77 spec.
+  //
+  // These live here because they are theme operations -- a merge of token maps and a stamp of a
+  // normalised theme onto a document. The editor keeps what a module cannot: the undo push, the
+  // repaint and the save.
+  window.THEME_PRESETS_KEY = "authoring.themePresets";
+
+  // Keep EVERY existing doc style, then add or UPDATE each preset-named one as a COPY. The order
+  // matters: a doc-only style still referenced by a block.styleRef or a #99 inline span must never
+  // be orphaned by applying a preset, and a preset wins on a name clash.
+  window.mergeTextStyles = function (docStyles, presetStyles) {
+    var out = {};
+    Object.keys(docStyles || {}).forEach(function (n) { out[n] = docStyles[n]; });
+    Object.keys(presetStyles || {}).forEach(function (n) { out[n] = tclone(presetStyles[n]); });
+    return out;
+  };
+  // Stamp a deep COPY of the preset's theme onto d.theme and merge its text styles into d.styles.
+  // Normalised on the way in, so a preset saved under an older schema lands current. Mutates and
+  // returns d.
+  window.applyThemePresetToDoc = function (d, preset) {
+    if (!d || !preset) return d;
+    d.theme = window.normalizeDocTheme(tclone(preset.theme || {}));
+    d.styles = window.mergeTextStyles(d.styles || {}, preset.textStyles || {});
+    return d;
+  };
+  // A portable payload from one course's live theme + text styles. `now` is passed in so the
+  // snapshot is reproducible.
+  window.snapshotThemePreset = function (docTheme, textStyles, now) {
+    return { theme: tclone(docTheme || window.defaultDocTheme()), textStyles: tclone(textStyles || {}), savedAt: now };
+  };
+
+  // The library itself, over a localStorage-shaped store. Every one of these is total: a corrupt
+  // or absent blob reads as an empty library rather than throwing at the picker.
+  window.ThemePresets = {
+    load: function (storage) {
+      try {
+        var p = JSON.parse(storage.getItem(window.THEME_PRESETS_KEY));
+        return (p && typeof p === "object") ? p : {};
+      } catch (e) { return {}; }
+    },
+    save: function (storage, presets) {
+      try { storage.setItem(window.THEME_PRESETS_KEY, JSON.stringify(presets)); return { ok: true }; }
+      catch (e) { return { ok: false, error: e }; }
+    },
+    // Add or overwrite by name. A blank name is refused rather than stored as "".
+    put: function (presets, name, payload) {
+      name = (name || "").trim();
+      if (!name) return null;
+      presets[name] = payload;
+      return name;
+    },
+    // Rename in place. Refuses a blank name, a no-op rename, an unknown source, and -- crucially --
+    // a name that already exists, so a rename can never silently overwrite another preset.
+    rename: function (presets, oldName, newName) {
+      newName = (newName || "").trim();
+      if (!newName || newName === oldName) return { ok: false, reason: "no-change" };
+      if (!presets[oldName]) return { ok: false, reason: "missing" };
+      if (presets[newName]) return { ok: false, reason: "exists" };
+      presets[newName] = presets[oldName];
+      delete presets[oldName];
+      return { ok: true, name: newName };
+    },
+    remove: function (presets, name) {
+      if (!presets[name]) return false;
+      delete presets[name];
+      return true;
+    }
+  };
+
   // arch-P2 (the test seam): under `require`, the `window` above is this file's OWN namespace --
   // exactly what it publishes and nothing else. In the browser `module` is undefined, so this
   // line does nothing at all.

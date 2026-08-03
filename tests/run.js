@@ -4159,12 +4159,9 @@ section("#126 theme presets (copy-on-apply)");
 (function () {
   var tw = {};
   tw = LOAD.load("src/theme.js", { window: tw });
-  // Extract the two PURE preset helpers from editor.js and exercise them for real.
+  // arch-P3-09: the preset library folded back into src/theme.js, beside the tokens it copies.
   var t = src("src/editor.js");
-  var slice = t.slice(t.indexOf("function mergeTextStyles"), t.indexOf("function snapshotThemePreset"));
-  function clone(o) { return JSON.parse(JSON.stringify(o)); }
-  var helpers = new Function("window", "clone", slice + "\nreturn { mergeTextStyles: mergeTextStyles, applyThemePresetToDoc: applyThemePresetToDoc };").call(null, tw, clone);
-  var mergeTextStyles = helpers.mergeTextStyles, applyThemePresetToDoc = helpers.applyThemePresetToDoc;
+  var mergeTextStyles = tw.mergeTextStyles, applyThemePresetToDoc = tw.applyThemePresetToDoc;
 
   // merge-by-name: preset overwrites a same-named style, keeps doc-only styles, and COPIES.
   var docStyles = { "Body 1": { size: 15 }, "MyDocOnly": { size: 99, weight: "700" } };
@@ -4193,7 +4190,51 @@ section("#126 theme presets (copy-on-apply)");
 
   // The Editor exposes the preset library API (browser-verify + automation hook).
   ok("Editor.themePresets API exposed", /themePresets:\s*\{[\s\S]*?save:[\s\S]*?apply:[\s\S]*?rename:[\s\S]*?remove:/.test(t));
-  ok("presets live in cross-course localStorage (not the per-doc registry)", /THEME_PRESETS_KEY\s*=\s*"authoring\.themePresets"/.test(t));
+  ok("presets live in cross-course localStorage (not the per-doc registry)", (function () {
+    // The key is the module's, and the library round-trips through a localStorage-shaped store --
+    // never through the per-doc registry, so a preset is shared across projects.
+    var mem = {};
+    var storage = {
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+      setItem: function (k, v) { mem[k] = String(v); }
+    };
+    var TP = tw.ThemePresets;
+    var presets = TP.load(storage);
+    TP.put(presets, "Brand", tw.snapshotThemePreset(tw.defaultDocTheme(), { H1: { size: 40 } }, 1700));
+    TP.save(storage, presets);
+    return tw.THEME_PRESETS_KEY === "authoring.themePresets" &&
+      typeof mem["authoring.themePresets"] === "string" &&
+      TP.load(storage)["Brand"].textStyles.H1.size === 40 &&
+      TP.load(storage)["Brand"].savedAt === 1700;
+  })());
+  // The library's refusals, which are what stop a preset being silently lost.
+  ok("a blank preset name is refused rather than stored as an empty key", (function () {
+    var TP = tw.ThemePresets, presets = {};
+    return TP.put(presets, "   ", {}) === null && Object.keys(presets).length === 0 &&
+      TP.put(presets, " Brand ", {}) === "Brand" && !!presets["Brand"];
+  })());
+  ok("a rename never silently overwrites another preset", (function () {
+    var TP = tw.ThemePresets;
+    var presets = { A: { tag: "a" }, B: { tag: "b" } };
+    var clash = TP.rename(presets, "A", "B");
+    var ok1 = clash.ok === false && clash.reason === "exists" && presets.A.tag === "a" && presets.B.tag === "b";
+    var moved = TP.rename(presets, "A", "C");
+    return ok1 && moved.ok && presets.C.tag === "a" && presets.A === undefined &&
+      TP.rename(presets, "ghost", "D").reason === "missing" &&
+      TP.rename(presets, "C", "  ").reason === "no-change";
+  })());
+  ok("deleting an unknown preset is a no-op, not a throw", (function () {
+    var TP = tw.ThemePresets, presets = { A: {} };
+    return TP.remove(presets, "ghost") === false && TP.remove(presets, "A") === true && Object.keys(presets).length === 0;
+  })());
+  ok("a corrupt preset blob reads as an empty library", (function () {
+    var TP = tw.ThemePresets;
+    var bad = { getItem: function () { return "{not json"; } };
+    var wrong = { getItem: function () { return "42"; } };
+    var thrower = { getItem: function () { throw new Error("blocked"); } };
+    return Object.keys(TP.load(bad)).length === 0 && Object.keys(TP.load(wrong)).length === 0 &&
+      Object.keys(TP.load(thrower)).length === 0;
+  })());
   ok("applyThemePreset is undoable (pushHistory) + repaints (mount)", /function applyThemePreset\(name\)[\s\S]*?pushHistory\(\)[\s\S]*?applyThemePresetToDoc\(doc, p\)[\s\S]*?syncWorkingFromDoc\(\)[\s\S]*?mount\(\)/.test(t));
   // Picker dropdown fixes (James report): the placeholder option must NOT echo the selected
   // name (else the chosen theme rendered twice), and the per-course selection must reset on a
@@ -4255,6 +4296,19 @@ section("#128 doc.theme contract (ADR 0002)");
   var tw = {};
   tw = LOAD.load("src/theme.js", { window: tw });
   ok("ADR SCHEMA_VERSION matches window.THEME_SCHEMA_VERSION (no drift)", !!m && Number(m[1]) === tw.THEME_SCHEMA_VERSION);
+  // arch-P3-09: folding the preset library into theme.js must not disturb the one thing ADR-0002
+  // machine-checks. The schema version is still declared exactly once, in theme.js, and a preset
+  // saved under an older schema lands NORMALISED at the current one rather than being trusted.
+  ok("the schema version is still declared once, in theme.js", (function () {
+    var decls = (src("src/theme.js").match(/window\.THEME_SCHEMA_VERSION\s*=\s*\d+/g) || []).length;
+    return decls === 1 && !/THEME_SCHEMA_VERSION\s*=\s*\d+/.test(src("src/editor.js"));
+  })());
+  ok("applying a preset saved under an older schema normalises it to the current one", (function () {
+    var stale = { theme: { schemaVersion: 0, color: { dark: { bg: "#111" }, light: { bg: "#eee" } } }, textStyles: {} };
+    var d = { theme: tw.defaultDocTheme(), styles: {} };
+    tw.applyThemePresetToDoc(d, stale);
+    return d.theme.schemaVersion === tw.THEME_SCHEMA_VERSION;
+  })());
   // Completeness: every group + resolution hook the implemented shape uses is named.
   ["schemaVersion", "color", "font", "space", "radius", "size", "button", "textStyles",
    "blockStyles", "styleRef", "textRoles", "resolveBlockBox", "__blockStyles",
@@ -16045,7 +16099,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 148, SLICE_BUDGET = 17;
+  var FN_BUDGET = 147, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);

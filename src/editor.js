@@ -4330,46 +4330,26 @@
   // Applying SNAPSHOTS (deep-clones) the tokens onto THIS doc — no live link — so a
   // course stays self-contained/portable and editing a preset never retro-changes an
   // existing course. Deliberately the OPPOSITE of #99 by-reference styles (see #77 spec).
-  var THEME_PRESETS_KEY = "authoring.themePresets";
-  // Which saved theme the picker dropdown currently shows (UI-only; copy-on-apply keeps
-  // no live link, so this is just the last applied/saved name, reset on delete). Editor-
-  // global, survives renderInspector re-renders.
+  // The preset LIBRARY (load/save/merge/apply/rename/delete) is src/theme.js -- it copies theme
+  // tokens, so it belongs beside them (arch-P3-09). What stays here is what a module cannot own:
+  // the undo push, the repaint and the durable save.
+  //
+  // Which saved theme the picker shows. UI-only: copy-on-apply keeps no live link, so this is just
+  // the last applied/saved name, reset on delete. Editor-global, survives renderInspector rebuilds.
   var themePresetSel = null;
-  function loadThemePresets() {
-    try { var p = JSON.parse(localStorage.getItem(THEME_PRESETS_KEY)); return (p && typeof p === "object") ? p : {}; }
-    catch (e) { return {}; }
-  }
-  function saveThemePresets(p) { try { localStorage.setItem(THEME_PRESETS_KEY, JSON.stringify(p)); } catch (e) {} }
-  // Pure merge (extracted for the regression guard): keep EVERY existing doc style
-  // (so a doc-only style still referenced by a block.styleRef / #99 inline span is
-  // never orphaned), then add/UPDATE each preset-named style as a COPY. Preset wins
-  // on a name clash; doc-only names survive untouched.
-  function mergeTextStyles(docStyles, presetStyles) {
-    var out = {};
-    Object.keys(docStyles || {}).forEach(function (n) { out[n] = docStyles[n]; });
-    Object.keys(presetStyles || {}).forEach(function (n) { out[n] = clone(presetStyles[n]); });
-    return out;
-  }
-  // Pure copy-on-apply (extracted for the guard): stamp a deep COPY of the preset's
-  // theme onto d.theme + merge its text styles into d.styles. Mutates + returns d.
-  function applyThemePresetToDoc(d, preset) {
-    if (!d || !preset) return d;
-    d.theme = window.normalizeDocTheme(clone(preset.theme || {}));
-    d.styles = mergeTextStyles(d.styles || {}, preset.textStyles || {});
-    return d;
-  }
-  // Snapshot THIS course's live theme + text styles as a portable preset payload.
-  function snapshotThemePreset() {
-    return { theme: clone(doc.theme || window.defaultDocTheme()), textStyles: clone(getTextStyles()), savedAt: Date.now() };
-  }
+  var TP = window.ThemePresets;
+  function loadThemePresets() { return TP.load(localStorage); }
+  function saveThemePresets(p) { return TP.save(localStorage, p); }
+  function mergeTextStyles(docStyles, presetStyles) { return window.mergeTextStyles(docStyles, presetStyles); }
+  function applyThemePresetToDoc(d, preset) { return window.applyThemePresetToDoc(d, preset); }
+  function snapshotThemePreset() { return window.snapshotThemePreset(doc.theme, getTextStyles(), Date.now()); }
   function saveThemePreset(name) {
-    name = (name || "").trim(); if (!name) return false;
     var presets = loadThemePresets();
-    presets[name] = snapshotThemePreset();
+    if (!TP.put(presets, name, snapshotThemePreset())) return false;
     saveThemePresets(presets); return true;
   }
   function applyThemePreset(name) {
-    var presets = loadThemePresets(); var p = presets[name]; if (!p) return false;
+    var presets = loadThemePresets(), p = presets[name]; if (!p) return false;
     pushHistory(); // theme + styles are doc data now -> an apply is undoable
     applyThemePresetToDoc(doc, p);
     window.applyRenderContext({ docStyles: getTextStyles() }); // render reads the text-style hook
@@ -4379,17 +4359,18 @@
     return true;
   }
   function renameThemePreset(oldName, newName) {
-    newName = (newName || "").trim(); if (!newName || newName === oldName) return false;
     var presets = loadThemePresets();
-    if (!presets[oldName]) return false;
-    if (presets[newName]) { window.alert('A preset named "' + newName + '" already exists.'); return false; }
-    presets[newName] = presets[oldName]; delete presets[oldName];
+    var res = TP.rename(presets, oldName, newName);
+    if (!res.ok) {
+      if (res.reason === "exists") window.alert('A preset named "' + (newName || "").trim() + '" already exists.');
+      return false;
+    }
     saveThemePresets(presets); return true;
   }
   function deleteThemePreset(name) {
     var presets = loadThemePresets();
-    if (!presets[name]) return false;
-    delete presets[name]; saveThemePresets(presets); return true;
+    if (!TP.remove(presets, name)) return false;
+    saveThemePresets(presets); return true;
   }
 
   // ---- master page layout (side padding per breakpoint, persisted) ---------
