@@ -2882,13 +2882,14 @@ section("editor-rework static-fallback palette filter");
 // ---- SPEC 7: cell switcher + tiered mutability (wiring) ----
 section("editor-rework cell switcher");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   var html = src("index.html");
   // edit-header-ia-v2: the cell chip left the header bar; geometry/interactivity now live in the
   // Document settings modal's "Document type" section (buildDocTypeBody). The cell MODEL is unchanged.
   ok("the cell chip is retired from the header bar", html.indexOf('id="editor-cell-chip"') === -1);
-  ok("Document type is a settings section (first in the Project tab)", /\{ key: "docType", title: "Document type", build: buildDocTypeBody \}/.test(e));
-  ok("buildDocTypeBody offers the three geometries + an Interactive toggle (reusing the cell model)", /function buildDocTypeBody\(host\)[\s\S]{0,400}segmentedLive\("Geometry"[\s\S]{0,260}setCellGeo\(v\)[\s\S]{0,160}switchRow\("Interactive"[\s\S]{0,80}setCellInteractive\(on\)/.test(e));
+  ok("Document type is a settings section (first in the Project tab)", /\{ key: "docType", title: "Document type", build: buildDocTypeBody \}/.test(SS));
+  ok("buildDocTypeBody offers the three geometries + an Interactive toggle (reusing the cell model)", /function buildDocTypeBody\(host\)[\s\S]{0,400}segmentedLive\("Geometry"[\s\S]{0,260}setCellGeo\(v\)[\s\S]{0,160}switchRow\("Interactive"[\s\S]{0,80}setCellInteractive\(on\)/.test(SS));
   ok("interactivity toggles are IMMEDIATE (no warning)", /function setCellInteractive\(on\)[\s\S]{0,200}applyCellChange\(c\.geo, on\); \/\/ immediate, no warning/.test(e));
   ok("a geometry-mode change is GUARDED by a reflow warning", /function setCellGeo\(geo\)[\s\S]{0,320}confirmModal\("Change layout mode\?"/.test(e));
   ok("the geometry change re-renders the canvas via applyCellChange -> mount", /function applyCellChange\(geo, interactive\)[\s\S]{0,220}tagDocCell\(doc, geo, interactive\);[\s\S]{0,80}mount\(\);/.test(e));
@@ -4006,6 +4007,7 @@ section("group as a single side-by-side target (#95)");
 // #42: author-editable pixel dimensions behind the desktop/tablet/mobile preview buttons.
 section("customisable preview preset sizes (#42)");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   var bpClampDim = new Function("v", "def", "min", "max",
@@ -4016,8 +4018,8 @@ section("customisable preview preset sizes (#42)");
   ok("clamp: above max pins to max", bpClampDim(99999, 1200, 240, 4000) === 4000);
   ok("preview sizes are merged on boot BEFORE applyBp", /loadBpSizes\(\); loadBp\(\); applyBp\(\)/.test(e));
   ok("loadBpSizes validates + clamps stored dims against defaults", /function loadBpSizes\(\)[\s\S]*?bpClampDim\(s\[k\]\.w, BP_DEFAULTS\[k\]\.w\)/.test(e));
-  ok("setBpSize clamps, persists, and re-mounts to resize the frame", /function setBpSize\(bp, dim, val\)[\s\S]*?bpClampDim\(val[\s\S]*?saveBpSizes\(\);[\s\S]*?mount\(\)/.test(e));
-  ok("Preview sizes is a System settings section", /\{ key: "preview", title: "Preview sizes", build: buildPreviewSizesBody \}/.test(e));
+  ok("setBpSize clamps, persists, and re-mounts to resize the frame", /function setBpSize\(bp, dim, val\)[\s\S]*?bpClampDim\(val[\s\S]*?saveBpSizes\(\);[\s\S]*?mount\(\)/.test(SS));
+  ok("Preview sizes is a System settings section", /\{ key: "preview", title: "Preview sizes", build: buildPreviewSizesBody \}/.test(SS));
   ok("BP_DEFAULTS snapshots the shipped defaults for Reset", /var BP_DEFAULTS = JSON\.parse\(JSON\.stringify\(BREAKPOINTS\)\)/.test(e));
   // A forced device renders at its EXACT breakpoint pixels (a floating window in the black
   // stage), not fit-scaled to the monitor: zoom is cleared and demoFitScale is no longer used.
@@ -4087,8 +4089,8 @@ section("#111 completion screen");
   ok("exitCourse uses logout+close only in the no-splash fallback", /if\(!host\)\{ if\(window\.SCORM\)\{ try\{SCORM\.init\(\); SCORM\.quit\('logout'\)/.test(ex));
   ok("export fills meta (modules + date) from state", /function fillEndMeta\(host\)\{[\s\S]*?data-modules-map[\s\S]*?toLocaleDateString/.test(ex));
   // editor.js — inspector + demo preview
-  ok("editor adds a Completion screen settings section", /\{ key: "endScreen", title: "Completion screen", build: buildEndScreenBody \}/.test(ed));
-  ok("editor builds the end-screen inspector body", /function buildEndScreenBody\(host\)/.test(ed) && /Show completion screen/.test(ed));
+  ok("editor adds a Completion screen settings section", /\{ key: "endScreen", title: "Completion screen", build: buildEndScreenBody \}/.test(src("src/editor/settings-sheet.js")));
+  ok("editor builds the end-screen inspector body", /function buildEndScreenBody\(host\)/.test(src("src/editor/settings-sheet.js")) && /Show completion screen/.test(src("src/editor/settings-sheet.js")));
   ok("editor demo previews the real splash on Exit", /function previewEndScreen\(\)/.test(src("src/editor/demo.js")) && /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(src("src/editor/demo.js")));
   // course.css — hidden until revealed; reduced-motion honoured
   ok("course.css hides the splash until .is-shown", /\.course-end \{[\s\S]*?display: none;[\s\S]*?\}\s*\.course-end\.is-shown \{ display: flex; \}/.test(cs));
@@ -6185,7 +6187,7 @@ section("named-styles rename");
 // ---- Glossary: structured term/def model (table + CSV), searchable popover ---
 section("glossary");
 (function () {
-  var etxt = src("src/editor.js");
+  var etxt = src("src/editor/settings-sheet.js");   // arch-P3b-07g: the glossary is a sheet section
   // glossaryTerms(d): cleans doc.glossary.terms -> [{term,def}] (or null when empty).
   var s = etxt.indexOf("function glossaryTerms(d)");
   var e = etxt.indexOf("window.__glossaryTermsFn = glossaryTerms;") + "window.__glossaryTermsFn = glossaryTerms;".length;
@@ -6241,8 +6243,10 @@ section("glossary");
   var mg = win3.mergeGlossaryTerms;
   ok("import de-dupes by term (case-insensitive) — later def wins, position kept", JSON.stringify(mg([{ term: "RF", def: "old" }, { term: "UAS", def: "drone" }], [{ term: "rf", def: "new" }, { term: "CNI", def: "infra" }])) === JSON.stringify([{ term: "RF", def: "new" }, { term: "UAS", def: "drone" }, { term: "CNI", def: "infra" }]));
   ok("merge keeps empty-term rows (not de-duped)", JSON.stringify(mg([{ term: "", def: "a" }], [{ term: "", def: "b" }])) === JSON.stringify([{ term: "", def: "a" }, { term: "", def: "b" }]));
-  ok("CSV import path MERGES (de-dupes), not concat", /doc\.glossary\.terms = mergeGlossaryTerms\(doc\.glossary\.terms, added\)/.test(etxt) && !/doc\.glossary\.terms = doc\.glossary\.terms\.concat\(added\)/.test(etxt));
-  ok("glossary settings offer a guarded Clear all", /Clear all terms/.test(etxt) && /doc\.glossary\.terms = \[\];/.test(etxt) && /confirm\(/.test(etxt));
+  ok("CSV import path MERGES (de-dupes), not concat", /E\.doc\.glossary\.terms = mergeGlossaryTerms\(E\.doc\.glossary\.terms, added\)/.test(etxt) && !/doc\.glossary\.terms = doc\.glossary\.terms\.concat\(added\)/.test(etxt));
+  // arch-P3b-07g: the guard used to be checked as a bare /confirm\(/ anywhere in editor.js, which
+  // any other dialog in the file satisfied. Now it names the canonical one on this action.
+  ok("glossary settings offer a guarded Clear all", /Clear all terms/.test(etxt) && /E\.doc\.glossary\.terms = \[\];/.test(etxt) && /confirmModal\("Clear all terms"/.test(etxt));
 })();
 
 // ---- §1 P2: nav-pill cleanup (title above bar, bar centred, glyphs +~20%) ---
@@ -6263,11 +6267,12 @@ section("chapter menu dismiss");
 // ---- #168 Nav settings single-source: Settings 'Learner nav' targets the canonical footer nav ----
 section("#168 learner-nav single source");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   // The Settings 'Learner nav' tab must resolve the CANONICAL footer nav (footerCourseNav),
   // not the FIRST courseNav eachCourseNav yields (header -> footer -> pages), which drifts to
   // a legacy/header stray away from the footer nav the author edits on the canvas.
-  ok("Settings 'Learner nav' sections use footerCourseNav (not first-found)", /function navSettingsSections\(\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(e));
+  ok("Settings 'Learner nav' sections use footerCourseNav (not first-found)", /function navSettingsSections\(\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(SS));
   ok("old first-found pattern is gone from the nav tab", !/title: "Learner nav"[\s\S]{0,120}eachCourseNav\(function \(x\) \{ if \(!n\) n = x; \}\)/.test(e));
   // footerCourseNav resolves ONLY the footer region's courseNav (the single creatable instance).
   var fn = slice(e, "function footerCourseNav()", "\n  }");
@@ -6336,6 +6341,7 @@ section("nav pill cleanup");
 // ---- global motion: light/dark fade + chapter-change fade ------------------
 section("global motion");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var css = src("src/course.css");
   var r = src("src/render.js");
   var rt = src("src/runtime.js");
@@ -6358,8 +6364,8 @@ section("global motion");
   ok("runtime adds .is-chapter-enter on a chapter change", /ch !== lastChapter[\s\S]*?classList\.add\("is-chapter-enter"\)/.test(rt));
   ok("runtime seeds lastChapter (no fade on init)", /lastChapter = chapterOfCurrent\(\);/.test(rt));
   // editor: Motion disclosure + clamped setMotion
-  ok("editor has a Motion document panel", /\{ key: "motion", title: "Motion", build: buildMotionBody \}/.test(e));
-  ok("editor setMotion clamps 0-2000 + prunes empty", /doc\.motion\[key\] = Math\.max\(0, Math\.min\(2000, n\)\)/.test(e) && /if \(!Object\.keys\(doc\.motion\)\.length\) delete doc\.motion;/.test(e));
+  ok("editor has a Motion document panel", /\{ key: "motion", title: "Motion", build: buildMotionBody \}/.test(SS));
+  ok("editor setMotion clamps 0-2000 + prunes empty", /doc\.motion\[key\] = Math\.max\(0, Math\.min\(2000, n\)\)/.test(SS) && /if \(!Object\.keys\(E\.doc\.motion\)\.length\) delete E\.doc\.motion;/.test(SS));
   // export cleanRoot must KEEP the author's root-level override vars (not strip them as theme
   // tokens). --img-radius joined the list once arch-P1 exposed that the master image radius
   // rounded images on the canvas and then never shipped.
@@ -7167,6 +7173,7 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -7206,14 +7213,19 @@ section("richer bullet lists");
   ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(e));
   var ecss = src("editor.css");
   ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
-  ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(e));
-  ok("settings PROJECT tab = the document sections (rail order)", /key: "header", title: "Header", build: buildHeaderBody[\s\S]*?key: "footer", title: "Footer"[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(e));
+  ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(SS));
+  ok("settings PROJECT tab = the document sections (rail order)", /key: "header", title: "Header", build: buildHeaderBody[\s\S]*?key: "footer", title: "Footer"[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(SS));
   // uio-F05: the 220px nav rail + one-section-at-a-time are GONE. The sheet body is one scroll
   // of canonical sectionGroups, so it reads like the inspector docked beside it.
-  ok("settings sheet = ONE scroll of canonical sections, no nav rail", /function renderSettingsBody\(\)[\s\S]*?sections\.forEach\(function \(s\) \{\s*\n\s*var sec = sectionGroup\("settings:" \+ s\.key, s\.title/.test(e)
+  ok("settings sheet = ONE scroll of canonical sections, no nav rail", /function renderSettingsBody\(\)[\s\S]*?sections\.forEach\(function \(s\) \{\s*\n\s*var sec = sectionGroup\("settings:" \+ s\.key, s\.title/.test(SS)
     && !/settings-nav__item/.test(e) && !/settingsModal\.nav/.test(e));
-  ok("every section still builds into the rebound `inspector`, so all 15 builders keep working", /inspector = body;\s*\n\s*try \{ s\.build\(body\); \} finally \{ inspector = _ins; \}/.test(e));
-  ok("open modal stays in sync via refreshSettingsPanes in renderInspector", /function renderInspector\(\)[\s\S]*?refreshSettingsPanes\(\)/.test(e) && /function refreshSettingsPanes\(\) \{ if \(settingsModal && settingsModal\.active\) renderSettingsBody/.test(e));
+  // arch-P3b-07g: the sheet moved, and the panel host is swapped through the setter now, because
+  // a module cannot assign to a provided getter.
+  ok("every section still builds into the rebound `inspector`, so all 15 builders keep working", /E\.setInspector\(body\);\s*\n\s*try \{ s\.build\(body\); \} finally \{ E\.setInspector\(_ins\); \}/.test(src("src/editor/settings-sheet.js")));
+  // arch-P3b-07g: renderInspector runs its after-steps by name, and `settingsPanes` is the one
+  // that keeps an open sheet in sync. The claim is that step existing and doing the sync, not a
+  // textual call below the function.
+  ok("open modal stays in sync via refreshSettingsPanes in renderInspector", /settingsPanes: function \(\) \{ refreshSettingsPanes\(\); \}/.test(e) && /rule\.after\.forEach\(function \(step\) \{ INSPECTOR_STEPS\[step\]\(\); \}\)/.test(e) && /function refreshSettingsPanes\(\) \{ if \(settingsModal && settingsModal\.active\) renderSettingsBody/.test(SS));
   // uio-F05: right-docked sheet, not a centred dialog. It takes the inspector's own column and
   // widens it, so the canvas is squeezed exactly once and never covered.
   ok("the sheet is right-docked in the inspector's column, no scrim", /\.workspace > \.settings-sheet \{ grid-column: 4; \}/.test(ecss)
@@ -7227,7 +7239,7 @@ section("richer bullet lists");
     && /--sheet-w: var\(--panel-sheet-width, 400px\);/.test(ecss)
     && /--dock-w: var\(--right-w\);/.test(ecss));
   ok("the canvas overlay bar follows the dock, not the inspector specifically", /right: var\(--dock-w, 248px\);/.test(ecss));
-  ok("the sheet carries its own drag handle, persisted as sheet-w", /var grip = h\("div", "panel-resizer"\); grip\.id = "resizer-sheet";[\s\S]{0,120}wirePanelResizer\(grip, "sheet-w", "right", 340, 720\)/.test(e)
+  ok("the sheet carries its own drag handle, persisted as sheet-w", /var grip = h\("div", "panel-resizer"\); grip\.id = "resizer-sheet";[\s\S]{0,120}wirePanelResizer\(grip, "sheet-w", "right", 340, 720\)/.test(SS)
     && /restoreDockWidth\("left-w"\); restoreDockWidth\("right-w"\); restoreDockWidth\("sheet-w"\);/.test(e)
     && /\.settings-sheet \.panel-resizer \{ left: -3px; \}/.test(ecss));
   // The sheet's rows used to sit flush against both edges (padding was `<pad> 0`). It now takes
@@ -7254,7 +7266,7 @@ section("richer bullet lists");
       return PL.isCollapsed("settings:anything-new") === true && PL.isCollapsed("Content") === false;
     })());
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
-  ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(e));
+  ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(SS) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(SS));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
@@ -7954,6 +7966,7 @@ section("inspector Enter-to-blur");
 // ---- project auto-backup (P0 data-safety) -------------
 section("project auto-backup");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07d: the durable-copy writer moved to src/editor/backup.js.
   var ebk = src("src/editor/backup.js");
   var e = src("src/editor.js");
@@ -7975,7 +7988,7 @@ section("project auto-backup");
   ok("create flow passes productId + geo + interactive into createBlankDoc", /createBlankDoc\(title, code, \{ productId: newDocProduct, geo: cell\.geo, interactive: cell\.interactive \}\)/.test(e));
   ok("createBlankDoc stamps the Product + cell onto the new doc", /if \(opts\.productId\) tagDocProductStage\(newDoc, opts\.productId, null\)/.test(e) && /if \(opts\.geo\) tagDocCell\(newDoc, opts\.geo, opts\.interactive\)/.test(e));
   ok("create flow offers a ChoiceCards preset grid from the doc-type model", /window\.VersoUI\.ChoiceCards\(\{[\s\S]{0,200}DT\.PRESETS\.map/.test(e));
-  ok("Backup section registered at the top of Project settings", /\{ key: "backup", title: "Backup", build: buildBackupBody \}/.test(e));
+  ok("Backup section registered at the top of Project settings", /\{ key: "backup", title: "Backup", build: buildBackupBody \}/.test(SS));
   ok("schema CSV has a pure text builder for reuse", /window\.__schemaCsv = schemaCsvText/.test(src("src/schema.js")));
   ok("backup-off banner styled (loud, [hidden]-toggled)", /#backup-off-banner\s*\{[\s\S]{0,320}position: fixed/.test(src("editor.css")) && /#backup-off-banner\[hidden\] \{ display: none; \}/.test(src("editor.css")));
 })();
@@ -8715,6 +8728,7 @@ section("SVG polarity classifier");
 // still use the old pattern). Slice 3 flips the app-wide count to a hard failure.
 section("panel-standards");
 (function () {
+  var SSHEET = src("src/editor/settings-sheet.js");   // arch-P3b-07g: the section registry moved
   var t = src("src/editor.js");
   // arch-P3b-07b: the canonical primitives are the module's job now, so that is where they must be.
   var ep = src("src/editor/inspector/primitives.js");
@@ -8730,8 +8744,8 @@ section("panel-standards");
   // section reasons about is sliced out of THAT file now.
   var region = slice(src("src/editor/header-footer.js"), "function headerFooterConfig", "// Page layout = per-breakpoint");
   ok("HF: header + footer are their own sections, switch and all",
-    /key: "header", title: "Header", build: buildHeaderBody, opts: function \(\) \{ return hfSectionOpts\(true\); \}/.test(t)
-    && /key: "footer", title: "Footer", build: buildFooterBody, opts: function \(\) \{ return hfSectionOpts\(false\); \}/.test(t));
+    /key: "header", title: "Header", build: buildHeaderBody, opts: function \(\) \{ return hfSectionOpts\(true\); \}/.test(SSHEET)
+    && /key: "footer", title: "Footer", build: buildFooterBody, opts: function \(\) \{ return hfSectionOpts\(false\); \}/.test(SSHEET));
   ok("HF: the section header keeps the switch, the summary and Reset",
     /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(src("src/editor/header-footer.js")));
   ok("HF: switch rows (Underline/Top rule/Pin)", /switchRow\("Underline"/.test(region) && /switchRow\("Top rule"/.test(region) && /switchRow\("Pin to top"/.test(region));
@@ -8752,7 +8766,7 @@ section("panel-standards");
   ok("Nav: no word booleans in courseNavControls", !/\["(off|on|show|hide)",\s*(true|false)\]/i.test(navRegion));
   // nav promoted to a TOP-LEVEL disclosure (keeps its nests at level 2, not 3-deep under Footer)
   ok("Nav: with a bar its groups ARE the settings sections; with none, one that says so",
-    /key: "nav", title: "Learner nav"/.test(t) && /courseNavNests\(n\)\.map/.test(t));
+    /key: "nav", title: "Learner nav"/.test(SSHEET) && /courseNavNests\(n\)\.map/.test(SSHEET));
   var hfChildren = slice(t, "function headerFooterChildrenEditor", "function makeCourseNav");
   ok("Nav: not rendered inline in header/footer children editor", hfChildren.indexOf("courseNavControls(") === -1);
   // issue #11 DS-conformance (panel scope): the converted Header & Footer body
@@ -9690,6 +9704,7 @@ section("uio-SK06 UI-spine save-contract ratchet (HARD FAIL)");
 // divergent switch-row anatomy). The tail/overflow are slots only (uio-F03 fills them).
 section("uio-F01 shared settings row anatomy");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js");
@@ -9750,6 +9765,7 @@ section("uio-F02 density baseline — type tokens + focus ring");
 // Header/Footer styling) are marked `gate-ok` and excluded.
 section("UI kit conformance gate (ticket 9 — HARD FAIL)");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   // Class 1 — hand-appended block container chrome: sub("Appearance"|"Layout") NOT
   // marked gate-ok.
@@ -11486,10 +11502,11 @@ section("uio-E-C04: labelled variant/version axes + off-base return chip");
 // the panel ⋯ overflow menu, and its on-state becomes a scope-stating banner.
 section("uio-E-C05: JSON model behind Developer tools + reorder in the panel overflow menu");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js"), html = src("index.html");
   // EDIT-10: developer-tools gate, off by default.
   ok("Developer tools setting defaults OFF and gates the model panel", /function devToolsOn\(\) \{ try \{ return localStorage\.getItem\("authoring\.devtools"\) === "on"/.test(e) && /function applyDevToolsVisibility\(\)[\s\S]{0,160}modelDetails\.hidden = !on/.test(e));
-  ok("a Developer tools switch lives in system settings", /switchRow\("Developer tools", function \(\) \{ return devToolsOn\(\); \}/.test(e));
+  ok("a Developer tools switch lives in system settings", /switchRow\("Developer tools", function \(\) \{ return devToolsOn\(\); \}/.test(SS));
   ok("the model view is enforced hidden at boot", /applyDevToolsVisibility\(\); \/\/ enforce the default-off state at boot/.test(e));
   // EDIT-09: reorder demoted to the panel overflow menu; banner states scope.
   // arch-P3b-03: the ⋯ menu and the banner moved to src/editor/inspector/sections.js.
@@ -11964,6 +11981,7 @@ section("uio-P-C06: picker multi-select + queue selected");
 // menu definition; and help prose gets one small typographic system instead of inventing sizes.
 section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu, help type)");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
@@ -11975,15 +11993,15 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   // --- OVL-09: the fake Done is gone; the surface states its contract ------------------
   ok("the settings footer no longer offers a commit button", !/label: "Done"/.test(e));
   ok("it states the real contract instead (live apply + autosave + Undo)",
-    /settings-foot__contract", "Changes apply live, saved automatically\. Undo with " \+ MOD_KEY \+ "Z\."/.test(e));
+    /settings-foot__contract", "Changes apply live, saved automatically\. Undo with " \+ MOD_KEY \+ "Z\."/.test(SS));
   ok("the only footer control is a plain Close, not the accent",
-    /VersoUI\.Button\(\{ variant: "secondary", label: "Close", onClick: closeSettingsModal \}\)/.test(e));
+    /VersoUI\.Button\(\{ variant: "secondary", label: "Close", onClick: closeSettingsModal \}\)/.test(SS));
   // uio-F05 SUPERSEDES the third dismissal. There is no scrim to click, and dismissing on a
   // canvas click would make the canvas unusable while the sheet is open — the one thing the
   // sheet exists to allow. Close and Esc (via the layer stack) are the two remaining ways.
   ok("the surface is dismissed two ways (Close, Esc) and never by clicking the canvas",
-    /pushLayer\("settings", closeSettingsModal\)/.test(e)
-    && /popLayer\("settings"\)/.test(e)
+    /pushLayer\("settings", closeSettingsModal\)/.test(SS)
+    && /popLayer\("settings"\)/.test(SS)
     && !/if \(e\.target === overlay\) closeSettingsModal/.test(e));
   ok("the contract line and the Close button share the footer", /\.settings-foot \{[^}]*justify-content: space-between;/.test(css) && /\.settings-foot__contract \{/.test(css));
   // the pre-F05 spine debt this ticket was allowed to carry is now spent
@@ -11995,15 +12013,15 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   ok("it always carries a live value slot and a navigating link", /insp-xref__value/.test(ep) && /insp-xref__link/.test(ep) && /link\.addEventListener\("click", function \(\) \{ if \(opts\.onNavigate\) opts\.onNavigate\(\); \}\)/.test(ep));
   // uio-F05: with no nav rail to highlight, landing means EXPANDING the named section and
   // scrolling it into view inside the one scroll.
-  ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}revealSettingsSection\(sectionKey\)/.test(e)
-    && /function revealSettingsSection\(key\)[\s\S]{0,600}scrollIntoView/.test(e));
+  ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}revealSettingsSection\(sectionKey\)/.test(SS)
+    && /function revealSettingsSection\(key\)[\s\S]{0,600}scrollIntoView/.test(SS));
   // the three dead-prose references named by the audit are gone, each replaced by a row
   ok("'edit it in the Learner nav panel' is gone", e.indexOf("edit it in the Learner nav panel") === -1);
   ok("the nav row states its live section count and links to Learner nav",
     /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(ehf));
   ok("'Add a footer nav bar in Header & Footer first' is gone", e.indexOf("Add a footer nav bar in Header & Footer first") === -1);
   ok("with no nav bar the row still shows a value plus the link that adds one",
-    /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(e));
+    /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(SS));
   ok("'preview a variant from the top-bar switcher' is gone", e.indexOf("preview a variant from the top-bar switcher)") === -1);
   ok("the image panel shows which variant is live and opens the switcher",
     /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenuAtSwitch\(\)/.test(e));
@@ -12267,12 +12285,13 @@ section("uio-P-C08: variant roll-up chip + variant popover on Publish");
 // whatever opened it. Exercised against the REAL fenced source, with a stub document.
 section("uio-F05 overlay layer stack (Esc-LIFO)");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07c: the modal builders moved to src/editor/modals.js.
   var emd = src("src/editor/modals.js");
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
-  var m = e.match(/\/\* @f05-start \*\/([\s\S]*?)\/\* @f05-end \*\//);
+  var m = src("src/editor/settings-sheet.js").match(/\/\* @f05-start \*\/([\s\S]*?)\/\* @f05-end \*\//);   // arch-P3b-07g
   if (!m) { ok("locate @f05 fence", false); return; }
   // a document stub: records listener add/remove and carries a focusable activeElement
   function makeDoc() {
@@ -12347,10 +12366,10 @@ section("uio-F05 overlay layer stack (Esc-LIFO)");
 
   // --- the surfaces that were migrated onto the stack -------------------------------
   ok("the settings sheet, the popover, the menu and the modal all register on the stack",
-    /pushLayer\("settings", closeSettingsModal\)/.test(e) && /pushLayer\("chrome-pop", closeChromePop\)/.test(e)
+    /pushLayer\("settings", closeSettingsModal\)/.test(SS) && /pushLayer\("chrome-pop", closeChromePop\)/.test(e)
     && /pushLayer\("ctx-menu", closeCtxMenu\)/.test(ecm) && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(emd));
   ok("no migrated surface keeps a private Escape handler", !/function _chromePopEsc/.test(e) && !/function settingsEsc/.test(e));
-  ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
+  ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(SS));
 })();
 
 // ---- uio-O-W2 (OVL-13): menus never render an empty section ----------------------
@@ -12465,6 +12484,7 @@ section("uio-O-W2 section switch vs disclosure (OVL-08)");
 // section, and sections nest one deep: a group that wants a third level is promoted.
 section("uio-O-W2 one section notation, two levels (OVL-07)");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -12513,16 +12533,16 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
 
   // --- promotion: the panes that used to go three deep now go two ---
   ok("Header and Footer are sheet sections, not nests inside one",
-    /key: "header", title: "Header"/.test(e) && /key: "footer", title: "Footer"/.test(e)
+    /key: "header", title: "Header"/.test(SS) && /key: "footer", title: "Footer"/.test(SS)
     && !/subDisclosure\("hf\.header"/.test(e));
   ok("the nav's five groups are described once and drawn in both surfaces",
     /function courseNavNests\(child\)/.test(ehf)
     && /function courseNavControls\(child, host\) \{\s*\n\s*courseNavNests\(child\)\.forEach/.test(ehf)
-    && /function navSettingsSections\(\)[\s\S]{0,700}courseNavNests\(n\)\.map/.test(e));
+    && /function navSettingsSections\(\)[\s\S]{0,700}courseNavNests\(n\)\.map/.test(SS));
   ok("standing alone in the sheet a group says what it belongs to",
     /sheetTitle: "Nav buttons"/.test(ehf) && /sheetTitle: "Nav sections"/.test(ehf));
   ok("with no nav bar there is still one section that says so and links onward",
-    /key: "nav", title: "Learner nav"[\s\S]{0,300}value: "Not added"/.test(e));
+    /key: "nav", title: "Learner nav"[\s\S]{0,300}value: "Not added"/.test(SS));
 
   // --- the mechanics a nested section needs ---
   // arch-P3b-03: driven against the booted editor rather than matched in editor.js's text. Every
@@ -12561,6 +12581,7 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
 // overflow box scrolls away with the content.
 section("uio-O-W1 scroll-edge affordance (OVL-10)");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js"), ecss = src("editor.css"), html = src("index.html");
   ok("the frame is the positioned host, not the scroller itself",
     /\.scroll-frame \{ position: relative;/.test(ecss)
@@ -12571,20 +12592,20 @@ section("uio-O-W1 scroll-edge affordance (OVL-10)");
     && /\.scroll-frame\.has-edge-top::before, \.scroll-frame\.has-edge-bottom::after \{ opacity: 1; \}/.test(ecss));
   ok("the edge never eats a click", /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,200}pointer-events: none;/.test(ecss));
   ok("both edges are measured from the scroll position, so neither shows at rest",
-    /frame\.classList\.toggle\("has-edge-top", scroller\.scrollTop > 1\);/.test(e)
-    && /frame\.classList\.toggle\("has-edge-bottom", slack - scroller\.scrollTop > 1\);/.test(e));
+    /frame\.classList\.toggle\("has-edge-top", scroller\.scrollTop > 1\);/.test(SS)
+    && /frame\.classList\.toggle\("has-edge-bottom", slack - scroller\.scrollTop > 1\);/.test(SS));
   ok("wiring is idempotent, so a re-render re-measures without stacking listeners",
-    /if \(!scroller\.__scrollEdges\) \{\s*\n\s*scroller\.__scrollEdges = true;/.test(e));
+    /if \(!scroller\.__scrollEdges\) \{\s*\n\s*scroller\.__scrollEdges = true;/.test(SS));
   // Folding a section open changes the CONTENT height without moving the scroller's own box,
   // so a ResizeObserver alone never fires -- which is the one case the affordance exists for.
   ok("folding a section open re-measures, coalesced to one layout read per frame",
-    /new MutationObserver\(function \(\) \{[\s\S]{0,320}requestAnimationFrame\(run\)[\s\S]{0,200}attributeFilter: \["class", "style", "hidden"\]/.test(e));
+    /new MutationObserver\(function \(\) \{[\s\S]{0,320}requestAnimationFrame\(run\)[\s\S]{0,200}attributeFilter: \["class", "style", "hidden"\]/.test(SS));
   ok("it refuses to run without its frame rather than drawing edges on the scroller",
-    /if \(!frame \|\| !frame\.classList \|\| !frame\.classList\.contains\("scroll-frame"\)\) return null;/.test(e));
-  ok("the settings sheet body sits in a frame", /var frame = h\("div", "scroll-frame"\); frame\.appendChild\(content\);/.test(e));
+    /if \(!frame \|\| !frame\.classList \|\| !frame\.classList\.contains\("scroll-frame"\)\) return null;/.test(SS));
+  ok("the settings sheet body sits in a frame", /var frame = h\("div", "scroll-frame"\); frame\.appendChild\(content\);/.test(SS));
   ok("the inspector's scroller sits in a frame too", /<div class="scroll-frame" id="inspector-scroll-frame">/.test(html));
   ok("both re-measure after their own re-render",
-    /wireScrollEdges\(settingsModal\.content\)/.test(e)
+    /wireScrollEdges\(settingsModal\.content\)/.test(SS)
     && /wireScrollEdges\(document\.querySelector\("\.panel--right \.panel-scroll"\)\)/.test(e));
 })();
 
@@ -12666,6 +12687,7 @@ section("uio-F06 command index (Cmd-K)");
 // ---- uio-F06: the palette + the keyboard contract --------------------------------
 section("uio-F06 palette wiring + keyboard contract");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07p: the palette overlay moved to src/editor/palette.js.
   var ep6 = src("src/editor/palette.js");
   var e = src("src/editor.js");
@@ -12673,9 +12695,9 @@ section("uio-F06 palette wiring + keyboard contract");
   ok("Cmd-, opens Settings and Alt+Cmd-, opens the selection's settings",
     /meta && e\.key === ","[\s\S]{0,600}if \(e\.altKey\) openSelectionSettings\(\); else openSettingsModal\(\);/.test(e));
   ok("the selection's settings ARE the inspector, not a second surface",
-    /function openSelectionSettings\(\)[\s\S]{0,500}closeSettingsModal\(\)[\s\S]{0,400}getElementById\("inspector"\)/.test(e));
+    /function openSelectionSettings\(\)[\s\S]{0,500}closeSettingsModal\(\)[\s\S]{0,400}getElementById\("inspector"\)/.test(SS));
   ok("and it lands on the inspector's first control, not its tab strip",
-    /var body = document\.getElementById\("inspector"\);[\s\S]{0,200}body\.querySelector\('input:not\(\[type="hidden"\]\), select, button, \[tabindex="0"\]'\)/.test(e));
+    /var body = document\.getElementById\("inspector"\);[\s\S]{0,200}body\.querySelector\('input:not\(\[type="hidden"\]\), select, button, \[tabindex="0"\]'\)/.test(SS));
   ok("the palette draws from the one index, not its own page list",
     /var entries = commandEntries\(commandSources\(__guideIndexCache\)\);/.test(ep6)
     && /filtered = rankCommands\(entries, "", PALETTE_LIMIT\)/.test(ep6));
@@ -13893,6 +13915,7 @@ section("#104 copy-editor variant columns");
 // ---- #44 light mode for the tool's own UI (editor chrome) -----------------
 section("#44 editor-chrome light mode");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   var css = src("editor.css");
   var colors = src("design-system/tokens/colors.css");
@@ -13900,7 +13923,7 @@ section("#44 editor-chrome light mode");
   ok("applyUiTheme toggles .theme-light on the root + persists", /function applyUiTheme\(light\) \{\s*document\.documentElement\.classList\.toggle\("theme-light", !!light\);\s*try \{ localStorage\.setItem\("verso\.uiTheme", light \? "light" : "dark"\); \}/.test(e));
   ok("uiThemeIsLight reads the persisted flag", /function uiThemeIsLight\(\) \{ try \{ return localStorage\.getItem\("verso\.uiTheme"\) === "light"; \}/.test(e));
   ok("boot restores the saved chrome theme", /applyUiTheme\(uiThemeIsLight\(\)\);/.test(e));
-  ok("Settings exposes a Light interface switch", /switchRow\("Light interface", function \(\) \{ return uiThemeIsLight\(\); \}, function \(v\) \{ applyUiTheme\(v\); \}/.test(e));
+  ok("Settings exposes a Light interface switch", /switchRow\("Light interface", function \(\) \{ return uiThemeIsLight\(\); \}, function \(v\) \{ applyUiTheme\(v\); \}/.test(SS));
   // the DS token layer ships the light override the chrome reads via var(--...)
   ok("DS colors.css defines the .theme-light token override", /\.theme-light\s*\{[\s\S]{0,600}--surface-app:\s*#ffffff/.test(colors));
   ok("DS light override remaps ink + surfaces", /\.theme-light[\s\S]{0,900}--text-primary:\s*#1e1e1e/.test(colors));
@@ -13918,6 +13941,7 @@ section("#44 editor-chrome light mode");
 // ---- P0 spellcheck: pure checker + hash contract + chrome-only invariant --
 section("P0 spellcheck");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var sc = src("src/spellcheck.js");
   var m = sc.match(/\/\* @spell-core-start \*\/([\s\S]*?)\/\* @spell-core-end \*\//);
   if (!m) { ok("locate @spell-core fence", false); return; }
@@ -15208,6 +15232,7 @@ section("Source rewrite: insert image/table node after a block (product-rail-sou
 // this section only asserts the module loads clean and exposes its contract.
 section("Source rewrite: mark painting engine contract (Epic 2b)");
 (function () {
+  var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var SM = require(path.join(ROOT, "src/source-marks.js"));
   ok("SourceMarks exposes create() + hasHighlight()", typeof SM.create === "function" && typeof SM.hasHighlight === "function");
   ok("hasHighlight() is false headlessly (no CSS.highlights in node) -> paint is a safe no-op", SM.hasHighlight() === false);
