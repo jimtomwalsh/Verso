@@ -4638,7 +4638,17 @@ section("comment mode (canvas)");
   ok("popover edits body / resolve / delete", /function openCommentPopover[\s\S]*?c\.body = ta\.value[\s\S]*?c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); refreshCommentPanel\(\)[\s\S]*?doc\.comments\.splice\(i, 1\)/.test(t));
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
   ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(t));
-  ok("applyView re-projects pins (pan/zoom)", /persistView\(\);\s*if \(typeof renderCommentPins === "function"\) renderCommentPins\(\)/.test(t));
+  // arch-P3b-02: applyView moved to src/editor/canvas-view.js, so this drives it instead of
+  // matching its text. A pin rebuild on every pan/zoom frame is the whole contract -- pins are
+  // absolutely positioned in canvas space, so a view change that skipped this would leave them
+  // sitting where the content used to be.
+  ok("applyView re-projects pins (pan/zoom)", (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor;
+    var calls = 0;
+    K.provide("renderCommentPins", function () { calls++; });
+    K.bind("applyView")();
+    return calls === 1;
+  })());
   // mode bails: drill + C shortcut
   ok("drill handler bails in comment mode", /if \(interactMode \|\| commentMode\) return;/.test(t));
   ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentMode\)/.test(t));
@@ -7831,10 +7841,29 @@ section("pan/zoom perf wiring (#150)");
     /window\.__svgColorCount\(block\) > 1/.test(img));
   // low-detail-while-moving: markNavigating tags the world nav-lod during a gesture and
   // clears it after a settle timer; CSS stops painting heavy leaf content under nav-lod.
-  ok("markNavigating adds nav-lod + clears it on a settle timer",
-    /function markNavigating\(\)[\s\S]*?classList\.add\("nav-lod"\)[\s\S]*?setTimeout\([\s\S]*?classList\.remove\("nav-lod"\)/.test(e));
-  ok("markNavigating is wired into zoomStep, wheel-pan and drag-pan",
-    (e.match(/markNavigating\(\);/g) || []).length >= 3);
+  // arch-P3b-02: this moved to src/editor/canvas-view.js, so it is DRIVEN now -- boot the editor,
+  // call it, read the class off the real world element. The settle is asynchronous, so the clear
+  // half is asserted in the deferred block below rather than by matching a setTimeout in text.
+  (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor;
+    var world = K.get("world");
+    K.bind("markNavigating")();
+    ok("markNavigating adds nav-lod", world.classList.contains("nav-lod"));
+    // The settle clears it ~120ms after the last movement. Waiting is the only honest check --
+    // a regex over a setTimeout proves the call exists, not that the class comes off.
+    __async.push(new Promise(function (resolve) {
+      setTimeout(function () {
+        ok("nav-lod clears on the settle timer", !world.classList.contains("nav-lod"));
+        resolve();
+      }, 200);
+    }));
+    // Every motion path has to tag it, or the heavy-content cull never engages for that gesture.
+    ["panBy", "panDrag"].forEach(function (name) {
+      var w2 = EDITOR_BOOT.boot().VersoEditor;
+      w2.bind(name)(10, 10);
+      ok(name + " marks the gesture as navigating", w2.get("world").classList.contains("nav-lod"));
+    });
+  })();
   var css2 = src("editor.css");
   ok("nav-lod stops painting heavy leaf content (img/svg/embed/video)",
     /\.world\.nav-lod img,[\s\S]*?\.world\.nav-lod \.embed__video \{ visibility: hidden; \}/.test(css2));
@@ -7847,10 +7876,23 @@ section("pan/zoom perf wiring (#150)");
 // to its frame box WHILE moving, snapping back on settle. Editor chrome only.
 section("zoomed-out plain-page LOD (#172)");
 (function () {
-  var e = src("src/editor.js");
-  ok("FAR_ZOOM threshold constant exists", /var FAR_ZOOM = [0-9.]+;/.test(e));
-  ok("applyView toggles .world--far off the current zoom vs FAR_ZOOM",
-    /world\.classList\.toggle\("world--far", view\.zoom < FAR_ZOOM\)/.test(e));
+  // arch-P3b-02: the threshold and the toggle moved to src/editor/canvas-view.js. Driven rather
+  // than matched -- what matters is that the class tracks the CURRENT zoom on every applyView, and
+  // that the boundary sits where the CSS expects it. A regex proved neither.
+  var FAR = 0.5;
+  ok("FAR_ZOOM threshold constant exists", /var FAR_ZOOM = [0-9.]+;/.test(src("src/editor/canvas-view.js")));
+  (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor;
+    var world = K.get("world"), view = K.get("view"), applyView = K.bind("applyView");
+    view.zoom = FAR - 0.01; applyView();
+    var farOn = world.classList.contains("world--far");
+    view.zoom = FAR; applyView();
+    var atThreshold = world.classList.contains("world--far");
+    view.zoom = 1; applyView();
+    var farOff = world.classList.contains("world--far");
+    ok("applyView toggles .world--far off the current zoom vs FAR_ZOOM", farOn && !atThreshold && !farOff);
+    ok("the zoom readout follows the same write", K.get("zoomLevelEl").textContent === "100%");
+  })();
   var css = src("editor.css");
   ok("far-zoom LOD is gated on BOTH nav-lod (in motion) AND world--far (zoomed out)",
     /\.world\.nav-lod\.world--far \.course-root \{ visibility: hidden; \}/.test(css));
@@ -7894,25 +7936,53 @@ section("background-pause power governor (#179)");
 // on settle. Feature-detected: no native bridge (a plain browser) -> the CSS LOD still runs.
 section("native-snapshot gesture proxy (#151)");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-02: the proxy moved to src/editor/canvas-view.js. Most of what mattered here is now
+  // driven -- the bridge is stubbed onto the booted window and the request/reply round trip runs
+  // for real. The remaining text checks are over the module, not editor.js.
+  var e = src("src/editor/canvas-view.js");
   ok("feature-detects the native bridge (webkit.messageHandlers.nativeSnapshot)",
     /window\.webkit && window\.webkit\.messageHandlers && window\.webkit\.messageHandlers\.nativeSnapshot/.test(e));
-  ok("nativeSnapshot returns a Promise and resolves null when the bridge is absent",
-    /function nativeSnapshot\(rect\) \{\s*if \(!hasNativeSnapshot\(\)\) return Promise\.resolve\(null\);/.test(e));
-  ok("reply pump + pending map wired (window.__nativeSnapshotReply)",
-    /window\.__nativeSnapshotReply = function \(reqId, dataUrl\)/.test(e) && /_snapPending\[reqId\]/.test(e));
   ok("proxy is DEFAULT OFF (takeSnapshot proved flaky) behind a console toggle",
     /var CANVAS_PROXY = false;/.test(e) && /window\.__canvasProxy = function \(on\)/.test(e));
-  ok("proxyBegin gated on the flag + far zoom + the native bridge, with a re-entrancy guard",
-    /if \(!CANVAS_PROXY \|\| proxyActive\(\) \|\| _proxy\.pending[\s\S]*?if \(!\(view\.zoom < FAR_ZOOM\) \|\| !hasNativeSnapshot\(\)\) return;/.test(e));
   ok("the live world is hidden only on img.onload (never before the bitmap paints -> no flicker)",
-    /img\.onload = function \(\) \{[\s\S]*?if \(!img\.naturalWidth \|\| !img\.naturalHeight\) return;[\s\S]*?world\.style\.visibility = "hidden";/.test(e));
-  ok("proxy is wired into markNavigating (begin) + the settle timer (end) + applyView (track)",
-    /proxyBegin\(\);/.test(e) && /proxyEnd\(\);/.test(e) && /if \(proxyActive\(\)\) proxyTrackView\(\)/.test(e));
+    /img\.onload = function \(\) \{[\s\S]*?if \(!img\.naturalWidth \|\| !img\.naturalHeight\) return;[\s\S]*?E\.world\.style\.visibility = "hidden";/.test(e));
   ok("affine track maps the bitmap by A=zoom/startZoom, B=view.xy - startXY*A",
-    /var A = view\.zoom \/ \(_proxy\.sz \|\| 1\);[\s\S]*?var bx = view\.x - _proxy\.sx \* A/.test(e));
+    /var A = E\.view\.zoom \/ \(_proxy\.sz \|\| 1\);[\s\S]*?var bx = E\.view\.x - _proxy\.sx \* A/.test(e));
   ok("failed/late snapshot leaves the live DOM up so the CSS LOD stays the fallback",
     /if \(epoch !== _proxy\.epoch\) \{ _proxy\.pending = false; return; \}[\s\S]*?if \(!dataUrl\) return;/.test(e));
+  // No bridge (a plain browser) -> resolves null, so the CSS LOD stays the fallback.
+  __async.push(EDITOR_BOOT.boot().__nativeSnapshot({ x: 0, y: 0, w: 10, h: 10 }).then(function (v) {
+    ok("nativeSnapshot resolves null when the bridge is absent", v === null);
+  }));
+  // With a bridge: the request carries the rect, and the reply pump resolves the same request id.
+  (function () {
+    var posted = [];
+    var win = EDITOR_BOOT.boot({ window: { webkit: { messageHandlers: { nativeSnapshot: {
+      postMessage: function (m) { posted.push(m); }
+    } } } } });
+    __async.push(win.__nativeSnapshot({ x: 1, y: 2, w: 3, h: 4 }).then(function (v) {
+      ok("the reply pump resolves the pending request by id (window.__nativeSnapshotReply)", v === "data:image/png;base64,AA");
+    }));
+    ok("the snapshot request carries the screen rect + a request id", posted.length === 1 &&
+      posted[0].x === 1 && posted[0].y === 2 && posted[0].w === 3 && posted[0].h === 4 && !!posted[0].reqId);
+    win.__nativeSnapshotReply(posted[0].reqId, "data:image/png;base64,AA");
+    // A reply for an id nobody is waiting on must be inert, not a throw -- the watchdog can have
+    // already resolved and cleared it.
+    ok("a stale reply is inert", (function () { try { win.__nativeSnapshotReply("nope", "x"); return true; } catch (_) { return false; } })());
+  })();
+  ok("proxy is wired into markNavigating (begin) + the settle timer (end) + applyView (track)",
+    /proxyBegin\(\);/.test(e) && /proxyEnd\(\);/.test(e) && /if \(proxyActive\(\)\) proxyTrackView\(\)/.test(e));
+  // Default OFF is the whole point of the flag: a far-zoom gesture WITH the bridge present must
+  // still take no snapshot, or the flaky path is live for everyone in the packaged app.
+  ok("proxyBegin is gated on the flag -- a gesture with the bridge but the flag off asks for nothing", (function () {
+    var asked = 0;
+    var win = EDITOR_BOOT.boot({ window: { webkit: { messageHandlers: { nativeSnapshot: {
+      postMessage: function () { asked++; }
+    } } } } });
+    win.VersoEditor.get("view").zoom = 0.1;   // far zoom, where the proxy would otherwise engage
+    win.VersoEditor.bind("markNavigating")();
+    return asked === 0;
+  })());
   // Native side: the Swift bridge rasterises via takeSnapshot and replies to the pump.
   var sw = src("desktop/AuthoringTool.swift");
   ok("Swift registers the nativeSnapshot handler + rasterises via takeSnapshot -> PNG data URL",
@@ -7933,40 +8003,118 @@ section("native-snapshot gesture proxy (#151)");
 // only writers (pan/zoom/fit) reroute to scroll. Default OFF behind a flag + console toggle.
 section("native-scroll pan (#151 lever 1)");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-02: all of this moved to src/editor/canvas-view.js. The flag is a real runtime switch,
+  // so the whole section is driven now -- boot with it on, boot with it off, and read what the
+  // editor actually did to the DOM. That is a stronger check than any of the regexes it replaces:
+  // several of them would have passed against code that never ran.
+  var e = src("src/editor/canvas-view.js");
+  var edSrc = src("src/editor.js");
   ok("NATIVE_SCROLL flag default OFF + SCROLL_PAD + console toggle",
     /var NATIVE_SCROLL = false;/.test(e) && /var SCROLL_PAD = \d+;/.test(e) && /window\.__nativeScroll = function \(on\)/.test(e));
-  ok("attachWorld wraps the world in the overflow sizer when native, plain append otherwise",
-    /function attachWorld\(\)[\s\S]*?scrollSizer\.appendChild\(world\)[\s\S]*?canvas\.classList\.add\("native-scroll"\)[\s\S]*?canvas\.appendChild\(world\)[\s\S]*?canvas\.classList\.remove\("native-scroll"\)/.test(e));
   ok("every world mount routes through attachWorld (no raw canvas.appendChild(world) mount left)",
-    (e.match(/attachWorld\(\)/g) || []).length >= 4 && !/\n\s*canvas\.appendChild\(world\);/.test(e.replace(/canvas\.appendChild\(world\);\n\s*canvas\.classList\.remove/,'')));
-  ok("applyView drives pan via scroll (scale-only transform, sizer sized, view reconciled from clamped scroll)",
-    /if \(NATIVE_SCROLL && scrollSizer\)[\s\S]*?world\.style\.transform = "scale\("[\s\S]*?canvas\.scrollLeft = SCROLL_PAD - view\.x[\s\S]*?view\.x = SCROLL_PAD - canvas\.scrollLeft/.test(e));
-  var scrollBody = e.slice(e.indexOf('canvas.addEventListener("scroll"'), e.indexOf('}, { passive: true });') + 22);
-  ok("scroll listener syncs view from scroll, reprojects pins, and does NOT re-raster (no nav-lod/applyView)",
-    /view\.x = SCROLL_PAD - canvas\.scrollLeft[\s\S]*?renderCommentPins\(\)/.test(scrollBody) &&
-    scrollBody.indexOf("markNavigating") === -1 && scrollBody.indexOf("applyView") === -1);
-  ok("wheel + drag pan use native scroll under the flag (no transform pan when NATIVE_SCROLL)",
-    /\} else if \(NATIVE_SCROLL\) \{\s*return;/.test(e) && /if \(NATIVE_SCROLL && scrollSizer\) \{[\s\S]*?canvas\.scrollLeft -= dx; canvas\.scrollTop -= dy;/.test(e));
+    (edSrc.match(/attachWorld\(\);/g) || []).length >= 2 && edSrc.indexOf("canvas.appendChild(world)") === -1);
+
+  // With the flag OFF: the world hangs straight off the viewport and pan is a transform.
+  (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor;
+    var canvas = K.get("canvas"), world = K.get("world"), view = K.get("view");
+    ok("flag off: the viewport is not in native-scroll mode", !canvas.classList.contains("native-scroll"));
+    view.x = 10; view.y = 20; view.zoom = 1;
+    K.bind("applyView")();
+    ok("flag off: applyView pans with a translate+scale transform",
+      world.style.transform === "translate(10px,20px) scale(1)");
+    K.bind("panBy")(5, 5);
+    ok("flag off: a wheel pan moves the view, not the scroll offset", view.x === 5 && view.y === 15 && !canvas.scrollLeft);
+    ok("flag off: the world hangs straight off the viewport", canvas.childNodes.indexOf(world) >= 0);
+  })();
+
+  // With the flag ON: the world moves into the sizer, the transform carries ZOOM ONLY, and pan is
+  // scroll. The read-back of view from the CLAMPED scroll offset is the load-bearing bit -- the
+  // stub clamps nothing, so this asserts the round trip, and the browser probe covers the clamp.
+  (function () {
+    var win = EDITOR_BOOT.boot();
+    var K = win.VersoEditor;
+    win.__nativeScroll(true);
+    var canvas = K.get("canvas"), world = K.get("world"), view = K.get("view");
+    var sizer = canvas.childNodes.filter(function (n) { return n.className === "canvas-scroll"; })[0];
+    ok("flag on: the viewport switches to native-scroll and the world is wrapped in the sizer",
+      canvas.classList.contains("native-scroll") && !!sizer && sizer.childNodes.indexOf(world) >= 0);
+    view.x = -100; view.y = -50; view.zoom = 0.5;
+    K.bind("applyView")();
+    ok("flag on: the transform carries zoom only", world.style.transform === "scale(0.5)");
+    ok("flag on: the world is offset by the scroll pad inside the sizer",
+      world.style.left === "2000px" && world.style.top === "2000px");
+    ok("flag on: pan is driven from view through the scroll offset",
+      canvas.scrollLeft === 2100 && canvas.scrollTop === 2050);
+    ok("flag on: view is reconciled back off the scroll the browser accepted",
+      view.x === -100 && view.y === -50);
+    // A user scroll IS the pan: sync view, reproject pins, and do NOT re-raster or re-enter.
+    var pins = 0;
+    K.provide("renderCommentPins", function () { pins++; });
+    canvas.scrollLeft = 2500; canvas.scrollTop = 2200;
+    canvas.dispatch("scroll");
+    ok("flag on: a user scroll syncs the view and reprojects pins without re-rastering",
+      view.x === -500 && view.y === -200 && pins === 1 && !world.classList.contains("nav-lod"));
+    // A drag pan under the flag moves scroll, never the transform.
+    var before = world.style.transform;
+    K.bind("panDrag")(10, 10);
+    ok("flag on: a drag pan scrolls rather than transforming",
+      canvas.scrollLeft === 2490 && canvas.scrollTop === 2190 && world.style.transform === before);
+  })();
   var css = src("editor.css");
   ok("native-scroll CSS: viewport scrolls + scrollbars hidden + sizer positioned",
     /\.canvas\.native-scroll \{ overflow: auto;/.test(css) && /\.canvas\.native-scroll::-webkit-scrollbar \{ width: 0; height: 0; \}/.test(css) && /\.canvas-scroll \{ position: relative; \}/.test(css));
   ok("native-scroll never leaks into render()/course.css",
     src("src/render.js").indexOf("NATIVE_SCROLL") === -1 &&
     src("src/course.css").indexOf("native-scroll") === -1);
-  ok("under native-scroll, markNavigating skips the blanking classes (zoom paints LIVE, not black)",
-    /function markNavigating\(\) \{[\s\S]*?if \(NATIVE_SCROLL\) return;[\s\S]*?classList\.add\("nav-lod"\)/.test(e));
-  ok("the native-scroll flag persists across reload (localStorage) + no-arg query",
-    /localStorage\.getItem\(NS_KEY\) === "1"/.test(e) && /\(on == null\) \? NATIVE_SCROLL : !!on/.test(e));
+  ok("under native-scroll, markNavigating skips the blanking classes (zoom paints LIVE, not black)", (function () {
+    var win = EDITOR_BOOT.boot();
+    win.__nativeScroll(true);
+    win.VersoEditor.bind("markNavigating")();
+    return !win.VersoEditor.get("world").classList.contains("nav-lod");
+  })());
+  // Persisted, because a reload that silently dropped back to transform pan would make an A/B on
+  // real hardware meaningless. Written under the flag's own key, and read back by the next boot.
+  ok("the native-scroll flag persists across reload (localStorage) + no-arg query", (function () {
+    var win = EDITOR_BOOT.boot();
+    if (win.__nativeScroll() !== false) return false;           // no arg = query, and default is off
+    win.__nativeScroll(true);
+    if (win.localStorage.getItem("authoring.nativeScroll") !== "1") return false;
+    if (win.__nativeScroll() !== true) return false;            // query again, still on
+    // A fresh boot seeded with that stored value comes up in native-scroll mode.
+    var store = LOAD.makeStorage(); store.setItem("authoring.nativeScroll", "1");
+    return EDITOR_BOOT.boot({ window: { localStorage: store } }).__nativeScroll() === true;
+  })());
   // Compositor zoom (#151 lever 2, done right): all zoom entry points route through startZoom;
   // native mode animates the world transform via a CSS transition (browser scales the painted
   // layer -> smooth at any page count) then bakes to a crisp scale-only transform + scroll.
   ok("every zoom entry point routes through startZoom (no raw zoomStep kick left outside it)",
     (e.match(/startZoom\(\);/g) || []).length >= 3);
-  ok("native zoom uses a CSS transition on the transform (compositor scales the cached layer)",
-    /function startZoom\(\)[\s\S]*?world\.style\.transition = "transform " \+ _zoomDur \+ "ms linear";[\s\S]*?world\.style\.transform = "translate\(/.test(e));
-  ok("zoom bakes to a crisp scale-only transform + folds the transient translate into scroll (no jump)",
-    /function bakeZoom\(z, a\)[\s\S]*?CV\.bakeView\(SCROLL_PAD, \{ left: sl, top: st \}, t\)[\s\S]*?applyView\(\)/.test(e) &&
+  // Driven: under the flag, a zoom gesture animates the world transform rather than re-rastering,
+  // then bakes to a crisp scale-only transform with the transient translate folded into scroll.
+  (function () {
+    var win = EDITOR_BOOT.boot();
+    win.__nativeScroll(true);
+    var K = win.VersoEditor, world = K.get("world"), canvas = K.get("canvas"), view = K.get("view");
+    view.zoom = 1; view.x = 0; view.y = 0;
+    K.bind("applyView")();
+    var scrollBefore = { l: canvas.scrollLeft, t: canvas.scrollTop };
+    K.bind("wheelZoom")(100, 100, -200, 0);   // a ctrl-wheel notch at (100,100), zooming in
+    ok("native zoom uses a CSS transition on the transform (compositor scales the cached layer)",
+      /^transform \d+ms linear$/.test(world.style.transition) && /^translate\(.*\) scale\(/.test(world.style.transform));
+    ok("the zoom readout updates during the gesture, not only on settle",
+      K.get("zoomLevelEl").textContent !== "100%");
+    __async.push(new Promise(function (resolve) {
+      setTimeout(function () {
+        ok("zoom bakes to a crisp scale-only transform (transition cleared, zoom committed)",
+          world.style.transition === "" && /^scale\(/.test(world.style.transform) && view.zoom > 1);
+        ok("the transient translate is folded into scroll, so the crisp render lands in the same place",
+          canvas.scrollLeft !== scrollBefore.l || canvas.scrollTop !== scrollBefore.t);
+        resolve();
+      }, 300);
+    }));
+  })();
+  ok("the fold itself is exact (bakeView + zoomTranslate)",
     (function () {
       // arch-P3-07: the fold itself, exercised. A gesture that returns to its base leaves scroll
       // untouched; otherwise the translate comes back out of the scroll offset exactly.
@@ -7977,6 +8125,31 @@ section("native-scroll pan (#151 lever 1)");
     })());
   ok("trackpad zoom sensitivity bumped (ZOOM_SENS raised from 0.004) + live tuning hook",
     /var ZOOM_SENS = 0\.00[5-9]\d?;/.test(e) && /window\.__zoomTune = function/.test(e));
+  ok("__zoomTune dials the live values without a rebuild", (function () {
+    var t = EDITOR_BOOT.boot().__zoomTune({ sens: 0.02, dur: 60, settle: 70 });
+    return t.sens === 0.02 && t.dur === 60 && t.settle === 70;
+  })());
+  // The zoom entry points, driven. In-then-out has to land back where it started: zoom in is
+  // `* 1.25` and zoom out is `/ 1.25`, and swapping either for the other's reciprocal drifts.
+  (function () {
+    var K = EDITOR_BOOT.boot().VersoEditor, view = K.get("view");
+    view.zoom = 0.8; view.x = 0; view.y = 0;
+    K.bind("applyView")();
+    K.bind("zoomIn")(); K.bind("zoomOut")();
+    __async.push(new Promise(function (resolve) {
+      setTimeout(function () {
+        ok("zoom in then out returns to the zoom it started at", Math.abs(view.zoom - 0.8) < 1e-9);
+        K.bind("zoomTo100")();
+        ok("100% snaps the zoom to exactly 1 with no easing", view.zoom === 1 && K.get("zoomLevelEl").textContent === "100%");
+        resolve();
+      }, 250);
+    }));
+    // A chunky mouse notch reports a huge deltaY; the cap is what stops one flick jumping the zoom.
+    var K2 = EDITOR_BOOT.boot().VersoEditor;
+    K2.get("view").zoom = 1;
+    K2.bind("wheelZoom")(0, 0, -5000, 0);
+    ok("one chunky wheel notch is capped, not a jump to the zoom ceiling", K2.get("view").zoom < 2);
+  })();
   ok("compositor zoom uses linear easing + a single tight settle (no double-phase)",
     /"transform " \+ _zoomDur \+ "ms linear"/.test(e) && /var _zoomDur = \d+, _zoomSettle = \d+;/.test(e));
 })();
