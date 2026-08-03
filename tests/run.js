@@ -10827,6 +10827,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
 // ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
 section("Product Rail: Source stage info panel");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
@@ -10853,7 +10854,7 @@ section("Product Rail: Source stage info panel");
   ok("the legacy !hasDoc branch renders only the Linked-in list, then closes (no comments accordion)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);\s*\n\s*\}\);\s*\n\s*\}\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(es));
   ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(es));
   ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(es));
-  ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(es) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(e));
+  ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(es) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(SL));
   // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
   // not a flat Created/Updated pair -- traces every import (and any edit since) back to
   // how the topic entered the platform, newest first.
@@ -14395,14 +14396,15 @@ section("left-panel Components reorg");
 // ---- SPEC 7: source insert (linked block) + two-way jump ----
 section("editor-rework source insert + two-way jump");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js");
   ok("source-link 03 retires the #137 whole-topic insert (insertSourceLinkedBlock is gone)", !/function insertSourceLinkedBlock\(/.test(e));
-  ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(cx, cy\)/.test(e));
-  ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
+  ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(SL) && /function placeArmedSourceLink\(cx, cy\)/.test(SL));
+  ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(SL));
   ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
   // arch-P3b-07: the stage owns that state, so the jump asks it to open the topic (which persists
   // it for the next refresh) rather than writing the stage's variable from outside.
-  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}openSourceTopicId\(topicId\);[\s\S]{0,120}setStage\("source"\)/.test(e));
+  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}openSourceTopicId\(topicId\);[\s\S]{0,120}setStage\("source"\)/.test(SL));
   ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
 })();
 
@@ -14424,41 +14426,43 @@ section("editor-rework left-panel 3-way switcher");
 // ---- SPEC 8 source-link 02: Edit Source tab = read-only live source-doc viewer ----
 section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js"), css = src("editor.css");
-  ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(doc && doc\.meta && doc\.meta\.productId\)/.test(e));
-  ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(e));
-  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a Product[\s\S]{0,600}This Product has no source document yet/.test(e));
-  ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(e));
+  ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(E\.doc && E\.doc\.meta && E\.doc\.meta\.productId\)/.test(SL));
+  ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
+  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a Product[\s\S]{0,600}This Product has no source document yet/.test(SL));
+  ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(SL));
   ok("the panel is read-only: its function never sets contentEditable / applySourceLockState", (function () {
-    var start = e.indexOf("function renderEditSourcePanel()");
+    var start = SL.indexOf("function renderEditSourcePanel()");
     if (start === -1) return false;
-    var body = e.slice(start, e.indexOf("\n  function ", start + 20));
+    var body = SL.slice(start, SL.indexOf("\n    function ", start + 20));   // one indent deeper inside install()
     return body.indexOf("renderSourceDocNode") !== -1 && body.indexOf("contentEditable") === -1 && body.indexOf("applySourceLockState") === -1;
   })());
-  ok("find reuses SourceDoc.findMatches + a next/prev cycle that scrolls to the hit", /matches = q \? SD\.findMatches\(model, q\) : \[\];/.test(e) && /function cycleFind\(dir\)[\s\S]{0,200}scrollToHit\(findIdx\)/.test(e));
-  ok("Enter / Shift+Enter cycle matches like the Source stage", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
-  ok("a TOC is built from SourceDoc.outline (chapters + headings), click-to-jump + scroll-spy", /var outline = SD\.outline\(model\)/.test(e) && /outline\.forEach\(function \(ch\) \{ tocRow\(ch\); \(ch\.children \|\| \[\]\)\.forEach\(tocRow\); \}\);/.test(e) && /docCol\.addEventListener\("scroll"[\s\S]{0,600}is-current/.test(e));
-  ok("the viewer reuses the shared .vbrowser__search field + .source-doc__toc-item rows (consistency-over-novelty), not bespoke controls", /h\("label", "vbrowser__search"\)/.test(e) && /h\("input", "vbrowser__search-input"\)/.test(e) && /"source-doc__toc-item source-doc__toc-item--l"/.test(e) && /\.edit-source__doc/.test(css));
+  ok("find reuses SourceDoc.findMatches + a next/prev cycle that scrolls to the hit", /matches = q \? SD\.findMatches\(model, q\) : \[\];/.test(SL) && /function cycleFind\(dir\)[\s\S]{0,200}scrollToHit\(findIdx\)/.test(SL));
+  ok("Enter / Shift+Enter cycle matches like the Source stage", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleFind\(e\.shiftKey \? -1 : 1\); \}/.test(SL));
+  ok("a TOC is built from SourceDoc.outline (chapters + headings), click-to-jump + scroll-spy", /var outline = SD\.outline\(model\)/.test(SL) && /outline\.forEach\(function \(ch\) \{ tocRow\(ch\); \(ch\.children \|\| \[\]\)\.forEach\(tocRow\); \}\);/.test(SL) && /docCol\.addEventListener\("scroll"[\s\S]{0,600}is-current/.test(SL));
+  ok("the viewer reuses the shared .vbrowser__search field + .source-doc__toc-item rows (consistency-over-novelty), not bespoke controls", /h\("label", "vbrowser__search"\)/.test(SL) && /h\("input", "vbrowser__search-input"\)/.test(e) && /"source-doc__toc-item source-doc__toc-item--l"/.test(SL) && /\.edit-source__doc/.test(css));
 })();
 
 // ---- SPEC 8 source-link 03: select a range -> place a live-linked text block (arm-then-click) ----
 section("SPEC 8: source-link 03 — select + place a linked block");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js"), css = src("editor.css");
   // A selection in the read-only panel builds a SourceDoc range descriptor: single-node -> one
   // anchor; cross-node -> anchor(first, start..end) + endAnchor(last, 0..end), matching addMark.
-  ok("panelSelectionDescriptor builds a single-node OR cross-node range from the DOM selection", /function panelSelectionDescriptor\(docCol, model\)/.test(e) && /if \(sKey === eKey\) \{[\s\S]{0,140}return \{ anchor: \{ nodeKey: sKey, start: sOff, len: eOff - sOff \} \};/.test(e) && /endAnchor: \{ nodeKey: eKey, start: 0, len: eOff \}/.test(e));
-  ok("char offsets are measured against the block's text (Range.toString().length) — the SourceDoc offset model", /function panelCharOffset\(blockEl, container, offset\)[\s\S]{0,200}return r\.toString\(\)\.length;/.test(e));
-  ok("a text selection raises the floating Place bar (mouseup on the reading column)", /docCol\.addEventListener\("mouseup"[\s\S]{0,120}maybeShowPlaceBar\(docCol, model\)/.test(e) && /function maybeShowPlaceBar\(docCol, model\)/.test(e));
-  ok("Place arms the range descriptor (mark creation deferred to the drop, so format-split can mint per-run marks)", /function armSourceLinkPlacement\(desc\)[\s\S]{0,300}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \}/.test(e));
+  ok("panelSelectionDescriptor builds a single-node OR cross-node range from the DOM selection", /function panelSelectionDescriptor\(docCol, model\)/.test(SL) && /if \(sKey === eKey\) \{[\s\S]{0,140}return \{ anchor: \{ nodeKey: sKey, start: sOff, len: eOff - sOff \} \};/.test(SL) && /endAnchor: \{ nodeKey: eKey, start: 0, len: eOff \}/.test(SL));
+  ok("char offsets are measured against the block's text (Range.toString().length) — the SourceDoc offset model", /function panelCharOffset\(blockEl, container, offset\)[\s\S]{0,200}return r\.toString\(\)\.length;/.test(SL));
+  ok("a text selection raises the floating Place bar (mouseup on the reading column)", /docCol\.addEventListener\("mouseup"[\s\S]{0,120}maybeShowPlaceBar\(docCol, model\)/.test(SL) && /function maybeShowPlaceBar\(docCol, model\)/.test(SL));
+  ok("Place arms the range descriptor (mark creation deferred to the drop, so format-split can mint per-run marks)", /function armSourceLinkPlacement\(desc\)[\s\S]{0,300}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \}/.test(SL));
   // #161: the marks are minted + PERSISTED to master.doc BEFORE any insertBlock, so the first canvas
   // render's resolver finds them (persist-after-insert rendered the block blank + collapsed).
-  ok("gap placement mints per-run link marks, persists them, THEN inserts blocks (persist before insert, #161)", /function placeSourceLinkBlocks\(a\)[\s\S]{0,900}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)\.id;[\s\S]{0,120}master\.doc = SD\.toJSON\(model\); saveLibrary\(\);[\s\S]{0,220}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}markId: markIds\[i\]/.test(e));
-  ok("the armed drop is coordinate-aware: onto a text block -> inline span (06), else gap placement", /function placeArmedSourceLink\(cx, cy\)[\s\S]{0,600}if \(blockEl && isSourceLinkTextBlock\(blockEl\.__block\)\) return dropInlineSourceLink\(a, blockEl\.__block\);/.test(e));
-  ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(e\.clientX, e\.clientY\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
-  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) opening the source-link menu (jump + alternates)", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}openSourceLinkMenu\(\{ kind: "block", block: b \}, b\.sourceLink\.masterId, b\.sourceLink\.markId/.test(e));
-  ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(e) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(e));
-  ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(e) && /\.is-source-linked-passage/.test(css));
+  ok("gap placement mints per-run link marks, persists them, THEN inserts blocks (persist before insert, #161)", /function placeSourceLinkBlocks\(a\)[\s\S]{0,1100}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)\.id;[\s\S]{0,160}master\.doc = SD\.toJSON\(model\); saveLibrary\(\);[\s\S]{0,300}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}markId: markIds\[i\]/.test(SL));
+  ok("the armed drop is coordinate-aware: onto a text block -> inline span (06), else gap placement", /function placeArmedSourceLink\(cx, cy\)[\s\S]{0,600}if \(blockEl && isSourceLinkTextBlock\(blockEl\.__block\)\) return dropInlineSourceLink\(a, blockEl\.__block\);/.test(SL));
+  ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(e\.clientX, e\.clientY\); \}\s*\}, true\);/.test(SL) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(SL));
+  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) opening the source-link menu (jump + alternates)", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}openSourceLinkMenu\(\{ kind: "block", block: b \}, b\.sourceLink\.masterId, b\.sourceLink\.markId/.test(SL));
+  ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(SL) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(SL));
+  ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(SL) && /\.is-source-linked-passage/.test(css));
   ok("the indicator + place bar + arming cursor carry their own editor chrome CSS", /\.source-link-badge/.test(css) && /\.source-placebar/.test(css) && /is-arming-source-link #canvas-viewport/.test(css));
   ok("decorateSourceLinks runs in the render passes (per-page frame + full reapplyStructural)", /decorateSourceLinks\(frame\);/.test(e) && /decorateSourceLinks\(\); \/\/ source-link 03/.test(e));
 })();
@@ -14466,61 +14470,66 @@ section("SPEC 8: source-link 03 — select + place a linked block");
 // ---- SPEC 8 source-link 04: custom pointer-drag placement gesture ----
 section("SPEC 8: source-link 04 — pointer-drag placement");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js"), css = src("editor.css");
-  ok("the Place bar carries a grab handle that starts a CUSTOM pointer-drag (pointerdown, not native DnD)", /var grip = h\("button", "source-placebar__grip"\)[\s\S]{0,260}grip\.addEventListener\("pointerdown", function \(ev\) \{ ev\.preventDefault\(\); startSourceLinkDrag\(desc, ev\); \}\)/.test(e));
-  ok("the drag is driven by custom pointer events (pointermove/pointerup on window), not native HTML5 DnD", /window\.addEventListener\("pointermove", move\); window\.addEventListener\("pointerup", up\);/.test(e) && /grip\.addEventListener\("pointerdown"/.test(e));
-  ok("the drag shows a ghost following the cursor + lights up the frame under it (drop target)", /function startSourceLinkDrag\(desc, ev\)[\s\S]{0,600}source-link-ghost[\s\S]{0,1400}frameElementUnder\(e\.clientX, e\.clientY\); if \(fr\) fr\.classList\.add\("is-drop-target"\)/.test(e));
-  ok("releasing over the canvas resolves through the SAME placement as arm-then-click (placeArmedSourceLink)", /function up\(e\)[\s\S]{0,500}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \};[\s\S]{0,80}placeArmedSourceLink\(e\.clientX, e\.clientY\);/.test(e));
-  ok("the drop targets the page under the cursor (pageIndexFromPoint -> setActivePage)", /function pageIndexFromPoint\(cx, cy\)[\s\S]{0,300}data-page-id[\s\S]{0,200}findIndex/.test(e) && /var pi = pageIndexFromPoint\(cx, cy\); if \(pi >= 0\) setActivePage\(pi\);/.test(e));
-  ok("a drop outside the canvas places nothing", /if \(!frameElementUnder\(e\.clientX, e\.clientY\)\) \{ sourceToast\("Dropped outside the canvas[\s\S]{0,40}return; \}/.test(e));
+  ok("the Place bar carries a grab handle that starts a CUSTOM pointer-drag (pointerdown, not native DnD)", /var grip = h\("button", "source-placebar__grip"\)[\s\S]{0,260}grip\.addEventListener\("pointerdown", function \(ev\) \{ ev\.preventDefault\(\); startSourceLinkDrag\(desc, ev\); \}\)/.test(SL));
+  ok("the drag is driven by custom pointer events (pointermove/pointerup on window), not native HTML5 DnD", /window\.addEventListener\("pointermove", move\); window\.addEventListener\("pointerup", up\);/.test(SL) && /grip\.addEventListener\("pointerdown"/.test(SL));
+  ok("the drag shows a ghost following the cursor + lights up the frame under it (drop target)", /function startSourceLinkDrag\(desc, ev\)[\s\S]{0,600}source-link-ghost[\s\S]{0,1400}frameElementUnder\(e\.clientX, e\.clientY\); if \(fr\) fr\.classList\.add\("is-drop-target"\)/.test(SL));
+  ok("releasing over the canvas resolves through the SAME placement as arm-then-click (placeArmedSourceLink)", /function up\(e\)[\s\S]{0,500}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \};[\s\S]{0,80}placeArmedSourceLink\(e\.clientX, e\.clientY\);/.test(SL));
+  ok("the drop targets the page under the cursor (pageIndexFromPoint -> setActivePage)", /function pageIndexFromPoint\(cx, cy\)[\s\S]{0,300}data-page-id[\s\S]{0,200}findIndex/.test(SL) && /var pi = pageIndexFromPoint\(cx, cy\); if \(pi >= 0\) setActivePage\(pi\);/.test(SL));
+  ok("a drop outside the canvas places nothing", /if \(!frameElementUnder\(e\.clientX, e\.clientY\)\) \{ sourceToast\("Dropped outside the canvas[\s\S]{0,40}return; \}/.test(SL));
   ok("the ghost, grab handle + drop-target highlight carry their own chrome CSS", /\.source-link-ghost/.test(css) && /\.source-placebar__grip/.test(css) && /\.frame\.is-drop-target/.test(css));
 })();
 
 // ---- SPEC 8 source-link 06: drop onto a text block -> locked linked inline span ----
 section("SPEC 8: source-link 06 — inline span append");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js"), css = src("editor.css");
-  ok("a drop onto an editable text block (not itself a linked block) routes to the inline path", /function isSourceLinkTextBlock\(b\)[\s\S]{0,120}SOURCE_LINK_TEXT_TYPES\[b\.type\] && !b\.sourceLink/.test(e));
-  ok("dropInlineSourceLink flattens the range to ONE link mark and appends a <span data-source-link> to the block's text", /function dropInlineSourceLink\(a, block\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor, endAnchor: a\.descriptor\.endAnchor \}\)[\s\S]{0,260}block\.text = \(block\.text \? block\.text \+ " " : ""\) \+ span;/.test(e));
-  ok("the appended span carries the mark + master ids (resolved live by 01's inline post-pass)", /var span = '<span data-source-link="' \+ mk\.id \+ '" data-master="' \+ a\.masterId \+ '">' \+ slEscape\(SD\.markText\(model, mk\)\)/.test(e));
-  ok("the block re-renders in place (reapplyBlock) so owned text + the locked span coexist", /function dropInlineSourceLink\(a, block\)[\s\S]{0,700}reapplyBlock\(block\);/.test(e));
-  ok("each inline linked span gets its OWN contextual menu (per-span, not one block badge)", /root\.querySelectorAll\("\.canvas-block span\[data-source-link\]"\)[\s\S]{0,300}is-source-linked-span[\s\S]{0,600}openSourceLinkMenu\(\{ kind: "span", block: owner\.__block, spanEl: sp/.test(e));
+  ok("a drop onto an editable text block (not itself a linked block) routes to the inline path", /function isSourceLinkTextBlock\(b\)[\s\S]{0,120}SOURCE_LINK_TEXT_TYPES\[b\.type\] && !b\.sourceLink/.test(SL));
+  ok("dropInlineSourceLink flattens the range to ONE link mark and appends a <span data-source-link> to the block's text", /function dropInlineSourceLink\(a, block\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor, endAnchor: a\.descriptor\.endAnchor \}\)[\s\S]{0,260}block\.text = \(block\.text \? block\.text \+ " " : ""\) \+ span;/.test(SL));
+  ok("the appended span carries the mark + master ids (resolved live by 01's inline post-pass)", /var span = '<span data-source-link="' \+ mk\.id \+ '" data-master="' \+ a\.masterId \+ '">' \+ slEscape\(SD\.markText\(model, mk\)\)/.test(SL));
+  ok("the block re-renders in place (reapplyBlock) so owned text + the locked span coexist", /function dropInlineSourceLink\(a, block\)[\s\S]{0,700}reapplyBlock\(block\);/.test(SL));
+  ok("each inline linked span gets its OWN contextual menu (per-span, not one block badge)", /root\.querySelectorAll\("\.canvas-block span\[data-source-link\]"\)[\s\S]{0,300}is-source-linked-span[\s\S]{0,600}openSourceLinkMenu\(\{ kind: "span", block: owner\.__block, spanEl: sp/.test(SL));
   ok("the inline span indicator carries its own chrome CSS (distinct from the block badge)", /\.is-source-linked-span/.test(css));
 })();
 
 // ---- SPEC 8 source-link 07: drag a source figure -> a new linked image block ----
 section("SPEC 8: source-link 07 — linked image drop");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js"), r = src("src/render.js"), css = src("editor.css");
   ok("render's image block resolves src/alt LIVE from the source figure (01 object branch), purely (shallow copy)", /image: function \(block\) \{[\s\S]{0,400}block\.sourceLink && block\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,300}rlink\.type === "object"[\s\S]{0,260}c\.src = rlink\.src \|\| block\.src[\s\S]{0,120}block = c;/.test(r));
-  ok("placement routes an OBJECT anchor (no start/len) to a linked IMAGE block, never inline/format-split", /var isObject = !!\(a\.descriptor && a\.descriptor\.anchor && a\.descriptor\.anchor\.len == null\);/.test(e) && /var result = isObject \? placeSourceLinkImage\(a\) : placeSourceLinkBlocks\(a\);/.test(e));
+  ok("placement routes an OBJECT anchor (no start/len) to a linked IMAGE block, never inline/format-split", /var isObject = !!\(a\.descriptor && a\.descriptor\.anchor && a\.descriptor\.anchor\.len == null\);/.test(SL) && /var result = isObject \? placeSourceLinkImage\(a\) : placeSourceLinkBlocks\(a\);/.test(SL));
   // #161 part 1: a source-link drop lands at the between-block gap under the cursor (drop-line), not the
   // selection-based insertLoc; the gap target is set only for the placement and cleared right after.
-  ok("a source-link drop targets the between-block gap under the cursor (#161 part 1)", /var gap = sourceLinkDropGap\(cx, cy\);\s*\n\s*if \(gap\) __sourceLinkDropAt = \{ pageIndex: gap\.pageIndex, index: gap\.index \};/.test(e) && /__sourceLinkDropAt = null; \/\/ one placement only/.test(e));
+  ok("a source-link drop targets the between-block gap under the cursor (#161 part 1)", /var gap = sourceLinkDropGap\(cx, cy\);\s*\n\s*if \(gap\) __sourceLinkDropAt = \{ pageIndex: gap\.pageIndex, index: gap\.index \};/.test(SL) && /__sourceLinkDropAt = null; \/\/ one placement only/.test(SL));
   ok("insertBlock honours an explicit __sourceLinkDropAt gap + auto-advances for a format-split's blocks", /if \(E\.__sourceLinkDropAt && E\.doc\.pages\[E\.__sourceLinkDropAt\.pageIndex\]\)[\s\S]{0,260}E\.__sourceLinkDropAt\.index = L\.index \+ 1;/.test(ASSETS));
-  ok("sourceLinkDropGap targets TOP-LEVEL page blocks only (a link drops between page blocks, not inside a column)", /function sourceLinkDropGap\(cx, cy\)[\s\S]{0,400}page\.blocks\.indexOf\(el\.__block\) !== -1;/.test(e));
-  ok("the drag shows a between-block drop-line for a gap, an inline-target ring over a text block (#161 part 1)", /function showSourceLinkDropLine\(cx, cy\)/.test(e) && /is-sl-inline-target/.test(e) && /\.source-link-dropline/.test(src("editor.css")) && /\.canvas-block\.is-sl-inline-target/.test(src("editor.css")));
-  ok("placeSourceLinkImage adds an OBJECT link mark (anchor {nodeKey}, no len) + inserts an image block with sourceLink", /function placeSourceLinkImage\(a\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor \}\)[\s\S]{0,160}insertBlock\(\{ type: "image", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: mk\.id \} \}\)/.test(e));
-  ok("a source figure in the panel is draggable as one unit (pointerdown -> object-anchor drag)", /docCol\.querySelectorAll\("figure\.source-doc__figure\[data-object\]"\)[\s\S]{0,260}startSourceLinkDrag\(\{ anchor: \{ nodeKey: figEl\.getAttribute\("data-node"\) \} \}, ev\)/.test(e));
+  ok("sourceLinkDropGap targets TOP-LEVEL page blocks only (a link drops between page blocks, not inside a column)", /function sourceLinkDropGap\(cx, cy\)[\s\S]{0,400}page\.blocks\.indexOf\(el\.__block\) !== -1;/.test(SL));
+  ok("the drag shows a between-block drop-line for a gap, an inline-target ring over a text block (#161 part 1)", /function showSourceLinkDropLine\(cx, cy\)/.test(SL) && /is-sl-inline-target/.test(SL) && /\.source-link-dropline/.test(src("editor.css")) && /\.canvas-block\.is-sl-inline-target/.test(src("editor.css")));
+  ok("placeSourceLinkImage adds an OBJECT link mark (anchor {nodeKey}, no len) + inserts an image block with sourceLink", /function placeSourceLinkImage\(a\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor \}\)[\s\S]{0,160}insertBlock\(\{ type: "image", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: mk\.id \} \}\)/.test(SL));
+  ok("a source figure in the panel is draggable as one unit (pointerdown -> object-anchor drag)", /docCol\.querySelectorAll\("figure\.source-doc__figure\[data-object\]"\)[\s\S]{0,260}startSourceLinkDrag\(\{ anchor: \{ nodeKey: figEl\.getAttribute\("data-node"\) \} \}, ev\)/.test(SL));
   ok("the draggable figure carries its own grab-affordance CSS", /\.edit-source__figure/.test(css));
 })();
 
 // ---- SPEC 8 source-link 08: alternates — create + pick from the canvas ----
 section("SPEC 8: source-link 08 — alternates from the canvas");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js");
-  ok("the source-link menu offers jump, base, existing alternates, and create-an-alternate", /function openSourceLinkMenu\(target, masterId, markId, x, y\)[\s\S]{0,400}label: "Jump to source"[\s\S]{0,300}label: "Base wording", active: !cur[\s\S]{0,600}sourceLinkAlternates\(model, link\)\.forEach[\s\S]{0,400}label: "Create an alternate…"/.test(e));
-  ok("create-an-alternate adds a type:alternate mark to the MASTER (anchored like the link) + persists it", /function createSourceAlternate\(target, masterId, markId\)[\s\S]{0,900}SD\.addMark\(model, \{ type: "alternate", anchor: link\.anchor, endAnchor: link\.endAnchor, alt: wording[\s\S]{0,200}saveLibrary\(\);[\s\S]{0,120}setSourceLinkTargetAlt\(target, alt\.id\)/.test(e));
-  ok("a canvas alternate points only THIS block/span (altId), never other documents", /function setSourceLinkTargetAlt\(target, altId\)[\s\S]{0,120}if \(altId\) target\.block\.sourceLink\.altId = altId; else delete target\.block\.sourceLink\.altId;[\s\S]{0,300}sp\.setAttribute\("data-alt", altId\)/.test(e));
-  ok("picking base vs an alternate reads/writes the target's altId (block field or span data-alt)", /function sourceLinkTargetAlt\(target\)[\s\S]{0,120}target\.block\.sourceLink && target\.block\.sourceLink\.altId[\s\S]{0,120}target\.spanEl\.getAttribute\("data-alt"\)/.test(e));
-  ok("sourceLinkAlternates matches alternates anchored identically to the link (single or multi-block)", /function sourceLinkAlternates\(model, link\)[\s\S]{0,300}m\.type !== "alternate" \|\| SD\.isObjectMark\(m\) !== SD\.isObjectMark\(link\)[\s\S]{0,400}m\.endAnchor\.nodeKey === end\.nodeKey/.test(e));
-  ok("an object (figure) link defers alternates in v1 (whole-block; figure-swap is a follow-up)", /if \(SD\.isObjectMark\(link\)\) \{ sourceToast\("Object \(figure\) alternates are coming soon\."\); return; \}/.test(e));
+  ok("the source-link menu offers jump, base, existing alternates, and create-an-alternate", /function openSourceLinkMenu\(target, masterId, markId, x, y\)[\s\S]{0,400}label: "Jump to source"[\s\S]{0,300}label: "Base wording", active: !cur[\s\S]{0,600}sourceLinkAlternates\(model, link\)\.forEach[\s\S]{0,400}label: "Create an alternate…"/.test(SL));
+  ok("create-an-alternate adds a type:alternate mark to the MASTER (anchored like the link) + persists it", /function createSourceAlternate\(target, masterId, markId\)[\s\S]{0,900}SD\.addMark\(model, \{ type: "alternate", anchor: link\.anchor, endAnchor: link\.endAnchor, alt: wording[\s\S]{0,200}saveLibrary\(\);[\s\S]{0,120}setSourceLinkTargetAlt\(target, alt\.id\)/.test(SL));
+  ok("a canvas alternate points only THIS block/span (altId), never other documents", /function setSourceLinkTargetAlt\(target, altId\)[\s\S]{0,120}if \(altId\) target\.block\.sourceLink\.altId = altId; else delete target\.block\.sourceLink\.altId;[\s\S]{0,300}sp\.setAttribute\("data-alt", altId\)/.test(SL));
+  ok("picking base vs an alternate reads/writes the target's altId (block field or span data-alt)", /function sourceLinkTargetAlt\(target\)[\s\S]{0,120}target\.block\.sourceLink && target\.block\.sourceLink\.altId[\s\S]{0,120}target\.spanEl\.getAttribute\("data-alt"\)/.test(SL));
+  ok("sourceLinkAlternates matches alternates anchored identically to the link (single or multi-block)", /function sourceLinkAlternates\(model, link\)[\s\S]{0,300}m\.type !== "alternate" \|\| SD\.isObjectMark\(m\) !== SD\.isObjectMark\(link\)[\s\S]{0,400}m\.endAnchor\.nodeKey === end\.nodeKey/.test(SL));
+  ok("an object (figure) link defers alternates in v1 (whole-block; figure-swap is a follow-up)", /if \(SD\.isObjectMark\(link\)\) \{ sourceToast\("Object \(figure\) alternates are coming soon\."\); return; \}/.test(SL));
 })();
 
 // ---- SPEC 8 source-link 09: base-edit warning + fork ----
 section("SPEC 8: source-link 09 — base-edit warning + fork");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
@@ -14550,18 +14559,19 @@ section("SPEC 8: source-link 09 — base-edit warning + fork");
 
   var e = src("src/editor.js");
   ok("the warning fires at LOCK (unlock snapshots, lock computes impact + shows the modal)", /snapshotSourceLinkBase\(\); \/\/ 09[\s\S]{0,400}var impact = sourceBaseEditImpact\(\);\s*if \(impact\.affected\.length && window\.VersoUI[\s\S]{0,80}showSourceBaseEditModal\(topic, impact, opts\); return; \}/.test(es));
-  ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]{0,500}onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(e) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(e));
-  ok("fork freezes each edited mark's OLD wording as an alternate + pins every affected location", /function forkAffectedToAlternate\(impact\)[\s\S]{0,600}alt: oldText, tag: "Frozen"[\s\S]{0,120}applyAltToLocation\(reg, loc, alt\.id\)[\s\S]{0,200}saveRegistry\(reg\)/.test(e));
-  ok("cancel reverts the model to the pre-edit snapshot", /function revertSourceEditSession\(topic\)[\s\S]{0,200}SD\.fromJSON\(__sourcePreEditModelJson\)/.test(e));
+  ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]{0,500}onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(SL) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(SL));
+  ok("fork freezes each edited mark's OLD wording as an alternate + pins every affected location", /function forkAffectedToAlternate\(impact\)[\s\S]{0,600}alt: oldText, tag: "Frozen"[\s\S]{0,120}applyAltToLocation\(reg, loc, alt\.id\)[\s\S]{0,200}saveRegistry\(reg\)/.test(SL));
+  ok("cancel reverts the model to the pre-edit snapshot", /function revertSourceEditSession\(topic\)[\s\S]{0,200}SD\.fromJSON\(__sourcePreEditModelJson\)/.test(SL));
 })();
 
 // ---- SPEC 8 source-link 10: source-stage where-used + alternate push ----
 section("SPEC 8: source-link 10 — where-used + push");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js"), css = src("editor.css");
-  ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(e));
+  ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(SL));
   ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1900}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(es));
   ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(es));
   ok("the push dialog picks an alternate + a subset of locations (Checkbox per location)", /function openSourceAltPushDialog\(link, alts, used\)[\s\S]{0,1700}window\.VersoUI\.Checkbox\(\{ label: loc\.docTitle[\s\S]{0,120}chosen\[i\] = v/.test(es));
@@ -14820,6 +14830,7 @@ section("Source rewrite: node model + owned undo (Epic 2b)");
 // runtime resolution + export bake are Puppeteer-verified in the browser-verify step).
 section("SPEC 8: source-link 01 — link mark model + resolver wiring");
 (function () {
+  var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var SD = require(path.join(ROOT, "src/source-doc.js"));
   function master() {
     return SD.create([
@@ -14903,7 +14914,7 @@ section("SPEC 8: source-link 01 — link mark model + resolver wiring");
     var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "h1", start: 0, len: 1 }, endAnchor: { nodeKey: "h2", start: 0, len: 1 } });
     return plan.length === 3 && plan[0].format === "h2" && plan[1].format === "body" && plan[2].format === "h2";
   })());
-  ok("placement maps planner formats to destination block types (h1->heading, h2->subheading, body->paragraph)", /SOURCE_LINK_BLOCK_TYPE = \{ h1: "heading", h2: "subheading", body: "paragraph" \}/.test(src("src/editor.js")));
+  ok("placement maps planner formats to destination block types (h1->heading, h2->subheading, body->paragraph)", /SOURCE_LINK_BLOCK_TYPE = \{ h1: "heading", h2: "subheading", body: "paragraph" \}/.test(SL));
 
   // --- render.js resolver wiring (source-string: render.js is DOM-coupled, not require-able) ---
   var r = src("src/render.js");

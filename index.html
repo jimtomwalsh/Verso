@@ -368,6 +368,8 @@
   <script src="src/editor/fonts.js"></script>
   <!-- arch-P3b-07h assets: window.VersoAssets — the Assets tab (every insertable block type and shared component, and the drag payload's stable index), the left-panel section switch, and the asset-store seam that keeps uploaded media content-addressed and swept at export. Must precede editor.js. -->
   <script src="src/editor/assets.js"></script>
+  <!-- arch-P3b-07 source links: window.VersoSourceLink — copy placed from a product's source document stays LINKED to the range it came from: the read-only Source tab, range placement, pinned alternates, where-used, and the warning shown before a base edit reaches the courses that show it. Must precede editor.js. -->
+  <script src="src/editor/source-link.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->
