@@ -132,6 +132,8 @@ src/
   runtime.js        learner-side runtime for the exported course
   quiz-runtime.js   knowledge-check runtime
   editor.js         canvas editor + inspector UI
+  editor/           editor internals with their own interface + tests
+    storage.js      the storage seam: keys, adapter swap, durable writes
   export.js         SCORM 1.2 packaging
   model.js / schema.js / persist.js / theme.js / csv.js / components.js …
   store-http.js     HTTP storage adapter — inert unless a server URL is injected

@@ -99,6 +99,11 @@
   <script src="src/components.js"></script>
   <script src="src/model.js"></script>
   <script src="src/icons.js"></script>
+  <!-- editor.js reaches for both of these as it loads, BEFORE __KIT_MODE gates the rest of boot,
+       so the kit gallery needs them as much as index.html does. (arch-P1 added the render context
+       to index.html only, which left this page throwing on load until arch-P3-01 noticed.) -->
+  <script src="src/render-context.js"></script>
+  <script src="src/editor/storage.js"></script>
   <script src="src/editor.js"></script>
   <script src="kit-gallery.js"></script>
 </body>
