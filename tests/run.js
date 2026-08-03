@@ -696,7 +696,7 @@ section("arch-P3-01 editor storage");
       !/(setItem|writeStore)\s*\([^)]*authoring\.storageBackend/.test(code));
   });
   ok("the flag has exactly one writer, and it is named", /function commitBackend\(value\) \{ return writeStore\(storage, KEYS\.backend, value\); \}/.test(src("src/editor/storage.js")));
-  ok("the guarded cutover is what calls it", /setFlag = opts\.setFlag \|\| function \(vv\) \{ Store\.commitBackend\(vv\); \}/.test(src("src/editor.js")));
+  ok("the guarded cutover is what calls it", /setFlag = opts\.setFlag \|\| function \(vv\) \{ Store\.commitBackend\(vv\); \}/.test(src("src/editor/assets.js")));
 
   // editor.js reaches for both the render context and the storage seam as it LOADS, so every page
   // that loads editor.js has to load them first. kit.html is the one that is easy to forget: it
@@ -2332,7 +2332,8 @@ section("#8 docs reader (TOC + search)");
 section("#8 docs auto-maintenance");
 (function () {
   var dm = require(path.join(ROOT, "tools/docs-maintain.js"));
-  var ed = src("src/editor.js"), guide = src("docs/USER-GUIDE.md");
+  // arch-P3b-07h: the palette moved to src/editor/assets.js with the tab it feeds.
+  var ed = src("src/editor/assets.js"), guide = src("docs/USER-GUIDE.md");
   var blocks = dm.extractLibrary(ed);
   ok("#8 maintain: parses the block palette from source (>= 20)", blocks.length >= 20 && blocks.every(function (b) { return b.group && b.label; }));
   var cov = dm.blockCoverage(ed, guide);
@@ -2638,7 +2639,9 @@ section("#91 docs anti-drift — block catalogue coverage");
   var guide = src("docs/USER-GUIDE.md");
   // Extract ONLY top-level LIBRARY entries — each begins `{ group: "..", icon: "..", label: ".." `
   // (nested labels inside make() bodies, e.g. the checkbox default / quiz retry, are skipped).
-  var lib = e.slice(e.indexOf("var LIBRARY = ["), e.indexOf("];", e.indexOf("var LIBRARY = [")));
+  // arch-P3b-07h: the palette moved to src/editor/assets.js.
+  var libSrc = src("src/editor/assets.js");
+  var lib = libSrc.slice(libSrc.indexOf("var LIBRARY = ["), libSrc.indexOf("];", libSrc.indexOf("var LIBRARY = [")));
   var labels = [], re = /group:\s*"[^"]+",\s*icon:\s*"[^"]*",\s*label:\s*"([^"]+)"/g, m;
   while ((m = re.exec(lib))) labels.push(m[1]);
   ok("#91 LIBRARY palette parsed from source (>= 20 blocks)", labels.length >= 20);
@@ -2855,7 +2858,8 @@ section("editor-rework tab scope");
 // ---- SPEC 7: static fallback — interactive-block palette filter (pure) ----
 section("editor-rework static-fallback palette filter");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07h: the pure predicate stayed in editor.js; renderAssets, which applies it, moved.
+  var t = src("src/editor.js"), ASSETS = src("src/editor/assets.js");
   var m = t.match(/\/\* @pure-doctype-start \*\/([\s\S]*?)\/\* @pure-doctype-end \*\//);
   if (!m) { ok("locate @pure-doctype fence", false); return; }
   var g = new Function(m[1] + "\nreturn { isInteractiveBlockType: isInteractiveBlockType, paletteAllowsType: paletteAllowsType, INTERACTIVE_BLOCK_TYPES: INTERACTIVE_BLOCK_TYPES };")();
@@ -2871,8 +2875,8 @@ section("editor-rework static-fallback palette filter");
   ok("static cell still offers a heading", g.paletteAllowsType("heading", false) === true);
   ok("legacy/undefined interactivity behaves as interactive (offers everything)", g.paletteAllowsType("quiz", undefined) === true);
   // the editor filters the LIBRARY through this predicate against the doc's cell
-  ok("renderAssets gates the palette on the cell's interactivity (type via item.make)", /item\.__bt = item\.type \|\| \(item\.make \? \(item\.make\(\) \|\| \{\}\)\.type : null\);[\s\S]{0,120}if \(!paletteAllowsType\(item\.__bt, cellInteractive\)\) return;/.test(t));
-  ok("existing blocks are never dropped by the filter (palette-only)", /this only gates what NEW content can be added/.test(t));
+  ok("renderAssets gates the palette on the cell's interactivity (type via item.make)", /item\.__bt = item\.type \|\| \(item\.make \? \(item\.make\(\) \|\| \{\}\)\.type : null\);[\s\S]{0,120}if \(!paletteAllowsType\(item\.__bt, cellInteractive\)\) return;/.test(ASSETS));
+  ok("existing blocks are never dropped by the filter (palette-only)", /this only gates what NEW content can be added/.test(ASSETS));
 })();
 
 // ---- SPEC 7: cell switcher + tiered mutability (wiring) ----
@@ -3149,28 +3153,30 @@ section("#69 migration cutover");
   })();
 
   // WIRING: editor.js honours the guard at every save choke point; index.html loads it first.
-  var ed = src("src/editor.js");
+  // arch-P3b-07h: the cutover orchestrator itself moved with the asset store's seam, which is what
+  // it migrates; the save choke points it suppresses stay here.
+  var ed = src("src/editor.js"), AS = src("src/editor/assets.js");
   ok("editor.js defines savesSuppressed via window.Migration", /function savesSuppressed\(\)\s*\{[\s\S]{0,160}window\.Migration[\s\S]{0,120}savesSuppressed\(\)/.test(ed));
   ok("saveRegistry early-returns when suppressed", /function saveRegistry\(r\)\s*\{\s*if \(savesSuppressed\(\)\) return false;/.test(ed));
   ok("scheduleSave early-returns when suppressed", /function scheduleSave\(\)\s*\{\s*if \(savesSuppressed\(\)\) return;/.test(ed));
   ok("flushSave early-returns when suppressed", /function flushSave\(\)\s*\{\s*if \(savesSuppressed\(\)\) return;/.test(ed));
   // WIRING: the guarded cutover orchestrator -- async, preconditions, backup-gate,
   // suppress, disk write+verify, flip-only-after-verify.
-  ok("migrateToFileBackend is async", /async function migrateToFileBackend\(opts\)/.test(ed));
-  ok("migrateToFileBackend requires the browser backend", /async function migrateToFileBackend\(opts\)[\s\S]{0,700}backend !== "browser"[\s\S]{0,80}return fail\("precondition"/.test(ed));
-  ok("migrateToFileBackend requires the native store glue", /if \(!ns\) return fail\("precondition", "native file storage is not available/.test(ed));
-  ok("migrateToFileBackend backup-gates before suppress", /window\.Migration\.runBackupsAsync\(src[\s\S]{0,700}bk\.count !== codes\.length[\s\S]{0,1900}window\.Migration\.suppress\(\)/.test(ed));
-  ok("migrateToFileBackend writes then verifies from disk", /await putRegistry\(srcJson\)[\s\S]{0,400}await getRegistry\(\)[\s\S]{0,200}window\.Migration\.verifyRegistries\(srcJson, back\)/.test(ed));
-  ok("migrateToFileBackend flips flag ONLY after verify passes", /if \(!v\.ok\) \{ window\.Migration\.resume\(\); return fail\("verify"[\s\S]{0,1900}setFlag\("file"\)/.test(ed));
-  ok("migrateToFileBackend resumes saves on write/verify failure", /window\.Migration\.resume\(\); return fail\("write"[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify"/.test(ed));
+  ok("migrateToFileBackend is async", /async function migrateToFileBackend\(opts\)/.test(AS));
+  ok("migrateToFileBackend requires the browser backend", /async function migrateToFileBackend\(opts\)[\s\S]{0,700}backend !== "browser"[\s\S]{0,80}return fail\("precondition"/.test(AS));
+  ok("migrateToFileBackend requires the native store glue", /if \(!ns\) return fail\("precondition", "native file storage is not available/.test(AS));
+  ok("migrateToFileBackend backup-gates before suppress", /window\.Migration\.runBackupsAsync\(src[\s\S]{0,700}bk\.count !== codes\.length[\s\S]{0,1900}window\.Migration\.suppress\(\)/.test(AS));
+  ok("migrateToFileBackend writes then verifies from disk", /await putRegistry\(srcJson\)[\s\S]{0,400}await getRegistry\(\)[\s\S]{0,200}window\.Migration\.verifyRegistries\(srcJson, back\)/.test(AS));
+  ok("migrateToFileBackend flips flag ONLY after verify passes", /if \(!v\.ok\) \{ window\.Migration\.resume\(\); return fail\("verify"[\s\S]{0,1900}setFlag\("file"\)/.test(AS));
+  ok("migrateToFileBackend resumes saves on write/verify failure", /window\.Migration\.resume\(\); return fail\("write"[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify"/.test(AS));
   // #18: the shared component library rides the SAME guarded cutover as the registry --
   // one flag flip must move both, or neither (never straddle backends).
-  ok("migrateToFileBackend requires put/getLibrary too", /if \(!putLibrary \|\| !getLibrary\) return fail\("precondition", "native store is missing put\/getLibrary"\)/.test(ed));
-  ok("migrateToFileBackend reads the browser library (optional source)", /libJson;[\s\S]{0,40}try \{ libJson = browserLibAdapter\.readLibrary\(\); \}/.test(ed));
-  ok("migrateToFileBackend backs up the library before suppress", /if \(libJson\) \{[\s\S]{0,1200}window\.Migration\.suppress\(\)/.test(ed));
-  ok("migrateToFileBackend writes+verifies the library after the registry, same suppression window", /window\.Migration\.verifyRegistries\(srcJson, back\)[\s\S]{0,600}if \(libJson\) \{[\s\S]{0,700}await putLibrary\(libJson\)[\s\S]{0,300}await getLibrary\(\)[\s\S]{0,300}window\.Migration\.verifyLibrary\(libJson, libBack\)/.test(ed));
-  ok("migrateToFileBackend resumes saves on library write/verify failure too", /window\.Migration\.resume\(\); return fail\("write", "library:[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify", "library:/.test(ed));
-  ok("Editor exposes migrateToFileBackend", /migrateToFileBackend: migrateToFileBackend/.test(ed));
+  ok("migrateToFileBackend requires put/getLibrary too", /if \(!putLibrary \|\| !getLibrary\) return fail\("precondition", "native store is missing put\/getLibrary"\)/.test(AS));
+  ok("migrateToFileBackend reads the browser library (optional source)", /libJson;[\s\S]{0,40}try \{ libJson = browserLibAdapter\.readLibrary\(\); \}/.test(AS));
+  ok("migrateToFileBackend backs up the library before suppress", /if \(libJson\) \{[\s\S]{0,1200}window\.Migration\.suppress\(\)/.test(AS));
+  ok("migrateToFileBackend writes+verifies the library after the registry, same suppression window", /window\.Migration\.verifyRegistries\(srcJson, back\)[\s\S]{0,600}if \(libJson\) \{[\s\S]{0,700}await putLibrary\(libJson\)[\s\S]{0,300}await getLibrary\(\)[\s\S]{0,300}window\.Migration\.verifyLibrary\(libJson, libBack\)/.test(AS));
+  ok("migrateToFileBackend resumes saves on library write/verify failure too", /window\.Migration\.resume\(\); return fail\("write", "library:[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify", "library:/.test(AS));
+  ok("Editor exposes migrateToFileBackend", /migrateToFileBackend: migrateToFileBackend/.test(AS));
   // WIRING (#18 / Product Rail #1), arch-P3-01: the library and the products store ride the same
   // seam as the registry -- same flag, same adapter selection -- and editor.js holds no storage
   // logic of its own. The behaviour is proved against the real module in "arch-P3-01 editor
@@ -3213,7 +3219,7 @@ section("#69 migration cutover");
   ok("A1: onPrimary dismisses the modal (shell.modal.close) + refreshes the product context (mountProductPicker)", /saveRegistry\(registry\);\s*\n\s*shell\.modal\.close\(\);\s*\n\s*mountProductPicker\(\);/.test(ptmBody));
   ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
-  ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(ed));
+  ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(AS));
   ok("migrate button registered only when __nativeStore present", /if \(window\.__nativeStore\) window\.Editor\.registerPipelineButton\("Migrate to file storage \(beta\)", migrateToFileBackendPrompt/.test(ed));
   // WIRING: the Swift bridge grew the ops the native store glue posts.
   var swift = src("desktop/AuthoringTool.swift");
@@ -3884,10 +3890,11 @@ section("hotspot inspector: markers consolidated with the list (#45)");
 // drop content into each column. Additive: the implicit side-by-side wrap is untouched.
 section("columns palette block (#94)");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
   var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js"), rn = src("src/render.js");
-  ok("Columns palette entry makes an EXPLICIT empty 2-column block", /label: "Columns", make: function \(\) \{ return \{ type: "columns", explicit: true, columns: \[\[\], \[\]\] \}/.test(e));
+  ok("Columns palette entry makes an EXPLICIT empty 2-column block", /label: "Columns", make: function \(\) \{ return \{ type: "columns", explicit: true, columns: \[\[\], \[\]\] \}/.test(ASSETS));
   // an explicit palette Columns block must NOT be collapsed/unwrapped by cleanupColumns
   var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
   ok("cleanupColumns preserves an explicit Columns block", (function () {
@@ -4036,6 +4043,7 @@ section("exit preview focuses the demo's page (#100)");
 // #90: native Table block — 4-file contract wiring (render / course.css / editor).
 section("table block (#90)");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var rn = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ic = src("src/icons.js");
   // render.js: pure renderer — editable cells (th/td by header), scroll wrapper, borders/zebra/pad/align
@@ -4047,7 +4055,7 @@ section("table block (#90)");
   ok("course.css styles the table block on tokens", /\.table-block__table \{[\s\S]*?border-collapse: collapse/.test(css) && /\.table-block__cell \{[\s\S]*?border: 1px solid var\(--color-hair\)/.test(css));
   ok("table header + zebra use theme tokens (no ad-hoc colour)", /th\.table-block__cell \{[\s\S]*?background: var\(--color-surface\)/.test(css) && /\[data-zebra\][\s\S]*?background: var\(--color-surface-alt\)/.test(css));
   // editor.js: palette entry, block-selection type, inspector dispatch, BLOCK_LUCIDE glyph
-  ok("Table is in the block palette (Layout group)", /label: "Table", make: function \(\) \{ return \{ type: "table"/.test(e));
+  ok("Table is in the block palette (Layout group)", /label: "Table", make: function \(\) \{ return \{ type: "table"/.test(ASSETS));
   ok("table selects as a block (not an inline field)", /=== "table"\) return "block"/.test(e));
   ok("table dispatches to renderTableInspector via two-level", /block\.type === "table"\) \{ renderBlockTwoLevel\(node, "Table", CONTENT_DECL, renderTableInspector\)/.test(e));
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
@@ -5475,7 +5483,7 @@ section("WWW retroactive auto-clean");
 // Components left-pane twirl's "Blocks" group as part of the left-panel reorg)
 section("shared-library palette insert");
 (function () {
-  var etxt = src("src/editor.js");
+  var etxt = src("src/editor/assets.js");   // arch-P3b-07h
   var reg = etxt.indexOf("SHARED component library (cross-course");
   ok("renderComponentsPalette adds a Blocks palette section", reg > -1);
   var body = etxt.slice(reg, reg + 1400);
@@ -5971,7 +5979,14 @@ section("multi-selection batch style");
 section("DDD undo-coverage");
 (function () {
   var t = src("src/editor.js");
-  function bodyOf(name) { var s = t.indexOf("function " + name + "("); return s < 0 ? "" : t.slice(s, t.indexOf("\n  }", s) + 4); }
+  // arch-P3b-07h: insertBlock moved to src/editor/assets.js with the palette that calls it, and a
+  // function body there closes one indent deeper, inside install().
+  var ASSETS = src("src/editor/assets.js");
+  function bodyOf(name) {
+    var s = t.indexOf("function " + name + "("), src2 = t, end = "\n  }";
+    if (s < 0) { s = ASSETS.indexOf("function " + name + "("); src2 = ASSETS; end = "\n    }"; }
+    return s < 0 ? "" : src2.slice(s, src2.indexOf(end, s) + end.length);
+  }
   ok("duplicateBlock pushes history", /pushHistory\(\)/.test(bodyOf("duplicateBlock")));
   ok("moveBlock pushes history", /pushHistory\(\)/.test(bodyOf("moveBlock")));
   ok("insertBlock pushes history", /pushHistory\(\)/.test(bodyOf("insertBlock")));
@@ -6657,6 +6672,7 @@ section("vimeo hash");
 // ---- HTML-interaction palette linking (Phase 2): map an interaction's own vars to theme ----
 section("embed palette linking");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
   var x = src("src/export.js");
@@ -6680,8 +6696,8 @@ section("embed palette linking");
   // exported runtime forwards + applies the map too
   ok("exported runtime forwards data-embed-colormap", /getAttribute\('data-embed-colormap'\)/.test(x) && /if\(mp\)\{ for\(var mk in mp\)/.test(x));
   // inspector exposes the per-var palette control
-  ok("embed inspector has an Interaction colours palette (detects inline OR bundled src)", /disclosure\("embedPalette", "Interaction colours"/.test(e) && /detectEmbedColorVars\(embedHtmlForInspect\(block\)\)/.test(e));
-  ok("bundled-file interactions decode their HTML for detection", /function embedHtmlForInspect\(block\)[\s\S]*?atob\(m\[2\]\)/.test(e));
+  ok("embed inspector has an Interaction colours palette (detects inline OR bundled src)", /disclosure\("embedPalette", "Interaction colours"/.test(e) && /detectEmbedColorVars\(embedHtmlForInspect\(block\)\)/.test(ASSETS));
+  ok("bundled-file interactions decode their HTML for detection", /function embedHtmlForInspect\(block\)[\s\S]*?atob\(m\[2\]\)/.test(ASSETS));
   // palette writes must persist NOW (scheduleSave), not only on the 4s autosave tick —
   // else a colour mapping made just before a hard refresh is lost (WKWebView skips
   // beforeunload on Cmd+R). One choke for embed / SVG-image / glossary palettes.
@@ -6690,7 +6706,7 @@ section("embed palette linking");
   // full interaction markup with no caching (a 2-3s freeze). Detection is now cached
   // per block, keyed on its html/src, and the palette reads through the cache.
   ok("#85 embed colour-var detection is cached per block (keyed on html/src)",
-    /function embedColorVarsCached\(block\)[\s\S]*?_embedVarCache\.get\(block\)[\s\S]*?_embedVarCache\.set\(block, \{ sig: sig, vars: vars \}\)/.test(e));
+    /function embedColorVarsCached\(block\)[\s\S]*?_embedVarCache\.get\(block\)[\s\S]*?_embedVarCache\.set\(block, \{ sig: sig, vars: vars \}\)/.test(ASSETS));
   ok("#85 the palette reads detection through the cache (no per-render decode)",
     /var embedVars = embedColorVarsCached\(block\);/.test(e));
   // #85: a colour-map change must recolour the iframe LIVE (push the theme), NOT
@@ -6847,6 +6863,7 @@ section("nested items[].children traversal");
 // these guards lock the tracer render + registration + token-driven styling.
 section("sequence block tracer");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
   var css = src("src/course.css");
@@ -6864,7 +6881,7 @@ section("sequence block tracer");
   ok("sequence stamps data-pattern + --tex-color", /root\.setAttribute\("data-pattern", block\.pattern === "dots" \|\| block\.pattern === "none" \? block\.pattern : "grid"\)/.test(r) && /block\.patternColor\) root\.style\.setProperty\("--tex-color", block\.patternColor\)/.test(r.slice(r.indexOf("sequence: function"))));
   // registration: container-classifier treats it as a "block", palette entry exists in Layout
   ok("sequence is a container 'block' in the selection classifier", /block\.type === "cardReveal" \|\| block\.type === "sequence"/.test(e));
-  ok("sequence has a Layout palette entry seeding 3 steps", /label: "Sequence[\s\S]*?type: "sequence", spine: "numbered", orient: "vertical", reveal: "scroll", items: \[1, 2, 3\]/.test(e));
+  ok("sequence has a Layout palette entry seeding 3 steps", /label: "Sequence[\s\S]*?type: "sequence", spine: "numbered", orient: "vertical", reveal: "scroll", items: \[1, 2, 3\]/.test(ASSETS));
   // token-driven styling only (design-gate: no bespoke per-element colour): connector = hairline,
   // node surface = per-mode card fill, marker text = accent
   ok("seq connector is token-driven (hairline default)", /--seq-connector, var\(--color-hair\)/.test(css));
@@ -6879,6 +6896,7 @@ section("sequence block tracer");
 // sequence -> nested delete/drag/drop/traversal inherited. Numbers DERIVED at render.
 section("card deck block");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
   var css = src("src/course.css");
@@ -6900,7 +6918,7 @@ section("card deck block");
   // registration: container-classifier treats it as a "block"; TWO_LEVEL; Layout palette
   ok("cardDeck is a container 'block' in the selection classifier", /block\.type === "cardDeck" \|\| block\.type === "courseNav"/.test(e));
   ok("cardDeck is a two-level type", require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("cardDeck"));
-  ok("cardDeck has a Layout palette entry", /label: "Card Deck \(carousel\)"[\s\S]*?type: "cardDeck", items:/.test(e));
+  ok("cardDeck has a Layout palette entry", /label: "Card Deck \(carousel\)"[\s\S]*?type: "cardDeck", items:/.test(ASSETS));
   ok("block inspector dispatches cardDeck -> two-level shell (renderCardDeckInspector)", /block\.type === "cardDeck"\) \{ renderBlockTwoLevel\(node, "Card deck", CONTENT_DECL, renderCardDeckInspector\); return; \}/.test(e));
   ok("renderCardDeckInspector exists + reuses repeatedList + patternControls", /function renderCardDeckInspector\(node\)/.test(e) && /repeatedList\(inspector, "Cards"/.test(e) && /patternControls\(block, refresh\)/.test(e.slice(e.indexOf("function renderCardDeckInspector"))));
   // runtime paging engine wired into create(), armed so the editor still shows all cards
@@ -7291,6 +7309,7 @@ section("multi-select delete");
 // ---- HTML embed Center align actually centres (fit offset) --------------------
 section("embed align centering");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var x = src("src/export.js");
   var css = src("src/course.css");
@@ -7301,7 +7320,7 @@ section("embed align centering");
   ok("export runtime fit is fit-to-width (no data-fit-fill)", /var avail=f\.clientWidth\|\|dw; var s=Math\.min\(1, avail\/dw\);/.test(x) && !/data-fit-fill/.test(x));
   ok("export runtime aligns (default start)", /al=wrap\.getAttribute\('data-align'\)\|\|'start';[\s\S]*?frame\.style\.marginLeft=\(off>0\?off:0\)/.test(x));
   ok("migration drops fitFill + centres interactions", /if \(b\.type === "htmlEmbed"\) \{ if \(b\.fitFill != null\) delete b\.fitFill; if \(b\.align == null\) b\.align = "center"; \}/.test(e));
-  ok("new interactions default centred", /\{ type: "htmlEmbed", height: 420, align: "center" \}/.test(e));
+  ok("new interactions default centred", /\{ type: "htmlEmbed", height: 420, align: "center" \}/.test(ASSETS));
   ok("block-flow align centres a sized top-level block (embeds excluded)", /\.page > \[data-align="center"\]:not\(\[data-embed\]\) \{ margin-inline: auto/.test(css));
   ok("embeds skip wrap-level alignSelf (align via internal offset)", /if \(block\.type !== "htmlEmbed"\) node\.style\.alignSelf/.test(src("src/render.js")));
 })();
@@ -7621,6 +7640,7 @@ section("#148 per-variant image versions (authoring)");
 // resolve a role only when the style exists; stamp UNSTYLED text blocks (deep) only.
 section("#145 text-role auto-styling");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var slice = e.slice(e.indexOf("function getTextRoles()"), e.indexOf("// Multi-selection (>=2) batch inspector"));
   var doc = { textRoles: { heading: "Heading 1", paragraph: "Body 1", note: "Warnings" }, styles: { "Heading 1": {}, "Body 1": {} }, pages: [] };
@@ -7664,7 +7684,7 @@ section("#145 text-role auto-styling");
 
   // Wiring (source guards): auto-stamp on drop, auto-apply on import, rename repoints the
   // role map, exposed API, audit toggle + decorator, render() untouched.
-  ok("insertBlock auto-stamps a dropped block's role style", /stampRoleStyle\(block\); \/\/ #145/.test(e));
+  ok("insertBlock auto-stamps a dropped block's role style", /stampRoleStyle\(block\); \/\/ #145/.test(ASSETS));
   ok("schema import auto-applies roles after setDoc", /window\.Editor\.applyTextRolesByType\(\);/.test(src("src/schema.js")));
   ok("renameTextStyle repoints the role map", /doc\.textRoles\[t\] === oldName\) doc\.textRoles\[t\] = newName/.test(e));
   ok("Editor exposes applyTextRolesByType", /applyTextRolesByType: function \(\)/.test(e));
@@ -8755,6 +8775,7 @@ section("panel-standards");
 // tree-block / asset-group__title) are preserved, so selection/DnD/rename don't move.
 section("LeftPanel DS re-skin (issue #13)");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var css = src("editor.css");
   var icons = src("src/icons.js");
@@ -8768,11 +8789,11 @@ section("LeftPanel DS re-skin (issue #13)");
   ok("chapter count is the canonical VersoUI.Badge", /window\.VersoUI\.Badge\(\{ children: String\(\(ch\.pages/.test(e));
   ok("chapter names stay upper-cased (CSS text-transform)", /\.tree-chapter__name \{[^}]*text-transform: uppercase/.test(css));
   // Palette is built from the canonical control set with a persisted grid/list view.
-  ok("palette entries build from BlockTile / BlockPaletteItem", /U\.BlockTile\(\{/.test(e) && /U\.BlockPaletteItem\(\{/.test(e));
+  ok("palette entries build from BlockTile / BlockPaletteItem", /U\.BlockTile\(\{/.test(ASSETS) && /U\.BlockPaletteItem\(\{/.test(ASSETS));
   // #105: grid view uses a WIDTH-ADAPTIVE BlockGrid (auto-fill), not a fixed 3-col
   // grid — the resizable dock would otherwise balloon the tiles as it widens.
-  ok("grid view lays out via the canonical BlockGrid (width-adaptive)", /U\.BlockGrid\(\{ minColWidth: \d+ \}\)/.test(e));
-  ok("grid/list view is a canonical SegmentedControl (Lucide icons)", /U\.SegmentedControl\(\{[\s\S]*layout-grid[\s\S]*list/.test(e));
+  ok("grid view lays out via the canonical BlockGrid (width-adaptive)", /U\.BlockGrid\(\{ minColWidth: \d+ \}\)/.test(ASSETS));
+  ok("grid/list view is a canonical SegmentedControl (Lucide icons)", /U\.SegmentedControl\(\{[\s\S]*layout-grid[\s\S]*list/.test(ASSETS));
   // #105: BlockGrid honours minColWidth with an auto-fill track (stable tile size,
   // flexing column count); tiles are single-line + ellipsised for uniform row height;
   // the tile glyph is the DS default 16px scale, not 20px.
@@ -8781,11 +8802,11 @@ section("LeftPanel DS re-skin (issue #13)");
   ok("BlockTile carries a title tooltip (labels truncate in grid)", /tile\.title = String\(props\.label\)/.test(uiKitSrc));
   ok("palette tile label is single-line + ellipsised (uniform height)", /\.vds-tile__label \{[^}]*white-space: nowrap/.test(css) && /\.vds-tile__label \{[^}]*text-overflow: ellipsis/.test(css));
   ok("palette tile glyph is the DS 16px scale", /\.vds-tile__icon svg \{ width: 16px; height: 16px; \}/.test(css));
-  ok("palette view is persisted", /PALETTE_VIEW_KEY = "authoring\.palette\.view"/.test(e));
+  ok("palette view is persisted", /PALETTE_VIEW_KEY = "authoring\.palette\.view"/.test(ASSETS));
   // Wiring hooks preserved (re-skin, never re-wire): the tests/queries that key off
   // these class names keep matching.
   ok("wiring hooks preserved (tree-page__name / tree-block / asset-group__title)",
-     /tree-page__name"/.test(e) && /"tree-block"/.test(e) && /"asset-group__title", g\)/.test(e) && /"asset-group__title", title\)/.test(e));
+     /tree-page__name"/.test(e) && /"tree-block"/.test(e) && /"asset-group__title", g\)/.test(ASSETS) && /"asset-group__title", title\)/.test(ASSETS));
   // The DS Lucide glyphs the LeftPanel uses are inlined offline in the accessor.
   ["file-text", "heading", "type", "list-checks", "layout-grid", "component", "target"].forEach(function (n) {
     ok("icons.js provides the DS glyph: " + n, new RegExp('"' + n + '":').test(icons));
@@ -9183,6 +9204,7 @@ section("interact contextual connectors");
 // set a card min-height. Blank inherits the block default. Ships in SCORM.
 section("hotspot per-card size");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
@@ -9211,8 +9233,8 @@ section("hotspot per-card size");
       loc.parentArray === hotspot.screens[0].markers[0].blocks;
   })());
   ok("editor: remintIds descends hotspot card blocks (#215)", /if \(Array\.isArray\(node\.screens\)\) node\.screens\.forEach\(function \(s\) \{\s*\n\s*if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) m\.blocks\.forEach\(remintIds\); \}\);/.test(e));
-  ok("editor: insertLoc resolves the selected block's own container via findBlockParent", /function insertLoc\(\) \{[\s\S]{0,200}var loc = findBlockParent\(page\.blocks, selection\.block\);[\s\S]{0,120}return \{ array: loc\.parentArray, index: loc\.index \+ 1 \};/.test(e));
-  ok("editor: insertBlock (default path) + pasteClipboard use insertLoc (not top-level-only)", /L = insertLoc\(\);\s*\}\s*L\.array\.splice\(L\.index, 0, block\);/.test(e) && /var L = insertLoc\(\);[\s\S]{0,260}L\.array\.splice\(L\.index \+ i, 0, c\);/.test(e));
+  ok("editor: insertLoc resolves the selected block's own container via findBlockParent", /function insertLoc\(\) \{[\s\S]{0,200}var loc = findBlockParent\(page\.blocks, E\.selection\.block\);[\s\S]{0,120}return \{ array: loc\.parentArray, index: loc\.index \+ 1 \};/.test(ASSETS));
+  ok("editor: insertBlock (default path) + pasteClipboard use insertLoc (not top-level-only)", /L = insertLoc\(\);\s*\}\s*L\.array\.splice\(L\.index, 0, block\);/.test(ASSETS) && /var L = insertLoc\(\);[\s\S]{0,260}L\.array\.splice\(L\.index \+ i, 0, c\);/.test(e));
   ok("render: walkBlocks descends hotspot card blocks (#215 screens[].markers[].blocks)", /if \(Array\.isArray\(b\.screens\)\) b\.screens\.forEach\(function \(s\) \{ if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) walkBlocks\(m\.blocks, fn\); \}\); \}\);/.test(r));
   // the old inPopover exclusion (children not drop targets / not draggable) is GONE
   // — popover cards are full editing containers now.
@@ -9330,6 +9352,7 @@ section("FR find/replace");
 // ---- PERF: block edits rebuild one page, not the whole world -------------
 section("PERF one-page re-render");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
   var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js");
@@ -9361,7 +9384,7 @@ section("PERF one-page re-render");
   // so deleting a page BEFORE the active one no longer jumps the view to a random page.
   ok("deletePage #171 re-anchors by page identity, not raw index", /var keepId = pi === currentPage[\s\S]{0,200}doc\.pages\.splice\(pi, 1\);\s*var ni = keepId \? pageIndexById\(keepId\) : -1;\s*currentPage = ni >= 0 \? ni : Math\.min\(currentPage, doc\.pages\.length - 1\);/.test(e));
   ok("duplicateBlock + moveBlock rebuild one page", /reapplyStructural\(pi\); \/\/ PERF: one page/.test(e));
-  ok("insertBlock rebuilds only the block's page", /L\.array\.splice\(L\.index, 0, block\);\s*reapplyStructural\(findPageOfBlock\(block\)\);/.test(e));
+  ok("insertBlock rebuilds only the block's page", /L\.array\.splice\(L\.index, 0, block\);\s*reapplyStructural\(findPageOfBlock\(block\)\);/.test(ASSETS));
   ok("pasteClipboard rebuilds only the paste page", /reapplyStructural\(findPageOfBlock\(news\[0\]\)\); return true;/.test(e));
   ok("image max-width edit uses reapplyBlock (not mount)", /block\.maxWidth = n; reapplyBlock\(block\); reselectBlockNode/.test(e));
   ok("image light/dark contrast toggle uses reapplyBlock (not mount)", /delete block\.autoTint; \/\/ auto\s*reapplyBlock\(block\); reselectBlockNode\(block, "block"\);/.test(e));
@@ -14322,6 +14345,7 @@ section("#215 hotspot unified screen-graph");
 // Components"/"Shared Library" asset-groups that used to live in the Blocks palette.
 section("left-panel Components reorg");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var html = src("index.html");
 
@@ -14338,9 +14362,11 @@ section("left-panel Components reorg");
   ok("the old draggable split handles are gone", html.indexOf('id="lpane-split-0"') === -1 && html.indexOf('id="lpane-split-1"') === -1);
 
   // renderComponentsPalette(): three groups, in the documented order
-  var rcpStart = e.indexOf("function renderComponentsPalette()");
+  // arch-P3b-07h: the components palette moved with the Assets tab.
+  var e2 = src("src/editor/assets.js");
+  var rcpStart = e2.indexOf("function renderComponentsPalette()");
   ok("renderComponentsPalette() is defined", rcpStart > -1);
-  var rcpBody = e.slice(rcpStart, rcpStart + 3800);
+  var rcpBody = e2.slice(rcpStart, rcpStart + 3800);
   var myOrder = rcpBody.indexOf('renderGroup("My Components"');
   var blocksOrder = rcpBody.indexOf('renderGroup("Blocks"');
   var pagesOrder = rcpBody.indexOf('renderGroup("Pages"');
@@ -14353,7 +14379,7 @@ section("left-panel Components reorg");
 
   // mount() keeps the new pane in sync on every render, same as the Blocks palette
   ok("mount() re-renders the Components pane alongside the Blocks palette", /renderAssets\(\); \/\/ keep the Blocks palette current[\s\S]{0,20}renderComponentsPalette\(\);/.test(e));
-  ok("wireLeftSwitcher() renders both panels on boot", /function wireLeftSwitcher\(\)[\s\S]{0,120}renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
+  ok("wireLeftSwitcher() renders both panels on boot", /function wireLeftSwitcher\(\)[\s\S]{0,120}renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(ASSETS));
 
   // context-menu additions (Tier 1 per the /verso-frontend ruling): single-block
   // "Save as component…" (canvas + outliner) and page "Save page to library…"
@@ -14383,15 +14409,16 @@ section("editor-rework source insert + two-way jump");
 // ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
 section("editor-rework left-panel 3-way switcher");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var html = src("index.html");
   ok("the panel has a switcher host + a Source pane", /id="lpane-switch"/.test(html) && /lpane lpane--source" id="lpane-source" data-lsec="source"/.test(html));
   ok("every content pane is tagged with a section (data-lsec)", /id="lpane-structure" data-lsec="structure"/.test(html) && /id="lpane-blocks" data-lsec="blocks"/.test(html) && /id="lpane-source" data-lsec="source"/.test(html));
-  ok("the switcher offers Structure / Blocks / Source", /options: \[\{ value: "structure", label: "Structure" \}, \{ value: "blocks", label: "Blocks" \}, \{ value: "source", label: "Source" \}\]/.test(e));
-  ok("applyLeftSection shows only the active section's panes", /el\.hidden = el\.getAttribute\("data-lsec"\) !== sec;/.test(e));
-  ok("the active section persists across reloads", /LEFT_SECTION_KEY = "authoring\.lpane\.active"/.test(e) && /localStorage\.getItem\(LEFT_SECTION_KEY\)/.test(e));
-  ok("switching to Source renders the read-only source-doc viewer (source-link 02)", /if \(sec === "source"\) renderEditSourcePanel\(\);/.test(e));
-  ok("setStage re-applies the switcher's active section in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(e) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
+  ok("the switcher offers Structure / Blocks / Source", /options: \[\{ value: "structure", label: "Structure" \}, \{ value: "blocks", label: "Blocks" \}, \{ value: "source", label: "Source" \}\]/.test(ASSETS));
+  ok("applyLeftSection shows only the active section's panes", /el\.hidden = el\.getAttribute\("data-lsec"\) !== sec;/.test(ASSETS));
+  ok("the active section persists across reloads", /LEFT_SECTION_KEY = "authoring\.lpane\.active"/.test(ASSETS) && /localStorage\.getItem\(LEFT_SECTION_KEY\)/.test(ASSETS));
+  ok("switching to Source renders the read-only source-doc viewer (source-link 02)", /if \(sec === "source"\) renderEditSourcePanel\(\);/.test(ASSETS));
+  ok("setStage re-applies the switcher's active section in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(ASSETS) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
 })();
 
 // ---- SPEC 8 source-link 02: Edit Source tab = read-only live source-doc viewer ----
@@ -14464,13 +14491,14 @@ section("SPEC 8: source-link 06 — inline span append");
 // ---- SPEC 8 source-link 07: drag a source figure -> a new linked image block ----
 section("SPEC 8: source-link 07 — linked image drop");
 (function () {
+  var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js"), r = src("src/render.js"), css = src("editor.css");
   ok("render's image block resolves src/alt LIVE from the source figure (01 object branch), purely (shallow copy)", /image: function \(block\) \{[\s\S]{0,400}block\.sourceLink && block\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,300}rlink\.type === "object"[\s\S]{0,260}c\.src = rlink\.src \|\| block\.src[\s\S]{0,120}block = c;/.test(r));
   ok("placement routes an OBJECT anchor (no start/len) to a linked IMAGE block, never inline/format-split", /var isObject = !!\(a\.descriptor && a\.descriptor\.anchor && a\.descriptor\.anchor\.len == null\);/.test(e) && /var result = isObject \? placeSourceLinkImage\(a\) : placeSourceLinkBlocks\(a\);/.test(e));
   // #161 part 1: a source-link drop lands at the between-block gap under the cursor (drop-line), not the
   // selection-based insertLoc; the gap target is set only for the placement and cleared right after.
   ok("a source-link drop targets the between-block gap under the cursor (#161 part 1)", /var gap = sourceLinkDropGap\(cx, cy\);\s*\n\s*if \(gap\) __sourceLinkDropAt = \{ pageIndex: gap\.pageIndex, index: gap\.index \};/.test(e) && /__sourceLinkDropAt = null; \/\/ one placement only/.test(e));
-  ok("insertBlock honours an explicit __sourceLinkDropAt gap + auto-advances for a format-split's blocks", /if \(__sourceLinkDropAt && doc\.pages\[__sourceLinkDropAt\.pageIndex\]\)[\s\S]{0,260}__sourceLinkDropAt\.index = L\.index \+ 1;/.test(e));
+  ok("insertBlock honours an explicit __sourceLinkDropAt gap + auto-advances for a format-split's blocks", /if \(E\.__sourceLinkDropAt && E\.doc\.pages\[E\.__sourceLinkDropAt\.pageIndex\]\)[\s\S]{0,260}E\.__sourceLinkDropAt\.index = L\.index \+ 1;/.test(ASSETS));
   ok("sourceLinkDropGap targets TOP-LEVEL page blocks only (a link drops between page blocks, not inside a column)", /function sourceLinkDropGap\(cx, cy\)[\s\S]{0,400}page\.blocks\.indexOf\(el\.__block\) !== -1;/.test(e));
   ok("the drag shows a between-block drop-line for a gap, an inline-target ring over a text block (#161 part 1)", /function showSourceLinkDropLine\(cx, cy\)/.test(e) && /is-sl-inline-target/.test(e) && /\.source-link-dropline/.test(src("editor.css")) && /\.canvas-block\.is-sl-inline-target/.test(src("editor.css")));
   ok("placeSourceLinkImage adds an OBJECT link mark (anchor {nodeKey}, no len) + inserts an image block with sourceLink", /function placeSourceLinkImage\(a\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor \}\)[\s\S]{0,160}insertBlock\(\{ type: "image", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: mk\.id \} \}\)/.test(e));
