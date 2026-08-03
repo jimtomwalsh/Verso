@@ -2606,7 +2606,8 @@ section("#71 recents");
 section("editor-rework file-picker grouping");
 (function () {
   var t = src("src/editor.js");
-  var m = t.match(/\/\* @pure-browser-geo-start \*\/([\s\S]*?)\/\* @pure-browser-geo-end \*\//);
+  // arch-P3b-07k: a fenced slice must follow its code -- the grouping moved to editor/home.js.
+  var m = src("src/editor/home.js").match(/\/\* @pure-browser-geo-start \*\/([\s\S]*?)\/\* @pure-browser-geo-end \*\//);
   if (!m) { ok("locate @pure-browser-geo fence", false); return; }
   var g = new Function(m[1] + "\nreturn { groupDocIdsByGeo: groupDocIdsByGeo, BROWSER_GEO_ORDER: BROWSER_GEO_ORDER };")();
   var reg = { a: { geo: "reflow" }, b: { geo: "paged" }, c: { geo: "reflow" }, d: { geo: "frame" }, e: { geo: "unknownGeo" } };
@@ -2620,9 +2621,10 @@ section("editor-rework file-picker grouping");
   ok("ids with no registry doc are dropped", g.groupDocIdsByGeo(["a", "ghost"], reg, geoOf)[0].ids.join(",") === "a");
   ok("null-safe on empty input", g.groupDocIdsByGeo(null, reg, geoOf).length === 0);
   // the browser is product-scoped + auto-opens on a zero-tab Edit landing
-  ok("the browser filters by the product scope (docMatchesProductStage)", /courseMatchesQuery\(registry\[id\], browserQuery\) && docMatchesProductStage\(registry\[id\], scope, null\)/.test(t));
+  // arch-P3b-07k: both claims are about the browser, which is editor/home.js now.
+  ok("the browser filters by the product scope (docMatchesProductStage)", /courseMatchesQuery\(registry\[id\], browserQuery\) && docMatchesProductStage\(registry\[id\], scope, null\)/.test(src("src/editor/home.js")));
   ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(t));
-  ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(t) && /cell\.interactive \? "Interactive" : "Static"/.test(t));
+  ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(src("src/editor/home.js")) && /cell\.interactive \? "Interactive" : "Static"/.test(src("src/editor/home.js")));
 })();
 
 // ---- SPEC 7: product-filtered tab scope (pure predicate) ----
@@ -3051,8 +3053,12 @@ section("#69 migration cutover");
   ok("store-native.js carries the same readProducts/writeProducts pair as readLibrary/writeLibrary", /readProducts: function \(\) \{ return productsCache; \}/.test(src("src/store-native.js")) && /writeProducts: function \(json\)/.test(src("src/store-native.js")));
   // WIRING (Product Rail): "Promote to Product" -- folded into the file picker's per-card menu
   // (side-rail-cleanup slice 2); parameterised by the specific card's doc, writes ONLY its meta.
-  ok("'Promote to Product…' is wired into the file picker's per-card menu, on the card's doc", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ed));
-  ok("promoteToProductModal has ONE UI call site (the per-card menu) + its definition", (ed.match(/promoteToProductModal\(/g) || []).length === 2);
+  // arch-P3b-07k: the per-card menu moved to editor/home.js; the modal's DEFINITION stayed here,
+  // so the one-call-site claim now counts one in each file rather than two in one.
+  var ehm2 = src("src/editor/home.js");
+  ok("'Promote to Product…' is wired into the file picker's per-card menu, on the card's doc", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm2));
+  ok("promoteToProductModal has ONE UI call site (the per-card menu) + its definition",
+    (ehm2.match(/promoteToProductModal\(/g) || []).length === 1 && (ed.match(/promoteToProductModal\(/g) || []).length === 1);
   var ptmStart = ed.indexOf("function promoteToProductModal(targetDoc)");
   ok("promoteToProductModal found (parameterised by targetDoc)", ptmStart !== -1);
   var ptmBody = ed.slice(ptmStart, ptmStart + 2900);
@@ -3085,7 +3091,8 @@ section("#69 migration cutover");
   ok("Swift storePutProducts writes products.json and refreshes injections", /op == "storePutProducts"[\s\S]{0,600}products\.json[\s\S]{0,300}refreshRegistryInjection\(\)/.test(swift));
   ok("Swift storePath rejects absolute / parent-escape paths", /func storePath[\s\S]{0,160}hasPrefix\("\/"\)[\s\S]{0,40}contains\("\.\."\)/.test(swift));
   // REGRESSION: editor.js's __versoBackupReply must CHAIN store-native's, not clobber it.
-  ok("editor.js chains a prior __versoBackupReply owner", /__prevBackupReply = window\.__versoBackupReply[\s\S]{0,320}typeof __prevBackupReply === "function"\) __prevBackupReply\(id, result\)/.test(ed));
+  // arch-P3b-07d: the native reply bridge moved to editor/backup.js with the writer it feeds.
+  ok("editor.js chains a prior __versoBackupReply owner", /__prevBackupReply = window\.__versoBackupReply[\s\S]{0,320}typeof __prevBackupReply === "function"\) __prevBackupReply\(id, result\)/.test(src("src/editor/backup.js")));
   var html = src("index.html");
   ok("index.html loads migration.js before editor.js", html.indexOf("src/migration.js") !== -1 && html.indexOf("src/migration.js") < html.indexOf("src/editor.js"));
   ok("index.html loads store-native.js before editor.js", html.indexOf("src/store-native.js") !== -1 && html.indexOf("src/store-native.js") < html.indexOf("src/editor.js"));
@@ -7756,17 +7763,21 @@ section("inspector Enter-to-blur");
 // ---- project auto-backup (P0 data-safety) -------------
 section("project auto-backup");
 (function () {
+  // arch-P3b-07d: the durable-copy writer moved to src/editor/backup.js.
+  var ebk = src("src/editor/backup.js");
   var e = src("src/editor.js");
-  ok("backup .json is SELF-CONTAINED (assets baked via resolveMedia)", /function selfContainedDocText\(\)[\s\S]{0,300}window\.resolveMedia\(frozen[\s\S]{0,300}return JSON\.stringify\(frozen/.test(e));
-  ok("backupFilesFor composes live json + schema csv (skip-unchanged) + snapshot", /function backupFilesFor[\s\S]{0,400}slug \+ "\.json"[\s\S]{0,160}__schemaCsv[\s\S]{0,200}slug \+ "-backup-" \+ backupTs\(\)/.test(e) && /jsonText === backupLastText/.test(e));
-  ok("two transports: native app bridge (WKWebView) + browser FSA", /function nativeBackupBridge\(\)[\s\S]{0,120}messageHandlers\.versoBackup/.test(e) && /function backupMode\(\) \{ if \(nativeBackupBridge\(\)\) return "native"; if \(window\.showDirectoryPicker\) return "fsa"/.test(e));
-  ok("native write goes through the bridge (web side)", /nativeBackupCall\("write", \{ folder: doc\.backup\.folderPath, files: b\.files \}\)/.test(e) && /nativeBackupCall\("pickFolder"\)/.test(e));
+  ok("backup .json is SELF-CONTAINED (assets baked via resolveMedia)", /function selfContainedDocText\(\)[\s\S]{0,300}window\.resolveMedia\(frozen[\s\S]{0,300}return JSON\.stringify\(frozen/.test(ebk));
+  ok("backupFilesFor composes live json + schema csv (skip-unchanged) + snapshot", /function backupFilesFor[\s\S]{0,400}slug \+ "\.json"[\s\S]{0,160}__schemaCsv[\s\S]{0,200}slug \+ "-backup-" \+ backupTs\(\)/.test(ebk) && /jsonText === backupLastText/.test(ebk));
+  ok("two transports: native app bridge (WKWebView) + browser FSA", /function nativeBackupBridge\(\)[\s\S]{0,120}messageHandlers\.versoBackup/.test(ebk) && /function backupMode\(\) \{ if \(nativeBackupBridge\(\)\) return "native"; if \(window\.showDirectoryPicker\) return "fsa"/.test(ebk));
+  // arch-P3b-07d: `doc` is replaced on a document swap, so the module reads it through E.
+  ok("native write goes through the bridge (web side)", /nativeBackupCall\("write", \{ folder: E\.doc\.backup\.folderPath, files: b\.files \}\)/.test(ebk) && /nativeBackupCall\("pickFolder"\)/.test(ebk));
   ok("Swift shell registers + handles the versoBackup bridge", (function () { var s = src("desktop/AuthoringTool.swift"); return /userContentController\.add\(self, name: "versoBackup"\)/.test(s) && /message\.name == "versoBackup" \{ handleBackup/.test(s) && /func handleBackup/.test(s) && /NSOpenPanel\(\)[\s\S]{0,300}canChooseDirectories = true/.test(s) && /__versoBackupReply/.test(s); })());
   ok("auto-backup hooked into the save choke point", /if \(res\.ok\) \{ setSaveState\("saved"\);[\s\S]{0,60}scheduleBackup\(\)/.test(e));
   ok("folder reconnects on boot + doc switch", /window\.addEventListener\("load", function \(\) \{ initReviewAutoIngest\(\); connectBackupFolder\(\)/.test(e) && /connectBackupFolder\(\); \/\/ re-point auto-backup/.test(e));
-  ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(e) && /saveBackupHandle\(activeDocId, h\)/.test(e));
-  ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(e) && /Backup OFF — this course is NOT being saved/.test(e) && /No backup folder — this course is NOT being saved anywhere/.test(e) && /\? "Reconnect folder" : "Choose folder"/.test(e));
-  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(doc && doc\.backupRequired\)\)/.test(e));
+  ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(ebk) && /saveBackupHandle\(E\.activeDocId, h\)/.test(ebk));
+  ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(ebk) && /Backup OFF — this course is NOT being saved/.test(ebk) && /No backup folder — this course is NOT being saved anywhere/.test(ebk) && /\? "Reconnect folder" : "Choose folder"/.test(ebk));
+  // arch-P3b-07d: the new-doc flow stayed here; only the banner it raises moved.
+  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(E\.doc && E\.doc\.backupRequired\)\)/.test(ebk));
   // SPEC 7 create flow: the new-doc dialog resolves the chosen preset to a matrix cell and
   // stamps the new doc with its Product + {geo, interactive}; createBlankDoc applies both.
   ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(e));
@@ -9774,6 +9785,8 @@ section("ui-kit #10 DS control set");
 // ---- product-rail-left-rail-and-topbar-3-stage: rail segment switch + product context ----
 section("Product Rail: 3-stage rail + product dropdown");
 (function () {
+  // arch-P3b-07k: the course browser moved to src/editor/home.js.
+  var ehm = src("src/editor/home.js");
   var e = src("src/editor.js");
   var m = e.match(/\/\* @stage-rail-start \*\/([\s\S]*?)\/\* @stage-rail-end \*\//);
   if (!m) { ok("locate @stage-rail fence", false); return; }
@@ -9826,8 +9839,8 @@ section("Product Rail: 3-stage rail + product dropdown");
   // retired (recents + Promote/Remove/store-path folded into the file picker).
   ok("pinned bottom rail actions = Settings + Help/Docs; the save-menu popover is retired", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && !/id="save-menu-btn"/.test(idx));
   ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
-  ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(e) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(e));
-  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(e) && /\.vbrowser__foot/.test(src("editor.css")));
+  ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(ehm));
+  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(src("editor.css")));
   ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
   // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
   ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(e) && /function mountProductPicker/.test(e));
@@ -9835,8 +9848,8 @@ section("Product Rail: 3-stage rail + product dropdown");
   // new-product-empty-landing: '+ New Product' lands on the Edit-stage document browser (empty for a
   // Product with zero docs, since renderBrowserGrid filters by the active product scope).
   ok("newProductPrompt lands on the Edit-stage document browser (setStage edit + openBrowser)", /function newProductPrompt\(\)[\s\S]{0,900}setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(e));
-  ok("the browser header carries a 'New Product' action wired to newProductPrompt", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,120}newProductPrompt\(\);/.test(e));
-  ok("the document browser is scoped to the active product (empty state for a zero-doc Product)", /function renderBrowserGrid\(\)[\s\S]{0,400}getActiveProduct\(\)[\s\S]{0,300}docMatchesProductStage\(registry\[id\], scope, null\)/.test(e));
+  ok("the browser header carries a 'New Product' action wired to newProductPrompt", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,120}newProductPrompt\(\);/.test(ehm));
+  ok("the document browser is scoped to the active product (empty state for a zero-doc Product)", /function renderBrowserGrid\(\)[\s\S]{0,400}getActiveProduct\(\)[\s\S]{0,300}docMatchesProductStage\(registry\[id\], scope, null\)/.test(ehm));
   ok("a document created from the browser pre-stamps the active Product (createBlankDoc gets its id)", /var newDocProduct = \(typeof getActiveProduct === "function"\) \? getActiveProduct\(\) : "";/.test(e) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(e));
   ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
   ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
@@ -10405,6 +10418,8 @@ section("Product Rail: source-alignment metric");
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
 section("Product Rail: Source stage variant columns");
 (function () {
+  // arch-P3b-07k: the course browser moved to src/editor/home.js.
+  var ehm = src("src/editor/home.js");
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
@@ -10452,7 +10467,7 @@ section("Product Rail: Source stage variant columns");
   ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
   ok("lifecycle: deleteProductSource removes the master + every topic tagged to the Product", /function deleteProductSource\(pid\)[\s\S]{0,400}c\.kind === "topic" && c\.productId === pid[\s\S]{0,200}delete comps\[product\.groundTruthId\]/.test(e));
   ok("lifecycle: deleteProduct clears the source, unlinks its courses, and removes the entry", /function deleteProduct\(pid\)[\s\S]{0,200}deleteProductSource\(pid\);\s*unlinkAllCoursesFromProduct\(pid\);\s*delete window\.ProductsStore\[pid\]/.test(e));
-  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,400}if \(linked\) \{[\s\S]{0,120}"Remove from Product"[\s\S]{0,600}unlinkDocFromProduct\(d\)/.test(e));
+  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,400}if \(linked\) \{[\s\S]{0,120}"Remove from Product"[\s\S]{0,600}unlinkDocFromProduct\(d\)/.test(ehm));
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
@@ -12345,7 +12360,8 @@ section("uio-O-W1 scroll-edge affordance (OVL-10)");
 section("uio-F06 command index (Cmd-K)");
 (function () {
   var e = src("src/editor.js");
-  var m = e.match(/\/\* @f06-start \*\/([\s\S]*?)\/\* @f06-end \*\//);
+  // arch-P3b-07p: a fenced slice must follow its code -- the index moved to editor/palette.js.
+  var m = src("src/editor/palette.js").match(/\/\* @f06-start \*\/([\s\S]*?)\/\* @f06-end \*\//);
   if (!m) { ok("locate @f06 fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { entries: commandEntries, score: scoreCommand, rank: rankCommands," +
@@ -12415,6 +12431,8 @@ section("uio-F06 command index (Cmd-K)");
 // ---- uio-F06: the palette + the keyboard contract --------------------------------
 section("uio-F06 palette wiring + keyboard contract");
 (function () {
+  // arch-P3b-07p: the palette overlay moved to src/editor/palette.js.
+  var ep6 = src("src/editor/palette.js");
   var e = src("src/editor.js");
   ok("Cmd-K opens the one palette", /meta && \(e\.key === "k" \|\| e\.key === "K"\)[\s\S]{0,120}openQuickJump\(\)/.test(e));
   ok("Cmd-, opens Settings and Alt+Cmd-, opens the selection's settings",
@@ -12424,18 +12442,18 @@ section("uio-F06 palette wiring + keyboard contract");
   ok("and it lands on the inspector's first control, not its tab strip",
     /var body = document\.getElementById\("inspector"\);[\s\S]{0,200}body\.querySelector\('input:not\(\[type="hidden"\]\), select, button, \[tabindex="0"\]'\)/.test(e));
   ok("the palette draws from the one index, not its own page list",
-    /var entries = commandEntries\(commandSources\(__guideIndexCache\)\);/.test(e)
-    && /filtered = rankCommands\(entries, "", PALETTE_LIMIT\)/.test(e));
+    /var entries = commandEntries\(commandSources\(__guideIndexCache\)\);/.test(ep6)
+    && /filtered = rankCommands\(entries, "", PALETTE_LIMIT\)/.test(ep6));
   ok("the palette joins the layer stack instead of owning Escape",
-    /pushLayer\("palette", close\)/.test(e) && /popLayer\("palette"\)/.test(e)
+    /pushLayer\("palette", close\)/.test(ep6) && /popLayer\("palette"\)/.test(ep6)
     && !/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); close\(\); \}\s*\n\s*else if \(e\.key === "ArrowDown"\)/.test(e));
   ok("a result routes by kind, and a settings result opens its named section",
-    /function runCommandEntry\(entry\)[\s\S]{0,200}openSettingsSection\(entry\.ref\.tab, entry\.ref\.key\)/.test(e));
-  ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(e));
+    /function runCommandEntry\(entry\)[\s\S]{0,200}openSettingsSection\(entry\.ref\.tab, entry\.ref\.key\)/.test(ep6));
+  ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(ep6));
   ok("the guide index is fetched once and cached, and degrades to no guide results",
-    /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(e));
-  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(e));
-  ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(e));
+    /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(ep6));
+  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(ep6));
+  ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(ep6));
   // DS first, per the gate: the canonical set had no palette, so it was added there before it
   // was built here — and the spine settles that it is navigation, not a seventh presentation.
   var ds = src("design-system/components/overlays/CommandPalette.d.ts");
@@ -16355,8 +16373,12 @@ section("arch-P3-02 editor history");
     (code.match(/(?<![.\w])(?<!var )doc = /g) || []).length === 1 && /doc = next;/.test(owner));
   ok("setActiveDocObject is the only place the registry entry is replaced",
     (e.match(/registry\[activeDocId\] = /g) || []).length === 1);
+  // arch-P3b-07k: course DELETE moved to editor/home.js with the browser that offers it, so one of
+  // the four call sites went with it. Same claim, counted across both files.
+  var activateCalls = (e.match(/activateDoc\(/g) || []).length +
+                      (src("src/editor/home.js").match(/activateDoc\(/g) || []).length;
   ok("every tab switch, tab close and course delete goes through activateDoc",
-    (e.match(/activateDoc\(/g) || []).length === 4 && /function activateDoc\(id\)[\s\S]{0,700}History\.reset\(\);/.test(e));
+    activateCalls === 4 && /function activateDoc\(id\)[\s\S]{0,700}History\.reset\(\);/.test(e));
   ok("editor.js holds no undo/redo state of its own",
     e.indexOf("undoStack") === -1 && e.indexOf("redoStack") === -1);
 })();

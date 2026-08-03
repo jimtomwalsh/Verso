@@ -325,6 +325,12 @@
   <script src="src/editor/inspector/primitives.js"></script>
   <!-- arch-P3b-07t drag overlay: window.VersoDndUi — the insertion line, drop hit zones, column edge bands, resizers and swap handles. The other half of dnd.js: that one decides where a drop lands, this one shows it. OWNS the drag state (dragPayload / dragTargetZone) the outliner and Assets tab read. Must precede editor.js. -->
   <script src="src/editor/dnd-ui.js"></script>
+  <!-- arch-P3b-07p command palette: window.VersoPalette — the one Cmd-K index (settings, actions, guide headings, the document's own pages and blocks) and the overlay that ranks and runs it. Must precede editor.js. -->
+  <script src="src/editor/palette.js"></script>
+  <!-- arch-P3b-07d auto-backup: window.VersoBackup — the P0 data-safety writer that puts a durable, portable copy of the course in a real folder on every debounced autosave (File System Access in a browser, a native bridge in the desktop shell, a no-op where neither exists). Must precede editor.js. -->
+  <script src="src/editor/backup.js"></script>
+  <!-- arch-P3b-07k Home: window.VersoHome — the pre-document course browser, grouped by document geometry, with each card rendering its real first page behind an IntersectionObserver rather than showing a cached image. Must precede editor.js. -->
+  <script src="src/editor/home.js"></script>
   <!-- arch-P3-05 Product Rail facts: window.VersoProductRail — alignment, drift, where-used and outputs, the four facts every stage reads. DOM-free. Must precede editor.js. -->
   <script src="src/editor/product-rail.js"></script>
   <!-- arch-P3-06 tour board: window.VersoBoardLayout (node/loop geometry + the tidy plan) and window.VersoHarvest (the source-video segment math). Both pure. Must precede editor.js. -->
