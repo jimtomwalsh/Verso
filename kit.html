@@ -116,6 +116,8 @@
   <script src="src/editor/inspector/sections.js"></script>
   <!-- arch-P3b-07 colour: window.VersoColor — the hex/HSV maths, colourControl's anchored popover and the Panel System v2 colorField/colorFieldFlat. The kit page renders colour rows, so it loads here too. -->
   <script src="src/editor/color.js"></script>
+  <!-- arch-P3b-07b canonical control set: window.VersoInspectorPrimitives — the scrub/datalist plumbing, the binary + segmented controls, the five-rung scope ladder with its row anatomy, and the row/container primitives on top. OWNS the scope tally the section engine reads. Must precede editor.js. -->
+  <script src="src/editor/inspector/primitives.js"></script>
   <!-- arch-P3-05 Product Rail facts: window.VersoProductRail — alignment, drift, where-used and outputs, the four facts every stage reads. DOM-free. Must precede editor.js. -->
   <script src="src/editor/product-rail.js"></script>
   <!-- arch-P3-06 tour board: window.VersoBoardLayout (node/loop geometry + the tidy plan) and window.VersoHarvest (the source-video segment math). Both pure. Must precede editor.js. -->
