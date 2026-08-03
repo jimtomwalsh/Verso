@@ -6747,9 +6747,13 @@ section("inline links");
   var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var e = src("src/editor.js");
   var css = src("src/course.css");
-  ok("text inspector has a Link button using createLink", /var linkB = h\("button"[\s\S]*?execCommand\("createLink", false, url\)/.test(e));
-  ok("created anchor gets target=_blank + rel=noopener", /setAttribute\("target", "_blank"\); el\.setAttribute\("rel", "noopener noreferrer"\)/.test(e));
-  ok("empty URL removes the link (unlink)", /if \(!url\) \{ document\.execCommand\("unlink", false, null\)/.test(e));
+  // arch-P3b-07fmt: the Link button belongs to the shared format bar (editor/text-format.js), which the
+  // text inspector mounts. The claim was always about that bar; it only read against editor.js
+  // because the bar and the inspector sat in one file.
+  var FMT = src("src/editor/text-format.js");
+  ok("the shared format bar has a Link button using createLink", /var linkB = h\("button"[\s\S]*?execCommand\("createLink", false, url\)/.test(FMT));
+  ok("created anchor gets target=_blank + rel=noopener", /setAttribute\("target", "_blank"\); el\.setAttribute\("rel", "noopener noreferrer"\)/.test(FMT));
+  ok("empty URL removes the link (unlink)", /if \(!url\) \{ document\.execCommand\("unlink", false, null\)/.test(FMT));
   ok("link/BIU commits are sanitised so the drag-handle can't ride in", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\)/.test(PARTS));
   ok("theme-aware link style (accent + underline, excludes nav buttons)", /\.page a:not\(\.nav-button\):not\(\.course-nav__btn\) \{[\s\S]*?color: var\(--color-accent\);[\s\S]*?text-decoration: underline/.test(css));
 })();
@@ -7384,8 +7388,10 @@ section("richer bullet lists");
   // #170/#33: List is a single toggle BUTTON in the shared B/I/U/Link/List bar, whose
   // on-state reads block.type (not queryCommandState) and whose click CONVERTS the whole
   // block to/from the dedicated "list" type (was a switchEl, then an inline execCommand).
-  ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
-  ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
+  // arch-P3b-07fmt: the List button is one kind in the shared format bar (editor/text-format.js).
+  var FMT = src("src/editor/text-format.js");
+  ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(FMT) && !/switchRow\("List",/.test(FMT + e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(FMT + e));
+  ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(FMT));
   ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*var _typeBody = E\.inspector; E\.setInspector\(panelSection\(_typeBody, "List"\)\);[\s\S]*?customSelectRow\("Bullet style"/.test(src("src/editor/inspector/parts.js")));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
   // marker settings always show for it; the TYPE-conversion toggle only shows for a
@@ -7496,7 +7502,7 @@ section("list discoverability + spacing");
   // #170/#33: the List toggle folds into the shared inline-format bar as a whole
   // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
   // heads only the marker-settings section, shown when the field root is a list.
-  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(PARTS));
+  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(src("src/editor/text-format.js")) && /convertTextListBlockType\(obj\)/.test(PARTS));
   ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = E\.inspector; E\.setInspector\(panelSection\(_typeBody, "List"\)\);/.test(src("src/editor/inspector/parts.js")));
   ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(SOPS) && /block\.__priorTextType/.test(SOPS));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(PARTS));
@@ -9355,7 +9361,7 @@ section("panel system v2 — layout engine");
   ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(emd)
     && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(emd));
   ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(emd));
-  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(WORLD) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(LIB));
+  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(WORLD) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(src("src/editor/text-format.js")) && /confirmModal\("Remove component"/.test(LIB));
   // arch-P3b-07lib: the one survivor is the library import-merge, and it left with the library.
   // The claim is the same and stronger stated across both files: exactly one raw dialog, and
   // editor.js itself now has none.
@@ -13873,14 +13879,16 @@ section("chrome invariant: file picker + Read view are contained, not full-scree
 section("#170/#158 shared formatting toggle-bar");
 (function () {
   var e = src("src/editor.js");
-  var body = slice(e, "function buildFormatToggleBar(io)", "window.__buildFormatToggleBar = buildFormatToggleBar;");
+  // arch-P3b-07fmt: the toggle set, the shared bar and the canvas bar are editor/text-format.js now.
+  var FMT = src("src/editor/text-format.js");
+  var body = slice(FMT, "function buildFormatToggleBar(io)", "window.__buildFormatToggleBar = buildFormatToggleBar;");
   ok("buildFormatToggleBar found", body.indexOf("var bar = h(\"div\", \"prop-toggle-row\");") !== -1);
-  ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(e));
-  ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(e));
+  ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(FMT));
+  ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(FMT));
   ok("inline-exec toggle calls io.getNode()/document.execCommand/io.onChange (behaviour unchanged)", /var node = io\.getNode\(\); if \(!node\) return;\s*\n\s*node\.focus\(\);\s*\n\s*document\.execCommand\(t\.cmd, false, null\);\s*\n\s*io\.onChange\(\);/.test(body));
   ok("Link uses the SAME createLink\\/unlink + target=_blank mechanic as before", /document\.execCommand\("createLink", false, url\)[\s\S]{0,250}setAttribute\("target", "_blank"\)/.test(body));
   ok("bar.refresh() resyncs is-on state against the CURRENT selection (for a bar that persists across re-focus)", /bar\.refresh = function \(\) \{/.test(body));
-  ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(e));
+  ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(FMT));
 
   // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
   // arch-P3b-07parts: the field inspector is editor/inspector/parts.js now.
@@ -13897,10 +13905,10 @@ section("#170/#158 shared formatting toggle-bar");
   ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
   ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   // exactly one config-driven toggle list in the whole file (no second duplicate copy).
-  ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (e.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1);
+  ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (FMT.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1 && e.indexOf("var FORMAT_TOGGLES = [") === -1);
   // floating-format-bar-to-edit-canvas: an above-selection floating B/I/U bar on the Edit canvas,
   // reusing FORMAT_TOGGLES' inline-exec set (one config, two surfaces) + the field's own input->commit.
-  var fb = slice(e, "/* @canvas-fmtbar-start */", "/* @canvas-fmtbar-end */");
+  var fb = slice(FMT, "/* @canvas-fmtbar-start */", "/* @canvas-fmtbar-end */");
   ok("floating bar reuses the inline-exec FORMAT_TOGGLES (shared config, glyph icons)", /FORMAT_TOGGLES\.filter\(function \(t\) \{ return t\.kind === "inline-exec"; \}\)/.test(fb) && /FMTBAR_GLYPH = \{ bold: "bold", italic: "italic", underline: "underline" \}/.test(fb));
   ok("clicking runs execCommand (no separate write path -- fires the field's own input->writeModel)", /document\.execCommand\(t\.cmd, false, null\); syncCanvasFmtBarActive\(bar\)/.test(fb) && fb.indexOf("writeModel") === -1);
   ok("the bar binds ONLY to a live editable [data-edit] canvas field (never the Source [data-node] selbar)", /function canvasEditableFieldOf\(node\)[\s\S]{0,200}closest\("\[data-edit\]\.is-editable"\)[\s\S]{0,120}getAttribute\("contenteditable"\) === "true"/.test(fb));

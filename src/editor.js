@@ -5018,172 +5018,14 @@
   // ...continues in fonts.js (arch-P3b-07).
 
 
-  // #170/#158: ONE canonical, config-driven formatting toggle-bar builder, shared by the
-  // block inspector's field editor AND the Course Copy Editor -- replacing their two
-  // bespoke prop-toggle-row "biu" rows. Behaviour is unchanged (inline execCommand for
-  // B/I/U/Link, active state via queryCommandState/an anchor check); only the surfaces
-  // now share one implementation. `io` decouples the bar from which surface it's in:
-  //   io.getNode() -> the current contentEditable element to focus/act on (or null/undefined
-  //                   when nothing is active -- the bar simply no-ops on click)
-  //   io.onChange() -> called after a toggle mutates content; the caller owns persistence
-  //                    (inspector: obj[field] = sanitizeFieldHtml(...) + renderModelView();
-  //                    copy editor: commitCopyRow(...))
-  // Config-driven so a future kind (e.g. the List ticket's block-level toggle) is a new
-  // branch here, not a new bar -- today "inline-exec" (B/I/U), "link", and "list-block"
-  // (#170/#33: a whole block-TYPE conversion, not an inline execCommand list) exist.
-  var FORMAT_TOGGLES = [
-    { kind: "inline-exec", label: "B", cmd: "bold", title: "Bold (selected text)" },
-    { kind: "inline-exec", label: "I", cmd: "italic", title: "Italic (selected text)" },
-    { kind: "inline-exec", label: "U", cmd: "underline", title: "Underline (selected text)" },
-    { kind: "link" },
-    { kind: "list-block" }
-  ];
-  function formatCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-  function formatSelectionAnchor() {
-    var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
-    var c = sel.getRangeAt(0).commonAncestorContainer;
-    c = c.nodeType === 1 ? c : c.parentNode;
-    return (c && c.closest) ? c.closest("a[href]") : null;
-  }
-  // ---- Above-selection floating format bar on the Edit canvas (floating-format-bar-to-edit-canvas) ----
-  // The same above-the-selection glyph bar idiom the Source stage uses (buildSourceSelBar), brought to
-  // the main Edit canvas. It appears on a non-collapsed text selection inside an editable [data-edit]
-  // field with the inline format actions -- bold / italic / underline, the SAME inline-exec set as the
-  // inspector's FORMAT_TOGGLES (one config, two surfaces). Clicking runs execCommand, which fires the
-  // field's own input -> writeModel commit (identical to typing), so there is no separate write path.
-  // Editor chrome only; never in the shipped course. Positioned fixed above the selection.
-  /* @canvas-fmtbar-start */
-  var FMTBAR_GLYPH = { bold: "bold", italic: "italic", underline: "underline" };
-  var __canvasFmtBar = null;
-  // The editable canvas text field a DOM point sits in, or null (a live contentEditable [data-edit]).
-  function canvasEditableFieldOf(node) {
-    var el = (node && node.nodeType === 3) ? node.parentNode : node;
-    var f = (el && el.closest) ? el.closest("[data-edit].is-editable") : null;
-    return (f && f.getAttribute("contenteditable") === "true") ? f : null;
-  }
-  function hideCanvasFmtBar() { if (__canvasFmtBar) { __canvasFmtBar.remove(); __canvasFmtBar = null; } }
-  function syncCanvasFmtBarActive(bar) {
-    Array.prototype.forEach.call(bar.querySelectorAll("[data-cmd]"), function (b) {
-      var on = false; try { on = document.queryCommandState(b.getAttribute("data-cmd")); } catch (e) {}
-      b.classList.toggle("is-active", on);
-    });
-  }
-  function ensureCanvasFmtBar() {
-    if (__canvasFmtBar) return __canvasFmtBar;
-    var bar = h("div", "canvas-fmtbar"); bar.setAttribute("data-canvas-fmtbar", "1");
-    FORMAT_TOGGLES.filter(function (t) { return t.kind === "inline-exec"; }).forEach(function (t) {
-      var b = h("button", "canvas-fmtbar__btn"); b.type = "button"; b.title = t.title;
-      b.setAttribute("data-cmd", t.cmd);
-      var glyph = FMTBAR_GLYPH[t.cmd];
-      if (glyph && window.Icon) b.innerHTML = window.Icon(glyph); else b.textContent = t.label;
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
-      b.addEventListener("click", function () { document.execCommand(t.cmd, false, null); syncCanvasFmtBarActive(bar); });
-      bar.appendChild(b);
-    });
-    document.body.appendChild(bar);
-    __canvasFmtBar = bar; return bar;
-  }
-  // Shows/positions the bar for a text selection in a canvas field; hides it otherwise. The Source
-  // stage's own selbar owns [data-node] selections, so this only ever binds to [data-edit] fields --
-  // the two never collide.
-  function onCanvasSelectionChange() {
-    if (typeof document === "undefined") return;
-    var sel = window.getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed) { hideCanvasFmtBar(); return; }
-    var r = sel.getRangeAt(0);
-    if (!canvasEditableFieldOf(r.commonAncestorContainer)) { hideCanvasFmtBar(); return; }
-    var rect = r.getBoundingClientRect();
-    if (!rect || !rect.width) { hideCanvasFmtBar(); return; }
-    var bar = ensureCanvasFmtBar();
-    syncCanvasFmtBarActive(bar);
-    bar.style.left = (rect.left + rect.width / 2) + "px";
-    bar.style.top = rect.top + "px"; // a CSS transform centres + lifts it above the selection
-  }
-  /* @canvas-fmtbar-end */
-  function buildFormatToggleBar(io) {
-    var bar = h("div", "prop-toggle-row");
-    var execBtns = [];
-    var listBtn = null;
-    FORMAT_TOGGLES.forEach(function (t) {
-      if (t.kind === "inline-exec") {
-        var b = h("button", "prop-toggle" + (formatCmdOn(t.cmd) ? " is-on" : ""), t.label);
-        if (t.title) b.title = t.title;
-        b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's text selection
-        b.addEventListener("click", function () {
-          var node = io.getNode(); if (!node) return;
-          node.focus();
-          document.execCommand(t.cmd, false, null);
-          io.onChange();
-          b.classList.toggle("is-on", formatCmdOn(t.cmd));
-        });
-        bar.appendChild(b);
-        execBtns.push({ el: b, cmd: t.cmd });
-      } else if (t.kind === "link") {
-        // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
-        // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
-        // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
-        var linkB = h("button", "prop-toggle" + (formatSelectionAnchor() ? " is-on" : ""), "Link");
-        linkB.title = "Link the selected text to an external URL (opens in a new tab)";
-        linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-        linkB.addEventListener("click", function () {
-          var node = io.getNode(); if (!node) return;
-          var a = formatSelectionAnchor(), sel = window.getSelection();
-          if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
-          // Save the text selection — the modal steals focus, so restore the Range before execCommand.
-          var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
-          promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
-            var n2 = io.getNode(); if (!n2) return;
-            n2.focus();
-            if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
-            url = (url || "").trim();
-            if (!url) { document.execCommand("unlink", false, null); }
-            else {
-              document.execCommand("createLink", false, url);
-              Array.prototype.forEach.call(n2.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
-            }
-            io.onChange();
-          });
-        });
-        bar.appendChild(linkB);
-        var unlinkB = iconBtn("unlink", "Remove the link");
-        unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-        unlinkB.addEventListener("click", function () { var n3 = io.getNode(); if (!n3) return; n3.focus(); document.execCommand("unlink", false, null); io.onChange(); });
-        bar.appendChild(unlinkB);
-      } else if (t.kind === "list-block") {
-        // #170/#33: converts the WHOLE block to/from the dedicated "list" type (on-state
-        // reads block.type, not queryCommandState). Not every surface/field supports this
-        // (e.g. a quiz sub-field can't become a top-level list block), so the button is
-        // hidden -- not just disabled -- when io.isListToggleable() says no. A persisting
-        // bar (copy editor) re-derives visibility on every bar.refresh(), since which row
-        // is focused changes without the bar itself being rebuilt.
-        if (!io.isListToggleable || !io.isListBlock || !io.toggleListBlock) return;
-        var listB = h("button", "prop-toggle prop-toggle--icon");
-        listB.type = "button";
-        listB.title = "List — converts this block to/from a bulleted list";
-        listB.innerHTML = Icon("list");
-        listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-        listB.addEventListener("click", function () { io.toggleListBlock(); });
-        bar.appendChild(listB);
-        listBtn = listB;
-      }
-    });
-    // Resync every inline-exec button's active state against the CURRENT selection, plus
-    // the list-block toggle's visibility/state -- callers that persist across re-focus
-    // (the copy editor's format bar, built once) use this instead of rebuilding; a surface
-    // that rebuilds the bar every render still gets a correct initial state (called below).
-    bar.refresh = function () {
-      var active = !!io.getNode();
-      execBtns.forEach(function (o) { o.el.classList.toggle("is-on", active && formatCmdOn(o.cmd)); });
-      if (listBtn) {
-        var canList = !!(io.isListToggleable && io.isListToggleable());
-        listBtn.hidden = !canList;
-        if (canList) listBtn.classList.toggle("is-on", !!(io.isListBlock && io.isListBlock()));
-      }
-    };
-    bar.refresh();
-    return bar;
-  }
-  window.__buildFormatToggleBar = buildFormatToggleBar; // headless test hook
+  // arch-P3b-07fmt: inline text formatting -- the FORMAT_TOGGLES set, the shared toggle bar three
+  // panels mount, and the floating bar that follows a selection on the Edit canvas -- moved to
+  // editor/text-format.js. One model with two surfaces; splitting them would have left the config in
+  // one file and both its only consumers in another.
+  var buildFormatToggleBar = VE.bind("buildFormatToggleBar");
+  var onCanvasSelectionChange = VE.bind("onCanvasSelectionChange");
+  var hideCanvasFmtBar = VE.bind("hideCanvasFmtBar");
+
 
   // Panel System v2 (James 2026-07-08): the generalised custom listbox. Same shape as
   // buildFontPicker (a button + popup, exposes `.value` get/set, fires 'change' on pick)
@@ -7248,6 +7090,7 @@
   window.VersoTabs.install(VE);   // the open documents, and which one you are looking at
   window.VersoShell.install(VE);   // the frame around the work: stage, Product, cell
   window.VersoEditing.install(VE);   // what makes the canvas typeable
+  window.VersoTextFormat.install(VE);   // inline formatting: the toggle set and both bars that render it
   window.VersoActions.install(VE);   // what a learner's click does
   window.VersoInspectorBlocks.install(VE);   // which panel a selected block gets
   window.VersoInspectorParts.install(VE);   // the panels for a field and a component-grid instance

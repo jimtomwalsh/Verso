@@ -400,6 +400,8 @@
   <script src="src/editor/shell.js"></script>
   <!-- arch-P3b-07n editing: window.VersoEditing — what makes the canvas typeable: contentEditable on copy fields (selected first, editable second), drop targets, column resizers, the embed shield, and the collaboration edit lifecycle. Nothing it adds may leak into render(). Must precede editor.js. -->
   <script src="src/editor/editing.js"></script>
+  <!-- arch-P3b-07fmt: window.VersoTextFormat — inline text formatting: the FORMAT_TOGGLES set, the shared toggle bar the panels mount, and the floating format bar on the Edit canvas. Must precede editor.js. -->
+  <script src="src/editor/text-format.js"></script>
   <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->
   <script src="src/editor/actions.js"></script>
   <!-- arch-P3b-07x block panels: window.VersoInspectorBlocks — the block-type -> inspector table and the panels for the blocks whose settings are structural (quiz, accordion, sequence, card deck, card reveal, learner nav, embed). Must precede editor.js. -->
