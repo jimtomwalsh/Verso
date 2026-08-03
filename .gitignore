@@ -55,3 +55,9 @@ references/
 # Local review/comment exchange sidecars
 review-*.json
 verso-comments*.json
+
+# --- UI overhaul working material (specs, audits, prototypes) — local only ---
+_ui-overhaul/
+
+# --- Codebase design working material (survey + restructure report) — local only ---
+_codebase-design/

@@ -17,6 +17,12 @@
   "use strict";
 
   var SVGNS = "http://www.w3.org/2000/svg";
+  // uio-O-W1: one spelling of the modifier key, so every printed shortcut in the chrome
+  // (save-contract line, menu hints) reads the same on a Mac as on Windows/Linux.
+  var MOD_KEY = (function () {
+    try { return /Mac|iPhone|iPad/.test((navigator.platform || navigator.userAgent || "")) ? "⌘" : "Ctrl+"; }
+    catch (e) { return "⌘"; }
+  })();
   var GAP_X = 300, GAP_Y = 110, LABEL_H = 30;
   // JJJJ: per-page canvas position { x, y, col } (chapters = columns, pages stack
   // vertically). Filled by buildWorld (x/col) + layoutColumns (y). frameX/frameY
@@ -194,6 +200,21 @@
   };
   function libraryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserLibraryAdapter); }
 
+  // ---- Products storage adapter (Product Rail #1) — same seam/flag as the registry and
+  // library above. ProductsStore holds Product containers ({id,name,createdAt,groundTruthId})
+  // keyed by productId; a document only joins a Product when explicitly tagged via
+  // doc.meta.productId/stage (see docMatchesProductStage, @pure-recents fence) — untagged
+  // documents never touch this store and read/save through the registry exactly as today.
+  /* @products-adapter-start */
+  var PRODUCTS_STORAGE_KEY = "authoring.products";
+  var browserProductsAdapter = {
+    name: "browser",
+    readProducts: function () { return localStorage.getItem(PRODUCTS_STORAGE_KEY); },
+    writeProducts: function (json) { return writeStore(localStorage, PRODUCTS_STORAGE_KEY, json); }
+  };
+  /* @products-adapter-end */
+  function productsAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserProductsAdapter); }
+
   // ---- StorageBackend (platform-pivot 01/31 — EXPAND) -----------------------
   // The single, highest seam the whole platform pivot introduces. It unifies the
   // three storage choke points — the registry writer (saveRegistry), the low-level
@@ -293,6 +314,16 @@
     d.meta.lastOpenedAt = now;
     return d;
   }
+  // Product Rail: version/updatedAt stamp on a LibraryStore master, bumped on every
+  // content edit -- the primitive Deliver's staleness count and Ground Truth's change-
+  // tracking display both read, with no UI of its own. Promotion (the "Save to library"
+  // overwrite) is the ONLY content-mutation path today (#21: no in-place master editor
+  // yet), so that is the sole call site. A read never bumps it -- only this stamper does.
+  function stampMasterVersion(master, now) {
+    if (!master) return master;
+    master.updatedAt = now;
+    return master;
+  }
   function docUpdatedAt(d) {
     return (d && d.meta && typeof d.meta.updatedAt === "number") ? d.meta.updatedAt : -Infinity;
   }
@@ -333,7 +364,113 @@
     var yrs = Math.floor(days / 365);
     return yrs + (yrs === 1 ? " year ago" : " years ago");
   }
+  // Product Rail #1: doc.meta.productId/stage are optional tagging fields (next to
+  // code/title/updatedAt) — an untagged doc has neither and behaves exactly as today.
+  // A falsy filter value means "no constraint on that dimension" (matches everything,
+  // tagged or not); a truthy one requires an exact match, so an untagged doc never
+  // matches a specific Product/Stage filter.
+  function docMatchesProductStage(d, productId, stage) {
+    var meta = (d && d.meta) || {};
+    if (productId && meta.productId !== productId) return false;
+    if (stage && meta.stage !== stage) return false;
+    return true;
+  }
+  // Tags (or clears, when passed a falsy value) a document's Product/Stage. Writes
+  // ONLY doc.meta — never touches pages/blocks, so promotion is lossless by construction.
+  function tagDocProductStage(d, productId, stage) {
+    if (!d) return d;
+    if (!d.meta) d.meta = {};
+    if (productId) d.meta.productId = productId; else delete d.meta.productId;
+    if (stage) d.meta.stage = stage; else delete d.meta.stage;
+    return d;
+  }
   /* @pure-recents-end */
+
+  // SPEC 7 (Editor Window Rework): a document is a cell in a two-axis matrix, not a
+  // fixed profile. Layout geometry (doc.meta.geo) x interactivity (doc.meta.interactive)
+  // sit on the SAME meta object as productId/stage. These are PURE helpers (DOM-free) so
+  // tests/run.js exercises them headlessly; the UI tickets (creation flow, cell switcher,
+  // capability inspector, static fallback) all consume this one model. `stage` from
+  // SPEC 1 is subsumed -- geo is the authoritative geometry; the three former stages are
+  // now presets over {geo, interactive}. An untagged legacy doc resolves to
+  // {reflow, interactive:true} = today's behaviour, so NO migration is needed and every
+  // existing course opens byte-identical.
+  /* @pure-doctype-start */
+  var DOCTYPE_GEOS = ["reflow", "frame", "paged"];
+  // The five named starting cells. Authors can recombine (any geo x interactivity) after
+  // creation, so the preset list is a convenience for the create flow, not an enum lock.
+  var DOCTYPE_PRESETS = [
+    { key: "elearning",  name: "eLearning",         geo: "reflow", interactive: true  },
+    { key: "deck",       name: "Presentation",      geo: "frame",  interactive: true  },
+    { key: "onepager",   name: "1-pager",           geo: "paged",  interactive: false },
+    { key: "quickstart", name: "Quick-start guide", geo: "paged",  interactive: false },
+    { key: "webdoc",     name: "Responsive doc",    geo: "reflow", interactive: false }
+  ];
+  // Geometry-specific Document-context tools (right inspector, nothing selected).
+  var DOCTYPE_COND_TOOLS = {
+    paged:  ["Margins", "Running header / footer", "Page breaks", "Page numbers"],
+    frame:  ["Frame size / aspect", "Slide transitions", "Animation"],
+    reflow: ["Breakpoint preview"]
+  };
+  function isValidGeo(geo) { return DOCTYPE_GEOS.indexOf(geo) !== -1; }
+  // Resolve a doc's matrix cell. Untagged/legacy docs -> {reflow, interactive:true}. An
+  // out-of-range geo falls back to reflow; interactive is strict -- only an explicit
+  // `false` turns a doc static (so an absent/legacy value stays interactive).
+  function docCell(d) {
+    var meta = (d && d.meta) || {};
+    var geo = isValidGeo(meta.geo) ? meta.geo : "reflow";
+    var interactive = meta.interactive === false ? false : true;
+    return { geo: geo, interactive: interactive };
+  }
+  // Write a doc's cell onto doc.meta ONLY -- never touches pages/blocks, so a cell change
+  // is lossless by construction. A falsy/invalid geo clears geo back to the reflow
+  // default; a non-boolean interactive clears it back to the interactive default.
+  function tagDocCell(d, geo, interactive) {
+    if (!d) return d;
+    if (!d.meta) d.meta = {};
+    if (isValidGeo(geo)) d.meta.geo = geo; else delete d.meta.geo;
+    if (interactive === true || interactive === false) d.meta.interactive = interactive;
+    else delete d.meta.interactive;
+    return d;
+  }
+  // preset key -> {geo, interactive}. Unknown key -> null (caller falls back to default).
+  function presetToCell(presetKey) {
+    for (var i = 0; i < DOCTYPE_PRESETS.length; i++) {
+      if (DOCTYPE_PRESETS[i].key === presetKey) {
+        return { geo: DOCTYPE_PRESETS[i].geo, interactive: DOCTYPE_PRESETS[i].interactive };
+      }
+    }
+    return null;
+  }
+  // {geo, interactive} -> the preset key that names that cell, or null when the cell is a
+  // recombination no preset covers (the matrix allows cells outside the five presets).
+  function cellToPreset(geo, interactive) {
+    for (var i = 0; i < DOCTYPE_PRESETS.length; i++) {
+      if (DOCTYPE_PRESETS[i].geo === geo && DOCTYPE_PRESETS[i].interactive === interactive) {
+        return DOCTYPE_PRESETS[i].key;
+      }
+    }
+    return null;
+  }
+  // Geometry tool list for the Document-context inspector. Unknown geo -> the reflow set
+  // (matches the default geo).
+  function condToolsFor(geo) {
+    return (DOCTYPE_COND_TOOLS[geo] || DOCTYPE_COND_TOOLS.reflow).slice();
+  }
+  // SPEC 7 static fallback: block types that mount runtime.js for learner interactivity. In a
+  // STATIC cell (doc.meta.interactive === false) these are hidden from the Blocks library so a
+  // static document can't gain new interactive content. Existing ones are NEVER dropped -- they
+  // simply render their static output (the authoring canvas already renders without the learner
+  // runtime; the degrade is only visible in Demo/export, a follow-up), and toggling back to
+  // interactive restores them, so the toggle is lossless.
+  var INTERACTIVE_BLOCK_TYPES = {
+    quiz: 1, hotspot: 1, checkbox: 1, navButton: 1,
+    accordion: 1, cardReveal: 1, sequence: 1, cardDeck: 1, htmlEmbed: 1, webEmbed: 1
+  };
+  function isInteractiveBlockType(t) { return !!INTERACTIVE_BLOCK_TYPES[t]; }
+  // A palette item is offered when the cell is interactive, OR the item is not an interactive type.
+  function paletteAllowsType(type, interactive) { return interactive !== false || !isInteractiveBlockType(type); }
+  /* @pure-doctype-end */
 
   var saveStateEl = null;
   var saveFailed = false;
@@ -559,38 +696,104 @@
     _storageDotEl.title = (state === "fail" ? "Storage nearly full or a save failed"
       : state === "warn" ? "Storage getting full" : "Storage healthy") + " — click for details";
   }
-  function openStoragePopover(anchor) {
-    var open = document.getElementById("storage-pop");
-    if (open) { open.remove(); return; } // toggle off
-    var pop = h("div", "storage-pop"); pop.id = "storage-pop";
-    pop.appendChild(h("div", "storage-pop__title", "Storage"));
-    function row(label, val, cls) {
-      var r = h("div", "storage-pop__row");
-      r.appendChild(h("span", "storage-pop__label", label));
-      r.appendChild(h("span", "storage-pop__val" + (cls ? " " + cls : ""), val));
-      pop.appendChild(r);
-    }
-    var backend = storageBackend();
-    row("Location", backend === "file" ? "Local file" : "This browser");
-    row("Used", _storageRatio != null ? Math.round(_storageRatio * 100) + "%" : "n/a");
-    var weight = (typeof window.estimateCourseBytes === "function") ? _fmtBytes(window.estimateCourseBytes(doc)) : "-";
-    row("Course weight", weight);
-    if (saveFailed) pop.appendChild(h("div", "storage-pop__note storage-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
-    else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "storage-pop__note", adv.msg)); }
+  // The ONE anchored chrome popover -- the UI spine's Popover surface (anchored to its trigger, a
+  // few rows of fact, light-dismiss). The storage dot's details and the Publish variant roll-up
+  // (uio-P-C08) both open THROUGH this; a second floating-div implementation anywhere in the chrome
+  // is exactly the per-corner divergence this helper exists to prevent. Opening from the anchor
+  // that already owns the open popover closes it (toggle); Esc closes it as the topmost layer.
+  var _chromePopEl = null, _chromePopAnchor = null;
+  function closeChromePop() {
+    if (!_chromePopEl) return;
+    if (_chromePopEl.parentNode) _chromePopEl.parentNode.removeChild(_chromePopEl);
+    _chromePopEl = null; _chromePopAnchor = null;
+    document.removeEventListener("mousedown", _chromePopOutside, true);
+    // uio-F05: Escape is the layer stack's, not this popover's. Popping restores focus to the
+    // anchor, so dismissing a popover leaves the keyboard where it started.
+    popLayer("chrome-pop");
+  }
+  function _chromePopOutside(e) {
+    if (_chromePopEl && !_chromePopEl.contains(e.target) && !(_chromePopAnchor && _chromePopAnchor.contains(e.target)) && e.target !== _chromePopAnchor) closeChromePop();
+  }
+  // uio-F05: the ONE escalation control. A narrow surface (popover, menu) states the few things
+  // it can hold, then routes into the sheet on a named section — never "go and look in Settings".
+  // { label, tab, section }. Used by openChromePop(opts.escalate) and by the context menu.
+  function escalateLink(spec) {
+    var a = h("button", "chrome-pop__escalate", spec.label || "All settings");
+    a.type = "button";
+    a.title = "Open the settings sheet" + (spec.label ? "" : "") ;
+    a.addEventListener("click", function () {
+      closeChromePop();
+      openSettingsSection(spec.tab || "project", spec.section || null);
+    });
+    return a;
+  }
+  function openChromePop(anchor, build, opts) {
+    if (_chromePopAnchor === anchor) { closeChromePop(); return null; } // toggle off
+    closeChromePop();
+    var pop = h("div", "chrome-pop" + (opts && opts.cls ? " " + opts.cls : ""));
+    build(pop);
+    // uio-F05: a popover holds a few rows and then has to hand over. The spine requires every
+    // narrow surface to carry a VISIBLE route into the sheet, so the author is never stuck in a
+    // dead end guessing where the rest of the settings live.
+    if (opts && opts.escalate) pop.appendChild(escalateLink(opts.escalate));
+    document.body.appendChild(pop);
     var r = anchor.getBoundingClientRect();
     pop.style.top = (r.bottom + 6) + "px";
-    pop.style.right = Math.max(8, window.innerWidth - r.right) + "px";
-    document.body.appendChild(pop);
+    if (opts && opts.align === "right") pop.style.right = Math.max(8, window.innerWidth - r.right) + "px";
+    else pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - (pop.offsetWidth || 220) - 8)) + "px";
+    // no room below the anchor: open above it instead of running off screen
+    var ph = pop.offsetHeight || 0;
+    if (r.bottom + 6 + ph > window.innerHeight - 8) pop.style.top = Math.max(8, r.top - 6 - ph) + "px";
+    _chromePopEl = pop; _chromePopAnchor = anchor;
+    pushLayer("chrome-pop", closeChromePop);
     setTimeout(function () {
-      function onDoc(e) { if (!pop.contains(e.target) && e.target !== anchor) { pop.remove(); document.removeEventListener("mousedown", onDoc); } }
-      document.addEventListener("mousedown", onDoc);
+      document.addEventListener("mousedown", _chromePopOutside, true);
     }, 0);
+    return pop;
+  }
+  function openStoragePopover(anchor) {
+    openChromePop(anchor, function (pop) {
+      pop.appendChild(h("div", "chrome-pop__title", "Storage"));
+      function row(label, val, cls) {
+        var r = h("div", "chrome-pop__row");
+        r.appendChild(h("span", "chrome-pop__label", label));
+        r.appendChild(h("span", "chrome-pop__val" + (cls ? " " + cls : ""), val));
+        pop.appendChild(r);
+      }
+      var backend = storageBackend();
+      row("Location", backend === "file" ? "Local file" : "This browser");
+      row("Used", _storageRatio != null ? Math.round(_storageRatio * 100) + "%" : "n/a");
+      var weight = (typeof window.estimateCourseBytes === "function") ? _fmtBytes(window.estimateCourseBytes(doc)) : "-";
+      row("Course weight", weight);
+      // uio-F04: share of this document's prose linked to approved source, phrased by the shared
+      // resolver so it matches the Publish row and the Source top bar word for word.
+      var stFacts = f04DocFacts(activeDocId);
+      if (stFacts) row("Source alignment", stFacts.alignment.label);
+      if (saveFailed) pop.appendChild(h("div", "chrome-pop__note chrome-pop__note--fail", "A save failed - export JSON from the red bar to avoid losing work."));
+      else { var adv = (typeof window.storageAdvisory === "function") ? window.storageAdvisory() : null; if (adv && adv.msg) pop.appendChild(h("div", "chrome-pop__note", adv.msg)); }
+    }, { align: "right", escalate: { label: "Backup settings", tab: "project", section: "backup" } });
   }
   function mountStorageDot() {
     var dot = document.getElementById("storage-dot"); if (!dot) return;
     if (!dot.__wired) { dot.__wired = true; dot.addEventListener("click", function () { openStoragePopover(dot); }); }
     probeStorageQuota();
     refreshStorageDot();
+  }
+  // Environment cue (2026-07-26): the staging Pages deploy serves at .../staging/ (see
+  // .github/workflows/deploy.yml) -- flag it so a staging session is never mistaken for
+  // production. Matches ONLY that exact deployed path (not a local folder that merely
+  // happens to have "staging" somewhere in it, and never a file:// local open). Editor
+  // chrome only -- editor.js never ships in the SCORM export, so a learner never sees this.
+  function mountStagingBanner() {
+    try {
+      if (location.protocol.indexOf("http") !== 0) return;
+      if (!/\/staging\/(index\.html)?$/.test(location.pathname)) return;
+    } catch (e) { return; }
+    var b = document.createElement("div");
+    b.id = "staging-banner";
+    b.textContent = "STAGING";
+    b.title = "Pre-release test build — not production";
+    document.body.appendChild(b);
   }
   function flushSave() {
     if (savesSuppressed()) return;
@@ -766,6 +969,11 @@
 
   function normalizeDoc(d) {
     if (!d || typeof d !== "object") return d;
+    // A stray null/malformed entry in d.pages (seen from a live-session page-array bug)
+    // crashes every walker below it (and everywhere else the doc is read) the moment it's
+    // hit -- strip it before any of those walkers run, so a doc that got corrupted mid-
+    // session self-heals on next load instead of crashing on it.
+    if (Array.isArray(d.pages)) d.pages = d.pages.filter(function (p) { return p && typeof p === "object"; });
     var v = d.schemaVersion || 0;
     // v0 -> v1: course header/footer field renamed chrome -> headerFooter.
     if (v < 1 && d.chrome && !d.headerFooter) { d.headerFooter = d.chrome; delete d.chrome; }
@@ -1056,6 +1264,32 @@
   window.__pageDisplayName = pageDisplayName; // headless test hooks
   window.__firstCopyOf = firstCopyOf;
   window.__setPageTitle = setPageTitle;
+  // uio-E-C07 (EDIT-12): split naming. The old behaviour appended " (cont.)" on every split, so a
+  // twice-split page read "Base (cont.) (cont.)" and clipped its tail. Instead a split family reads
+  // "Base · K of M". stripSplitSuffix reduces any name to its clean base (removing a trailing
+  // " · N of M" or one-or-more " (cont.)"), and renumberSplitFamily renumbers the contiguous
+  // same-chapter run that shares a base. Both are PURE (mutate only the passed doc) -> regression-guarded.
+  function stripSplitSuffix(name) {
+    var s = String(name == null ? "" : name).trim(), prev;
+    // Peel any trailing " · N of M" or " (cont.)" — repeatedly, in any order — until stable.
+    do { prev = s; s = s.replace(/\s*·\s*\d+\s+of\s+\d+\s*$/i, "").replace(/\s*\(cont\.?\)\s*$/i, "").trim(); } while (s !== prev);
+    return s || "Page";
+  }
+  function renumberSplitFamily(doc, pageId) {
+    var pages = (doc && doc.pages) || [];
+    var idx = -1;
+    for (var i = 0; i < pages.length; i++) { if (pages[i] && pages[i].id === pageId) { idx = i; break; } }
+    if (idx < 0) return;
+    var base = stripSplitSuffix(pages[idx].name), ch = pages[idx].chapterId;
+    var lo = idx, hi = idx;
+    while (lo - 1 >= 0 && pages[lo - 1] && pages[lo - 1].chapterId === ch && stripSplitSuffix(pages[lo - 1].name) === base) lo--;
+    while (hi + 1 < pages.length && pages[hi + 1] && pages[hi + 1].chapterId === ch && stripSplitSuffix(pages[hi + 1].name) === base) hi++;
+    var M = hi - lo + 1;
+    if (M < 2) { pages[idx].name = base; return; } // a lone page just gets the clean base back
+    for (var k = lo; k <= hi; k++) pages[k].name = base + " · " + (k - lo + 1) + " of " + M;
+  }
+  window.__stripSplitSuffix = stripSplitSuffix;
+  window.__renumberSplitFamily = renumberSplitFamily;
   // <<< P2 auto page-naming helpers
 
   var registry = getRegistry();
@@ -1102,16 +1336,1690 @@
   // context), so the shipped SCORM is self-contained. Storage routes through
   // libraryAdapter() (#18) -- localStorage on the 'browser' backend, the per-user file
   // store on 'file' -- the same seam/flag the doc registry uses.
+  // Neutral demo master (ships with the tool, mirrors SAMPLE_DOC's role): a single
+  // reusable component carrying one named facet ("pro"), so the shipped demo course's
+  // Products & Variants chapter (model.js) has a real shared component to point its
+  // libraryInstance placements at on a fresh install. Only used to seed an EMPTY store —
+  // never overwrites real authored components.
+  function seedDemoLibrary(lib) {
+    lib.components["comp-demo-feature"] = {
+      name: "Feature Highlight",
+      productId: "prod-demo",
+      template: {
+        id: "lib-demo-root", type: "frame", padding: 24, radius: 12, border: true,
+        children: [
+          { id: "lib-demo-h", type: "subheading", text: "Standard" },
+          { id: "lib-demo-p", type: "paragraph", text: "The Standard tier covers the core feature set." }
+        ]
+      },
+      facets: {
+        pro: {
+          name: "Pro",
+          template: {
+            id: "lib-demo-root-pro", type: "frame", padding: 24, radius: 12, border: true,
+            children: [
+              { id: "lib-demo-h-pro", type: "subheading", text: "Pro" },
+              { id: "lib-demo-p-pro", type: "paragraph", text: "The Pro tier adds advanced options on top of the Standard feature set." }
+            ]
+          }
+        }
+      }
+    };
+  }
   function loadLibrary() {
     var lib = { components: {} };
     try { var raw = libraryAdapter().readLibrary(); if (raw) { var p = JSON.parse(raw); if (p && p.components) lib = p; } } catch (e) {}
     if (!lib.components) lib.components = {};
+    if (!Object.keys(lib.components).length) seedDemoLibrary(lib);
     return lib;
   }
   window.LibraryStore = loadLibrary();
   function saveLibrary() { try { libraryAdapter().writeLibrary(JSON.stringify(window.LibraryStore)); } catch (e) {} }
   function libComponents() { return (window.LibraryStore && window.LibraryStore.components) || {}; }
+
+  // Product Rail #1 — ProductsStore: { [productId]: {id, name, createdAt, groundTruthId} }.
+  // Same load/save shape as the library above, through productsAdapter()'s adapter seam.
+  // A fresh (empty) store seeds the same neutral demo Product SAMPLE_DOC tags itself to
+  // (meta.productId), so "Products & Variants" (model.js) is a real Product Rail example
+  // out of the box — never overwrites a real, already-persisted store.
+  function loadProducts() {
+    var prods = {};
+    try { var raw = productsAdapter().readProducts(); if (raw) { var p = JSON.parse(raw); if (p && typeof p === "object") prods = p; } } catch (e) {}
+    if (!Object.keys(prods).length) prods = { "prod-demo": { id: "prod-demo", name: "Sample Product Line", createdAt: 0 } };
+    return prods;
+  }
+  window.ProductsStore = loadProducts();
+  function saveProducts() { try { productsAdapter().writeProducts(JSON.stringify(window.ProductsStore)); } catch (e) {} }
+
+  // ---- Publish queue (Product Rail Epic 6, T1) — the persistent Publish-stage queue -----------
+  // A single app-global queue (PublishQueue model, src/publish-queue.js), persisted through the
+  // durable key/value writer (writeStore) so it survives refresh + stage-switches. Lazily loaded
+  // on first use; every mutation calls savePublishQueue().
+  var PUBLISH_QUEUE_KEY = "authoring.publishQueue";
+  var __publishQueue = null;
+  function loadPublishQueue() {
+    var PQ = window.PublishQueue; if (!PQ) return null;
+    try { var raw = localStorage.getItem(PUBLISH_QUEUE_KEY); if (raw) return PQ.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return PQ.create();
+  }
+  function publishQueue() { if (!__publishQueue) __publishQueue = loadPublishQueue(); return __publishQueue; }
+  function savePublishQueue() {
+    var PQ = window.PublishQueue; if (!PQ || !__publishQueue) return;
+    try { writeStore(localStorage, PUBLISH_QUEUE_KEY, JSON.stringify(PQ.toJSON(__publishQueue))); } catch (e) {}
+  }
+
+  // ---- Publish save paths (Product Rail Epic 6, T3) — where each package lands + its version ------
+  // The PublishPaths model (src/publish-paths.js) holds only labels + the version ledger, so it rides
+  // the same durable key/value seam as the queue. The File System Access directory HANDLES can't be
+  // serialised, so each one lives in the existing keyed-handle IndexedDB store under the key the model
+  // computes — one handle per Product root, one per per-output override.
+  var PUBLISH_PATHS_KEY = "authoring.publishPaths";
+  var __publishPaths = null;
+  var __publishDirHandles = {}; // handleKey -> handle|null, so a run doesn't re-read IndexedDB per output
+  function loadPublishPaths() {
+    var PA = window.PublishPaths; if (!PA) return null;
+    try { var raw = localStorage.getItem(PUBLISH_PATHS_KEY); if (raw) return PA.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return PA.create();
+  }
+  function publishPaths() { if (!__publishPaths) __publishPaths = loadPublishPaths(); return __publishPaths; }
+  function savePublishPaths() {
+    var PA = window.PublishPaths; if (!PA || !__publishPaths) return;
+    try { writeStore(localStorage, PUBLISH_PATHS_KEY, JSON.stringify(PA.toJSON(__publishPaths))); } catch (e) {}
+  }
+  // The persisted handle for a resolved destination: memory first, then IndexedDB (saveBackupHandle /
+  // loadBackupHandle, the same store the backup + review folders already use). A handle whose
+  // permission has lapsed and can't be re-granted resolves to null, and the caller downloads instead —
+  // a publish never fails because a folder went away.
+  function publishDirHandle(handleKey) {
+    if (!handleKey) return Promise.resolve(null);
+    if (Object.prototype.hasOwnProperty.call(__publishDirHandles, handleKey)) return Promise.resolve(__publishDirHandles[handleKey]);
+    return Promise.resolve(loadBackupHandle(handleKey)).then(function (h) {
+      if (!h) { __publishDirHandles[handleKey] = null; return null; }
+      return Promise.resolve(dirPermission(h, false)).then(function (perm) {
+        __publishDirHandles[handleKey] = perm === "granted" ? h : null;
+        return __publishDirHandles[handleKey];
+      });
+    }).catch(function () { __publishDirHandles[handleKey] = null; return null; });
+  }
+  // Pick a folder and remember it. Returns the handle's folder name (the label the model stores) or
+  // null if the browser can't pick or the author cancelled.
+  function pickPublishDir(handleKey) {
+    if (!window.showDirectoryPicker) return Promise.resolve(null);
+    return Promise.resolve(window.showDirectoryPicker({ mode: "readwrite" })).then(function (h) {
+      __publishDirHandles[handleKey] = h;
+      return Promise.resolve(saveBackupHandle(handleKey, h)).then(function () { return h.name || "folder"; });
+    }).catch(function () { return null; });
+  }
+  function forgetPublishDir(handleKey) { delete __publishDirHandles[handleKey]; saveBackupHandle(handleKey, null); }
+  // Walk (creating as needed) the `Product/<doc-variant>/` nesting an inherited root writes into.
+  function publishEnsureDir(root, segments) {
+    return (segments || []).reduce(function (chain, seg) {
+      return chain.then(function (dir) { return dir.getDirectoryHandle(seg, { create: true }); });
+    }, Promise.resolve(root));
+  }
+  // What one output of one row resolves against. The Product is the document's own, falling back to
+  // the active one, so a row publishes into the tree it belongs to rather than the one on screen.
+  function publishPathCtx(row, variant) {
+    var d = registry[row.docId] || {}, meta = d.meta || {};
+    var pid = meta.productId || getActiveProduct() || "";
+    var prod = pid && window.ProductsStore && window.ProductsStore[pid];
+    return { productId: pid, productName: (prod && prod.name) || "", docId: row.docId,
+             docCode: meta.code || row.docId, variant: variant || null };
+  }
+  function publishResolveDest(row, variant) {
+    var PA = window.PublishPaths; if (!PA) return null;
+    return PA.resolve(publishPaths(), publishPathCtx(row, variant));
+  }
+  // Every package this row produces, flagship first. It reads f04OutputsFact — the SAME fact the
+  // row's outputs chip states — so the count promised and the packages that land cannot disagree.
+  // A preset that pins one variant narrows the row to that single output.
+  function publishRowOutputs(row) {
+    var SX = window.SCORMExport, PP = window.PublishPresets;
+    var pinned = (SX && PP) ? PP.optionsFor(publishPresets(), (row && row.preset) || "master").variant : null;
+    if (pinned) return [String(pinned)];
+    var d = registry[row && row.docId];
+    var fact = f04OutputsFact(d && d.variants);
+    return fact.variants.length ? [null].concat(fact.variants) : [null];
+  }
+
+  // ---- Release history (Product Rail Epic 6) — the append-only whole-family export log --------------
+  // Every completed Publish run appends ONE immutable release record (ReleaseHistory model) capturing
+  // what was published together. Persisted through the same k/v seam as the queue; append-only.
+  var RELEASE_HISTORY_KEY = "authoring.releaseHistory";
+  var __releaseHistory = null;
+  function loadReleaseHistory() {
+    var RH = window.ReleaseHistory; if (!RH) return null;
+    try { var raw = localStorage.getItem(RELEASE_HISTORY_KEY); if (raw) return RH.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return RH.create();
+  }
+  function releaseHistory() { if (!__releaseHistory) __releaseHistory = loadReleaseHistory(); return __releaseHistory; }
+  function saveReleaseHistory() {
+    var RH = window.ReleaseHistory; if (!RH || !__releaseHistory) return;
+    try { writeStore(localStorage, RELEASE_HISTORY_KEY, JSON.stringify(RH.toJSON(__releaseHistory))); } catch (e) {}
+  }
+  // One release entry for a document published in a run: its identity + the export options it went out
+  // with + the source-version stamps it was built against (auditable against later Ground-Truth drift).
+  // uio-P-C03 (PUB-10): the record also captures the PRESET it went out under, WHERE it was
+  // delivered, and whether it succeeded -- the three things a history row has to state and which
+  // nothing else stores. `result` is the delivery outcome (null on a row that never delivered).
+  // T3: one entry per OUTPUT, not per row — a document with variants ships several packages, each
+  // with its own variant, version and destination, and a record that collapsed them into one row
+  // would misreport what actually went out.
+  function releaseEntryForRow(row, result, variant) {
+    var d = registry[row.docId] || {}, meta = d.meta || {};
+    var opts = publishOptionsForRow(row, variant);
+    var PP = window.PublishPresets;
+    var gtv = {}; docLinkedMasterIds(d).forEach(function (id) { gtv[id] = currentMasterVersions()[id]; });
+    var failed = !result || result.to === "error";
+    return {
+      docId: row.docId,
+      code: meta.code || "",
+      stage: meta.stage || "",
+      title: row.title || meta.title || row.docId,
+      exportFormat: opts.format || "",
+      variant: opts.variant || "",
+      version: opts.version || "",
+      preset: PP ? PP.presetName(publishPresets(), row.preset || "master") : "",
+      destination: failed ? "" : (result.to === "download" ? "Downloads" : (result.path || result.to || "")),
+      status: failed ? "error" : "done",
+      groundTruthVersions: gtv
+    };
+  }
+
+  // ---- Publish presets (Product Rail Epic 6, T2) — app-global output presets -------------------
+  // Named export-option bundles (PublishPresets model). App-global, persisted through the same k/v
+  // seam; each queue row references a preset by id, resolved to real options at Publish time.
+  var PUBLISH_PRESETS_KEY = "authoring.publishPresets";
+  var __publishPresets = null;
+  function loadPublishPresets() {
+    var PP = window.PublishPresets; if (!PP) return null;
+    try { var raw = localStorage.getItem(PUBLISH_PRESETS_KEY); if (raw) return PP.fromJSON(JSON.parse(raw)); } catch (e) {}
+    return PP.create();
+  }
+  function publishPresets() { if (!__publishPresets) __publishPresets = loadPublishPresets(); return __publishPresets; }
+  function savePublishPresets() {
+    var PP = window.PublishPresets; if (!PP || !__publishPresets) return;
+    try { writeStore(localStorage, PUBLISH_PRESETS_KEY, JSON.stringify(PP.toJSON(__publishPresets))); } catch (e) {}
+  }
+  // Resolve a row's preset id to real export options: the exporter defaults with the preset's
+  // overrides applied on top (T2). Falls back to plain defaults if presets aren't available.
+  // T3 added the second argument: a row is several OUTPUTS (flagship + each variant), and each one is
+  // named and versioned in its own right. Passing the variant explicitly keeps one function answering
+  // "what options build this package" for the preview on the row and for the run that writes it.
+  function publishOptionsForRow(row, variant) {
+    var SX = window.SCORMExport, PP = window.PublishPresets, PA = window.PublishPaths;
+    var base = (SX && SX.defaultOptions) ? SX.defaultOptions() : {};
+    if (!PP || !row) return base;
+    var out = Object.assign(base, PP.optionsFor(publishPresets(), row.preset || "master"));
+    if (variant !== undefined) out.variant = variant || null;
+    // uio-P-C07 (PUB-05): name the package for THIS row's document, not for whichever document
+    // happens to be open. The publish run hands these same options to buildPackage, so the
+    // filename shown on the row is the filename that lands.
+    var d = registry[row.docId], code = d && d.meta && d.meta.code;
+    if (code) out.code = code;
+    // T3: the version is the ledger's, not defaultOptions()' frozen "V001". Per doc+variant, so a
+    // variant steps independently of its flagship; "replace current version" reuses the last one.
+    if (PA) out.version = PA.nextVersion(publishPaths(), PA.pathKey(row.docId, out.variant),
+      { replace: !!row.replaceVersion, suggest: SX && SX.suggestVersion });
+    return out;
+  }
+  // uio-P-C07 (PUB-05): a queue row used to say nothing about where its package goes or what it is
+  // called — the first mention of either was "Done · <name>" after the run, which is too late to be
+  // a decision. Every row now states its destination and, before you press Publish, the exact
+  // filename it will write. T3 turned that statement into a real destination: a Product root folder
+  // set once and inherited, a per-output override, or the download fallback (PublishPaths.resolve).
+  /* @publish-dest-start */
+  // A row is several outputs, so the collapsed chip has to speak for all of them. Three cases, in
+  // order of how much it can honestly say:
+  //   · every output lands on the same path -> state that path;
+  //   · they share the folder the author PICKED but nest differently under it (an inherited root
+  //     gives each variant its own subfolder) -> state the shared part and end it in an ellipsis,
+  //     which is true of all of them rather than true of one and implied of the rest;
+  //   · they came from different picked folders -> "Mixed", and the popover has the detail.
+  // The shared part is cut at a folder boundary, so the chip never states half a folder name.
+  function publishRowDestSummary(dests) {
+    var list = (dests || []).filter(Boolean);
+    if (!list.length) return null;
+    var first = list[0];
+    if (list.every(function (dd) { return dd.chip === first.chip; })) {
+      return { label: first.kind === "download" ? first.label : first.chip, kind: first.kind, mixed: false, why: first.hint };
+    }
+    if (list.every(function (dd) { return dd.handleKey === first.handleKey; })) {
+      var shared = list.reduce(function (acc, dd) { return commonPrefix(acc, dd.chip); }, first.chip);
+      var cut = shared.lastIndexOf("/");
+      return { label: (cut > -1 ? shared.slice(0, cut + 1) : shared) + "…", kind: first.kind, mixed: false,
+               why: first.hint + " Each output gets its own subfolder." };
+    }
+    return { label: "Mixed", kind: "mixed", mixed: true,
+             why: "These outputs publish to different folders. Open to see each one." };
+  }
+  function commonPrefix(a, b) {
+    var i = 0, n = Math.min(a.length, b.length);
+    while (i < n && a.charAt(i) === b.charAt(i)) i++;
+    return a.slice(0, i);
+  }
+  // Which Product the head's folder chip is setting. The rail's scope when one is chosen; otherwise
+  // the Product the queued rows agree on, and failing that the open document's. A queue spanning
+  // several Products has no single root to state, so it resolves to null and the chip says so rather
+  // than naming one Product's folder and quietly writing it to another's.
+  function publishRootScope() {
+    var active = getActiveProduct(); if (active) return active;
+    var PQ = window.PublishQueue, seen = {};
+    if (PQ) (publishQueue().rows || []).forEach(function (r) {
+      var d = registry[r.docId], p = d && d.meta && d.meta.productId;
+      if (p) seen[p] = 1;
+    });
+    var keys = Object.keys(seen);
+    if (keys.length === 1) return keys[0];
+    if (keys.length > 1) return null;
+    var od = registry[activeDocId];
+    return (od && od.meta && od.meta.productId) || "";
+  }
+  // What the row promises to write. The name is asked of the exporter's OWN naming function (passed
+  // in) instead of being rebuilt here, so the promise on the row and the file that lands can never
+  // drift apart. No exporter, or a namer that throws, yields "" — the row states nothing rather
+  // than guessing at a filename.
+  function publishRowFilename(nameFn, opts) {
+    if (typeof nameFn !== "function" || !opts) return "";
+    try { return String(nameFn(opts) || ""); } catch (e) { return ""; }
+  }
+  // The filename is a promise about a run that hasn't happened, so it is shown only while the run is
+  // still ahead. Once a row is done or failed its status carries the real outcome, and repeating the
+  // prediction beside it would be noise at best and a contradiction at worst.
+  function publishShowsFilename(row) {
+    var s = row && row.status;
+    return s === "pending" || s === "running";
+  }
+  /* @publish-dest-end */
+  // uio-P-C08 (PUB-15, Conservative): one Edit document with variants is several packages -- "the
+  // real unit of publishing" -- and a Publish row said so only in a static badge. The roll-up below
+  // turns the F04 outputs fact into the chip + popover model. It INVENTS no expansion of its own:
+  // count, names and phrasing come from f04OutputsFact verbatim, the same fact the publish run's
+  // variant expansion reads, so the chip and the packages that land can never disagree. A document
+  // without variants rolls up to null -- a flagship-only row carries no chip at all rather than a
+  // chip that says "1 output" about nothing.
+  /* @publish-varpop-start */
+  function publishVariantRollup(outputsFact) {
+    if (!outputsFact || !(outputsFact.count > 1)) return null;
+    return {
+      count: outputsFact.count,
+      label: outputsFact.label,   // the F04 phrasing, verbatim -- never re-worded here
+      title: outputsFact.title,
+      rows: (outputsFact.names || []).map(function (name, i) { return { name: name, flagship: i === 0 }; })
+    };
+  }
+  /* @publish-varpop-end */
+  // The chip itself: the same publish-chip family as the preset + destination chips beside it, and
+  // -- unlike P-C07's destination -- a real button, because it has somewhere to go: the canonical
+  // anchored popover (openChromePop, the storage dot's own machinery) listing every output. Both
+  // Publish rows (picker + queue) build it through here, so there is one chip, not two.
+  function publishVariantChip(facts, cls) {
+    var roll = publishVariantRollup(facts && facts.outputs);
+    if (!roll) return null;
+    var chip = h("button", "publish-chip" + (cls ? " " + cls : ""), roll.label);
+    chip.type = "button";
+    chip.title = roll.title + " Click to list them.";
+    chip.addEventListener("click", function () {
+      openChromePop(chip, function (pop) {
+        pop.appendChild(h("div", "chrome-pop__title", "Outputs"));
+        roll.rows.forEach(function (o) {
+          var row = h("div", "chrome-pop__row");
+          row.appendChild(h("span", "chrome-pop__val", o.name));
+          if (o.flagship) row.appendChild(h("span", "chrome-pop__label", "Base"));
+          pop.appendChild(row);
+        });
+        pop.appendChild(h("div", "chrome-pop__note", "Each output publishes as its own package. Variants are defined in the Edit stage."));
+      }, { cls: "publish-varpop" });
+    });
+    return chip;
+  }
+  // uio-P-C05 (PUB-13): the Publish pane's one menu mixed INBOUND pipelines (Import CSV, Import
+  // Schema) with outbound ones, under a label that was half irrelevant. Direction is now data: the
+  // Source stage lists the imports (where import already lives), the Publish pane states only what
+  // it emits. Both stages read the SAME registered list, so a module that registers a new action
+  // lands on the right stage without either stage keeping its own copy.
+  //
+  // Direction is DECLARED at registration (registerPipelineButton's `opts.direction`). The label
+  // regex below is only the fallback for an action that never declared one: registerPipelineButton
+  // is public API, and a third-party caller naming something "Ingest CSV" must not silently land on
+  // the Publish pane. Declaring it is how you get it right; the guess is how old callers keep working.
+  /* @publish-format-start */
+  var PIPELINE_DIRECTIONS = ["import", "export"];
+  function pipelineDirection(label) { return /^\s*import\b/i.test(String(label == null ? "" : label)) ? "import" : "export"; }
+  function pipelineDirectionOf(btn) {
+    var declared = btn && btn.direction;
+    if (PIPELINE_DIRECTIONS.indexOf(declared) !== -1) return declared; // an explicit declaration always wins
+    return pipelineDirection(btn && btn.label);
+  }
+  function pipelineByDirection(btns, dir) {
+    return (btns || []).filter(function (b) { return b && pipelineDirectionOf(b) === dir; });
+  }
+  // Under an "Import" menu head the repeated prefix is noise ("Import CSV" -> "CSV…"). Every import
+  // opens a file picker, so the entry always ends in an ellipsis.
+  function importMenuLabel(label) {
+    var raw = String(label == null ? "" : label).trim();
+    var s = raw.replace(/^import\s+/i, "").trim() || raw;
+    return /(…|\.\.\.)$/.test(s) ? s : s + "…";
+  }
+  // The output formats, stated ONCE: the emitted one is marked selected, the rest carry a plain
+  // "Soon" state instead of smuggling "(soon)" into their names.
+  function publishFormatRows(formats, selected) {
+    return (formats || []).map(function (f) {
+      return { value: f.value, label: f.label, available: !!f.enabled, selected: f.value === selected, hint: f.enabled ? "" : "Soon" };
+    });
+  }
+  // What the queue will actually emit. Format is a PRESET option, so it is READ from the rows'
+  // resolved options — the Publish pane never becomes a second place that sets it. Presets that
+  // disagree read "Mixed" rather than picking a winner; an empty queue states the default.
+  function publishFormatSummary(formats, values, fallback) {
+    var uniq = [];
+    (values || []).forEach(function (v) { if (v && uniq.indexOf(v) === -1) uniq.push(v); });
+    if (uniq.length > 1) return { value: null, label: "Mixed", mixed: true };
+    var value = uniq[0] || fallback || "";
+    var match = (formats || []).filter(function (f) { return f.value === value; })[0];
+    return { value: value, label: (match && match.label) || value, mixed: false };
+  }
+  /* @publish-format-end */
+  // The documents the picker offers: every registry doc, scoped to the active Product when one is
+  // set (untagged docs drop out of a Product-scoped view), sorted by title. docId = the registry key.
+  function publishPickDocs() {
+    var pid = getActiveProduct(), out = [];
+    Object.keys(registry).forEach(function (id) {
+      var d = registry[id]; if (!d) return;
+      if (pid && !docMatchesProductStage(d, pid, null)) return;
+      out.push({ id: id, title: (d.meta && d.meta.title) || id });
+    });
+    out.sort(function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; });
+    return out;
+  }
+  // uio-P-C04 (PUB-12): the picker was alphabetical-only with no scope, count, search or sort, so the
+  // two orderings that actually decide publishing work -- most drifted first, least recently published
+  // first -- were unreachable. The whole view (search -> filter -> sort) is a pure function of the
+  // decorated rows, so it is fixture-testable and the header's count can never disagree with the list.
+  /* @publish-pick-start */
+  var PUBLISH_SORTS = [
+    { key: "title", label: "Title" },
+    { key: "drift", label: "Drift" },
+    { key: "last", label: "Last published" }
+  ];
+  // A row "needs attention" when approved source moved under it, or it has never gone out at all.
+  // Both mean the same thing to the person publishing: this one is not current.
+  function publishNeedsAttention(row) {
+    return !!(row && ((row.drift || 0) > 0 || !row.lastAt));
+  }
+  function publishPickView(rows, opts) {
+    opts = opts || {};
+    var q = String(opts.query == null ? "" : opts.query).trim().toLowerCase();
+    var out = (rows || []).filter(function (r) {
+      if (!r) return false;
+      if (q && String(r.title || "").toLowerCase().indexOf(q) === -1) return false;
+      if (opts.filter === "attention" && !publishNeedsAttention(r)) return false;
+      return true;
+    });
+    var byTitle = function (a, b) {
+      var x = String(a.title || "").toLowerCase(), y = String(b.title || "").toLowerCase();
+      return x < y ? -1 : x > y ? 1 : 0;
+    };
+    if (opts.sort === "drift") {
+      // most drifted first; ties fall back to title so the order is stable, never arbitrary
+      out.sort(function (a, b) { return (b.drift || 0) - (a.drift || 0) || byTitle(a, b); });
+    } else if (opts.sort === "last") {
+      // least recently published first, and NEVER-published ahead of everything -- those are the
+      // most overdue, not the most recent (a 0 timestamp would sort them last by accident).
+      out.sort(function (a, b) {
+        var ax = a.lastAt || 0, bx = b.lastAt || 0;
+        if (!ax !== !bx) return ax ? 1 : -1;
+        return ax - bx || byTitle(a, b);
+      });
+    } else {
+      out.sort(byTitle);
+    }
+    return out;
+  }
+  /* @publish-pick-end */
+  // uio-P-C06 (PUB-04): bulk publishing had no bulk controls -- a dozen documents meant a dozen
+  // identical "+" clicks. Selection is VIEW state (session-only, never saved on the document), and
+  // searching, filtering or re-ordering the list NEVER changes it. Filtering is a lens, not an edit:
+  // one keystroke in the search field must not throw away five deliberate ticks that cannot be undone.
+  // The hazard -- queueing documents that are off screen -- is answered by stating it plainly in the
+  // footer instead ("5 selected · 2 hidden by search"), so nothing is silently lost and nothing is
+  // silently included.
+  /* @publish-sel-start */
+  // The selected ids among `rows`, in the order those rows are given. Pass the visible list to count
+  // what is on screen; pass the full candidate list to get everything the batch will queue. Ids for
+  // documents that no longer exist simply never match, so a stale tick can never queue anything.
+  function publishSelectedIds(sel, rows) {
+    var out = [];
+    (rows || []).forEach(function (r) { if (r && r.id && sel && sel[r.id]) out.push(r.id); });
+    return out;
+  }
+  // Which of the two lenses is doing the hiding, named the way the author would name it.
+  function publishHiddenBy(query, filter) {
+    var q = !!String(query == null ? "" : query).trim(), f = !!filter && filter !== "all";
+    if (q && f) return "search and filter";
+    if (q) return "search";
+    if (f) return "the filter";
+    return "the current view";
+  }
+  // Everything the selection footer needs, from the visible rows plus the full candidate list.
+  // The one deliberate asymmetry: "select all" and its mixed state count the VISIBLE rows only,
+  // because ticking a box that says "Select all 3" over a list of 3 can only sanely mean those 3 --
+  // while the queue button counts the WHOLE selection, hidden rows included, because that is what
+  // the author actually ticked. The hidden line exists so those two numbers are never a surprise.
+  function publishSelectionSummary(sel, visible, all, opts) {
+    opts = opts || {};
+    var vis = publishSelectedIds(sel, visible), tot = publishSelectedIds(sel, all);
+    var visTotal = (visible || []).filter(function (r) { return r && r.id; }).length;
+    var hidden = Math.max(0, tot.length - vis.length);
+    return {
+      ids: tot,
+      selected: tot.length,
+      visible: vis.length,
+      hidden: hidden,
+      visibleTotal: visTotal,
+      all: visTotal > 0 && vis.length === visTotal,
+      mixed: vis.length > 0 && vis.length < visTotal,
+      allLabel: vis.length ? (vis.length + " of " + visTotal + " selected") : ("Select all " + visTotal),
+      queueLabel: "Queue selected" + (tot.length ? " (" + tot.length + ")" : ""),
+      hiddenLabel: hidden ? (tot.length + " selected · " + hidden + " hidden by " + publishHiddenBy(opts.query, opts.filter)) : "",
+      reason: tot.length ? "" : "Tick documents above to queue them together."
+    };
+  }
+  /* @publish-sel-end */
+  // ---- Product Rail: Ground-Truth staleness (export-is-publish tracking) ----
+  // A document links Ground Truth through block.sourceLink.masterId; each linked master carries a
+  // version stamp (master.updatedAt via stampMasterVersion, bumped on every content edit). At export
+  // we snapshot every linked master's stamp into doc.meta.lastPublishedGroundTruthVersions; the
+  // staleness count is how many linked masters have changed since that baseline. UI-only, never a
+  // gate. All four helpers are pure (fixture-testable in tests/run.js).
+  /* @gt-staleness-start */
+  function docLinkedMasterIds(doc) {
+    var ids = {};
+    walkBlocks(doc, function (b) { if (b && b.sourceLink && b.sourceLink.masterId) ids[b.sourceLink.masterId] = 1; });
+    return Object.keys(ids);
+  }
+  // WHICH linked masters have changed since the doc's last-published baseline. Returns null when the
+  // doc links NO Ground Truth content -> no badge (not a misleading "0 changed"). A master absent from
+  // the baseline (newly linked, or a doc never yet exported) counts as changed.
+  // uio-F04: this is the ONE staleness computation. The count below and every F04 surface derive from
+  // it, so a drift badge and a drift list can never disagree.
+  function driftedMasterIds(doc, currentVersions) {
+    if (!doc) return null;
+    var ids = docLinkedMasterIds(doc);
+    if (!ids.length) return null;
+    var baseline = (doc.meta && doc.meta.lastPublishedGroundTruthVersions) || {};
+    return ids.filter(function (id) { return baseline[id] !== (currentVersions || {})[id]; });
+  }
+  // Count of the above. Same null contract.
+  function groundTruthStaleCount(doc, currentVersions) {
+    var drifted = driftedMasterIds(doc, currentVersions);
+    return drifted === null ? null : drifted.length;
+  }
+  // Current stamp map from the live LibraryStore (masterId -> updatedAt).
+  function currentMasterVersions() {
+    var comps = (typeof libComponents === "function" && libComponents()) || {}, out = {};
+    Object.keys(comps).forEach(function (k) { if (comps[k]) out[k] = comps[k].updatedAt; });
+    return out;
+  }
+  // Baseline reset: record every linked master's current stamp as this doc's new "last published"
+  // point -- the instant a document finishes exporting (solo or whole-family), its badge -> 0.
+  function snapshotGroundTruthBaseline(doc) {
+    if (!doc) return;
+    var cur = currentMasterVersions(), snap = {};
+    docLinkedMasterIds(doc).forEach(function (id) { snap[id] = cur[id]; });
+    doc.meta = doc.meta || {};
+    doc.meta.lastPublishedGroundTruthVersions = snap;
+  }
+  /* @gt-staleness-end */
+
+  // ---- Product Rail: source-alignment metric (linked-to-approved-source vs novel) ----
+  // What share of a document's prose is linked to approved source vs authored novel here. A whole
+  // source-linked block (block.sourceLink) counts all its words as linked; an inline `<span
+  // data-source-link>` counts the words inside it. Reuses frWords (the shared HTML-stripping word
+  // counter). Pure -> fixture-testable. Surfaced live in the Edit header + on the Publish rows.
+  /* @src-align-start */
+  function sourceLinkedSpanWords(html) {
+    var s = String(html == null ? "" : html), linked = 0, re = /<span\b[^>]*\bdata-source-link\b[^>]*>([\s\S]*?)<\/span>/gi, m;
+    while ((m = re.exec(s))) linked += frWords(m[1]);
+    return linked;
+  }
+  function sourceAlignment(doc) {
+    var linked = 0, total = 0;
+    walkBlocks(doc, function (b) {
+      if (!b || typeof b.text !== "string") return;
+      var w = frWords(b.text);
+      if (!w) return;
+      total += w;
+      if (b.sourceLink && b.sourceLink.markId) linked += w;       // whole-block linked
+      else linked += sourceLinkedSpanWords(b.text);               // inline linked spans
+    });
+    return { linkedWords: linked, totalWords: total, ratio: total ? linked / total : 0 };
+  }
+  // Format the ratio as a rounded percent string, or null when the doc has no prose to measure.
+  function sourceAlignmentPct(doc) {
+    var a = sourceAlignment(doc);
+    if (!a.totalWords) return null;
+    return Math.round(a.ratio * 100);
+  }
+  /* @src-align-end */
+
+  // ---- uio-F04: cross-stage data surfacing (the READ layer over the Product Rail) ----------------
+  // Four facts follow a document (and a source topic) across Source, Edit and Publish: how much of it
+  // comes from approved source, what has drifted since it last went out, where a passage is used, and
+  // how many packages it actually produces. Every stage used to phrase these itself, so the same fact
+  // read differently in three places -- or, worse, was computed twice.
+  //
+  // THE RULE: this layer INVENTS NOTHING. Its inputs are the Product Rail helpers that already exist
+  // -- sourceAlignment (@src-align), driftedMasterIds + currentMasterVersions (@gt-staleness),
+  // sourceLinkWhereUsed, ReleaseHistory.lastPublishedFor, and doc.variants. It turns those into one
+  // phrasing + one tone that every surface renders identically. A second staleness or alignment
+  // computation anywhere else is a hard fail.
+  //
+  // The fenced part is pure (plain values in, plain fact objects out) so tests/run.js can fixture it
+  // directly; the adapters below the fence do the binding to the live stores.
+  /* @f04-start */
+  // One band scale, everywhere. >=85 verified · 60-84 mixed · <60 mostly novel.
+  var F04_BANDS = [
+    { key: "verified", min: 85, label: "Verified" },
+    { key: "mixed", min: 60, label: "Mixed" },
+    { key: "novel", min: 0, label: "Mostly novel" }
+  ];
+  // Tones read as fact, not as scolding: novel copy is a legitimate authoring choice, so the bottom
+  // band is neutral rather than red. Red is reserved for something actually wrong.
+  var F04_BAND_TONE = { verified: "success", mixed: "warning", novel: "neutral" };
+  function f04Band(pct) {
+    if (pct == null) return null;
+    for (var i = 0; i < F04_BANDS.length; i++) if (pct >= F04_BANDS[i].min) return F04_BANDS[i];
+    return F04_BANDS[F04_BANDS.length - 1];
+  }
+  // ALIGNMENT. `alignment` is whatever sourceAlignment() returned ({linkedWords,totalWords}); pass
+  // `indexed:false` when there is no approved source to measure against at all. Both no-source and
+  // no-prose resolve to the SAME honest "Not indexed" state rather than a 0% that blames the author.
+  function f04AlignmentFact(alignment, indexed) {
+    var total = (alignment && alignment.totalWords) || 0;
+    var linked = (alignment && alignment.linkedWords) || 0;
+    if (indexed === false || !total) {
+      return {
+        indexed: false, pct: null, band: null, bandLabel: "Not indexed", tone: "neutral",
+        label: "Not indexed",
+        title: indexed === false
+          ? "Not indexed - there is no approved source document to measure this against yet."
+          : "Not indexed - there is no prose here to measure."
+      };
+    }
+    var pct = Math.round(linked / total * 100), band = f04Band(pct);
+    return {
+      indexed: true, pct: pct, band: band.key, bandLabel: band.label, tone: F04_BAND_TONE[band.key],
+      linkedWords: linked, totalWords: total,
+      label: pct + "% aligned",
+      title: pct + "% of these " + total + " words are linked to approved source (" + band.label.toLowerCase() +
+        "). The rest is novel copy authored here."
+    };
+  }
+  // Roll-up: several documents as ONE alignment number, by summing the same word counts the per-document
+  // fact uses. With a single document the roll-up IS that document's number, which is exactly why the
+  // Source top bar and a Publish row can never disagree.
+  function f04RollUpAlignment(alignments) {
+    var linked = 0, total = 0, indexed = false;
+    (alignments || []).forEach(function (a) {
+      if (!a) return;
+      linked += a.linkedWords || 0; total += a.totalWords || 0;
+      if (a.indexed !== false) indexed = true;
+    });
+    return f04AlignmentFact({ linkedWords: linked, totalWords: total }, indexed && total > 0);
+  }
+  // DRIFT. `driftedIds` is driftedMasterIds()'s answer (null = links no source at all); `published` is
+  // whether ReleaseHistory has ever recorded this document going out. A never-published document has
+  // nothing to have drifted FROM, so it reports "unpublished" instead of counting every linked topic as
+  // changed -- the misreading the raw count invited.
+  function f04DriftFact(driftedIds, published) {
+    if (driftedIds == null) {
+      return { state: "unlinked", count: 0, ids: [], tone: "neutral", label: "",
+        title: "This document links no approved source." };
+    }
+    if (!published) {
+      return { state: "unpublished", count: 0, ids: [], tone: "neutral", label: "",
+        title: "Never published, so there is no earlier version to have drifted from." };
+    }
+    if (!driftedIds.length) {
+      return { state: "current", count: 0, ids: [], tone: "neutral", label: "",
+        title: "Every linked source passage is as it was when this document was last published." };
+    }
+    var n = driftedIds.length;
+    return { state: "drifted", count: n, ids: driftedIds.slice(), tone: "warning",
+      label: n + " changed",
+      title: n + " linked source document" + (n === 1 ? "" : "s") + " changed since this document was last published." };
+  }
+  // WHERE-USED. `places` is sourceLinkWhereUsed()'s list of placements ({docCode,...}); this counts the
+  // distinct documents behind them, because "linked in 3 documents" is the fact an author acts on.
+  function f04WhereUsedFact(places) {
+    var docs = {}, n = 0;
+    (places || []).forEach(function (p) { if (p && p.docCode != null) docs[p.docCode] = 1; });
+    var codes = Object.keys(docs); n = codes.length;
+    return {
+      docs: n, docCodes: codes, places: (places || []).length, tone: "neutral",
+      label: n ? ("Linked in " + n) : "Not linked",
+      title: n
+        ? ("Used in " + n + " document" + (n === 1 ? "" : "s") + " across " + (places || []).length + " place" + ((places || []).length === 1 ? "" : "s") + ".")
+        : "Not currently linked in any document."
+    };
+  }
+  // VARIANTS AS OUTPUTS. One document with N variants is N+1 packages; the queue treats it as one row,
+  // which is why the real output count is invisible today. Flagship always leads the list.
+  function f04OutputsFact(variants) {
+    var vs = (variants || []).filter(function (v) { return v != null && String(v) !== ""; });
+    var names = ["Flagship"].concat(vs.map(String));
+    return {
+      count: names.length, names: names, variants: vs.map(String), tone: "neutral",
+      label: names.length + " outputs",
+      title: names.length === 1
+        ? "Publishing this document produces one package (Flagship)."
+        : "Publishing this document produces " + names.length + " packages: " + names.join(", ") + "."
+    };
+  }
+  // uio-P-C01 (PUB-01): the meter's pure model. The meter EXPLAINS the alignment number, so every
+  // part of it -- fill, tone, value text, band name -- comes from the fact object, never a second
+  // computation. A not-indexed fact yields a meter with no fill and the words instead of a 0%.
+  function f04AlignmentMeterModel(fact) {
+    if (!fact || fact.indexed === false || fact.pct == null) {
+      return { indexed: false, pct: null, tone: "neutral", value: "Not indexed",
+        bandLabel: "Not indexed", title: (fact && fact.title) || "Not indexed." };
+    }
+    var band = f04Band(fact.pct);
+    return { indexed: true, pct: fact.pct, tone: F04_BAND_TONE[band.key], value: fact.pct + "%",
+      bandLabel: band.label, title: fact.title };
+  }
+  /* @f04-end */
+
+  // ---- uio-F04 adapters: bind the pure resolver above to the live Product Rail stores --------------
+  // Nothing here computes a fact; each one only fetches an existing input and hands it over.
+  // Is there approved source to align this document against at all? A document tagged to a Product with
+  // no source document can never score, so it reads "Not indexed" rather than 0%.
+  function f04SourceIndexed(d) {
+    var pid = d && d.meta && d.meta.productId;
+    if (!pid) return true;                                    // untagged: fall back to "has prose" alone
+    if (typeof sourceMasterFor !== "function") return true;
+    return !!sourceMasterFor(pid) || (typeof unifiableTopicsFor === "function" && unifiableTopicsFor(pid).length > 0);
+  }
+  // Has this document ever actually gone out? Straight from the release log, the same record the
+  // picker's "Last published" line reads.
+  function f04Published(docId) {
+    var RH = window.ReleaseHistory;
+    return !!(RH && RH.lastPublishedFor && RH.lastPublishedFor(releaseHistory(), docId));
+  }
+  // The three document-scoped facts, for any surface, from one call.
+  function f04DocFacts(docId, versions) {
+    var d = registry[docId]; if (!d) return null;
+    var vers = versions || currentMasterVersions();
+    return {
+      docId: docId,
+      title: (d.meta && d.meta.title) || docId,
+      alignment: f04AlignmentFact(sourceAlignment(d), f04SourceIndexed(d)),
+      drift: f04DriftFact(driftedMasterIds(d, vers), f04Published(docId)),
+      outputs: f04OutputsFact(d.variants)
+    };
+  }
+  // Documents belonging to a Product (the same meta.productId tag the browser + picker scope by).
+  function f04ProductDocIds(pid) {
+    if (!pid) return [];
+    return Object.keys(registry).filter(function (code) {
+      var d = registry[code];
+      return !!(d && d.meta && d.meta.productId === pid);
+    });
+  }
+  // Product-scoped roll-up, plus (when a source topic is given) that topic's where-used and how many
+  // of the Product's published documents are behind it.
+  function f04ProductFacts(pid, masterId) {
+    var vers = currentMasterVersions();
+    var ids = f04ProductDocIds(pid);
+    var each = ids.map(function (id) { return f04DocFacts(id, vers); }).filter(Boolean);
+    var outputs = 0;
+    each.forEach(function (f) { outputs += f.outputs.count; });
+    var behind = masterId ? each.filter(function (f) {
+      return f.drift.state === "drifted" && f.drift.ids.indexOf(masterId) !== -1;
+    }) : [];
+    return {
+      productId: pid,
+      docIds: ids,
+      docs: each,
+      alignment: f04RollUpAlignment(each.map(function (f) { return f.alignment; })),
+      outputs: { count: outputs, tone: "neutral", label: outputs + " outputs",
+        title: outputs + " package" + (outputs === 1 ? "" : "s") + " across " + ids.length + " document" + (ids.length === 1 ? "" : "s") + "." },
+      whereUsed: masterId && typeof sourceLinkWhereUsed === "function"
+        ? f04WhereUsedFact(sourceLinkWhereUsed(masterId, null)) : null,
+      behind: { count: behind.length, tone: behind.length ? "warning" : "neutral",
+        label: behind.length ? (behind.length + " behind") : "",
+        title: behind.length
+          ? (behind.length + " published document" + (behind.length === 1 ? " is" : "s are") + " older than this source.")
+          : "Every published document here is up to date with this source." }
+    };
+  }
+  // The ONE way an F04 fact is drawn: the canonical DS Badge, quiet (these repeat down lists), small,
+  // carrying the fact's own tone + tooltip. Returns null for a fact with nothing to say, so a surface
+  // never has to decide when to hide one.
+  function f04Badge(fact, cls) {
+    if (!fact || !fact.label) return null;
+    var U = window.VersoUI;
+    var el = U && U.Badge
+      ? U.Badge({ tone: fact.tone || "neutral", quiet: true, size: "sm", children: [fact.label] })
+      : h("span", "vds-badge vds-badge--neutral vds-badge--sm vds-badge--quiet", fact.label);
+    if (cls) el.classList.add(cls);
+    if (fact.title) el.title = fact.title;
+    return el;
+  }
+  // uio-P-C01 (PUB-01): the ONE way alignment is drawn on Publish -- the canonical DS Meter,
+  // labelled and banded, fed by the same fact object every other surface reads. The picker row and
+  // the queue row both call this, so the number and its band can never read differently a pane
+  // apart -- and both stay equal to the Source top bar, which reads the same resolver.
+  function f04AlignmentMeter(fact, cls) {
+    if (!fact) return null;
+    var m = f04AlignmentMeterModel(fact);
+    var U = window.VersoUI;
+    var el = U && U.Meter
+      ? U.Meter({ label: "Alignment", pct: m.pct, tone: m.tone, value: m.value, bandLabel: m.bandLabel })
+      : h("span", "vds-meter", "Alignment " + m.value);
+    if (cls) el.classList.add(cls);
+    if (m.title) el.title = m.title;
+    return el;
+  }
+  // Read API for the tickets that CONSUME this layer (uio-P-C01's alignment meter, uio-P-C08's variant
+  // roll-up chip, uio-S-M05, uio-E-M03) and for the browser-verify harness. Read-only: it renders
+  // nothing and mutates nothing.
+  window.__f04 = {
+    docFacts: f04DocFacts,
+    productFacts: f04ProductFacts,
+    productDocIds: f04ProductDocIds,
+    whereUsed: function (masterId) { return f04WhereUsedFact(sourceLinkWhereUsed(masterId, null)); },
+    bands: F04_BANDS,
+    band: f04Band,
+    _pure: { alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment, driftFact: f04DriftFact,
+      whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact, alignmentMeterModel: f04AlignmentMeterModel }
+  };
+
+  // uio-P-C03 (PUB-10): the picker row's provenance line. States the fact plainly when a document
+  // has gone out, and states the absence just as plainly when it hasn't -- "never published" is
+  // information, not an error, so it reads as a fact rather than a warning.
+  function publishLastLabel(docId) {
+    var RH = window.ReleaseHistory; if (!RH || !RH.lastPublishedFor) return "";
+    var last = RH.lastPublishedFor(releaseHistory(), docId);
+    if (!last) return "Never published";
+    var when = last.at ? new Date(last.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+    return "Last published " + [when, last.version].filter(Boolean).join(" · ");
+  }
+  // uio-P-C04: the picker's view state. Session-only on purpose — a search you left behind three
+  // days ago silently hiding documents is worse than retyping it.
+  // uio-P-C06: the tick marks live here too — same session-only lifetime, for the same reason.
+  var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title", __publishPickSel = {};
+  function publishSortLabel() {
+    for (var i = 0; i < PUBLISH_SORTS.length; i++) if (PUBLISH_SORTS[i].key === __publishPickSort) return PUBLISH_SORTS[i].label;
+    return PUBLISH_SORTS[0].label;
+  }
+  function mountPublishStage() {
+    if (typeof document === "undefined") return;
+    renderPublishPick();
+    renderPublishQueue();
+  }
+  // browser-verify hook (mirrors window.__sourceRw): lets the Puppeteer harness seed release records
+  // and re-render the stage without driving a real export. Read/render only -- no publish path here.
+  window.__publishRw = {
+    releaseHistory: releaseHistory,
+    saveReleaseHistory: saveReleaseHistory,
+    lastLabel: publishLastLabel,
+    render: mountPublishStage
+  };
+  // uio-P-C04 (PUB-12): decorate every candidate with the two facts the orderings need -- how far it
+  // has drifted from approved source, and when it last actually went out -- then let the pure view do
+  // search/filter/sort. The header counts what the list shows, from the same array.
+  // uio-P-C06: the render AND "Queue selected" both read the list from here, so the batch can only
+  // ever contain rows the picker is showing.
+  // uio-F04: the row's facts come from f04DocFacts -- the same call the Source top bar and the Edit
+  // provenance line make -- so a number here can never disagree with the same number a stage away.
+  function publishPickRows() {
+    var vers = currentMasterVersions(), RH = window.ReleaseHistory;
+    return publishPickDocs().map(function (d) {
+      var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
+      var facts = f04DocFacts(d.id, vers);
+      return { id: d.id, title: d.title, drift: facts ? facts.drift.count : 0, lastAt: last ? last.at : 0, facts: facts };
+    });
+  }
+  // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
+  // shortcut to queue the currently-open document (the fast single-export path -- a queue-of-one).
+  function renderPublishPick() {
+    var host = document.getElementById("publish-pick"); if (!host) return;
+    var U = window.VersoUI;
+    host.innerHTML = "";
+    var all = publishPickRows();
+    var docs = publishPickView(all, { query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort });
+    var attention = all.filter(publishNeedsAttention).length;
+    // uio-P-C06 (PUB-04): this render READS the selection and never writes it. Search, filter and
+    // sort are a lens over the list, so a tick survives all three for the whole session; the footer
+    // states how much of the selection the current lens is hiding.
+    var sel = publishSelectionSummary(__publishPickSel, docs, all, { query: __publishPickQuery, filter: __publishPickFilter });
+
+    // Header strip: what this list IS (scope + count), and how it is ordered.
+    var head = h("div", "publish-pick__head");
+    head.appendChild(h("span", "publish-pick__title", "Documents"));
+    var prod = getActiveProduct(), pname = prod && window.ProductsStore && window.ProductsStore[prod] ? window.ProductsStore[prod].name : "";
+    head.appendChild(h("span", "publish-pick__scope", [pname, String(docs.length)].filter(Boolean).join(" · ")));
+    // Reuses `publish-chip` — this pane's established "compact value that opens a menu" control
+    // (the queue row's preset chip). Same job, same look; a second chrome for it would be exactly
+    // the piecemeal divergence this overhaul exists to undo.
+    var sortBtn = h("button", "publish-chip publish-pick__sort"); sortBtn.type = "button";
+    sortBtn.title = "Order this list";
+    sortBtn.innerHTML = (window.Icon ? window.Icon("list") : "") + "<span>" + publishSortLabel() + "</span>";
+    // A menu, not a cycling button: three orderings that a cycle would hide. Canonical context menu,
+    // current one ticked.
+    sortBtn.addEventListener("click", function (ev) {
+      var r = (ev.currentTarget || ev.target).getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, [{ head: "Order by" }].concat(PUBLISH_SORTS.map(function (s) {
+        return { label: s.label, active: __publishPickSort === s.key, onClick: function () { __publishPickSort = s.key; renderPublishPick(); } };
+      })));
+    });
+    head.appendChild(sortBtn);
+    host.appendChild(head);
+
+    // Search — the same field the Source rail uses for the same job, one stage over.
+    var search = h("div", "vbrowser__search publish-pick__search");
+    search.innerHTML = window.Icon ? window.Icon("search") : "";
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "Search documents";
+    input.value = __publishPickQuery;
+    input.addEventListener("input", function () {
+      __publishPickQuery = input.value;
+      renderPublishPick();
+      var again = document.querySelector(".publish-pick__search .vbrowser__search-input");
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    });
+    search.appendChild(input);
+    host.appendChild(search);
+
+    // "Needs attention" is only offered when something actually needs it — a permanently-empty
+    // filter is noise.
+    if (attention && U && U.SegmentedControl) {
+      host.appendChild(U.SegmentedControl({
+        size: "sm",
+        options: [{ value: "all", label: "All " + all.length }, { value: "attention", label: "Needs attention " + attention }],
+        value: __publishPickFilter,
+        onChange: function (v) { __publishPickFilter = v; renderPublishPick(); }
+      }));
+    } else if (__publishPickFilter !== "all") { __publishPickFilter = "all"; }
+
+    if (registry[activeDocId]) {
+      var addCur = U ? U.Button({ variant: "secondary", full: true, icon: "plus", label: "Add current document", onClick: function () { addDocToPublishQueue(activeDocId); } }) : h("button", null, "Add current document");
+      addCur.classList.add("publish-pane__addcur");
+      host.appendChild(addCur);
+    }
+    var list = h("div", "publish-picklist");
+    if (!docs.length) {
+      list.appendChild(h("div", "publish-empty", all.length
+        ? "No document matches that."
+        : ("No documents" + (getActiveProduct() ? " in this Product" : "") + " yet.")));
+    }
+    docs.forEach(function (d) {
+      var row = h("div", "publish-pickrow");
+      // uio-P-C06 (PUB-04): the row leads with the canonical DS Checkbox (14px, Checkbox.d.ts) so a
+      // dozen documents are picked as one set. The per-row "+" below is untouched: ticking is the
+      // additional path for a batch, not a replacement for queueing one document.
+      if (U && U.Checkbox) {
+        var box = U.Checkbox({
+          checked: !!__publishPickSel[d.id],
+          onChange: function (v) {
+            if (v) __publishPickSel[d.id] = true; else delete __publishPickSel[d.id];
+            renderPublishPick();
+          }
+        });
+        box.classList.add("publish-pickrow__sel");
+        box.title = "Select “" + d.title + "” for queueing";
+        row.appendChild(box);
+      }
+      row.appendChild(h("span", "publish-pickrow__title", d.title));
+      var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
+      row.appendChild(add);
+      // uio-P-C03 (PUB-10): "when did this last actually go out, and as what" — the line that
+      // decides whether a re-publish is needed at all. Read from the release record, so it can
+      // never disagree with the history below.
+      var wrap = h("div", "publish-pickitem");
+      wrap.appendChild(row);
+      // uio-F04 (PUB-01/02/15): drift, alignment and real output count, all from f04DocFacts and all
+      // drawn as the canonical DS Badge. They sit on the row's meta line, BELOW the title, for the
+      // same reason the queue row does it: three badges beside a title eat the title, and a document
+      // you cannot read the name of is worse than one whose numbers take a second line. A fact with
+      // nothing to say returns no badge, so an in-sync or never-published document stays quiet
+      // instead of carrying a chip that only means "nothing here". Never blocks or warns -- the
+      // author can still queue any of these freely.
+      var meta = h("div", "publish-pickitem__meta");
+      var facts = d.facts || f04DocFacts(d.id);
+      if (facts) {
+        // uio-P-C01 (PUB-01): alignment is the one fact drawn as the labelled Meter.
+        // uio-P-C08 (PUB-15): outputs graduate to the variant roll-up chip.
+        // Drift stays a quiet badge.
+        [f04Badge(facts.drift, "publish-pickrow__drift"),
+         f04AlignmentMeter(facts.alignment, "publish-pickrow__align"),
+         publishVariantChip(facts, "publish-pickrow__outputs")
+        ].forEach(function (b) { if (b) meta.appendChild(b); });
+      }
+      meta.appendChild(h("span", "publish-pickitem__last", publishLastLabel(d.id)));
+      wrap.appendChild(meta);
+      list.appendChild(wrap);
+    });
+    host.appendChild(list);
+
+    // uio-P-C06 (PUB-04): the selection footer, pinned under the scrolling list. It stays as long as
+    // there is anything to select OR anything selected -- a live selection with every row filtered
+    // away must never lose its footer, or the author is left holding ticks they can neither see nor
+    // clear. The Publish button's rule applies here too: with nothing ticked the action is disabled
+    // and states its reason on hover instead of failing silently.
+    if (docs.length || sel.selected) {
+      var foot = h("div", "publish-pick__foot");
+      if (docs.length && U && U.Checkbox) {
+        // Ticks what is SHOWN. Untickng it clears the shown rows and leaves hidden ones alone; the
+        // hidden line below carries its own Clear for the whole selection.
+        var allBox = U.Checkbox({
+          checked: sel.all, mixed: sel.mixed, label: sel.allLabel,
+          onChange: function (v) {
+            docs.forEach(function (r) { if (v) __publishPickSel[r.id] = true; else delete __publishPickSel[r.id]; });
+            renderPublishPick();
+          }
+        });
+        allBox.classList.add("publish-pick__all");
+        allBox.title = "Select every document shown";
+        foot.appendChild(allBox);
+      }
+      // The whole truth when the current lens is hiding part of the selection: how many are ticked,
+      // how many of those are off screen, and one action to drop the lot.
+      if (sel.hidden) {
+        var hint = h("div", "publish-pick__hidden");
+        hint.appendChild(h("span", "publish-pick__hidden-text", sel.hiddenLabel));
+        var clearFn = function () { __publishPickSel = {}; renderPublishPick(); };
+        var clear = U ? U.Button({ variant: "ghost", size: "sm", label: "Clear", onClick: clearFn }) : h("button", null, "Clear");
+        clear.classList.add("publish-pick__clear");
+        clear.title = "Clear all " + sel.selected + " ticked documents, hidden ones included";
+        if (!U) clear.addEventListener("click", clearFn);
+        hint.appendChild(clear);
+        foot.appendChild(hint);
+      }
+      var qs = U ? U.Button({ variant: "secondary", full: true, icon: "plus", label: sel.queueLabel, onClick: queueSelectedDocs })
+        : h("button", null, sel.queueLabel);
+      qs.classList.add("publish-pick__queuesel");
+      if (!sel.selected) { qs.setAttribute("disabled", "disabled"); qs.title = sel.reason; }
+      foot.appendChild(qs);
+      host.appendChild(foot);
+    }
+  }
+  // A tiny transient confirmation toast (reuses the shared .collab-toast style), for actions taken
+  // away from the Publish stage -- e.g. "Send to publish queue" from the Edit-stage top bar.
+  function publishToast(msg) {
+    var t = h("div", "collab-toast", msg); document.body.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add("is-on"); });
+    setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2600);
+  }
+  // The ONE shared "queue this document" action (T4). Adds the doc with its remembered preset (T2),
+  // no configure step, no duplicate row (re-arms an existing one). Used by every entry point: the
+  // Publish-stage picker rows AND the Edit-stage top-bar "Send to publish queue". Toasts the count.
+  // uio-P-C06 (PUB-04): `quiet` suppresses only the confirmation, never the save. A batch adds every
+  // document through this exact path and then confirms once, so one toast per document never stacks.
+  function addToQueue(docId, opts) {
+    var PQ = window.PublishQueue, PP = window.PublishPresets, d = registry[docId]; if (!PQ || !d) return;
+    var preset = PP ? PP.lastForDoc(publishPresets(), docId) : "master"; // zero-config recall
+    PQ.addDoc(publishQueue(), docId, { title: (d.meta && d.meta.title) || docId, preset: preset });
+    savePublishQueue();
+    renderPublishQueue();
+    var n = PQ.pendingRows(publishQueue()).length;
+    syncSendToPublishCount();
+    if (!(opts && opts.quiet)) publishToast("Added to the publish queue — " + n + " pending.");
+  }
+  // uio-P-C06 (PUB-04): queue the whole selection in one action -- every ticked document, including
+  // any the current search or filter is hiding, because that is what the author ticked and the
+  // footer said so before they pressed it. Identical to pressing "+" on each row (same preset
+  // recall, same de-duplication); the ticks clear afterwards, since the batch has been handed over
+  // and a stale selection would invite queueing it twice.
+  function queueSelectedDocs() {
+    var PQ = window.PublishQueue; if (!PQ) return;
+    var ids = publishSelectedIds(__publishPickSel, publishPickRows());
+    if (!ids.length) return;
+    ids.forEach(function (id) { addToQueue(id, { quiet: true }); });
+    __publishPickSel = {};
+    renderPublishPick();
+    var n = PQ.pendingRows(publishQueue()).length;
+    publishToast("Added " + ids.length + " document" + (ids.length === 1 ? "" : "s") + " to the publish queue — " + n + " pending.");
+  }
+  // uio-E-C08 (EDIT-15): reflect the pending queue count on the Edit header's "Send to publish"
+  // button, so the destination + its backlog are legible without opening the Publish stage.
+  function syncSendToPublishCount() {
+    var el = document.getElementById("send-to-publish-count"); if (!el) return;
+    var PQ = window.PublishQueue;
+    var n = (PQ && __publishQueue !== undefined) ? PQ.pendingRows(publishQueue()).length : 0;
+    el.textContent = n ? String(n) : "";
+    el.hidden = !n;
+  }
+  function addDocToPublishQueue(docId) { addToQueue(docId); } // back-compat name used by the picker rows
+  // Right pane: the persistent queue, one row per document (title + status + remove), and one
+  // Publish button that runs every pending row sequentially through buildPackage.
+  function renderPublishQueue() {
+    var host = document.getElementById("publish-queue"); if (!host) return;
+    var U = window.VersoUI, PQ = window.PublishQueue; if (!PQ) return;
+    var q = publishQueue();
+    host.innerHTML = "";
+    var head = h("div", "publish-pane__head");
+    head.appendChild(h("div", "publish-pane__title", "Publish queue"));
+    // uio-P-C02 (PUB-03): the accent belongs to a button that has something to do. The Publish
+    // button is the accent primary ONLY when there are rows to run; otherwise it's a quiet disabled
+    // secondary that states the reason on hover, so a dead button never hogs the pane's one accent.
+    var pending = PQ.pendingRows(q).length;
+    var canRun = !!pending && !__publishRunning;
+    var pubLabel = __publishRunning ? "Publishing…" : ("Publish" + (pending ? " (" + pending + ")" : ""));
+    var pub = U ? U.Button({ variant: canRun ? "primary" : "secondary", icon: "upload", label: pubLabel, onClick: runPublishQueue }) : h("button", null, pubLabel);
+    if (!canRun) {
+      pub.setAttribute("disabled", "disabled");
+      pub.title = __publishRunning ? "Publishing…" : "Nothing queued to publish — add documents from the left.";
+    }
+    // side-rail-cleanup slice 2: the relocated Import/Export menu sits with the Publish button (the
+    // stage's export/publish surface). #publish-io is filled by renderToolbarPipeline below.
+    var actions = h("div", "publish-pane__head-actions");
+    var io = h("div", "publish-io"); io.id = "publish-io";
+    // T3: the Product publish folder — one pick for the whole family, stated where the queue's own
+    // actions live so it reads as a property of this queue rather than of any one row.
+    var rootChip = publishRootChip();
+    if (rootChip) actions.appendChild(rootChip);
+    actions.appendChild(io); actions.appendChild(pub);
+    head.appendChild(actions);
+    host.appendChild(head);
+    syncSendToPublishCount(); // uio-E-C08: keep the Edit header's count in step with every queue change
+    renderToolbarPipeline(); // fill #publish-io with the Format control + its export overflow
+    // uio-P-C03 (PUB-10): the queue scrolls in its own region so Release history can take the space
+    // the queue isn't using — the pane no longer scrolls as one long strip with history off-screen.
+    var scroller = h("div", "publish-queue__body");
+    host.appendChild(scroller);
+    var rows = (q.rows || []);
+    if (!rows.length) { scroller.appendChild(h("div", "publish-empty", "Add documents from the left to queue them for publishing.")); renderPublishHistory(host); return; }
+    var list = h("div", "publish-queuelist");
+    rows.forEach(function (r) {
+      var row = h("div", "publish-queuerow is-" + r.status);
+      var main = h("div", "publish-queuerow__main");
+      main.appendChild(h("span", "publish-queuerow__title", r.title));
+      var meta = h("div", "publish-queuerow__meta");
+      // preset chip -> a menu to switch preset / save-as / rename / delete (T2). Frozen at add-time;
+      // clicking re-picks. Disabled while the row is running.
+      var PP = window.PublishPresets;
+      var chip = h("button", "publish-chip", PP ? PP.presetName(publishPresets(), r.preset || "master") : (r.preset || "master"));
+      chip.type = "button"; chip.title = "Output preset";
+      if (r.status !== "running") chip.addEventListener("click", function (ev) {
+        var rr = (ev.currentTarget || ev.target).getBoundingClientRect();
+        openPublishPresetMenu(r.id, rr.left, rr.bottom + 4);
+      });
+      meta.appendChild(chip);
+      // uio-P-C07 (PUB-05) / T3: destination + resolved filename, in the same chip family as the
+      // preset beside them. Now that a folder is a real choice, the chip is a real button: it opens
+      // the destination popover, which owns one path row per output plus the re-cut opt-in.
+      var outs = publishRowOutputs(r);
+      var dests = outs.map(function (v) { return publishResolveDest(r, v); });
+      var summary = publishRowDestSummary(dests);
+      if (summary) {
+        var dchip = h("button", "publish-chip publish-chip--dest", summary.label);
+        dchip.type = "button";
+        dchip.title = "Destination · " + summary.why + " Click to set a folder.";
+        if (r.status !== "running") dchip.addEventListener("click", function () { openPublishDestPopover(dchip, r.id); });
+        meta.appendChild(dchip);
+      }
+      if (publishShowsFilename(r)) {
+        // The flagship's name leads; a row with variants says how many more follow rather than
+        // listing filenames it has no room for — the popover holds the full list.
+        var fname = publishRowFilename(window.SCORMExport && window.SCORMExport.packageName, publishOptionsForRow(r, outs[0]));
+        if (fname) {
+          var more = outs.length > 1 ? "  +" + (outs.length - 1) + " more" : "";
+          var fEl = h("span", "publish-queuerow__file", fname + more);
+          fEl.title = outs.length > 1 ? "Writes " + outs.length + " packages, starting with " + fname : "Writes " + fname;
+          meta.appendChild(fEl);
+        }
+      }
+      meta.appendChild(h("span", "publish-queuerow__status", publishStatusLabel(r)));
+      // uio-F04 (PUB-01/02/15): the same three facts the picker row states, on the row that is actually
+      // about to run -- so what you confirmed before queueing is still in front of you at the moment of
+      // publishing. Identical call, identical phrasing, identical badge.
+      var qf = f04DocFacts(r.docId);
+      if (qf) {
+        // uio-P-C01 (PUB-01): the same labelled Meter as the picker row.
+        // uio-P-C08 (PUB-15): outputs graduate to the variant roll-up chip.
+        [f04Badge(qf.drift, "publish-queuerow__drift"),
+         f04AlignmentMeter(qf.alignment, "publish-queuerow__align"),
+         publishVariantChip(qf, "publish-queuerow__outputs")
+        ].forEach(function (b) { if (b) meta.appendChild(b); });
+      }
+      main.appendChild(meta);
+      row.appendChild(main);
+      if (r.status !== "running") {
+        var rm = U ? U.IconButton({ icon: "x", label: "Remove from the queue", onClick: function () { PQ.removeRow(q, r.id); savePublishQueue(); renderPublishQueue(); } }) : h("button", null, "x");
+        row.appendChild(rm);
+      }
+      list.appendChild(row);
+    });
+    scroller.appendChild(list);
+    renderPublishHistory(host);
+  }
+  // Release history (Epic 6): the append-only whole-family export log, newest first, each release
+  // expandable to its per-document entries (format / variant / version). Provenance only -- it never
+  // re-exports or mutates a package.
+  // uio-P-C03 (PUB-10): it answers "what did we ship?", so it OWNS the empty half of the pane
+  // instead of hiding collapsed beneath the queue. Open by default (the mirror image of the Source
+  // stage's History, which is demoted for the opposite reason), one row per release stating count /
+  // preset / destination / outcome, and it states its own empty state rather than vanishing.
+  function renderPublishHistory(host) {
+    var RH = window.ReleaseHistory, U = window.VersoUI; if (!RH) return;
+    var releases = RH.list(releaseHistory());
+    var body = panelSection(host, "Release history", { collapsible: true, defaultOpen: true, divider: true });
+    body.parentNode && body.parentNode.classList && body.parentNode.classList.add("publish-history");
+    body.appendChild(h("div", "publish-history__note", "Append-only. Every completed run is recorded here; nothing here re-exports."));
+    if (!releases.length) {
+      body.appendChild(h("div", "publish-empty", "Nothing published yet — queue a document above and press Publish to start the record."));
+      return;
+    }
+    releases.forEach(function (rel) {
+      var s = RH.releaseSummary(rel);
+      var det = h("details", "publish-release");
+      var sum = h("summary", "publish-release__sum");
+      sum.appendChild(h("span", "publish-release__when", formatRelativeTime(rel.createdAt, Date.now())));
+      sum.appendChild(h("span", "publish-release__count", s.docLabel));
+      if (s.presetLabel) sum.appendChild(h("span", "publish-release__preset", s.presetLabel));
+      if (s.destinationLabel) sum.appendChild(h("span", "publish-release__dest", s.destinationLabel));
+      // canonical DS Badge, quiet tone — one per row, so a column of solid fills would shout.
+      var pill = U && U.Badge ? U.Badge({ tone: s.ok ? "success" : "danger", quiet: true, children: s.outcome })
+        : h("span", null, s.outcome);
+      pill.classList.add("publish-release__outcome");
+      sum.appendChild(pill);
+      det.appendChild(sum);
+      var relBody = h("div", "publish-release__body");
+      (rel.entries || []).forEach(function (en) {
+        var row = h("div", "publish-release__entry" + (en.status === "error" ? " is-failed" : ""));
+        row.appendChild(h("span", "publish-release__entry-title", en.title));
+        var tags = [en.exportFormat, en.variant, en.version, en.preset].filter(Boolean).join(" · ");
+        if (tags) row.appendChild(h("span", "publish-release__entry-tags", tags));
+        if (en.status === "error") row.appendChild(h("span", "publish-release__entry-tags", "failed"));
+        else if (en.destination) row.appendChild(h("span", "publish-release__entry-tags", en.destination));
+        relBody.appendChild(row);
+      });
+      det.appendChild(relBody);
+      body.appendChild(det);
+    });
+  }
+  function publishStatusLabel(r) {
+    if (r.status === "running") return "Publishing…";
+    if (r.status === "done") return "Done" + (r.result && r.result.path ? " · " + r.result.path : "");
+    if (r.status === "error") return "Failed" + (r.result && r.result.path ? " · " + r.result.path : "");
+    return "Pending";
+  }
+  // The preset menu on a queue row (T2): pick any preset (built-in or custom) for this row, save the
+  // current one under a new name, or rename/delete a custom preset. Picking also records the choice as
+  // the document's last-used preset so a re-queue is zero-config.
+  function openPublishPresetMenu(rowId, x, y) {
+    var PQ = window.PublishQueue, PP = window.PublishPresets; if (!PQ || !PP) return;
+    var q = publishQueue(), store = publishPresets();
+    var row = PQ.rowById(q, rowId); if (!row) return;
+    var items = [{ head: "Output preset" }];
+    PP.allPresets(store).forEach(function (p) {
+      items.push({ label: p.name, active: (row.preset || "master") === p.id, onClick: function () {
+        row.preset = p.id; PP.setLastForDoc(store, row.docId, p.id);
+        savePublishQueue(); savePublishPresets(); renderPublishQueue();
+      } });
+    });
+    items.push({ sep: true });
+    items.push({ label: "Save current as new preset…", onClick: function () {
+      promptPublishPresetName("Save output preset", PP.presetName(store, row.preset || "master") + " copy", function (name) {
+        var np = PP.saveCustom(store, name, PP.optionsFor(store, row.preset || "master"));
+        if (np) { row.preset = np.id; PP.setLastForDoc(store, row.docId, np.id); savePublishQueue(); savePublishPresets(); renderPublishQueue(); }
+      });
+    } });
+    if (!PP.isBuiltin(row.preset || "master")) {
+      items.push({ label: "Rename preset…", onClick: function () {
+        promptPublishPresetName("Rename preset", PP.presetName(store, row.preset), function (name) {
+          PP.renameCustom(store, row.preset, name); savePublishPresets(); renderPublishQueue();
+        });
+      } });
+      items.push({ label: "Delete preset", danger: true, onClick: function () {
+        PP.deleteCustom(store, row.preset); row.preset = "master";
+        savePublishPresets(); savePublishQueue(); renderPublishQueue();
+      } });
+    }
+    showContextMenu(x, y, items);
+  }
+  // T3: the destination popover. It is the row's "where does this land, and what is it called"
+  // surface — one path row PER OUTPUT (flagship + each variant), each independently pickable and
+  // independently remembered, each showing the filename it will write. It also carries the one
+  // setting that changes those filenames: the deliberate re-cut.
+  //
+  // Why a popover rather than an expanded row: the spine puts a few settings for the thing you
+  // clicked in a popover anchored to it, and keeps the collapsed row's name in front of the author
+  // instead of trading it for a column of folder paths.
+  function openPublishDestPopover(anchor, rowId) {
+    var PQ = window.PublishQueue, PA = window.PublishPaths, SX = window.SCORMExport, U = window.VersoUI;
+    if (!PQ || !PA) return;
+    var q = publishQueue();
+    var row = PQ.rowById(q, rowId); if (!row) return;
+    openChromePop(anchor, function (pop) {
+      pop.appendChild(h("div", "chrome-pop__title", "Publish destination"));
+      var rootLbl = PA.rootLabel(publishPaths(), publishPathCtx(row, null).productId);
+      var note = h("div", "chrome-pop__note", rootLbl
+        ? "Outputs inherit the Product folder “" + rootLbl + "” and nest by document and variant. Pick a folder below to override one."
+        : "No Product folder is set, so these outputs download. Pick a folder below, or set a Product folder once in the pane header.");
+      pop.appendChild(note);
+      publishRowOutputs(row).forEach(function (v) {
+        var dest = PA.resolve(publishPaths(), publishPathCtx(row, v));
+        var opts = publishOptionsForRow(row, v);
+        var line = h("div", "publish-destrow");
+        var head = h("div", "publish-destrow__head");
+        head.appendChild(h("span", "publish-destrow__name", v ? String(v) : "Flagship"));
+        var pathEl = h("span", "publish-destrow__path" + (dest.inherited ? " is-inherited" : ""), dest.chip);
+        pathEl.title = dest.hint;
+        head.appendChild(pathEl);
+        line.appendChild(head);
+        var fn = publishRowFilename(SX && SX.packageName, opts);
+        if (fn) line.appendChild(h("div", "publish-destrow__file", fn));
+        var acts = h("div", "publish-destrow__acts");
+        var pickLabel = dest.kind === "row" ? "Change folder" : "Choose folder";
+        var pick = U ? U.Button({ variant: "secondary", label: pickLabel, onClick: function () {
+          pickPublishDir(PA.rowHandleKey(dest.key)).then(function (name) {
+            if (!name) return;
+            PA.setRowPath(publishPaths(), dest.key, name); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          });
+        } }) : h("button", null, pickLabel);
+        acts.appendChild(pick);
+        if (dest.kind === "row") {
+          var rst = U ? U.Button({ variant: "secondary", label: "Reset", onClick: function () {
+            forgetPublishDir(PA.rowHandleKey(dest.key));
+            PA.clearRowPath(publishPaths(), dest.key); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          } }) : h("button", null, "Reset");
+          // The spine's inheritance tail: Reset says, in words, what it puts the row back to.
+          rst.title = rootLbl ? "Go back to inheriting the Product folder “" + rootLbl + "”." : "Go back to downloading this output.";
+          acts.appendChild(rst);
+        }
+        line.appendChild(acts);
+        pop.appendChild(line);
+      });
+      // Q2: never a silent overwrite. Off (the default) steps to a new version every run; on reuses
+      // the last one, which is the only way to write over a package on purpose.
+      var sw = U && U.SwitchRow ? U.SwitchRow({
+        label: "Replace current version",
+        description: row.replaceVersion ? "Overwrites the last package instead of adding a new version." : "Off: every run writes a new incremented version.",
+        checked: !!row.replaceVersion,
+        onChange: function (on) {
+          row.replaceVersion = !!on; savePublishQueue();
+          closeChromePop(); renderPublishQueue();
+        }
+      }) : null;
+      if (sw) { sw.classList.add("publish-destrow__replace"); pop.appendChild(sw); }
+    }, { cls: "chrome-pop--publish-dest" });
+  }
+  // The Product root folder, set once for the whole family (T3, Q1). It lives in the pane head rather
+  // than on a row because it is a Product-scoped setting that every row inherits — putting it on a row
+  // would imply it belonged to that row.
+  function publishRootChip() {
+    var PA = window.PublishPaths, U = window.VersoUI; if (!PA) return null;
+    var pid = publishRootScope();
+    if (pid === null) {
+      // Several Products are queued. Each keeps its own folder, so there is nothing here to set —
+      // and a control that would write one Product's folder onto another's rows would be a trap.
+      var span = h("span", "publish-chip publish-chip--root publish-chip--static", "Folder · per Product");
+      span.title = "This queue spans several Products, and each one has its own publish folder. Pick a Product in the rail to set its folder.";
+      return span;
+    }
+    var lbl = PA.rootLabel(publishPaths(), pid);
+    var chip = h("button", "publish-chip publish-chip--root", lbl ? "Folder · " + lbl : "Set publish folder");
+    chip.type = "button";
+    chip.title = lbl
+      ? "Every queued output publishes under “" + lbl + "”, nested by document and variant, unless it has its own folder."
+      : "Pick one folder for this Product and every queued output publishes under it. Until then, packages download.";
+    chip.addEventListener("click", function () {
+      openChromePop(chip, function (pop) {
+        pop.appendChild(h("div", "chrome-pop__title", "Product publish folder"));
+        pop.appendChild(h("div", "chrome-pop__note", lbl
+          ? "Rows inherit this folder and nest into Product / document-variant. A row with its own folder ignores it."
+          : "One pick covers the whole queue. Without it every package downloads instead."));
+        var pick = U ? U.Button({ variant: "primary", full: true, label: lbl ? "Change folder" : "Choose folder", onClick: function () {
+          pickPublishDir(PA.rootHandleKey(pid)).then(function (name) {
+            if (!name) return;
+            PA.setRoot(publishPaths(), pid, name); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          });
+        } }) : h("button", null, "Choose folder");
+        pop.appendChild(pick);
+        if (lbl) {
+          var clr = U ? U.Button({ variant: "secondary", full: true, label: "Clear folder", onClick: function () {
+            forgetPublishDir(PA.rootHandleKey(pid));
+            PA.clearRoot(publishPaths(), pid); savePublishPaths();
+            closeChromePop(); renderPublishQueue();
+          } }) : h("button", null, "Clear folder");
+          clr.title = "Rows without their own folder go back to downloading.";
+          pop.appendChild(clr);
+        }
+        if (!window.showDirectoryPicker) pop.appendChild(h("div", "chrome-pop__note", "This browser can't save straight to a folder, so packages download."));
+      }, { cls: "chrome-pop--publish-dest", align: "right" });
+    });
+    return chip;
+  }
+  // A minimal DS name modal (no raw prompt()): a single TextField + Save/Cancel. Reused for save +
+  // rename of an output preset. onOk receives the trimmed name (never fires on a blank name).
+  function promptPublishPresetName(title, initial, onOk) {
+    var UI = window.VersoUI; if (!UI || !UI.Modal) return;
+    var field = UI.TextField({ value: initial || "" });
+    var inputEl = field.input || (field.querySelector && field.querySelector("input,textarea"));
+    var body = h("div"); body.appendChild(field);
+    var modal;
+    function commit() {
+      var val = (inputEl && inputEl.value != null ? inputEl.value : "").trim();
+      if (!val) return;
+      if (modal && modal.close) modal.close();
+      onOk(val);
+    }
+    var footer = h("div");
+    footer.appendChild(UI.Button({ variant: "secondary", label: "Cancel", onClick: function () { if (modal && modal.close) modal.close(); } })); // spine-ok: one-decision prompt modal (single field)
+    footer.appendChild(UI.Button({ variant: "primary", label: "Save", onClick: commit })); // spine-ok: one-decision prompt modal (single field)
+    modal = UI.Modal({ title: title, children: body, footer: footer });
+    document.body.appendChild(modal);
+    if (inputEl) { setTimeout(function () { inputEl.focus(); inputEl.select && inputEl.select(); }, 0); inputEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); commit(); } }); }
+  }
+  // Download a built package — the fallback whenever no folder is set, the browser can't write to
+  // one, or a remembered folder's permission has lapsed. A publish never fails for want of a folder.
+  function downloadPublishPackage(pkg) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(pkg.blob); a.download = pkg.name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    return { to: "download", path: pkg.name };
+  }
+  // T3: write one built package to its resolved destination. An override writes straight into the
+  // picked folder; an inherited root nests into `Product/<doc-variant>/` first. `create: true` on the
+  // file handle is what makes "replace current version" an overwrite — with the flag off the filename
+  // has already stepped, so there is nothing to overwrite.
+  function deliverPublishPackage(row, variant, pkg) {
+    var PA = window.PublishPaths;
+    var dest = PA ? publishResolveDest(row, variant) : null;
+    if (!dest || dest.kind === "download") return Promise.resolve(downloadPublishPackage(pkg));
+    return publishDirHandle(dest.handleKey).then(function (root) {
+      if (!root) return downloadPublishPackage(pkg);
+      return publishEnsureDir(root, dest.segments)
+        .then(function (dir) { return dir.getFileHandle(pkg.name, { create: true }); })
+        .then(function (fh) { return fh.createWritable(); })
+        .then(function (w) { return Promise.resolve(w.write(pkg.blob)).then(function () { return w.close(); }); })
+        .then(function () { return { to: "folder", path: dest.chip + pkg.name }; });
+    }).catch(function (e) {
+      console.warn("[publish] folder write failed, downloading instead: " + pkg.name, e);
+      return downloadPublishPackage(pkg);
+    });
+  }
+  // A row's outcome after all of its outputs have run. One output states its own result; several
+  // state the count and where they went, because "Done · <one filename>" would under-report a row
+  // that shipped three packages.
+  function publishRowResult(results) {
+    var rs = (results || []).filter(Boolean);
+    if (!rs.length) return { to: "error", path: "nothing to publish" };
+    if (rs.length === 1) return rs[0];
+    var toFolder = rs.filter(function (r) { return r.to === "folder"; }).length;
+    return { to: toFolder === rs.length ? "folder" : (toFolder ? "mixed" : "download"),
+             path: rs.length + " packages" + (toFolder ? " · " + rs[rs.length - 1].path.replace(/[^/]+$/, "") : "") };
+  }
+  var __publishRunning = false;
+  // Run every PENDING row sequentially: switch to that doc so buildPackage reads it, build a SCORM
+  // package with the default options, deliver (download), and record the result. The active doc is
+  // restored at the end. Done rows stay (greyed) with their result; the queue is not auto-emptied.
+  function runPublishQueue() {
+    var PQ = window.PublishQueue, SX = window.SCORMExport; if (!PQ || !SX) return;
+    if (location.protocol === "file:") { window.alert("Publish needs the http:// origin so it can bundle fonts, course.css and interactions.\n\nRun ./serve.command and open http://localhost:8123, then Publish again."); return; }
+    var q = publishQueue();
+    var pend = PQ.pendingRows(q);
+    if (!pend.length || __publishRunning) return;
+    __publishRunning = true;
+    var originalId = activeDocId, i = 0;
+    var runEntries = []; // whole-family release record: one entry per successfully-published row this run
+    renderPublishQueue();
+    function finish() {
+      __publishRunning = false;
+      if (activeDocId !== originalId && registry[originalId]) switchDoc(originalId);
+      // Write ONE immutable release record for everything that published together this run (Epic 6).
+      if (runEntries.length && window.ReleaseHistory) {
+        window.ReleaseHistory.append(releaseHistory(), { productId: getActiveProduct(), createdAt: Date.now(), entries: runEntries });
+        saveReleaseHistory();
+      }
+      savePublishQueue(); renderPublishQueue();
+    }
+    function step() {
+      if (i >= pend.length) { finish(); return; }
+      var row = pend[i++];
+      if (!registry[row.docId]) {
+        var gone = { to: "error", path: "document not found" };
+        runEntries.push(releaseEntryForRow(row, gone));
+        PQ.setStatus(q, row.id, "error", gone); savePublishQueue(); renderPublishQueue(); step(); return;
+      }
+      PQ.setStatus(q, row.id, "running"); renderPublishQueue();
+      var run = function () {
+        // T3: a row is several OUTPUTS — flagship plus each variant — built and delivered in sequence,
+        // each to its own resolved folder and under its own version. The version is recorded only
+        // after the package actually lands, so a failed write never burns a version number.
+        var PA = window.PublishPaths;
+        var outs = publishRowOutputs(row), results = [];
+        outs.reduce(function (chain, variant) {
+          return chain.then(function () {
+            var opts = publishOptionsForRow(row, variant);
+            return Promise.resolve(SX.buildPackage(opts))
+              .then(function (pkg) { return deliverPublishPackage(row, variant, pkg); })
+              .then(function (res) {
+                results.push(res);
+                // Capture the release entry BEFORE the baseline snapshot, so groundTruthVersions
+                // reflects the source versions this package was actually built against.
+                runEntries.push(releaseEntryForRow(row, res, variant));
+                if (PA && opts.version) { PA.recordVersion(publishPaths(), PA.pathKey(row.docId, opts.variant), opts.version); savePublishPaths(); }
+              });
+          });
+        }, Promise.resolve())
+          .then(function () {
+            PQ.setStatus(q, row.id, "done", publishRowResult(results));
+            // staleness-tracking: a finished export IS this document's new "last published" baseline.
+            snapshotGroundTruthBaseline(registry[row.docId]); saveRegistry(registry);
+          })
+          .catch(function (e) {
+            // uio-P-C03: a failed row is part of the release record too — a history row that omits
+            // its failures would report a clean "Published" for a run that partly didn't.
+            var err = { to: "error", path: String((e && e.message) || e) };
+            runEntries.push(releaseEntryForRow(row, err));
+            PQ.setStatus(q, row.id, "error", err);
+          })
+          .then(function () { savePublishQueue(); renderPublishQueue(); step(); });
+      };
+      if (activeDocId !== row.docId) { switchDoc(row.docId); requestAnimationFrame(run); } else run();
+    }
+    step();
+  }
+  // Creates a Product container and persists it; the sole write path other Product Rail
+  // tickets (new-product-flow, promote-to-product) build their UI on top of.
+  function createProduct(name) {
+    var id = "prod-" + Math.random().toString(36).slice(2, 8);
+    while (window.ProductsStore[id]) id = "prod-" + Math.random().toString(36).slice(2, 8);
+    var prod = { id: id, name: (String(name || "").trim() || "Untitled product"), createdAt: Date.now() };
+    window.ProductsStore[id] = prod;
+    saveProducts();
+    return prod;
+  }
+  // Product Rail (source-stage-variant-columns): the hardware-variant axis a Product's
+  // Source topics carry, declared once per Product (not per-document -- topics are
+  // Product-scoped library content). No declaring UI exists yet; this is a fixture/
+  // future-authoring write path, same precedent as createProduct/createTopic.
+  function setProductVariants(productId, variants) {
+    var p = productId && window.ProductsStore[productId]; if (!p) return null;
+    p.variants = (variants || []).slice();
+    saveProducts();
+    return p;
+  }
+  // Product/source lifecycle (test + real authoring cleanup): unlink a course, delete a Product's
+  // source document, or delete the Product outright. Destructive ops are confirm-gated at the UI.
+  // Unlink the OPEN (or given) course from its Product -- clears only doc.meta.productId/stage; the
+  // course + its content are untouched.
+  function unlinkDocFromProduct(d) {
+    d = d || doc; if (!d || !d.meta || !d.meta.productId) return false;
+    pushHistory();
+    delete d.meta.productId; delete d.meta.stage;
+    saveRegistry(registry);
+    return true;
+  }
+  // Clear the Product tag from EVERY course in the registry pointing at pid. Returns the count.
+  function unlinkAllCoursesFromProduct(pid) {
+    var n = 0;
+    Object.keys(registry).forEach(function (id) {
+      var d = registry[id];
+      if (d && d.meta && d.meta.productId === pid) { delete d.meta.productId; delete d.meta.stage; n++; }
+    });
+    if (n) saveRegistry(registry);
+    return n;
+  }
+  // Delete a Product's WHOLE source document: its reserved master + every topic tagged to it
+  // (archived or loose). Clears product.groundTruthId. The Product entry itself stays.
+  function deleteProductSource(pid) {
+    var product = window.ProductsStore[pid]; if (!product) return 0;
+    var comps = libComponents(), n = 0;
+    Object.keys(comps).forEach(function (k) {
+      var c = comps[k];
+      if (c && c.kind === "topic" && c.productId === pid) { delete comps[k]; n++; }
+    });
+    if (product.groundTruthId && comps[product.groundTruthId]) { delete comps[product.groundTruthId]; n++; }
+    delete product.groundTruthId;
+    saveLibrary(); saveProducts();
+    return n;
+  }
+  // Delete a Product outright: its source document + unlink all its linked courses + remove the entry.
+  function deleteProduct(pid) {
+    if (!window.ProductsStore[pid]) return false;
+    deleteProductSource(pid);
+    unlinkAllCoursesFromProduct(pid);
+    delete window.ProductsStore[pid];
+    saveProducts();
+    return true;
+  }
+  // Foundational tagging-layer API (Product Rail #1) — the surface every downstream
+  // Product Rail ticket (bottom-rail nav, +New Product, Promote to Product, browser
+  // filters) builds its UI on top of. Exposed the same way __modals exposes confirmModal.
+  window.__productRail = { createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants,
+    unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct };
+  // SPEC 7 matrix doc-type model -- the pure surface the Editor Window Rework tickets
+  // (creation flow, cell switcher, capability inspector, static fallback, file picker
+  // grouping) consume so the {geo, interactive} logic lives in exactly one place.
+  window.__docType = { docCell: docCell, tagDocCell: tagDocCell, presetToCell: presetToCell,
+    cellToPreset: cellToPreset, condToolsFor: condToolsFor, isValidGeo: isValidGeo,
+    isInteractiveBlockType: isInteractiveBlockType, paletteAllowsType: paletteAllowsType,
+    PRESETS: DOCTYPE_PRESETS, GEOS: DOCTYPE_GEOS };
+  // "Promote to Product" (save menu action): tags the ACTIVE document onto a new or
+  // existing Product + stage. Writes ONLY doc.meta.productId/stage -- no content
+  // extraction, splitting, or Ground Truth generation, and never a bulk/batch action
+  // (this modal always operates on `doc`, the one open course). Reuses the modalField +
+  // dsSelect pattern Find & Replace's variant picker already established, not a new
+  // control -- see modalField(box, "Apply to") at the Find & Replace call site.
+  var PRODUCT_STAGE_OPTS = [["eLearning", "elearning"], ["Presentations", "presentations"], ["Print docs", "printDocs"]];
+  // targetDoc defaults to the active doc (top-bar / header entry points); the file picker's per-card
+  // menu passes a specific registry doc so any course can be promoted without opening it first.
+  function promoteToProductModal(targetDoc) {
+    var td = targetDoc || doc;
+    if (!td) return;
+    var NEW_KEY = "__new__";
+    var products = window.ProductsStore || {};
+    var productKeys = Object.keys(products);
+    var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
+    var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
+    var stage = (td.meta && td.meta.stage) || "elearning";
+    var newNameVal = "";
+    var shell = dsModalShell({
+      title: "Promote to Product",
+      subtitle: "Tags this course onto a Product + format. Only adds meta — the course's content is never touched.",
+      primaryLabel: "Promote",
+      onPrimary: function () {
+        var pid = chosen;
+        if (chosen === NEW_KEY) {
+          var name = (newNameVal || "").trim();
+          if (!name) return;
+          pid = createProduct(name).id;
+        }
+        pushHistory();
+        tagDocProductStage(td, pid, stage);
+        // spec 2d bridge: carry the course's declared variants onto the Product (union) so the
+        // Product's variant workflow (import-as-variant, columns) is reachable -- both sides store
+        // variants as the same array of name strings, so this is a straight merge. Reads the CARD's
+        // doc (td), not the open one, since Promote is a per-card menu action.
+        if (td.variants && td.variants.length) {
+          var pv = (window.ProductsStore[pid] && window.ProductsStore[pid].variants) || [];
+          var merged = pv.slice();
+          td.variants.forEach(function (v) { if (merged.indexOf(v) === -1) merged.push(v); });
+          setProductVariants(pid, merged);
+        }
+        saveRegistry(registry);
+        shell.modal.close();
+        mountProductPicker(); // refresh the top-bar product context so the new/changed Product shows
+      }
+    });
+    var box = shell.body;
+    var pRow = modalField(box, "Product");
+    var pSel = dsSelect(pOpts, chosen, function (v) { chosen = v; newNameRow.style.display = (v === NEW_KEY) ? "" : "none"; });
+    pSel.classList.add("modal-field__control");
+    pRow.appendChild(pSel);
+    var newNameRow = h("div"); newNameRow.style.display = (chosen === NEW_KEY) ? "" : "none";
+    var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
+    nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
+    box.appendChild(newNameRow);
+    var sRow = modalField(box, "Format");
+    var sSel = dsSelect(PRODUCT_STAGE_OPTS, stage, function (v) { stage = v; });
+    sSel.classList.add("modal-field__control");
+    sRow.appendChild(sSel);
+  }
   function isLibraryComponent(key) { return !!libComponents()[key]; }
+
+  // ---- Product Rail: tag vocabulary + reserved owning-Product tag ---------------
+  // A master's tags: [{value, reserved}]. At most one entry is reserved:true -- the
+  // "owning Product" tag, stamped ONCE at promotion time from the active doc's Product
+  // context (birthplace, not ownership -- a master promoted from an untagged doc simply
+  // gets no reserved tag, nothing to attribute). Every other entry is a freeform
+  // technology tag, global across Products (never scoped per Product). Pure; callers own
+  // persistence (saveLibrary()) after mutating the master object passed in.
+  /* @tag-vocab-start */
+  function ownerProductTagValue(productId) { return productId ? ("product:" + productId) : null; }
+  function stampOwnerProductTag(master, productId) {
+    if (!master) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (!productId) return master; // no Product context at promotion time -- nothing to attribute
+    if (master.tags.some(function (t) { return t && t.reserved; })) return master; // stamped once, never re-stamped
+    master.tags.push({ value: ownerProductTagValue(productId), reserved: true });
+    return master;
+  }
+  function addTechnologyTag(master, value) {
+    if (!master) return master;
+    var v = String(value || "").trim(); if (!v) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (master.tags.some(function (t) { return t && t.value === v; })) return master; // no dupes
+    master.tags.push({ value: v, reserved: false });
+    return master;
+  }
+  // Ordinary tag-editing can never remove the reserved tag -- matches on a non-reserved value only.
+  function removeMasterTag(master, value) {
+    if (!master || !Array.isArray(master.tags)) return master;
+    master.tags = master.tags.filter(function (t) { return !(t && t.value === value && !t.reserved); });
+    return master;
+  }
+  // Autocomplete-first matching against the global technology-tag vocabulary. "propose
+  // new" is the caller's fallback when exact is false -- never the default typing path.
+  function matchTagVocabulary(vocab, query) {
+    var q = String(query || "").trim().toLowerCase();
+    if (!q) return { matches: [], exact: false };
+    var matches = (vocab || []).filter(function (t) { return t && t.toLowerCase().indexOf(q) !== -1; });
+    var exact = (vocab || []).some(function (t) { return t && t.toLowerCase() === q; });
+    return { matches: matches, exact: exact };
+  }
+  /* @tag-vocab-end */
+  // The global technology-tag vocabulary: every non-reserved tag value already used by
+  // any master in the shared library (not scoped per Product, per the ticket's spec).
+  function collectTagVocabulary() {
+    var seen = {}, out = [];
+    var comps = libComponents();
+    Object.keys(comps).forEach(function (k) {
+      ((comps[k] && comps[k].tags) || []).forEach(function (t) {
+        if (t && !t.reserved && t.value && !seen[t.value]) { seen[t.value] = true; out.push(t.value); }
+      });
+    });
+    return out;
+  }
   // doc override -> shared library -> built-in. Shared by the editor + render.
   function resolveComponentDef(key) {
     return (doc.components && doc.components[key]) || libComponents()[key] || (window.COMPONENTS || {})[key];
@@ -1160,19 +3068,60 @@
   // is the DS IconButton (Lucide plus). Re-skin only — the switch/close/new-doc
   // handlers are unchanged. A legacy chip fallback keeps the bar working if the
   // control library is ever absent.
+  // SPEC 7 (product-filtered tabs): the global product picker scopes the visible tabs. A tab
+  // shows when its doc matches the active product ("" = All products -> every open tab). An
+  // untagged doc has no productId, so it only ever shows under All products -- the same rule
+  // Product Rail uses everywhere else (an untagged doc is never silently attributed to a
+  // filter). PURE (no DOM) so tests/run.js exercises the predicate headlessly.
+  /* @pure-tabscope-start */
+  function visibleTabIds(openIds, reg, activeProduct) {
+    var pid = activeProduct || "";
+    return (openIds || []).filter(function (id) {
+      var d = reg && reg[id];
+      if (!d) return false;
+      if (!pid) return true; // All products
+      return !!(d.meta && d.meta.productId === pid);
+    });
+  }
+  /* @pure-tabscope-end */
+
+  // tab-doctype-glyph: map a document's geometry cell -> {glyph, label} for the tab's leading
+  // doc-type marker. Keyed on geo (the doc-type spine the file-picker already groups by), so the
+  // tab glyph and the browser grouping read as one vocabulary.
+  var TAB_DOCTYPE_GLYPH = {
+    reflow: { icon: "layers", label: "Course" },
+    frame: { icon: "monitor", label: "Presentation" },
+    paged: { icon: "file-text", label: "Paged / print document" }
+  };
   function renderTabs() {
     var container = document.getElementById("toolbar-tabs");
     if (!container) return;
     container.innerHTML = "";
     var U = window.VersoUI;
-    openDocIds.forEach(function (id) {
+    var activeProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var shown = visibleTabIds(openDocIds, registry, activeProduct);
+    shown.forEach(function (id) {
       var d = registry[id];
       if (!d) return;
       var title = d.meta.title || id;
+      // Per-Product colour dot, keyed on the stable productId (not the mutable name) so the
+      // colour never shifts when a product is renamed. Untagged docs get no dot.
+      var pid = d.meta && d.meta.productId;
+      var dotColour = pid ? colourForName(pid) : null;
+      // Per-Product dot tooltip so its meaning is legible (it's a stable Product marker, NOT a
+      // changed-since-export cue).
+      var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
+      var dotTitle = pid ? ("Product: " + ((prod && prod.name) || pid)) : null;
+      var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { geo: "reflow" };
+      var dt = TAB_DOCTYPE_GLYPH[cell.geo] || TAB_DOCTYPE_GLYPH.reflow;
       if (U && U.DocumentTab) {
         container.appendChild(U.DocumentTab({
           label: title,
           active: id === activeDocId,
+          dot: dotColour,
+          dotTitle: dotTitle,
+          icon: dt.icon,
+          typeLabel: dt.label,
           onSelect: function () { switchDoc(id); },
           onClose: function () { closeTab(id); }
         }));
@@ -1244,6 +3193,17 @@
     renderTabs();
     renderVariantSwitch(); // rebuild the top-bar variant pill for the NEW doc (else it shows the old doc's variants / goes blank)
     renderVersionSwitch(); // #206: same for the software-version switcher
+    syncCellChip(); // SPEC 7: reflect the new doc's matrix cell in the header chip
+  }
+
+  // SPEC 7: after the product picker changes, re-scope the tab strip. If the active doc fell
+  // out of scope and other tabs are visible, activate the first visible one (switchDoc rebuilds
+  // the strip + canvas). If NOTHING is in scope, leave the active doc as-is and just redraw the
+  // (now empty-but-for-＋) strip -- the file-picker is how the author opens one in that product.
+  function reconcileActiveTabToScope() {
+    var shown = visibleTabIds(openDocIds, registry, (typeof getActiveProduct === "function") ? getActiveProduct() : "");
+    if (shown.length && shown.indexOf(activeDocId) === -1) { switchDoc(shown[0]); return; }
+    renderTabs();
   }
 
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
@@ -1291,6 +3251,15 @@
     meta.appendChild(h("span", "vbrowser-card__sep", "·"));
     meta.appendChild(h("span", "vbrowser-card__when", formatRelativeTime(d.meta && d.meta.updatedAt, Date.now())));
     main.appendChild(titleEl); main.appendChild(meta);
+    // SPEC 7: a badge row — Product (if tagged), interactive/static, and an open-state mark.
+    var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { interactive: true };
+    var pid = d.meta && d.meta.productId;
+    var pname = (pid && window.ProductsStore && window.ProductsStore[pid]) ? window.ProductsStore[pid].name : null;
+    var badges = h("div", "vbrowser-card__badges");
+    if (pname) badges.appendChild(h("span", "vbrowser-card__badge", pname));
+    badges.appendChild(h("span", "vbrowser-card__badge", cell.interactive ? "Interactive" : "Static"));
+    if (id === activeDocId || openDocIds.indexOf(id) !== -1) badges.appendChild(h("span", "vbrowser-card__badge vbrowser-card__badge--open", "Open"));
+    main.appendChild(badges);
     var menuBtn = iconBtn("more-horizontal", "Course actions"); menuBtn.classList.add("vbrowser-card__menu");
     menuBtn.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -1365,16 +3334,29 @@
       }, { danger: true, okLabel: "Delete" });
   }
   function showCourseMenu(x, y, id) {
-    if (!registry[id]) return;
-    showContextMenu(x, y, [
+    var d = registry[id]; if (!d) return;
+    // side-rail-cleanup slice 2: Promote / Remove-from-Product folded in from the retired save-menu, so
+    // the file picker is the one home for file actions. Remove only shows when the course is tagged.
+    var linkedPid = d.meta && d.meta.productId;
+    var linked = !!(linkedPid && window.ProductsStore && window.ProductsStore[linkedPid]);
+    var items = [
       { label: "Open", onClick: function () { openCourseFromBrowser(id); } },
       { label: "Duplicate", onClick: function () { duplicateCourse(id); } },
       { label: "Rename…", onClick: function () { renameCourse(id); } },
       { sep: true },
-      { label: "Export .verso", onClick: function () { exportVersoPackage(registry[id]); } },
-      { sep: true },
-      { label: "Delete", danger: true, onClick: function () { deleteCourse(id); } }
-    ]);
+      { label: "Promote to Product…", onClick: function () { promoteToProductModal(d); } }
+    ];
+    if (linked) {
+      items.push({ label: "Remove from Product", onClick: function () {
+        var pname = (window.ProductsStore[linkedPid].name) || "this Product";
+        confirmModal("Remove from Product?", "Unlinks “" + ((d.meta && d.meta.title) || id) + "” from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(d); mountProductPicker(); renderBrowserGrid(); }, { okLabel: "Remove", danger: true });
+      } });
+    }
+    items.push({ sep: true });
+    items.push({ label: "Export .verso", onClick: function () { exportVersoPackage(registry[id]); } });
+    items.push({ sep: true });
+    items.push({ label: "Delete", danger: true, onClick: function () { deleteCourse(id); } });
+    showContextMenu(x, y, items);
   }
 
   function buildBrowserEmpty() {
@@ -1405,14 +3387,53 @@
     cards.forEach(function (c) { thumbObserver.observe(c); });
   }
 
+  // SPEC 7 file-picker: the doc browser groups documents BY DOC TYPE (geometry cell), each group
+  // colour-coded. Grouping is pure (takes a geoOf resolver) so tests/run.js exercises it headlessly.
+  var BROWSER_GEO = {
+    reflow: { label: "Reflow", colour: "#0d99ff" },
+    frame:  { label: "Fixed frame", colour: "#9747ff" },
+    paged:  { label: "Paged", colour: "#14ae5c" }
+  };
+  /* @pure-browser-geo-start */
+  var BROWSER_GEO_ORDER = ["reflow", "frame", "paged"];
+  function groupDocIdsByGeo(ids, reg, geoOf) {
+    var by = { reflow: [], frame: [], paged: [] };
+    (ids || []).forEach(function (id) {
+      var d = reg && reg[id]; if (!d) return;
+      var geo = geoOf ? geoOf(d) : "reflow";
+      if (!by[geo]) geo = "reflow"; // unknown geo groups under reflow
+      by[geo].push(id);
+    });
+    return BROWSER_GEO_ORDER.filter(function (g) { return by[g].length; })
+      .map(function (g) { return { geo: g, ids: by[g] }; });
+  }
+  /* @pure-browser-geo-end */
   function renderBrowserGrid() {
     if (!browserUI) return;
     var grid = browserUI.grid; grid.innerHTML = "";
-    var ids = Object.keys(registry).filter(function (id) { return courseMatchesQuery(registry[id], browserQuery); });
+    // Respect the global product scope (like the tabs) + the search query.
+    var scope = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var ids = Object.keys(registry).filter(function (id) {
+      return courseMatchesQuery(registry[id], browserQuery) && docMatchesProductStage(registry[id], scope, null);
+    });
     ids.sort(function (x, y) { return recentsCompare(registry[x], registry[y]); });
     if (!ids.length) { grid.appendChild(buildBrowserEmpty()); return; }
-    var cards = ids.map(function (id) { var c = buildBrowserCard(id, registry[id]); grid.appendChild(c); return c; });
-    observeThumbs(cards);
+    var groups = groupDocIdsByGeo(ids, registry, function (d) {
+      return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d).geo : "reflow";
+    });
+    var allCards = [];
+    groups.forEach(function (grp) {
+      var gm = BROWSER_GEO[grp.geo] || BROWSER_GEO.reflow;
+      var head = h("div", "vbrowser__group");
+      var dot = h("span", "vbrowser__group-dot"); dot.style.background = gm.colour; head.appendChild(dot);
+      head.appendChild(h("span", "vbrowser__group-title", gm.label));
+      head.appendChild(h("span", "vbrowser__group-count", String(grp.ids.length)));
+      grid.appendChild(head);
+      var inner = h("div", "vbrowser__grid-inner");
+      grp.ids.forEach(function (id) { var c = buildBrowserCard(id, registry[id]); inner.appendChild(c); allCards.push(c); });
+      grid.appendChild(inner);
+    });
+    observeThumbs(allCards);
   }
 
   function ensureBrowser() {
@@ -1432,6 +3453,11 @@
       pickCourseFile(function (imported) { importDocToRegistry(imported); closeBrowser(); });
     });
     bar.appendChild(importBtn);
+    // new-product-empty-landing: create a Product straight from the browser header. newProductPrompt
+    // sets it as the active scope and re-opens this browser onto its (empty) grid.
+    var newProdBtn = h("button", "vbrowser__btn", "New Product");
+    newProdBtn.addEventListener("click", function () { newProductPrompt(); });
+    bar.appendChild(newProdBtn);
     var newBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "New course");
     newBtn.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
     bar.appendChild(newBtn);
@@ -1439,9 +3465,14 @@
     closeBtn.addEventListener("click", closeBrowser);
     bar.appendChild(closeBtn);
     var grid = h("div", "vbrowser__grid");
-    overlay.appendChild(bar); overlay.appendChild(grid);
+    // side-rail-cleanup slice 2: the "where are my files" store path, folded in from the retired
+    // save-menu, so the picker carries every file affordance the popover used to.
+    var foot = h("div", "vbrowser__foot");
+    foot.appendChild(h("span", "vbrowser__foot-label", "Files stored in"));
+    foot.appendChild(h("span", "vbrowser__foot-path", storeLocationText()));
+    overlay.appendChild(bar); overlay.appendChild(grid); overlay.appendChild(foot);
     document.body.appendChild(overlay);
-    browserUI = { overlay: overlay, grid: grid, input: input };
+    browserUI = { overlay: overlay, grid: grid, input: input, foot: foot };
     return browserUI;
   }
 
@@ -1469,20 +3500,12 @@
     });
   })();
 
-  // ---- #75 Save / recents menu (top-bar dropdown) ---------------------------
-  // A condensed version of the browser for quick access without leaving the
-  // editor: recent courses (mini snapshots), Save as a copy (duplicate into the
-  // library), Open (import .verso), and a read-only "where are my files" store
-  // path. Reuses the same recents/thumbnail/duplicate/import single-source paths.
-  var saveMenuEl = null;
-  function onSaveMenuOutside(e) {
-    if (saveMenuEl && !saveMenuEl.contains(e.target) && e.target.id !== "save-menu-btn") closeSaveMenu();
-  }
-  function closeSaveMenu() {
-    if (!saveMenuEl) return;
-    saveMenuEl.remove(); saveMenuEl = null;
-    document.removeEventListener("mousedown", onSaveMenuOutside, true);
-  }
+  // ---- File store location -------------------------------------------------
+  // side-rail-cleanup slice 2: the #75 rail save/recents popover is RETIRED. Its recents were a
+  // subset of the file picker's grid; its actions (Save-as-copy = Duplicate, Open = Import,
+  // Promote / Remove-from-Product, and this store path) now all live in the picker (ensureBrowser
+  // + showCourseMenu), so the picker is the one home for file management. storeLocationText survives
+  // -- the picker footer reads it for the "where are my files" line.
   function storeLocationText() {
     var backend = "browser";
     try { backend = localStorage.getItem(STORAGE_BACKEND_KEY) || "browser"; } catch (_) {}
@@ -1490,51 +3513,6 @@
       ? "~/Library/Application Support/Verso/store"
       : "This browser (localStorage + IndexedDB)";
   }
-  function openSaveMenu(anchor) {
-    closeSaveMenu();
-    var menu = h("div", "vsavemenu");
-    menu.appendChild(h("div", "vsavemenu__head", "Recent courses"));
-    var ids = Object.keys(registry).sort(function (a, b) { return recentsCompare(registry[a], registry[b]); }).slice(0, 6);
-    if (!ids.length) menu.appendChild(h("div", "vsavemenu__empty", "No courses yet"));
-    ids.forEach(function (id) {
-      var d = registry[id];
-      var row = h("div", "vsavemenu__row" + (id === activeDocId ? " is-active" : ""));
-      var thumb = renderCourseThumb(d); thumb.classList.add("vsavemenu__thumb");
-      var main = h("div", "vsavemenu__main");
-      var t = h("div", "vsavemenu__title", (d.meta && d.meta.title) || id); t.title = t.textContent;
-      main.appendChild(t); main.appendChild(h("div", "vsavemenu__code", (d.meta && d.meta.code) || id));
-      row.appendChild(thumb); row.appendChild(main);
-      row.appendChild(h("div", "vsavemenu__when", formatRelativeTime(d.meta && d.meta.updatedAt, Date.now())));
-      row.addEventListener("click", function () { closeSaveMenu(); openCourseFromBrowser(id); });
-      menu.appendChild(row);
-      thumb.__renderThumb(); // few rows -> render eagerly
-    });
-    menu.appendChild(h("div", "vsavemenu__sep"));
-    function action(label, fn) {
-      var a = h("div", "vsavemenu__action", label);
-      a.addEventListener("click", function () { closeSaveMenu(); fn(); });
-      menu.appendChild(a);
-    }
-    action("Save as a copy", function () { if (activeDocId) duplicateCourse(activeDocId); });
-    action("Open…", function () { pickCourseFile(function (imported) { importDocToRegistry(imported); }); });
-    menu.appendChild(h("div", "vsavemenu__sep"));
-    menu.appendChild(h("div", "vsavemenu__head", "Where are my files"));
-    menu.appendChild(h("div", "vsavemenu__path", storeLocationText()));
-    document.body.appendChild(menu);
-    var r = anchor.getBoundingClientRect();
-    menu.style.top = (r.bottom + 6) + "px";
-    menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + "px";
-    saveMenuEl = menu;
-    setTimeout(function () { document.addEventListener("mousedown", onSaveMenuOutside, true); }, 0);
-  }
-  function saveMenuIsOpen() { return !!saveMenuEl; }
-  (function wireSaveMenu() {
-    var b = document.getElementById("save-menu-btn");
-    if (b) b.addEventListener("click", function () { if (saveMenuEl) closeSaveMenu(); else openSaveMenu(b); });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && saveMenuIsOpen()) { e.preventDefault(); closeSaveMenu(); }
-    });
-  })();
 
   // ---- Shared "header & footer default for new courses" ---------------------
   // A machine-level default (localStorage, cross-project) captured from any course's
@@ -1586,7 +3564,11 @@
   }
   function clearHeaderFooterDefault() { try { localStorage.removeItem(HF_DEFAULT_KEY); } catch (e) {} }
 
-  function createBlankDoc(title, code) {
+  // SPEC 7: `opts` (optional) = { productId, geo, interactive } from the product-first create
+  // flow. When present, the new doc is stamped with its Product (doc.meta.productId) and its
+  // matrix cell (doc.meta.geo/interactive) at birth. Omitted -> an untagged doc = today's
+  // {reflow, interactive} default, so the old callers are unchanged.
+  function createBlankDoc(title, code, opts) {
     if (registry[code]) {
       alert("A course with code '" + code + "' already exists.");
       return;
@@ -1609,6 +3591,9 @@
         }
       ]
     };
+    opts = opts || {};
+    if (opts.productId) tagDocProductStage(newDoc, opts.productId, null);
+    if (opts.geo) tagDocCell(newDoc, opts.geo, opts.interactive); // preset {geo, interactive}
     registry[code] = newDoc;
     saveRegistry(registry);
     openDocIds.push(code);
@@ -1703,6 +3688,12 @@
     // dialog routes through the DS modal shell (VersoUI.Modal) — issue #19. modal
     // + box are assigned from the shell below.
     var modal, box, titleIn, codeIn;
+    // SPEC 7 product-first creation: the new doc is born in a Product (defaults to the current
+    // picker scope) and a matrix-cell preset (defaults to eLearning). Resolved to
+    // {geo, interactive} via the doc-type model at create time.
+    var DT = window.__docType;
+    var newDocProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+    var newDocPreset = "elearning";
     var btnImport = window.VersoUI.Button({ variant: "secondary", label: "Import…", onClick: function () {
       pickCourseFile(function (imported) { importDocToRegistry(imported); modal.remove(); });
     } });
@@ -1725,7 +3716,8 @@
         var title = titleIn.value.trim();
         var code = codeIn.value.trim();
         if (!title || !code) { alert("Title and Code are required."); return; }
-        createBlankDoc(title, code);
+        var cell = (DT && DT.presetToCell(newDocPreset)) || { geo: "reflow", interactive: true };
+        createBlankDoc(title, code, { productId: newDocProduct, geo: cell.geo, interactive: cell.interactive });
         modal.remove();
         // Slice 2: MANDATORY backup-folder setup — prompt the picker immediately (still
         // within this click gesture, required for the native/FSA folder pickers). If the
@@ -1739,7 +3731,7 @@
       return openDocIds.indexOf(id) === -1;
     });
     if (closedIds.length > 0) {
-      modalSection(box, "Open a saved course");
+      var openBody = modalSection(box, "Open a saved course");
       var list = h("div", "modal-list");
       closedIds.forEach(function (id) {
         var d = registry[id];
@@ -1769,10 +3761,27 @@
         item.appendChild(del);
         list.appendChild(item);
       });
-      box.appendChild(list);
+      openBody.appendChild(list);
     }
 
-    modalSection(box, "New course");
+    box = modalSection(box, "New course");
+    // Product (defaults to the current scope) -> preset (matrix cell) -> name, per SPEC 7.
+    var prodRow = modalField(box, "Product");
+    prodRow.appendChild(window.VersoUI.Select({
+      options: productSelectOptions(window.ProductsStore),
+      value: newDocProduct,
+      onChange: function (v) { newDocProduct = v || ""; }
+    }));
+    if (DT && window.VersoUI.ChoiceCards) {
+      modalField(box, "Start from a preset");
+      box.appendChild(window.VersoUI.ChoiceCards({
+        options: DT.PRESETS.map(function (p) {
+          return { value: p.key, title: p.name, desc: (p.geo.charAt(0).toUpperCase() + p.geo.slice(1)) + " · " + (p.interactive ? "interactive" : "static") };
+        }),
+        value: newDocPreset,
+        onChange: function (v) { newDocPreset = v; }
+      }));
+    }
     titleIn = modalText(box, "Course title", "", "e.g. My New Course");
     codeIn = modalText(box, "Course code", "", "e.g. DRO-NEW-101");
   }
@@ -1978,6 +3987,22 @@
     });
     return { courses: courses, instances: instances };
   }
+  // Product Rail (source-stage-info-panel): the detailed, per-usage sibling of
+  // libraryWhereUsed's counts -- one entry per referencing block, with enough to
+  // both label it (document title) and jump to it (docCode + blockId). Generic over
+  // any LibraryStore ref (topics included -- a topic is just a kind:"topic" master).
+  function libraryWhereUsedDetail(ref, registryObj) {
+    var entries = [];
+    Object.keys(registryObj || {}).forEach(function (code) {
+      var doc = registryObj[code];
+      walkBlocks(doc, function (b) {
+        if (b.type === "libraryInstance" && b.ref === ref) {
+          entries.push({ docCode: code, docTitle: (doc.meta && doc.meta.title) || code, blockId: b.id });
+        }
+      });
+    });
+    return entries;
+  }
   /* @where-used-end */
   window.__libraryWhereUsed = libraryWhereUsed; // test hook
   // Re-mint on duplicate: a cloned subtree must never reuse ids, or a copy's
@@ -2067,8 +4092,9 @@
   // pickers. getBlockPageIndexAndIndex only sees top-level blocks.
   function findPageOfBlock(block) {
     for (var pi = 0; pi < doc.pages.length; pi++) {
+      var pg = doc.pages[pi]; if (!pg) continue; // a stray null/malformed page entry must not abort every later page's lookup
       var hit = false;
-      walkPageBlocks(doc.pages[pi].blocks, function (b) { if (b === block) hit = true; });
+      walkPageBlocks(pg.blocks, function (b) { if (b === block) hit = true; });
       if (hit) return pi;
     }
     return -1;
@@ -2740,6 +4766,65 @@
     }
   }
 
+  // Pure swap of two adjacent columns' block arrays (+ colWidths, if custom and still
+  // matching the column count). i/i+1 must both be valid indices; the caller (the click
+  // handler below) guarantees that by construction (one button per adjacent pair).
+  /* @swap-columns-start */
+  function swapColumns(block, i) {
+    if (!block || !Array.isArray(block.columns)) return block;
+    var a = block.columns[i], b = block.columns[i + 1];
+    block.columns[i] = b; block.columns[i + 1] = a;
+    if (Array.isArray(block.colWidths) && block.colWidths.length === block.columns.length) {
+      var wa = block.colWidths[i], wb = block.colWidths[i + 1];
+      block.colWidths[i] = wb; block.colWidths[i + 1] = wa;
+    }
+    return block;
+  }
+  /* @swap-columns-end */
+  // Per-gap column-SWAP glyph (editor chrome only — never rendered/exported). A small
+  // hover-revealed icon button in each inter-column gap, mirroring attachColumnResizers'
+  // wiring exactly, that exchanges the two adjacent columns via swapColumns and
+  // re-renders. Unlike a resize (a live drag on flex ratios), a swap is a genuine
+  // structural change — content actually moves — so it goes through the normal
+  // pushHistory + reapplyStructural + reselectBlockNode path, not a live DOM mirror.
+  function attachColumnSwaps(columnsNode, block) {
+    var cols = Array.prototype.slice.call(columnsNode.children).filter(function (c) {
+      return c.classList && c.classList.contains("layout-column");
+    });
+    if (cols.length < 2) return; // nothing to swap between
+    var gap = block.gap == null ? 24 : block.gap;
+    var btns = [];
+
+    function positionSwaps() {
+      btns.forEach(function (btn, i) {
+        var left = cols[i].offsetLeft + cols[i].offsetWidth + gap / 2;
+        btn.style.left = left + "px";
+        btn.style.top = (columnsNode.offsetHeight / 2) + "px";
+      });
+    }
+
+    cols.slice(0, -1).forEach(function (_, i) {
+      var btn = iconBtn("arrow-left-right", "Swap these two columns");
+      btn.classList.add("col-swap-btn");
+      btn.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); });
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        pushHistory();
+        swapColumns(block, i);
+        reapplyStructural(findPageOfBlock(block));
+        reselectBlockNode(block, "block");
+      });
+      btns.push(btn);
+      columnsNode.appendChild(btn);
+    });
+
+    positionSwaps();
+    if (window.ResizeObserver) {
+      var ro2 = new ResizeObserver(function () { positionSwaps(); });
+      ro2.observe(columnsNode);
+    }
+  }
+
   // Legacy icon-button keys -> Lucide (kebab) names, resolved through the offline
   // Icon accessor (src/icons.js). Hand-drawn ICONS art retired; callers keep their
   // stable keys so wiring is untouched (re-skin, never re-wire).
@@ -2896,12 +4981,29 @@
       var cap = caption ? "<figcaption class=\"doc-figure__cap\">" + inline(caption) + "</figcaption>" : "";
       return "<figure class=\"doc-figure\">" + img + cap + "</figure>";
     }
+    // uio-O-W1 (OVL-23): a keyboard shortcut written in the guide renders as the SAME chip the
+    // menus use, instead of bare glyphs floating in a sentence. Pure text pass, run last: a
+    // <code> span always wins the alternation, so a shortcut quoted as code stays code.
+    function kbdify(html) {
+      return String(html).replace(/(<code\b[^>]*>[\s\S]*?<\/code>)|([⌘⌥⇧⌃]+[A-Za-z0-9=\\−-]?)/g,
+        function (_m, codeSpan, chip) { return codeSpan ? codeSpan : "<kbd class=\"help-kbd\">" + chip + "</kbd>"; });
+    }
     function inline(s) {
       s = esc(s);
       s = s.replace(/`([^`]+)`/g, function (_m, c) { return "<code>" + c + "</code>"; });
       s = s.replace(/\*\*([^*]+)\*\*/g, function (_m, b) { return "<strong>" + b + "</strong>"; });
       s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function (_m, t, u) { return "<a href=\"" + u + "\" target=\"_blank\" rel=\"noopener\">" + t + "</a>"; });
-      return s;
+      return kbdify(s);
+    }
+    // uio-O-W1 (OVL-23): ONE callout with three tones. A guide callout already leads with its
+    // own label ("**Note.**", "**Tip.**", "**Caution.**"), so the tone is read from that label:
+    // authors keep writing plain markdown and every callout in the app is drawn one way.
+    function calloutTone(text) {
+      var m = String(text).match(/^\s*\*\*\s*([^*]+?)\s*\.?\s*\*\*/);
+      var w = m ? m[1].trim().toLowerCase() : "";
+      if (w === "caution" || w === "warning" || w === "important") return "caution";
+      if (w === "tip" || w === "reassurance" || w === "remember" || w === "what you build") return "reassure";
+      return "note";
     }
     // #8 heading IDs: slugify heading text so the docs reader's TOC nav can deep-link to a
     // section (ADR 0004 — "guide headings are docs anchors"). Deterministic + unique per doc.
@@ -2940,10 +5042,11 @@
       if (/^---+\s*$/.test(line) || /^\*\*\*+\s*$/.test(line)) { out.push("<hr>"); i++; continue; }
       var fig = line.match(FIG_RE);
       if (fig) { out.push(figHtml(fig)); i++; continue; }
-      if (/^\s*>\s?/.test(line)) { // blockquote (consecutive)
+      if (/^\s*>\s?/.test(line)) { // blockquote -> the one help callout, toned by its own label
         var qb = [];
         while (i < lines.length && /^\s*>\s?/.test(lines[i])) { qb.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
-        out.push("<blockquote>" + mdToHtml(qb.join("\n")) + "</blockquote>");
+        var qtext = qb.join("\n");
+        out.push("<blockquote class=\"help-callout help-callout--" + calloutTone(qtext) + "\">" + mdToHtml(qtext) + "</blockquote>");
         continue;
       }
       if (/^\s*[-*]\s+/.test(line)) { // unordered list (with lazy continuation of wrapped lines)
@@ -2984,7 +5087,9 @@
   // #8 docs reader: a two-pane guide (sidebar TOC + search on the left, reading pane on the
   // right), modelled on a professional docs site. The TOC is built from the guide's own
   // heading IDs (mdToHtml emits them), so nav + scroll-spy track the content and never drift.
-  function openHelpModal() {
+  // uio-F06: `focusId` is a guide heading slug -- the palette passes one so a guide result lands
+  // on its section instead of at the top of the guide.
+  function openHelpModal(focusId) {
     if (document.getElementById("help-modal")) return;
     var modal = h("div", "modal-overlay"); modal.id = "help-modal";
     var box = h("div", "modal-box modal-box--docs");
@@ -2995,41 +5100,36 @@
 
     var split = h("div", "docs-split");
     var nav = h("aside", "docs-nav");
-    var searchWrap = h("div", "docs-search");
-    var sIcon = h("span", "docs-search__icon"); sIcon.innerHTML = window.Icon ? window.Icon("search") : "";
-    var search = h("input", "docs-search__input"); search.type = "search";
-    search.placeholder = "Search the guide"; search.setAttribute("aria-label", "Search the guide");
-    searchWrap.appendChild(sIcon); searchWrap.appendChild(search);
+    // uio-F06 (OVL-21): the guide's own "Search the guide" field is GONE. It was a third search
+    // box over a third index, next to the document search and the settings the palette now
+    // covers -- and the question people actually ask ("where is the disclaimer setting and how
+    // does it work?") needed two of them. Guide sections are in the one Cmd-K index; the TOC
+    // stays, because a contents list is navigation, not search.
     var toc = h("nav", "docs-toc");
-    var noHits = h("p", "docs-toc__empty", "No matches."); noHits.style.display = "none";
-    nav.appendChild(searchWrap); nav.appendChild(toc); nav.appendChild(noHits);
+    nav.appendChild(toc);
 
     var body = h("div", "help-doc"); body.appendChild(h("p", "help-doc__loading", "Loading the guide…"));
     split.appendChild(nav); split.appendChild(body);
     box.appendChild(split);
     modal.appendChild(box);
     document.body.appendChild(modal);
-    function close() { modal.remove(); document.removeEventListener("keydown", onEsc, true); }
-    function onEsc(e) {
-      if (e.key === "Escape") {
-        // Escape clears a live search first, then closes (progressive dismiss).
-        if (document.activeElement === search && search.value) { search.value = ""; runSearch(""); return; }
-        e.preventDefault(); close();
-      }
-    }
+    // uio-F06: the guide joins the ONE layer stack, so Escape over it closes the topmost layer
+    // only and focus returns to whatever opened it.
+    function close() { if (!modal.parentNode) return; modal.remove(); popLayer("help"); }
     x.addEventListener("click", close);
     modal.addEventListener("mousedown", function (e) { if (e.target === modal) close(); });
-    document.addEventListener("keydown", onEsc, true);
+    pushLayer("help", close);
 
-    var runSearch = function () {}; // set after load
     fetch("docs/USER-GUIDE.md", { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
       .then(function (md) {
         body.innerHTML = mdToHtml(md);
         postProcessFigures(body);
-        runSearch = buildDocsNav(body, toc, noHits);
-        search.addEventListener("input", function () { runSearch(search.value); });
-        setTimeout(function () { search.focus(); }, 30);
+        buildDocsNav(body, toc);
+        if (focusId) {
+          var target = body.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(focusId) : focusId));
+          if (target) scrollToHead(body, target);
+        }
       })
       .catch(function () {
         body.innerHTML = "";
@@ -3049,23 +5149,20 @@
     });
   }
 
-  // Build the sidebar TOC from the rendered guide's h2/h3 headings, wire click-to-scroll +
-  // scroll-spy (active section follows the reading pane), and return a search(query) fn that
-  // filters the TOC to sections whose heading OR body text matches. Returns runSearch.
-  function buildDocsNav(body, toc, noHits) {
+  // Build the sidebar TOC from the rendered guide's h2/h3 headings and wire click-to-scroll +
+  // scroll-spy (the active section follows the reading pane).
+  // uio-F06: it no longer returns a search function -- searching the guide is Cmd-K's job now.
+  function buildDocsNav(body, toc) {
     var heads = Array.prototype.slice.call(body.querySelectorAll("h2[id], h3[id]"));
-    var items = []; // { el(nav button), head, id, level, text, sectionText }
+    var items = []; // { el(nav button), head, id, level, text }
     heads.forEach(function (hEl) {
       var level = hEl.tagName === "H2" ? 2 : 3;
       var text = hEl.textContent.trim();
-      // section text = this heading + following siblings up to the next h2/h3 (for search)
-      var chunk = [text], sib = hEl.nextElementSibling;
-      while (sib && sib.tagName !== "H2" && sib.tagName !== "H3") { chunk.push(sib.textContent || ""); sib = sib.nextElementSibling; }
       var btn = h("button", "docs-toc__item docs-toc__item--h" + level);
       btn.type = "button"; btn.textContent = text; btn.setAttribute("data-target", hEl.id);
       btn.addEventListener("click", function () { scrollToHead(body, hEl); setActive(hEl.id); });
       toc.appendChild(btn);
-      items.push({ el: btn, head: hEl, id: hEl.id, level: level, text: text.toLowerCase(), sectionText: chunk.join(" ").toLowerCase() });
+      items.push({ el: btn, head: hEl, id: hEl.id, level: level, text: text.toLowerCase() });
     });
     function setActive(id) {
       items.forEach(function (it) { it.el.classList.toggle("is-active", it.id === id); });
@@ -3086,18 +5183,6 @@
       });
     });
     if (items[0]) items[0].el.classList.add("is-active");
-    // search: filter the TOC to matching sections; jump to the first match on Enter
-    function runSearch(q) {
-      q = String(q || "").trim().toLowerCase();
-      var hits = 0;
-      items.forEach(function (it) {
-        var match = !q || it.text.indexOf(q) !== -1 || it.sectionText.indexOf(q) !== -1;
-        it.el.classList.toggle("is-hidden", !match);
-        if (match && q) hits++;
-      });
-      noHits.style.display = (q && hits === 0) ? "" : "none";
-    }
-    return runSearch;
   }
   function scrollToHead(body, hEl) {
     var top = hEl.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
@@ -3222,6 +5307,10 @@
     canvas.classList.toggle("is-version-preview", !!activeVersion);
     updateVariantBadge();
     updateVersionBadge();
+    // uio-E-C04: keep the top-bar axis switches + the off-base return chip in sync (menu pick,
+    // undo/redo, doc swap) -- onVariantPick only mounts, so the label/chip refresh here.
+    syncVariantSwitch();
+    syncVersionSwitch();
     if (canvasEditable()) enableEditing(world); // #207 + ticket 15: variant preview read-only; software version editable UNLESS collaborating
     fitEmbeds();
     refreshCanvasSelection();
@@ -3261,6 +5350,7 @@
     refreshCanvasSelection();
     decorateVariantVersionBadges(frame); // #148: re-add the version-cycle badge on this page's image blocks
     decorateStyleAudit(frame); // #145: re-mark unstyled text blocks on this page
+    decorateSourceLinks(frame); // source-link 03: re-add the link indicator on this page's linked blocks
   }
   // Rebuild only the page a block lives on (falls back to full mount if it can't be located).
   function reapplyBlock(block) {
@@ -3299,6 +5389,7 @@
     if (interactMode) decorateInteractHandle();
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
+    decorateSourceLinks(); // source-link 03: link indicator on placed source-linked blocks
   }
   window.__reapplyPage = reapplyPage; // perf/test hook
   window.__perf = { // perf-measurement hooks (harmless; used to profile the re-render paths)
@@ -3786,6 +5877,22 @@
     modelViewT = setTimeout(function () { modelViewT = null; paintModelView(); }, 200);
   }
   if (modelDetails) modelDetails.addEventListener("toggle", function () { if (modelDetails.open) paintModelView(); }); // refresh on open
+  // uio-E-C05 (EDIT-10): the live JSON document model is a DEBUGGING affordance, not everyday
+  // authoring chrome. It is hidden unless the "Developer tools" system setting is on (off by
+  // default), so authors scrolling for a property never land on it.
+  function devToolsOn() { try { return localStorage.getItem("authoring.devtools") === "on"; } catch (e) { return false; } }
+  function applyDevToolsVisibility() {
+    if (!modelDetails) return;
+    var on = devToolsOn();
+    modelDetails.hidden = !on;
+    if (!on) modelDetails.open = false; // collapse when hidden so re-enabling starts closed
+  }
+  function setDevToolsEnabled(on) {
+    try { localStorage.setItem("authoring.devtools", on ? "on" : "off"); } catch (e) {}
+    applyDevToolsVisibility();
+    if (on) paintModelView();
+  }
+  applyDevToolsVisibility(); // enforce the default-off state at boot
 
   // ---- selection state -----------------------------------------------------
   var selection = { type: "none", node: null };
@@ -3876,7 +5983,7 @@
         if (!found && b.columns) for (var c = 0; c < b.columns.length && !found; c++) walk(b.columns[c], chain.concat(b));
       }
     }
-    (doc.pages || []).forEach(function (p) { if (!found) walk(p.blocks, []); });
+    (doc.pages || []).forEach(function (p) { if (!found && p) walk(p.blocks, []); });
     return found || [];
   }
   function syncStructureToSelection() {
@@ -4137,6 +6244,11 @@
     // types open COLLAPSED on first paint, revealed on intent. Core types (Type…Behaviour) stay
     // open. The author's explicit open/close still wins (recorded for these types, see setCollapsed).
     var DEFAULT_COLLAPSED = { "Light/Dark": true, "Advanced": true };
+    // uio-F05: the settings sheet is ONE scroll of sections (it lost its nav rail), so its
+    // sections open COLLAPSED — a 15-section wall is the "pre-expanded wall" the spine forbids.
+    // Collapsed headers ARE the browse affordance; openSettingsSection expands the one you asked
+    // for. Prefix rule rather than 15 map entries, so a new settings section inherits it.
+    function defaultCollapsed(type) { return !!DEFAULT_COLLAPSED[type] || /^settings:/.test(type); }
     function load() {
       var st = { order: TAXONOMY.slice(), collapsed: {} };
       try {
@@ -4165,13 +6277,13 @@
     function isCollapsed(type) {
       var c = load().collapsed;
       if (Object.prototype.hasOwnProperty.call(c, type)) return !!c[type];
-      return !!DEFAULT_COLLAPSED[type];
+      return defaultCollapsed(type);
     }
     // For a default-collapsed type, record BOTH open + closed explicitly so an author's "open"
     // sticks (deleting would fall back to the collapsed default). Others: store true, clear on open.
     function setCollapsed(type, v) {
       var st = load();
-      if (DEFAULT_COLLAPSED[type]) st.collapsed[type] = !!v;
+      if (defaultCollapsed(type)) st.collapsed[type] = !!v;
       else if (v) st.collapsed[type] = true; else delete st.collapsed[type];
       save(st);
     }
@@ -4195,24 +6307,126 @@
   var panelEditMode = false; // "Edit panel layout" mode: reorder sections by drag
   var _sectionBuf = null;    // active buffer during a v2 panel render
   function beginSections() { _sectionBuf = []; }
-  function sectionGroup(type, title, buildFn) {
-    var sec = h("div", "insp-section"); sec.setAttribute("data-section-type", type);
-    var collapsed = window.PanelLayout.isCollapsed(type);
-    if (collapsed) sec.classList.add("is-collapsed");
+  // uio-O-W2 (OVL-07): THE section. Every group of rows in every settings surface is this one
+  // function -- a chevron, a title, an optional switch, an optional one-line summary when
+  // collapsed, and a body of plain rows. The three other header styles are retired: a plain bold
+  // heading with no affordance (`sub()`), a bullet-prefixed twirl (`.disc`) and a second nested
+  // twirl (`.subdisc`) all shared one pane, so the same glyph meant "section" in one panel and
+  // "sub-section" in another, and which headers could be opened was something you learned by
+  // clicking. `panelSection`/`subDisclosure`/`disclosure` are now thin adapters over this.
+  //
+  // TWO LEVELS, NEVER THREE. Depth is counted while building, not declared: a section built
+  // inside another section's body is level 2 -- same header, quieter and indented. A group that
+  // would nest a third time is not a sub-sub-group; it is a section that belongs beside its
+  // parent, so promote it. The guard below still renders a too-deep section as level 2 (nothing
+  // disappears) and records where it came from, so the depth cannot creep back unnoticed.
+  //
+  //   type              PanelLayout taxonomy key -- reorderable, collapse persisted per type.
+  //                     Null for a section outside the reorderable set.
+  //   opts.key          openSections key: open/closed persists across rebuilds and reloads.
+  //   opts.defaultOpen  first-run state when neither store knows this section.
+  //   opts.toggle       {get,set} -- a switch in the header, independent of the chevron (OVL-08).
+  //   opts.summary      fn -> string: the collapsed one-liner ("On - centred, bottom rule").
+  //   opts.overridden   fn -> bool: the section-level override dot; opts.onReset enables Reset.
+  //   opts.actions      element (or array) pinned to the right of the title.
+  var _sectionDepth = 0;
+  // Published so a browser probe can NAME an offender instead of the depth quietly creeping
+  // back: a static test can read the source, but only a real render knows how deep a panel
+  // actually nests once every builder has run.
+  var _sectionDepthViolations = window.__sectionDepth3 = [];
+  /* @ovl07-start */
+  // Depth is observed two ways, because sections are built two ways: a `buildFn` nests while it
+  // runs (the counter sees that), and an imperative caller appends into a body it already holds
+  // (only the DOM sees that). Either signal makes this a level-2 section. Past that the section
+  // is STILL DRAWN, at level 2 — dropping rows to enforce a rule would hide an author's settings
+  // — and reported, so the offender gets promoted rather than the depth quietly returning.
+  // `counterDepth` = how many buildFn calls are on the stack. `hostBodies` = how many section
+  // bodies the host sits inside, itself included. They OVERLAP by one whenever a caller appends
+  // into the very body being built, so that one is subtracted rather than counted twice; the
+  // rest of `hostBodies` is real extra nesting the counter cannot see, and the counter in turn
+  // sees the nesting the DOM cannot (a section still detached from its parent while it builds).
+  function sectionDepthOf(counterDepth, hostBodies) {
+    var extra = Math.max(0, (hostBodies || 0) - (counterDepth > 0 ? 1 : 0));
+    var depth = counterDepth + extra;
+    return { level: depth === 0 ? 1 : 2, tooDeep: depth > 1 };
+  }
+  /* @ovl07-end */
+  function sectionGroup(type, title, buildFn, opts) {
+    opts = opts || {};
+    var d = sectionDepthOf(_sectionDepth, opts.hostBodies);
+    var level = d.level;
+    if (d.tooDeep) _sectionDepthViolations.push(title);
+    var keyed = opts.key != null;
+    var collapsed = keyed
+      ? !(openSections[opts.key] == null ? opts.defaultOpen !== false : openSections[opts.key])
+      : (type != null ? window.PanelLayout.isCollapsed(type) : opts.defaultOpen === false);
+    var enabled = opts.toggle ? !!opts.toggle.get() : true;
+    var over = !!(opts.overridden && opts.overridden());
+    var sec = h("div", "insp-section" + (level === 2 ? " insp-section--l2" : "") +
+      (collapsed ? " is-collapsed" : "") + (enabled ? "" : " is-inactive") +
+      (opts.divider === false ? " insp-section--no-divider" : ""));
+    if (type != null) sec.setAttribute("data-section-type", type);
     var head = h("div", "insp-section__head");
     var twirl = h("span", "insp-section__twirl" + (collapsed ? "" : " is-open"));
     var titleEl = h("span", "insp-section__title", title);
     var handle = h("span", "insp-section__drag"); handle.textContent = "∷"; handle.title = "Drag to reorder";
-    head.appendChild(twirl); head.appendChild(titleEl); head.appendChild(handle);
+    // uio-F03 roll-up: the header counts the rows in this section that carry their own value
+    // instead of inheriting one ("3 overridden"). Filled after buildFn, from the tally the
+    // inheritance tails push into. Empty (and invisible) when nothing is overridden.
+    var rollup = h("span", "insp-section__rollup");
+    head.appendChild(twirl); head.appendChild(titleEl);
+    if (over) { var dot = h("span", "insp-section__dot"); dot.title = "Customized from theme default"; head.appendChild(dot); }
+    // The one-line summary, shown only while collapsed: what this section will actually do.
+    // With a switch it always leads with On/Off, so "collapsed" never has to mean "unknown".
+    var summaryText = sectionSummary(opts, enabled);
+    if (summaryText) { var sum = h("span", "insp-section__summary", summaryText); sum.title = summaryText; head.appendChild(sum); }
+    head.appendChild(rollup);
+    var ctrls = h("div", "insp-section__ctrls");
+    if (over && opts.onReset) {
+      var rb = h("button", "insp-section__reset", "Reset"); rb.type = "button"; rb.title = "Reset this section to the theme default";
+      rb.addEventListener("click", function (e) { e.stopPropagation(); pushHistory(); opts.onReset(); renderInspector(); });
+      ctrls.appendChild(rb);
+    }
+    if (opts.toggle) {
+      ctrls.appendChild(switchEl(enabled, function (v) {
+        pushHistory();
+        opts.toggle.set(v);   // the switch NEVER moves the disclosure (OVL-08)
+        renderInspector();
+      }));
+    }
+    if (opts.actions) [].concat(opts.actions).forEach(function (a) { if (a) ctrls.appendChild(a); });
+    head.appendChild(ctrls);
+    head.appendChild(handle);
     var body = h("div", "insp-section__body");
     head.addEventListener("click", function () {
       if (panelEditMode) return; // in edit mode the header is a drag grip, not a collapse toggle
       var nowCollapsed = !sec.classList.contains("is-collapsed");
       sec.classList.toggle("is-collapsed", nowCollapsed); twirl.classList.toggle("is-open", !nowCollapsed);
-      window.PanelLayout.setCollapsed(type, nowCollapsed);
+      if (keyed) { openSections[opts.key] = !nowCollapsed; saveOpenSections(); }
+      else if (type != null) window.PanelLayout.setCollapsed(type, nowCollapsed);
     });
-    try { buildFn(body); } catch (e) {}
+    // Assembled BEFORE the body is built, so a nested section can see the chain it is being
+    // appended into (sectionBodiesAbove walks the tree even while the panel is still detached).
     sec.appendChild(head); sec.appendChild(body);
+    // Nested sections must not land in the panel's own ordering buffer (they belong to their
+    // parent's body), so the buffer is suspended for the duration of the build.
+    var prevTally = _scopeTally; _scopeTally = [];
+    var prevBuf = _sectionBuf; _sectionBuf = null;
+    _sectionDepth++;
+    try { buildFn(body); } catch (e) {}
+    _sectionDepth--;
+    _sectionBuf = prevBuf;
+    var childTally = _scopeTally; _scopeTally = prevTally;
+    // A parent counts what its nested sections resolved too, so the roll-up on a level-1 header
+    // is the truth for everything folded underneath it.
+    if (_scopeTally) [].push.apply(_scopeTally, childTally);
+    var overrides = overrideCount(childTally);
+    rollup.textContent = rollupLabel(overrides);
+    if (overrides) {
+      sec.classList.add("has-overrides");
+      rollup.title = overrides + (overrides === 1 ? " value in this section is" : " values in this section are") +
+        " set here instead of inherited";
+    }
     if (_sectionBuf) _sectionBuf.push({ type: type, el: sec });
     return sec;
   }
@@ -4239,29 +6453,55 @@
       });
     });
   }
-  // The "Edit panel layout" toggle bar (D3) — rendered atop the inspector. Off: a quiet gear.
-  // On: Done + Reset. Editor-chrome only; drag reorders section TYPES globally.
+  // uio-E-C05 (EDIT-09): section reordering is a once-in-a-while GLOBAL preference, so its entry
+  // point moved OFF the top of the inspector into the panel overflow menu ("Reorder inspector
+  // sections…"). This bar is now only the MODE BANNER while reordering is on: it states the scope
+  // (every block's inspector) + Done/Reset, so you always know what the drag is rearranging.
   function renderPanelLayoutBar() {
-    var bar = h("div", "insp-layout-bar" + (panelEditMode ? " is-editing" : ""));
-    var toggle = h("button", "insp-layout-bar__btn"); toggle.type = "button";
-    toggle.textContent = panelEditMode ? "Done" : "Edit layout";
-    toggle.title = "Reorder / collapse the panel sections (saved for you, not the course)";
-    toggle.addEventListener("click", function () { panelEditMode = !panelEditMode; renderInspector(); });
-    bar.appendChild(toggle);
-    if (panelEditMode) {
-      var reset = h("button", "insp-layout-bar__btn insp-layout-bar__btn--reset"); reset.type = "button";
-      reset.textContent = "Reset"; reset.title = "Restore the default section order + collapse";
-      reset.addEventListener("click", function () { window.PanelLayout.reset(); renderInspector(); });
-      bar.appendChild(reset);
-    }
+    if (!panelEditMode) return; // off: no top-of-panel control; the ⋯ menu is the entry point
+    var bar = h("div", "insp-layout-bar is-editing");
+    bar.appendChild(h("span", "insp-layout-bar__scope", "Reordering sections for every block’s inspector — saved for you, not the course."));
+    var done = h("button", "insp-layout-bar__btn"); done.type = "button";
+    done.textContent = "Done"; done.title = "Finish reordering";
+    done.addEventListener("click", function () { panelEditMode = false; renderInspector(); });
+    bar.appendChild(done);
+    var reset = h("button", "insp-layout-bar__btn insp-layout-bar__btn--reset"); reset.type = "button";
+    reset.textContent = "Reset"; reset.title = "Restore the default section order + collapse";
+    reset.addEventListener("click", function () { window.PanelLayout.reset(); renderInspector(); });
+    bar.appendChild(reset);
     inspector.insertBefore(bar, inspector.firstChild); // pin to the very top of the panel
+  }
+  // uio-E-C05 (EDIT-09): the panel overflow (⋯) menu. Holds the demoted "Reorder inspector
+  // sections…" entry, shown only when the current inspector actually has reorderable sections.
+  function panelHasReorderableSections() { return !!inspector.querySelector(".insp-section[data-section-type]"); }
+  function openPanelOverflowMenu(anchor) {
+    // The ⋯ button only shows when there ARE reorderable sections (see maybeRenderLayoutBar), so
+    // the menu always carries the reorder entry.
+    var items = [{ label: panelEditMode ? "Done reordering sections" : "Reorder inspector sections…",
+      onClick: function () { panelEditMode = !panelEditMode; renderInspector(); } }];
+    if (panelEditMode) items.push({ label: "Reset section order", onClick: function () { window.PanelLayout.reset(); renderInspector(); } });
+    var r = anchor.getBoundingClientRect();
+    showContextMenu(r.right - 4, r.bottom + 6, items);
+  }
+  function mountPanelOverflow() {
+    var btn = document.getElementById("panel-overflow-btn");
+    if (!btn || btn.__wired) return;
+    btn.__wired = true;
+    btn.addEventListener("click", function () { openPanelOverflowMenu(btn); });
   }
   // Show the Edit-layout bar only on panels that actually use v2 sections (else it's a dead control).
   // Only the PanelLayout-managed sections (sectionGroup -> data-section-type) are
   // drag-reorderable, so the Edit-layout bar shows only when THOSE exist. The DS
   // PanelSection wrappers (issue #14, no data-section-type) are plain collapsibles
   // and must not summon the bar on every block inspector.
-  function maybeRenderLayoutBar() { if (inspector.querySelector(".insp-section[data-section-type]")) renderPanelLayoutBar(); }
+  function maybeRenderLayoutBar() {
+    var has = panelHasReorderableSections();
+    // uio-E-C05 (EDIT-09): the ⋯ entry point shows only where reordering applies; the banner shows
+    // only while reordering is on. If a re-render drops the sections, leave edit mode so no orphan banner.
+    var ov = document.getElementById("panel-overflow-btn"); if (ov) ov.hidden = !has;
+    if (!has) { panelEditMode = false; return; }
+    renderPanelLayoutBar();
+  }
   window.__panelV2 = { beginSections: beginSections, sectionGroup: sectionGroup, endSections: endSections, setEditMode: function (v) { panelEditMode = v; }, getEditMode: function () { return panelEditMode; } }; // test hook
 
   function renderInspector() {
@@ -4286,6 +6526,7 @@
     // #221 tour builder: when the spatial board overlay is open, mirror every edit
     // (canvas drag, inspector change, undo) back onto the board + its re-hosted inspector.
     if (typeof tourBoardIsOpen === "function" && tourBoardIsOpen()) syncTourBoard();
+    wireScrollEdges(document.querySelector(".panel--right .panel-scroll")); // uio-O-W1 (OVL-10)
   }
   // #207 FIX 2 (interaction-feel §3 "no dead controls"): while editing a NON-BASE software version,
   // per-version appearance/structure overrides are not captured yet, so an element inspector's block
@@ -4358,15 +6599,16 @@
     sectionGroup("Behaviour", "Interaction gate", function (secBody) {
       var _i = inspector; inspector = secBody;
       try {
-      var gateVal = page.gateInteractions === true ? "on" : page.gateInteractions === false ? "off" : "inherit";
-      selectRow("Require interactions before Next", [["Inherit course default", "inherit"], ["Require on this page", "on"], ["Don't require", "off"]], gateVal, function (v) {
-        pushHistory();
-        if (v === "on") page.gateInteractions = true;
-        else if (v === "off") page.gateInteractions = false;
-        else delete page.gateInteractions;
-        mount(); setSelection("page", pi);
-      });
-      inspector.appendChild(h("div", "insp-hint", "Hold this page's Next until its interactions are done (hotspots, cards, sequences, accordions, quizzes, videos, checkboxes). 'Inherit' follows the course switch in Header & Footer → Progression."));
+      // uio-F03: was a tri-state picker with an explicit "Inherit course default" option —
+      // the exact "unset" the spine forbids. Now the switch always shows what will ACTUALLY
+      // apply on this page, and the tail says where that came from (or offers Reset).
+      var gateRes = resolveScoped(gateScopeChain(page), "gateInteractions", { at: "page" });
+      switchRow("Require interactions before Next", function () { return !!gateRes.value; },
+        function (v) { page.gateInteractions = !!v; mount(); setSelection("page", pi); }, inspector, false,
+        { inherit: { res: gateRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete page.gateInteractions; mount(); setSelection("page", pi);
+          } } });
+      inspector.appendChild(h("div", "insp-hint", "Hold this page's Next until its interactions are done (hotspots, cards, sequences, accordions, quizzes, videos, checkboxes). With nothing set here the page follows the course switch in Header & Footer → Progression."));
       } finally { inspector = _i; }
     });
 
@@ -4617,7 +6859,7 @@
         inspector.appendChild(codeIn);
       }
 
-      inspector.appendChild(sub("Or bundled file"));
+      inspector = panelSection(inspector, "Or bundled file");
       // §10 design-consistency: canonical fieldRow (was labeledRow); commits on change.
       fieldRow("src", block.src, function (v) { block.src = v || undefined; node = reRenderBlockNode(node); renderModelView(); }, "path/to/file.html");
       } finally { inspector = _eins; }
@@ -4709,7 +6951,8 @@
       sectionGroup("Content", "Source", function (secBody) {
       var _wins = inspector; inspector = secBody;
       try {
-      inspector.appendChild(sub("URL"));
+      var _srcBody = inspector;
+      inspector = panelSection(_srcBody, "URL");
       var urlIn = h("textarea", "prop-input"); urlIn.spellcheck = false;
       urlIn.placeholder = "Vimeo / YouTube / embed URL";
       urlIn.value = block.url || "";
@@ -4718,7 +6961,7 @@
       urlIn.addEventListener("change", function () { block.url = urlIn.value; node = reRenderBlockNode(node); readout.textContent = describeUrl(urlIn.value); });
       inspector.appendChild(urlIn); inspector.appendChild(readout);
 
-      inspector.appendChild(sub("Offline video (self-host)"));
+      inspector = panelSection(_srcBody, "Offline video (self-host)");
       var fileBtn = h("button", "prop-btn", block.localVideo ? "Replace Video file" : "Upload local video (MP4)");
       fileBtn.addEventListener("click", function () {
         var input = document.createElement("input");
@@ -4755,6 +6998,8 @@
       inspector.appendChild(rmBtn);
 
       // §10 design-consistency: canonical iconField (was labeledRow); live-applies iframe height.
+      // Height is the section's own row, not the offline-video group's — back onto the body.
+      inspector = _srcBody;
       inspector.appendChild(iconField("H", { value: block.height || 360, unit: "px", placeholder: "360", step: 10, min: 50, max: 2000, datalist: "dl-gap", title: "Height",
         onchange: function (v) { var n = parseInt(v, 10); if (!isNaN(n)) { block.height = n; var f = node.querySelector(".embed__iframe"); if (f) f.style.height = n + "px"; renderModelView(); } } }).wrap);
       } finally { inspector = _wins; }
@@ -4810,7 +7055,8 @@
   }
   function getBlockPageIndexAndIndex(block) {
     for (var pi = 0; pi < doc.pages.length; pi++) {
-      var idx = doc.pages[pi].blocks.indexOf(block);
+      var pg = doc.pages[pi]; if (!pg || !pg.blocks) continue; // a stray null/malformed page entry must not abort every later page's lookup
+      var idx = pg.blocks.indexOf(block);
       if (idx >= 0) return { pageIndex: pi, blockIndex: idx };
     }
     return null;
@@ -4883,6 +7129,47 @@
     });
   }
   window.__clearBlockContent = clearBlockContent; // #174 test hook (pure subtree clear)
+  // #170/#33: text<->list BLOCK-TYPE conversion (not an inline execCommand list -- a
+  // whole-block type swap between the dedicated "list" type and any other text-content
+  // type). Only block-level tags are treated as item breaks, so inline formatting
+  // (b/i/u/span/a) survives untouched inside each <li>.
+  /* @list-convert-start */
+  function htmlToListItems(html) {
+    var s = String(html == null ? "" : html);
+    s = s.replace(/<\/(p|div)>/gi, "\n").replace(/<(p|div)[^>]*>/gi, "").replace(/<br\s*\/?>/gi, "\n");
+    var lines = s.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
+    if (!lines.length) return "<li></li>";
+    return lines.map(function (l) { return "<li>" + l + "</li>"; }).join("");
+  }
+  // Inverse: join <li> items back into one flowing field, each item's inline HTML kept
+  // intact, multiple items separated by <br> so nothing is silently dropped.
+  function listItemsToHtml(liHtml) {
+    var s = String(liHtml == null ? "" : liHtml);
+    var items = [], re = /<li[^>]*>([\s\S]*?)<\/li>/gi, m;
+    while ((m = re.exec(s))) items.push(m[1].trim());
+    if (!items.length) return s; // not actually <li>-shaped -- return untouched (defensive)
+    return items.join("<br>");
+  }
+  // Converts a text-content block to/from the dedicated "list" type IN PLACE. Remembers
+  // the PRIOR type on the block (__priorTextType) so a round-trip restores it (default
+  // "paragraph" if that memory is somehow absent) -- heading<->list<->heading is lossless
+  // on TYPE; content is lossless on inline formatting (see htmlToListItems above).
+  function convertTextListBlockType(block) {
+    if (!block) return block;
+    if (block.type === "list") {
+      var restore = block.__priorTextType || "paragraph";
+      block.text = listItemsToHtml(block.text);
+      block.type = restore;
+      delete block.__priorTextType;
+    } else {
+      block.__priorTextType = block.type;
+      block.text = htmlToListItems(block.text);
+      block.type = "list";
+    }
+    return block;
+  }
+  /* @list-convert-end */
+  window.__convertTextListBlockType = convertTextListBlockType; // test hook
   // Action wrapper: confirm (destructive), push history, clear one or more blocks, remount.
   function clearBlockContentAction(blocks) {
     var list = Array.isArray(blocks) ? blocks.filter(Boolean) : [blocks].filter(Boolean);
@@ -5071,7 +7358,9 @@
     var tail = P.blocks.splice(idx); // blocks[idx..] move to the new page
     var newPage = {
       id: "page-" + Date.now(),
-      name: (P.name || "Page") + " (cont.)",
+      // uio-E-C07 (EDIT-12): seed with the clean base; renumberSplitFamily rewrites the whole run
+      // to "Base · K of M" below, so splits never accumulate " (cont.)".
+      name: stripSplitSuffix(P.name || "Page"),
       blocks: tail
     };
     // inherit page-level props so the cont. page renders identically
@@ -5083,6 +7372,7 @@
     if (P.hideHeader) newPage.hideHeader = P.hideHeader;
     if (P.hideFooter) newPage.hideFooter = P.hideFooter;
     doc.pages.splice(pi + 1, 0, newPage);
+    renumberSplitFamily(doc, P.id); // uio-E-C07: rename the run to "Base · K of M" (no accumulating "(cont.)")
     // sync section membership: wherever P.id sits, drop newPage.id right after it
     eachCourseNav(function (nav) {
       (nav.sections || []).forEach(function (sec) {
@@ -5143,13 +7433,24 @@
       block.box = block.box || {};
       var box = block.box;
       function nodeOf() { return canvasNodeForBlock(block); }
-      function setBorder() { var n = nodeOf(); if (n) n.style.border = box.border ? ((box.borderWidth || 1) + "px solid " + (box.borderColor || "var(--color-hair)")) : ""; }
+      // uio-F03: the live preview follows the RESOLVED value (this block's own, else the
+      // course's captured type default, else the system default) — the same ladder the row
+      // shows and the same one render.js applies, so Reset previews correctly too.
+      function effBox(prop) { return resolveScoped(blockBoxChain(block), prop, { at: "block" }).value; }
+      function setBorder() { var n = nodeOf(); if (n) n.style.border = effBox("border") ? ((effBox("borderWidth") || 1) + "px solid " + (box.borderColor || "var(--color-hair)")) : ""; }
       // Condensed (James 2026-07-08): colours stacked, the two dimensional fields (border weight
       // + corner radius) paired two-up with glyphs — matching the case/align/spacing language.
       colorFieldFlat("Fill", box.fill, function (v) { var n = nodeOf(); if (v == null) { delete box.fill; if (n) n.style.background = ""; } else { box.fill = v; if (n) n.style.background = v; } renderModelView(); }, body);
       colorFieldFlat("Text", box.textColor, function (v) { var n = nodeOf(); if (v == null) { delete box.textColor; if (n) n.style.color = ""; } else { box.textColor = v; if (n) n.style.color = v; } renderModelView(); }, body);
-      switchRow("Stroke", function () { return !!box.border; }, function (v) { box.border = v; setBorder(); renderModelView(); renderInspector(); }, body);
-      if (box.border) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; setBorder(); renderModelView(); }, body);
+      // uio-F03: Stroke resolves down System -> Course type default -> Block, and the row
+      // carries the shared inheritance tail (named scope, or dot + Reset when set here).
+      var strokeRes = resolveScoped(blockBoxChain(block), "border", { at: "block" });
+      switchRow("Stroke", function () { return !!strokeRes.value; },
+        function (v) { box.border = v; setBorder(); renderModelView(); renderInspector(); }, body, false,
+        { inherit: { res: strokeRes, format: onOffLabel, onReset: function () {
+            pushHistory(); delete box.border; setBorder(); renderModelView(); renderInspector();
+          } } });
+      if (strokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; setBorder(); renderModelView(); }, body);
       // Stroke width + corner radius: canonical iconFields, live-applied, paired two-up.
       var weightField = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", title: "Stroke width",
         onchange: function (v) { pushHistory(); var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; setBorder(); renderModelView(); } }).wrap;
@@ -5164,8 +7465,8 @@
       var type = block.type;
       var bs = getBlockStyles();
       var hasTypeDef = bs && bs[type] && Object.keys(bs[type]).length;
-      body.appendChild(sub("Theme default (" + type + ")"));
-      body.appendChild(h("div", "insp-hint", hasTypeDef
+      var tdBody = panelSection(body, "Theme default (" + type + ")");
+      tdBody.appendChild(h("div", "insp-hint", hasTypeDef
         ? "Every " + type + " block inherits this captured look unless it sets its own. Capture again to update it."
         : "Capture this look as the default for every " + type + " block in the course."));
       var capRow = h("div", null); capRow.style.display = "flex"; capRow.style.gap = "6px"; capRow.style.marginTop = "2px";
@@ -5191,7 +7492,7 @@
         });
         capRow.appendChild(clrBtn);
       }
-      body.appendChild(capRow);
+      tdBody.appendChild(capRow);
     });
   }
 
@@ -5474,8 +7775,7 @@
   // (grid / dots / none) and its colour. Pure data on the block (block.pattern +
   // block.patternColor) -> render stamps data-pattern + --tex-color; ships in SCORM.
   function patternControls(block, refresh, target) {
-    var host = target || inspector;
-    host.appendChild(sub("Texture"));
+    var host = panelSection(target || inspector, "Texture");
     segmentedLive("Pattern", [["Grid", "grid"], ["Dots", "dots"], ["None", "none"]],
       function (v) { return (block.pattern || "grid") === v; },
       function (v) { if (v === "grid") delete block.pattern; else block.pattern = v; refresh(); }, host);
@@ -5810,7 +8110,7 @@
     courseNavControls(block, inspector);
     var toFooter = h("button", "insp-hint insp-backlink", "Footer padding, logo & disclaimer → ⚙ Header & Footer");
     toFooter.type = "button";
-    toFooter.addEventListener("click", function () { openSettingsModal("project"); if (settingsModal) { settingsModal.sectionKey.project = "headerFooter"; renderSettingsBody(); } });
+    toFooter.addEventListener("click", function () { openSettingsModal("project"); if (settingsModal) { settingsModal.sectionKey.project = "footer"; renderSettingsBody(); } });
     inspector.appendChild(toFooter);
   }
 
@@ -6105,20 +8405,61 @@
         trail.push({ label: last ? label : blockLabel(b), level: last ? null : { kind: "block", block: b } });
       });
     } else { trail.push({ label: label, level: null }); }
-    breadcrumb(inspector, trail, function (level) {
+    var bar = breadcrumb(inspector, trail, function (level) {
       if (!level) return;
       enteredBlock = null;
       if (level.kind === "page") { setActivePage(level.i); setSelection("page", level.i); }
       else if (level.kind === "block") { reselectBlockNode(level.block, "block"); }
     });
+    // uio-O-W1 (OVL-14): the second door onto the block's verbs. Right-click is the only way
+    // to reach Copy style / Save as component / Clear content, and nothing advertises it — so
+    // the inspector header carries a "..." overflow opening the IDENTICAL menu (one definition,
+    // blockMenuItems). Canonical ContextMenu surface, canonical more-horizontal glyph.
+    if (bar && block) {
+      var ov = h("button", "insp-crumbs__more"); ov.type = "button";
+      ov.innerHTML = Icon("more-horizontal");
+      ov.title = "Block actions";
+      ov.setAttribute("aria-label", "Block actions");
+      ov.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var r = ov.getBoundingClientRect();
+        showContextMenu(r.right, r.bottom + 4, blockMenuItems({ block: block }));
+      });
+      bar.appendChild(ov);
+    }
   }
   // SPEC-ui-kit (James, all-in-one): the universal chrome (Position/Layout/Appearance +
   // actions) is ALWAYS shown; double-clicking the block (or "Edit settings") reveals the
   // block-specific params BELOW it — one panel, not two views that replace.
+  // uio-F04 (EDIT-06): a source-linked block used to say only "linked" (a badge on the canvas). It now
+  // states the same facts every other stage states -- which source it came from, how many other
+  // documents use that passage, and whether the source has moved since this document last went out.
+  // Same resolver, same phrasing, same badge as the Publish row. uio-E-M03 adds the lock chip and the
+  // Edit-in-Source jump on top of this line.
+  function renderSourceLinkProvenance(block) {
+    if (!block || !block.sourceLink || !block.sourceLink.masterId) return null;
+    var masterId = block.sourceLink.masterId, markId = block.sourceLink.markId || null;
+    var comps = (typeof libComponents === "function" && libComponents()) || {};
+    var master = comps[masterId];
+    var line = h("div", "insp-provenance");
+    line.appendChild(h("span", "insp-provenance__label", "From source"));
+    line.appendChild(h("span", "insp-provenance__name", (master && master.name) || "an unknown source document"));
+    var used = f04WhereUsedFact(sourceLinkWhereUsed(masterId, markId));
+    var ub = f04Badge(used, "insp-provenance__fact"); if (ub) line.appendChild(ub);
+    var docFacts = f04DocFacts(activeDocId);
+    if (docFacts && docFacts.drift.state === "drifted" && docFacts.drift.ids.indexOf(masterId) !== -1) {
+      var db = f04Badge({ tone: "warning", label: "Source changed",
+        title: "This source document has changed since “" + docFacts.title + "” was last published." }, "insp-provenance__fact");
+      if (db) line.appendChild(db);
+    }
+    return line;
+  }
   function renderBlockTwoLevel(node, label, decl, renderContent, io, handlers) {
     var block = node.__block;
     var atContent = (enteredBlock === block);
     renderLayerCrumbs(block, label);
+    var prov = renderSourceLinkProvenance(block);
+    if (prov) inspector.appendChild(prov);
     // #160: depth-pure content level (panel-ia §1). A block opts in via decl.pureContent —
     // at CONTENT level the visible container chrome (Position / Layout / Appearance) is
     // suppressed so the panel shows ONLY the content's own canonical sections; the Actions
@@ -6169,8 +8510,8 @@
   // its instances live on the canvas (no Content panel) -> single-level.
   function renderComponentGridBody(node) {
     var block = node.__block;
-      inspector.appendChild(sub("Grid Layout"));
-
+    var _ins = inspector; inspector = panelSection(inspector, "Grid Layout");
+    try {
       var comps = getComponents();
       var optComps = Object.keys(comps).map(function (k) { return [comps[k].name, k]; });
       selectRow("Component Template", optComps, block.component, function (v) {
@@ -6219,6 +8560,7 @@
           reselectBlockNode(block, "block");
         }, "Add " + def.name));
       }
+    } finally { inspector = _ins; }
   }
 
   // #20/#21: a live-linked mirror of a shared library master, placed inline on the canvas
@@ -6241,6 +8583,35 @@
     inspector.appendChild(h("div", "insp-hint", def
       ? "Live library instance, linked to “" + (def.name || block.ref) + "”. Edit the master in Settings → System → Component Library and every placement updates automatically."
       : "This instance's library master (“" + block.ref + "”) no longer exists. Detach to keep this placement as an editable copy, or remove it."));
+
+    // SPEC 7 two-way link: a block inserted from Source carries a sourceRef -- offer a jump back
+    // to its exact source topic (the reverse of the Source panel's where-used row).
+    if (block.sourceRef && block.sourceRef.topicId && window.VersoUI && window.VersoUI.Button) {
+      inspector.appendChild(window.VersoUI.Button({
+        variant: "secondary", icon: "link", label: "Open in Source",
+        onClick: function () { jumpToSourceTopic(block.sourceRef.topicId); }
+      }));
+    }
+
+    // Product Rail: a facet switcher, shown only when the master carries named facets
+    // (never for docTypeRenderings -- that's export-time-only, structurally never a
+    // picker here). Switching only changes what THIS placement resolves to; it never
+    // touches the master or the link status, so there's no confirmation dialog.
+    if (def && def.facets && typeof def.facets === "object") {
+      var facetKeys = Object.keys(def.facets);
+      if (facetKeys.length) {
+        inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Facet"));
+        var facetOpts = facetKeys.map(function (k) { return [(def.facets[k].name || k), k]; });
+        var curFacet = (block.facet && def.facets[block.facet]) ? block.facet : facetKeys[0];
+        var fSel = dsSelect(facetOpts, curFacet, function (v) {
+          pushHistory();
+          if (v) block.facet = v; else delete block.facet;
+          saveRegistry(registry); mount(); reselectBlockNode(block, "block");
+        });
+        fSel.title = "Which facet of this topic this placement shows.";
+        inspector.appendChild(fSel);
+      }
+    }
 
     if (def && def.template) {
       // #21 RECONCILE: prune + surface any override whose field the master no longer
@@ -6271,7 +8642,7 @@
 
     var detachB = h("button", "prop-btn", "Detach"); detachB.style.marginTop = "6px";
     detachB.title = "Convert to an independent, editable copy — this placement stops receiving master updates.";
-    detachB.disabled = !def;
+    detachB.disabled = !def || !(window.resolveFacetTemplate ? window.resolveFacetTemplate(def, block.facet) : def.template);
     detachB.addEventListener("click", function () { detachLibraryInstance(block); });
     inspector.appendChild(detachB);
   }
@@ -6287,10 +8658,14 @@
   // re-attach it later.
   function detachLibraryInstance(block) {
     var def = resolveComponentDef(block.ref);
-    if (!def || !def.template) return;
+    // Product Rail: bake whatever facet this placement was actually pointing at (falls
+    // back to def.template when the master carries no facets) -- the fork snapshots the
+    // resolved facet+variant+token combo; there's no live pointer afterward.
+    var facetTemplate = window.resolveFacetTemplate ? window.resolveFacetTemplate(def, block.facet) : (def && def.template);
+    if (!def || !facetTemplate) return;
     pushHistory();
     var ref = block.ref;
-    var withOverrides = clone(def.template);
+    var withOverrides = clone(facetTemplate);
     // #23: bake the CURRENT axis content first (same "detach bakes what you see"
     // principle #21 established for instance overrides) -- axis resolves, THEN the
     // instance's own field overrides apply on top (most specific wins, matches the
@@ -6329,7 +8704,8 @@
       // section — the label is edited on canvas, plus a self-contained acknowledgement
       // gate that reuses the shipped gate engine (GGGG): a required self-referencing
       // "checked" gate keeps the footer Next disabled until the learner ticks it.
-      inspector.appendChild(sub("Acknowledgement"));
+      var _ins = inspector; inspector = panelSection(inspector, "Acknowledgement");
+      try {
       inspector.appendChild(h("div", "insp-hint", "The checkbox label is edited on the canvas."));
       var isAckGate = !!(block.gate && block.gate.required && block.gate.when && block.gate.when.source === block.id && block.gate.when.is === "checked");
       switchRow("Require to continue", function () { return isAckGate; },
@@ -6339,10 +8715,12 @@
           reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block");
         });
       inspector.appendChild(h("div", "insp-hint", "On: the footer Next stays disabled until the learner ticks this box. Ships in the exported course."));
+      } finally { inspector = _ins; }
   }
   function renderColumnsBody(node) {
     var block = node.__block;
-      inspector.appendChild(sub("Columns Layout"));
+      var _ins = inspector; inspector = panelSection(inspector, "Columns Layout");
+      try {
       // Column gap = horizontal (between columns); Row gap = vertical (between
       // stacked blocks in a column). Row gap defaults to 0 so the blocks' own
       // Space top/bottom drive vertical spacing (GG); set it to add a uniform gap.
@@ -6361,7 +8739,8 @@
         });
         inspector.appendChild(resetColW);
       }
-    inspector.appendChild(h("div", "insp-hint", "Blocks inside each column are edited on the canvas — click one to select it."));
+      inspector.appendChild(h("div", "insp-hint", "Blocks inside each column are edited on the canvas — click one to select it."));
+      } finally { inspector = _ins; }
   }
 
   function renderSpacerBody(node) {
@@ -6394,7 +8773,8 @@
     function refresh() { reapplyStructural(findPageOfBlock(block)); reselectBlockNode(block, "block"); }
     function newRow(n) { var r = []; for (var i = 0; i < n; i++) r.push({ t: "" }); return r; }
 
-    inspector.appendChild(sub("Table"));
+    var _tblRoot = inspector;
+    inspector = panelSection(_tblRoot, "Table");
     switchRow("Header row", function () { return block.header !== false; }, function (v) { block.header = !!v; refresh(); });
     segmentedLive("Borders", [["All", "all"], ["Rows", "rows"], ["None", "none"]],
       function (v) { return (block.borders || "all") === v; },
@@ -6403,7 +8783,7 @@
     inspector.appendChild(iconField(Icon("padding"), { value: block.cellPad == null ? 10 : block.cellPad, unit: "px", placeholder: "10", step: 1, min: 0, max: 48, datalist: "dl-gap", title: "Cell padding",
       onchange: function (v) { var n = parseInt(v, 10); block.cellPad = isNaN(n) ? undefined : n; refresh(); } }).wrap);
 
-    inspector.appendChild(sub("Structure"));
+    inspector = panelSection(_tblRoot, "Structure");
     inspector.appendChild(propHeader("Rows (" + block.rows.length + ")", function () { pushHistory(); block.rows.push(newRow(ncols())); refresh(); }, "Add row"));
     inspector.appendChild(propHeader("Columns (" + ncols() + ")", function () { pushHistory(); block.rows.forEach(function (r) { r.push({ t: "" }); }); refresh(); }, "Add column"));
     var rmRow = h("button", "prop-btn", "Remove last row"); rmRow.disabled = block.rows.length <= 1;
@@ -6413,7 +8793,7 @@
     rmRow.style.marginTop = "8px";
     inspector.appendChild(rmRow); inspector.appendChild(rmCol);
 
-    inspector.appendChild(sub("Column alignment"));
+    inspector = panelSection(_tblRoot, "Column alignment");
     for (var ci = 0; ci < ncols(); ci++) {
       (function (i) {
         segmentedIconLive("Column " + (i + 1), [[Icon("align-left"), "left", "Left"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "right", "Right"]],
@@ -6421,10 +8801,11 @@
           function (v) { block.align[i] = v; refresh(); });
       })(ci);
     }
+    inspector = _tblRoot;
   }
   function renderTextContent(node) {
     var block = node.__block;
-      inspector.appendChild(sub("Content"));
+      var _ins = inspector; inspector = panelSection(inspector, "Content");
       var textIn = h("textarea", "prop-input");
       textIn.value = block.text || "";
       textIn.addEventListener("input", function () {
@@ -6438,7 +8819,8 @@
         renderModelView();
       });
       inspector.appendChild(textIn);
-    inspector.appendChild(h("div", "insp-hint", "Or edit on the canvas; double-click the text to style it (font, size, colour)."));
+      inspector.appendChild(h("div", "insp-hint", "Or edit on the canvas; double-click the text to style it (font, size, colour)."));
+      inspector = _ins;
   }
 
   // SPEC-ui-kit ticket 7: image Content = the image + all its display params
@@ -6499,8 +8881,16 @@
   function renderImageVariantVersions(block) {
     var names = variantNames();
     if (!names.length) return;
-    inspector.appendChild(sub("Variant versions"));
-    inspector.appendChild(h("div", "insp-hint", "Show a different image per product variant. The image above is the Flagship; a variant with its own version swaps to it at runtime and in the export (preview a variant from the top-bar switcher)."));
+    var _ins = inspector; inspector = panelSection(inspector, "Variant versions");
+    inspector.appendChild(h("div", "insp-hint", "Show a different image per product variant. The image above is the Flagship; a variant with its own version swaps to it at runtime and in the export."));
+    // uio-O-W1 (OVL-06): the hint used to end with an instruction ("preview a variant from the
+    // top-bar switcher"). Which variant is being previewed is owned by the top-bar switcher, so
+    // this row shows the live value and opens that switcher.
+    crossRefRow({
+      label: "Previewing", value: activeVariant || "Flagship", linkLabel: "Variant switcher",
+      title: "Open the top-bar variant switcher",
+      onNavigate: function () { if (variantSwitchEl) openVariantMenu(variantSwitchEl); }
+    });
     names.forEach(function (V) {
       var own = imgVariantSrc(block, V);
       var row = h("div", "insp-inline-row");
@@ -6508,7 +8898,7 @@
       var nm = h("span", null, V); nm.style.fontWeight = "600"; nm.style.fontSize = "11px";
       var stt = h("span", null, own ? "Own image" : "Inherits flagship"); stt.style.fontSize = "9px"; stt.style.color = own ? "var(--color-accent, #e08600)" : "var(--text-secondary)";
       lbl.appendChild(nm); lbl.appendChild(stt); row.appendChild(lbl);
-      var upBtn = iconBtn("upload", own ? "Replace this variant's image" : "Add a variant version for " + V);
+      var upBtn = iconBtn("image-plus", own ? "Replace this variant's image" : "Add a variant version for " + V);
       upBtn.addEventListener("click", function () { uploadImageVariant(block, V, function () { reapplyBlock(block); reselectBlockNode(block, "block"); }); });
       row.appendChild(upBtn);
       if (own) {
@@ -6518,6 +8908,7 @@
       }
       inspector.appendChild(row);
     });
+    inspector = _ins;
   }
 
   // #148: on-canvas VERSION CYCLE. An image block that has >=1 variant version gets a
@@ -6621,7 +9012,9 @@
       // per-mode). Sections buffer + emit in PanelLayout order via endSections.
       // VV state-conditional: with no image the alt/size/light-dark/per-mode controls are
       // meaningless, so only the Content section shows until a source is set.
-      var hasImage = !!(block.src || block.srcLight || block.srcDark);
+      // A source-linked image resolves its pixels at render time (block.src stays empty), so count a
+      // live source link as "has an image" too -- else its Layout/Appearance/Behaviour controls hide.
+      var hasImage = !!(block.src || block.srcLight || block.srcDark || (block.sourceLink && block.sourceLink.markId));
       beginSections();
 
       // Content — source (URL / upload), alt, per-variant versions, caption.
@@ -6712,8 +9105,9 @@
       sectionGroup("Light/Dark", "Light & dark", function (secBody) {
         var _ins = inspector; inspector = secBody;
         try {
-      // Item Y — light/dark contrast (its own dimension, NOT the CSV variant axis).
-      inspector.appendChild(sub("Light / dark"));
+      // Item Y — light/dark contrast (its own dimension, NOT the CSV variant axis). No inner
+      // "Light / dark" header: it restated the section's own title one style down (OVL-07).
+      var _ldBody = inspector;
       // Tri-state contrast: Auto (default) tints VECTOR art (SVG) and leaves RASTER
       // photos alone, so assets adapt to light/dark out of the box; On/Off override.
       var isVec = window.isVectorSrc && window.isVectorSrc(srcForInspect(block.src));
@@ -6734,7 +9128,7 @@
       // fallback (e.g. a raster photo that needs distinct artwork per mode).
       var svgColors = (window.detectSvgColorsFromSrc && window.detectSvgColorsFromSrc(srcForInspect(block.src))) || [];
       if (svgColors.length) {
-        inspector.appendChild(sub("Palette — SVG colours"));
+        inspector = panelSection(_ldBody, "Palette — SVG colours");
         inspector.appendChild(h("div", "insp-hint", "Give each colour a role — Background and Text follow light/dark automatically; Keep leaves a brand colour as-is. Use ⋯ to map to a specific theme token, or switch it to a fixed custom colour."));
         block.colorMap = block.colorMap || {};
         // Three plain roles instead of raw token names: BG -> surface, Text -> ink,
@@ -6763,7 +9157,7 @@
         });
       }
 
-      inspector.appendChild(sub("Per-mode image (fallback)"));
+      inspector = panelSection(_ldBody, "Per-mode image (fallback)");
       inspector.appendChild(h("div", "insp-hint", "Rarely needed — for a raster asset that needs different artwork per mode. For SVGs use the palette above. Blank = use Image URL."));
       // optional per-mode raster sources; blank falls back to Image URL above
       function modeSrcRow(labelText, key) {
@@ -6798,7 +9192,8 @@
     var block = node.__block;
     var isCard = block.type === "frame";
     block.children = block.children || [];
-    inspector.appendChild(sub("Inside"));
+    var _frameRoot = inspector;
+    inspector = panelSection(_frameRoot, "Inside");
     block.children.forEach(function (child, ci) {
       var crow = h("div", "insp-row");
       crow.appendChild(h("span", "insp-row__label", blockIcon(child) + "  " + blockLabel(child)));
@@ -6825,7 +9220,7 @@
     addWrap.appendChild(addSel);
     inspector.appendChild(addWrap);
 
-    inspector.appendChild(sub("Actions"));
+    inspector = panelSection(_frameRoot, "Actions");
     var saveBtn = h("button", "prop-btn prop-btn--accent", "Save as component…");
     saveBtn.addEventListener("click", function () { saveBlockAsComponent(block); });
     inspector.appendChild(saveBtn);
@@ -6842,6 +9237,7 @@
     ungBtn.style.marginTop = "6px";
     ungBtn.addEventListener("click", function () { ungroupContainer(block); });
     inspector.appendChild(ungBtn);
+    inspector = _frameRoot;
   }
   function renderFrameOrGroupTwoLevel(node) {
     var block = node.__block;
@@ -6959,7 +9355,7 @@
     try {
     var isAssetSrc = typeof curScreen.visual === "string" && curScreen.visual.indexOf("asset:") === 0;
     var brow = h("div", "insp-inline-row");
-    var up = iconBtn("upload", isAssetSrc ? "Replace image / video / SVG" : "Upload image / video / SVG");
+    var up = iconBtn("image-plus", isAssetSrc ? "Replace image / video / SVG" : "Upload image / video / SVG");
     up.addEventListener("click", function () {
       var inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*,.svg,video/*";
       inp.addEventListener("change", function () { var f = inp.files && inp.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { pushHistory(); curScreen.visual = assetRef(r.result, f); if (f.type && f.type.indexOf("video/") === 0) curScreen.kind = "video"; else curScreen.kind = "image"; refresh(); }; r.readAsDataURL(f); });
@@ -7094,7 +9490,7 @@
     // (scripts stripped; green = a tint on completion).
     var markerKind = block.markerHtml ? "HTML animation" : (block.markerSvg ? "SVG marker" : null);
     var mrow = h("div", "insp-inline-row");
-    var upM = iconBtn("upload", markerKind ? "Replace custom marker" : "Upload custom marker (SVG or HTML)");
+    var upM = iconBtn("image-plus", markerKind ? "Replace custom marker" : "Upload custom marker (SVG or HTML)");
     upM.addEventListener("click", function () {
       var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".svg,.html,.htm,image/svg+xml,text/html";
       inp.addEventListener("change", function () {
@@ -7279,7 +9675,8 @@
     if (!active) active = curScreen.markers[0] || null;
     hotspotEditId = active ? active.id : null;
     if (active) {
-      inspector.appendChild(sub("Selected hotspot"));
+      var _hsListBody = inspector;
+      inspector = panelSection(_hsListBody, "Selected hotspot");
       // #49: per-hotspot Action — the real truth (block "Default for new hotspots" only seeds
       // new ones). Flip freely: card blocks AND a navigate target are both kept, so switching
       // back and forth is lossless. Everything below re-renders for the chosen action.
@@ -7403,9 +9800,33 @@
           inspector.appendChild(h("div", "insp-hint", "Then select the video block inside the card to upload the file."));
         }
       }
+      inspector = _hsListBody;
     }
     } finally { inspector = _hins; }
     });
+
+    // Advanced: bulk source-video purge (tour builder only). Harvested screens are
+    // author-time scratch (never exported) but the recordings themselves can be heavy —
+    // this is the all-at-once pressure valve alongside the per-source Remove on each card.
+    if (Array.isArray(block.sources) && block.sources.length) {
+      sectionGroup("Advanced", "Source videos", function (_asb) {
+        var _ains = inspector; inspector = _asb;
+        try {
+          var n = block.sources.length;
+          inspector.appendChild(h("div", "insp-hint", n + " source video" + (n === 1 ? "" : "s") + " on the board. Author-time scratch — never exported."));
+          var purge = h("button", "prop-btn prop-btn--danger", "Purge all sources");
+          purge.addEventListener("click", function () {
+            confirmModal("Purge all sources", "Remove all " + block.sources.length + " source video" + (block.sources.length === 1 ? "" : "s") + "? Screens you've already harvested from them are kept.", function () {
+              pushHistory();
+              delete block.sources;
+              scheduleSave(); renderTourNodes(); renderTourInspector();
+              try { sweepAllAssets(); } catch (_) {} // free the purged blobs now (unreferenced)
+            }, { okLabel: "Purge all", danger: true });
+          });
+          inspector.appendChild(purge);
+        } finally { inspector = _ains; }
+      });
+    }
 
     endSections(inspector);
     // reveal the active hotspot on the canvas for in-place editing (after layout)
@@ -7774,21 +10195,23 @@
   }
   function renderTourLoopInspector(body, loop) {
     var li = tourLoops().indexOf(loop);
-    body.appendChild(h("div", "insp-sub", "Loop"));
+    // uio-O-W2 (OVL-07): two sections in the one notation — the loop's own settings, then its
+    // ordered members — instead of a bold "Loop" line with a stack of labels under it.
+    var loopBody = panelSection(body, "Loop");
     // name
-    body.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Name"));
+    loopBody.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Name"));
     var nm = h("input", "prop-text"); nm.type = "text"; nm.spellcheck = false; nm.placeholder = "Loop " + (li + 1); nm.value = loop.name || "";
     nm.addEventListener("change", function () { pushHistory(); if (nm.value.trim()) loop.name = nm.value.trim(); else delete loop.name; scheduleSave(); renderTourNodes(); });
-    body.appendChild(nm);
+    loopBody.appendChild(nm);
     // wrap toggle — cycle past the ends (last -> first) or stop at the ends
     var wrapRow = h("label", "tourb__switch"); wrapRow.style.margin = "10px 0";
     wrapRow.appendChild(h("span", "tourb__switch-label", "Wrap around"));
     wrapRow.appendChild(switchEl(!!loop.wrap, function (v) { pushHistory(); if (v) loop.wrap = true; else delete loop.wrap; scheduleSave(); }));
-    body.appendChild(wrapRow);
+    loopBody.appendChild(wrapRow);
     // ordered member strip: reorder (up/down) + remove. Order = carousel order.
-    body.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Screens in this loop"));
+    var memBody = panelSection(body, "Screens in this loop");
     var members = loop.screens || [];
-    if (!members.length) body.appendChild(h("div", "tourb-loop__hint", "None yet. Drag screens into the frame, or add them below."));
+    if (!members.length) memBody.appendChild(h("div", "tourb-loop__hint", "None yet. Drag screens into the frame, or add them below."));
     var list = h("div", "tourb-memlist");
     members.forEach(function (sid, idx) {
       var s = tourScreenById(sid); if (!s) return;
@@ -7804,13 +10227,13 @@
       row.appendChild(up); row.appendChild(dn); row.appendChild(rm);
       list.appendChild(row);
     });
-    body.appendChild(list);
+    memBody.appendChild(list);
     // add-screens picker (the fallback to drag-in): every screen not already in this loop
     var addOpts = [["Add a screen…", ""]];
     tourScreens().forEach(function (s, si) { if (s && members.indexOf(s.id) < 0) addOpts.push([tourScreenLabel(s, si), s.id]); });
     if (addOpts.length > 1) {
       var addSel = dsSelect(addOpts, "", function (v) { if (!v) return; pushHistory(); members.push(v); scheduleSave(); renderTourNodes(); renderTourInspector(); });
-      addSel.title = "Add a screen to this loop"; body.appendChild(addSel);
+      addSel.title = "Add a screen to this loop"; memBody.appendChild(addSel);
     }
     // delete the loop (members become free nodes; any inbound navigate target is cleared)
     var del = h("button", "prop-btn prop-btn--danger", "Delete loop"); del.style.marginTop = "12px";
@@ -9399,25 +11822,30 @@
     renderTourEdges(); scheduleSave();
   });
 
-  function sub(title) { return h("div", "insp-sub", title); }
-  // DS PanelSection (issue #14, parent #22) — the canonical collapsible section
-  // wrapper (VersoUI.PanelSection -> .insp-section). Re-skins the two-level
-  // inspector's flat sub()/insp-sub headers to the DS mockup
-  // (design-system/ui_kits/editor/Inspector.jsx), so every section reads the same
-  // sibling-to-sibling. Returns the section BODY element so imperative builders
-  // append their rows into it. Falls back to sub() if the DS library is somehow
-  // absent (same library-absent guard as switchEl). The section carries NO
-  // data-section-type, so it is not part of the PanelLayout drag-reorder set
-  // (that stays the sectionGroup panels' feature) — see maybeRenderLayoutBar.
+  // A section built for an imperative caller: appends it to `host` and hands back the BODY, so
+  // the rows that follow append into the section rather than beside it. uio-O-W2 (OVL-07): this
+  // is now an adapter over the ONE sectionGroup, not a second section implementation — it used
+  // to build VersoUI.PanelSection and fall back to a flat sub() header, which is how a panel
+  // ended up mixing two section chromes. It carries no data-section-type, so it stays out of
+  // the PanelLayout drag-reorder set (that remains the taxonomy panels' feature).
   function panelSection(host, title, opts) {
     opts = opts || {};
-    if (window.VersoUI && window.VersoUI.PanelSection) {
-      var sec = window.VersoUI.PanelSection({ title: title, divider: opts.divider, collapsible: opts.collapsible, defaultOpen: opts.defaultOpen !== false, actions: opts.actions });
-      (host || inspector).appendChild(sec);
-      return sec.querySelector(".insp-section__body");
+    host = host || inspector;
+    var sec = sectionGroup(null, title, function () {}, {
+      key: opts.key, defaultOpen: opts.defaultOpen, divider: opts.divider, actions: opts.actions,
+      hostBodies: sectionBodiesAbove(host)
+    });
+    host.appendChild(sec);
+    return sec.querySelector(".insp-section__body");
+  }
+  // How many section bodies `host` sits inside, itself included. The host may still be detached
+  // (a panel is built before it is mounted), so this walks the tree it is in, not the document.
+  function sectionBodiesAbove(host) {
+    var n = 0;
+    for (var el = host; el; el = el.parentNode) {
+      if (el.nodeType === 1 && el.classList && el.classList.contains("insp-section__body")) n++;
     }
-    (host || inspector).appendChild(sub(title));
-    return host || inspector;
+    return n;
   }
   // DS inline-labelled segmented row (mockup AlignRow) — a canonical FieldRow whose
   // control is a VersoUI.SegmentedControl. Preserves the segmented wiring exactly
@@ -9464,16 +11892,11 @@
   var openSections = loadOpenSections();
   function saveOpenSections() { try { localStorage.setItem(OPEN_KEY, JSON.stringify(openSections)); } catch (e) {} }
   function toggleSection(key) { openSections[key] = !openSections[key]; saveOpenSections(); renderInspector(); }
+  // uio-O-W2 (OVL-07): an adapter over the ONE section, kept for the callers that name their
+  // open-state key. It used to be its own bullet-caret chrome — the third header style in a pane
+  // that already had two.
   function disclosure(key, title, buildBody) {
-    var open = !!openSections[key];
-    var secEl = h("div", "disc" + (open ? " is-open" : ""));
-    var head = h("button", "disc__head");
-    head.appendChild(h("span", "disc__caret"));
-    head.appendChild(h("span", "disc__title", title));
-    head.addEventListener("click", function () { toggleSection(key); });
-    secEl.appendChild(head);
-    if (open) { var body = h("div", "disc__body"); buildBody(body); secEl.appendChild(body); }
-    return secEl;
+    return sectionGroup(null, title, buildBody, { key: key, defaultOpen: false });
   }
 
   // ---- Canonical panel primitives -------------------
@@ -9495,25 +11918,28 @@
     return b;
   }
   // Labelled standalone switch row (for a boolean that is NOT a nest-enable).
-  function switchRow(labelText, get, set, target, noHistory) {
-    var host = target || inspector;
-    var row = h("div", "switch-row");
-    row.appendChild(h("span", "switch-row__label", labelText));
-    row.appendChild(switchEl(!!get(), function (v) { if (!noHistory) pushHistory(); set(v); }));
-    host.appendChild(row);
+  // A toggle sits in the shared settings row (uio-F01): label grows, the switch is the
+  // control, right-aligned. Not a separate row anatomy.
+  // rowOpts (optional) forwards the shared row's slots — today `inherit` (uio-F03's scope
+  // tail) and `overflow` — so a toggle can carry them without a second row anatomy.
+  function switchRow(labelText, get, set, target, noHistory, rowOpts) {
+    var o = {
+      label: labelText, variant: "insp-row--toggle", controlAlign: "end",
+      host: target || inspector,
+      control: switchEl(!!get(), function (v) { if (!noHistory) pushHistory(); set(v); })
+    };
+    if (rowOpts) { if (rowOpts.inherit) o.inherit = rowOpts.inherit; if (rowOpts.overflow) o.overflow = rowOpts.overflow; }
+    settingsRow(o);
   }
   // Visibility control = an EYE glyph (open / slashed). `visibleGet/Set` in terms of
   // VISIBLE (true = shown); the caller maps to whatever underlying flag it uses.
   function eyeRow(labelText, visibleGet, visibleSet, target) {
-    var host = target || inspector;
     var vis = !!visibleGet();
-    var row = h("div", "switch-row");
-    row.appendChild(h("span", "switch-row__label", labelText));
     var b = h("button", "eye-btn" + (vis ? "" : " is-off")); b.type = "button";
     b.title = vis ? "Visible — click to hide" : "Hidden — click to show";
     b.innerHTML = vis ? Icon("eye") : Icon("eye-off");
     b.addEventListener("click", function () { pushHistory(); visibleSet(!vis); });
-    row.appendChild(b); host.appendChild(row);
+    settingsRow({ label: labelText, variant: "insp-row--toggle", controlAlign: "end", host: target || inspector, control: b });
   }
   // Icon-segmented single-choice (mode-choice, e.g. alignment). options =
   // [[iconSvg, value, title], ...]. Word segments are only for choices with no clear icon.
@@ -9529,44 +11955,52 @@
     });
     host.appendChild(rowEl);
   }
-  // Nested (level-2) twirl. opts: { toggle:{get,set} (switch in header, feature-enable),
-  // overridden:fn->bool (active-override dot + enables Reset), onReset:fn (revert styling) }.
-  // Auto-opens the nest when its switch is turned ON (decision 3).
+  // A section that carries a feature switch. opts: { toggle:{get,set} (the switch),
+  // overridden:fn->bool (override dot + enables Reset), onReset:fn (revert styling),
+  // summary:fn->string (the collapsed one-liner) }.
+  //
+  // uio-O-W2 (OVL-08): the switch and the disclosure used to fight each other. Being OFF forced
+  // `is-collapsed` whatever the author had twirled open, turning it ON auto-opened the section,
+  // and an off section never built its body at all -- so it showed nothing of the configuration
+  // it still held, and turning the header back on was a leap of faith. They are independent now:
+  // the chevron owns open/closed, the switch owns on/off, an OFF section dims but keeps its rows.
+  //
+  // uio-O-W2 (OVL-07): and it is no longer its own chrome. It was the second of three header
+  // styles in the Header & Footer pane; every one of those behaviours now lives in the ONE
+  // section, so this is a named adapter rather than a parallel implementation.
   function subDisclosure(key, title, buildBody, opts) {
     opts = opts || {};
-    var enabled = opts.toggle ? !!opts.toggle.get() : true;
-    var open = !!openSections[key];
-    var over = !!(opts.overridden && opts.overridden());
-    var sec = h("div", "subdisc" + (open ? " is-open" : "") + (enabled ? "" : " is-collapsed"));
-    var head = h("div", "subdisc__head");
-    var twirl = h("button", "subdisc__twirl"); twirl.type = "button";
-    twirl.appendChild(h("span", "disc__caret"));
-    twirl.appendChild(h("span", "subdisc__title", title));
-    if (over) { var dot = h("span", "subdisc__dot"); dot.title = "Customized from theme default"; twirl.appendChild(dot); }
-    twirl.addEventListener("click", function () { toggleSection(key); });
-    head.appendChild(twirl);
-    var ctrls = h("div", "subdisc__ctrls");
-    if (over && opts.onReset) {
-      var rb = h("button", "subdisc__reset", "Reset"); rb.type = "button"; rb.title = "Reset this section to the theme default";
-      rb.addEventListener("click", function (e) { e.stopPropagation(); pushHistory(); opts.onReset(); renderInspector(); });
-      ctrls.appendChild(rb);
-    }
-    if (opts.toggle) {
-      ctrls.appendChild(switchEl(enabled, function (v) {
-        pushHistory();
-        if (v) openSections[key] = true;   // auto-open on enable
-        saveOpenSections();
-        opts.toggle.set(v);
-        renderInspector();
-      }));
-    }
-    head.appendChild(ctrls);
-    sec.appendChild(head);
-    if (open && enabled) { var body = h("div", "subdisc__body"); buildBody(body); sec.appendChild(body); }
-    return sec;
+    return sectionGroup(null, title, buildBody, {
+      key: key, defaultOpen: false, toggle: opts.toggle, summary: opts.summary,
+      overridden: opts.overridden, onReset: opts.onReset
+    });
+  }
+  // "Off · centred, top rule" — the collapsed section's one line. Pure string assembly over
+  // whatever the caller reports, so a section with nothing to say adds nothing rather than
+  // padding the header with "Default".
+  function sectionSummary(opts, enabled) {
+    var parts = [];
+    if (opts.toggle) parts.push(enabled ? "On" : "Off");
+    var detail = "";
+    try { detail = opts.summary ? String(opts.summary() || "") : ""; } catch (e) {}
+    if (detail) parts.push(detail);
+    return parts.join(" · ");
   }
   // Override registry (SPEC decision 5): each appearance nest declares the block-prop
   // keys it owns. Present key = overridden; reset = delete them (revert to theme default).
+  // uio-O-W2 (OVL-08): what the collapsed Header/Footer section will actually do. PURE over the
+  // config object, so it is regression-guarded in tests/run.js. Names only what is SET -- an
+  // untouched section reads as its alignment alone rather than a recital of every default.
+  function headerFooterSummary(cfg, isHeader) {
+    cfg = cfg || {};
+    var bits = [];
+    if (cfg.align) bits.push(cfg.align === "center" ? "centred" : cfg.align);
+    if (cfg.border) bits.push(isHeader ? "bottom rule" : "top rule");
+    if (isHeader && cfg.logo) bits.push("logo");
+    if (isHeader && cfg.pinned) bits.push("pinned");
+    if (!isHeader && cfg.hideText) bits.push("text hidden");
+    return bits.join(", ");
+  }
   function nestOverridden(cfg, keyList) { return !!cfg && keyList.some(function (k) { return cfg[k] !== undefined && cfg[k] !== null && cfg[k] !== ""; }); }
   function nestReset(cfg, keyList) { if (cfg) keyList.forEach(function (k) { delete cfg[k]; }); }
   var HEADER_STYLE_KEYS = ["align", "border", "borderColor", "padX", "padY", "logoTint", "logoSize", "pinned"];
@@ -9930,48 +12364,66 @@
   // in mountTopBar). The secondary IO (Import CSV, Publish to Viewer, JSON backup)
   // stays in the ⋯ overflow, now the DS IconButton. Re-skin only — Export fires
   // the same registered accent pipeline handler; the overflow menu is unchanged.
+  // side-rail-cleanup slice 2: the Import/Export pipeline was RELOCATED off the rail onto the Publish
+  // stage, into #publish-io (built in the queue-pane head).
+  // uio-P-C05 (PUB-13): it is no longer an "Import & export" grab-bag. Import belongs to Source, so
+  // the pane's named control is now FORMAT — it states the format the queue will emit without
+  // opening anything, and its menu lists the other formats once with their "soon" state. The
+  // remaining outbound/workspace actions keep a home in a quiet ... overflow beside it.
+  // Callers that kept the old menu in sync (registerPipelineButton) still re-render this.
   function renderToolbarPipeline() {
-    var host = document.getElementById("pipeline-actions"); if (!host) return;
+    var host = document.getElementById("publish-io"); if (!host) return;
     host.innerHTML = "";
     var U = window.VersoUI;
-    // #89: when mounted in the left rail, Export is a pinned GLYPH (not the labelled
-    // top-bar button). Same registered accent pipeline handler either way.
-    var inRail = !!(host.closest && host.closest(".left-rail"));
-    var exp = pipelineButtons.filter(function (b) { return b.accent; })[0];
-    if (exp) {
-      if (inRail && U && U.IconButton) {
-        host.appendChild(U.IconButton({
-          icon: "upload", label: "Export", size: "md",
-          title: "Export the course as a SCORM package", onClick: exp.onClick
-        }));
-      } else if (U && U.Button) {
-        host.appendChild(U.Button({
-          variant: "secondary", size: "md", icon: "upload", iconRight: "chevron-down",
-          label: "Export", title: "Export the course as a SCORM package", onClick: exp.onClick
-        }));
-      } else {
-        var primary = h("button", "tool-primary"); primary.type = "button";
-        primary.textContent = "Export"; primary.title = "Export the course as a SCORM package";
-        primary.addEventListener("click", exp.onClick);
-        host.appendChild(primary);
-      }
-    }
-    function openOverflow(anchor) {
-      var items = [];
-      pipelineButtons.filter(function (b) { return !b.accent; }).forEach(function (b) { items.push({ label: b.label, onClick: b.onClick }); });
-      items.push({ sep: true });
-      items.push({ label: "Publish to Viewer…", onClick: function () { publishToViewer(); } }); // not a registered pipeline button
-      var r = anchor.getBoundingClientRect();
-      showContextMenu(r.right, r.bottom + 4, items);
-    }
-    var more;
-    if (U && U.IconButton) {
-      more = U.IconButton({ icon: "more-horizontal", label: "Import & export", size: "md" });
+    var summary = publishQueueFormat();
+    var fmtLabel = "Format: " + summary.label;
+    var fmtTitle = summary.mixed
+      ? "The queued documents use presets that ask for different formats"
+      : "Output format, set by each document's output preset";
+    var btn;
+    if (U && U.Button) {
+      btn = U.Button({ variant: "secondary", size: "sm", icon: "file-text", iconRight: "chevron-down", label: fmtLabel, title: fmtTitle, onClick: function () { openPublishFormatMenu(btn); } });
     } else {
-      more = h("button", "tool tool--more"); more.type = "button"; more.title = "Import & export"; more.innerHTML = "⋯";
+      btn = h("button", "tool"); btn.type = "button"; btn.textContent = fmtLabel; btn.title = fmtTitle;
+      btn.addEventListener("click", function () { openPublishFormatMenu(btn); });
     }
-    more.addEventListener("click", function () { openOverflow(more); });
-    host.appendChild(more);
+    host.appendChild(btn);
+    var outbound = pipelineByDirection(pipelineButtons, "export");
+    if (U && U.IconButton) {
+      var ov = U.IconButton({ icon: "more-horizontal", label: "Other export actions", onClick: function () {
+        var r = ov.getBoundingClientRect();
+        var items = outbound.map(function (b) { return { label: b.label, onClick: b.onClick }; });
+        items.push({ sep: true });
+        items.push({ label: "Publish to Viewer…", onClick: function () { publishToViewer(); } }); // not a registered pipeline button
+        showContextMenu(r.right, r.bottom + 4, items);
+      } });
+      host.appendChild(ov);
+    }
+  }
+  // The format the pending queue will emit, read from each row's resolved preset options.
+  function publishQueueFormat() {
+    var SX = window.SCORMExport, PQ = window.PublishQueue;
+    var fmts = (SX && SX.formats) ? SX.formats() : [];
+    var base = (SX && SX.defaultOptions) ? (SX.defaultOptions().format || "") : "";
+    var rows = (PQ && PQ.pendingRows) ? PQ.pendingRows(publishQueue()) : [];
+    var values = rows.map(function (r) { return publishOptionsForRow(r).format || base; });
+    return publishFormatSummary(fmts, values, base);
+  }
+  // Every format listed ONCE: the emitted one marked selected, the rest greyed with a "Soon" state
+  // (never re-labelled "(soon)" per entry). Nothing here sets the format — the menu ends by naming
+  // where it IS set, the row's output preset.
+  function openPublishFormatMenu(anchor) {
+    var SX = window.SCORMExport;
+    var fmts = (SX && SX.formats) ? SX.formats() : [];
+    var summary = publishQueueFormat();
+    var items = [{ head: "Output format" }];
+    publishFormatRows(fmts, summary.value).forEach(function (f) {
+      items.push({ label: f.label, active: f.selected, hint: f.hint, disabled: !f.available });
+    });
+    items.push({ sep: true });
+    items.push({ head: "Set by the output preset on each queued document." });
+    var r = anchor.getBoundingClientRect();
+    showContextMenu(r.right, r.bottom + 4, items);
   }
 
   // Issue #12 (parent #22) — re-skin the editor top bar to the DS. Hydrate the
@@ -9982,7 +12434,7 @@
   function mountTopBar() {
     if (typeof document === "undefined") return;
     var Ic = window.Icon; if (!Ic) return;
-    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide]");
+    var hosts = document.querySelectorAll(".toolbar [data-lucide], .left-rail [data-lucide], .canvas-overlay-bar [data-lucide], .stage-placeholder [data-lucide], .panel-tabs [data-lucide]");
     Array.prototype.forEach.call(hosts, function (el) {
       var name = el.getAttribute("data-lucide");
       if (!name) return;
@@ -10000,26 +12452,3443 @@
     }
   }
 
-  // #89 left rail. The Document tab shows the Structure + Blocks
-  // panes; the pinned bottom glyphs are global actions.
-  var __leftView = "document";
-  function setLeftPanelView(view) {
-    ["lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = false; });
-    var dt = document.getElementById("rail-tab-document"); if (dt) dt.classList.toggle("is-active", true);
-    __leftView = view;
+  // Product Rail (2026-07-27 DaVinci pivot): left rail is three fixed, ungated,
+  // free-form segments -- Source, Edit, Publish -- replacing the old single
+  // Document tab. Edit shows exactly today's document-editing workspace
+  // (Structure/Blocks/Components + canvas + inspector), byte-for-byte unchanged.
+  // Source/Publish are placeholder regions until Epics 2/3/6 build their real
+  // content -- this ticket only owns the segment switch + the shared product
+  // context, not what renders inside each stage.
+  /* @stage-rail-start */
+  var STAGE_IDS = ["source", "edit", "publish"];
+  function isValidStage(s) { return STAGE_IDS.indexOf(s) !== -1; }
+  // Edit renders through the workspace's ORIGINAL grid (no extra class) so today's
+  // editing experience never changes; Source/Publish get a modifier class that hides
+  // the edit-only grid items and reveals their own placeholder (same "hide the grid
+  // items, span the leftover column" approach as .workspace.is-panels-hidden).
+  function stageWorkspaceClass(stage) {
+    if (stage === "source") return "workspace--stage-source";
+    if (stage === "publish") return "workspace--stage-publish";
+    return null;
+  }
+  // ProductsStore ({id: {id,name,...}}) -> dropdown options, "All products" first.
+  function productSelectOptions(store) {
+    var opts = [{ value: "", label: "All products" }];
+    Object.keys(store || {}).sort(function (a, b) {
+      return ((store[a] && store[a].name) || "").localeCompare((store[b] && store[b].name) || "");
+    }).forEach(function (id) {
+      opts.push({ value: id, label: (store[id] && store[id].name) || id });
+    });
+    return opts;
+  }
+  /* @stage-rail-end */
+
+  var __activeStage = "edit";
+  var STAGE_PERSIST_KEY = "verso.activeStage"; // persist the active stage so a refresh returns here, not Edit
+  // The canvas viewport is display:none on Source/Publish, so any fit computed while it's hidden
+  // measures a 0x0 rect and lands the author in blank space. Frame the content ONCE the first time
+  // Edit is shown with a laid-out canvas; later Edit entries keep the author's pan.
+  var __framedWhileVisible = false;
+  function setStage(stage) {
+    if (!isValidStage(stage)) return;
+    __activeStage = stage;
+    try { localStorage.setItem(STAGE_PERSIST_KEY, stage); } catch (e) {}
+    if (typeof document === "undefined") return;
+    if (typeof applyLeftSection === "function") applyLeftSection(_activeLeftSection); // SPEC 7: re-apply the left switcher's active section (Edit shows the panel; the switcher owns pane visibility)
+    var ws = document.getElementById("workspace");
+    if (ws) {
+      ws.classList.remove("workspace--stage-source", "workspace--stage-publish");
+      var cls = stageWorkspaceClass(stage);
+      if (cls) ws.classList.add(cls);
+    }
+    var srcEl = document.getElementById("stage-source"); if (srcEl) srcEl.hidden = stage !== "source";
+    var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
+    // uio-E-C01 (EDIT-07): the doc zones (tabs / doc controls / output) were merged into the
+    // single .toolbar and show only in Edit; Source/Publish show the identity zone only.
+    var tb = document.querySelector(".toolbar"); if (tb) tb.classList.toggle("toolbar--edit", stage === "edit");
+    STAGE_IDS.forEach(function (s) {
+      var btn = document.getElementById("rail-tab-" + s);
+      if (btn) btn.classList.toggle("is-active", s === stage);
+    });
+    if (stage === "source") renderSourceStage();
+    if (stage === "publish") mountPublishStage();
+    // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
+    if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
+    // Frame the content the first time Edit is actually visible (see __framedWhileVisible). rAF so the
+    // canvas has a real, non-zero rect before fitAll measures it.
+    if (stage === "edit" && !__framedWhileVisible && typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () {
+        if (__framedWhileVisible || __activeStage !== "edit") return;
+        var r = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
+        if (!r || r.width < 2 || r.height < 2) return; // still hidden / not laid out yet
+        view.ready = false; fitAll(); __framedWhileVisible = true;
+      });
+    }
   }
   function mountLeftRail() {
     if (typeof document === "undefined") return;
     var rail = document.getElementById("left-rail"); if (!rail) return;
     var setBtn = document.getElementById("rail-settings-btn");
-    if (setBtn && !setBtn.__wired) { setBtn.__wired = true; setBtn.addEventListener("click", function () { openSettingsModal("project"); }); }
+    // side-rail-cleanup: the rail cog opens SYSTEM (app/machine) settings. Per-document/project
+    // settings now open from the editor header's Document-settings button (edit-header-ia-v2), so
+    // the rail no longer duplicates them.
+    if (setBtn && !setBtn.__wired) { setBtn.__wired = true; setBtn.addEventListener("click", function () { openSettingsModal("system"); }); }
     var tabs = rail.querySelectorAll(".rail-tab");
     Array.prototype.forEach.call(tabs, function (t) {
       if (t.__navWired) return; t.__navWired = true;
-      t.addEventListener("click", function () { setLeftPanelView(t.getAttribute("data-rail-tab")); });
+      t.addEventListener("click", function () { setStage(t.getAttribute("data-rail-tab")); });
+    });
+    // restore the stage the author left on (a refresh should not snap back to Edit)
+    try { var saved = localStorage.getItem(STAGE_PERSIST_KEY); if (isValidStage(saved)) __activeStage = saved; } catch (e) {}
+    setStage(__activeStage);
+  }
+  window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; } }; // boot + settings
+
+  // SPEC 7 (cell switcher + tiered mutability): the editor-header chip shows the document's matrix
+  // cell (geometry . interactivity) and opens a menu to change it AFTER creation. Tiered: toggling
+  // interactivity is free + immediate; a geometry-mode change warns (content reflows, may not survive
+  // 1:1) then re-renders the canvas into the new geometry. Reads/writes doc.meta via the pure
+  // doc-type model; a geometry change is reflected by mount() rebuilding the geo-classed canvas.
+  var CELL_GEO_LABEL = { reflow: "Reflow", frame: "Fixed frame", paged: "Paged" };
+  function currentCell() {
+    return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc) : { geo: "reflow", interactive: true };
+  }
+  function applyCellChange(geo, interactive) {
+    if (!window.__docType || !window.__docType.tagDocCell) return;
+    window.__docType.tagDocCell(doc, geo, interactive);
+    saveRegistry(registry);
+    mount();            // rebuild the geo-classed canvas + palette (static fallback rides render)
+    syncCellChip();     // no-op now the chip left the bar; harmless if re-added later
+    // edit-header-ia-v2: the geometry/interactivity controls now live in the Document settings
+    // modal -- re-render it so the segmented state reflects the change.
+    var sm = document.getElementById("settings-modal");
+    if (sm && !sm.hidden && typeof renderSettingsBody === "function") renderSettingsBody();
+  }
+  function setCellInteractive(on) {
+    var c = currentCell();
+    if (c.interactive === on) return;
+    applyCellChange(c.geo, on); // immediate, no warning (free per tiered mutability)
+  }
+  function setCellGeo(geo) {
+    var c = currentCell();
+    if (c.geo === geo) return;
+    // Guarded: a geometry-mode switch reflows content and may not survive 1:1.
+    confirmModal("Change layout mode?",
+      "Switching to " + (CELL_GEO_LABEL[geo] || geo) + " reflows this document's content into the new geometry. It may not survive 1:1 -- you can switch back, but check the result.",
+      function () { applyCellChange(geo, c.interactive); },
+      { okLabel: "Change & reflow" });
+  }
+  // edit-header-ia-v2: the geometry/interactivity picker moved off the header (the cell chip +
+  // its menu are retired) into the Document settings modal's "Document type" section
+  // (buildDocTypeBody). syncCellChip is kept as a safe no-op for the 3 legacy call sites (the chip
+  // element no longer exists, so it returns early) rather than re-plumbing them.
+  function syncCellChip() {
+    if (typeof document === "undefined") return;
+    var chip = document.getElementById("editor-cell-chip"); if (!chip) return;
+    var c = currentCell();
+    chip.textContent = (CELL_GEO_LABEL[c.geo] || c.geo) + " · " + (c.interactive ? "Interactive" : "Static");
+    chip.classList.toggle("is-static", !c.interactive);
+  }
+  // edit-header-ia-v2: the header's Document-settings button opens the settings modal on the
+  // Project tab -- the per-document/per-course settings (Header & Footer, Learner nav, Theme...).
+  // The System tab (app/machine settings) is reachable from the rail cog. Today's eLearning is the
+  // only shipped doc type, so the Project sections ARE its document settings; when other doc types
+  // land, getSettingsSections filters the list by the doc's type (the capability-driven seam).
+  function mountDocSettingsBtn() {
+    if (typeof document === "undefined") return;
+    var b = document.getElementById("doc-settings-btn"); if (!b || b.__wired) return;
+    b.__wired = true;
+    b.addEventListener("click", function () { openSettingsModal("project"); });
+  }
+
+  // Persistent top-bar product context (Product Rail): "" = All products. Persisted across
+  // refresh (mirrors STAGE_PERSIST_KEY) so a chosen product scope survives a reload on every
+  // stage; every stage reads it through window.__productRail.getActiveProduct().
+  var PRODUCT_PERSIST_KEY = "verso.activeProduct";
+  var __activeProduct = "";
+  var __productRestored = false;
+  function setActiveProduct(id) {
+    __activeProduct = id || "";
+    try {
+      if (__activeProduct) localStorage.setItem(PRODUCT_PERSIST_KEY, __activeProduct);
+      else localStorage.removeItem(PRODUCT_PERSIST_KEY); // "All products" clears the pref
+    } catch (e) {}
+  }
+  function getActiveProduct() { return __activeProduct; }
+  // Restore once at first mount (ProductsStore is loaded by then). Validate the stored id still
+  // exists -> a deleted Product falls back cleanly to "All products" (and clears the stale pref).
+  function restoreActiveProduct() {
+    if (__productRestored) return;
+    __productRestored = true;
+    try {
+      var saved = localStorage.getItem(PRODUCT_PERSIST_KEY);
+      if (saved && window.ProductsStore && window.ProductsStore[saved]) __activeProduct = saved;
+      else if (saved) { try { localStorage.removeItem(PRODUCT_PERSIST_KEY); } catch (e2) {} }
+    } catch (e) {}
+  }
+  function mountProductPicker() {
+    if (typeof document === "undefined") return;
+    restoreActiveProduct(); // first mount = boot; restore the persisted scope before building the Select
+    var host = document.getElementById("product-picker-host"); if (!host) return;
+    host.innerHTML = "";
+    var U = window.VersoUI; if (!U || !U.Select) return;
+    host.appendChild(U.Select({
+      options: productSelectOptions(window.ProductsStore),
+      value: __activeProduct,
+      onChange: function (v) { setActiveProduct(v); renderSourceStage(); reconcileActiveTabToScope(); } // re-resolve the Product's document + re-scope the Edit tabs
+    }));
+    // new-product-button: a "+" beside the picker creates an empty Product from scratch (the only
+    // other path, Promote to Product, tags an already-open course -- it can't make a net-new one).
+    if (U.IconButton) {
+      var addBtn = U.IconButton({ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt });
+      addBtn.classList.add("product-picker__add");
+      host.appendChild(addBtn);
+    }
+  }
+  // Create an empty Product from a single-field name modal, then select it (scope switches to it).
+  // First-document creation is handled by the editor's empty-state file picker once the scope is set.
+  function newProductPrompt() {
+    promptModal("New product", "Product name", "", function (v) {
+      var name = (v || "").trim(); if (!name) return;
+      var prod = createProduct(name); if (!prod) return;
+      setActiveProduct(prod.id);
+      mountProductPicker();          // rebuild the dropdown with the new Product selected
+      // new-product-empty-landing: land on the Edit-stage document browser, empty (no documents are
+      // tagged to the new Product yet), rather than a bespoke per-stage prompt. Creating a document
+      // from that empty browser pre-stamps it with this Product (showNewDocDialog reads the scope).
+      setStage("edit");
+      reconcileActiveTabToScope();   // re-scope the Edit tabs to the new (empty) Product
+      renderSourceStage();           // keep the Source stage's own doc bound for when it's opened
+      openBrowser();                 // the empty document browser for the new Product
     });
   }
-  window.__leftRail = { mount: mountLeftRail, setView: setLeftPanelView }; // boot + settings
+  window.__productRail.getActiveProduct = getActiveProduct;
+  window.__productRail.setActiveProduct = setActiveProduct;
+  window.__productRail.mountProductPicker = mountProductPicker; // boot hook
+
+  // Product Rail (source-stage-nav-article): Source stage left-nav + flowing article.
+  // A "topic" is a LibraryStore master with kind:"topic" -- per #68's own note, Ground
+  // Truth topics slot into the existing master shape rather than a second store. No
+  // variant-column support yet (Flagship/base facet only); that's the next ticket.
+  /* @source-stage-start */
+  var DETAIL_FACETS = ["technical", "digestible", "dotpoint"];
+  function isValidFacet(f) { return DETAIL_FACETS.indexOf(f) !== -1; }
+  // Fuzzy full-text search across the topic (name + every heading/paragraph/facet), not the
+  // title only -- so an author finds a topic by a phrase inside it (spec 2.3, toc-search-drawer).
+  // Falls back to a title substring if SourceDoc isn't loaded (defensive; it always is).
+  function topicMatchesQuery(topic, query) {
+    if (!query) return true;
+    if (typeof window !== "undefined" && window.SourceDoc && window.SourceDoc.fuzzyMatch) {
+      return window.SourceDoc.fuzzyMatch(window.SourceDoc.searchText(topic), query);
+    }
+    return ((topic && topic.name) || "").toLowerCase().indexOf(String(query).toLowerCase()) !== -1;
+  }
+  // Every kind:"topic" master, narrowed to the active product context ("" = All
+  // products -> every topic) and a search query. Untagged (productId-less) topics
+  // only ever show under "All products", matching an untagged doc's existing
+  // behaviour elsewhere in Product Rail (never silently attributed to a filter).
+  function filterTopics(comps, activeProduct, query) {
+    return Object.keys(comps || {}).map(function (k) { return comps[k]; })
+      .filter(function (t) { return t && t.kind === "topic"; })
+      // Source v2: the reserved unified-doc master is not a nav topic, and a topic already
+      // rolled into a master (archivedInto) is now a chapter -- both are hidden so a migrated
+      // Product's nav shows the one document, never the old per-topic list on top of it.
+      .filter(function (t) { return !t.sourceMaster && !t.archivedInto; })
+      .filter(function (t) { return !activeProduct || t.productId === activeProduct; })
+      .filter(function (t) { return topicMatchesQuery(t, query); });
+  }
+  // Groups topics by owning Product (label from ProductsStore; "" bucket -> "Unassigned",
+  // sorted last), each group's topics sorted by their canonical order (see canonicalizeTopicOrder).
+  // Only reached in the empty-Product onboarding fallback now that the unified TOC replaced the
+  // per-topic navigator; kept (with filterTopics/topicMatchesQuery) as a small pure helper.
+  function groupTopicsByProduct(topics, products) {
+    var groups = {};
+    (topics || []).forEach(function (t) {
+      var pid = t.productId || "";
+      if (!groups[pid]) groups[pid] = [];
+      groups[pid].push(t);
+    });
+    return Object.keys(groups).sort(function (a, b) {
+      var an = a ? ((products[a] && products[a].name) || a) : "￿";
+      var bn = b ? ((products[b] && products[b].name) || b) : "￿";
+      return an.localeCompare(bn);
+    }).map(function (pid) {
+      return {
+        productId: pid,
+        label: pid ? ((products[pid] && products[pid].name) || pid) : "Unassigned",
+        topics: groups[pid].slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); })
+      };
+    });
+  }
+  // Assigns a stable, dense integer `order` to every topic within its own Product group
+  // (order is meaningful only WITHIN a group -- cross-group position doesn't exist). A
+  // topic with no order yet (never dragged) sorts to the end of its group, alphabetically
+  // among its equally-unordered siblings, so a freshly created/imported topic appends
+  // rather than jumping into the middle of an author's chosen order. Same canonicalize-
+  // then-restamp idiom `doc.chapters` already uses (editor.js ~1044-1045).
+  function canonicalizeTopicOrder(topics) {
+    var byProduct = {};
+    (topics || []).forEach(function (t) {
+      var pid = t.productId || "";
+      (byProduct[pid] = byProduct[pid] || []).push(t);
+    });
+    Object.keys(byProduct).forEach(function (pid) {
+      var group = byProduct[pid].slice().sort(function (a, b) {
+        var ao = a.order, bo = b.order;
+        if (ao == null && bo == null) return (a.name || "").localeCompare(b.name || "");
+        if (ao == null) return 1;
+        if (bo == null) return -1;
+        return ao - bo;
+      });
+      group.forEach(function (t, i) { t.order = i; });
+    });
+  }
+  // A section's text for the requested facet, falling back to "technical" then to
+  // whichever facet IS present -- a section never renders blank just because the
+  // page-level control is set to a facet this section hasn't been written for yet.
+  function resolveSectionFacetText(section, facet) {
+    var facets = (section && section.facets) || {};
+    if (facets[facet] != null) return facets[facet];
+    if (facets.technical != null) return facets.technical;
+    var firstKey = Object.keys(facets)[0];
+    return firstKey ? facets[firstKey] : "";
+  }
+  // Product Rail (source-stage-variant-columns): variants are declared per-Product
+  // (ProductsStore[id].variants), not per-document -- a Source topic is Product-scoped
+  // library content, not tied to whatever course happens to be open.
+  function declaredVariantsForProduct(products, productId) {
+    var p = productId && products && products[productId];
+    return (p && Array.isArray(p.variants)) ? p.variants.slice() : [];
+  }
+  // A section only carries a variant's own content when section.overrides[v] exists --
+  // mirrors the shipped per-variant image-override mechanic (own image vs inherits
+  // flagship, src/editor.js's renderImageVariantVersions), applied to section text.
+  function sectionOverrideVariants(section) {
+    return Object.keys((section && section.overrides) || {});
+  }
+  // Of the currently-toggled variants, only the ones THIS section actually diverges
+  // for -- a section with no override for any toggled variant stays single-column.
+  function sectionActiveVariants(section, activeVariants) {
+    var present = sectionOverrideVariants(section);
+    return (activeVariants || []).filter(function (v) { return present.indexOf(v) !== -1; });
+  }
+  // [{variant:null, text:<flagship>}, {variant:"coastal", text:<override>}, ...] in
+  // toggle order. Length 1 (Flagship only) when nothing toggled diverges here --
+  // callers render that case as a plain single body, no column chrome at all.
+  function sectionColumns(section, activeVariants, facet) {
+    var cols = [{ variant: null, text: resolveSectionFacetText(section, facet) }];
+    sectionActiveVariants(section, activeVariants).forEach(function (v) {
+      var ov = (section.overrides && section.overrides[v]) || {};
+      cols.push({ variant: v, text: resolveSectionFacetText({ facets: ov.facets }, facet) });
+    });
+    return cols;
+  }
+  // Product Rail (source-topic-content-authoring): section CRUD -- plain array ops on
+  // topic.sections, mutating in place (callers stamp updatedAt + saveLibrary()).
+  function addSection(topic) {
+    if (!topic) return null;
+    topic.sections = topic.sections || [];
+    var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), heading: "", facets: { technical: "" } };
+    topic.sections.push(sec);
+    return sec;
+  }
+  function removeSection(topic, index) {
+    if (!topic || !topic.sections) return;
+    topic.sections.splice(index, 1);
+  }
+  // Drag-and-drop reorder (the section grip handle) -- move dragId to just before/after
+  // refId within the same topic.sections array. Same shape as the outliner's
+  // structMoveChapter (editor.js ~16341): splice out, find the reference's new index,
+  // splice back in before/after it. Self-drop is a no-op.
+  function structMoveSection(topic, dragId, refId, after) {
+    if (!topic || !topic.sections || dragId === refId) return;
+    var arr = topic.sections;
+    var di = arr.findIndex(function (s) { return s.id === dragId; });
+    if (di < 0) return;
+    var drag = arr.splice(di, 1)[0];
+    var ri = arr.findIndex(function (s) { return s.id === refId; });
+    var at = ri < 0 ? arr.length : (after ? ri + 1 : ri);
+    arr.splice(at, 0, drag);
+  }
+  // Diverge-for-<variant>: copies Flagship's CURRENT facets into an independently-
+  // editable override, once -- mirrors the shipped "own image vs inherits flagship"
+  // convention (src/editor.js's renderImageVariantVersions). A no-op if already diverged
+  // (never silently resets an author's existing override back to Flagship's text).
+  function divergeSectionVariant(section, variant, cloneFn) {
+    if (!section || !variant) return;
+    section.overrides = section.overrides || {};
+    if (section.overrides[variant]) return;
+    section.overrides[variant] = { facets: cloneFn(section.facets || {}) };
+  }
+  // source-stage-comments: which of a topic's comments anchor to this section.
+  function sourceCommentsForSection(topic, sectionId) {
+    return (topic.comments || []).filter(function (c) { return c.anchor && c.anchor.sectionId === sectionId; });
+  }
+  /* @source-stage-end */
+
+  var __sourceActiveTopicId = null;
+  var __sourceActiveFacet = "technical";
+  var __sourceSearchQuery = "";
+  var __sourceReplaceQuery = ""; // source find-and-replace: the replacement text
+  var __sourceReplaceOpen = false; // uio-S-C02 (SRC-05): the replace row is revealed on demand, not always shown
+  var __sourceActiveVariants = []; // reset whenever a different topic is selected
+  // Source rewrite (Epic 2b, lock-toolbars): a topic renders the new continuous-document article
+  // (node model + range marks + two-layer lock + canvas-idiom toolbars) once it carries a `doc`
+  // (SourceDoc JSON). Legacy section topics render the shipped article unchanged -- additive, no
+  // regression. The live SourceDoc model is cached per topic so its owned undo stack survives
+  // re-renders; edits persist back to topic.doc.
+  var __sourceUnlocked = false;    // base prose editable? (annotation is always live)
+  var __sourceEditSession = null;  // buffered prose-edit deltas during an unlock->lock cycle (History commit collapse)
+  var __sourceShowMarks = true;    // marks painted + status dots visible
+  var __sourceDocModel = null;     // the live SourceDoc model for __sourceDocModelTopicId
+  var __sourceDocModelTopicId = null;
+  var __sourceMarksEngine = null;  // the SourceMarks painting engine bound to the mounted article
+  // Source v2 (consolidated-panel): ONE right panel (#source-stage-info) holds Marks + History +
+  // Source + Comments; the on-demand overlay drawer is retired. One doc-bar control shows/hides it.
+  var __sourceInfoOpen = true;     // the one consolidated right panel is shown (default) or hidden
+  var __sourceMarksFilter = "all"; // the Marks-section filter: all | alternate | link | comment
+  var __sourceActiveMarkId = null; // the mark whose row is highlighted (selected in the panel/article)
+  var __sourceAltPanelMarkId = null; // the alternate mark shown in the pinned contextual panel
+  var __sourceWhereUsedMarkId = null; // the link mark shown in the pinned where-used ("Linked in N") panel
+  var __sourceOpenCommentMarkId = null; // the comment mark whose thread card is open, or null
+  // Source v2 (unified-toc): the left rail is ONE document TOC of the active Product's unified
+  // doc (chapters + nested headings) instead of a per-topic list. Chapter twirl state (a key set
+  // to false is collapsed; default open) + the chapter drag-reorder state.
+  var __sourceOpenChapters = {}; // chapterKey -> false collapses it in the TOC (default open)
+  var __sourceChapterDrag = null; // { key } | null
+  // Source v2 (find-word-cycling): the TOC search finds down to the word/line level. The live
+  // ordered hits + the cursor into them drive the "N matches" count, next/prev cycling, and the
+  // TOC filter (a heading is kept when it owns a hit). Recomputed by renderSourceUnifiedToc.
+  var __sourceFindMatches = []; // [{nodeKey,start,len,index}] in document order for the current query
+  var __sourceFindIndex = 0;    // which hit is currently scrolled-to + highlighted
+
+  // A small canonical Badge overlaid on an IconButton's corner -- the notification-bell-
+  // with-unread-count pattern -- so a count survives an icon-only treatment without
+  // reintroducing a text sentence. Returns the plain icon button unwrapped when there's
+  // nothing to show a count for.
+  function iconButtonWithBadge(btn, count) {
+    if (!count || !window.VersoUI || !window.VersoUI.Badge) return btn;
+    var wrap = h("div", "source-stage__toolbar-badge-wrap");
+    wrap.appendChild(btn);
+    var badge = window.VersoUI.Badge({ children: String(count), tone: "warning", size: "sm" });
+    badge.classList.add("source-stage__toolbar-badge");
+    wrap.appendChild(badge);
+    return wrap;
+  }
+
+  // The left-rail action row. Under the unified-document model (Source v2) there is no per-topic
+  // list to manage, so the topic-management actions -- select / delete / move / reorder / needs-
+  // review -- are gone (cleanup, spec 2c section 7.6). What remains: Markdown import always, plus
+  // "New topic" only in the empty-Product onboarding path (no document yet).
+  function renderSourceToolbar() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-nav-actions"); if (!host) return;
+    host.innerHTML = "";
+    if (!window.VersoUI || !window.VersoUI.IconButton) return;
+    var U = window.VersoUI;
+    // Top row = navigation / authoring actions (New topic, Import).
+    var row = h("div", "source-stage__toolbar");
+    if (!sourceMasterFor(activeSourceProductId())) {
+      row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
+    }
+    // uio-P-C05 (PUB-13): import is a SOURCE action. This one button now opens the whole inbound
+    // set — Markdown plus every registered import pipeline that used to sit on the Publish pane —
+    // so nothing is duplicated and the Publish pane is left to what it sends out.
+    row.appendChild(U.IconButton({ icon: "download", label: "Import…", onClick: function (ev) {
+      var t = (ev && (ev.currentTarget || ev.target)) || null;
+      var r = t && t.getBoundingClientRect ? t.getBoundingClientRect() : { left: 0, bottom: 0 };
+      openSourceImportMenu(r.left, r.bottom + 4);
+    } }));
+    host.appendChild(row);
+    // uio-S-C05 (SRC-13): product-scope actions (incl. the destructive delete-document / delete-
+    // product) live in the FOOTER strip, away from navigation, so they read as acting on the
+    // Product and are never one click from ordinary outline navigation.
+    var footer = document.getElementById("source-stage-nav-footer");
+    if (footer) {
+      footer.innerHTML = "";
+      var lifePid = activeSourceProductId();
+      if (lifePid && window.ProductsStore[lifePid]) {
+        var frow = h("div", "source-stage__toolbar");
+        frow.appendChild(U.IconButton({ icon: "more-horizontal", label: "Product actions", onClick: function (e) {
+          var t = (e && (e.currentTarget || e.target)) || null; var r = t && t.getBoundingClientRect ? t.getBoundingClientRect() : { left: 0, bottom: 0 };
+          openProductActionsMenu(lifePid, r.left, r.bottom + 4);
+        } }));
+        footer.appendChild(frow);
+      }
+    }
+  }
+  // uio-P-C05 (PUB-13): the Source stage's one inbound menu. Markdown first (the everyday path),
+  // then every action a module registered with an "Import" name — routed to the SAME handler the
+  // Publish pane used to call, so no importer is rebuilt or duplicated here.
+  function openSourceImportMenu(x, y) {
+    var items = [{ head: "Import" }, { label: "Markdown…", onClick: importMarkdownModal }];
+    var inbound = pipelineByDirection(pipelineButtons, "import");
+    if (inbound.length) items.push({ sep: true });
+    inbound.forEach(function (b) { items.push({ label: importMenuLabel(b.label), onClick: b.onClick }); });
+    showContextMenu(x, y, items);
+  }
+  // Product/source lifecycle menu (Source stage). Destructive items are confirm-gated; on delete we
+  // reset the active Product + re-render so the stage never points at a document that no longer exists.
+  function openProductActionsMenu(pid, x, y) {
+    var pname = (window.ProductsStore[pid] && window.ProductsStore[pid].name) || "Product";
+    var hasSource = !!sourceMasterFor(pid) || unifiableTopicsFor(pid).length > 0;
+    showContextMenu(x, y, [
+      { head: pname },
+      { label: "Export to Markdown", onClick: function () {
+        if (!hasSource) { window.alert("This Product has no source document to export."); return; }
+        exportProductSourceMarkdown(pid);
+      } },
+      { label: "Unlink all courses", onClick: function () {
+        var n = unlinkAllCoursesFromProduct(pid); mountProductPicker();
+        window.alert(n ? ("Unlinked " + n + " course" + (n === 1 ? "" : "s") + " from “" + pname + "”.") : "No linked courses to unlink.");
+      } },
+      { label: "Delete source document", danger: true, onClick: function () {
+        if (!hasSource) { window.alert("This Product has no source document to delete."); return; }
+        confirmModal("Delete source document?", "Removes the entire continuous document for “" + pname + "” -- every chapter -- and cannot be undone. The Product itself stays.", function () { deleteProductSource(pid); afterProductLifecycleChange(); }, { okLabel: "Delete", danger: true });
+      } },
+      { sep: true },
+      { label: "Delete Product", danger: true, onClick: function () {
+        confirmModal("Delete Product?", "Deletes “" + pname + "” entirely -- its source document and its Product tag on any linked course. Cannot be undone.", function () { deleteProduct(pid); afterProductLifecycleChange(); }, { okLabel: "Delete", danger: true });
+      } }
+    ]);
+  }
+  // Export a Product's continuous source document to a portable Markdown (.md) file (pilot ask:
+  // "this source page should be exportable to .md"). Prefers the persisted unified master doc (it
+  // carries the author's edits); falls back to a freshly-concatenated model for a not-yet-unified
+  // Product. Serialisation is the pure SourceDoc.toMarkdown; download reuses the Blob idiom.
+  function sourceModelForExport(pid) {
+    var SD = window.SourceDoc; if (!SD) return null;
+    var master = sourceMasterFor(pid);
+    if (master && master.doc && master.doc.nodes && master.doc.nodes.length) return SD.fromJSON(master.doc);
+    return buildUnifiedModelFor(pid);
+  }
+  function exportProductSourceMarkdown(pid) {
+    var SD = window.SourceDoc;
+    var model = sourceModelForExport(pid);
+    if (!SD || !model || !model.nodes || !model.nodes.length) { window.alert("This Product has no source document to export."); return; }
+    var pname = (window.ProductsStore[pid] && window.ProductsStore[pid].name) || "source";
+    var slug = String(pname).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "source";
+    var md = SD.toMarkdown(model);
+    var blob = new Blob([md], { type: "text/markdown" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = slug + "-source.md";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    if (typeof sourceToast === "function") sourceToast("Exported “" + pname + "” source to Markdown.");
+  }
+  // After a delete, drop any dangling active-Product/topic state and re-render the stage + picker.
+  function afterProductLifecycleChange() {
+    setActiveProduct("");
+    __sourceActiveTopicId = null; __sourceDocModel = null; __sourceDocModelTopicId = null;
+    __sourceActiveVariants = [];
+    mountProductPicker();
+    renderSourceStage();
+  }
+
+  // ---- Source v2: the unified-document TOC (unified-toc, spec 2c section 2) ----
+  // The active Product's source is ONE document (the reserved master). The left rail shows its
+  // whole outline -- chapters (old topics, level-1) with their headings nested -- not a per-topic
+  // list. This resolves the Product to show and materialises the one-doc model on first entry.
+
+  // The Product whose source document the stage shows. Prefers the picker's active Product; if
+  // none is set, defaults to the first Product that has source content (a master or topics), so
+  // the stage always lands on a real document instead of an empty rail.
+  function activeSourceProductId() {
+    var pid = getActiveProduct();
+    if (pid && window.ProductsStore[pid]) return pid;
+    var keys = Object.keys(window.ProductsStore || {});
+    for (var i = 0; i < keys.length; i++) {
+      if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) {
+        // Before the saved scope is restored (boot), auto-pick in memory ONLY -- persisting here would
+        // overwrite the author's saved Product with a default before restoreActiveProduct reads it,
+        // which is exactly the "refresh resets the dropdown" bug.
+        if (__productRestored) setActiveProduct(keys[i]); else __activeProduct = keys[i];
+        return keys[i];
+      }
+    }
+    return keys[0] || "";
+  }
+  // Resolve the active Product's unified-doc master, migrating on first entry when the Product
+  // still has loose topics (the one-doc model is the locked v2 design and the migration is
+  // reversible -- see migrateProductToUnifiedDoc). Returns the master topic, or null.
+  function ensureUnifiedDocForActiveProduct() {
+    var pid = activeSourceProductId(); if (!pid) return null;
+    var master = sourceMasterFor(pid);
+    if (!master && unifiableTopicsFor(pid).length) master = migrateProductToUnifiedDoc(pid);
+    return master;
+  }
+  // Scroll the reading column to a node (a chapter or heading key) -- the TOC's click-to-jump.
+  function scrollSourceToNode(key) {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var target = host.querySelector('[data-node="' + key + '"]');
+    if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
+  // ---- find-to-word + match cycling (find-word-cycling, spec 2c section 2) ----
+  // The TOC search finds every occurrence of the query across the whole document (not just
+  // headings). The hits drive a "N matches" count + next/prev cycling that scrolls to and paints
+  // each one, and the same hits filter the TOC (a heading stays when it owns a hit). The paint
+  // reuses the mounted marks engine's rangeFor (model offset -> live DOM Range) into a dedicated
+  // CSS Custom Highlight so it never collides with the alternate/link/comment sets.
+  function clearSourceFindHighlight() {
+    if (typeof CSS !== "undefined" && CSS.highlights) { var hl = CSS.highlights.get("sd-find"); if (hl) hl.clear(); }
+  }
+  function paintSourceFindHit(hit) {
+    if (!hit || typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") return;
+    var hl = CSS.highlights.get("sd-find"); if (!hl) { hl = new Highlight(); CSS.highlights.set("sd-find", hl); }
+    hl.clear();
+    var eng = __sourceMarksEngine; if (!eng || !eng.rangeFor) return;
+    var r = eng.rangeFor({ nodeKey: hit.nodeKey, start: hit.start, len: hit.len });
+    if (r) hl.add(r);
+  }
+  function scrollToSourceFindHit(hit) {
+    var host = document.getElementById("source-stage-article"); if (!host || !hit) return;
+    var el = host.querySelector('[data-node="' + hit.nodeKey + '"]');
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+    syncSourceTocToNode(hit.nodeKey);
+    // paint after layout settles so rangeFor reads final text nodes
+    requestAnimationFrame(function () { paintSourceFindHit(hit); });
+  }
+  // Scroll the left TOC to (and mark current) the entry owning a given doc node -- used when a
+  // find-jump moves the cursor without a document scroll (the scroll-spy only fires on scroll).
+  function syncSourceTocToNode(nodeKey) {
+    var rail = document.getElementById("source-topic-list"); if (!rail) return;
+    var SD = window.SourceDoc; if (!SD || !SD.headingKeyForNode || !__sourceDocModel) return;
+    var key = SD.headingKeyForNode(__sourceDocModel, nodeKey); if (!key) return;
+    var rows = Array.prototype.slice.call(rail.querySelectorAll(".source-toc__row[data-toc-key]"));
+    rows.forEach(function (it) {
+      var on = it.getAttribute("data-toc-key") === key;
+      it.classList.toggle("is-current", on);
+      it.classList.toggle("is-selected", on);
+      if (on) it.scrollIntoView({ block: "nearest" });
+    });
+  }
+  // Step the find cursor by dir (+1 next / -1 prev), wrapping, then scroll+paint + refresh the nav.
+  function cycleSourceFind(dir) {
+    if (!__sourceFindMatches.length) return;
+    __sourceFindIndex = (__sourceFindIndex + dir + __sourceFindMatches.length) % __sourceFindMatches.length;
+    scrollToSourceFindHit(__sourceFindMatches[__sourceFindIndex]);
+    renderSourceFindNav();
+  }
+  // The contextual match navigator ("3 / 12" + prev/next), shown only while a query has hits.
+  function renderSourceFindNav() {
+    var nav = document.getElementById("source-find-nav"); if (!nav) return;
+    nav.innerHTML = "";
+    var q = __sourceSearchQuery || "", U = window.VersoUI;
+    if (!q) { nav.style.display = "none"; return; }
+    nav.style.display = "";
+    var n = __sourceFindMatches.length;
+    var count = h("span", "source-find-nav__count", n ? (__sourceFindIndex + 1) + " / " + n : "No matches");
+    nav.appendChild(count);
+    if (n && U && U.IconButton) {
+      nav.appendChild(U.IconButton({ icon: "chevron-up", label: "Previous match", onClick: function () { cycleSourceFind(-1); } }));
+      nav.appendChild(U.IconButton({ icon: "chevron-down", label: "Next match", onClick: function () { cycleSourceFind(1); } }));
+    }
+  }
+  // Chapter drag-reorder on a TOC chapter row: same drop-marker idiom as the topic-row drag it
+  // replaces (tree-drop-before/after + clearTreeMarks), but it moves a whole chapter block in the
+  // one document via SourceDoc.moveChapter.
+  function wireSourceChapterDrag(row, key) {
+    row.setAttribute("draggable", "true");
+    row.addEventListener("dragstart", function (e) { __sourceChapterDrag = { key: key }; row.classList.add("is-dragging"); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {} e.stopPropagation(); });
+    row.addEventListener("dragend", function () { __sourceChapterDrag = null; row.classList.remove("is-dragging"); clearTreeMarks(); });
+    row.addEventListener("dragover", function (e) {
+      if (!__sourceChapterDrag || __sourceChapterDrag.key === key) return;
+      e.preventDefault(); e.stopPropagation();
+      var r = row.getBoundingClientRect();
+      row.__after = (e.clientY - r.top) > r.height / 2;
+      clearTreeMarks();
+      row.classList.add(row.__after ? "tree-drop-after" : "tree-drop-before");
+    });
+    row.addEventListener("dragleave", function () { row.classList.remove("tree-drop-before", "tree-drop-after"); });
+    row.addEventListener("drop", function (e) {
+      if (!__sourceChapterDrag) return;
+      e.preventDefault(); e.stopPropagation();
+      var dragKey = __sourceChapterDrag.key, after = row.__after;
+      __sourceChapterDrag = null; clearTreeMarks();
+      applySourceChapterMove(dragKey, key, after);
+    });
+  }
+  function applySourceChapterMove(dragKey, refKey, after) {
+    var master = ensureUnifiedDocForActiveProduct(); if (!master) return;
+    var SD = window.SourceDoc, model = ensureSourceDocModel(master);
+    var chs = SD.chapters(model).map(function (c) { return c.key; });
+    var refIdx = chs.indexOf(refKey);
+    var target = after ? (chs[refIdx + 1] || null) : refKey; // drop-after == "before the next chapter"
+    if (SD.moveChapter(model, dragKey, target)) {
+      persistSourceDocModel(master, model);
+      renderSourceArticle();
+      renderSourceTopicList();
+    }
+  }
+  // Render the one-document TOC into the left rail: chapters as top-level TreeItem rows (twirl +
+  // heading-count badge), their headings nested one/two levels deep. The search finds every hit
+  // across the whole document (find-word-cycling); the TOC narrows to headings that OWN a hit --
+  // one mechanism drives the count, the highlight, and this filter. Rows are canonical
+  // VersoUI.TreeItem (DSLMS structure/TreeItem).
+  function renderSourceUnifiedToc(master) {
+    if (typeof document === "undefined") return;
+    renderSourceToolbar(null, 0); // one-doc toolbar: import only
+    var host = document.getElementById("source-topic-list"); if (!host) return;
+    host.innerHTML = "";
+    var U = window.VersoUI, SD = window.SourceDoc;
+    if (!U || !U.TreeItem || !SD) return;
+    var model = ensureSourceDocModel(master);
+    var q = __sourceSearchQuery || "";
+    // Recompute the live hits (the count/cycle source of truth) and the set of headings that own
+    // one: headingKeyForNode of a heading-text hit is that heading itself, so this covers both
+    // heading matches and body matches uniformly.
+    __sourceFindMatches = q ? SD.findMatches(model, q) : [];
+    if (__sourceFindIndex >= __sourceFindMatches.length) __sourceFindIndex = 0;
+    var kept = null;
+    if (q) { kept = {}; __sourceFindMatches.forEach(function (m) { var hk = SD.headingKeyForNode(model, m.nodeKey); if (hk) kept[hk] = 1; }); }
+    function keep(key) { return !q || (kept && kept[key]); }
+    var tree = SD.outline(model), rendered = 0;
+    // B1: collapse-all / expand-all. One toggle atop the outline -- if any chapter is open it
+    // collapses them all, else it re-expands them (clears the per-chapter overrides). Hidden
+    // during an active find (the filter force-opens every matching chapter, so it's a no-op).
+    var expandableKeys = tree.filter(function (ch) { return (ch.children || []).length > 0; }).map(function (ch) { return ch.key; });
+    if (!q && expandableKeys.length && U.IconButton) {
+      var anyOpen = expandableKeys.some(function (k) { return __sourceOpenChapters[k] !== false; });
+      var collapseBtn = U.IconButton({
+        icon: "list-collapse",
+        label: anyOpen ? "Collapse all chapters" : "Expand all chapters",
+        onClick: function () {
+          if (anyOpen) expandableKeys.forEach(function (k) { __sourceOpenChapters[k] = false; });
+          else expandableKeys.forEach(function (k) { delete __sourceOpenChapters[k]; });
+          renderSourceTopicList();
+        }
+      });
+      // Sit on the SAME row as New topic / Import / Product actions (built by renderSourceToolbar just
+      // above) rather than in its own full-width strip atop the tree. Falls back to a strip if the
+      // toolbar row isn't there.
+      var toolbarRow = document.querySelector("#source-stage-nav-actions .source-stage__toolbar");
+      if (toolbarRow) toolbarRow.appendChild(collapseBtn);
+      else { var tools = h("div", "source-toc__tools"); tools.appendChild(collapseBtn); host.appendChild(tools); }
+    }
+    tree.forEach(function (ch) {
+      var kids = (ch.children || []).filter(function (k) { return keep(k.key); });
+      if (q && !keep(ch.key) && !kids.length) return; // chapter has no hit anywhere -> filtered out
+      var open = q ? true : (__sourceOpenChapters[ch.key] !== false); // an active filter force-opens
+      var count = (ch.children || []).length;
+      var chapterRow = U.TreeItem({
+        label: ch.text || "Untitled chapter", depth: 0,
+        expandable: count > 0, expanded: open,
+        trailing: count ? U.Badge({ children: String(count), tone: "neutral", size: "sm" }) : null,
+        onToggle: function () { __sourceOpenChapters[ch.key] = !open; renderSourceTopicList(); },
+        onSelect: function () { scrollSourceToNode(ch.key); }
+      });
+      chapterRow.classList.add("source-toc__row", "source-toc__row--chapter");
+      chapterRow.setAttribute("data-toc-key", ch.key);
+      chapterRow.title = ch.text || "";
+      wireSourceChapterDrag(chapterRow, ch.key);
+      host.appendChild(chapterRow); rendered++;
+      if (open) kids.forEach(function (k) {
+        var kr = U.TreeItem({ label: k.text || "Untitled", depth: (k.level >= 3 ? 2 : 1), onSelect: function () { scrollSourceToNode(k.key); } });
+        kr.classList.add("source-toc__row");
+        kr.setAttribute("data-toc-key", k.key);
+        kr.title = k.text || "";
+        host.appendChild(kr); rendered++;
+      });
+    });
+    if (!rendered) host.appendChild(h("div", "source-stage__empty", q ? "No matches." : "This document has no headings yet."));
+    renderSourceFindNav();
+    updateSourceScrollSpy();
+  }
+
+  function renderSourceTopicList() {
+    if (typeof document === "undefined") return;
+    // Source v2: when the active Product has a unified document, the rail is its one TOC.
+    var master = sourceMasterFor(activeSourceProductId());
+    if (master) { renderSourceUnifiedToc(master); return; }
+    // No unified document for this Product yet (an empty Product) -> the onboarding toolbar
+    // (import / new topic) + a plain, click-to-open list of any still-loose topics. The old
+    // select / reorder / bulk-move / needs-review machinery is gone with the topic model (cleanup).
+    renderSourceToolbar();
+    var host = document.getElementById("source-topic-list"); if (!host) return;
+    host.innerHTML = "";
+    var topics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
+    if (!topics.length) {
+      host.appendChild(h("div", "source-stage__empty", "No source document yet — import a Markdown file or add a topic to begin."));
+      return;
+    }
+    groupTopicsByProduct(topics, window.ProductsStore || {}).forEach(function (g) {
+      host.appendChild(h("div", "source-stage__group-label", g.label));
+      g.topics.forEach(function (t) {
+        var row = h("div", "source-stage__topic-row" + (t.id === __sourceActiveTopicId ? " is-active" : ""));
+        var label = h("button", "source-stage__topic-label", t.name || "Untitled topic");
+        label.type = "button";
+        label.addEventListener("click", function () {
+          if (t.id === __sourceActiveTopicId) return;
+          __sourceActiveTopicId = t.id;
+          try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, t.id); } catch (e) {} // return to this topic after a refresh
+          __sourceActiveVariants = []; // a different topic may have a different variant set
+          __sourceEditingCell = null; // don't carry an in-progress edit across topics
+          __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind the doc model to the new topic
+          __sourceUnlocked = false; // every topic opens locked (base prose protected by default)
+          renderSourceTopicList();
+          renderSourceArticle();
+        });
+        row.appendChild(label);
+        host.appendChild(row);
+      });
+    });
+  }
+
+  // The Flagship chip (always on, non-interactive) + one VersoUI.ToggleChip per variant
+  // declared for the topic's Product -- a MULTI-select toggle row (several variants can
+  // be active at once), unlike SegmentedControl's one-of-N. Returns null (append
+  // nothing) when the Product has no declared variants at all.
+  function buildVariantPillsRow(topic) {
+    var declared = declaredVariantsForProduct(window.ProductsStore || {}, topic.productId);
+    if (!declared.length) return null;
+    var U = window.VersoUI; if (!U || !U.ToggleChip) return null;
+    var row = h("div", "source-stage__variant-pills");
+    row.appendChild(U.ToggleChip({ label: "Flagship", active: true, disabled: true }));
+    declared.forEach(function (v) {
+      row.appendChild(U.ToggleChip({
+        label: v,
+        active: __sourceActiveVariants.indexOf(v) !== -1,
+        onClick: function () {
+          var idx = __sourceActiveVariants.indexOf(v);
+          if (idx === -1) __sourceActiveVariants.push(v); else __sourceActiveVariants.splice(idx, 1);
+          renderSourceArticle();
+        }
+      }));
+    });
+    return row;
+  }
+  // spec 2d: the Source-stage variant bar on a Product's unified document -- the column-toggle chips
+  // (when variants are declared) plus a "Manage variants" entry that is ALWAYS shown, so you can
+  // declare the FIRST variant on a Product that has none yet (the piece that was missing: nothing
+  // let you tell a Product its variants, so the whole variant workflow was unreachable).
+  function buildSourceVariantBar(topic) {
+    if (!topic || !topic.sourceMaster) return null;
+    var U = window.VersoUI;
+    var bar = h("div", "source-stage__variant-bar");
+    var pills = buildVariantPillsRow(topic);
+    if (pills) bar.appendChild(pills); else bar.appendChild(h("span", "source-stage__variant-empty", "No variants declared."));
+    var manage = (U && U.IconButton) ? U.IconButton({ icon: "layers", label: "Manage variants", onClick: function () { openVariantEditor(topic); } }) : h("button", null, "Variants");
+    manage.classList.add("source-stage__variant-manage");
+    bar.appendChild(manage);
+    return bar;
+  }
+  // spec 2d: declare/rename/remove the variants a Product's source can carry. Writes the Product's
+  // variant list (setProductVariants); a rename also migrates the master document's per-node
+  // overrides to the new name (SourceDoc.renameVariant), so a variant's divergences travel with it.
+  function openVariantEditor(topic) {
+    var U = window.VersoUI, SD = window.SourceDoc;
+    var pid = topic.productId || activeSourceProductId();
+    var product = pid && window.ProductsStore[pid]; if (!product) return;
+    var shell = dsModalShell({
+      title: "Variants",
+      subtitle: "The variants this Product's source can carry. Each is a column you can compare and a target you can import a variant manual into. Flagship is the base and is always present.",
+      primaryLabel: "Done",
+      // Commit any name still typed in the add field before closing -- otherwise clicking Done
+      // after typing a name (without Enter / the + button) would silently discard it.
+      onPrimary: function () { if (addInput && addInput.value.trim()) doAdd(); shell.modal.close(); }
+    });
+    var box = shell.body;
+    function current() { return declaredVariantsForProduct(window.ProductsStore || {}, pid); }
+    var listWrap = h("div", "variant-editor__list"); box.appendChild(listWrap);
+    function rerender() {
+      listWrap.innerHTML = "";
+      var vs = current();
+      if (!vs.length) { listWrap.appendChild(h("div", "variant-editor__empty", "No variants yet. Add one below.")); return; }
+      vs.forEach(function (v) {
+        var row = h("div", "variant-editor__row");
+        var input = h("input", "prop-text variant-editor__name"); input.type = "text"; input.value = v;
+        input.addEventListener("change", function () {
+          var nn = input.value.trim(); var list = current();
+          if (!nn || nn === v || list.indexOf(nn) !== -1) { input.value = v; return; }
+          list[list.indexOf(v)] = nn; setProductVariants(pid, list);
+          var model = ensureSourceDocModel(topic); SD.renameVariant(model, v, nn); persistSourceDocModel(topic, model);
+          var si = __sourceActiveVariants.indexOf(v); if (si !== -1) __sourceActiveVariants[si] = nn;
+          rerender(); renderSourceArticle();
+        });
+        row.appendChild(input);
+        var rm = (U && U.IconButton) ? U.IconButton({ icon: "x", label: "Remove variant", onClick: function () {
+          setProductVariants(pid, current().filter(function (x) { return x !== v; }));
+          var si = __sourceActiveVariants.indexOf(v); if (si !== -1) __sourceActiveVariants.splice(si, 1);
+          rerender(); renderSourceArticle();
+        } }) : h("button", null, "Remove");
+        rm.classList.add("variant-editor__remove");
+        row.appendChild(rm);
+        listWrap.appendChild(row);
+      });
+    }
+    rerender();
+    var addRow = h("div", "variant-editor__add");
+    var addInput = h("input", "prop-text variant-editor__name"); addInput.type = "text"; addInput.placeholder = "New variant name";
+    function doAdd() {
+      var nn = addInput.value.trim(); if (!nn) return;
+      var list = current(); if (list.indexOf(nn) !== -1) { addInput.value = ""; return; }
+      list.push(nn); setProductVariants(pid, list); addInput.value = ""; rerender(); renderSourceArticle();
+    }
+    // stopPropagation, not just preventDefault: dsModalShell binds Enter to the primary button,
+    // so without it one Enter both adds the variant AND closes the dialog, and you cannot declare
+    // two variants without reopening. Enter in this field means "add"; Done means "finish".
+    addInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); doAdd(); } });
+    var addBtn = (U && U.IconButton) ? U.IconButton({ icon: "plus", label: "Add variant", onClick: doAdd }) : h("button", null, "Add");
+    addRow.appendChild(addInput); addRow.appendChild(addBtn);
+    box.appendChild(addRow);
+  }
+
+  // Product Rail (source-topic-content-authoring): the facets object to read/write for
+  // a given column -- Flagship writes straight onto the section; a variant column
+  // writes into its (already-diverged, by the time this is called) override.
+  function facetsRefFor(sec, variant) {
+    if (variant == null) { sec.facets = sec.facets || {}; return sec.facets; }
+    sec.overrides = sec.overrides || {};
+    sec.overrides[variant] = sec.overrides[variant] || { facets: {} };
+    sec.overrides[variant].facets = sec.overrides[variant].facets || {};
+    return sec.overrides[variant].facets;
+  }
+  function stampTopicUpdated(topic) { topic.updatedAt = Date.now(); saveLibrary(); }
+
+  // Drag state for the section grip handle (source-stage-section-disclosure) -- only the
+  // handle itself is draggable=true (the section box holds an editable heading input and
+  // body text, so making the whole box draggable would fight text selection); the
+  // surrounding .source-stage__section box is the drop target. Same shape as the
+  // outliner's `treeDrag` (editor.js ~16310), reusing its drop-marker classes.
+  var __sourceSectionDrag = null; // { id } | null
+  // Which single (section, variant) body cell is currently in edit mode -- click a
+  // rendered body to swap it for a real contentEditable surface (seeded with the SAME
+  // MarkdownLite.render() HTML the view shows, so entering edit mode never flashes raw
+  // ** markers); blur commits + swaps back. Everything else keeps reading as normal
+  // MarkdownLite output, so browsing a topic never shows raw markdown -- only the one
+  // cell an author is actively typing into, and even that cell reads as formatted text.
+  var __sourceEditingCell = null; // { sectionId, variant } | null
+
+  // (#92) buildSourceEditToolbar is retired: the legacy per-cell Bold/code/bullet toolbar it built
+  // was superseded by the continuous-doc rewrite's floating selection bar (buildSourceSelBar), which
+  // owns Source-stage formatting now. It had no remaining callers, so the format-toolbar duplication
+  // #92 flagged is gone -- one live inspector-style bar (buildFormatToggleBar) + the Source selbar,
+  // which are deliberately different idioms.
+  // Commits an edited cell's contentEditable content back to markdown-lite text. Guards
+  // against a purely cosmetic open/close (click in, click away, nothing typed) ever
+  // rewriting the stored string: some of render()'s own behaviour is lossy in one
+  // direction (e.g. a multi-line paragraph with no blank-line separators collapses its
+  // newlines to spaces), so a naive round-trip of UNCHANGED content could still come out
+  // textually different from the original -- which would falsely look like an edit to
+  // the re-import reconcile system (#87/#88's lastImportedText comparisons). Comparing
+  // against a re-serialize of the OLD text's own rendered form (not the old text
+  // itself) means "no real edit happened" is judged the same lossy way render() itself
+  // already behaves, so it never fires on a no-op.
+  function commitEditableCell(topic, sec, variant, editEl) {
+    var ref = facetsRefFor(sec, variant);
+    var oldText = ref[__sourceActiveFacet] || "";
+    var newText = window.MarkdownLite.serialize(editEl);
+    var probe = document.createElement("div");
+    probe.innerHTML = window.MarkdownLite.render(oldText);
+    var normalizedOld = window.MarkdownLite.serialize(probe);
+    if (newText !== normalizedOld) {
+      ref[__sourceActiveFacet] = newText;
+      stampTopicUpdated(topic);
+    }
+  }
+
+  // md-topic-import: lets the author compare their current (Flagship) text against a
+  // re-imported source's version once reconcileSection has flagged a real conflict, and
+  // pick a side -- "Use updated text" applies the source's version (and clears the flag);
+  // "Keep mine" dismisses the flag without changing anything; Cancel leaves it pending.
+  function openSourceUpdateModal(topic, sec) {
+    var shell = dsModalShell({
+      title: "Source updated",
+      subtitle: (sec.heading || "This section") + " changed both here and in the re-imported source since the last import.",
+      primaryLabel: "Use updated text",
+      extras: window.VersoUI ? [window.VersoUI.Button({
+        variant: "secondary", label: "Keep mine",
+        onClick: function () { delete sec.sourceUpdate; stampTopicUpdated(topic); shell.modal.close(); renderSourceArticle(); }
+      })] : [],
+      onPrimary: function () {
+        sec.facets.technical = sec.sourceUpdate.text;
+        sec.lastImportedText = sec.sourceUpdate.text;
+        delete sec.sourceUpdate;
+        stampTopicUpdated(topic);
+        shell.modal.close();
+        renderSourceArticle();
+      }
+    });
+    // product-rail-review-diff: a real line-level diff (LineDiff, classic LCS) instead of
+    // two flat side-by-side blocks -- removed lines (your text) and added lines (the
+    // source's) are visually distinguished so the actual change is legible at a glance.
+    var diffBody = modalSection(shell.body, "What changed");
+    var diffBlock = h("div", "source-stage__diff-block");
+    var ops = window.LineDiff ? window.LineDiff.diff(sec.facets.technical || "", sec.sourceUpdate.text || "") : [];
+    ops.forEach(function (op) {
+      var prefix = op.type === "removed" ? "− " : op.type === "added" ? "+ " : "  ";
+      diffBlock.appendChild(h("div", "source-stage__diff-line source-stage__diff-line--" + op.type, prefix + op.text));
+    });
+    diffBody.appendChild(diffBlock);
+  }
+
+  // source-stage-comments: the same feedback/discussion system the canvas editor already
+  // has (makeComment/makeReply, comment-popover/comment-thread/comment-row CSS), ported
+  // to Source stage. Storage lives on the topic itself (topic.comments), not doc.comments
+  // -- Product Rail topics are library content (window.LibraryStore), not part of any
+  // course doc. Anchor is section-scoped ({sectionId}, no dx/dy/pageId -- there's no
+  // canvas/zoom here to project a pixel position from). No floating pin/popover either:
+  // Source stage never uses floating overlays anywhere (the flag pill, diverge row,
+  // variant pills are all plain inline siblings, full-rerender on every state change) --
+  // an inline expand/collapse thread panel matches that established convention, not the
+  // canvas's own (structurally different: infinite pan/zoom needs a pin anchored in
+  // screen space; a normal scrolling document doesn't).
+  var __sourceOpenCommentSectionId = null; // which section's thread panel is expanded, or null
+
+  // One comment's rendered row: the SAME .comment-reply/.comment-row__dot/.comment-
+  // popover__row/.comment-popover__del classes the canvas comment system already
+  // defines in editor.css (plain flex rows, nothing canvas/position-specific), reused
+  // verbatim rather than styled twice.
+  // opts.onChange (optional): fired after any mutation (resolve/delete/reply) so a mark-anchored
+  // thread can log the event to History + refresh its pinned card, instead of the default section
+  // path's full renderSourceArticle. Defaults to renderSourceArticle when omitted (the #94 path).
+  function buildSourceCommentItem(topic, c, opts) {
+    var UI = window.VersoUI;
+    var after = (opts && opts.onChange) || function () { stampTopicUpdated(topic); renderSourceArticle(); };
+    var item = h("div", "source-stage__comment-item");
+    var line = h("div", "comment-reply");
+    var dot = h("span", "comment-row__dot"); dot.style.background = c.colour || "";
+    var body = h("span", "comment-reply__body");
+    body.textContent = (c.author ? c.author + ": " : "") + (c.body || "");
+    line.appendChild(dot); line.appendChild(body);
+    item.appendChild(line);
+    var row = h("div", "comment-popover__row");
+    if (UI && UI.Checkbox) {
+      var doneCheck = UI.Checkbox({
+        checked: !!c.done, label: "Resolved",
+        onChange: function (v) { c.done = v; after("resolve", c); }
+      });
+      row.appendChild(doneCheck);
+    }
+    var del = h("button", "comment-popover__del", "Delete");
+    del.addEventListener("click", function () {
+      var i = (topic.comments || []).indexOf(c);
+      if (i !== -1) topic.comments.splice(i, 1);
+      after("delete", c);
+    });
+    row.appendChild(del);
+    item.appendChild(row);
+    (c.replies || []).forEach(function (rp) {
+      var rl = h("div", "comment-reply");
+      var rd = h("span", "comment-row__dot"); rd.style.background = rp.colour || "";
+      var rb = h("span", "comment-reply__body"); rb.textContent = (rp.author ? rp.author + ": " : "") + (rp.body || "");
+      rl.appendChild(rd); rl.appendChild(rb); item.appendChild(rl);
+    });
+    if (UI && UI.TextField && UI.Button) {
+      var replyField = UI.TextField({ value: "", placeholder: "Reply…" });
+      replyField.classList.add("comment-reply__input");
+      var replyBtn = UI.Button({
+        variant: "secondary", label: "Reply",
+        onClick: function () {
+          var v = (replyField.input.value || "").trim(); if (!v) return;
+          c.replies = c.replies || []; c.replies.push(makeReply(v));
+          after("reply", c);
+        }
+      });
+      item.appendChild(replyField); item.appendChild(replyBtn);
+    }
+    return item;
+  }
+  // The expanded thread panel for one section: every comment anchored to it, then a
+  // fresh "Add a comment" field at the bottom.
+  function buildSourceCommentPanel(topic, sec) {
+    var UI = window.VersoUI;
+    var panel = h("div", "comment-thread source-stage__comment-panel");
+    sourceCommentsForSection(topic, sec.id).forEach(function (c) { panel.appendChild(buildSourceCommentItem(topic, c)); });
+    if (UI && UI.TextField && UI.Button) {
+      var newField = UI.TextField({ multiline: true, rows: 2, value: "", placeholder: "Add a comment…" });
+      newField.classList.add("comment-popover__body");
+      var addBtn = UI.Button({
+        variant: "primary", label: "Comment",
+        onClick: function () {
+          var v = (newField.input.value || "").trim(); if (!v) return;
+          topic.comments = topic.comments || [];
+          topic.comments.push(makeComment({ sectionId: sec.id }, v));
+          stampTopicUpdated(topic); renderSourceArticle();
+        }
+      });
+      panel.appendChild(newField); panel.appendChild(addBtn);
+    }
+    return panel;
+  }
+
+  function renderSourceArticle() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    host.innerHTML = "";
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    // the all-marks drawer belongs to the continuous-document view only -- drop it when the
+    // active topic isn't a doc topic (the doc path re-syncs it against the live model below).
+    if (!(topic && topicHasDoc(topic))) { __sourceActiveMarkId = null; closeSourceAltPanel(); closeSourceWherePanel(); closeSourceCommentThread(); }
+    if (!topic || topic.kind !== "topic") {
+      host.appendChild(h("div", "source-stage__empty", "Select a topic to read it."));
+      renderSourceInfoPanel(null);
+      return;
+    }
+    var headEl = h("div", "source-stage__article-head");
+    var titleInput = h("input", "source-stage__title source-stage__title-input");
+    titleInput.type = "text"; titleInput.value = topic.name || "";
+    titleInput.placeholder = "Untitled topic";
+    titleInput.addEventListener("change", function () {
+      topic.name = titleInput.value.trim();
+      stampTopicUpdated(topic);
+      renderSourceTopicList(); // the left-nav row label must stay in sync
+    });
+    headEl.appendChild(titleInput);
+    headEl.appendChild(renderSourceProvenanceLine(topic)); // provenance pinned under the header
+    headEl.appendChild(renderSourceFactsStrip(topic));     // uio-F04 (SRC-12): downstream consequence
+
+    // Section-cells RETIRED (superseded by the continuous document): every topic now uses the
+    // continuous node-model article (lock + toolbars + marks). A legacy section topic auto-converts
+    // on open -- lossless, the section model only carried base prose in practice. An empty topic
+    // seeds one editable paragraph so it's never a dead, uneditable page.
+    if (!topicHasDoc(topic) && window.SourceDoc) {
+      var _m = window.SourceDoc.fromSections(topic, resolveTopicBaseText);
+      if (!_m.nodes.length) _m = window.SourceDoc.create([{ type: "paragraph", text: "" }]);
+      topic.doc = window.SourceDoc.toJSON(_m);
+      __sourceDocModel = null; __sourceDocModelTopicId = null;
+      stampTopicUpdated(topic);
+    }
+    host.appendChild(headEl);
+    renderSourceNodeArticle(topic, host);
+    renderSourceInfoPanel(topic);
+    return;
+  }
+
+  // Product Rail (source-stage-info-panel): "Linked in" (where-used, jumps to the
+  // referencing document -- Epic 4's lock/fork tickets are what will ever populate
+  // this list; the panel + its empty state are correct before that data exists) +
+  // "History" (created/last-updated, reusing the same relative-time formatter recents
+  // already uses). Reuses the canonical panelSection() helper, not a one-off block --
+  // this is a plain info panel, not a block-inspector taxonomy section (sectionGroup's
+  // TAXONOMY/reorder system is specific to that surface, not this one).
+  // The ONE consolidated right panel (Source v2, spec 2c section 3). It replaces the old pair --
+  // an always-on info aside PLUS an overlay all-marks drawer that stacked on top of it (the
+  // "double-up") -- with a single panel of canonical sections in navigator order: Marks (the mark
+  // navigator, folded in from the drawer) / History / Source (provenance + where-used) / Comments.
+  // Resolve a topic's imported-source stamp. A unified master built from imported topics may carry no
+  // own stamp (older migrations) -- inherit it from an imported constituent (archivedInto === master.id).
+  function resolveTopicSource(topic) {
+    if (!topic) return null;
+    if (topic.source) return topic.source;
+    if (topic.sourceMaster) {
+      var comps = libComponents(), ids = Object.keys(comps);
+      for (var i = 0; i < ids.length; i++) { var t = comps[ids[i]]; if (t && t.archivedInto === topic.id && t.source) return t.source; }
+    }
+    return null;
+  }
+  // The provenance line shown UNDER the document header (moved out of the sidebar): where this doc
+  // came from (imported file + version/date), or that it was authored in Verso. Sets the reader's
+  // expectation up front.
+  function renderSourceProvenanceLine(topic) {
+    var src = resolveTopicSource(topic);
+    var el = h("div", "source-stage__provenance");
+    if (src) {
+      var meta = [src.version, src.publishDate].filter(Boolean).join(" · ");
+      el.textContent = "Imported from " + (src.file || "an unknown file") + (meta ? " · " + meta : "");
+    } else {
+      el.textContent = "Authored in Verso";
+      el.classList.add("is-authored");
+    }
+    return el;
+  }
+  // uio-F04 (SRC-12): the Source stage never said what depends on the document being edited. This
+  // quiet strip sits under the title and states it: how far the Product's documents run on approved
+  // source, how many of them are behind THIS topic, where this topic is used, and how many packages
+  // the Product actually ships. Every number comes from f04ProductFacts -- the same resolver the
+  // Publish rows read -- so with one document in the Product the alignment badge here and the
+  // alignment badge on that document's Publish row are literally the same number.
+  function renderSourceFactsStrip(topic) {
+    var strip = h("div", "source-stage__facts");
+    var pid = activeSourceProductId();
+    var facts = f04ProductFacts(pid, topic && topic.id);
+    var docCount = facts.docIds.length;
+    var align = facts.alignment;
+    var alignEl = f04Badge(align, "source-stage__fact");
+    if (alignEl) {
+      // Scope stated in the tooltip AND beside the badge: this is a Product roll-up, not one
+      // document's score, and nobody should have to guess which.
+      alignEl.title = align.title + " Across " + docCount + " document" + (docCount === 1 ? "" : "s") + " in this Product.";
+      strip.appendChild(alignEl);
+      strip.appendChild(h("span", "source-stage__fact-scope", docCount + " document" + (docCount === 1 ? "" : "s")));
+    }
+    [facts.whereUsed ? f04Badge(facts.whereUsed, "source-stage__fact") : null,
+     f04Badge(facts.behind, "source-stage__fact"),
+     facts.outputs.count > docCount ? f04Badge(facts.outputs, "source-stage__fact") : null
+    ].forEach(function (b) { if (b) strip.appendChild(b); });
+    return strip;
+  }
+  function renderSourceInfoPanel(topic) {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-info"); if (!host) return;
+    host.innerHTML = "";
+    if (!topic) return;
+    // Marks -- the navigator, first (only when the topic is a continuous document with a live model).
+    // For a doc topic this section owns the Linked (where-used) + Comments tabs, so the old
+    // standalone Source "Linked in" block and the duplicate comments accordion are retired here --
+    // each mark type now appears in exactly one place (source-right-panel-consolidation parts 2-3).
+    var hasDoc = topicHasDoc(topic);
+    if (hasDoc) renderSourceMarksSection(host, ensureSourceDocModel(topic));
+    // History
+    renderHistoryTimeline(host, topic);
+    // Legacy section topics have no marks tabs -- keep their standalone Linked-in list. Comments are
+    // NOT re-rendered here: they already live in the Marks section's Comments tab, so a second
+    // standalone accordion just duplicated them (#163). The Comments tab is now their only home.
+    if (!hasDoc) {
+      var sourceBody = panelSection(host, "Source", { collapsible: true });
+      var used = libraryWhereUsedDetail(topic.id, getRegistry());
+      sourceBody.appendChild(h("div", "source-info__subhead", "Linked in (" + used.length + ")"));
+      if (!used.length) {
+        sourceBody.appendChild(h("div", "insp-hint", "Not currently linked in any document."));
+      } else {
+        used.forEach(function (u) {
+          var row = h("button", "source-stage__linked-row", u.docTitle);
+          row.type = "button";
+          row.title = "Open " + u.docTitle + " and select the linked block";
+          row.addEventListener("click", function () { jumpToLinkedBlock(u.docCode, u.blockId); });
+          sourceBody.appendChild(row);
+        });
+      }
+    }
+    applySourceInfoVisibility();
+  }
+  // Show or hide the one consolidated panel (its single doc-bar toggle). Hidden -> the reading
+  // column reclaims the width; shown (default) -> the panel docks at the right as before.
+  function applySourceInfoVisibility() {
+    var el = document.getElementById("source-stage-info"); if (!el) return;
+    el.style.display = __sourceInfoOpen ? "" : "none";
+  }
+  // Structural History events (comment/alternate added, resolved, reopened) log to model.history,
+  // but the info-panel History timeline must be RE-RENDERED to show them. Only the prose-commit
+  // path did that, so structural events never surfaced until an unrelated re-render (bug #109).
+  // Call this after any structural event persists.
+  function refreshSourceHistory(topic) {
+    var t = topic || (__sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null);
+    if (t && typeof document !== "undefined" && document.getElementById("source-stage-info")) renderSourceInfoPanel(t);
+  }
+
+  // ==== Source rewrite (Epic 2b): continuous-document article + two-layer lock + toolbars ====
+  // The node-model article. Coexists with the legacy section article (above): a topic renders
+  // this once it carries a `doc`. render()/mount() stay pure -- topic.doc is data on the topic,
+  // the live model is cached, and edits round-trip through applyTextEdit -> topic.doc.
+  function topicHasDoc(topic) { return !!(topic && topic.doc && topic.doc.nodes && topic.doc.nodes.length); }
+  function resolveTopicBaseText(sec) { return resolveSectionFacetText(sec, "technical"); }
+  function convertTopicToDoc(topic) {
+    if (!window.SourceDoc) return;
+    var model = window.SourceDoc.fromSections(topic, resolveTopicBaseText);
+    topic.doc = window.SourceDoc.toJSON(model);
+    __sourceDocModel = null; __sourceDocModelTopicId = null; // force a fresh model bind
+    stampTopicUpdated(topic);
+    renderSourceArticle();
+  }
+  function revertTopicDoc(topic) {
+    if (topic) { delete topic.doc; stampTopicUpdated(topic); }
+    __sourceDocModel = null; __sourceDocModelTopicId = null;
+    renderSourceArticle();
+  }
+  // The live model for a topic, cached so its owned undo stack persists across the article's
+  // frequent full re-renders. Rebuilt from topic.doc whenever the active topic changes.
+  function ensureSourceDocModel(topic) {
+    if (__sourceDocModel && __sourceDocModelTopicId === topic.id) return __sourceDocModel;
+    __sourceDocModel = window.SourceDoc.fromJSON(topic.doc);
+    __sourceDocModelTopicId = topic.id;
+    return __sourceDocModel;
+  }
+  function persistSourceDocModel(topic, model) {
+    topic.doc = window.SourceDoc.toJSON(model);
+    stampTopicUpdated(topic);
+  }
+
+  // Project one node to its DOM block, keyed by node.key. Text blocks (heading/paragraph/callout)
+  // are contentEditable so the base prose can be edited when unlocked; structural blocks (list/
+  // table/image) render for reading in v1 (cell/list editing is fast-follow, spec 6) but still
+  // carry marks. Marks paint over whatever text these blocks contain via the engine.
+  /* @pure-imgwidth-start */
+  // A1 (source image resize): width is stored as node.imgWidth = % of the column, so render
+  // is pure (editor == export). Blank/>=100 = full width. These two helpers are the pure core
+  // exercised by tests/run.js.
+  function clampSourceImgWidth(w) {
+    w = parseFloat(w);
+    if (isNaN(w)) return 100;
+    return Math.max(20, Math.min(100, w));
+  }
+  // Free-drag with a light magnetic snap at 25/50/75/100% (within ~4% of a stop).
+  function snapSourceImgWidth(pct) {
+    var stops = [25, 50, 75, 100];
+    for (var i = 0; i < stops.length; i++) { if (Math.abs(pct - stops[i]) <= 4) return stops[i]; }
+    return Math.round(pct);
+  }
+  // A2 (source image align): align stored as node.align; centre is the default (no style, so a
+  // full-width image reads the same either way). Returns "left"/"right" to apply, or "" for centred.
+  function sourceImgAlign(node) {
+    var a = node && node.align;
+    return (a === "left" || a === "right") ? a : "";
+  }
+  /* @pure-imgwidth-end */
+
+  // Fill an element with text, wrapping inline-format runs (from Markdown import) in transparent
+  // <strong>/<em>/<code>. The wrappers do NOT change the element's text content or length, so the
+  // mark engine (which walks text nodes by character offset) still lines up on the plain model text.
+  function fillSourceInline(el, text, runs) {
+    text = String(text == null ? "" : text);
+    // An empty text block generates no line box in the contentEditable article, so it has zero height
+    // and is invisible -- an Enter at the end of a line splits off an empty paragraph that "vanishes"
+    // (History still logs the split). A trailing <br> gives the empty block a line to sit on.
+    if (!text) { el.appendChild(document.createElement("br")); return; }
+    if (!runs || !runs.length) { el.textContent = text; return; }
+    var sorted = runs.slice().sort(function (a, b) { return a.start - b.start; });
+    var pos = 0;
+    sorted.forEach(function (r) {
+      if (!r || r.start < pos || r.start > text.length) return; // defensive: skip overlaps / stale runs
+      if (r.start > pos) el.appendChild(document.createTextNode(text.slice(pos, r.start)));
+      var tag = r.style === "bold" ? "strong" : r.style === "italic" ? "em" : "code";
+      var span = document.createElement(tag);
+      span.textContent = text.slice(r.start, r.start + r.len);
+      el.appendChild(span); pos = r.start + r.len;
+    });
+    if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
+  }
+  function renderSourceDocNode(node) {
+    var SD = window.SourceDoc, el;
+    // level-aware so the selbar's H1/H2 read distinctly (source-selbar-block-formats): level 1 -> h1
+    // (also chapter headings, the top structure), level 2 -> h2, level 3 -> h3.
+    if (node.type === "heading") { el = h(node.level === 1 ? "h1" : node.level === 3 ? "h3" : "h2", "source-doc__h"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
+    else if (node.type === "callout") { el = h("div", "source-doc__callout"); if (node.tag) el.appendChild(h("div", "source-doc__callout-tag", node.tag)); var cb = h("div", "source-doc__callout-body"); fillSourceInline(cb, SD.nodeText(node), node.formats); cb.setAttribute("data-node-body", "1"); el.appendChild(cb); }
+    else if (node.type === "list") { el = h(node.ordered ? "ol" : "ul", "source-doc__list"); if (node.ordered && node.start && node.start !== 1) el.setAttribute("start", node.start); (node.items || []).forEach(function (it, ix) { var liEl = h("li"); fillSourceInline(liEl, it, node.itemFormats && node.itemFormats[ix]); el.appendChild(liEl); }); }
+    else if (node.type === "table") { el = h("table", "source-doc__table"); (node.rows || []).forEach(function (row, ri) { var tr = h("tr"); (row || []).forEach(function (c, ci) { var td = h("td"); fillSourceInline(td, c, node.cellFormats && node.cellFormats[ri] && node.cellFormats[ri][ci]); tr.appendChild(td); }); el.appendChild(tr); }); }
+    else if (node.type === "row") {
+      // A3: a row lays its image children side by side. Each child renders through the normal path
+      // so it keeps its own key (marks stay attached), its width (A1) and its align chrome.
+      el = h("div", "source-doc__row");
+      (node.children || []).forEach(function (ch) { el.appendChild(renderSourceDocNode(ch)); });
+    }
+    else if (node.type === "image") {
+      // A1: the image sits inside a sized wrap so the L/R resize handles pin to the image edges
+      // (not the full-width figure). Width = node.imgWidth % of the column, applied purely.
+      el = h("figure", "source-doc__figure");
+      var wrap = h("span", "source-doc__imgwrap");
+      var im = h("img"); if (node.src) im.src = node.src; if (node.alt) im.alt = node.alt;
+      var iw = clampSourceImgWidth(node.imgWidth == null ? 100 : node.imgWidth);
+      if (iw < 100) wrap.style.width = iw + "%";
+      wrap.appendChild(im);
+      wrap.appendChild(h("span", "source-doc__handle source-doc__handle--l"));
+      wrap.appendChild(h("span", "source-doc__handle source-doc__handle--r"));
+      el.appendChild(wrap);
+      if (node.caption) el.appendChild(h("figcaption", null, node.caption));
+      var al = sourceImgAlign(node); if (al) el.style.textAlign = al; // A2: centre is the default
+    }
+    else { el = h("p", "source-doc__p"); fillSourceInline(el, SD.nodeText(node), node.formats); el.setAttribute("data-editable", "1"); }
+    el.setAttribute("data-node", node.key);
+    // image/table = a first-class markable OBJECT (a node-id mark, no text span). Tag it so a
+    // click selects the whole node and offers the same alternate/comment actions as a text span.
+    if (SD.isMarkableObjectNode && SD.isMarkableObjectNode(node)) { el.classList.add("source-doc__obj"); el.setAttribute("data-object", "1"); }
+    return el;
+  }
+
+  // spec 2d: render one node as a variant comparison. A node all shown variants agree on renders as
+  // a single shared block (its normal element); a node that diverges splits into one column per shown
+  // variant, each drawing its own wording or an explicit "not in this variant" state. Read-oriented.
+  function renderSourceDocNodeColumns(topic, node, shown) {
+    var SD = window.SourceDoc;
+    if (node.type === "image") return renderSourceImageColumns(topic, node, shown); // B2
+    var view = SD.variantView(node, shown);
+    if (view.mode === "shared") { var el = renderSourceDocNode(node); el.classList.add("source-doc__shared"); return el; }
+    var row = h("div", "source-doc__vrow"); row.setAttribute("data-node", node.key);
+    view.cols.forEach(function (c) {
+      var cell = h("div", "source-doc__vcol" + (c.diverged ? " is-diverged" : "") + (!c.present ? " is-absent" : ""));
+      cell.appendChild(h("div", "source-doc__vcol-head", c.variant));
+      if (!c.present) cell.appendChild(h("div", "source-doc__vcol-absent", "Not in this variant"));
+      else { var body = h("div", "source-doc__vcol-body"); body.textContent = c.text; cell.appendChild(body); }
+      row.appendChild(cell);
+    });
+    return row;
+  }
+  // B2: an image node compared across variants -- each column shows that variant's picture (its own
+  // src override, or the inherited Flagship one), or "Not in this variant". Unlike text (read-only in
+  // the columns view), an image is swappable per column: a Swap button picks a new file for JUST that
+  // variant, and a named variant can be removed/restored -- a discrete object action, not free-text
+  // editing that would fight contentEditable. Columns collapse to one shared image when they agree.
+  function renderSourceImageColumns(topic, node, shown) {
+    var SD = window.SourceDoc;
+    var cols = shown.map(function (v) { var r = SD.imageForVariant(node, v); r.variant = v; return r; });
+    var first = cols[0];
+    var allSame = cols.every(function (c) { return c.present === first.present && c.src === first.src; });
+    if (allSame && first.present) { var el = renderSourceDocNode(node); el.classList.add("source-doc__shared"); return el; }
+    var row = h("div", "source-doc__vrow"); row.setAttribute("data-node", node.key);
+    cols.forEach(function (c) {
+      var isFlag = SD.isFlagship(c.variant);
+      var cell = h("div", "source-doc__vcol" + (c.source === "override" ? " is-diverged" : "") + (!c.present ? " is-absent" : ""));
+      cell.appendChild(h("div", "source-doc__vcol-head", c.variant));
+      var acts = h("div", "source-vcol__imgacts");
+      function imgBtn(icon, title, fn) { var b = h("button", "source-vcol__imgbtn"); b.type = "button"; b.title = title; b.innerHTML = window.Icon ? window.Icon(icon) : ""; b.addEventListener("click", fn); return b; }
+      if (!c.present) {
+        cell.appendChild(h("div", "source-doc__vcol-absent", "Not in this variant"));
+        acts.appendChild(imgBtn("plus", "Add an image for " + c.variant, function () { pickImageForVariant(topic, node.key, c.variant); }));
+      } else {
+        var fig = h("figure", "source-doc__figure source-doc__vcol-fig");
+        var wrap = h("span", "source-doc__imgwrap");
+        var im = h("img"); if (c.src) im.src = c.src; if (c.alt) im.alt = c.alt;
+        var iw = clampSourceImgWidth(node.imgWidth == null ? 100 : node.imgWidth); if (iw < 100) wrap.style.width = iw + "%";
+        wrap.appendChild(im); fig.appendChild(wrap);
+        if (c.caption) fig.appendChild(h("figcaption", null, c.caption));
+        cell.appendChild(fig);
+        acts.appendChild(imgBtn("image", isFlag ? "Replace the base image" : "Swap image for " + c.variant, function () { pickImageForVariant(topic, node.key, c.variant); }));
+        if (!isFlag) acts.appendChild(imgBtn("eye-off", "Hide in " + c.variant, function () { SD.removeNodeFromVariant(__sourceDocModel, node.key, c.variant); persistSourceDocModel(topic, __sourceDocModel); renderSourceArticle(); }));
+        else if (c.source === "override") { /* Flagship always present */ }
+      }
+      cell.appendChild(acts);
+      row.appendChild(cell);
+    });
+    return row;
+  }
+  // B2: pick a file and set it as the image for one variant (Flagship replaces the base). Stored as a
+  // data-URI inline (the Source doc is never SCORM-exported -- same as insertSourceImage). Unlocked.
+  function pickImageForVariant(topic, nodeKey, variant) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to change a variant's image."); return; }
+    var inp = h("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        window.SourceDoc.setVariantImage(__sourceDocModel, nodeKey, variant, rd.result, { alt: String(f.name || "image").replace(/\.[^.]+$/, "") });
+        persistSourceDocModel(topic, __sourceDocModel);
+        renderSourceArticle();
+        sourceToast(window.SourceDoc.isFlagship(variant) ? "Base image replaced." : "Image set for " + variant + ".");
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
+  }
+
+  function renderSourceNodeArticle(topic, host) {
+    var SD = window.SourceDoc, SM = window.SourceMarks;
+    var model = ensureSourceDocModel(topic);
+    var layout = h("div", "source-doc__layout");
+    // Source v2: the unified document's outline lives in the LEFT rail (renderSourceUnifiedToc),
+    // so the in-article sticky rail is dropped for a source master -- no double-TOC. A legacy
+    // section topic (fallback path) keeps its own in-article outline.
+    var toc = topic.sourceMaster ? null : buildSourceToc(model, host);
+    if (toc) layout.appendChild(toc);
+    var col = h("div", "source-doc__col");
+    // spec 2d: on a variant-bearing Product, a chip row picks which variants are shown as columns.
+    // Flagship-only (no chips active) reads exactly as before; turning a variant on splits the
+    // diverged nodes into columns. The column view is a read-oriented comparison (no inline edit yet).
+    if (topic.sourceMaster) { var vbar = buildSourceVariantBar(topic); if (vbar) col.appendChild(vbar); }
+    var showCols = topic.sourceMaster && __sourceActiveVariants.length > 0;
+    // /verso-frontend fix: make the editable->read-only mode switch legible when comparing variants.
+    if (showCols) col.appendChild(h("div", "source-doc__cols-hint", "Comparing variants — read-only. Turn variants off to edit."));
+    var art = h("article", "source-doc" + (showCols ? " source-doc--cols" : "")); art.setAttribute("spellcheck", "false");
+    if (showCols) {
+      var shown = [SD.FLAGSHIP].concat(__sourceActiveVariants);
+      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNodeColumns(topic, n, shown)); });
+    } else {
+      model.nodes.forEach(function (n) { art.appendChild(renderSourceDocNode(n)); });
+    }
+    col.appendChild(art);
+    layout.appendChild(col);
+    host.appendChild(layout);
+    // scroll-spy + alt-panel tracking: re-bound each render (host survives innerHTML clears).
+    host.removeEventListener("scroll", onSourceArticleScroll);
+    host.addEventListener("scroll", onSourceArticleScroll);
+    requestAnimationFrame(updateSourceScrollSpy);
+
+    // Column comparison is read-only: skip the marks engine + editing wiring (they operate on the
+    // Flagship base text, which the split columns don't project). Toggle every variant off to edit.
+    if (showCols) return;
+
+    // per-block contentEditable when unlocked; the keydown guard (below) enforces the lock so
+    // marks stay clickable + annotation stays live even when locked.
+    applySourceLockState(art);
+
+    __sourceMarksEngine = SM.create({ root: art, model: model });
+    repaintSourceMarks();
+    wireSourceImageResize(topic, art, model);
+
+    // A cross-paragraph edit (typing/deleting over a selection that spans blocks, or a Backspace/Delete
+    // that would merge two paragraphs) can't be left to the browser -- with one editing host it would
+    // mangle the block DOM. Intercept those before the input lands and route them through the model
+    // (SourceDoc.replaceRange), which merges + removes blocks and re-anchors marks. Single-block edits
+    // fall through to native editing + the input reconcile below.
+    art.addEventListener("beforeinput", function (e) {
+      if (!__sourceUnlocked) return; // locked: the keydown guard already refuses edits
+      var it = e.inputType || "";
+      if (it === "insertParagraph" || it === "insertLineBreak") {
+        // Enter splits the current block into a new paragraph THROUGH the model (a single editing
+        // host over discrete blocks can't be left to the browser). Collapsed caret only; a rare
+        // Enter over a multi-char selection is left as a no-op (delete then press Enter).
+        e.preventDefault();
+        var selP = window.getSelection();
+        if (!selP || !selP.isCollapsed || !selP.focusNode) return;
+        var blk = selP.focusNode.nodeType === 3 ? selP.focusNode.parentNode : selP.focusNode;
+        blk = blk && blk.closest ? blk.closest("[data-node]") : null;
+        if (!blk) return;
+        var off = sourceCaretOffsetIn(blk, selP.focusNode, selP.focusOffset);
+        afterSourceStructuralEdit(topic, model, SD.splitNode(model, blk.getAttribute("data-node"), off));
+        return;
+      }
+      var isDelete = it.indexOf("delete") === 0;
+      var isInsert = it === "insertText" || it === "insertReplacementText" || it === "insertFromPaste";
+      if (!isDelete && !isInsert) return;
+      var anchor = __sourceMarksEngine && __sourceMarksEngine.selectionAnchor();
+      // (A) an edit replacing a MULTI-BLOCK selection
+      if (anchor && anchor.endAnchor) {
+        e.preventDefault();
+        var ins = isDelete ? "" : (e.data != null ? e.data : (e.dataTransfer ? e.dataTransfer.getData("text/plain") : ""));
+        afterSourceStructuralEdit(topic, model, SD.replaceRange(model, anchor, ins));
+        return;
+      }
+      // (B) a collapsed caret at a block boundary -> a Backspace/Delete that would merge two paragraphs
+      if (isDelete) {
+        var sel = window.getSelection();
+        if (!sel || !sel.isCollapsed || !sel.focusNode) return;
+        var block = sel.focusNode.nodeType === 3 ? sel.focusNode.parentNode : sel.focusNode;
+        block = block && block.closest ? block.closest("[data-node]") : null;
+        if (!block) return;
+        var caretOff = sourceCaretOffsetIn(block, sel.focusNode, sel.focusOffset);
+        var key = block.getAttribute("data-node");
+        var idx = model.nodes.findIndex(function (n) { return n.key === key; });
+        if (idx < 0) return;
+        var back = it === "deleteContentBackward", fwd = it === "deleteContentForward";
+        if (back && caretOff === 0 && idx > 0) {
+          var prev = model.nodes[idx - 1], prevLen = SD.nodeText(prev).length;
+          e.preventDefault();
+          afterSourceStructuralEdit(topic, model, SD.replaceRange(model, { nodeKey: prev.key, start: prevLen, len: 0, endAnchor: { nodeKey: key, start: 0, len: 0 } }, ""));
+        } else if (fwd && caretOff === SD.nodeText(model.nodes[idx]).length && idx < model.nodes.length - 1) {
+          var next = model.nodes[idx + 1], thisLen = SD.nodeText(model.nodes[idx]).length;
+          e.preventDefault();
+          afterSourceStructuralEdit(topic, model, SD.replaceRange(model, { nodeKey: key, start: thisLen, len: 0, endAnchor: { nodeKey: next.key, start: 0, len: 0 } }, ""));
+        }
+      }
+    });
+    // base edits: read the edited block's text back into the model, shift marks, persist. With one
+    // editing host the input event targets the article, so the edited block is found from the caret.
+    art.addEventListener("input", function () {
+      var sel = window.getSelection();
+      var fn = sel && sel.focusNode;
+      var host = fn ? (fn.nodeType === 3 ? fn.parentNode : fn) : null;
+      var block = host && host.closest ? host.closest("[data-node]") : null;
+      if (!block) return;
+      var res = SD.applyTextEdit(model, block.getAttribute("data-node"), block.textContent);
+      recordSourceEdit(res && res.edit); // buffer for the unlock->lock History commit
+      persistSourceDocModel(topic, model);
+      repaintSourceMarks();
+      // a base edit can flip an open alternate to stale -> re-render its panel (status + base line).
+      if (__sourceAltPanelMarkId) renderSourceAltPanel(topic);
+    });
+    // two-layer lock: typing into base prose while locked is refused with a reminder; Ctrl+Z is
+    // our owned undo (native undo would not restore marks).
+    art.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) SD.redo(model); else SD.undo(model);
+        persistSourceDocModel(topic, model);
+        renderSourceArticle();
+        return;
+      }
+      if (!__sourceUnlocked && (e.key.length === 1 || e.key === "Backspace" || e.key === "Delete" || e.key === "Enter")) {
+        e.preventDefault();
+        sourceToast("The source is locked -- unlock in the toolbar to edit the base text.");
+      }
+    });
+    // clicking a painted mark activates it (contextual view is the alternates/comments tickets;
+    // here we confirm the hit-test + active repaint work).
+    art.addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".source-doc__handle")) return; // resize handle, not a select
+      if (!__sourceShowMarks) return;
+      // an image/table is a whole-node OBJECT: a click on it selects the object (not a text span)
+      // and offers the same alternate/comment actions, anchored by node id (spec 6).
+      var objEl = e.target && e.target.closest ? e.target.closest('[data-object="1"]') : null;
+      if (objEl && art.contains(objEl)) { selectSourceObject(topic, objEl.getAttribute("data-node")); return; }
+      clearSourceObjectSel();
+      var sel = window.getSelection(); if (!sel || !sel.focusNode) return;
+      var m = __sourceMarksEngine.markAtPoint(sel.focusNode, sel.focusOffset);
+      __sourceMarksEngine.setActive(m ? m.id : null); repaintSourceMarks();
+      // keep the consolidated panel's Marks section in sync -- highlight the row for the clicked mark
+      __sourceActiveMarkId = m ? m.id : null;
+      if (__sourceInfoOpen && topicHasDoc(topic)) renderSourceInfoPanel(topic);
+      // selecting a span opens its contextual panel by mark type: an alternate -> the alt panel
+      // (spec 3.2); a link -> the read-only where-used panel (spec 3.1). One mark has one type, so
+      // at most one opens; the other is passed null and closes. Comments have their own thread.
+      syncSourceAltPanel(topic, m && m.type === "alternate" ? m.id : null);
+      syncSourceWherePanel(topic, m && m.type === "link" ? m.id : null);
+    });
+    document.addEventListener("selectionchange", onSourceSelectionChange);
+    document.removeEventListener("keydown", onSourceLockedTypeGuard);
+    document.addEventListener("keydown", onSourceLockedTypeGuard); // #108: reminder when typing into locked prose
+
+    host.appendChild(buildSourceDocBar(topic));
+    host.appendChild(buildSourceSelBar(topic));
+    applySourceInfoVisibility(); // keep the one consolidated panel's shown/hidden state after a re-render
+    if (__sourceAltPanelMarkId) renderSourceAltPanel(topic); // re-pin the alt panel after a re-render
+    if (__sourceWhereUsedMarkId) renderSourceWherePanel(topic); // re-pin the where-used panel after a re-render
+    renderSourceCommentPins(topic); // re-pin the comment margin pins after a re-render
+    if (__sourceOpenCommentMarkId) renderSourceCommentThread(topic); // re-pin an open comment thread
+  }
+
+  function applySourceLockState(art) {
+    art = art || document.querySelector("#source-stage-article .source-doc");
+    if (!art) return;
+    // Single editing host: the whole article is the one contentEditable region when unlocked, so a
+    // selection can span paragraphs. Per-block editable hosts confined every selection to one block --
+    // the browser cannot extend a selection across separate editing hosts -- which is why a
+    // cross-paragraph drag (comment / alternate / delete across paragraphs) was impossible in edit
+    // mode. Blocks inherit editability from the article; objects (image / table) stay non-editable so
+    // they remain whole-node selections rather than editable text.
+    art.contentEditable = __sourceUnlocked ? "true" : "false";
+    Array.prototype.forEach.call(art.querySelectorAll('[data-editable], [data-node-body]'), function (el) {
+      el.removeAttribute("contenteditable"); // inherit the article host
+    });
+    Array.prototype.forEach.call(art.querySelectorAll('[data-object="1"]'), function (el) {
+      el.contentEditable = "false";
+    });
+    art.classList.toggle("source-doc--unlocked", __sourceUnlocked);
+  }
+  // When LOCKED the blocks are contentEditable=false, so a real click can't place a caret in them
+  // and a keystroke lands on <body>, never reaching the article's keydown guard -- so no "source
+  // is locked" reminder ever showed (bug #108). A document-level guard catches the attempt: if the
+  // locked source doc is mounted and the user presses a character key while NOT in a real field,
+  // show the reminder. Registered once; cheap (returns early in every non-typing case).
+  function onSourceLockedTypeGuard(e) {
+    if (__sourceUnlocked) return;
+    if (!document.querySelector("#source-stage-article .source-doc")) return; // no locked doc mounted
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // a shortcut, not typing
+    if (!e.key || e.key.length !== 1) return; // only printable keys count as "trying to type"
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ""))) return; // a real field (title, search)
+    sourceToast("The source is locked -- unlock in the toolbar to edit the base text.");
+  }
+  function repaintSourceMarks() {
+    if (!__sourceMarksEngine) return;
+    if (!__sourceShowMarks) { if (window.SourceMarks && window.SourceMarks._registry && window.SourceMarks._registry()) { var reg = window.SourceMarks._registry(); Object.keys(reg).forEach(function (k) { reg[k].clear(); }); } if (__sourceMarksEngine.clearObjectDecor) __sourceMarksEngine.clearObjectDecor(); return; }
+    __sourceMarksEngine.paint();
+  }
+
+  // --- History commit collapse (spec 5) --------------------------------------
+  // Prose edits made during one unlock->lock cycle fold into a single "commit" History entry
+  // rather than one entry per keystroke (structural events -- breaks, stale, comments -- keep
+  // their own discrete entries; those are logged inside applyTextEdit / the mark actions).
+  // We buffer the per-edit deltas while unlocked; on lock we summarise + capture a why-note.
+  function beginSourceEditSession() { __sourceEditSession = { edits: [] }; }
+  function recordSourceEdit(edit) {
+    if (__sourceEditSession && edit && ((edit.inserted || 0) || (edit.removed || 0))) __sourceEditSession.edits.push(edit);
+  }
+  function flushSourceEditSession(topic, opts) {
+    opts = opts || {};
+    var s = __sourceEditSession; __sourceEditSession = null;
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    if (!s || !s.edits.length || !topic || !SD || !model) return;
+    var summary = SD.summarizeEdits(s.edits);
+    if (!summary.editCount) return;
+    function commit(note) {
+      SD.logHistory(model, { type: "commit", charsAdded: summary.charsAdded, charsRemoved: summary.charsRemoved, editCount: summary.editCount, note: (note || "").trim() || undefined });
+      persistSourceDocModel(topic, model);
+      renderSourceInfoPanel(topic); // refresh the History timeline in the info panel
+    }
+    if (opts.prompt === false) commit(""); else sourceCommitNoteModal(commit);
+  }
+  // The skippable why-note prompted at lock (spec 5). Reuses the DS modal shell (promptModal's
+  // family) -- Save records the note, Skip / Escape / scrim commits with no note. The commit
+  // always lands; the note is optional, never a gate.
+  function sourceCommitNoteModal(onCommit) {
+    if (!window.VersoUI || !window.VersoUI.Modal) { onCommit(""); return; }
+    var done = false;
+    var ta = h("textarea", "source-note__text"); ta.placeholder = "Why this change? (optional)"; ta.rows = 3;
+    var shell = dsModalShell({
+      title: "Save changes", subtitle: "Add an optional note about why you made this edit.",
+      primaryLabel: "Save note", cancelLabel: "Skip",
+      onPrimary: function () { if (done) return; done = true; var v = ta.value; shell.modal.close(); onCommit(v); },
+      onClose: function () { if (done) return; done = true; onCommit(""); }
+    });
+    shell.body.appendChild(ta);
+    ta.focus();
+  }
+  // Single entry point for flipping the source lock, so the toolbar button and the
+  // browser-verify hook share one begin/flush path. opts.prompt=false skips the why-note modal.
+  function setSourceUnlocked(v, opts) {
+    opts = opts || {};
+    var next = !!v;
+    if (next === __sourceUnlocked) { applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar(); return; }
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (next) {
+      beginSourceEditSession();
+      snapshotSourceLinkBase(); // 09: snapshot linked-passage wording so lock can warn + fork
+      __sourceUnlocked = true;
+      applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+      return;
+    }
+    // Locking: if the edit session changed wording that other documents link, warn first (09).
+    var impact = sourceBaseEditImpact();
+    if (impact.affected.length && window.VersoUI && window.VersoUI.Button) { showSourceBaseEditModal(topic, impact, opts); return; }
+    finalizeSourceLock(topic, opts);
+  }
+
+  // The document-level bar, docked bottom-centre (canvas idiom): lock/unlock + marks show/hide.
+  // The block the next insert lands AFTER (spec 2b §6 / handoff C2: "after the currently selected
+  // block"): the object-selected node, else the block under the caret/selection, else the doc's last
+  // node. Insert targets a whole block, never the text caret.
+  function currentSourceBlockKey() {
+    if (__sourceObjectSelKey) return __sourceObjectSelKey;
+    var art = document.getElementById("source-stage-article");
+    var sel = window.getSelection && window.getSelection();
+    if (sel && sel.focusNode && art && art.contains(sel.focusNode)) {
+      var n = sel.focusNode.nodeType === 3 ? sel.focusNode.parentNode : sel.focusNode;
+      var el = n && n.closest ? n.closest("[data-node]") : null;
+      if (el) return el.getAttribute("data-node");
+    }
+    if (__sourceSelAnchor && __sourceSelAnchor.nodeKey) return __sourceSelAnchor.nodeKey;
+    var m = __sourceDocModel;
+    return (m && m.nodes && m.nodes.length) ? m.nodes[m.nodes.length - 1].key : null;
+  }
+  // Insert a node after the current block, persist, re-render the article, and select the new object
+  // so its alternate/comment actions are one click away. Shared by the image + table inserts.
+  function insertSourceNodeAfterCurrent(topic, node) {
+    var SD = window.SourceDoc, model = __sourceDocModel; if (!SD || !model) return;
+    var inserted = SD.insertNodeAfter(model, currentSourceBlockKey(), node);
+    persistSourceDocModel(topic, model);
+    renderSourceArticle(); // full clean rebuild (headEl + article + docbar + marks)
+    if (inserted && SD.isMarkableObjectNode && SD.isMarkableObjectNode(inserted)) selectSourceObject(topic, inserted.key);
+    return inserted;
+  }
+  // Toolbar image insert: pick a file, store it inline as a data-URI (the Source doc is never
+  // exported to SCORM, so the simple storage wins -- handoff C2), insert an image node after the
+  // current block. Alt defaults to the file name; caption/alt are editable later via the object.
+  function insertSourceImage(topic) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to insert an image."); return; }
+    var inp = h("input"); inp.type = "file"; inp.accept = "image/*"; inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; inp.remove();
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        var alt = String(f.name || "image").replace(/\.[^.]+$/, "");
+        insertSourceNodeAfterCurrent(topic, { type: "image", src: rd.result, alt: alt });
+        sourceToast("Image inserted.");
+      };
+      rd.readAsDataURL(f);
+    });
+    inp.click();
+  }
+  // Toolbar table insert: a 2x2 starter (header row + one body row) after the current block. Rich
+  // in-cell editing is the spec 2b §6 fast-follow; this is the create half -- the table renders and
+  // is markable/movable as an object immediately.
+  function insertSourceTable(topic) {
+    if (!__sourceUnlocked) { sourceToast("Unlock the source to insert a table."); return; }
+    insertSourceNodeAfterCurrent(topic, { type: "table", rows: [["Column 1", "Column 2"], ["", ""]] });
+    sourceToast("Table inserted.");
+  }
+  // Document-scope only; glyph-only IconButtons from the DS.
+  function buildSourceDocBar(topic) {
+    var U = window.VersoUI;
+    var bar = h("div", "source-docbar");
+    var lockBtn = U && U.IconButton ? U.IconButton({ icon: __sourceUnlocked ? "lock-open" : "lock", label: __sourceUnlocked ? "Lock the source prose" : "Unlock to edit the source prose", active: __sourceUnlocked, onClick: function () { setSourceUnlocked(!__sourceUnlocked); } }) : h("button", null, "Lock");
+    lockBtn.classList.add("source-docbar__btn");
+    var lockLbl = h("span", "source-docbar__lbl", __sourceUnlocked ? "Source editable" : "Source locked");
+    var marksBtn = U && U.IconButton ? U.IconButton({ icon: __sourceShowMarks ? "eye" : "eye-off", label: "Show / hide marks", active: __sourceShowMarks, onClick: function () { __sourceShowMarks = !__sourceShowMarks; repaintSourceMarks(); if (!__sourceShowMarks) closeSourceCommentThread(); renderSourceCommentPins(topic); updateSourceDocBar(); } }) : h("button", null, "Marks");
+    marksBtn.classList.add("source-docbar__btn");
+    // ONE control for the ONE consolidated right panel (Marks + History + Source + Comments) --
+    // replaces the old all-marks-drawer toggle that stacked a second surface over the info aside.
+    var panelBtn = U && U.IconButton ? U.IconButton({ icon: "columns-2", label: __sourceInfoOpen ? "Hide the details panel" : "Show the details panel", active: __sourceInfoOpen, onClick: function () { __sourceInfoOpen = !__sourceInfoOpen; applySourceInfoVisibility(); updateSourceDocBar(); } }) : h("button", null, "Panel");
+    panelBtn.classList.add("source-docbar__btn");
+    bar.appendChild(lockLbl); bar.appendChild(lockBtn);
+    // Insert image / table -- base-content mutations, so shown ONLY when unlocked (the same rule as
+    // the selection bar's rich-text buttons). Each drops a new node after the current block.
+    if (__sourceUnlocked && U && U.IconButton) {
+      var imgBtn = U.IconButton({ icon: "image", label: "Insert an image after the current block", onClick: function () { insertSourceImage(topic); } });
+      imgBtn.classList.add("source-docbar__btn");
+      var tblBtn = U.IconButton({ icon: "table", label: "Insert a table after the current block", onClick: function () { insertSourceTable(topic); } });
+      tblBtn.classList.add("source-docbar__btn");
+      bar.appendChild(imgBtn); bar.appendChild(tblBtn);
+    }
+    bar.appendChild(marksBtn); bar.appendChild(panelBtn);
+    bar.setAttribute("data-source-docbar", "1");
+    return bar;
+  }
+  function updateSourceDocBar() {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var old = host.querySelector("[data-source-docbar]"); if (!old) return;
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    var fresh = buildSourceDocBar(topic); old.parentNode.replaceChild(fresh, old);
+  }
+
+  // The left TOC / navigator (spec 2.3): heading nodes, clickable to jump, with a scroll-spy
+  // highlight on the section in view. Sticky beside the article. Returns null when the doc has
+  // no headings (nothing to navigate) so the reading column keeps its full width.
+  function buildSourceToc(model, host) {
+    var heads = window.SourceDoc.headings(model);
+    if (!heads.length) return null;
+    var nav = h("nav", "source-doc__toc"); nav.setAttribute("aria-label", "Document outline");
+    nav.appendChild(h("div", "source-doc__toc-label", "On this page"));
+    heads.forEach(function (hd) {
+      var item = h("button", "source-doc__toc-item source-doc__toc-item--l" + (hd.level || 2), hd.text || "Untitled");
+      item.type = "button"; item.setAttribute("data-toc-key", hd.key); item.title = hd.text || "";
+      item.addEventListener("click", function () {
+        var target = host.querySelector('[data-node="' + hd.key + '"]');
+        if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+      nav.appendChild(item);
+    });
+    return nav;
+  }
+  // Highlights the TOC item whose heading is the last one scrolled above the top of the
+  // reading pane -- the section the author is currently reading.
+  function updateSourceScrollSpy() {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var top = host.getBoundingClientRect().top + 12;
+    var heads = Array.prototype.slice.call(host.querySelectorAll(".source-doc__h[data-node]"));
+    var currentKey = heads.length ? heads[0].getAttribute("data-node") : null;
+    heads.forEach(function (el) { if (el.getBoundingClientRect().top <= top) currentKey = el.getAttribute("data-node"); });
+    // Highlight the current entry wherever the outline lives: the left-rail unified TOC
+    // (VersoUI.TreeItem rows, is-selected) and/or the legacy in-article rail (is-current).
+    var rows = [];
+    var rail = document.getElementById("source-topic-list");
+    if (rail) rows = rows.concat(Array.prototype.slice.call(rail.querySelectorAll(".source-toc__row[data-toc-key]")));
+    var toc = host.querySelector(".source-doc__toc");
+    if (toc) rows = rows.concat(Array.prototype.slice.call(toc.querySelectorAll(".source-doc__toc-item")));
+    rows.forEach(function (it) {
+      var on = it.getAttribute("data-toc-key") === currentKey;
+      it.classList.toggle("is-current", on);
+      it.classList.toggle("is-selected", on);
+    });
+  }
+  function onSourceArticleScroll() {
+    updateSourceScrollSpy();
+    // the alt panel is absolutely positioned within the scrolling content, so it tracks its
+    // span for free on scroll -- no per-scroll reposition needed.
+  }
+
+  // The contextual alternate panel (spec 3.2, primary view): selecting a span-with-alternate
+  // opens a card pinned in the right gutter, tracking the span like a margin comment. Shows base
+  // vs alternate + status; stale alternates offer a "Mark reviewed" re-sync. Annotation-tier, so
+  // it works whether or not the base is unlocked.
+  function onSourceAltPanelKey(ev) { if (ev.key === "Escape") closeSourceAltPanel(); }
+  function closeSourceAltPanel() {
+    __sourceAltPanelMarkId = null;
+    var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceAltPanelKey);
+  }
+  function syncSourceAltPanel(topic, markId) {
+    if (!markId) { closeSourceAltPanel(); return; }
+    __sourceAltPanelMarkId = markId;
+    renderSourceAltPanel(topic);
+  }
+  // Pin a gutter card (alternate panel / comment thread) to a mark's span: absolute within the
+  // scrolling article, so it tracks the span on scroll for free. Shared by both margin surfaces.
+  function pinCardToSpan(el, markId) {
+    if (!el || !__sourceMarksEngine) return;
+    var model = __sourceDocModel, SD = window.SourceDoc;
+    var m = model && SD.markById(model, markId); if (!m) return;
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var rect = __sourceMarksEngine.rectFor(m); if (!rect) return;
+    el.style.top = Math.max(8, rect.top - host.getBoundingClientRect().top + host.scrollTop) + "px";
+  }
+  function positionSourceAltPanel() { pinCardToSpan(document.querySelector("[data-source-altpanel]"), __sourceAltPanelMarkId); }
+  // Where-used panel (spec 3.1): selecting a LINKED span opens a read-only card pinned in the
+  // right gutter -- "Linked in N" with a breadcrumb pill per destination (Document > Section >
+  // Location), clickable to navigate out to the course. Source only DISPLAYS links; creating them
+  // is an Edit-stage ticket. Reuses the alt panel's pinned-card chrome (.source-altpanel*) + the
+  // shared pinCardToSpan tracker; light-dismisses on Escape like its siblings.
+  function onSourceWherePanelKey(ev) { if (ev.key === "Escape") closeSourceWherePanel(); }
+  function closeSourceWherePanel() {
+    __sourceWhereUsedMarkId = null;
+    var ex = document.querySelector("[data-source-wherepanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceWherePanelKey);
+  }
+  function syncSourceWherePanel(topic, markId) {
+    if (!markId) { closeSourceWherePanel(); return; }
+    __sourceWhereUsedMarkId = markId;
+    renderSourceWherePanel(topic);
+  }
+  function positionSourceWherePanel() { pinCardToSpan(document.querySelector("[data-source-wherepanel]"), __sourceWhereUsedMarkId); }
+  function renderSourceWherePanel(topic) {
+    var ex = document.querySelector("[data-source-wherepanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceWherePanelKey);
+    var model = __sourceDocModel, SD = window.SourceDoc;
+    if (!model || !__sourceWhereUsedMarkId) return;
+    var m = SD.markById(model, __sourceWhereUsedMarkId);
+    if (!m || m.type !== "link") { __sourceWhereUsedMarkId = null; return; }
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    // 10: the REAL, live where-used -- every block/span in any document that links this passage,
+    // walked from the registry (placement links carry no stored crumb list). Each row jumps to the
+    // exact block in Edit; an alternate can be pushed to all or a chosen subset of these locations.
+    var used = sourceLinkWhereUsed(__sourceActiveTopicId, m.id);
+    var panel = h("aside", "source-altpanel source-wherepanel"); panel.setAttribute("data-source-wherepanel", "1");
+    panel.setAttribute("aria-label", "Where this is linked");
+    var head = h("div", "source-altpanel__head");
+    var glyph = h("span", "source-wherepanel__glyph"); glyph.innerHTML = window.Icon ? window.Icon("link") : "";
+    head.appendChild(glyph);
+    head.appendChild(h("div", "source-altpanel__title", used.length ? ("Linked in " + used.length) : "Where used"));
+    var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
+    close.innerHTML = window.Icon ? window.Icon("x") : "close";
+    close.addEventListener("click", function () { closeSourceWherePanel(); });
+    head.appendChild(close);
+    panel.appendChild(head);
+    if (!used.length) {
+      // uio-S-C03 (SRC-02): the zero state reads as an INVITATION, not a contradiction of the
+      // LINKED mark. A link mark makes the passage linkable; 0 just means it isn't placed yet.
+      panel.appendChild(h("div", "source-altpanel__field insp-hint", "Not used in a course yet — place this passage from the Edit stage to reuse it here."));
+    } else {
+      used.forEach(function (loc) {
+        var row = h("button", "source-wherepanel__row"); row.type = "button";
+        row.title = "Open " + loc.docTitle + " and select the linked " + (loc.kind === "span" ? "span" : "block");
+        row.appendChild(h("span", "source-wherepanel__row-doc", loc.docTitle));
+        row.appendChild(h("span", "source-wherepanel__row-tag" + (loc.altId ? " is-alt" : ""), loc.altId ? "alternate" : "base"));
+        row.addEventListener("click", function () { jumpToLinkedBlock(loc.docCode, loc.blockId); });
+        panel.appendChild(row);
+      });
+      // Push an alternate out to the linked documents (all, or a picked subset). Never automatic.
+      var alts = sourceLinkAlternates(model, m);
+      if (alts.length && window.VersoUI && window.VersoUI.Button) {
+        var pushWrap = h("div", "source-wherepanel__push");
+        pushWrap.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", icon: "arrow-up-to-line", label: "Push an alternate…", onClick: function () { openSourceAltPushDialog(m, alts, used); } }));
+        panel.appendChild(pushWrap);
+      }
+    }
+    host.appendChild(panel);
+    positionSourceWherePanel();
+    document.addEventListener("keydown", onSourceWherePanelKey);
+  }
+  // 10: push a forked wording to the documents that link a passage. Sets altId on each chosen
+  // location across whatever documents use it; base stays base until pushed (never automatic).
+  function pushSourceAlternate(markId, altId, locations) {
+    var reg = registry;
+    (locations || []).forEach(function (loc) { applyAltToLocation(reg, loc, altId); });
+    saveRegistry(reg); decorateSourceLinks();
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (topic) renderSourceWherePanel(topic); // refresh the base/alternate tags
+    sourceToast("Pushed to " + locations.length + " place" + (locations.length === 1 ? "" : "s") + ".");
+  }
+  function openSourceAltPushDialog(link, alts, used) {
+    var selectedAlt = alts[0].id, chosen = used.map(function () { return true; });
+    var shell = dsModalShell({
+      title: "Push an alternate", subtitle: "Send a forked wording to the documents that link this passage.",
+      primaryLabel: "Push",
+      onPrimary: function () {
+        var locs = used.filter(function (loc, i) { return chosen[i]; });
+        if (!locs.length || !selectedAlt) return;
+        pushSourceAlternate(link.id, selectedAlt, locs); shell.modal.close();
+      }
+    });
+    var altField = modalField(shell.body, "Alternate");
+    var altRow = h("div", "prop-toggle-row");
+    alts.forEach(function (alt) {
+      var b = h("button", "prop-toggle" + (alt.id === selectedAlt ? " is-on" : "")); b.type = "button";
+      b.textContent = alt.tag || sourceAltSnippet(alt.alt);
+      b.addEventListener("click", function () { selectedAlt = alt.id; Array.prototype.forEach.call(altRow.querySelectorAll(".prop-toggle"), function (x) { x.classList.remove("is-on"); }); b.classList.add("is-on"); });
+      altRow.appendChild(b);
+    });
+    altField.appendChild(altRow);
+    var locField = modalField(shell.body, "Apply to");
+    used.forEach(function (loc, i) {
+      locField.appendChild(window.VersoUI.Checkbox({ label: loc.docTitle + " (" + (loc.altId ? "alternate" : "base") + ")", checked: true, onChange: function (v) { chosen[i] = v; } }));
+    });
+  }
+  function renderSourceAltPanel(topic) {
+    var ex = document.querySelector("[data-source-altpanel]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceAltPanelKey);
+    var model = __sourceDocModel, SD = window.SourceDoc;
+    if (!model || !__sourceAltPanelMarkId) return;
+    var m = SD.markById(model, __sourceAltPanelMarkId);
+    if (!m || m.type !== "alternate") { __sourceAltPanelMarkId = null; return; }
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var status = SD.markStatus(m);
+    var panel = h("aside", "source-altpanel"); panel.setAttribute("data-source-altpanel", "1");
+    panel.setAttribute("aria-label", "Alternate rendition");
+    var head = h("div", "source-altpanel__head");
+    var dot = h("span", "source-drawer__dot source-drawer__dot--" + status.dot); dot.title = status.label;
+    head.appendChild(dot);
+    head.appendChild(h("div", "source-altpanel__title", "Alternate"));
+    var close = h("button", "source-altpanel__close"); close.type = "button"; close.title = "Close";
+    close.innerHTML = window.Icon ? window.Icon("x") : "close";
+    close.addEventListener("click", function () { closeSourceAltPanel(); });
+    head.appendChild(close);
+    panel.appendChild(head);
+    // tag = the canonical DS Badge (tone accent -- its stated use is "variant tags"), not a one-off pill.
+    if (m.tag) {
+      var tagWrap = h("div", "source-altpanel__tag");
+      tagWrap.appendChild(window.VersoUI && window.VersoUI.Badge ? window.VersoUI.Badge({ tone: "accent", children: "For: " + m.tag }) : document.createTextNode("For: " + m.tag));
+      panel.appendChild(tagWrap);
+    }
+    var baseWrap = h("div", "source-altpanel__field");
+    baseWrap.appendChild(h("div", "source-altpanel__label", "Base"));
+    // an object mark has no span text -- show the node's label (e.g. "Image — <caption>") instead.
+    var baseLine = SD.isObjectMark(m) ? SD.objectNodeLabel(SD.nodeByKey(model, m.anchor.nodeKey)) : (SD.anchorText(model, m.anchor) || "(empty)");
+    baseWrap.appendChild(h("div", "source-altpanel__base", baseLine));
+    panel.appendChild(baseWrap);
+    var altWrap = h("div", "source-altpanel__field");
+    altWrap.appendChild(h("div", "source-altpanel__label", "Alternate"));
+    altWrap.appendChild(h("div", "source-altpanel__alt", m.alt || ""));
+    panel.appendChild(altWrap);
+    if (m.stale) panel.appendChild(h("div", "source-altpanel__stale", "Base changed since this alternate was written -- review it."));
+    var actions = h("div", "source-altpanel__actions");
+    if (m.stale) {
+      var reviewed = h("button", "source-altpanel__btn source-altpanel__btn--primary", "Mark reviewed"); reviewed.type = "button";
+      reviewed.title = "Re-sync: accept the current base as what this alternate was written against";
+      reviewed.addEventListener("click", function () { SD.updateMark(model, m.id, m.anchor); persistSourceDocModel(topic, model); repaintSourceMarks(); renderSourceAltPanel(topic); });
+      actions.appendChild(reviewed);
+    }
+    var edit = h("button", "source-altpanel__btn", "Edit"); edit.type = "button";
+    edit.addEventListener("click", function () {
+      openSourceComposer("alternate", function (val, tag) { m.alt = val; m.tag = tag || ""; persistSourceDocModel(topic, model); repaintSourceMarks(); renderSourceAltPanel(topic); }, { alt: m.alt, tag: m.tag });
+    });
+    actions.appendChild(edit);
+    var del = h("button", "source-altpanel__btn source-altpanel__btn--danger", "Delete"); del.type = "button";
+    del.addEventListener("click", function () {
+      var i = model.marks.indexOf(m); if (i >= 0) { SD.pushUndo(model); model.marks.splice(i, 1); }
+      persistSourceDocModel(topic, model); repaintSourceMarks(); closeSourceAltPanel();
+    });
+    actions.appendChild(del);
+    panel.appendChild(actions);
+    host.appendChild(panel);
+    positionSourceAltPanel();
+    document.removeEventListener("keydown", onSourceAltPanelKey);
+    document.addEventListener("keydown", onSourceAltPanelKey);
+  }
+
+  // Comments (spec 3.3): ONE engine shared with the canvas -- makeComment/makeReply, the same
+  // comment-reply/comment-row__dot thread UI (buildSourceCommentItem), the same users. The
+  // Source-specific adapter is the ANCHOR: a comment is anchored to a range mark ({markId}, where
+  // the canvas uses a pixel pin). Comments live on topic.comments (library content, not a course
+  // doc), keyed by the mark id. Presentation = canvas-style margin pins in the right gutter,
+  // pinned to their span + scrolling with it; clicking a pin opens the thread card in place.
+  function sourceCommentsForMark(topic, markId) {
+    return (topic.comments || []).filter(function (c) { return c.anchor && c.anchor.markId === markId; });
+  }
+  // Every comment MARK on the doc that still has a live thread, newest span first is not needed --
+  // draw order follows model.marks. A comment mark with no thread (all deleted) draws no pin.
+  function renderSourceCommentPins(topic) {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    Array.prototype.forEach.call(host.querySelectorAll(".source-commentpin"), function (n) { n.remove(); });
+    var model = __sourceDocModel; if (!model || !__sourceShowMarks) return;
+    (model.marks || []).forEach(function (m) {
+      if (m.type !== "comment") return;
+      var thread = sourceCommentsForMark(topic, m.id); if (!thread.length) return;
+      var open = thread.filter(function (c) { return !c.done; }).length;
+      var pin = h("button", "source-commentpin" + (open ? "" : " is-done") + (m.id === __sourceOpenCommentMarkId ? " is-open" : ""));
+      pin.type = "button"; pin.setAttribute("data-comment-mark", m.id);
+      pin.title = thread.length + " comment" + (thread.length === 1 ? "" : "s") + (open ? "" : " (resolved)");
+      pin.innerHTML = window.Icon ? window.Icon("message-square") : "";
+      var lead = thread[0];
+      if (lead && lead.colour) pin.style.setProperty("--pin-colour", lead.colour);
+      if (thread.length > 1) pin.appendChild(h("span", "source-commentpin__count", String(thread.length)));
+      pin.addEventListener("click", function () { toggleSourceCommentThread(topic, m.id); });
+      host.appendChild(pin);
+      pinCardToSpan(pin, m.id); // sets top (tracks the span vertically)
+      anchorPinToTextMargin(pin, host); // sets left just right of the reading column (pilot feedback)
+    });
+  }
+  // Anchor a comment pin just to the RIGHT of the text margin (the reading column's right edge),
+  // not out in the far gutter -- pilot feedback 2026-07-28. Clamped so it never leaves the host.
+  function anchorPinToTextMargin(pin, host) {
+    var col = host.querySelector(".source-doc__col") || host.querySelector(".source-doc");
+    if (!col) return;
+    var cr = col.getBoundingClientRect(), hr = host.getBoundingClientRect();
+    var left = cr.right - hr.left + host.scrollLeft + 6;
+    left = Math.min(left, host.clientWidth - 26); // keep it on-screen on a narrow viewport
+    pin.style.left = Math.max(8, left) + "px";
+    pin.style.right = "auto";
+  }
+  function onSourceCommentThreadKey(ev) { if (ev.key === "Escape") closeSourceCommentThread(); }
+  // Outside-click light-dismiss, matching the canvas comment popover ("first outside click closes
+  // the open note", editor.js ~19632). A click on a pin is left to the pin's own toggle.
+  function onSourceCommentThreadOutside(ev) {
+    var card = document.querySelector("[data-source-commentthread]"); if (!card) return;
+    if (card.contains(ev.target)) return;
+    if (ev.target.closest && ev.target.closest(".source-commentpin")) return;
+    closeSourceCommentThread();
+    var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    renderSourceCommentPins(t);
+  }
+  function closeSourceCommentThread() {
+    __sourceOpenCommentMarkId = null;
+    var ex = document.querySelector("[data-source-commentthread]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceCommentThreadKey);
+    document.removeEventListener("mousedown", onSourceCommentThreadOutside);
+  }
+  function toggleSourceCommentThread(topic, markId) {
+    if (__sourceOpenCommentMarkId === markId) { closeSourceCommentThread(); renderSourceCommentPins(topic); return; }
+    __sourceOpenCommentMarkId = markId;
+    renderSourceCommentThread(topic);
+    renderSourceCommentPins(topic); // repaint the is-open pin state
+  }
+  // The in-place thread card for one comment mark: the shared canvas thread items + reply, plus a
+  // fresh "Add a comment" field. Open/resolve activity is logged to History (spec 3.3).
+  function renderSourceCommentThread(topic) {
+    var ex = document.querySelector("[data-source-commentthread]"); if (ex) ex.remove();
+    document.removeEventListener("keydown", onSourceCommentThreadKey);
+    document.removeEventListener("mousedown", onSourceCommentThreadOutside);
+    var model = __sourceDocModel, SD = window.SourceDoc, UI = window.VersoUI;
+    if (!model || !__sourceOpenCommentMarkId) return;
+    var m = SD.markById(model, __sourceOpenCommentMarkId);
+    if (!m || m.type !== "comment") { __sourceOpenCommentMarkId = null; return; }
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var card = h("aside", "source-commentthread comment-thread"); card.setAttribute("data-source-commentthread", "1");
+    card.setAttribute("aria-label", "Comment thread");
+    var head = h("div", "source-commentthread__head");
+    head.appendChild(h("div", "source-commentthread__title", "Comments"));
+    var close = h("button", "source-commentthread__close"); close.type = "button"; close.title = "Close";
+    close.innerHTML = window.Icon ? window.Icon("x") : "close";
+    close.addEventListener("click", function () { closeSourceCommentThread(); renderSourceCommentPins(topic); });
+    head.appendChild(close);
+    card.appendChild(head);
+    var mid = m.id;
+    function afterThreadChange(kind, c) {
+      if (kind === "resolve") SD.logHistory(model, { type: c && c.done ? "comment-resolved" : "comment-reopened", markId: mid, commentId: c && c.id });
+      persistSourceDocModel(topic, model); stampTopicUpdated(topic);
+      // if every thread comment was deleted, drop the now-empty comment mark + close.
+      if (!sourceCommentsForMark(topic, mid).length) {
+        var i = model.marks.indexOf(m); if (i >= 0) { SD.pushUndo(model); model.marks.splice(i, 1); }
+        persistSourceDocModel(topic, model); closeSourceCommentThread(); repaintSourceMarks(); renderSourceCommentPins(topic); return;
+      }
+      repaintSourceMarks(); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+      refreshSourceHistory(topic); // surface comment resolve/reopen in the History timeline (#109)
+    }
+    sourceCommentsForMark(topic, mid).forEach(function (c) { card.appendChild(buildSourceCommentItem(topic, c, { onChange: afterThreadChange })); });
+    if (UI && UI.TextField && UI.Button) {
+      var newField = UI.TextField({ multiline: true, rows: 2, value: "", placeholder: "Add a comment..." });
+      newField.classList.add("comment-popover__body");
+      var addBtn = UI.Button({ variant: "primary", label: "Comment", onClick: function () {
+        var v = (newField.input.value || "").trim(); if (!v) return;
+        topic.comments = topic.comments || [];
+        var cm = makeComment({ markId: mid }, v);
+        topic.comments.push(cm);
+        SD.logHistory(model, { type: "comment-added", markId: mid, commentId: cm.id });
+        stampTopicUpdated(topic); renderSourceCommentThread(topic); renderSourceCommentPins(topic);
+        refreshSourceHistory(topic); // surface the new comment in the History timeline (#109)
+      } });
+      card.appendChild(newField); card.appendChild(addBtn);
+    }
+    host.appendChild(card);
+    pinCardToSpan(card, mid);
+    document.addEventListener("keydown", onSourceCommentThreadKey);
+    document.addEventListener("mousedown", onSourceCommentThreadOutside);
+  }
+
+  // Source v2 (consolidated-panel): the all-marks list is no longer a separate overlay drawer --
+  // it is the FIRST section of the one consolidated right panel (see renderSourceMarksSection,
+  // built by renderSourceInfoPanel). The filter set is shared. Clicking a row activates + scrolls
+  // to that mark in the article, exactly as the drawer did.
+  // uio-S-C01 (SRC-06): ONE labelled filter, not four unlabelled glyphs that duplicated it. Each
+  // segment states its type and carries a live count, so the filter also reads as the document's
+  // mark summary. Counts come from SourceDoc.markCounts, so a segment can never disagree with the
+  // list beneath it.
+  var SOURCE_MARK_FILTERS = [
+    { key: "all", label: "All", title: "Every mark" },
+    { key: "alternate", label: "Alt", title: "Alternates" },
+    { key: "link", label: "Linked", title: "Linked passages" },
+    { key: "comment", label: "Notes", title: "Comments" }
+  ];
+  // Reveal a mark in the consolidated panel: open the panel if hidden, highlight its row, and
+  // scroll the article to it (the "selecting a mark opens the panel to that mark" behaviour).
+  function revealSourceMark(m) {
+    __sourceActiveMarkId = m.id;
+    // You clicked a mark (or an alternate) -- if marks are hidden, show them so the highlight
+    // you jumped to is actually visible (source-right-panel-consolidation part 4). Flip the flag
+    // before repaint (repaintSourceMarks reads it) and refresh pins + doc-bar toggle after.
+    var wasHidden = !__sourceShowMarks;
+    if (wasHidden) __sourceShowMarks = true;
+    if (__sourceMarksEngine) { __sourceMarksEngine.setActive(m.id); repaintSourceMarks(); }
+    if (!__sourceInfoOpen) { __sourceInfoOpen = true; applySourceInfoVisibility(); updateSourceDocBar(); }
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (wasHidden) { renderSourceCommentPins(topic); updateSourceDocBar(); }
+    if (topic) renderSourceInfoPanel(topic);
+    var host = document.getElementById("source-stage-article");
+    var target = host && host.querySelector('[data-node="' + m.anchor.nodeKey + '"]');
+    if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+    var info = document.getElementById("source-stage-info");
+    var rowEl = info && info.querySelector('.source-drawer__row[data-mark-id="' + m.id + '"]');
+    if (rowEl) rowEl.scrollIntoView({ block: "nearest" });
+  }
+  // uio-S-C01 (SRC-01): the count a mark row carries instead of one row per instance. A linked
+  // passage used by four documents is ONE row saying "in 4 docs" -- the destination list lives in
+  // the mark's own where-used card, which is where you act on it. Also decides the status dot: a
+  // comment whose whole thread is resolved goes grey rather than reading as live work.
+  function sourceMarkRowState(topic, model, m) {
+    var SD = window.SourceDoc, st = SD.markStatus(m);
+    var out = { dot: st.dot, dotTitle: st.label, meta: "" };
+    if (m.type === "link") {
+      var docs = {};
+      sourceLinkWhereUsed(__sourceActiveTopicId, m.id).forEach(function (u) { docs[u.docCode] = 1; });
+      var n = Object.keys(docs).length;
+      out.meta = n ? ("in " + n + " doc" + (n === 1 ? "" : "s")) : "not placed yet";
+    } else if (m.type === "alternate") {
+      var parts = [];
+      if (m.stale) parts.push("base changed");
+      if (m.tag) parts.push(String(m.tag));
+      out.meta = parts.join(" · ");
+    } else if (m.type === "comment") {
+      var thread = sourceCommentsForMark(topic, m.id);
+      var open = thread.filter(function (c) { return !c.done; }).length;
+      out.meta = open ? (open + " open") : (thread.length ? "resolved" : "");
+      if (!open && thread.length && !m.broken) { out.dot = "grey"; out.dotTitle = "Resolved"; }
+    }
+    return out;
+  }
+  // The Marks section of the consolidated panel: the mark navigator (filter + rows), folded in
+  // from the retired drawer. One labelled, counted filter (All / Alt / Linked / Notes) over one row
+  // per MARK -- a row jumps to + highlights its mark, and states its own location so it identifies
+  // itself without leaning on a truncated snippet (uio-S-C01, SRC-01/06).
+  function renderSourceMarksSection(host, model) {
+    var SD = window.SourceDoc, U = window.VersoUI;
+    var topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    // Marks is the primary section of the consolidated panel -- render it title-less, straight
+    // into the panel host (no "Marks" header), above the History/Source/Comments sections.
+    var body = h("div", "source-marks__primary"); host.appendChild(body);
+    var counts = SD.markCounts(model);
+    if (U && U.SegmentedControl) {
+      body.appendChild(U.SegmentedControl({
+        size: "sm",
+        options: SOURCE_MARK_FILTERS.map(function (f) {
+          var n = counts[f.key] || 0;
+          return { value: f.key, label: f.label + " " + n, title: f.title + " (" + n + ")" };
+        }),
+        value: __sourceMarksFilter,
+        onChange: function (v) { __sourceMarksFilter = v; var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; if (t) renderSourceInfoPanel(t); }
+      }));
+    }
+    var listWrap = h("div", "source-marks__list");
+    var marks = (model.marks || []).filter(function (m) { return __sourceMarksFilter === "all" || m.type === __sourceMarksFilter; });
+    if (!marks.length) {
+      listWrap.appendChild(h("div", "source-drawer__empty", __sourceMarksFilter === "link"
+        ? "Nothing linked yet — select a passage and place it from the Edit stage."
+        : ("No marks" + (__sourceMarksFilter === "all" ? " yet." : " of this type."))));
+    } else {
+      marks.forEach(function (m) {
+        var meta = SD.markMeta(m), state = sourceMarkRowState(topic, model, m);
+        var row = h("button", "source-drawer__row" + (m.id === __sourceActiveMarkId ? " is-active" : "")); row.type = "button";
+        row.setAttribute("data-mark-id", m.id);
+        var dot = h("span", "source-drawer__dot source-drawer__dot--" + state.dot); dot.title = state.dotTitle;
+        var rbody = h("div", "source-drawer__row-body");
+        var head = h("div", "source-drawer__row-head");
+        head.appendChild(h("span", "source-drawer__row-type " + meta.cls, meta.label));
+        if (state.meta) head.appendChild(h("span", "source-drawer__row-count", state.meta));
+        rbody.appendChild(head);
+        var snip = SD.isObjectMark(m) ? SD.objectNodeLabel(SD.nodeByKey(model, m.anchor.nodeKey)) : (SD.anchorText(model, m.anchor) || "(empty)");
+        rbody.appendChild(h("div", "source-drawer__row-snip", snip));
+        var path = SD.markPath(model, m);
+        if (path) rbody.appendChild(h("div", "source-drawer__row-where", path));
+        row.appendChild(dot); row.appendChild(rbody);
+        row.addEventListener("click", function () {
+          revealSourceMark(m);
+          // a linked row opens the card that holds its destination list -- the instances the row
+          // deliberately no longer enumerates (SRC-01).
+          if (m.type === "link" && topic) syncSourceWherePanel(topic, m.id);
+        });
+        listWrap.appendChild(row);
+      });
+    }
+    body.appendChild(listWrap);
+    // The topic can ALSO be placed whole, as a library component instance -- a DIFFERENT mechanism
+    // from a link mark. It closes the list as one plain footnote rather than a fake mark row: it
+    // isn't a mark, so it must not wear a mark's row or borrow a mark colour (SRC-07's fixed
+    // palette only works if no hue does two jobs).
+    if (__sourceMarksFilter === "all" || __sourceMarksFilter === "link") {
+      var inst = libraryWhereUsedDetail(__sourceActiveTopicId, getRegistry());
+      var idocs = {}; inst.forEach(function (u) { idocs[u.docCode] = 1; });
+      var ni = Object.keys(idocs).length;
+      if (ni) {
+        var irow = h("button", "source-marks__rollup", "Also placed whole, as a component, in " + ni + " document" + (ni === 1 ? "" : "s") + ".");
+        irow.type = "button";
+        irow.title = "Open " + inst[0].docTitle + " and select the placed component";
+        irow.addEventListener("click", function () { jumpToLinkedBlock(inst[0].docCode, inst[0].blockId); });
+        body.appendChild(irow);
+      }
+    }
+  }
+
+  // The contextual selection bar, above the highlight (canvas idiom): glyph rich-text
+  // (bold/italic/dot-points -- ONLY when unlocked) plus the annotation actions alternate +
+  // comment (always, since annotation is ungated). NO create-link here -- linking is Edit-stage.
+  // A selection that extends past an existing mark flips the create button to a ⟳ update.
+  function buildSourceSelBar(topic) {
+    var bar = h("div", "source-selbar"); bar.setAttribute("data-source-selbar", "1"); bar.style.display = "none";
+    // glyph-only, from the shared Lucide icon set (Icon()), matching the canvas toolbar idiom --
+    // never text letters or emoji.
+    function seg(cmd, icon, title, cls) {
+      var b = h("button", "source-selbar__btn" + (cls ? " " + cls : "")); b.type = "button"; b.title = title;
+      b.innerHTML = window.Icon ? window.Icon(icon) : "";
+      b.setAttribute("data-cmd", cmd);
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      return b;
+    }
+    bar.appendChild(seg("bold", "bold", "Bold", "source-selbar__rt"));
+    bar.appendChild(seg("italic", "italic", "Italic", "source-selbar__rt"));
+    bar.appendChild(seg("list", "list", "Dot points", "source-selbar__rt"));
+    // source-selbar-block-formats: block-format actions reassign the selected node's TYPE (H1/H2/Body/
+    // Caution box), for operating-manual parity. Base edits -> gated behind the unlock (__rt), grouped
+    // after the inline three with a separator. Tight set by design: these four + the inline three only.
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
+    bar.appendChild(seg("fmt-h1", "heading-1", "Heading 1", "source-selbar__rt"));
+    bar.appendChild(seg("fmt-h2", "heading-2", "Heading 2", "source-selbar__rt"));
+    bar.appendChild(seg("fmt-body", "pilcrow", "Body text", "source-selbar__rt"));
+    bar.appendChild(seg("fmt-caution", "triangle-alert", "Caution box", "source-selbar__rt"));
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__rt"));
+    bar.appendChild(seg("alternate", "square-pen", "Add an alternate rendition"));
+    bar.appendChild(seg("comment", "message-square", "Comment"));
+    // B1: create-link on a source OBJECT (image/table) -- closes the link gap so an image is a full
+    // source-of-truth object. Object-only (hidden for text, where linking stays Edit-stage).
+    bar.appendChild(seg("link", "link", "Add a link", "source-selbar__obj"));
+    bar.appendChild(seg("update", "refresh-cw", "Update the mark to include the appended text", "source-selbar__update"));
+    // A2: align segment -- shown only when an IMAGE object owns the bar (hidden for text + tables).
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
+    bar.appendChild(seg("align-left", "align-left", "Align left", "source-selbar__img"));
+    bar.appendChild(seg("align-center", "align-center", "Align centre", "source-selbar__img"));
+    bar.appendChild(seg("align-right", "align-right", "Align right", "source-selbar__img"));
+    bar.appendChild(h("span", "source-selbar__sep source-selbar__img"));
+    bar.appendChild(seg("row", "columns-2", "Place beside next image", "source-selbar__img")); // A3
+    bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
+    bar.querySelectorAll(".source-selbar__img, .source-selbar__obj").forEach(function (b) { b.style.display = "none"; });
+    bar.querySelector('[data-cmd="update"]').style.display = "none";
+    bar.querySelectorAll("[data-cmd]").forEach(function (b) {
+      b.addEventListener("click", function () { onSourceSelbarAction(topic, b.getAttribute("data-cmd")); });
+    });
+    return bar;
+  }
+  function sourceSelBarEl() { return document.querySelector("[data-source-selbar]"); }
+  function refreshSourceSelBar() {
+    var bar = sourceSelBarEl(); if (!bar) return;
+    bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = __sourceUnlocked ? "" : "none"; });
+  }
+  var __sourceSelAnchor = null, __sourceUpdateTarget = null, __sourceObjectSelKey = null;
+  function onSourceSelectionChange() {
+    var bar = sourceSelBarEl(); if (!bar || !__sourceMarksEngine) return;
+    var anchor = __sourceMarksEngine.selectionAnchor();
+    if (!anchor) {
+      if (__sourceObjectSelKey) return; // an object selection owns the bar -- don't clear it
+      bar.style.display = "none"; __sourceSelAnchor = null; return;
+    }
+    if (__sourceObjectSelKey) clearSourceObjectSel(); // a real text selection supersedes the object
+    __sourceSelAnchor = anchor;
+    // ⟳ update if this selection extends past an existing mark; else offer create. The pure
+    // decision (SourceDoc.selbarDecision) keeps update/alt/comment visibility consistent for BOTH
+    // single- and multi-paragraph anchors -- a cross-paragraph selection still offers alt + comment.
+    __sourceUpdateTarget = window.SourceDoc.markExtendedBy(__sourceDocModel, anchor);
+    var d = window.SourceDoc.selbarDecision(anchor, __sourceUpdateTarget, __sourceUnlocked);
+    var upd = bar.querySelector('[data-cmd="update"]');
+    var altB = bar.querySelector('[data-cmd="alternate"]'), cmtB = bar.querySelector('[data-cmd="comment"]');
+    upd.style.display = d.showUpdate ? "" : "none";
+    altB.style.display = d.showAlt ? "" : "none"; cmtB.style.display = d.showComment ? "" : "none";
+    var sel = window.getSelection(); var r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+    if (!r || !r.width) { bar.style.display = "none"; return; }
+    positionSourceSelBar(bar, r);
+  }
+  // Pin the selection bar over a viewport rect. The bar is absolutely positioned inside
+  // #source-stage-article -- a scrollable container offset from the page by the left rail -- so it
+  // must use container-relative coords (same conversion as pinCardToSpan). Feeding it raw
+  // viewport/page x pushed it right by the rail's width. left = the selection's CENTRE x; the CSS
+  // transform: translate(-50%, -132%) then centres the bar over, and lifts it above, the selection.
+  // A cross-paragraph edit changes the block structure, so rebuild the article, persist, and restore
+  // the caret at the model position the edit reported (the seam where the merge happened).
+  function afterSourceStructuralEdit(topic, model, res) {
+    if (!res) return;
+    persistSourceDocModel(topic, model);
+    renderSourceArticle(); // full rebuild (nodes removed/merged) -> re-mounts the marks engine too
+    if (res.caret) placeSourceCaret(res.caret.nodeKey, res.caret.offset);
+  }
+  // Chars before a DOM point within a block element (the caret's plain-text offset in the block).
+  function sourceCaretOffsetIn(block, node, offset) {
+    try { var r = document.createRange(); r.selectNodeContents(block); r.setEnd(node, offset); return r.toString().length; }
+    catch (e) { return 0; }
+  }
+  // Place the caret at a plain-text offset within a block (walks the block's text nodes).
+  function placeSourceCaret(nodeKey, offset) {
+    var host = document.getElementById("source-stage-article"); if (!host) return;
+    var esc = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(nodeKey) : String(nodeKey).replace(/["\\\]]/g, "\\$&");
+    var el = host.querySelector('[data-node="' + esc + '"]'); if (!el) return;
+    var tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null), n, acc = 0, target = null, to = 0;
+    while ((n = tw.nextNode())) { if (acc + n.length >= offset) { target = n; to = offset - acc; break; } acc += n.length; }
+    if (!target) { target = el; to = 0; }
+    try { var rg = document.createRange(); rg.setStart(target, to); rg.collapse(true); var s = window.getSelection(); s.removeAllRanges(); s.addRange(rg); } catch (e) {}
+  }
+  // A1: drag the L/R grab handles on a selected source image to resize it live. Width is symmetric
+  // about the image centre (newWidth = 2 x |pointerX - centreX|), snapped lightly to 25/50/75/100%,
+  // and committed to node.imgWidth on release (a base edit -> gated behind the unlock, like prose).
+  function wireSourceImageResize(topic, art, model) {
+    art.addEventListener("pointerdown", function (e) {
+      var handle = e.target && e.target.closest ? e.target.closest(".source-doc__handle") : null;
+      if (!handle) return;
+      var fig = handle.closest(".source-doc__figure[data-node]"); if (!fig) return;
+      e.preventDefault(); e.stopPropagation();
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to resize the image."); return; }
+      var nodeKey = fig.getAttribute("data-node");
+      var wrap = fig.querySelector(".source-doc__imgwrap"); if (!wrap) return;
+      var figRect = fig.getBoundingClientRect();
+      var colW = figRect.width, centreX = figRect.left + figRect.width / 2;
+      if (!colW) return;
+      var guide = h("span", "source-doc__resize-guide"); wrap.appendChild(guide);
+      fig.classList.add("is-resizing");
+      var lastPct = clampSourceImgWidth(wrap.style.width ? parseFloat(wrap.style.width) : 100);
+      function move(ev) {
+        var pct = snapSourceImgWidth(clampSourceImgWidth(2 * Math.abs(ev.clientX - centreX) / colW * 100));
+        lastPct = pct;
+        wrap.style.width = pct >= 100 ? "" : pct + "%";
+      }
+      function up() {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        if (guide.parentNode) guide.remove();
+        fig.classList.remove("is-resizing");
+        var node = window.SourceDoc.nodeByKey(model, nodeKey); // descends into a row child (A3)
+        if (node) {
+          if (lastPct >= 100) delete node.imgWidth; else node.imgWidth = lastPct;
+          persistSourceDocModel(topic, model);
+        }
+      }
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    });
+  }
+  function positionSourceSelBar(bar, r) {
+    var host = document.getElementById("source-stage-article"); if (!host || !bar || !r) return;
+    var hr = host.getBoundingClientRect();
+    bar.style.display = "flex";
+    bar.style.left = (r.left + r.width / 2 - hr.left + host.scrollLeft) + "px";
+    bar.style.top = (r.top - hr.top + host.scrollTop) + "px";
+  }
+  // ---- object selection (spec 6): an image/table is selected as a whole node ----------------
+  // Selecting an object shows the SAME selbar (alternate + comment only -- no text formatting, no
+  // ⟳ update) anchored over the node, with __sourceSelAnchor set to an object anchor { nodeKey }
+  // (no start/len). addMark then produces a node-id mark, stable by construction.
+  function clearSourceObjectSel() {
+    if (!__sourceObjectSelKey) return;
+    var el = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
+    if (el) el.classList.remove("is-object-selected");
+    __sourceObjectSelKey = null;
+    var bar = sourceSelBarEl(); // drop the object-only controls (A2 align, B1 link) on deselect
+    if (bar) bar.querySelectorAll(".source-selbar__img, .source-selbar__obj").forEach(function (b) { b.style.display = "none"; });
+  }
+  // A2: light the active align glyph (centre is the default when node.align is unset).
+  function syncSourceAlignActive(bar, align) {
+    bar.querySelectorAll(".source-selbar__img[data-cmd]").forEach(function (b) {
+      b.classList.toggle("is-active", b.getAttribute("data-cmd") === "align-" + align);
+    });
+  }
+  function selectSourceObject(topic, nodeKey) {
+    var SD = window.SourceDoc;
+    clearSourceObjectSel();
+    __sourceObjectSelKey = nodeKey;
+    var el = document.querySelector('[data-node="' + nodeKey + '"]');
+    if (el) el.classList.add("is-object-selected");
+    var s = window.getSelection(); if (s && s.removeAllRanges) s.removeAllRanges(); // the two selection models must not fight
+    __sourceSelAnchor = { nodeKey: nodeKey }; // object anchor -- no start/len
+    __sourceUpdateTarget = null;
+    // any existing object mark on this node becomes the active (tinted) one
+    var existing = objectMarksOnNode(nodeKey);
+    if (__sourceMarksEngine) { __sourceMarksEngine.setActive(existing.length ? existing[0].id : null); repaintSourceMarks(); }
+    // show the selbar over the object: annotation actions only, formatting/update hidden
+    var bar = sourceSelBarEl();
+    if (bar && el) {
+      bar.querySelectorAll(".source-selbar__rt").forEach(function (b) { b.style.display = "none"; });
+      var upd = bar.querySelector('[data-cmd="update"]'); if (upd) upd.style.display = "none";
+      bar.querySelector('[data-cmd="alternate"]').style.display = "";
+      bar.querySelector('[data-cmd="comment"]').style.display = "";
+      // B1: every markable object (image/table) also gets create-link; lit if it already has one.
+      var linkBtn = bar.querySelector('[data-cmd="link"]');
+      if (linkBtn) {
+        linkBtn.style.display = "";
+        var hasLink = objectMarksOnNode(nodeKey).some(function (mk) { return mk.type === "link"; });
+        linkBtn.classList.toggle("is-active", hasLink);
+        linkBtn.title = hasLink ? "Show where this is linked" : "Add a link";
+      }
+      // A2: an IMAGE object also gets the align segment (tables/other objects do not).
+      var node = (__sourceDocModel && __sourceDocModel.nodes || []).find(function (n) { return n.key === nodeKey; });
+      var isImg = node && node.type === "image";
+      bar.querySelectorAll(".source-selbar__img").forEach(function (b) { b.style.display = isImg ? "" : "none"; });
+      if (isImg) {
+        syncSourceAlignActive(bar, sourceImgAlign(node) || "center");
+        // A3: the row button toggles meaning by context (in a row -> take out; else -> place beside).
+        var rowBtn = bar.querySelector('[data-cmd="row"]');
+        if (rowBtn) { var inRow = !!SD.rowOf(__sourceDocModel, nodeKey); rowBtn.title = inRow ? "Take out of the row" : "Place beside next image"; rowBtn.classList.toggle("is-active", inRow); }
+      }
+      positionSourceSelBar(bar, el.getBoundingClientRect());
+    }
+    // if the object already carries an alternate or a link, open the matching contextual panel
+    var alts = SD.objectAlternatesFor(__sourceDocModel, nodeKey);
+    var links = existing.filter(function (mk) { return mk.type === "link"; });
+    syncSourceAltPanel(topic, alts.length ? alts[0].id : null);
+    syncSourceWherePanel(topic, links.length ? links[0].id : null);
+  }
+  function objectMarksOnNode(nodeKey) {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    return (model && model.marks || []).filter(function (m) { return SD.isObjectMark(m) && m.anchor.nodeKey === nodeKey; });
+  }
+  function onSourceSelbarAction(topic, cmd) {
+    var SD = window.SourceDoc;
+    if (cmd === "bold" || cmd === "italic" || cmd === "list") {
+      if (!__sourceUnlocked) return;
+      if (cmd === "list") document.execCommand("insertUnorderedList"); else document.execCommand(cmd);
+      return;
+    }
+    // source-selbar-block-formats: reassign the selected node(s)' block type. A base edit, so it is
+    // gated behind the unlock; applies across a multi-paragraph selection; rides marks (in-place, the
+    // node key is kept) + owned undo (SD.setNodeType). Rebuild the article since the element changes.
+    if (cmd === "fmt-h1" || cmd === "fmt-h2" || cmd === "fmt-body" || cmd === "fmt-caution") {
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to change a block's format."); return; }
+      if (!__sourceSelAnchor || !__sourceDocModel) return;
+      var spec = cmd === "fmt-h1" ? { type: "heading", level: 1 }
+        : cmd === "fmt-h2" ? { type: "heading", level: 2 }
+        : cmd === "fmt-body" ? { type: "paragraph" }
+        : { type: "callout", tag: "Caution" };
+      var keys = SD.nodesInAnchor(__sourceDocModel, __sourceSelAnchor);
+      var changed = 0;
+      keys.forEach(function (k) { if (SD.setNodeType(__sourceDocModel, k, spec)) changed++; });
+      if (!changed) return;
+      persistSourceDocModel(topic, __sourceDocModel);
+      renderSourceArticle(); // the element type changed -> full rebuild + re-mount marks
+      return;
+    }
+    // A2: align an image object. Live (set the figure's text-align, keep the selection), persist
+    // node.align (centre = the default, stored as none). A base edit -> gated behind the unlock.
+    if (cmd === "align-left" || cmd === "align-center" || cmd === "align-right") {
+      if (!__sourceObjectSelKey) return;
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to align the image."); return; }
+      var al = cmd.slice("align-".length);
+      var anode = window.SourceDoc.nodeByKey(__sourceDocModel, __sourceObjectSelKey); // row child too (A3)
+      if (!anode) return;
+      if (al === "center") delete anode.align; else anode.align = al;
+      var fig = document.querySelector('[data-node="' + __sourceObjectSelKey + '"]');
+      if (fig) fig.style.textAlign = (al === "center") ? "" : al;
+      persistSourceDocModel(topic, __sourceDocModel);
+      var bar = sourceSelBarEl(); if (bar) { syncSourceAlignActive(bar, al); if (fig) positionSourceSelBar(bar, fig.getBoundingClientRect()); }
+      return;
+    }
+    // B1: create-link on the selected object (image/table). If it already carries a link, just open
+    // the where-used panel. Annotation is ungated, so link-create stays available even when locked.
+    if (cmd === "link") {
+      if (!__sourceObjectSelKey) return;
+      var existLink = objectMarksOnNode(__sourceObjectSelKey).filter(function (mk) { return mk.type === "link"; });
+      var linkId;
+      if (existLink.length) { linkId = existLink[0].id; }
+      else {
+        var lm = SD.addMark(__sourceDocModel, { type: "link", anchor: { nodeKey: __sourceObjectSelKey } });
+        persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+        linkId = lm.id;
+        var lbtn = sourceSelBarEl() && sourceSelBarEl().querySelector('[data-cmd="link"]');
+        if (lbtn) { lbtn.classList.add("is-active"); lbtn.title = "Show where this is linked"; }
+        sourceToast("Link added. It will list where it's placed as you use it in courses.");
+      }
+      syncSourceWherePanel(topic, linkId);
+      return;
+    }
+    // A3: "place beside next" -- combine this image with the adjacent one into a side-by-side row,
+    // or, if it's already in a row, take it back out. Structural -> gated behind the unlock.
+    if (cmd === "row") {
+      if (!__sourceObjectSelKey) return;
+      if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to arrange images."); return; }
+      var selKey = __sourceObjectSelKey;
+      if (SD.rowOf(__sourceDocModel, selKey)) {
+        SD.removeFromRow(__sourceDocModel, selKey);
+        sourceToast("Took the image out of the row.");
+      } else if (SD.combineIntoRow(__sourceDocModel, selKey)) {
+        sourceToast("Placed the images side by side.");
+      } else {
+        sourceToast("Add another image right after this one to place them side by side.");
+        return;
+      }
+      persistSourceDocModel(topic, __sourceDocModel);
+      renderSourceArticle();
+      selectSourceObject(topic, selKey); // re-select the same image in its new home
+      return;
+    }
+    if (cmd === "update" && __sourceUpdateTarget && __sourceSelAnchor) {
+      SD.updateMark(__sourceDocModel, __sourceUpdateTarget.id, __sourceSelAnchor);
+      persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+      sourceToast("Updated the mark to include the appended text."); return;
+    }
+    if (cmd === "alternate" || cmd === "comment") {
+      if (!__sourceSelAnchor) return;
+      var anchor = __sourceSelAnchor;
+      // object anchors have no text selection to position under -- pin the composer to the node.
+      var objRect = null;
+      if (anchor.len == null) { var oe = document.querySelector('[data-node="' + anchor.nodeKey + '"]'); if (oe) objRect = oe.getBoundingClientRect(); }
+      openSourceComposer(cmd, function (val, tag) {
+        if (cmd === "alternate") {
+          var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: anchor, alt: val, tag: tag || "" });
+          SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" });
+          persistSourceDocModel(topic, __sourceDocModel); repaintSourceMarks();
+          syncSourceAltPanel(topic, mk.id); // open the contextual panel on the new alternate
+          refreshSourceHistory(topic); // surface the new alternate in the History timeline (#109)
+        } else {
+          // comment = a range mark (the anchor) + a shared-canvas comment thread on topic.comments,
+          // keyed by the mark id (spec 3.3). Reuses makeComment; open/add logs to History.
+          var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor });
+          topic.comments = topic.comments || [];
+          var cm = makeComment({ markId: cmark.id }, val);
+          topic.comments.push(cm);
+          SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id });
+          persistSourceDocModel(topic, __sourceDocModel); stampTopicUpdated(topic); repaintSourceMarks();
+          renderSourceCommentPins(topic);
+          refreshSourceHistory(topic); // surface the new comment in the History timeline (#109)
+          toggleSourceCommentThread(topic, cmark.id);
+        }
+        sourceToast(cmd === "alternate" ? "Alternate added." : "Comment added.");
+      }, { rect: objRect });
+    }
+  }
+  // A small inline composer positioned under the selection -- the DS idiom for capturing an
+  // alternate rendition or a comment (no raw prompt(); the rich pinned panels are the
+  // alternates-staleness + comments-adapter tickets). Annotation stays available even when locked.
+  function openSourceComposer(mode, onSave, opts) {
+    opts = opts || {};
+    var existing = document.querySelector("[data-source-composer]"); if (existing) existing.remove();
+    var wrap = h("div", "source-composer"); wrap.setAttribute("data-source-composer", "1");
+    wrap.appendChild(h("div", "source-composer__lbl", mode === "alternate" ? "Alternate rendition" : "Comment"));
+    var ta = h("textarea", "source-composer__text"); ta.placeholder = mode === "alternate" ? "Another way to say this..." : "Add a comment...";
+    if (opts.alt != null) ta.value = opts.alt;
+    wrap.appendChild(ta);
+    // alternates carry an optional tag -- what this rendition is "appropriate for" (spec 3.2).
+    var tagIn = null;
+    if (mode === "alternate") {
+      tagIn = h("input", "source-composer__tag"); tagIn.type = "text";
+      tagIn.placeholder = "Appropriate for (optional) -- e.g. quick-start, plain-language";
+      if (opts.tag) tagIn.value = opts.tag;
+      wrap.appendChild(tagIn);
+    }
+    var row = h("div", "source-composer__row");
+    var cancel = h("button", "source-composer__btn", "Cancel"); cancel.type = "button";
+    var save = h("button", "source-composer__btn source-composer__btn--primary", "Save"); save.type = "button";
+    row.appendChild(cancel); row.appendChild(save); wrap.appendChild(row);
+    var sel = window.getSelection(); var r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+    if ((!r || !r.width) && opts.rect) r = opts.rect; // object selection has no text range -- use the node rect
+    if (r) { wrap.style.left = (window.scrollX + r.left + r.width / 2) + "px"; wrap.style.top = (window.scrollY + r.bottom + 8) + "px"; }
+    document.body.appendChild(wrap);
+    function close() { if (wrap.parentNode) wrap.remove(); }
+    cancel.addEventListener("click", close);
+    save.addEventListener("click", function () { var v = ta.value.trim(); var t = tagIn ? tagIn.value.trim() : undefined; close(); if (v) onSave(v, t); });
+    ta.focus();
+  }
+  // a light transient reminder for the Source stage (the lock reminder + annotation confirms).
+  function sourceToast(msg) {
+    var t = h("div", "source-toast", msg); document.body.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add("is-on"); });
+    setTimeout(function () { t.classList.remove("is-on"); setTimeout(function () { if (t.parentNode) t.remove(); }, 220); }, 2600);
+  }
+  // browser-verify hook (mirrors window.__productRail's own test hooks): lets the Puppeteer
+  // harness open a topic, convert it to the continuous-document model, and drive the lock.
+  window.__sourceRw = {
+    topicHasDoc: topicHasDoc,
+    convertTopicToDoc: convertTopicToDoc,
+    revertTopicDoc: revertTopicDoc,
+    setActiveTopic: function (id) { __sourceActiveTopicId = id; __sourceDocModel = null; __sourceDocModelTopicId = null; __sourceUnlocked = false; },
+    setUnlocked: function (v, opts) { setSourceUnlocked(v, opts || { prompt: false }); },
+    isUnlocked: function () { return __sourceUnlocked; },
+    getModel: function () { return __sourceDocModel; },
+    openAltPanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceAltPanel(t, id); },
+    altPanelMarkId: function () { return __sourceAltPanelMarkId; },
+    addLinkMark: function (anchor, locations) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "link", anchor: anchor, locations: locations || [] }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); return mk.id; },
+    openWherePanel: function (id) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; syncSourceWherePanel(t, id); },
+    wherePanelMarkId: function () { return __sourceWhereUsedMarkId; },
+    editBaseNode: function (nodeKey, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; window.SourceDoc.applyTextEdit(__sourceDocModel, nodeKey, text); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); if (__sourceAltPanelMarkId) renderSourceAltPanel(t); },
+    addComment: function (anchor, text) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null, SD = window.SourceDoc; var cmark = SD.addMark(__sourceDocModel, { type: "comment", anchor: anchor }); t.comments = t.comments || []; var cm = makeComment({ markId: cmark.id }, text); t.comments.push(cm); SD.logHistory(__sourceDocModel, { type: "comment-added", markId: cmark.id, commentId: cm.id }); persistSourceDocModel(t, __sourceDocModel); stampTopicUpdated(t); repaintSourceMarks(); renderSourceCommentPins(t); refreshSourceHistory(t); return cmark.id; },
+    selectObject: function (nodeKey) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; selectSourceObject(t, nodeKey); },
+    objectSelKey: function () { return __sourceObjectSelKey; },
+    objectMarksOnNode: function (nodeKey) { return objectMarksOnNode(nodeKey); },
+    addObjectAlternate: function (nodeKey, alt, tag) { var SD = window.SourceDoc, t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; var mk = SD.addMark(__sourceDocModel, { type: "alternate", anchor: { nodeKey: nodeKey }, alt: alt, tag: tag || "" }); SD.logHistory(__sourceDocModel, { type: "alternate-created", markId: mk.id, markType: "alternate", tag: tag || "" }); persistSourceDocModel(t, __sourceDocModel); repaintSourceMarks(); refreshSourceHistory(t); return mk.id; },
+    openCommentThread: function (markId) { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; toggleSourceCommentThread(t, markId); },
+    openCommentMarkId: function () { return __sourceOpenCommentMarkId; },
+    getComments: function () { var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; return t && t.comments; },
+    // consolidated-panel: the one right panel's visibility + Marks filter/active-row
+    setInfoOpen: function (v) { __sourceInfoOpen = !!v; applySourceInfoVisibility(); updateSourceDocBar(); },
+    infoOpen: function () { return __sourceInfoOpen; },
+    setMarksFilter: function (f) { __sourceMarksFilter = f; var t = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null; if (t) renderSourceInfoPanel(t); },
+    revealMark: function (id) { var m = __sourceDocModel && window.SourceDoc.markById(__sourceDocModel, id); if (m) revealSourceMark(m); },
+    activeMarkId: function () { return __sourceActiveMarkId; }
+  };
+
+
+  // source-stage-comments: a topic-wide overview alongside the per-section thread
+  // panels -- Open/Resolved/Orphaned, mirroring renderCommentList's own split
+  // (editor.js ~17819) and reusing its exact .comment-row/.comment-row__dot/
+  // .comment-row__snip classes.
+  // #163: renderSourceCommentsPanel (the standalone Comments accordion) is retired -- comments live
+  // only in the Marks section's Comments filter tab now, so the panel never double-renders them.
+
+  // md-topic-import + source-rw-history-timeline: a node-based vertical timeline tracing every
+  // change on this topic -- newest first. Two provenance streams are merged (spec 5, hybrid
+  // granularity):
+  //   * IMPORT events (topic.history) -- creation / re-import reconcile passes, timestamped.
+  //   * DOC events (the SourceDoc model.history) -- prose edits collapsed into "commit" entries
+  //     plus discrete structural events (alternate added, span broke/stale/restored, comment
+  //     opened/resolved). These carry an `at` stamp so both streams interleave by time.
+  // A hand-created "New topic" with neither stream shows a single synthetic "Created" node. The
+  // synthetic "Last edited" node only fills in for legacy topics that have no doc-commit history.
+  function renderHistoryTimeline(host, topic) {
+    // uio-S-C04 (SRC-11): History is a collapsed FOOTER section (opens on demand) so it stops
+    // competing with the marks above it at equal weight.
+    var body = panelSection(host, "History", { collapsible: true, defaultOpen: false });
+    if (!window.VersoUI || !window.VersoUI.Timeline) return;
+    var SD = window.SourceDoc;
+
+    // Import stream -> a common { ts, date, label, detail } row shape.
+    var imports = (topic.history || []).map(function (entry) {
+      var label = entry.type === "created" ? (entry.file ? ("Imported " + entry.file + [entry.version, entry.publishDate].filter(Boolean).map(function (x) { return " " + x; }).join("")) : "Created") :
+        "Re-imported " + entry.file + [entry.version, entry.publishDate].filter(Boolean).map(function (x) { return " " + x; }).join("");
+      var details = [entry.sectionsCreated && (entry.sectionsCreated + " new section(s)"),
+        entry.sectionsUpdated && (entry.sectionsUpdated + " updated from source"),
+        entry.sectionsFlagged && (entry.sectionsFlagged + " flagged for review")].filter(Boolean);
+      return { ts: entry.importedAt || 0, importedAt: entry.importedAt, label: label, detail: details.length ? details.join(", ") : null };
+    });
+
+    // Doc stream -> the same row shape via the pure SourceDoc.historyEntryView mapping. Prefer
+    // the live model when this is the active topic; else read the persisted doc.
+    var liveModel = (__sourceDocModel && __sourceDocModelTopicId === topic.id) ? __sourceDocModel : null;
+    var docHistory = liveModel ? (liveModel.history || []) : ((topic.doc && topic.doc.history) || []);
+    var hasCommit = false;
+    var docRows = (SD && SD.historyEntryView) ? docHistory.map(function (e) {
+      if (e.type === "commit") hasCommit = true;
+      var v = SD.historyEntryView(e);
+      return { ts: e.at || 0, importedAt: e.at, label: v.label, detail: v.detail };
+    }) : [];
+
+    var rows = imports.concat(docRows);
+    // Legacy fallback: no doc commits AND a plain edit is newer than the last import -> a single
+    // synthetic "Last edited" node (superseded by real commit entries once the doc is edited).
+    if (!hasCommit) {
+      var newestImportAt = (topic.history && topic.history.length) ? topic.history[topic.history.length - 1].importedAt : topic.createdAt;
+      if (topic.updatedAt && topic.updatedAt > (newestImportAt || 0)) rows.push({ ts: topic.updatedAt, importedAt: topic.updatedAt, label: "Last edited", detail: null });
+    }
+    if (!rows.length) rows = [{ ts: topic.createdAt || 0, importedAt: topic.createdAt, label: "Created", detail: null }];
+
+    // Newest first; stable order preserves each stream's own sequence when times tie.
+    rows.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    // uio-S-C04 (SRC-11): GROUP BY DAY — the date is stated ONCE at the top of each day's run
+    // (rows are newest-first, so same-day rows cluster), instead of repeating on every row.
+    var lastDate = null;
+    var entries = rows.map(function (r) {
+      var d = r.importedAt ? new Date(r.importedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : "—";
+      var showDate = d !== lastDate; lastDate = d;
+      return {
+        date: showDate ? d : null,
+        label: r.label,
+        detail: r.detail
+      };
+    });
+    body.appendChild(window.VersoUI.Timeline({ entries: entries }));
+  }
+
+  // Matches the established search-field sibling (.vbrowser__search, also reused as
+  // .docs-search) rather than the generic TextField control -- VersoUI has no
+  // SearchField factory yet (DSLMS documents one in components/browser/SearchField.d.ts
+  // but ui-kit.js never built it), so this converges to the real existing pattern
+  // instead of introducing a third near-duplicate search input.
+  function mountSourceStageSearch() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("source-stage-search"); if (!host) return;
+    host.innerHTML = "";
+    var U = window.VersoUI;
+    // uio-S-C02 (SRC-05): ONE search field. It carries the search icon + input, and (unified doc)
+    // an in-field trailing adornment: the match navigator ("3 / 12" + prev/next) and a replace glyph
+    // that reveals the replace row on demand. A div (not a label) so the trailing controls click
+    // cleanly without stealing input focus; the input fills the field so click-to-type still works.
+    var search = h("div", "vbrowser__search source-stage__search-field");
+    search.innerHTML = window.Icon ? window.Icon("search") : "";
+    var unified = !!sourceMasterFor(activeSourceProductId());
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = unified ? "find in document" : "search topics + text";
+    input.value = __sourceSearchQuery;
+    input.addEventListener("input", function () {
+      __sourceSearchQuery = input.value;
+      renderSourceTopicList(); // recomputes __sourceFindMatches + the TOC + the match nav
+      if (unified) {
+        __sourceFindIndex = 0;
+        if (__sourceFindMatches.length) scrollToSourceFindHit(__sourceFindMatches[0]); else clearSourceFindHighlight();
+      }
+    });
+    // Enter cycles to the next match, Shift+Enter to the previous (find-word-cycling).
+    if (unified) input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); cycleSourceFind(e.shiftKey ? -1 : 1); } });
+    search.appendChild(input);
+    if (unified) {
+      // In-field adornment: the match navigator ("3 / 12" + prev/next, populated by
+      // renderSourceFindNav) + a replace-toggle glyph. Kept in the field so the frequent half of
+      // search (the counter) is always where you look, and the rare half (replace) is one glyph away.
+      var adorn = h("div", "source-search__adorn");
+      var findNav = h("div", "source-find-nav"); findNav.id = "source-find-nav";
+      adorn.appendChild(findNav);
+      if (U && U.IconButton) {
+        var repToggle = U.IconButton({ icon: "replace", label: "Find and replace", onClick: function () {
+          __sourceReplaceOpen = !__sourceReplaceOpen; mountSourceStageSearch();
+          if (__sourceReplaceOpen) { var ri = host.querySelector(".source-replace__field input"); if (ri) ri.focus(); }
+        } });
+        repToggle.classList.add("source-search__replace-toggle");
+        repToggle.classList.toggle("is-active", __sourceReplaceOpen);
+        adorn.appendChild(repToggle);
+      }
+      search.appendChild(adorn);
+    }
+    host.appendChild(search);
+    // Source find-AND-replace (unified doc only): revealed on demand by the replace glyph. Replacing
+    // edits the base prose, so it is gated behind the unlock -- a LOCKED doc shows the reason + keeps
+    // the buttons disabled instead of hiding it. Both paths ride owned undo (replaceRange/replaceAll).
+    if (unified && __sourceReplaceOpen) {
+      var repRow = h("div", "source-replace");
+      var locked = !__sourceUnlocked;
+      var repWrap = h("div", "vbrowser__search source-stage__search-field source-replace__field");
+      repWrap.innerHTML = window.Icon ? window.Icon("replace") : "";
+      var repInput = h("input", "vbrowser__search-input"); repInput.type = "text"; repInput.placeholder = "replace with"; repInput.value = __sourceReplaceQuery; repInput.disabled = locked;
+      repInput.addEventListener("input", function () { __sourceReplaceQuery = repInput.value; });
+      repWrap.appendChild(repInput);
+      repRow.appendChild(repWrap);
+      var repBtns = h("div", "source-replace__btns");
+      if (U && U.Button) {
+        var repOne = U.Button({ variant: "secondary", size: "sm", label: "Replace", title: "Replace the current match", onClick: function () { replaceCurrentSourceMatch(); } });
+        var repAll = U.Button({ variant: "secondary", size: "sm", label: "Replace all", title: "Replace every match", onClick: function () { replaceAllSourceMatches(); } });
+        if (locked) { [repOne, repAll].forEach(function (b) { b.setAttribute("disabled", "disabled"); b.title = "Unlock the source (toolbar) to replace text"; }); }
+        repBtns.appendChild(repOne); repBtns.appendChild(repAll);
+      }
+      repRow.appendChild(repBtns);
+      if (locked) repRow.appendChild(h("div", "source-replace__lockhint insp-hint", "The source is locked — unlock in the toolbar to replace text."));
+      host.appendChild(repRow);
+    }
+    renderSourceFindNav(); // populate the in-field match navigator
+  }
+  // Replace the current find match (find-word-cycling's highlighted hit) with the replace text. Gated
+  // behind the unlock; rides replaceRange -> owned undo + mark-shift. Re-runs the find so the count +
+  // highlight track the edited document, staying on the same match index.
+  function replaceCurrentSourceMatch() {
+    var SD = window.SourceDoc, topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (!SD || !topic || !__sourceDocModel) return;
+    if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to replace text."); return; }
+    var m = __sourceFindMatches[__sourceFindIndex]; if (!m) { sourceToast("No match selected."); return; }
+    SD.replaceRange(__sourceDocModel, { nodeKey: m.nodeKey, start: m.start, len: m.len }, __sourceReplaceQuery);
+    persistSourceDocModel(topic, __sourceDocModel);
+    renderSourceArticle();
+    renderSourceTopicList(); // recomputes __sourceFindMatches against the edited doc
+    if (__sourceFindMatches.length) { if (__sourceFindIndex >= __sourceFindMatches.length) __sourceFindIndex = 0; scrollToSourceFindHit(__sourceFindMatches[__sourceFindIndex]); }
+  }
+  // Replace every match in the document (one owned-undo step). Gated behind the unlock; toasts the count.
+  function replaceAllSourceMatches() {
+    var SD = window.SourceDoc, topic = __sourceActiveTopicId ? libComponents()[__sourceActiveTopicId] : null;
+    if (!SD || !topic || !__sourceDocModel) return;
+    if (!__sourceUnlocked) { sourceToast("The source is locked -- unlock in the toolbar to replace text."); return; }
+    var q = __sourceSearchQuery; if (!q) { sourceToast("Type something to find first."); return; }
+    var n = SD.replaceAll(__sourceDocModel, q, __sourceReplaceQuery);
+    persistSourceDocModel(topic, __sourceDocModel);
+    renderSourceArticle();
+    renderSourceTopicList();
+    sourceToast(n ? ("Replaced " + n + " match" + (n === 1 ? "" : "es") + ".") : "Nothing to replace.");
+  }
+
+  function newTopicModal() {
+    var productId = getActiveProduct();
+    if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
+    promptModal("New Topic", "Name", "", function (name) {
+      if (!(name || "").trim()) return;
+      var topic = createTopic(name, productId, []); // LibraryStore write, not doc -- no pushHistory
+      __sourceActiveTopicId = topic.id;
+      // new-product first-run: for an empty Product this is the FIRST chapter, so mint the unified
+      // master immediately (renderSourceStage -> ensureUnifiedDocForActiveProduct migrates the new
+      // topic into a master) rather than leaving a loose topic until the stage is re-entered. Matches
+      // the import path (finishMarkdownImport), so "start writing" and "import" seed the same way.
+      renderSourceStage();
+    });
+  }
+
+  // Called each time Source becomes the active stage (setStage("source")) -- mounts the
+  // search field once, then re-renders the toolbar + topic list + article from current
+  // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
+  // inside renderSourceTopicList, not mounted separately).
+  var SOURCE_TOPIC_PERSIST_KEY = "verso.sourceTopic"; // the topic open on the Source stage, restored across a refresh
+  function renderSourceStage() {
+    // Source v2: the active Product's source is ONE document. Resolve (and materialise on first
+    // entry) its unified master and open it, so the stage shows the document, not a topic list.
+    var master = ensureUnifiedDocForActiveProduct();
+    if (master) {
+      __sourceActiveTopicId = master.id;
+      __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind if the Product changed
+      try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, master.id); } catch (e) {}
+    } else if (!__sourceActiveTopicId) {
+      // no unified doc yet (no Product / no topics) -> restore the last-open topic on a fresh load
+      try { var savedT = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY); if (savedT && libComponents()[savedT]) __sourceActiveTopicId = savedT; } catch (e) {}
+    }
+    mountSourceStageSearch();
+    renderSourceTopicList();
+    renderSourceArticle();
+  }
+
+  // Minimal write path other tickets (source-topic-content-authoring) build their
+  // authoring UI on top of -- same "ship the mechanism, UI follows" precedent as
+  // createProduct(). Not wired to any Source-stage control in this ticket (view-only).
+  // extra (md-topic-import): optional { key, source, variantSources, historyEntry } --
+  // key is the matching handle a later re-import uses to find this topic again;
+  // source/variantSources are plain display metadata (which manual file/version/publish
+  // date this came from); historyEntry seeds topic.history (the info panel's node
+  // timeline) with this creation event. A blank "New topic" never sets any of these --
+  // they're import-only.
+  function createTopic(name, productId, sections, extra) {
+    var comps = libComponents();
+    var id = "topic-" + Math.random().toString(36).slice(2, 8);
+    while (comps[id]) id = "topic-" + Math.random().toString(36).slice(2, 8);
+    var now = Date.now();
+    var topic = { id: id, kind: "topic", name: (String(name || "").trim() || "Untitled topic"),
+      productId: productId || undefined, sections: sections || [], createdAt: now, updatedAt: now };
+    if (extra && extra.key != null) topic.key = extra.key;
+    if (extra && extra.source) topic.source = extra.source;
+    if (extra && extra.variantSources) topic.variantSources = extra.variantSources;
+    if (extra && extra.historyEntry) topic.history = [extra.historyEntry];
+    window.LibraryStore.components[id] = topic;
+    saveLibrary();
+    return topic;
+  }
+  window.__productRail.createTopic = createTopic;
+  window.__productRail.renderSourceStage = renderSourceStage; // headless/browser-verify hook
+
+  // ---- Source v2: unify a Product's topic docs into ONE continuous document (spec 2c section 1) ----
+  // A Product's source becomes ONE document. It is stored as a reserved "source master"
+  // component (kind:"topic", sourceMaster:true) pointed to by product.groundTruthId -- the
+  // already-reserved seam (:1212). This reuses the whole topic-keyed Source stage (doc
+  // round-trip, marks/variants, lock, every __sourceRw hook) with the least churn instead of a
+  // new product.sourceDoc content path the topic nav has no slot for. The migration is guarded
+  // (idempotent -- re-running returns the existing master) and REVERSIBLE: the old per-topic
+  // docs are KEPT, only stamped archivedInto:<masterId>, so a revert restores the pre-migration
+  // nav exactly (nothing is ever deleted). The heavy lifting -- concatenating N topic models
+  // into one, re-keying on collision, and riding every mark/variant/history reference across --
+  // is SourceDoc.concatChapters (a pure, headlessly-tested core).
+
+  // The reserved source-master component for a Product (via product.groundTruthId), or null.
+  function sourceMasterFor(productId) {
+    var p = productId && window.ProductsStore[productId];
+    if (!p || !p.groundTruthId) return null;
+    var m = libComponents()[p.groundTruthId];
+    return (m && m.sourceMaster) ? m : null;
+  }
+  // The topics that feed a Product's unified doc, in the author's canonical reading order.
+  // Excludes the reserved master itself and any topic already archived into one.
+  function unifiableTopicsFor(productId) {
+    var comps = libComponents();
+    var all = Object.keys(comps).map(function (k) { return comps[k]; })
+      .filter(function (t) { return t && t.kind === "topic" && !t.sourceMaster && !t.archivedInto && (t.productId || "") === (productId || ""); });
+    canonicalizeTopicOrder(all);
+    return all.slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+  }
+  // Build the unified model from a Product's topics without persisting: each topic contributes
+  // its live doc model (a legacy section topic is converted on the fly), concatenated to chapters.
+  function buildUnifiedModelFor(productId) {
+    var SD = window.SourceDoc; if (!SD) return null;
+    var chapters = unifiableTopicsFor(productId).map(function (t) {
+      var model = topicHasDoc(t) ? SD.fromJSON(t.doc) : SD.fromSections(t, resolveTopicBaseText);
+      return { name: t.name, model: model };
+    });
+    return SD.concatChapters(chapters);
+  }
+  // Migrate a Product to one unified document. Guarded: returns the existing master untouched if
+  // one already exists (unless opts.force rebuilds it from the current topics). Concatenates the
+  // Product's topics into a reserved master, points product.groundTruthId at it, and stamps each
+  // source topic archivedInto:<masterId> (kept, not deleted). Reversible via revertProductUnifiedDoc.
+  function migrateProductToUnifiedDoc(productId, opts) {
+    opts = opts || {};
+    var SD = window.SourceDoc; if (!SD) return null;
+    var product = productId && window.ProductsStore[productId];
+    if (!product) return null;
+    var existing = sourceMasterFor(productId);
+    if (existing && !opts.force) return existing;
+    var topics = unifiableTopicsFor(productId);
+    var unified = buildUnifiedModelFor(productId);
+    var master = existing;
+    if (!master) {
+      master = createTopic(product.name || "Source", productId, []);
+      master.sourceMaster = true;
+    }
+    master.doc = SD.toJSON(unified);
+    master.updatedAt = Date.now();
+    // provenance fix: carry the imported source stamp onto the unified master so it reports the real
+    // origin, not "Authored in Verso". Take the first constituent that was imported; keep its
+    // variantSources too. (Already-migrated masters with no stamp are repaired read-time by
+    // resolveTopicSource.)
+    if (!master.source) {
+      var imported = topics.filter(function (t) { return t && t.source; })[0];
+      if (imported) { master.source = imported.source; if (imported.variantSources) master.variantSources = imported.variantSources; }
+    }
+    product.groundTruthId = master.id;
+    topics.forEach(function (t) { t.archivedInto = master.id; });
+    saveLibrary();
+    saveProducts();
+    return master;
+  }
+  // Reverse the migration: drop the reserved master, clear product.groundTruthId, and un-archive
+  // the source topics -> the pre-migration Source nav is restored exactly (nothing was deleted).
+  function revertProductUnifiedDoc(productId) {
+    var product = productId && window.ProductsStore[productId];
+    if (!product) return false;
+    var masterId = product.groundTruthId;
+    var comps = libComponents();
+    Object.keys(comps).forEach(function (k) { if (comps[k] && comps[k].archivedInto === masterId) delete comps[k].archivedInto; });
+    if (masterId && comps[masterId] && comps[masterId].sourceMaster) delete comps[masterId];
+    delete product.groundTruthId;
+    saveLibrary();
+    saveProducts();
+    return true;
+  }
+  window.__productRail.applySourceChapterMove = applySourceChapterMove; // browser-verify: chapter drag-reorder
+  window.__productRail.sourceMasterFor = sourceMasterFor;
+  window.__productRail.unifiableTopicsFor = unifiableTopicsFor;
+  window.__productRail.buildUnifiedModelFor = buildUnifiedModelFor;
+  window.__productRail.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;
+  window.__productRail.revertProductUnifiedDoc = revertProductUnifiedDoc;
+
+  // Applies one MarkdownImport.reconcileSection() verdict to a REAL section (or creates
+  // it, when none existed yet) -- "update"/"track" adopt the fresh text and clear any
+  // stale flag; "flag" leaves the author's text untouched and parks the source's version
+  // in section.sourceUpdate for review; "noop" touches nothing. Always returns the
+  // resolved section object (new or existing) so a caller can chain into its overrides.
+  function applySectionReconcile(topic, existingSec, freshSection, decision) {
+    if (decision.action === "create") {
+      var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), key: freshSection.key, heading: freshSection.heading, facets: { technical: freshSection.text }, lastImportedText: freshSection.text };
+      topic.sections.push(sec);
+      return sec;
+    }
+    if (decision.action === "update" || decision.action === "track") {
+      existingSec.facets.technical = freshSection.text;
+      existingSec.lastImportedText = freshSection.text;
+      delete existingSec.sourceUpdate;
+    } else if (decision.action === "flag") {
+      existingSec.sourceUpdate = { text: freshSection.text };
+    }
+    return existingSec; // noop/update/track/flag all keep the same object
+  }
+  // Same verdict, applied to one variant's override text instead of the section's own
+  // Flagship facets -- same three-way safety (only ever auto-applies when nothing of the
+  // author's is at risk of being lost).
+  function applyVariantReconcile(sec, variant, freshText, decision) {
+    if (decision.action === "create" || decision.action === "update" || decision.action === "track") {
+      sec.overrides = sec.overrides || {};
+      sec.overrides[variant] = { facets: { technical: freshText }, lastImportedText: freshText };
+    } else if (decision.action === "flag") {
+      sec.overrides = sec.overrides || {};
+      sec.overrides[variant] = sec.overrides[variant] || { facets: {} };
+      sec.overrides[variant].sourceUpdate = { text: freshText };
+    }
+  }
+  // Product Rail (md-topic-import): turns a MarkdownImport parse's topics (already
+  // variant-merged, if any) into real LibraryStore topic components. First import of a
+  // given (Product, source file) creates fresh topics via createTopic, stamped with the
+  // key/source a later re-import matches on. A re-import of the SAME (Product, file)
+  // reconciles instead of duplicating: matches existing topics/sections by key, and lets
+  // MarkdownImport.reconcileSection decide create/update/flag/noop per section (and per
+  // variant override) so nothing hand-authored is ever silently overwritten.
+  // meta (optional): { file, version, publishDate, variantMeta: {variantName: {...}} }.
+  function importParsedTopics(parsedTopics, productId, meta) {
+    meta = meta || {};
+    var topicCount = 0, sectionCount = 0, updatedCount = 0, flaggedCount = 0;
+    var comps = libComponents();
+    var existingForSource = meta.file ? Object.keys(comps).map(function (k) { return comps[k]; }).filter(function (t) {
+      return t.kind === "topic" && t.productId === productId && t.source && t.source.file === meta.file;
+    }) : [];
+    var sourceStamp = meta.file ? { file: meta.file, version: meta.version, publishDate: meta.publishDate, importedAt: Date.now() } : undefined;
+
+    parsedTopics.forEach(function (t) {
+      var existingTopic = existingForSource.filter(function (et) { return et.key === t.key; })[0];
+      if (!existingTopic) {
+        var sections = t.sections.map(function (s) {
+          var sec = { id: "sec-" + Math.random().toString(36).slice(2, 8), key: s.key, heading: s.heading, facets: { technical: s.text }, lastImportedText: s.text };
+          if (s.overrides) {
+            sec.overrides = {};
+            Object.keys(s.overrides).forEach(function (v) { sec.overrides[v] = { facets: { technical: s.overrides[v] }, lastImportedText: s.overrides[v] }; });
+          }
+          sectionCount++;
+          return sec;
+        });
+        var historyEntry = sourceStamp ? { type: "created", file: sourceStamp.file, version: sourceStamp.version, publishDate: sourceStamp.publishDate, importedAt: sourceStamp.importedAt, sectionsCreated: sections.length } : undefined;
+        createTopic(t.name, productId, sections, { key: t.key, source: sourceStamp, variantSources: meta.variantMeta, historyEntry: historyEntry });
+        topicCount++;
+        return;
+      }
+      var runCreated = 0, runUpdated = 0, runFlagged = 0;
+      t.sections.forEach(function (s) {
+        var existingSec = existingTopic.sections.filter(function (es) { return es.key === s.key; })[0];
+        var decision = window.MarkdownImport.reconcileSection(existingSec ? { text: existingSec.facets.technical, lastImportedText: existingSec.lastImportedText } : null, s.text);
+        var resolvedSec = applySectionReconcile(existingTopic, existingSec, s, decision);
+        if (decision.action === "create") { sectionCount++; runCreated++; }
+        else if (decision.action === "update" || decision.action === "track") { updatedCount++; runUpdated++; }
+        else if (decision.action === "flag") { flaggedCount++; runFlagged++; }
+        if (s.overrides) {
+          Object.keys(s.overrides).forEach(function (v) {
+            var vExisting = resolvedSec.overrides && resolvedSec.overrides[v];
+            var vDecision = window.MarkdownImport.reconcileSection(vExisting ? { text: vExisting.facets.technical, lastImportedText: vExisting.lastImportedText } : null, s.overrides[v]);
+            applyVariantReconcile(resolvedSec, v, s.overrides[v], vDecision);
+            if (vDecision.action === "flag") { flaggedCount++; runFlagged++; }
+          });
+        }
+      });
+      // Stamped with sourceStamp.importedAt, NOT a fresh Date.now() -- both must read as
+      // the SAME moment, or updatedAt (a few ms later in real time) would always look
+      // newer than the history entry it belongs to, wrongly triggering a phantom
+      // "Last edited" timeline node on every reconcile even when nothing was hand-edited.
+      existingTopic.updatedAt = sourceStamp ? sourceStamp.importedAt : Date.now();
+      if (sourceStamp) {
+        existingTopic.source = sourceStamp;
+        existingTopic.history = existingTopic.history || [];
+        existingTopic.history.push({
+          type: "reimport", file: sourceStamp.file, version: sourceStamp.version, publishDate: sourceStamp.publishDate,
+          importedAt: sourceStamp.importedAt, sectionsCreated: runCreated, sectionsUpdated: runUpdated, sectionsFlagged: runFlagged
+        });
+      }
+      if (meta.variantMeta) existingTopic.variantSources = meta.variantMeta;
+    });
+    saveLibrary();
+    return { topicCount: topicCount, sectionCount: sectionCount, updatedCount: updatedCount, flaggedCount: flaggedCount };
+  }
+  window.__productRail.importParsedTopics = importParsedTopics; // headless/browser-verify hook
+
+  function readFileAsText(file) {
+    return new Promise(function (resolve) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result == null ? "" : r.result)); };
+      r.onerror = function () { resolve(""); };
+      r.readAsText(file);
+    });
+  }
+
+  // A lightweight version + publish-date prompt per file about to be imported -- optional,
+  // but it's what a later re-import shows in the info panel ("what changed and when").
+  // One small step regardless of path: neither a native file picker nor the file-input
+  // modal has anywhere to type free text, so this always runs right after file(s) are
+  // chosen and right before anything is actually parsed/written.
+  function promptImportProvenance(fileEntries, onDone) {
+    var values = fileEntries.map(function () { return { version: "", publishDate: "" }; });
+    var shell = dsModalShell({
+      title: "Manual details",
+      subtitle: "Optional — lets a later re-import of the same file show what changed and when.",
+      primaryLabel: "Import",
+      onPrimary: function () {
+        shell.modal.close();
+        onDone(fileEntries.map(function (f, i) { return { key: f.key, file: f.file, version: values[i].version, publishDate: values[i].publishDate }; }));
+      }
+    });
+    fileEntries.forEach(function (f, i) {
+      var vIn = modalText(shell.body, f.label + " version", "", "e.g. v1.4");
+      vIn.addEventListener("input", function () { values[i].version = vIn.value; });
+      var dIn = modalText(shell.body, f.label + " published", "", "e.g. 2026-06-24");
+      dIn.addEventListener("input", function () { values[i].publishDate = dIn.value; });
+    });
+  }
+
+  // product-rail-rename-tolerant-match: re-import matches by filename (see
+  // importParsedTopics), so renaming the source file on disk would otherwise silently
+  // start an unrelated second lineage of topics. Before treating an unrecognised
+  // filename as brand new, check whether it substantially overlaps with topics already
+  // bound to some OTHER file for this Product (MarkdownImport.detectRenamedSource);
+  // if so, ask before doing anything -- never auto-applies a guess. Flagship file only
+  // (the primary import's own filename); scoped this way so variant-file rename
+  // tolerance can follow later without complicating this pass. onDone(meta) always
+  // fires eventually, whichever choice is made (or if there was nothing to ask about).
+  function checkRenamedSource(productId, meta, parsedTopics, onDone) {
+    if (!meta || !meta.file) { onDone(meta); return; }
+    var allForProduct = Object.keys(libComponents()).map(function (k) { return libComponents()[k]; }).filter(function (t) {
+      return t.kind === "topic" && t.productId === productId && t.source && t.source.file;
+    });
+    var alreadyBound = allForProduct.some(function (t) { return t.source.file === meta.file; });
+    if (alreadyBound || !allForProduct.length) { onDone(meta); return; }
+    var filesToKeys = {};
+    allForProduct.forEach(function (t) { (filesToKeys[t.source.file] = filesToKeys[t.source.file] || []).push(t.key); });
+    var candidate = window.MarkdownImport.detectRenamedSource(filesToKeys, parsedTopics.map(function (t) { return t.key; }));
+    if (!candidate) { onDone(meta); return; }
+    var shell = dsModalShell({
+      title: "Same manual, new filename?",
+      subtitle: '"' + meta.file + '" substantially matches topics already imported from "' + candidate.file + '" (' +
+        candidate.matched + " of " + candidate.total + " topics). Treat it as an update to that source, or keep them separate?",
+      primaryLabel: "Yes, same manual",
+      extras: window.VersoUI ? [window.VersoUI.Button({
+        variant: "secondary", label: "No, keep separate",
+        onClick: function () { shell.modal.close(); onDone(meta); }
+      })] : [],
+      onPrimary: function () {
+        allForProduct.forEach(function (t) { if (t.source.file === candidate.file) t.source.file = meta.file; });
+        saveLibrary();
+        shell.modal.close();
+        onDone(meta);
+      }
+    });
+  }
+
+  // Shared tail end of an import, whether it came from the one-click no-variant path or
+  // the multi-file modal: merge any variant parses in, write/reconcile real topics,
+  // re-render, and report a short summary through the canonical confirmModal (never a raw
+  // window.alert for anything beyond a single-sentence hard failure -- /verso-frontend
+  // Tier 2 review).
+  function finishMarkdownImport(baseParse, variantParses, productId, meta) {
+    var warnings = baseParse.warnings.slice();
+    var variantMeta = {};
+    (variantParses || []).forEach(function (vp) {
+      warnings = warnings.concat(vp.parse.warnings.map(function (w) { return "[" + vp.name + "] " + w; }));
+      warnings = warnings.concat(window.MarkdownImport.mergeVariant(baseParse.topics, vp.parse, vp.name));
+      if (vp.meta) variantMeta[vp.name] = vp.meta;
+    });
+    var result = importParsedTopics(baseParse.topics, productId, {
+      file: meta && meta.file, version: meta && meta.version, publishDate: meta && meta.publishDate,
+      variantMeta: Object.keys(variantMeta).length ? variantMeta : undefined
+    });
+    // Source v2: the imported topics seed the ONE continuous document. Land in the unified stage so
+    // the topics->unified migration fires now (renderSourceStage -> ensureUnifiedDocForActiveProduct),
+    // rather than stranding the author in the retired topic/section view -- its second left panel +
+    // "Switch to continuous document" button -- until the next stage entry (pilot 2026-07-28).
+    renderSourceStage();
+    var parts = [];
+    if (result.topicCount) parts.push(result.topicCount + " new topic(s)");
+    if (result.sectionCount) parts.push(result.sectionCount + " new section(s)");
+    if (result.updatedCount) parts.push(result.updatedCount + " section(s) updated from source");
+    if (result.flaggedCount) parts.push(result.flaggedCount + " section(s) flagged for review (changed both here and in the source since the last import)");
+    var summary = parts.length ? parts.join(", ") + "." : "Nothing changed since the last import.";
+    if (warnings.length) summary += " " + warnings.length + " other item(s) may need review.";
+    confirmModal("Import from Markdown", summary, function () {});
+  }
+
+  // "Import from Markdown…": one primary (Flagship) .md, plus one optional .md per the
+  // active Product's already-declared variants (no free-form variant-name entry -- the
+  // variant list is fixed by ProductsStore[id].variants, same source buildVariantPillsRow
+  // reads). A Product with NO declared variants only ever needs one file, so it matches
+  // the established one-click precedent exactly (glossary's importCsv, editor.js -- click
+  // the button, the native file picker opens immediately, no intermediate modal at all).
+  // The modal only exists for the multi-file case a single click structurally can't do:
+  // mapping several files to several variant names at once. Re-running this against the
+  // SAME filename for a Product that already has topics from it reconciles instead of
+  // duplicating -- see importParsedTopics.
+  // ---- Source v2: additive Markdown import into the ONE document (md-import-additive, spec 2c section 4) ----
+  // The one surviving left action under the unified-document model. A Markdown file becomes one or
+  // more CHAPTERS that either ADD (a new name) or UPDATE an existing chapter; the author previews
+  // exactly what will add / change / remove BEFORE it touches the document -- never a silent
+  // whole-document overwrite. The reconcile itself is the pure SourceDoc.importPlan/applyImportPlan.
+
+  // A parse's topics -> [{name, nodes}] chapters, reusing fromSections to turn each topic's
+  // sections into heading + body nodes (the incoming nodes are matched by TEXT in the reconcile,
+  // so their keys don't matter -- applyImportPlan mints fresh keys for whatever it inserts).
+  function incomingChaptersFromParse(parse) {
+    var SD = window.SourceDoc;
+    return (parse && parse.topics || []).map(function (t) {
+      var model = SD.fromSections({ sections: t.sections }, function (sec) { return sec.text || ""; });
+      return { name: t.name, nodes: model.nodes };
+    });
+  }
+  // A short human line describing one plan op, for the preview list.
+  function importOpLine(op) {
+    if (op.type === "add") return "Add chapter “" + op.name + "” (" + op.nodes.length + " block" + (op.nodes.length === 1 ? "" : "s") + ")";
+    var bits = [];
+    if (op.added) bits.push("+" + op.added);
+    if (op.removed) bits.push("−" + op.removed);
+    var change = bits.length ? bits.join(" ") + " block" + (op.added + op.removed === 1 ? "" : "s") : "no changes";
+    return "Update “" + op.name + "”: " + change + ", " + op.kept + " unchanged";
+  }
+  function importMarkdownAdditive() {
+    var master = ensureUnifiedDocForActiveProduct();
+    if (!master) { window.alert("Open a Product's source document first."); return; }
+    var SD = window.SourceDoc;
+    var inp = h("input"); inp.type = "file"; inp.accept = ".md,.markdown,.txt";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      readFileAsText(f).then(function (text) {
+        var parse = SD && window.MarkdownImport ? window.MarkdownImport.parse(text) : { topics: [] };
+        var incoming = incomingChaptersFromParse(parse);
+        if (!incoming.length) { window.alert("No headings found in that file -- nothing to import. (Chapters come from level-1 headings.)"); return; }
+        var model = ensureSourceDocModel(master);
+        var plan = SD.importPlan(model, incoming);
+        // Preview BEFORE anything changes -- add / change / remove, then confirm (spec 2c section 4).
+        var shell = dsModalShell({
+          title: "Import from Markdown",
+          subtitle: f.name + " — " + plan.summary.chaptersAdded + " chapter" + (plan.summary.chaptersAdded === 1 ? "" : "s") + " added, " + plan.summary.chaptersUpdated + " updated. Nothing changes until you apply.",
+          primaryLabel: "Apply import",
+          onPrimary: function () {
+            SD.applyImportPlan(model, plan);
+            persistSourceDocModel(master, model);
+            SD.logHistory(model, { type: "imported", file: f.name, chaptersAdded: plan.summary.chaptersAdded, chaptersUpdated: plan.summary.chaptersUpdated });
+            persistSourceDocModel(master, model);
+            shell.modal.close();
+            renderSourceArticle();
+            renderSourceTopicList();
+            refreshSourceHistory(master);
+          }
+        });
+        var list = h("div", "source-import__preview");
+        plan.ops.forEach(function (op) {
+          var row = h("div", "source-import__op" + (op.type === "add" ? " is-add" : " is-update"));
+          row.appendChild(h("span", "source-import__op-dot"));
+          row.appendChild(h("span", "source-import__op-text", importOpLine(op)));
+          list.appendChild(row);
+        });
+        shell.body.appendChild(list);
+      });
+    });
+    inp.click();
+  }
+
+  // spec 2d: choose what an imported .md updates on a variant-bearing Product -- the Flagship base
+  // (additive reconcile) or one variant (an overlay combine). Reuses the modalField + dsSelect
+  // pattern (same as Promote to Product / Find & Replace), not a bespoke control.
+  function importIntentModal(declared) {
+    var FLAG = "__flagship__";
+    var choice = FLAG;
+    var shell = dsModalShell({
+      title: "Import from Markdown",
+      subtitle: "Flagship is the base document. A variant overlays only where its manual differs -- the base is never rewritten.",
+      primaryLabel: "Choose file…",
+      onPrimary: function () {
+        shell.modal.close();
+        if (choice === FLAG) importMarkdownAdditive();
+        else importVariantCombine(choice);
+      }
+    });
+    var row = modalField(shell.body, "Import as");
+    var opts = [["Flagship (the base document)", FLAG]].concat(declared.map(function (v) { return [v, v]; }));
+    var sel = dsSelect(opts, choice, function (v) { choice = v; });
+    sel.classList.add("modal-field__control");
+    row.appendChild(sel);
+  }
+
+  function shorten(s, n) { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  // A short human line describing one variant-combine plan op, for the preview list.
+  function variantImportOpLine(op) {
+    if (op.type === "diverge") return "Diverge in “" + op.name + "”: “" + shorten(op.text, 60) + "”";
+    if (op.type === "absent") return "Not in this variant (“" + op.name + "”): “" + shorten(op.from, 60) + "”";
+    if (op.type === "add-node") return "Add (variant only, “" + op.name + "”): “" + shorten(op.text, 60) + "”";
+    if (op.type === "add-chapter") return "Add chapter “" + op.name + "” (variant only)";
+    return op.type;
+  }
+  // spec 2d: combine a variant's manual into the ONE document as an overlay. Reconciles the file
+  // against the Flagship base per node (SourceDoc.variantImportPlan) and previews exactly what will
+  // diverge / go absent / be added for this variant BEFORE anything is written; the base is untouched.
+  function importVariantCombine(variant) {
+    var master = ensureUnifiedDocForActiveProduct();
+    if (!master) { window.alert("Open a Product's source document first."); return; }
+    var SD = window.SourceDoc;
+    var inp = h("input"); inp.type = "file"; inp.accept = ".md,.markdown,.txt";
+    inp.addEventListener("change", function () {
+      var f = inp.files && inp.files[0]; if (!f) return;
+      readFileAsText(f).then(function (text) {
+        var incoming = incomingChaptersFromParse(window.MarkdownImport.parse(text));
+        if (!incoming.length) { window.alert("No headings found in that file -- nothing to combine. (Chapters come from level-1 headings.)"); return; }
+        var model = ensureSourceDocModel(master);
+        var plan = SD.variantImportPlan(model, variant, incoming);
+        var s = plan.summary;
+        var shell = dsModalShell({
+          title: "Combine variant: " + variant,
+          subtitle: f.name + " — " + s.diverged + " diverged, " + s.absent + " absent, " + s.added + " added for " + variant + ". The Flagship base is not changed.",
+          primaryLabel: "Apply combine",
+          onPrimary: function () {
+            SD.applyVariantImportPlan(model, plan);
+            persistSourceDocModel(master, model);
+            SD.logHistory(model, { type: "imported", file: f.name, variant: variant, diverged: s.diverged, absent: s.absent, added: s.added });
+            persistSourceDocModel(master, model);
+            shell.modal.close();
+            // show the variant's column so the author immediately sees the combine result
+            if (__sourceActiveVariants.indexOf(variant) === -1) __sourceActiveVariants.push(variant);
+            renderSourceArticle();
+            refreshSourceHistory(master);
+          }
+        });
+        var list = h("div", "source-import__preview");
+        if (!plan.ops.length) { list.appendChild(h("div", "source-drawer__empty", "This variant matches the Flagship exactly -- nothing to combine.")); }
+        plan.ops.forEach(function (op) {
+          var row = h("div", "source-import__op" + (op.type === "absent" ? " is-update" : (op.type === "diverge" ? " is-update" : " is-add")));
+          row.appendChild(h("span", "source-import__op-dot"));
+          row.appendChild(h("span", "source-import__op-text", variantImportOpLine(op)));
+          list.appendChild(row);
+        });
+        shell.body.appendChild(list);
+      });
+    });
+    inp.click();
+  }
+
+  function importMarkdownModal() {
+    if (!window.MarkdownImport) { window.alert("Markdown import isn't available (markdown-import.js failed to load)."); return; }
+    // Source v2: a Product with a unified source document imports ADDITIVELY (add/update a chapter
+    // with a preview), not by spawning fresh topics.
+    if (sourceMasterFor(activeSourceProductId())) {
+      // spec 2d: if the Product declares variants, ask what this file updates first -- Flagship
+      // (the base) or one variant (an overlay). This IS the guardrail: you can't reconcile a
+      // variant manual into the Flagship base by mistake, because you must choose up front.
+      var declaredNow = declaredVariantsForProduct(window.ProductsStore || {}, activeSourceProductId());
+      if (declaredNow.length) { importIntentModal(declaredNow); return; }
+      importMarkdownAdditive(); return;
+    }
+    var productId = getActiveProduct();
+    if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
+    var declaredVariants = declaredVariantsForProduct(window.ProductsStore || {}, productId);
+
+    if (!declaredVariants.length) {
+      var inp = h("input"); inp.type = "file"; inp.accept = ".md,.markdown,.txt";
+      inp.addEventListener("change", function () {
+        var f = inp.files && inp.files[0]; if (!f) return;
+        promptImportProvenance([{ key: "flagship", label: "Manual", file: f.name }], function (metaList) {
+          readFileAsText(f).then(function (text) {
+            var baseParse = window.MarkdownImport.parse(text);
+            checkRenamedSource(productId, metaList[0], baseParse.topics, function (meta) {
+              finishMarkdownImport(baseParse, [], productId, meta);
+            });
+          });
+        });
+      });
+      inp.click();
+      return;
+    }
+
+    var primaryFile = null;
+    var variantFiles = {};
+    var shell = dsModalShell({
+      title: "Import from Markdown",
+      subtitle: "Creates topics from a Markdown manual's headings (numbered headings like \"5.3\" split into topic/section by their number; plain headings use #/##). Only the Technical facet is written -- Digestible/Dot-point stay yours to author.",
+      primaryLabel: "Import",
+      onPrimary: function () {
+        if (!primaryFile) { window.alert("Choose the manual file first."); return; }
+        runImport();
+      }
+    });
+    var box = shell.body;
+
+    var pRow = modalField(box, "Manual (Flagship)");
+    var pWrap = h("div", "modal-field__control modal-field__file");
+    var pInput = h("input"); pInput.type = "file"; pInput.accept = ".md,.markdown,.txt";
+    var pLabel = h("span", "modal-field__hint", "No file chosen");
+    pInput.addEventListener("change", function () {
+      primaryFile = (pInput.files && pInput.files[0]) || null;
+      pLabel.textContent = primaryFile ? primaryFile.name : "No file chosen";
+    });
+    pWrap.appendChild(pInput);
+    pWrap.appendChild(pLabel);
+    pRow.appendChild(pWrap);
+
+    declaredVariants.forEach(function (v) {
+      var vRow = modalField(box, v + " (optional)");
+      var vWrap = h("div", "modal-field__control modal-field__file");
+      var vInput = h("input"); vInput.type = "file"; vInput.accept = ".md,.markdown,.txt";
+      var vLabel = h("span", "modal-field__hint", "No file chosen");
+      vInput.addEventListener("change", function () {
+        variantFiles[v] = (vInput.files && vInput.files[0]) || null;
+        vLabel.textContent = variantFiles[v] ? variantFiles[v].name : "No file chosen";
+      });
+      vWrap.appendChild(vInput);
+      vWrap.appendChild(vLabel);
+      vRow.appendChild(vWrap);
+    });
+
+    function runImport() {
+      var variantNames = Object.keys(variantFiles).filter(function (v) { return variantFiles[v]; });
+      var files = [primaryFile].concat(variantNames.map(function (v) { return variantFiles[v]; }));
+      shell.modal.close();
+      var entries = [{ key: "flagship", label: "Manual (Flagship)", file: primaryFile.name }]
+        .concat(variantNames.map(function (v) { return { key: v, label: v, file: variantFiles[v].name }; }));
+      promptImportProvenance(entries, function (metaList) {
+        Promise.all(files.map(readFileAsText)).then(function (texts) {
+          var baseParse = window.MarkdownImport.parse(texts[0]);
+          var variantParses = variantNames.map(function (v, i) { return { name: v, parse: window.MarkdownImport.parse(texts[i + 1]), meta: metaList[i + 1] }; });
+          checkRenamedSource(productId, metaList[0], baseParse.topics, function (meta) {
+            finishMarkdownImport(baseParse, variantParses, productId, meta);
+          });
+        });
+      });
+    }
+  }
+  window.__productRail.importMarkdownModal = importMarkdownModal; // headless/browser-verify hook
+  // Source v2 (md-import-additive) verify hook: run the additive pipeline from raw text (no file
+  // picker / modal) -- parse -> chapters -> reconcile plan; apply=true commits it. Returns the plan.
+  window.__productRail.importMarkdownText = function (text, apply) {
+    var master = ensureUnifiedDocForActiveProduct(); if (!master || !window.SourceDoc || !window.MarkdownImport) return null;
+    var SD = window.SourceDoc;
+    var incoming = incomingChaptersFromParse(window.MarkdownImport.parse(text));
+    var model = ensureSourceDocModel(master);
+    var plan = SD.importPlan(model, incoming);
+    if (apply) { SD.applyImportPlan(model, plan); persistSourceDocModel(master, model); renderSourceArticle(); renderSourceTopicList(); }
+    return { summary: plan.summary, ops: plan.ops.map(function (o) { return { type: o.type, name: o.name, added: o.added, removed: o.removed, kept: o.kept }; }) };
+  };
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {
@@ -10163,7 +16032,14 @@
           // #19: plain clone(), NOT remintIds — promoting to the shared library keeps the
           // exact ids this course-local component was captured with (see the contract on
           // remintIds); they become the master's permanent cross-course identity.
-          window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);
+          var promoted = clone(doc.components[selectedKey]);
+          stampMasterVersion(promoted, Date.now()); // Product Rail: bump on this content edit
+          // Product Rail: stamp the reserved owning-Product tag from THIS course's Product
+          // context, if it has one -- birthplace, not ownership; an untagged course simply
+          // promotes with no reserved tag (nothing to attribute). Stamped once, here, at
+          // the moment of promotion -- never re-stamped on a later overwrite.
+          stampOwnerProductTag(promoted, doc.meta && doc.meta.productId);
+          window.LibraryStore.components[selectedKey] = promoted;
           delete doc.components[selectedKey]; // single-source: this course now references the library copy
           saveLibrary(); saveRegistry(registry); mount(); renderInspector();
         }
@@ -10288,15 +16164,39 @@
     // #162: the canvas backdrop is an Appearance sectionGroup (canonical taxonomy), so the
     // document panel reads with the same grammar as the block inspectors.
     beginSections();
+    // SPEC 7 capability inspector: with nothing selected the Document context leads with the
+    // document's matrix cell + the geometry-specific tools (condToolsFor). No top strip -- these
+    // live in the inspector like every other document control. Changing the cell (header chip)
+    // re-mounts, so this section updates live.
+    var _cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc) : { geo: "reflow", interactive: true };
+    sectionGroup("Layout", "Document type", function (secBody) {
+      var _i = inspector; inspector = secBody;
+      try {
+        inspector.appendChild(h("div", "insp-hint",
+          (CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " · " + (_cell.interactive ? "Interactive" : "Static") +
+          " — change it in Document settings (the sliders button in the editor header)."));
+        var tools = (window.__docType && window.__docType.condToolsFor) ? window.__docType.condToolsFor(_cell.geo) : [];
+        if (tools.length) {
+          var toolsBody = panelSection(inspector, (CELL_GEO_LABEL[_cell.geo] || _cell.geo) + " tools");
+          tools.forEach(function (t) {
+            var row = h("div", "insp-row insp-doc-tool");
+            row.appendChild(h("span", "insp-row__label", t));
+            toolsBody.appendChild(row);
+          });
+        }
+      } finally { inspector = _i; }
+    });
     sectionGroup("Appearance", "Canvas", function (secBody) {
       var _i = inspector; inspector = secBody;
       try {
       // Canvas background lives in localStorage (not doc), so it is off the undo stack
       // (noHistory) and applies live via applyCanvasBg. Clearing reverts to the default backdrop.
       colourControl("Background", canvasBg, function (val) { applyCanvasBg(val == null ? BG_DEFAULT : val); }, inspector, true);
-      var openBtn = h("button", "insp-hint insp-backlink", "Project & system settings → open ⚙ (top right)");
+      // The button IS the route, so it states its destination rather than pointing at a
+      // corner of the window (it used to say "top right", which no cog has ever been in).
+      var openBtn = h("button", "insp-hint insp-backlink", "Open project & system settings");
       openBtn.type = "button";
-      openBtn.title = "Header & Footer, Glossary, Theme, fonts and more now live in the settings modal.";
+      openBtn.title = "Header & Footer, Glossary, Theme, fonts and more live in the settings sheet.";
       openBtn.addEventListener("click", function () { openSettingsModal("project"); });
       inspector.appendChild(openBtn);
       } finally { inspector = _i; }
@@ -10304,12 +16204,58 @@
     endSections(inspector);
   }
 
-  // ---- ⚙ Settings modal (System / Project tabs) ----------------------------
-  // The doc-settings panels are mounted here by redirecting `inspector` at a tab pane (the
-  // same trick the sectioned inspectors use). SYSTEM = global / cross-document (canvas +
-  // shared component library); PROJECT = this document (header/footer, nav, layout, theme,
-  // fonts, glossary, motion, components, review).
-  var settingsModal = null; // { overlay, sysPane, projPane, active, tab }
+  // ---- uio-F05: the overlay LAYER STACK (the spine's Esc contract) ----------
+  // Every dismissible surface pushes itself here as it opens and pops as it closes. ONE global
+  // keydown owns Escape, and it closes the TOPMOST layer only, last-in-first-out — so a confirm
+  // raised over the settings sheet closes the confirm and leaves the sheet standing. Before
+  // this, each surface listened for Escape on its own, so one keypress could close two things
+  // (or the wrong one). Focus returns to whatever opened the layer, per the spine's keyboard
+  // contract. `window.__overlayLayers` is the test hook.
+  /* @f05-start */
+  var overlayLayers = []; // [{ name, close, returnFocus }] — topmost is last
+  function pushLayer(name, close) {
+    var active = document.activeElement;
+    var layer = { name: name, close: close, returnFocus: active && active.focus ? active : null };
+    overlayLayers.push(layer);
+    if (overlayLayers.length === 1) document.addEventListener("keydown", overlayEsc, true);
+    return layer;
+  }
+  function popLayer(name) {
+    // Remove the TOPMOST layer with this name (a surface may legitimately be stacked twice).
+    for (var i = overlayLayers.length - 1; i >= 0; i--) {
+      if (overlayLayers[i].name !== name) continue;
+      var layer = overlayLayers.splice(i, 1)[0];
+      if (!overlayLayers.length) document.removeEventListener("keydown", overlayEsc, true);
+      if (layer.returnFocus && document.contains(layer.returnFocus)) {
+        try { layer.returnFocus.focus(); } catch (e) {}
+      }
+      return layer;
+    }
+    return null;
+  }
+  function topLayer() { return overlayLayers.length ? overlayLayers[overlayLayers.length - 1] : null; }
+  function overlayEsc(e) {
+    if (e.key !== "Escape") return;
+    var top = topLayer();
+    if (!top) return;
+    e.preventDefault();
+    e.stopPropagation(); // the topmost layer answers this keypress, and only it
+    try { top.close(); } catch (err) {}
+  }
+  /* @f05-end */
+  window.__overlayLayers = {
+    push: pushLayer, pop: popLayer, top: topLayer,
+    names: function () { return overlayLayers.map(function (l) { return l.name; }); }
+  };
+
+  // ---- ⚙ Settings sheet (System / Project tabs) ----------------------------
+  // uio-F05: this was a centred modal on a scrim. It is now the spine's SHEET — right-docked,
+  // full-height, NO scrim — so the canvas stays live and editable beside it (squeezed, never
+  // covered). The doc-settings panels are mounted by redirecting `inspector` at the content
+  // pane (the same trick the sectioned inspectors use). SYSTEM = global / cross-document
+  // (canvas + shared component library); PROJECT = this document (header/footer, nav, layout,
+  // theme, fonts, glossary, motion, components, review).
+  var settingsModal = null; // { host, box, content, active, tab }
   // Section registry per tab. Each section's `build(host)` fills the CONTENT pane — the same
   // body-builders the old sidebar used, so no logic is duplicated; they just render into the
   // dialog's right pane one-at-a-time instead of a stacked wall of disclosures.
@@ -10340,10 +16286,24 @@
     });
     host.appendChild(reset);
   }
+  // edit-header-ia-v2: the document type (geometry . interactivity) moved off the header bar into
+  // the Document settings modal -- it's set once, so it belongs here, not on a face-up control.
+  // Reuses the cell model (currentCell / setCellGeo / setCellInteractive); a geometry change still
+  // warns + reflows via setCellGeo's confirm.
+  function buildDocTypeBody(host) {
+    var body = host; // OVL-07: no inner "Document type" heading restating the section's own title
+    segmentedLive("Geometry",
+      [{ value: "reflow", label: "Reflow" }, { value: "frame", label: "Fixed frame" }, { value: "paged", label: "Paged" }],
+      function (v) { return currentCell().geo === v; },
+      function (v) { setCellGeo(v); },
+      body, true);
+    switchRow("Interactive", function () { return currentCell().interactive; }, function (on) { setCellInteractive(on); }, body, true);
+    body.appendChild(h("div", "insp-hint", "Set once per document. Geometry lays out the canvas — Reflow scrolls; Fixed frame and Paged are fixed-size. Changing geometry reflows existing content. Interactive allows interactive blocks; Static is print/read-oriented."));
+  }
   function getSettingsSections(tab) {
     if (tab === "system") return [
       { key: "canvas", title: "Canvas", build: function (host) {
-          var cvBody = panelSection(host, "Canvas");
+          var cvBody = host; // OVL-07: the section is already called Canvas — no second heading
           colourControl("Background", canvasBg, function (val) { applyCanvasBg(val == null ? BG_DEFAULT : val); }, cvBody, true);
           cvBody.appendChild(h("div", "insp-hint", "System settings persist across every document on this machine."));
           // #44: light theme for Verso's OWN UI (chrome), distinct from the learner course light/dark.
@@ -10353,14 +16313,30 @@
           // P0 spellcheck: mark misspellings across every text box, on or off selection.
           switchRow("Spellcheck", function () { return spellcheckOn(); }, function (v) { setSpellcheckEnabled(v); }, ifBody);
           ifBody.appendChild(h("div", "insp-hint", "Underlines likely typos in every text box on the canvas and in the copy editor, whether or not it's selected. Editor-only — never shown to learners or exported."));
+          // uio-E-C05 (EDIT-10): the live JSON document model is a developer affordance, off by default.
+          switchRow("Developer tools", function () { return devToolsOn(); }, function (v) { setDevToolsEnabled(v); }, ifBody);
+          ifBody.appendChild(h("div", "insp-hint", "Shows the live document model (JSON) below the inspector for debugging. Off by default; editor-only, never exported."));
         } },
       { key: "preview", title: "Preview sizes", build: buildPreviewSizesBody },
       { key: "library", title: "Component Library", build: buildLibraryBody }
     ];
     return [
+      { key: "docType", title: "Document type", build: buildDocTypeBody },
       { key: "backup", title: "Backup", build: buildBackupBody },
-      { key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody },
-      { key: "nav", title: "Learner nav", build: function (host) { var n = footerCourseNav(); if (n) courseNavControls(n, host); else host.appendChild(h("div", "insp-hint", "Add a footer nav bar in Header & Footer first, then style it here.")); } }, // #168: canonical footer nav (was first-found, which could drift to a stray)
+      // OVL-07: promoted out of one "Header & Footer" section, so their own groups are level 2
+      // rather than a third level of headings. `opts` rides the section header (switch + summary
+      // + Reset) and is resolved per render, because it reads the live document.
+      { key: "header", title: "Header", build: buildHeaderBody, opts: function () { return hfSectionOpts(true); } },
+      { key: "footer", title: "Footer", build: buildFooterBody, opts: function () { return hfSectionOpts(false); } },
+      { key: "hfDefault", title: "New-course default", build: buildHeaderFooterDefaultBody },
+      // #168: canonical footer nav (was first-found, which could drift to a stray).
+      // uio-O-W1 (OVL-06): with no nav bar yet, the pane used to instruct the author to walk to
+      // Header & Footer. It now states the fact and links there.
+      // OVL-07: with a nav bar present its five groups are sheet sections of their own, so their
+      // inner groups (Labels, Appearance, Size…) sit at level 2 instead of a third level under a
+      // "Learner nav" wrapper. With no nav bar there is nothing to configure, so the one section
+      // states that and links to where a nav bar is added.
+      ].concat(navSettingsSections()).concat([
       { key: "layout", title: "Page layout", build: buildLayoutBody },
       { key: "endScreen", title: "Completion screen", build: buildEndScreenBody },
       { key: "theme", title: "Theme", build: renderThemeControls },
@@ -10369,31 +16345,78 @@
       { key: "motion", title: "Motion", build: buildMotionBody },
       { key: "components", title: "Custom Components", build: buildComponentsBody },
       { key: "pipeline", title: "Review (Viewer)", build: buildPipelineBody }
-    ];
+    ]);
   }
-  // Render the left rail (section list for the active tab) + the active section's body into the
-  // content pane. Called on open, tab switch, section click, and after in-modal re-renders.
+  // The learner-nav sections for the settings sheet. One descriptor list, two surfaces: the
+  // same five groups are the nav BLOCK's inspector sections when the bar is selected on the
+  // canvas (courseNavControls) and sheet sections here.
+  function navSettingsSections() {
+    var n = footerCourseNav();
+    if (!n) {
+      return [{ key: "nav", title: "Learner nav", build: function (host) {
+        crossRefRow({ label: "Learner nav bar", value: "Not added", linkLabel: "Footer", host: host,
+          title: "Open Footer, where the nav bar is added",
+          onNavigate: function () { openSettingsSection("project", "footer"); } });
+      } }];
+    }
+    return courseNavNests(n).map(function (nest) {
+      return {
+        // Under the selected nav block "Buttons" is unambiguous; standing on their own in the
+        // sheet they say which thing they belong to.
+        key: nest.key, title: nest.sheetTitle || nest.title,
+        build: function (host) { nest.build(host); },
+        opts: nest.opts ? function () { return nest.opts; } : null
+      };
+    });
+  }
+  // uio-F05: render EVERY section of the active tab into the content pane as one scroll.
+  // This used to be a 220px nav rail plus one section at a time. Both are gone: a nav rail
+  // inside a dock is a second navigation system competing with the section headers and with
+  // the one ⌘K index, and one-section-at-a-time is the same divergence uio-E-C02 removes from
+  // the inspector. Sections are the canonical sectionGroup -- collapsible, with the F03
+  // "N overridden" roll-up -- and open collapsed, so the sheet reads as a browsable list.
+  // The section builders are untouched: `inspector` is still rebound at the host they append
+  // into, exactly as before, so all 15 keep working.
   function renderSettingsBody() {
     if (!settingsModal) return;
     var tab = settingsModal.tab, sections = getSettingsSections(tab);
     var activeKey = settingsModal.sectionKey[tab];
     if (!sections.some(function (s) { return s.key === activeKey; })) activeKey = sections[0].key;
     settingsModal.sectionKey[tab] = activeKey;
-    settingsModal.nav.innerHTML = "";
-    sections.forEach(function (s) {
-      var b = h("button", "settings-nav__item" + (s.key === activeKey ? " is-active" : ""), s.title); b.type = "button";
-      b.addEventListener("click", function () { settingsModal.sectionKey[tab] = s.key; renderSettingsBody(); });
-      settingsModal.nav.appendChild(b);
-    });
-    var section = sections.filter(function (s) { return s.key === activeKey; })[0];
     settingsModal.content.innerHTML = "";
-    var _ins = inspector; inspector = settingsModal.content;
-    try { section.build(settingsModal.content); } finally { inspector = _ins; }
+    var _ins = inspector;
+    try {
+      sections.forEach(function (s) {
+        var sec = sectionGroup("settings:" + s.key, s.title, function (body) {
+          inspector = body;
+          try { s.build(body); } finally { inspector = _ins; }
+        }, s.opts ? s.opts() : null);
+        sec.setAttribute("data-settings-section", s.key);
+        settingsModal.content.appendChild(sec);
+      });
+    } finally { inspector = _ins; }
+    wireScrollEdges(settingsModal.content); // uio-O-W1: idempotent — wires once, re-measures every time
+  }
+  // Open one section and bring it into view — the landing move for every cross-reference link
+  // (uio-O-W1/OVL-06) now that there is no nav rail to highlight.
+  function revealSettingsSection(key) {
+    if (!settingsModal) return;
+    var sec = settingsModal.content.querySelector('[data-settings-section="' + key + '"]');
+    if (!sec) return;
+    if (sec.classList.contains("is-collapsed")) {
+      var head = sec.querySelector(".insp-section__head");
+      if (head) head.click(); // reuse the header's own toggle, so the stored state follows
+    }
+    if (sec.scrollIntoView) sec.scrollIntoView({ block: "start" });
   }
   function ensureSettingsModal() {
     if (settingsModal) return settingsModal;
-    var overlay = h("div", "modal-overlay"); overlay.id = "settings-modal"; overlay.hidden = true;
-    var box = h("div", "modal-box modal-box--settings");
+    // uio-F05: the sheet is a grid child of .workspace pinned to the SAME column the inspector
+    // uses. Opening it widens that column to --panel-sheet-width and hides the inspector, so the
+    // canvas is squeezed exactly ONCE and stays live. No overlay element, because there is no
+    // scrim: the whole point of the sheet is that the author can keep editing beside it.
+    var host = h("div", "settings-sheet"); host.id = "settings-modal"; host.hidden = true;
+    var box = h("div", "settings-sheet__box");
     // Header: title + subtitle + System/Project tabs (canonical VersoUI.Tabs).
     var head = h("div", "settings-head");
     head.appendChild(h("div", "settings-title", "Settings"));
@@ -10404,11 +16427,12 @@
       onChange: function (v) { selectTab(v); }
     });
     head.appendChild(tabs); box.appendChild(head);
-    // Body: left section rail + one-section-at-a-time content pane.
-    var bodyRow = h("div", "settings-body");
-    var nav = h("div", "settings-nav");
+    // Body: ONE scroll of collapsible sections (the nav rail is gone — see renderSettingsBody).
+    // uio-O-W1 (OVL-10): the body sits in a scroll-frame so its top/bottom edges can say when
+    // there is more. The sheet is exactly where the audit found content sliced by the footer.
     var content = h("div", "settings-content");
-    bodyRow.appendChild(nav); bodyRow.appendChild(content); box.appendChild(bodyRow);
+    var frame = h("div", "scroll-frame"); frame.appendChild(content);
+    box.appendChild(frame);
     function selectTab(name) {
       settingsModal.tab = name;
       // Keep the canonical Tabs strip in sync on programmatic opens (open("system")/open("project")).
@@ -10417,30 +16441,110 @@
       });
       renderSettingsBody();
     }
-    // Footer: single primary action (canonical VersoUI.Button).
+    // uio-O-W1 (OVL-09): the footer used to carry one accent "Done", which implied a commit
+    // that never happens — settings apply live and save themselves. The surface now STATES its
+    // contract (the spine's save contract: autosave + live-apply + Undo) and offers a plain
+    // Close. The accent is spent on the app's real primary action, never on dismissing a panel.
     var foot = h("div", "settings-foot");
-    foot.appendChild(window.VersoUI.Button({ variant: "primary", label: "Done", onClick: closeSettingsModal }));
+    foot.appendChild(h("div", "settings-foot__contract", "Changes apply live, saved automatically. Undo with " + MOD_KEY + "Z."));
+    foot.appendChild(window.VersoUI.Button({ variant: "secondary", label: "Close", onClick: closeSettingsModal }));
     box.appendChild(foot);
-    overlay.appendChild(box);
-    overlay.addEventListener("mousedown", function (e) { if (e.target === overlay) closeSettingsModal(); });
-    document.body.appendChild(overlay);
-    settingsModal = { overlay: overlay, box: box, nav: nav, content: content, selectTab: selectTab, active: false, tab: "project", sectionKey: { system: "canvas", project: "headerFooter" } };
+    host.appendChild(box);
+    // uio-F05-fb1: the sheet is resizable like every other dock, and keeps its own persisted
+    // width (--sheet-w) rather than borrowing the inspector's. 340px minimum because below that
+    // the shared row's 76px label column plus a 24px control stops being legible; 720px maximum
+    // so the sheet can never take more room than the canvas it is meant to sit beside.
+    var grip = h("div", "panel-resizer"); grip.id = "resizer-sheet";
+    host.appendChild(grip);
+    wirePanelResizer(grip, "sheet-w", "right", 340, 720);
+    // uio-F05: NO scrim click-out. There is no scrim, and dismissing on a canvas click would
+    // make the canvas unusable while the sheet is open — which is the one thing the sheet exists
+    // to allow. Close and Esc are the only dismissals.
+    var ws = document.querySelector(".workspace");
+    (ws || document.body).appendChild(host);
+    settingsModal = { host: host, overlay: host, box: box, content: content, selectTab: selectTab, active: false, tab: "project", sectionKey: { system: "canvas", project: "header" } };
     return settingsModal;
   }
   function openSettingsModal(tab) {
     ensureSettingsModal();
+    if (settingsModal.active) { settingsModal.selectTab(tab || settingsModal.tab || "project"); return; }
     settingsModal.active = true;
     settingsModal.selectTab(tab || settingsModal.tab || "project");
-    settingsModal.overlay.hidden = false;
-    document.addEventListener("keydown", settingsEsc);
+    settingsModal.host.hidden = false;
+    var ws = document.querySelector(".workspace");
+    if (ws) ws.classList.add("has-sheet"); // widens the right dock; hides the inspector
+    pushLayer("settings", closeSettingsModal);
+  }
+  // uio-O-W1 (OVL-06): the navigation target behind every settings cross-reference — open
+  // Settings on a NAMED section, so a link lands the author on the row instead of at the top.
+  function openSettingsSection(tab, sectionKey) {
+    ensureSettingsModal();
+    if (sectionKey) settingsModal.sectionKey[tab] = sectionKey;
+    openSettingsModal(tab);
+    if (sectionKey) revealSettingsSection(sectionKey);
   }
   function closeSettingsModal() {
-    if (!settingsModal) return;
+    if (!settingsModal || !settingsModal.active) return;
     settingsModal.active = false;
-    settingsModal.overlay.hidden = true;
-    document.removeEventListener("keydown", settingsEsc);
+    settingsModal.host.hidden = true;
+    var ws = document.querySelector(".workspace");
+    if (ws) ws.classList.remove("has-sheet"); // restores the inspector at --panel-right-width
+    popLayer("settings"); // returns focus to whatever opened the sheet
   }
-  function settingsEsc(e) { if (e.key === "Escape") closeSettingsModal(); }
+  // uio-O-W1 (OVL-10): tell a scrolling body to state where there is more. The classes go on the
+  // `.scroll-frame` WRAPPER, not the scroller -- pseudo-elements inside an overflow box scroll
+  // away with the content, so the edges have to be drawn by a positioned host around it. Safe to
+  // call repeatedly; `sync` is kept on the element so a re-render can re-measure.
+  function wireScrollEdges(scroller) {
+    if (!scroller) return null;
+    var frame = scroller.parentNode;
+    if (!frame || !frame.classList || !frame.classList.contains("scroll-frame")) return null;
+    function sync() {
+      var slack = scroller.scrollHeight - scroller.clientHeight;
+      frame.classList.toggle("has-edge-top", scroller.scrollTop > 1);
+      frame.classList.toggle("has-edge-bottom", slack - scroller.scrollTop > 1);
+    }
+    if (!scroller.__scrollEdges) {
+      scroller.__scrollEdges = true;
+      scroller.addEventListener("scroll", sync);
+      // ResizeObserver catches the panel being dragged wider/narrower and the window resizing.
+      if (typeof ResizeObserver === "function") {
+        try { new ResizeObserver(sync).observe(scroller); } catch (e) {}
+      }
+      // It does NOT catch the CONTENT changing height -- the scroller's own box never moves for
+      // that -- and folding a section open is exactly the case the affordance exists for. So
+      // watch the subtree too, coalesced to one measure per frame so a burst of class toggles
+      // during a re-render costs one layout read, not one per mutation.
+      if (typeof MutationObserver === "function") {
+        var queued = false;
+        try {
+          new MutationObserver(function () {
+            if (queued) return; queued = true;
+            var run = function () { queued = false; sync(); };
+            if (typeof requestAnimationFrame === "function") requestAnimationFrame(run); else run();
+          }).observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+        } catch (e) {}
+      }
+    }
+    sync();
+    return sync;
+  }
+  // uio-F06 (Alt+Cmd-,): the settings for the CURRENT SELECTION. Those are the inspector's rows --
+  // the spine has the inspector holding the sheet's Block scope -- so this is not a second
+  // surface. It puts the sheet away if it is covering the dock, brings the panels back if they
+  // are hidden, and puts focus in the inspector.
+  function openSelectionSettings() {
+    closeSettingsModal();
+    var ws = document.querySelector(".workspace");
+    if (ws && ws.classList.contains("is-panels-hidden")) togglePanels();
+    // Focus the first control of the inspector's BODY, not the panel's Design/Interact tab strip
+    // -- landing on the tabs would answer "settings for what I selected" with "here is a panel".
+    var body = document.getElementById("inspector");
+    if (!body) return;
+    var focusable = body.querySelector('input:not([type="hidden"]), select, button, [tabindex="0"]');
+    if (focusable && focusable.focus) { try { focusable.focus(); } catch (e) {} }
+    else if (body.scrollIntoView) body.scrollIntoView({ block: "nearest" });
+  }
   // #111 course-completion / exit splash. Course-level config on doc.endScreen; ON for
   // every course unless the author turns it off here. Copy is optional -> empty falls back
   // to the render defaults (shown as placeholders, read from window.VERSO_ENDSCREEN_DEFAULTS
@@ -10630,7 +16734,7 @@
       inp.click();
     };
     var csvBtn = (window.VersoUI && window.VersoUI.Button)
-      ? window.VersoUI.Button({ variant: "secondary", full: true, icon: "upload", label: "Import CSV (Term, Definition)…", onClick: importCsv })
+      ? window.VersoUI.Button({ variant: "secondary", full: true, icon: "download", label: "Import CSV (Term, Definition)…", onClick: importCsv })
       : (function () { var b = h("button", "prop-btn", "Import CSV (Term, Definition)…"); b.addEventListener("click", importCsv); return b; })();
     c.appendChild(csvBtn);
 
@@ -10828,7 +16932,20 @@
       // The nav bar is a full-width footer element; per-child alignment is a no-op
       // for it. Its controls live in the top-level "Learner nav" panel (keeping the nav
       // nests at level 2 rather than burying them 3 deep under Footer > Placed items).
-      if (child.type === "courseNav") { host.appendChild(h("div", "insp-hint", "Learner nav bar — edit it in the Learner nav panel.")); return; }
+      // uio-O-W1 (OVL-06): this used to be a line of prose telling the author to go and find
+      // another panel. The nav bar is owned by the Learner nav section, so the row states its
+      // live value and links straight there.
+      if (child.type === "courseNav") {
+        var navSecs = (child.sections || []).length;
+        crossRefRow({
+          label: "Nav bar",
+          value: navSecs ? (navSecs + (navSecs === 1 ? " section" : " sections")) : "No sections yet",
+          linkLabel: "Learner nav", host: host,
+          title: "Open Settings on Learner nav, where this bar is styled",
+          onNavigate: function () { openSettingsSection("project", "nav"); }
+        });
+        return;
+      }
       segmentedIconLive("Align", [[Icon("align-left"), "start", "Start"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "end", "End"]],
         function (v) { return (child.align || "start") === v; },
         function (v) { if (v === "start") delete child.align; else child.align = v; reapplyHeaderFooter(); }, host);
@@ -10876,51 +16993,70 @@
   // SPEC-panel-cleanup slice 2: the nav block inspector as nests — Buttons / Progress
   // pill / Progression / Sections. Same primitives as slice 1 (switch/eye/icon segments
   // + dot/reset). Word-boolean segments retired.
-  function courseNavControls(child, host) {
+  // uio-O-W2 (OVL-07): the nav's five groups are described ONCE and drawn in two places. On the
+  // canvas the nav block is selected and they are the panel's own sections; in the settings sheet
+  // they are sheet sections in their own right. They used to be nested inside a "Learner nav"
+  // section there, which made their inner groups (Labels, Appearance, Size…) a third level.
+  function courseNavNests(child) {
     child.sections = child.sections || [];
-    host.appendChild(subDisclosure("nav.buttons", "Buttons", function (b) { navButtonsNest(child, b); }, {
-      overridden: function () { return nestOverridden(child, NAV_BTN_KEYS); },
-      onReset: function () { nestReset(child, NAV_BTN_KEYS); reapplyHeaderFooter(); }
-    }));
-    host.appendChild(subDisclosure("nav.pill", "Progress pill", function (b) { navPillNest(child, b); }, {
-      toggle: { get: function () { return child.showBar !== false; }, set: function (v) { if (v) delete child.showBar; else child.showBar = false; reapplyHeaderFooter(); } },
-      overridden: function () { return nestOverridden(child, NAV_PILL_KEYS); },
-      onReset: function () { nestReset(child, NAV_PILL_KEYS); reapplyHeaderFooter(); }
-    }));
-    host.appendChild(subDisclosure("nav.progression", "Progression", function (b) {
-      b.appendChild(h("div", "insp-hint", "On: each chapter must pass its knowledge check (native quiz) before the learner can advance to the next; play it in demo mode to test. Add the chapter's dot-point summary to the quiz's \"Chapter summary\" list (on the quiz completion panel) — it shows once the learner passes."));
-      // §5: auto-gate ALL interactions — one course-level DEFAULT switch (per-page override
-      // lives in the page inspector). Default off.
-      switchRow("Require all interactions before Next", function () { return !!doc.gateAllInteractions; }, function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); }, b);
-      b.appendChild(h("div", "insp-hint", "Course default: on every page the learner must finish its interactions — pass quizzes, view all hotspots, watch videos, tick checkboxes, reveal all cards, step through sequences, open every accordion section — before Next enables. The gated Next greys out and shows a reminder. Override per page in the page's settings. Interactions we can't detect (embedded HTML interactions) are skipped, so a page can never trap the learner."));
-      // Author-overridable reminder copy (optional; blank -> the default sentence).
-      var gmRow = h("div", "insp-row");
-      gmRow.appendChild(h("span", "insp-row__label", "Reminder message"));
-      var gmIn = h("input", "prop-text"); gmIn.type = "text"; gmIn.spellcheck = false;
-      gmIn.placeholder = "Complete the interactions on this page to continue.";
-      gmIn.value = doc.gateMessage || "";
-      gmIn.addEventListener("change", function () { pushHistory(); var v = gmIn.value.trim(); if (v) doc.gateMessage = v; else delete doc.gateMessage; reapplyHeaderFooter(); });
-      gmRow.appendChild(gmIn); b.appendChild(gmRow);
-    }, {
-      // §2 chapter progression: opt-in course-level gate (feature-enable = the switch).
-      toggle: { get: function () { return !!doc.gatedProgression; }, set: function (v) { if (v) doc.gatedProgression = true; else delete doc.gatedProgression; reapplyHeaderFooter(); } }
-    }));
-    host.appendChild(subDisclosure("nav.sections", "Sections", function (b) { navSectionsNest(child, b); }));
-    // Guided tour (learner coach-marks over the footer controls). Feature-enable = the
-    // header switch; body = which page it appears on + editable copy per marker.
-    host.appendChild(subDisclosure("nav.tour", "Guided tour", function (b) { navTourNest(child, b); }, {
-      toggle: {
-        get: function () { return !!(child.tour && child.tour.on); },
-        set: function (v) {
-          if (v) {
-            child.tour = child.tour || {};
-            child.tour.on = true;
-            if (child.tour.page == null) child.tour.page = (doc.pages && doc.pages[0] && doc.pages[0].id) || "";
-          } else if (child.tour) { child.tour.on = false; }
-          reapplyHeaderFooter();
+    return [
+      { key: "nav.buttons", title: "Buttons", sheetTitle: "Nav buttons", build: function (b) { navButtonsNest(child, b); }, opts: {
+        overridden: function () { return nestOverridden(child, NAV_BTN_KEYS); },
+        onReset: function () { nestReset(child, NAV_BTN_KEYS); reapplyHeaderFooter(); }
+      } },
+      { key: "nav.pill", title: "Progress pill", build: function (b) { navPillNest(child, b); }, opts: {
+        toggle: { get: function () { return child.showBar !== false; }, set: function (v) { if (v) delete child.showBar; else child.showBar = false; reapplyHeaderFooter(); } },
+        overridden: function () { return nestOverridden(child, NAV_PILL_KEYS); },
+        onReset: function () { nestReset(child, NAV_PILL_KEYS); reapplyHeaderFooter(); }
+      } },
+      { key: "nav.progression", title: "Progression", build: function (b) { navProgressionNest(child, b); }, opts: {
+        // §2 chapter progression: opt-in course-level gate (feature-enable = the switch).
+        toggle: { get: function () { return !!doc.gatedProgression; }, set: function (v) { if (v) doc.gatedProgression = true; else delete doc.gatedProgression; reapplyHeaderFooter(); } }
+      } },
+      { key: "nav.sections", title: "Sections", sheetTitle: "Nav sections", build: function (b) { navSectionsNest(child, b); } },
+      // Guided tour (learner coach-marks over the footer controls). Feature-enable = the
+      // header switch; body = which page it appears on + editable copy per marker.
+      { key: "nav.tour", title: "Guided tour", build: function (b) { navTourNest(child, b); }, opts: {
+        toggle: {
+          get: function () { return !!(child.tour && child.tour.on); },
+          set: function (v) {
+            if (v) {
+              child.tour = child.tour || {};
+              child.tour.on = true;
+              if (child.tour.page == null) child.tour.page = (doc.pages && doc.pages[0] && doc.pages[0].id) || "";
+            } else if (child.tour) { child.tour.on = false; }
+            reapplyHeaderFooter();
+          }
         }
-      }
-    }));
+      } }
+    ];
+  }
+  function courseNavControls(child, host) {
+    courseNavNests(child).forEach(function (n) {
+      host.appendChild(subDisclosure(n.key, n.title, n.build, n.opts));
+    });
+  }
+  // Progression body — a course-level gate, so it reads the doc rather than the nav block.
+  function navProgressionNest(child, b) {
+    b.appendChild(h("div", "insp-hint", "On: each chapter must pass its knowledge check (native quiz) before the learner can advance to the next; play it in demo mode to test. Add the chapter's dot-point summary to the quiz's \"Chapter summary\" list (on the quiz completion panel) — it shows once the learner passes."));
+    // §5: auto-gate ALL interactions — one course-level DEFAULT switch (per-page override
+    // lives in the page inspector). Default off.
+    // uio-F03: the SAME ladder, seen from the Course rung — one primitive, two surfaces.
+    var courseGateRes = resolveScoped(gateScopeChain(null), "gateInteractions", { at: "course" });
+    switchRow("Require all interactions before Next", function () { return !!courseGateRes.value; },
+      function (v) { if (v) doc.gateAllInteractions = true; else delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector(); }, b, false,
+      { inherit: { res: courseGateRes, format: onOffLabel, onReset: function () {
+          pushHistory(); delete doc.gateAllInteractions; reapplyHeaderFooter(); renderInspector();
+        } } });
+    b.appendChild(h("div", "insp-hint", "Course default: on every page the learner must finish its interactions — pass quizzes, view all hotspots, watch videos, tick checkboxes, reveal all cards, step through sequences, open every accordion section — before Next enables. The gated Next greys out and shows a reminder. Override per page in the page's settings. Interactions we can't detect (embedded HTML interactions) are skipped, so a page can never trap the learner."));
+    // Author-overridable reminder copy (optional; blank -> the default sentence).
+    var gmRow = h("div", "insp-row");
+    gmRow.appendChild(h("span", "insp-row__label", "Reminder message"));
+    var gmIn = h("input", "prop-text"); gmIn.type = "text"; gmIn.spellcheck = false;
+    gmIn.placeholder = "Complete the interactions on this page to continue.";
+    gmIn.value = doc.gateMessage || "";
+    gmIn.addEventListener("change", function () { pushHistory(); var v = gmIn.value.trim(); if (v) doc.gateMessage = v; else delete doc.gateMessage; reapplyHeaderFooter(); });
+    gmRow.appendChild(gmIn); b.appendChild(gmRow);
   }
   // Tour body: a page picker (when the dots appear) + per-marker Title/Description. Copy
   // is optional -> empty falls back to the render default (shown as the field placeholder,
@@ -11071,28 +17207,39 @@
     row.appendChild(input); return row;
   }
 
-  // SPEC-panel-cleanup slice 1: Header & Footer split into two nests, each with a
-  // header switch (feature-enable), an active-override dot + Reset (styling revert),
-  // and canonical inner order (Layout -> Appearance -> Content) via sub() dividers.
-  function buildHeaderFooterBody(c) {
-    var ch = doc.headerFooter || (doc.headerFooter = { header: { on: false }, footer: { on: false } });
-    c.appendChild(subDisclosure("hf.header", "Header", function (host) { buildHeaderNest(ch.header, host); }, {
-      toggle: { get: function () { return ch.header.on === true; }, set: function (v) { ch.header.on = v; reapplyHeaderFooter(); } },
-      overridden: function () { return nestOverridden(ch.header, HEADER_STYLE_KEYS); },
-      onReset: function () { nestReset(ch.header, HEADER_STYLE_KEYS); reapplyHeaderFooter(); }
-    }));
-    c.appendChild(subDisclosure("hf.footer", "Footer", function (host) { buildFooterNest(ch.footer, host); }, {
-      toggle: { get: function () { return ch.footer.on === true; }, set: function (v) { ch.footer.on = v; reapplyHeaderFooter(); } },
-      overridden: function () { return nestOverridden(ch.footer, FOOTER_STYLE_KEYS); },
-      onReset: function () { nestReset(ch.footer, FOOTER_STYLE_KEYS); reapplyHeaderFooter(); }
-    }));
-    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide header/footer on one page, select that page (its name in Structure or its label on the canvas)."));
-
+  // uio-O-W2 (OVL-07): Header and Footer are their own SHEET SECTIONS now, not two nests inside
+  // a "Header & Footer" one. Nested, their own groups (Logo / Layout / Appearance / Added
+  // content) were a third level of headings, which is what put three header styles in this pane.
+  // Promoted, the pane is exactly two levels: the section, and its groups. Each keeps the switch,
+  // summary and Reset it carried as a nest — those live on the section header (hfSectionOpts).
+  function headerFooterConfig() {
+    return doc.headerFooter || (doc.headerFooter = { header: { on: false }, footer: { on: false } });
+  }
+  function hfSectionOpts(isHeader) {
+    var ch = headerFooterConfig();
+    var part = isHeader ? ch.header : ch.footer;
+    var keys = isHeader ? HEADER_STYLE_KEYS : FOOTER_STYLE_KEYS;
+    return {
+      toggle: { get: function () { return part.on === true; }, set: function (v) { part.on = v; reapplyHeaderFooter(); } },
+      summary: function () { return headerFooterSummary(part, isHeader); },
+      overridden: function () { return nestOverridden(part, keys); },
+      onReset: function () { nestReset(part, keys); reapplyHeaderFooter(); }
+    };
+  }
+  function buildHeaderBody(c) {
+    buildHeaderNest(headerFooterConfig().header, c);
+    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide the header on one page, select that page (its name in Structure or its label on the canvas)."));
+  }
+  function buildFooterBody(c) {
+    buildFooterNest(headerFooterConfig().footer, c);
+    c.appendChild(h("div", "insp-hint", "Text is editable directly on the page. To hide the footer on one page, select that page (its name in Structure or its label on the canvas)."));
+  }
+  function buildHeaderFooterDefaultBody(c) {
     // New-course default: capture THIS course's header/footer as the starting point
     // for every new course (machine-wide). Look only — a new course keeps its own
     // name + chapter-derived nav (see sanitizeHeaderFooterDefault).
     var hasDefault = !!getHeaderFooterDefault();
-    var ncd = panelSection(c, "New-course default");
+    var ncd = c;
     var setBtn = h("button", "prop-btn", hasDefault ? "Update the default from this course" : "Set as default for new courses");
     setBtn.addEventListener("click", function () {
       if (saveHeaderFooterDefault()) renderInspector(); // re-render -> shows Clear + updated hint
@@ -11445,18 +17592,27 @@
     // A block's own box always wins over its type default (render/export cascade).
     var sBlock = panelSection(c, "Block styles");
     sBlock.appendChild(h("div", "insp-hint", "Default appearance per block type. Capture a styled block's look from its Appearance panel, then fine-tune it here. Any block's own styling overrides its type default."));
-    (function blockStylesEditor(c) {
+    // uio-O-W2 (OVL-07): each captured type is its OWN section beside "Block styles", not a
+    // third level of headings inside it. `listHost` is the Theme body they sit in.
+    (function blockStylesEditor(intro, listHost) {
       var bstyles = getBlockStyles();
       var types = Object.keys(bstyles);
       function commit() { window.__blockStyles = getBlockStyles(); scheduleSave(); mount(); }
-      if (!types.length) { c.appendChild(h("div", "insp-hint", "No block defaults captured yet.")); return; }
+      if (!types.length) { intro.appendChild(h("div", "insp-hint", "No block defaults captured yet.")); return; }
       types.forEach(function (type) {
         var box = bstyles[type];
-        c.appendChild(sub(type));
+        var c = panelSection(listHost, type + " blocks");
         colorFieldFlat("Fill", box.fill, function (v) { if (v == null) delete box.fill; else box.fill = v; commit(); }, c, { noHistory: true });
         colorFieldFlat("Text", box.textColor, function (v) { if (v == null) delete box.textColor; else box.textColor = v; commit(); }, c, { noHistory: true });
-        switchRow("Stroke", function () { return !!box.border; }, function (v) { if (v) box.border = true; else delete box.border; commit(); refreshSettingsPanes(); }, c);
-        if (box.border) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; commit(); }, c, { noHistory: true });
+        // uio-F03: the SAME row, at the COURSE rung — the type default overriding the system
+        // default. Proves one primitive reads correctly at any rung, in any surface.
+        var typeStrokeRes = resolveScoped(scopeChain([scopeRung("system", BOX_SYSTEM_DEFAULTS), scopeRung("course", box)]), "border", { at: "course" });
+        switchRow("Stroke", function () { return !!typeStrokeRes.value; },
+          function (v) { if (v) box.border = true; else delete box.border; commit(); refreshSettingsPanes(); }, c, false,
+          { inherit: { res: typeStrokeRes, format: onOffLabel, onReset: function () {
+              pushHistory(); delete box.border; commit(); refreshSettingsPanes();
+            } } });
+        if (typeStrokeRes.value) colorFieldFlat("Stroke colour", box.borderColor, function (v) { if (v == null) delete box.borderColor; else box.borderColor = v; commit(); }, c, { noHistory: true });
         var wf = iconField(Icon("border-weight"), { value: box.borderWidth, unit: "px", placeholder: "1", step: 1, min: 0, max: 12, datalist: "dl-gap", noHistory: true, title: "Stroke width",
           onchange: function (v) { var n = parseFloat(v); if (isNaN(n)) delete box.borderWidth; else box.borderWidth = n; commit(); } }).wrap;
         var rf = iconField(Icon("radius"), { value: box.radius, unit: "px", placeholder: "0", step: 1, min: 0, max: 80, datalist: "dl-gap", noHistory: true, title: "Corner radius",
@@ -11466,7 +17622,7 @@
         clr.addEventListener("click", function () { pushHistory(); delete bstyles[type]; commit(); refreshSettingsPanes(); });
         c.appendChild(clr);
       });
-    })(sBlock);
+    })(sBlock, c);
 
     var reset = h("button", "prop-btn", "Reset " + themeEditName() + " theme");
     reset.addEventListener("click", function () {
@@ -11670,6 +17826,173 @@
   }
   window.__buildFontPicker = buildFontPicker; // headless test hook
 
+  // #170/#158: ONE canonical, config-driven formatting toggle-bar builder, shared by the
+  // block inspector's field editor AND the Course Copy Editor -- replacing their two
+  // bespoke prop-toggle-row "biu" rows. Behaviour is unchanged (inline execCommand for
+  // B/I/U/Link, active state via queryCommandState/an anchor check); only the surfaces
+  // now share one implementation. `io` decouples the bar from which surface it's in:
+  //   io.getNode() -> the current contentEditable element to focus/act on (or null/undefined
+  //                   when nothing is active -- the bar simply no-ops on click)
+  //   io.onChange() -> called after a toggle mutates content; the caller owns persistence
+  //                    (inspector: obj[field] = sanitizeFieldHtml(...) + renderModelView();
+  //                    copy editor: commitCopyRow(...))
+  // Config-driven so a future kind (e.g. the List ticket's block-level toggle) is a new
+  // branch here, not a new bar -- today "inline-exec" (B/I/U), "link", and "list-block"
+  // (#170/#33: a whole block-TYPE conversion, not an inline execCommand list) exist.
+  var FORMAT_TOGGLES = [
+    { kind: "inline-exec", label: "B", cmd: "bold", title: "Bold (selected text)" },
+    { kind: "inline-exec", label: "I", cmd: "italic", title: "Italic (selected text)" },
+    { kind: "inline-exec", label: "U", cmd: "underline", title: "Underline (selected text)" },
+    { kind: "link" },
+    { kind: "list-block" }
+  ];
+  function formatCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
+  function formatSelectionAnchor() {
+    var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
+    var c = sel.getRangeAt(0).commonAncestorContainer;
+    c = c.nodeType === 1 ? c : c.parentNode;
+    return (c && c.closest) ? c.closest("a[href]") : null;
+  }
+  // ---- Above-selection floating format bar on the Edit canvas (floating-format-bar-to-edit-canvas) ----
+  // The same above-the-selection glyph bar idiom the Source stage uses (buildSourceSelBar), brought to
+  // the main Edit canvas. It appears on a non-collapsed text selection inside an editable [data-edit]
+  // field with the inline format actions -- bold / italic / underline, the SAME inline-exec set as the
+  // inspector's FORMAT_TOGGLES (one config, two surfaces). Clicking runs execCommand, which fires the
+  // field's own input -> writeModel commit (identical to typing), so there is no separate write path.
+  // Editor chrome only; never in the shipped course. Positioned fixed above the selection.
+  /* @canvas-fmtbar-start */
+  var FMTBAR_GLYPH = { bold: "bold", italic: "italic", underline: "underline" };
+  var __canvasFmtBar = null;
+  // The editable canvas text field a DOM point sits in, or null (a live contentEditable [data-edit]).
+  function canvasEditableFieldOf(node) {
+    var el = (node && node.nodeType === 3) ? node.parentNode : node;
+    var f = (el && el.closest) ? el.closest("[data-edit].is-editable") : null;
+    return (f && f.getAttribute("contenteditable") === "true") ? f : null;
+  }
+  function hideCanvasFmtBar() { if (__canvasFmtBar) { __canvasFmtBar.remove(); __canvasFmtBar = null; } }
+  function syncCanvasFmtBarActive(bar) {
+    Array.prototype.forEach.call(bar.querySelectorAll("[data-cmd]"), function (b) {
+      var on = false; try { on = document.queryCommandState(b.getAttribute("data-cmd")); } catch (e) {}
+      b.classList.toggle("is-active", on);
+    });
+  }
+  function ensureCanvasFmtBar() {
+    if (__canvasFmtBar) return __canvasFmtBar;
+    var bar = h("div", "canvas-fmtbar"); bar.setAttribute("data-canvas-fmtbar", "1");
+    FORMAT_TOGGLES.filter(function (t) { return t.kind === "inline-exec"; }).forEach(function (t) {
+      var b = h("button", "canvas-fmtbar__btn"); b.type = "button"; b.title = t.title;
+      b.setAttribute("data-cmd", t.cmd);
+      var glyph = FMTBAR_GLYPH[t.cmd];
+      if (glyph && window.Icon) b.innerHTML = window.Icon(glyph); else b.textContent = t.label;
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
+      b.addEventListener("click", function () { document.execCommand(t.cmd, false, null); syncCanvasFmtBarActive(bar); });
+      bar.appendChild(b);
+    });
+    document.body.appendChild(bar);
+    __canvasFmtBar = bar; return bar;
+  }
+  // Shows/positions the bar for a text selection in a canvas field; hides it otherwise. The Source
+  // stage's own selbar owns [data-node] selections, so this only ever binds to [data-edit] fields --
+  // the two never collide.
+  function onCanvasSelectionChange() {
+    if (typeof document === "undefined") return;
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) { hideCanvasFmtBar(); return; }
+    var r = sel.getRangeAt(0);
+    if (!canvasEditableFieldOf(r.commonAncestorContainer)) { hideCanvasFmtBar(); return; }
+    var rect = r.getBoundingClientRect();
+    if (!rect || !rect.width) { hideCanvasFmtBar(); return; }
+    var bar = ensureCanvasFmtBar();
+    syncCanvasFmtBarActive(bar);
+    bar.style.left = (rect.left + rect.width / 2) + "px";
+    bar.style.top = rect.top + "px"; // a CSS transform centres + lifts it above the selection
+  }
+  /* @canvas-fmtbar-end */
+  function buildFormatToggleBar(io) {
+    var bar = h("div", "prop-toggle-row");
+    var execBtns = [];
+    var listBtn = null;
+    FORMAT_TOGGLES.forEach(function (t) {
+      if (t.kind === "inline-exec") {
+        var b = h("button", "prop-toggle" + (formatCmdOn(t.cmd) ? " is-on" : ""), t.label);
+        if (t.title) b.title = t.title;
+        b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's text selection
+        b.addEventListener("click", function () {
+          var node = io.getNode(); if (!node) return;
+          node.focus();
+          document.execCommand(t.cmd, false, null);
+          io.onChange();
+          b.classList.toggle("is-on", formatCmdOn(t.cmd));
+        });
+        bar.appendChild(b);
+        execBtns.push({ el: b, cmd: t.cmd });
+      } else if (t.kind === "link") {
+        // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
+        // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
+        // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
+        var linkB = h("button", "prop-toggle" + (formatSelectionAnchor() ? " is-on" : ""), "Link");
+        linkB.title = "Link the selected text to an external URL (opens in a new tab)";
+        linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        linkB.addEventListener("click", function () {
+          var node = io.getNode(); if (!node) return;
+          var a = formatSelectionAnchor(), sel = window.getSelection();
+          if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
+          // Save the text selection — the modal steals focus, so restore the Range before execCommand.
+          var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
+          promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
+            var n2 = io.getNode(); if (!n2) return;
+            n2.focus();
+            if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
+            url = (url || "").trim();
+            if (!url) { document.execCommand("unlink", false, null); }
+            else {
+              document.execCommand("createLink", false, url);
+              Array.prototype.forEach.call(n2.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
+            }
+            io.onChange();
+          });
+        });
+        bar.appendChild(linkB);
+        var unlinkB = iconBtn("unlink", "Remove the link");
+        unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        unlinkB.addEventListener("click", function () { var n3 = io.getNode(); if (!n3) return; n3.focus(); document.execCommand("unlink", false, null); io.onChange(); });
+        bar.appendChild(unlinkB);
+      } else if (t.kind === "list-block") {
+        // #170/#33: converts the WHOLE block to/from the dedicated "list" type (on-state
+        // reads block.type, not queryCommandState). Not every surface/field supports this
+        // (e.g. a quiz sub-field can't become a top-level list block), so the button is
+        // hidden -- not just disabled -- when io.isListToggleable() says no. A persisting
+        // bar (copy editor) re-derives visibility on every bar.refresh(), since which row
+        // is focused changes without the bar itself being rebuilt.
+        if (!io.isListToggleable || !io.isListBlock || !io.toggleListBlock) return;
+        var listB = h("button", "prop-toggle prop-toggle--icon");
+        listB.type = "button";
+        listB.title = "List — converts this block to/from a bulleted list";
+        listB.innerHTML = Icon("list");
+        listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
+        listB.addEventListener("click", function () { io.toggleListBlock(); });
+        bar.appendChild(listB);
+        listBtn = listB;
+      }
+    });
+    // Resync every inline-exec button's active state against the CURRENT selection, plus
+    // the list-block toggle's visibility/state -- callers that persist across re-focus
+    // (the copy editor's format bar, built once) use this instead of rebuilding; a surface
+    // that rebuilds the bar every render still gets a correct initial state (called below).
+    bar.refresh = function () {
+      var active = !!io.getNode();
+      execBtns.forEach(function (o) { o.el.classList.toggle("is-on", active && formatCmdOn(o.cmd)); });
+      if (listBtn) {
+        var canList = !!(io.isListToggleable && io.isListToggleable());
+        listBtn.hidden = !canList;
+        if (canList) listBtn.classList.toggle("is-on", !!(io.isListBlock && io.isListBlock()));
+      }
+    };
+    bar.refresh();
+    return bar;
+  }
+  window.__buildFormatToggleBar = buildFormatToggleBar; // headless test hook
+
   // Panel System v2 (James 2026-07-08): the generalised custom listbox. Same shape as
   // buildFontPicker (a button + popup, exposes `.value` get/set, fires 'change' on pick)
   // but each option can carry a live PREVIEW instead of a bare word — a CSS style applied
@@ -11808,19 +18131,257 @@
     sync();
     return note;
   }
+  // ---- Scope + inheritance (uio-F03 — the UI spine's five-rung ladder) -------------
+  // System -> Product -> Course -> Page -> Block. One ladder, one primitive, one visual
+  // language (design-system/readme.md, "The UI spine" -> "Scope and inheritance").
+  //
+  // DELIBERATELY PROPERTY-AGNOSTIC — read this before extending it.
+  // resolveScoped() takes the property being resolved as an ARGUMENT and never inspects it.
+  // It only hands the key to each rung's own reader. There is NO list of known settings in
+  // here, and nothing assumes the resolved value is a style or theme value: it can be a
+  // boolean, a number, a colour string, a classification code, an approval state — the
+  // resolver does not care and must never learn to care.
+  //
+  // A SECOND AXIS rides this same primitive by supplying two things and nothing else:
+  //   1. a different property key, and
+  //   2. a scope chain whose rungs read that axis's own storage (the rung's `read` is where
+  //      per-rung name mapping lives, so rungs may store the same idea under different keys).
+  // That is how uio-F07's export-control classification inherits down this ladder without a
+  // second, parallel inheritance path. A parallel path is the failure this shape prevents.
+  //
+  // Two seams keep it general:
+  //   rung.read(prop) -> NOT_SET, or the value this rung sets. null / false / 0 / "" are
+  //      REAL values; only NOT_SET means "this rung says nothing about that property".
+  //   opts.choose(a, b) -> optional winner-picker for axes where the deepest rung does not
+  //      simply win. Default is last-wins (the deepest rung that sets it). F07's "a block may
+  //      only override to something MORE restrictive" is exactly a choose().
+  //
+  // PURE: no DOM, no closures over editor state. Fenced for the headless regression guard.
+  /* @f03-start */
+  var SCOPE_LADDER = ["system", "product", "course", "page", "block"];
+  var SCOPE_LABELS = { system: "System", product: "Product", course: "Course", page: "Page", block: "Block" };
+  var NOT_SET = { __f03NotSet: true };   // sentinel: this rung sets nothing for this property
+
+  function scopeLabel(scope) { return SCOPE_LABELS[scope] || String(scope == null ? "" : scope); }
+  function scopeDepth(scope) { var i = SCOPE_LADDER.indexOf(scope); return i === -1 ? SCOPE_LADDER.length : i; }
+
+  // A rung backed by a plain object bag: own-property presence means "this rung sets it".
+  // Any axis that does not store its value in a bag supplies its own read() instead.
+  function scopeRung(scope, bag, label) {
+    return {
+      scope: scope, label: label || scopeLabel(scope),
+      read: function (prop) {
+        return (bag && Object.prototype.hasOwnProperty.call(bag, prop)) ? bag[prop] : NOT_SET;
+      }
+    };
+  }
+  // Order any set of rungs System -> Block; absent rungs are simply left out.
+  function scopeChain(rungs) {
+    return (rungs || []).filter(Boolean).slice().sort(function (a, b) { return scopeDepth(a.scope) - scopeDepth(b.scope); });
+  }
+
+  // Resolve one property down a chain, as seen from one rung (opts.at, default the deepest).
+  // Rungs deeper than `at` are not in play — a page row must not read a block's override.
+  function resolveScoped(chain, prop, opts) {
+    opts = opts || {};
+    chain = chain || [];
+    var at = opts.at || (chain.length ? chain[chain.length - 1].scope : null);
+    var atDepth = scopeDepth(at);
+    var trace = [], winner = NOT_SET, winScope = null, ownValue = NOT_SET, parent = null;
+    for (var i = 0; i < chain.length; i++) {
+      var r = chain[i];
+      if (scopeDepth(r.scope) > atDepth) continue;
+      var lab = r.label || scopeLabel(r.scope);
+      var v = r.read(prop);
+      trace.push({ scope: r.scope, label: lab, set: v !== NOT_SET, value: v === NOT_SET ? undefined : v });
+      if (v === NOT_SET) continue;
+      if (r.scope === at) ownValue = v;
+      else parent = { scope: r.scope, label: lab, value: v };   // nearest ancestor that sets it
+      if (winner === NOT_SET || !opts.choose) { winner = v; winScope = r.scope; }
+      else { var w = opts.choose(winner, v); if (w === v) { winner = v; winScope = r.scope; } else winner = w; }
+    }
+    var found = winner !== NOT_SET;
+    var overridden = ownValue !== NOT_SET;
+    return {
+      prop: prop,
+      at: at, atLabel: scopeLabel(at),
+      found: found,
+      value: found ? winner : undefined,          // what will ACTUALLY apply — never "unset"
+      scope: winScope,                            // the rung the applied value came from
+      scopeLabel: winScope ? scopeLabel(winScope) : null,
+      overridden: overridden,                     // this rung sets its own value
+      inherited: found && !overridden,
+      from: parent,                               // what Reset restores, and from where
+      trace: trace
+    };
+  }
+
+  // What a Reset does, expressed as data (the mutation stays at the call site).
+  // null = nothing to reset. restores = null means no rung above sets it, so the value clears.
+  function resetPlan(chain, prop, at) {
+    var res = resolveScoped(chain, prop, { at: at });
+    if (!res.overridden) return null;
+    return { prop: prop, clearAt: res.at, restores: res.from || null };
+  }
+  // Reset's tooltip must state WHAT it restores and FROM WHICH scope (spine requirement).
+  function resetTooltip(res, format) {
+    if (!res || !res.overridden) return "";
+    var f = format || String;
+    return res.from
+      ? "Reset to the " + res.from.label + " value: " + f(res.from.value)
+      : "Reset — nothing is set above " + res.atLabel + ", so this clears";
+  }
+  // Inherited copy: never "unset" — always what will apply, and where it comes from.
+  function inheritedTooltip(res, format) {
+    if (!res || !res.found) return "";
+    var f = format || String;
+    return "Inherited from " + (res.scopeLabel || "") + ": " + f(res.value);
+  }
+  // Section roll-up: how many of a section's rows carry their own value at this rung.
+  function overrideCount(resolutions) {
+    var n = 0;
+    (resolutions || []).forEach(function (r) { if (r && r.overridden) n++; });
+    return n;
+  }
+  function rollupLabel(n) { return n > 0 ? n + " overridden" : ""; }
+  /* @f03-end */
+
+  // The active sectionGroup's tally of resolutions, so a section header can count its own
+  // overrides without every call site plumbing a count back up. A stack, so nesting is safe.
+  var _scopeTally = null;
+  function tallyResolution(res) { if (_scopeTally && res) _scopeTally.push(res); }
+
+  // Builds the shared row's inheritance TAIL (uio-F01 left this slot empty for F03).
+  // Two states, one language, every surface:
+  //   inherited  -> the source scope named in tertiary ink (the control shows the value)
+  //   overridden -> a 4px accent dot + an inline Reset naming what it restores
+  // Reset is a LIVE edit, not a commit control: it writes immediately and Undo takes it back
+  // (the spine's save contract — no Save/Apply/Cancel/Done).
+  //   spec: { res (a resolveScoped result), format (value -> string), onReset () }
+  function inheritanceTail(spec) {
+    var res = spec && spec.res;
+    if (!res || !res.found) return null;
+    tallyResolution(res);
+    var wrap = h("span", "insp-inherit");
+    if (res.overridden) {
+      wrap.appendChild(h("span", "insp-row__override-dot"));
+      var btn = h("button", "insp-row__reset", "Reset"); btn.type = "button";
+      btn.title = resetTooltip(res, spec.format);
+      btn.addEventListener("click", function (ev) { ev.stopPropagation(); if (spec.onReset) spec.onReset(res); });
+      wrap.appendChild(btn);
+    } else {
+      var s = h("span", "insp-row__scope", res.scopeLabel);
+      s.title = inheritedTooltip(res, spec.format);
+      wrap.appendChild(s);
+    }
+    return wrap;
+  }
+  function onOffLabel(v) { return v ? "on" : "off"; }
+
+  // ---- The two ladders wired today (uio-F03) --------------------------------------
+  // Each is only a CHAIN — a list of rungs and how each rung reads the property. The
+  // resolver above is shared and knows nothing about either of them. Adding an axis means
+  // adding a chain builder here, never touching resolveScoped.
+
+  // Block appearance: System defaults -> the course's captured per-type default
+  // (doc.theme.blockStyles[type]) -> this block's own box. This RECONCILES with the cascade
+  // render.js already applies (resolveBlockBox: type default is the baseline, block.box
+  // wins); the ladder surfaces that existing model rather than adding a second one.
+  var BOX_SYSTEM_DEFAULTS = { border: false, borderWidth: 1, radius: 0 };
+  function blockBoxChain(block) {
+    var bs = getBlockStyles();
+    return scopeChain([
+      scopeRung("system", BOX_SYSTEM_DEFAULTS),
+      scopeRung("course", (bs && block && bs[block.type]) || {}),
+      scopeRung("block", (block && block.box) || {})
+    ]);
+  }
+  // Interaction gate: System (off) -> Course (doc.gateAllInteractions) -> Page
+  // (page.gateInteractions). The two upper rungs store the same idea under different keys,
+  // which is why per-rung name mapping lives in read() — the same seam a second axis uses.
+  function gateScopeChain(page) {
+    return scopeChain([
+      { scope: "system", label: "System", read: function () { return false; } },
+      { scope: "course", label: "Course", read: function () { return doc.gateAllInteractions ? true : NOT_SET; } },
+      page ? scopeRung("page", page) : null
+    ]);
+  }
+
+  // ---- The shared settings/overlay row (uio-F01 — the UI spine's row anatomy) ------
+  // ONE row reused identically across sheet / popover / inspector: a fixed label column,
+  // the control beside it, an optional inheritance tail, and a hover-only overflow. It is
+  // width-independent by construction (label fixed in px, control flexes, tail/overflow
+  // fixed), so it renders identically at any panel width. A Switch is a control in this
+  // row, not a different row (the toggle variant grows the label and right-aligns the
+  // control). uio-F03 fills the inheritance tail: pass `inherit` and the row renders the
+  // inherited / overridden / Reset language from a resolveScoped result. See
+  // design-system/readme.md "The UI spine" and design-system/components/controls/FieldRow.*.
+  //   opts: { label, control, tail (node), inherit ({res,format,onReset}),
+  //           overflow ({title,onClick}), host, variant, controlAlign ("end") }
+  function settingsRow(opts) {
+    opts = opts || {};
+    var row = h("div", "insp-row" + (opts.variant ? " " + opts.variant : ""));
+    var label = null;
+    if (opts.label != null && opts.label !== "") {
+      label = h("span", "insp-row__label", opts.label);
+      row.appendChild(label);
+    } else {
+      row.classList.add("insp-row--nolabel");
+    }
+    if (opts.control) {
+      if (opts.controlAlign === "end" && opts.control.classList) opts.control.classList.add("insp-row__control--end");
+      row.appendChild(opts.control);
+    }
+    // uio-F03 fills the tail slot: pass `inherit` ({res, format, onReset}) and the row shows
+    // the scope/inheritance language; `tail` still takes a ready-made node.
+    var tailNode = opts.tail || (opts.inherit ? inheritanceTail(opts.inherit) : null);
+    if (tailNode) {
+      var tail = h("div", "insp-row__tail");
+      tail.appendChild(tailNode);
+      row.appendChild(tail);
+    }
+    if (opts.overflow) {
+      var ov = h("button", "insp-row__overflow"); ov.type = "button";
+      ov.innerHTML = Icon("more-horizontal");
+      ov.title = opts.overflow.title || "More actions";
+      ov.addEventListener("click", function (ev) { ev.stopPropagation(); opts.overflow.onClick(ev, ov); });
+      row.appendChild(ov);
+    }
+    (opts.host || inspector).appendChild(row);
+    return { row: row, label: label };
+  }
+  window.__settingsRow = settingsRow; // headless test hook
+
+  // uio-O-W1 (OVL-06): a setting that is READ-ONLY here because another surface owns it.
+  // The old shape was dead prose telling the author to walk somewhere ("edit it in the
+  // Learner nav panel"). This is the one replacement: the shared row (uio-F01) showing the
+  // LIVE value plus a link that navigates there — never an instruction. Every cross-reference
+  // in the chrome uses this, so one row anatomy covers them all.
+  // opts: { label, value, linkLabel, onNavigate, host, title }.
+  function crossRefRow(opts) {
+    opts = opts || {};
+    var wrap = h("div", "insp-xref");
+    if (opts.value != null && opts.value !== "") wrap.appendChild(h("span", "insp-xref__value", String(opts.value)));
+    var link = h("button", "insp-xref__link"); link.type = "button";
+    link.appendChild(h("span", "insp-xref__link-label", opts.linkLabel || "Open"));
+    var chev = h("span", "insp-xref__chev"); chev.innerHTML = Icon("chevron-right"); link.appendChild(chev);
+    link.title = opts.title || ("Go to " + (opts.linkLabel || "the panel that owns this"));
+    link.addEventListener("click", function () { if (opts.onNavigate) opts.onNavigate(); });
+    wrap.appendChild(link);
+    return settingsRow({ label: opts.label, host: opts.host || inspector, control: wrap, controlAlign: "end" });
+  }
+  window.__crossRefRow = crossRefRow; // headless test hook
+
   function fieldRow(label, value, onchange, placeholder, step, min, max, datalistId) {
-    var row = h("div", "insp-row"); 
-    var lbl = h("span", "insp-row__label", label);
-    row.appendChild(lbl);
     var i = h("input", "prop-text"); i.type = "text"; i.spellcheck = false; i.placeholder = placeholder || "auto"; i.value = value == null ? "" : value;
     if (datalistId) {
       ensureDatalists();
       i.setAttribute("list", datalistId);
     }
     i.addEventListener("change", function () { pushHistory(); onchange(i.value); });
-    row.appendChild(i); inspector.appendChild(row);
+    var r = settingsRow({ label: label, control: i });
     if (step) {
-      makeScrubbable(lbl, i, function (v) { onchange(v); }, step, min, max);
+      makeScrubbable(r.label, i, function (v) { onchange(v); }, step, min, max);
     }
     return i;
   }
@@ -12457,7 +19018,9 @@
     box.appendChild(head);
     return head;
   }
-  function modalSection(box, title) { box.appendChild(sub(title)); }
+  // A modal groups its rows with the same section as every other surface (OVL-07). Returns the
+  // body so the caller's rows land inside it rather than beside it.
+  function modalSection(box, title) { return panelSection(box, title); }
   // one aligned label -> control row; returns the row so the caller appends a control
   function modalField(box, labelText) {
     var r = h("div", "modal-field");
@@ -12499,17 +19062,23 @@
     var body = h("div");
     var footer = [];
     (opts.extras || []).forEach(function (b) { footer.push(b); });
-    var cancel = window.VersoUI.Button({ variant: "ghost", label: opts.cancelLabel || "Cancel", onClick: function () { modal.close(); } });
+    var cancel = window.VersoUI.Button({ variant: "ghost", label: opts.cancelLabel || "Cancel", onClick: function () { modal.close(); } }); // spine-ok: confirm/decision modal primitive (destructive confirm + blocking run)
     footer.push(cancel);
     var primary = window.VersoUI.Button({ variant: opts.danger ? "danger" : "primary", label: opts.primaryLabel || "OK", onClick: function () { if (opts.onPrimary) opts.onPrimary(); } });
     footer.push(primary);
     var modal = window.VersoUI.Modal({ title: opts.title, description: opts.subtitle || null, width: opts.width || null, children: body, footer: footer, onClose: opts.onClose || null });
     if (opts.id) modal.id = opts.id;
     document.body.appendChild(modal);
+    // uio-F05: the modal joins the ONE layer stack, so a confirm raised over the settings sheet
+    // takes the next Escape and leaves the sheet standing. Enter stays on the element (it is the
+    // modal's own submit, not a layer concern). `close` is wrapped once so every dismissal path
+    // — Cancel, the x, the scrim, Escape — pops the layer exactly once.
+    var _close = modal.close;
+    modal.close = function () { popLayer("modal"); modal.close = _close; if (_close) _close.call(modal); };
+    pushLayer("modal", function () { modal.close(); });
     if (opts.keys !== false) {
       modal.addEventListener("keydown", function (e) {
         if (e.key === "Enter") { e.preventDefault(); primary.click(); }
-        else if (e.key === "Escape") { e.preventDefault(); modal.close(); }
       });
     }
     return { modal: modal, body: body, primary: primary };
@@ -12554,11 +19123,11 @@
     var host = styleKey ? (obj[styleKey] || (obj[styleKey] = {})) : obj;
     // plain fields keep a simple textarea
     if (!node.getAttribute("data-rich")) {
-      inspector.appendChild(sub(field));
+      var plainBody = panelSection(inspector, field);
       var input = h("textarea", "prop-input");
       input.value = obj[field];
       input.addEventListener("input", function () { writeModel(node, input.value); if (node.textContent !== input.value) node.textContent = input.value; });
-      inspector.appendChild(input);
+      plainBody.appendChild(input);
       return;
     }
     // rich field -> Text properties (in the panel, no floating window)
@@ -12566,6 +19135,11 @@
     function apply() { window.applyTextStyle(node, s); renderModelView(); }
 
     var head = h("div", "prop-component"); head.appendChild(h("span", null, "Text")); inspector.appendChild(head);
+    // uio-F04 (EDIT-06): editing the text of a source-linked block is exactly when its provenance
+    // matters, so the same line the block inspector carries appears here too. Same call, so the two
+    // panels can never say different things about the same block.
+    var fieldProv = renderSourceLinkProvenance(obj);
+    if (fieldProv) inspector.appendChild(fieldProv);
 
     // Panel System v2 (D3): the flagship reference panel adopts the sectionGroup taxonomy —
     // a "Type" section (style picker + typeCluster + inline B/I/U/link) and a "Content"
@@ -12637,91 +19211,38 @@
       }
     });
 
-    // Row 4: Inline style (B / I / U)
+    // Row 4: Inline style (B / I / U / Link / List) — #170/#158/#33: the shared canonical
+    // toggle-bar builder, also used by the Course Copy Editor (buildCopyFormatBar). List is
+    // now a whole block-TYPE conversion (block.type <-> "list"), not an inline execCommand
+    // list -- on-state reads the model, and clicking converts the block in place via
+    // convertTextListBlockType, remembering the prior type for a lossless round-trip. Only
+    // genuine top-level text-content blocks (obj.type in TEXT_CONTENT_TYPES) can convert --
+    // a quiz sub-field (obj has no .type) never shows the List toggle.
     inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Style"));
-    var biu = h("div", "prop-toggle-row");
-    function cmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-    [["B", "bold"], ["I", "italic"], ["U", "underline"]].forEach(function (o) {
-      // J: reflect the current selection's formatting (active state).
-      var b = h("button", "prop-toggle" + (cmdOn(o[1]) ? " is-on" : ""), o[0]);
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      b.addEventListener("click", function () { document.execCommand(o[1], false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); b.classList.toggle("is-on", cmdOn(o[1])); });
-      biu.appendChild(b);
-    });
-    // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
-    // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
-    // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
-    function selectionAnchor() {
-      var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
-      var c = sel.getRangeAt(0).commonAncestorContainer;
-      c = c.nodeType === 1 ? c : c.parentNode;
-      return (c && c.closest) ? c.closest("a[href]") : null;
-    }
-    var linkB = h("button", "prop-toggle" + (selectionAnchor() ? " is-on" : ""), "Link");
-    linkB.title = "Link the selected text to an external URL (opens in a new tab)";
-    linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    linkB.addEventListener("click", function () {
-      var a = selectionAnchor(), sel = window.getSelection();
-      if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
-      // Save the text selection — the modal steals focus, so restore the Range before execCommand.
-      var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
-      promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
-        node.focus();
-        if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
-        url = (url || "").trim();
-        if (!url) { document.execCommand("unlink", false, null); }
-        else {
-          document.execCommand("createLink", false, url);
-          Array.prototype.forEach.call(node.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
-        }
-        obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView();
-      });
-    });
-    biu.appendChild(linkB);
-    var unlinkB = iconBtn("unlink", "Remove the link");
-    unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    unlinkB.addEventListener("click", function () { document.execCommand("unlink", false, null); obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); });
-    biu.appendChild(unlinkB);
-    // List — #9: folded INTO this inline-format toggle bar (was a separate switchEl below).
-    // As a prop-toggle it shares B/I/U's mousedown-preventDefault, so the field keeps its
-    // text selection and execCommand acts on the right range. The old switch had no such
-    // guard: clicking it blurred the field first -> collapsed caret -> the toggle "did
-    // nothing". A field whose editable ROOT is a list (#31: the quiz summary <ul>, the list
-    // block) is inherently a list, so it shows NO toggle here — its marker settings live in
-    // the List section below.
     var rootIsList = node.tagName === "UL" || node.tagName === "OL";
-    function listOn() { try { return document.queryCommandState("insertUnorderedList") || document.queryCommandState("insertOrderedList"); } catch (e) { return false; } }
-    if (!rootIsList) {
-      var listB = h("button", "prop-toggle prop-toggle--icon" + (listOn() ? " is-on" : ""));
-      listB.type = "button";
-      listB.title = "List";
-      listB.innerHTML = Icon("list");
-      listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      listB.addEventListener("click", function () {
-        node.focus();
-        if (listOn()) {
-          if (document.queryCommandState("insertOrderedList")) document.execCommand("insertOrderedList", false, null);
-          if (document.queryCommandState("insertUnorderedList")) document.execCommand("insertUnorderedList", false, null);
-        } else {
-          document.execCommand("insertUnorderedList", false, null);
-        }
-        writeModel(node, node.innerHTML);
-        renderModelView();
-        renderInspector(); // reveals / hides the List marker section below
-      });
-      biu.appendChild(listB);
-    }
+    var biu = buildFormatToggleBar({
+      getNode: function () { return node; },
+      onChange: function () { obj[field] = sanitizeFieldHtml(node.innerHTML); renderModelView(); },
+      isListToggleable: function () { return field === "text" && !!obj && !!obj.type && !!TEXT_CONTENT_TYPES[obj.type]; },
+      isListBlock: function () { return !!obj && obj.type === "list"; },
+      toggleListBlock: function () {
+        pushHistory();
+        convertTextListBlockType(obj);
+        reapplyStructural(findPageOfBlock(obj));
+        reselectBlockNode(obj, "field"); // re-renders the inspector fresh (new type + marker section)
+      }
+    });
     inspector.appendChild(biu);
 
-    // List marker settings — the on/off toggle now lives in the inline-format bar above (#9).
-    // This section is purely the marker styling, shown only when the field IS a list: an
-    // inline list toggled on, OR a root-<ul>/<ol> field (#31: the quiz Chapter-summary <ul>,
-    // the list block). One <ul> renders disc / numbered / lettered alike (list-style-type is
-    // tag-agnostic), so the marker (incl. Numbered / Lettered / Roman) lives entirely in the
-    // Bullet-style dropdown; marker size stays a numeric iconField (exception).
-    if (rootIsList || listOn()) {
-      inspector.appendChild(sub("List"));
-      var MARKERS = [["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
+    // List marker settings — the on/off toggle now lives in the inline-format bar above.
+    // Purely the marker styling, shown only when the field IS a list block (#31: the quiz
+    // Chapter-summary <ul> is its own root-<ul> field; the list block itself is rootIsList).
+    // One <ul> renders disc / numbered / lettered alike (list-style-type is tag-agnostic),
+    // so the marker (incl. Numbered / Lettered / Roman) lives entirely in the Bullet-style
+    // dropdown; marker size stays a numeric iconField (exception).
+    if (rootIsList) {
+      var _typeBody = inspector; inspector = panelSection(_typeBody, "List");
+      var MARKERS =[["Disc", "disc"], ["Circle", "circle"], ["Square", "square"], ["Dash", "dash"], ["Arrow", "arrow"], ["Check", "check"], ["Numbered 1.", "decimal"], ["Lettered a.", "lower-alpha"], ["Roman i.", "lower-roman"], ["Custom", "custom"]];
       var MARK_GLYPH = { disc: "•", circle: "◦", square: "▪", dash: "–", arrow: "→", check: "✓", decimal: "1.", "lower-alpha": "a.", "lower-roman": "i.", custom: (obj.listMarkerChar || "✱") };
       var markerOpts = MARKERS.map(function (o) { var g = MARK_GLYPH[o[1]] || ""; return [o[1], o[0], { html: '<span class="cs-mark">' + g + '</span>' + o[0] }]; });
       customSelectRow("Bullet style", markerOpts, (obj.listMarker || "disc"), function (v) {
@@ -12744,21 +19265,34 @@
       });
       inspector.appendChild(iconField("H", { value: obj.listMarkerSize == null ? "" : obj.listMarkerSize, unit: "em", placeholder: "1", step: 0.1, min: 0.5, max: 4, datalist: "dl-gap", title: "Marker size (relative to text)",
         onchange: function (val) { pushHistory(); var n = parseFloat(val); if (isNaN(n)) { delete obj.listMarkerSize; node.style.removeProperty("--li-marker-size"); } else { obj.listMarkerSize = n; node.style.setProperty("--li-marker-size", n + "em"); } renderModelView(); } }).wrap);
+      inspector = _typeBody;
     }
     } finally { inspector = _ins; }
     });
     endSections(inspector);
 
-    // Progressive disclosure (James 2026-07-08): the field/type inspector shows ONLY Type —
-    // block-level Layout / Spacing / Appearance belong to the BLOCK selection (one level out),
-    // so you never see controls that don't act on the text you're editing. A quiet affordance
-    // keeps those settings one click away (Esc also steps out to the block).
-    var backHint = h("button", "insp-hint insp-backlink", "Layout, spacing & appearance → block settings");
-    backHint.type = "button";
-    backHint.title = "These act on the whole block, not the text. Click to select the block (or press Esc).";
-    backHint.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    backHint.addEventListener("click", function () { blurActiveText(); resetDrill(); reselectBlockNode(selection.block, "block"); });
-    inspector.appendChild(backHint);
+    // uio-E-C02 (EDIT-02): one inspector scroll, no cross-panel jump link. This REVERSES the
+    // 2026-07-08 progressive-disclosure split (James's call 2026-07-30, option A): editing a
+    // top-level text block now shows the SAME full panel as block-select — the block's
+    // Position / Layout / Spacing / Appearance / Behaviour chrome sits right below Type, in one
+    // scroll, and the old "-> block settings" jump link is gone. Esc still steps out to the block.
+    var blk = node.__block;
+    var showBlockChrome = blk && blk.type && TEXT_CONTENT_TYPES[blk.type] && !versionEditable();
+    if (showBlockChrome) {
+      // Same builder + decl the block two-level inspector uses (renderBlockInspector -> text ->
+      // renderBlockTwoLevel with CONTENT_DECL), so the section set/wiring is identical.
+      renderContainerChrome(inspector, CONTENT_DECL, blockChromeIo(blk), blockChromeHandlers(blk));
+    } else {
+      // Quiz sub-fields (a rich field on a non-text block) still bridge to their block's own
+      // settings; and while editing a non-base software version the block chrome would be
+      // present-but-inert (per applyVersionEditGuard), so the focused text panel + link stay.
+      var backHint = h("button", "insp-hint insp-backlink", "Layout, spacing & appearance → block settings");
+      backHint.type = "button";
+      backHint.title = "These act on the whole block, not the text. Click to select the block (or press Esc).";
+      backHint.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      backHint.addEventListener("click", function () { blurActiveText(); resetDrill(); reselectBlockNode(selection.block, "block"); });
+      inspector.appendChild(backHint);
+    }
   }
 
   // a component instance selected -> sectioned, properties
@@ -12770,7 +19304,8 @@
     inspector.appendChild(head);
 
     // Content
-    inspector.appendChild(sub("Content"));
+    var _instRoot = inspector;
+    inspector = panelSection(_instRoot, "Content");
     def.slots.forEach(function (slot) {
       var control;
       if (slot.multiline) {
@@ -12797,7 +19332,7 @@
 
     // Variant (style-swap)
     if (def.variants && def.variants.status) {
-      inspector.appendChild(sub("Variant"));
+      inspector = panelSection(_instRoot, "Variant");
       var row = h("div", "prop-toggle-row");
       def.variants.status.options.forEach(function (opt) {
         var on = (instance.status || def.variants.status.default) === opt;
@@ -12809,21 +19344,24 @@
     }
 
     // Actions (flagship): where this card navigates on click
+    inspector = _instRoot;
     buildActions(instance, card, function () { reselectByIndex(block, index); });
 
     // Component (instance-specific): detach from the component definition. Hide /
     // move / duplicate / delete now live in the shared footer below, so this row
     // holds only the action the footer can't express.
-    inspector.appendChild(sub("Component"));
+    inspector = panelSection(_instRoot, "Component");
     var compRow = h("div", "icon-row");
     var detach = iconBtn("unlink", instance.detached ? "Detached" : "Detach from component");
     if (instance.detached) detach.classList.add("is-on");
     detach.addEventListener("click", function () { pushHistory(); instance.detached = true; mount(); reselectByIndex(block, index); });
     compRow.appendChild(detach);
     inspector.appendChild(compRow);
+    inspector = _instRoot;
 
-    // Grid — header-with-"+" add affordance (same handler as before).
-    inspector.appendChild(propHeader("Grid", function () {
+    // Grid — the cards row carries the "+" add affordance (same handler as before).
+    inspector = panelSection(_instRoot, "Grid");
+    inspector.appendChild(propHeader("Cards", function () {
       pushHistory();
       var fresh = { status: "incomplete", slots: {} };
       def.slots.forEach(function (s) { fresh.slots[s.key] = ""; });
@@ -12840,6 +19378,7 @@
       setSelection("block", gridNode);
     });
     inspector.appendChild(selGrid);
+    inspector = _instRoot;
 
     // Shared footer — SAME markup as every other inspector, wired to operate on
     // this card within its grid's instances[] rather than a page's blocks[].
@@ -12942,7 +19481,7 @@
   // Actions inspector section. host = the object that holds .action (an instance
   // or a block); sourceNode = its canvas node; reselect = re-select after remount.
   function buildActions(host, sourceNode, reselect) {
-    inspector.appendChild(sub("Actions"));
+    var _actRoot = inspector; inspector = panelSection(_actRoot, "Actions");
     var opts = [["No navigation", ""]]
       .concat(doc.pages.map(function (p) { return [pageDisplayName(p, doc), p.id]; }))
       .concat([["Exit course (end SCORM session)", EXIT_ACTION]]);
@@ -12959,6 +19498,7 @@
     } else {
       inspector.appendChild(h("div", "insp-hint", "No navigation set. Drag onto a frame, or pick a page above."));
     }
+    inspector = _actRoot;
   }
 
   // a nav-button block selected -> its label + Actions
@@ -13264,7 +19804,7 @@
 
       // A columns row gets page-level top/bottom edge bands (AA) but no box/drag
       // handle of its own; a group is an invisible container with neither.
-      if (block.type === "columns") { attachColumnsEdgeBands(node, block, pi); attachColumnResizers(node, block); attachEmptyColumnDrops(node, block); return; }
+      if (block.type === "columns") { attachColumnsEdgeBands(node, block, pi); attachColumnResizers(node, block); attachColumnSwaps(node, block); attachEmptyColumnDrops(node, block); return; }
       if (block.type === "group") return; // no box of its own
 
       // Hotspot popover-card content is a FULL editing container (parity with
@@ -13645,13 +20185,14 @@
   // ---- "Locked until ->" reactive gate -------------------------------------
   var IS_OPTIONS = [["visited", "visited"], ["watched", "watched"], ["checked", "checked"]];
   function renderGateSection(block) {
-    inspector.appendChild(sub("Locked until"));
+    var _gateRoot = inspector;
     var on = !!block.gate;
-    switchRow("Gate", function () { return on; }, function (v) {
-      if (v) { ensureId(block); block.gate = block.gate || { mode: "disable", when: { source: "", is: "visited" } }; }
-      else { delete block.gate; }
-      mount(); interactReselect(block);
-    });
+    // uio-O-W2 (OVL-07): the gate's own on/off is the SECTION's switch, not a "Gate" row one
+    // line under a heading that said the same thing. Off, the section states so and stops --
+    // there is no configuration to keep, because turning it off deletes the gate.
+    _gateRoot.appendChild(sectionGroup(null, "Locked until", function (gateBody) {
+    var _gins = inspector; inspector = gateBody;
+    try {
     if (!on) {
       inspector.appendChild(h("div", "insp-hint", "Off. Turn on to keep this element locked (greyed or hidden) until a condition is met."));
       return;
@@ -13680,7 +20221,7 @@
     addCond.addEventListener("click", function () { pushHistory(); addGateCondition(g); mount(); interactReselect(block); });
     inspector.appendChild(addCond);
 
-    inspector.appendChild(sub("Hint + completion"));
+    inspector = panelSection(gateBody, "Hint + completion");
     // hint writes live (no rebuild) so the field keeps focus while typing.
     var hintRow = h("div", "insp-row"); hintRow.appendChild(h("span", "insp-row__label", "Hint"));
     var hintIn = h("input", "prop-text"); hintIn.type = "text"; hintIn.spellcheck = false;
@@ -13694,6 +20235,19 @@
       mount(); interactReselect(block);
     });
     inspector.appendChild(h("div", "insp-hint", "Required gates must be satisfied (plus every page visited) before the course reports complete."));
+    } finally { inspector = _gins; }
+    }, {
+      key: "gate.lockedUntil",
+      toggle: {
+        get: function () { return !!block.gate; },
+        set: function (v) {
+          if (v) { ensureId(block); block.gate = block.gate || { mode: "disable", when: { source: "", is: "visited" } }; }
+          else { delete block.gate; }
+          mount(); interactReselect(block);
+        }
+      },
+      summary: function () { return block.gate ? ((block.gate.mode || "disable") === "hide" ? "hidden until met" : "greyed until met") : ""; }
+    }));
   }
 
   // normalise gate.when into an editable array of {source,is} conditions.
@@ -13791,11 +20345,27 @@
 
   // shows the device viewport line so you can gauge how much content sits below
   // the fold. Real scrolling lives in demo mode, not the authoring canvas.
+  // SPEC 7 canvas geometry: a page renders through the SAME renderPage() in every geometry
+  // (pure-render invariant held); only the frame CONTAINER changes per doc.meta.geo. reflow
+  // = today's fluid vertical flow (no rule -> pixel-identical). frame = a fixed one-screen
+  // surface that clips + warns on overflow. paged = a page-height surface with page-break
+  // guides, so content flows across page sections. These two helpers are PURE (headless-
+  // tested); the geometry itself is CSS on `.world.geo-<geo> .frame`, driven off this class.
+  /* @pure-geo-canvas-start */
+  function worldGeoClass(geo) { return "geo-" + (geo === "frame" || geo === "paged" ? geo : "reflow"); }
+  function frameContentOverflows(scrollH, clientH) { return clientH > 0 && scrollH > clientH + 2; }
+  /* @pure-geo-canvas-end */
+  var _worldGeo = "reflow";
+
   function buildWorld() {
     world = h("div", "world");
     frameDescs = [];
     var deviceH = BREAKPOINTS[activeBp].h;
     var renderDoc = currentDoc(); // base doc, or the resolved doc when previewing a variant
+    // Geometry cell drives the frame container (reflow / frame / paged). Untagged/legacy docs
+    // resolve to reflow via the doc-type model -> today's canvas, unchanged.
+    _worldGeo = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(renderDoc).geo : "reflow";
+    world.classList.add(worldGeoClass(_worldGeo));
 
     // JJJJ: group pages into chapter COLUMNS; each page's column X is known now
     // (its row Y is set after measure in layoutColumns). page.id -> {col,row}.
@@ -13965,6 +20535,12 @@
     colY.forEach(function (y) { if (y != null && y - GAP_Y > maxH) maxH = y - GAP_Y; });
     worldH = maxH || FRAME_H;
     world.style.height = worldH + "px";
+    // SPEC 7: in fixed-frame geometry a page is clipped to one screen -- flag any frame whose
+    // content overflows so the canvas shows the amber warning (never silently spawns a slide).
+    // Measured here (post-attach) before culling, alongside the height reads above.
+    if (_worldGeo === "frame") frameDescs.forEach(function (f) {
+      if (f.frame) f.frame.classList.toggle("is-overflowing", frameContentOverflows(f.frame.scrollHeight, f.frame.clientHeight));
+    });
     // Perf (#150): now that the TRUE heights are measured + stacked, pin each frame's
     // contain-intrinsic-size to its measured height and enable content-visibility:auto,
     // so the browser SKIPS painting + laying-out pages scrolled out of the viewport. The
@@ -14921,12 +21497,12 @@
     // only sees TOP-LEVEL blocks, so it was silently dropping every NESTED (column / child)
     // block from the multi-selection on each re-render, breaking cross-column select.
     multiSel = multiSel.filter(function (b) {
-      for (var pi = 0; pi < doc.pages.length; pi++) if (findBlockParent(doc.pages[pi].blocks, b)) return true;
+      for (var pi = 0; pi < doc.pages.length; pi++) { var pg = doc.pages[pi]; if (pg && findBlockParent(pg.blocks, b)) return true; }
       return false;
     });
     // module G: group the page rows under their CHAPTER (a twirl-able header row),
     // mirroring the canvas columns. `pi` stays the real doc.pages index everywhere.
-    var idxOf = {}; doc.pages.forEach(function (p, i) { idxOf[p.id] = i; });
+    var idxOf = {}; doc.pages.forEach(function (p, i) { if (p) idxOf[p.id] = i; });
     var groups = (window.groupPagesByChapter && Array.isArray(doc.chapters) && doc.chapters.length)
       ? window.groupPagesByChapter(doc) : null;
     if (groups) {
@@ -14951,7 +21527,7 @@
         if (cOpen) (ch.pages || []).forEach(function (page) { emitPage(page, idxOf[page.id]); });
       });
     } else {
-      doc.pages.forEach(emitPage);
+      doc.pages.forEach(function (page, pi) { if (page) emitPage(page, pi); });
     }
     function emitPage(page, pi) {
       var open = !!openPages[page.id];
@@ -14959,7 +21535,10 @@
       var caret = outlineCaret(open, false);
       caret.addEventListener("click", function (e) { e.stopPropagation(); openPages[page.id] = !open; renderStructure(); });
       var picon = outlineIcon("tree-page__icon", "file-text");
-      var name = h("span", "tree-page__name" + (pi === currentPage ? " is-active" : "") + (inMultiPage(pi) ? " is-multi" : ""), pageDisplayName(page, doc));
+      // uio-E-C07 (EDIT-12): the derived chapter.page number lives in its OWN fixed column so the
+      // name row identifies itself cleanly -- no baked-in / doubled numbers, no truncated tail.
+      var num = h("span", "tree-page__num", pageNumberOf(page, doc));
+      var name = h("span", "tree-page__name" + (pi === currentPage ? " is-active" : "") + (inMultiPage(pi) ? " is-multi" : ""), pageTitlePart(page));
       name.addEventListener("click", function (e) {
         if (e.metaKey || e.ctrlKey) { clearMulti(); toggleMultiPage(pi); outlineAnchor = { kind: "page", pi: pi }; return; }
         if (e.shiftKey && outlineAnchor && outlineAnchor.kind === "page") {
@@ -14985,7 +21564,7 @@
         inp.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); inp.blur(); } else if (ev.key === "Escape") { ev.preventDefault(); inp.value = seedTitle; inp.blur(); } });
         inp.addEventListener("blur", commit);
       });
-      prow.appendChild(caret); prow.appendChild(picon); prow.appendChild(name);
+      prow.appendChild(caret); prow.appendChild(picon); prow.appendChild(num); prow.appendChild(name);
       makeDropTarget(prow, function () { return { page: pi, index: doc.pages[pi].blocks.length }; }, "drop-into");
       wireTreePageDrag(prow, page); // reorder pages / move between chapters (isolated from block DnD)
       wireOutlinePageMenu(prow, page, pi, name);
@@ -15073,7 +21652,7 @@
       settings: { shuffleQuestions: false, shuffleOptions: false },
       questions: [
         { id: "q" + Date.now(), type: "multipleChoice", methodLabel: "Select the answer", prompt: "Type your question here?", options: [ { text: "Correct answer", correct: true }, { text: "Wrong answer", correct: false }, { text: "Another wrong answer", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> Explain why this is right.", feedbackIncorrect: "Give a hint and point to the material to review." },
-        { id: "q" + (Date.now() + 1), type: "fillBlank", methodLabel: "Complete the sentence", stemBefore: "RF jamming is regulated because", stemAfter: "", options: [ { text: "it is ineffective against drones", correct: false }, { text: "it can interfere with legitimate RF systems", correct: true }, { text: "it only works at short range", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> It disrupts whole frequency bands, not just the drone.", feedbackIncorrect: "Think about who else shares the frequency band." }
+        { id: "q" + (Date.now() + 1), type: "fillBlank", methodLabel: "Complete the sentence", stemBefore: "This step is important because", stemAfter: "", options: [ { text: "it has no real effect", correct: false }, { text: "it directly supports the topic being covered", correct: true }, { text: "it only matters in rare cases", correct: false } ], feedbackCorrect: "<strong>Correct.</strong> Explain why this is right.", feedbackIncorrect: "Give a hint and point to the material to review." }
       ],
       done: { title: "Knowledge Check Complete", body: "All questions answered correctly. Continue to the next section.", retry: { on: false, label: "Try again" } }
     }; } },
@@ -15157,8 +21736,15 @@
       if (view === "grid" && U && U.BlockGrid) return U.BlockGrid({ minColWidth: 84 });
       return h("div", "asset-group__list");
     }
+    // SPEC 7: in a static cell, hide interactive block types from the library (existing blocks
+    // are untouched -- this only gates what NEW content can be added).
+    var cellInteractive = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(doc).interactive : true;
     var order = [], byGroup = {};
     LIBRARY.forEach(function (item, idx) {
+      // A palette item's block type lives in item.make() (the item itself has no .type). Cache it
+      // on first read, then gate on the cell: a static cell hides interactive types.
+      if (item.__bt === undefined) item.__bt = item.type || (item.make ? (item.make() || {}).type : null);
+      if (!paletteAllowsType(item.__bt, cellInteractive)) return; // static cell: skip interactive types
       var g = item.group || "Blocks";
       if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
       byGroup[g].push({ item: item, idx: idx });
@@ -15167,7 +21753,7 @@
       var det = h("details", "asset-group"); det.open = !collapsed[g];
       det.addEventListener("toggle", function () { setGroupCollapsed(g, !det.open); });
       var sum = h("summary", "asset-group__summary");
-      sum.appendChild(h("span", "disc__caret"));
+      sum.appendChild(h("span", "caret"));
       sum.appendChild(h("span", "asset-group__title", g));
       det.appendChild(sum);
       var body = groupBody();
@@ -15198,7 +21784,7 @@
       var det = h("details", "asset-group"); det.open = !collapsed[title];
       det.addEventListener("toggle", function () { setGroupCollapsed(title, !det.open); });
       var sum = h("summary", "asset-group__summary");
-      sum.appendChild(h("span", "disc__caret"));
+      sum.appendChild(h("span", "caret"));
       sum.appendChild(h("span", "asset-group__title", title));
       det.appendChild(sum);
       if (rows.length) {
@@ -15274,95 +21860,722 @@
     return { array: page.blocks, index: page.blocks.length };
   }
   function insertBlock(block) {
-    var page = doc.pages[currentPage];
     pushHistory(); // DDD: was undoable-gap — inserting a block from the palette couldn't be undone
     stampRoleStyle(block); // #145: auto-link a dropped text block (+ its children) to its type's theme role style
-    var L = insertLoc();
+    // #161 part 1: a source-link drop targets an explicit between-block gap (the drop-line the drag
+    // showed), not the selection-based insertLoc. __sourceLinkDropAt is set only for the duration of a
+    // source-link placement and auto-advances so a format-split's multiple blocks stack in order.
+    var L;
+    if (__sourceLinkDropAt && doc.pages[__sourceLinkDropAt.pageIndex]) {
+      var tp = doc.pages[__sourceLinkDropAt.pageIndex];
+      L = { array: tp.blocks, index: Math.max(0, Math.min(__sourceLinkDropAt.index, tp.blocks.length)) };
+      currentPage = __sourceLinkDropAt.pageIndex;
+      __sourceLinkDropAt.index = L.index + 1; // the next block in this placement lands after this one
+    } else {
+      L = insertLoc();
+    }
     L.array.splice(L.index, 0, block);
     reapplyStructural(findPageOfBlock(block)); // PERF: one page, not the world
     setActivePage(currentPage);
     focusFrame(currentPage);
     reselectBlockNode(block, "block"); // select the new block so repeated inserts stack after it
   }
-  // SS: the left panel stacks N panes (Structure, Blocks, Components — all visible),
-  // each collapsible, with a draggable split between every adjacent pair adjusting
-  // their combined height share. Generalized from a hard-coded two-pane model so a
-  // pane can be added/removed without touching the split math (#component-library
-  // reorg: added the third "Components" pane).
-  var LPANE_ORDER = [
-    { id: "lpane-structure", key: "structure", share: 6 },
-    { id: "lpane-blocks", key: "blocks", share: 4 },
-    { id: "lpane-components", key: "components", share: 3 }
-  ];
-  function wireLeftPanes() {
-    renderAssets();
-    renderComponentsPalette();
-    var panel = document.querySelector(".panel--left");
-    var panes = LPANE_ORDER.map(function (o) {
-      return { el: document.getElementById(o.id), key: o.key, share: o.share };
-    }).filter(function (o) { return o.el; });
-    var splits = Array.prototype.slice.call(panel ? panel.querySelectorAll(".lpane-split") : []);
-    if (!panel || panes.length < 2) return;
+  // SPEC 7 (decision 11): the left panel is a single 3-way switcher -- Structure . Blocks .
+  // Source -- with equal billing (Source insertion is a primary use now, not a bolt-on). Each
+  // .lpane carries data-lsec; the active section's pane(s) show and the rest drop out. Components
+  // folds INTO Blocks (James's call), so the Blocks section shows the Insert palette with the
+  // Reusable-components pane beneath it. The last-active section persists across reloads.
+  var LEFT_SECTIONS = ["structure", "blocks", "source"];
+  var LEFT_SECTION_KEY = "authoring.lpane.active";
+  var _activeLeftSection = "structure";
+  function applyLeftSection(sec) {
+    if (LEFT_SECTIONS.indexOf(sec) === -1) sec = "structure";
+    _activeLeftSection = sec;
+    try { localStorage.setItem(LEFT_SECTION_KEY, sec); } catch (e) {}
+    var panel = document.querySelector(".panel--left"); if (!panel) return;
+    Array.prototype.forEach.call(panel.querySelectorAll(".lpane[data-lsec]"), function (el) {
+      el.hidden = el.getAttribute("data-lsec") !== sec;
+    });
+    mountLeftSwitcher(); // re-render so the active segment reflects the state (also on programmatic switches)
+    if (sec === "source") renderEditSourcePanel();
+  }
+  function mountLeftSwitcher() {
+    var host = document.getElementById("lpane-switch"); if (!host) return;
+    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
+    host.innerHTML = "";
+    host.appendChild(U.SegmentedControl({
+      size: "sm",
+      options: [{ value: "structure", label: "Structure" }, { value: "blocks", label: "Blocks" }, { value: "source", label: "Source" }],
+      value: _activeLeftSection,
+      onChange: function (v) { applyLeftSection(v); }
+    }));
+  }
+  // SPEC 8 (source-link 02): the Edit left-panel Source tab is a read-only, live view of the OPEN
+  // document's product source doc -- the same content the author sees in the Source stage, in a
+  // narrow reading column, with its own find (SourceDoc.findMatches + cycle) and a TOC
+  // (SourceDoc.outline, click-to-jump + scroll-spy). It keys off the open doc's product
+  // (doc.meta.productId), NOT the rail scope, so it always matches the course in front of you. All
+  // source editing stays in the Source stage (the single-host lesson) -- nothing here is editable.
+  function renderEditSourcePanel() {
+    var host = document.getElementById("tab-source"); if (!host) return;
+    host.innerHTML = "";
+    var SD = window.SourceDoc, U = window.VersoUI;
+    var productId = (doc && doc.meta && doc.meta.productId) || "";
+    if (!productId) {
+      host.appendChild(h("div", "source-stage__empty", "This document isn't attached to a Product. Use Save/Recents -> Promote to Product to link it, then its source appears here."));
+      return;
+    }
+    var master = productId ? sourceMasterFor(productId) : null;
+    if (!master || !master.doc || !SD) {
+      host.appendChild(h("div", "source-stage__empty", "This Product has no source document yet. Build it in the Source stage."));
+      return;
+    }
+    var model = SD.fromJSON(master.doc);
+    // source-link 03: keep the live master + model + its component id so the Place gesture can add a
+    // link mark to the master and persist it (and so the canvas can resolve placements back to it).
+    __editSourceMaster = master; __editSourceModel = model;
+    __editSourceMasterId = (window.ProductsStore[productId] && window.ProductsStore[productId].groundTruthId) || null;
+    var wrap = h("div", "edit-source");
 
-    function syncSplits() {
-      // a split between pane i and pane i+1 only matters (is shown) when BOTH are open
-      splits.forEach(function (split, i) {
-        var a = panes[i], b = panes[i + 1];
-        var bothOpen = a && b && !a.el.classList.contains("is-collapsed") && !b.el.classList.contains("is-collapsed");
-        split.style.display = bothOpen ? "" : "none";
+    // ---- find (reuses SD.findMatches + a small local cycle, mirroring the Source stage). The
+    // search field reuses the shared .vbrowser__search chrome (same control as the doc browser +
+    // Source stage) rather than a bespoke input, for app-wide search parity. ----
+    var matches = [], findIdx = 0;
+    var searchBar = h("div", "edit-source__searchbar");
+    var search = h("label", "vbrowser__search");
+    search.innerHTML = window.Icon ? window.Icon("search") : "";
+    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "find in source"; input.spellcheck = false;
+    var count = h("span", "edit-source__count", "");
+    search.appendChild(input); search.appendChild(count);
+    searchBar.appendChild(search);
+    wrap.appendChild(searchBar);
+
+    var docCol = h("div", "edit-source__doc");
+    function clearFindHi() { Array.prototype.forEach.call(docCol.querySelectorAll(".is-find-current"), function (el) { el.classList.remove("is-find-current"); }); }
+    function scrollToHit(i) {
+      clearFindHi();
+      var mt = matches[i]; if (!mt) return;
+      var el = docCol.querySelector('[data-node="' + mt.nodeKey + '"]');
+      if (el) { el.classList.add("is-find-current"); el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    }
+    function runFind() {
+      var q = input.value.trim();
+      matches = q ? SD.findMatches(model, q) : [];
+      findIdx = 0;
+      count.textContent = q ? (matches.length ? (matches.length + " found") : "no matches") : "";
+      if (matches.length) scrollToHit(0); else clearFindHi();
+    }
+    function cycleFind(dir) {
+      if (!matches.length) return;
+      findIdx = (findIdx + dir + matches.length) % matches.length;
+      count.textContent = (findIdx + 1) + " / " + matches.length;
+      scrollToHit(findIdx);
+    }
+    input.addEventListener("input", runFind);
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); cycleFind(e.shiftKey ? -1 : 1); } });
+
+    // ---- table of contents (SD.outline: chapters + headings, click to jump, scroll-spy) ----
+    var outline = SD.outline(model), tocRows = [];
+    if (outline.length) {
+      var toc = h("nav", "edit-source__toc"); toc.setAttribute("aria-label", "Source outline");
+      function tocRow(node) {
+        // Reuse the shared .source-doc__toc-item row (look + is-current scroll-spy class the Source
+        // stage's own TOC uses) rather than a bespoke row.
+        var r = h("button", "source-doc__toc-item source-doc__toc-item--l" + (node.level || 2), node.text || "Untitled");
+        r.type = "button"; r.setAttribute("data-toc-key", node.key); r.title = node.text || "";
+        r.addEventListener("click", function () { var t = docCol.querySelector('[data-node="' + node.key + '"]'); if (t) t.scrollIntoView({ block: "start", behavior: "smooth" }); });
+        toc.appendChild(r); tocRows.push(r);
+      }
+      outline.forEach(function (ch) { tocRow(ch); (ch.children || []).forEach(tocRow); });
+      wrap.appendChild(toc);
+    }
+
+    // ---- reading column (read-only projection; the SAME renderSourceDocNode the stage uses) ----
+    (model.nodes || []).forEach(function (n) { docCol.appendChild(renderSourceDocNode(n)); });
+    // 07: a source figure is draggable as one unit -> a linked image block. Object-anchor descriptor
+    // (no start/len). Images aren't text-selectable, so a pointerdown-drag on the figure is safe.
+    Array.prototype.forEach.call(docCol.querySelectorAll("figure.source-doc__figure[data-object]"), function (figEl) {
+      figEl.classList.add("edit-source__figure");
+      figEl.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault();
+        startSourceLinkDrag({ anchor: { nodeKey: figEl.getAttribute("data-node") } }, ev);
+      });
+    });
+    // Scroll-spy: highlight the TOC entry for the last heading scrolled above the top.
+    docCol.addEventListener("scroll", function () {
+      if (!tocRows.length) return;
+      var top = docCol.getBoundingClientRect().top + 8, curKey = null;
+      Array.prototype.forEach.call(docCol.querySelectorAll(".source-doc__h[data-node]"), function (el) { if (el.getBoundingClientRect().top <= top) curKey = el.getAttribute("data-node"); });
+      tocRows.forEach(function (r) { r.classList.toggle("is-current", r.getAttribute("data-toc-key") === curKey); });
+    });
+    wrap.appendChild(docCol);
+    host.appendChild(wrap);
+
+    // source-link 03: paint passages already linked into the OPEN document (a persistent highlight,
+    // distinct from the transient find highlight), and honour a pending jump-to-source request.
+    paintPanelLinkedPassages(docCol, model);
+    // A text selection in the read-only column raises the floating "Place" bar (arm-then-click).
+    docCol.addEventListener("mouseup", function () { setTimeout(function () { maybeShowPlaceBar(docCol, model); }, 0); });
+    if (__pendingSourceJumpMark && __pendingSourceJumpMark.masterId === __editSourceMasterId) {
+      var jm = SD.markById(model, __pendingSourceJumpMark.markId);
+      __pendingSourceJumpMark = null;
+      if (jm) {
+        var jk = jm.anchor && jm.anchor.nodeKey;
+        var tel = jk && docCol.querySelector('[data-node="' + jk + '"]');
+        if (tel) { tel.classList.add("is-find-current"); setTimeout(function () { tel.scrollIntoView({ block: "center", behavior: "smooth" }); }, 0); }
+      }
+    }
+  }
+  if (window.__productRail) window.__productRail.renderEditSourcePanel = renderEditSourcePanel; // browser-verify hook
+
+  // ==== source-link 03: select a range -> place a live-linked text block (arm-then-click) ========
+  // The panel viewer (02) is read-only, but its text is selectable. Selecting a range raises a
+  // small floating "Place" bar; Place creates a type:"link" mark on the source master and arms
+  // placement; the next canvas click drops one locked, live-linked text block that resolves through
+  // the 01 resolver. Cross-node selections (a heading through a paragraph) link as one passage.
+  var __editSourceMaster = null, __editSourceModel = null, __editSourceMasterId = null;
+  var __armedSourceLink = null;        // { masterId, markId } armed for the next canvas click
+  var __pendingSourceJumpMark = null;  // { masterId, markId } to scroll to after the panel re-renders
+  var __sourceLinkDropAt = null;       // #161 part 1: { pageIndex, index } explicit drop gap for a placement
+
+  // #161 part 1: the between-block gap under the cursor on the target page -> where a dropped linked
+  // block should land, plus the Y to draw the drop-line at. Only TOP-LEVEL page blocks are gap targets
+  // (a linked block drops between page blocks, not inside a column); returns null off any page.
+  function sourceLinkDropGap(cx, cy) {
+    var pi = pageIndexFromPoint(cx, cy); if (pi < 0) return null;
+    var fr = frameElementUnder(cx, cy); if (!fr) return null;
+    var page = doc.pages[pi]; if (!page) return null;
+    var tops = Array.prototype.filter.call(fr.querySelectorAll(".canvas-block"), function (el) {
+      return el.__block && page.blocks.indexOf(el.__block) !== -1; // top-level only (skip nested)
+    });
+    tops.sort(function (a, b) { return page.blocks.indexOf(a.__block) - page.blocks.indexOf(b.__block); });
+    var index = page.blocks.length, lineY = null;
+    for (var i = 0; i < tops.length; i++) {
+      var r = tops[i].getBoundingClientRect();
+      if (cy < r.top + r.height / 2) { index = page.blocks.indexOf(tops[i].__block); lineY = r.top; break; }
+    }
+    if (lineY == null) { // below every block -> the trailing gap
+      if (tops.length) lineY = tops[tops.length - 1].getBoundingClientRect().bottom;
+      else lineY = fr.getBoundingClientRect().top + 14; // empty page
+    }
+    return { pageIndex: pi, index: index, lineY: lineY, frameRect: fr.getBoundingClientRect() };
+  }
+  function hideSourceLinkDropLine() { var l = document.getElementById("source-link-dropline"); if (l) l.remove(); }
+  function showSourceLinkDropLine(cx, cy) {
+    var gap = sourceLinkDropGap(cx, cy);
+    if (!gap) { hideSourceLinkDropLine(); return; }
+    var line = document.getElementById("source-link-dropline");
+    if (!line) { line = h("div", "source-link-dropline"); line.id = "source-link-dropline"; document.body.appendChild(line); }
+    line.style.left = gap.frameRect.left + "px";
+    line.style.width = gap.frameRect.width + "px";
+    line.style.top = gap.lineY + "px";
+  }
+
+  // Char offset of a DOM point within a block element's text (walks all text nodes -> matches the
+  // SourceDoc plain-text offset model the marks anchor to).
+  function panelCharOffset(blockEl, container, offset) {
+    var r = document.createRange();
+    r.selectNodeContents(blockEl);
+    try { r.setEnd(container, offset); } catch (e) { return 0; }
+    return r.toString().length;
+  }
+  // Build a SourceDoc range descriptor {anchor, endAnchor?} from the current selection in the panel,
+  // or null when the selection is empty / collapsed / outside the reading column. Single-node ->
+  // one anchor; cross-node -> anchor (first node, start..end) + endAnchor (last node, 0..end),
+  // matching SourceDoc.addMark's multi-block shape.
+  function panelSelectionDescriptor(docCol, model) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    var rng = sel.getRangeAt(0);
+    if (!docCol.contains(rng.startContainer) || !docCol.contains(rng.endContainer)) return null;
+    var sEl = (rng.startContainer.nodeType === 3 ? rng.startContainer.parentNode : rng.startContainer);
+    var eEl = (rng.endContainer.nodeType === 3 ? rng.endContainer.parentNode : rng.endContainer);
+    var sBlock = sEl && sEl.closest ? sEl.closest("[data-node]") : null;
+    var eBlock = eEl && eEl.closest ? eEl.closest("[data-node]") : null;
+    if (!sBlock || !eBlock) return null;
+    var sKey = sBlock.getAttribute("data-node"), eKey = eBlock.getAttribute("data-node");
+    var sOff = panelCharOffset(sBlock, rng.startContainer, rng.startOffset);
+    var eOff = panelCharOffset(eBlock, rng.endContainer, rng.endOffset);
+    var SD = window.SourceDoc;
+    if (sKey === eKey) {
+      if (eOff <= sOff) return null;
+      return { anchor: { nodeKey: sKey, start: sOff, len: eOff - sOff } };
+    }
+    var sNode = SD.nodeByKey(model, sKey);
+    var sLen = sNode ? SD.nodeText(sNode).length : sOff;
+    return { anchor: { nodeKey: sKey, start: sOff, len: Math.max(0, sLen - sOff) }, endAnchor: { nodeKey: eKey, start: 0, len: eOff } };
+  }
+  function hidePlaceBar() { var b = document.querySelector("[data-source-placebar]"); if (b) b.remove(); }
+  function maybeShowPlaceBar(docCol, model) {
+    hidePlaceBar();
+    if (__armedSourceLink) return; // already arming -> don't stack
+    var desc = panelSelectionDescriptor(docCol, model);
+    if (!desc) return;
+    var sel = window.getSelection();
+    var rect = sel.getRangeAt(0).getBoundingClientRect();
+    var bar = h("div", "source-placebar"); bar.setAttribute("data-source-placebar", "1");
+    // 04: a grab handle starts a custom pointer-drag (decoupled from the text selection, which is why
+    // it's NOT native HTML5 DnD -- setting draggable would kill selecting text in the panel).
+    var grip = h("button", "source-placebar__grip"); grip.type = "button"; grip.title = "Drag onto the canvas to place";
+    grip.innerHTML = window.Icon ? window.Icon("grip-vertical") : "";
+    grip.addEventListener("pointerdown", function (ev) { ev.preventDefault(); startSourceLinkDrag(desc, ev); });
+    bar.appendChild(grip);
+    var btn = window.VersoUI && window.VersoUI.Button
+      ? window.VersoUI.Button({ variant: "primary", size: "sm", icon: "link", label: "Place", onClick: function () { armSourceLinkPlacement(desc); } })
+      : h("button", null, "Place");
+    if (!(window.VersoUI && window.VersoUI.Button)) btn.addEventListener("click", function () { armSourceLinkPlacement(desc); });
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+    bar.style.top = Math.max(8, rect.top - bar.offsetHeight - 8) + "px";
+    bar.style.left = Math.max(8, rect.left) + "px";
+  }
+  // Place: arm the next canvas click to drop the linked copy. Mark creation is DEFERRED to the drop
+  // (05): a range spanning formats splits into several linked blocks, each with its own link mark,
+  // so the marks are minted per run when the drop resolves — we carry the range descriptor, not a
+  // pre-made single mark.
+  function armSourceLinkPlacement(desc) {
+    if (!window.SourceDoc || !__editSourceModel || !__editSourceMasterId) return;
+    __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
+    document.body.classList.add("is-arming-source-link");
+    hidePlaceBar();
+    var s = window.getSelection(); if (s) s.removeAllRanges();
+    sourceToast("Linked passage armed — click a spot in the canvas to place it. Esc to cancel.");
+  }
+  function cancelArmedSourceLink() {
+    if (!__armedSourceLink) return;
+    __armedSourceLink = null;
+    document.body.classList.remove("is-arming-source-link");
+    sourceToast("Placement cancelled.");
+  }
+  // format-split (05): source structure -> destination block type. heading lvl1 -> Heading 1
+  // (heading block), heading lvl2/3 -> Heading 2 (subheading block), paragraph/callout -> Body.
+  var SOURCE_LINK_BLOCK_TYPE = { h1: "heading", h2: "subheading", body: "paragraph" };
+  var SOURCE_LINK_TEXT_TYPES = { heading: 1, subheading: 1, paragraph: 1, note: 1, quote: 1 };
+  // A drop target counts as "a text block to merge into" (06) only if it's an editable text block
+  // that isn't itself a whole-block linked placement (don't nest a link inside a link).
+  function isSourceLinkTextBlock(b) { return !!(b && SOURCE_LINK_TEXT_TYPES[b.type] && !b.sourceLink); }
+  // The armed drop. Dropping ONTO an existing text block appends a locked linked inline span there
+  // (06); dropping in a gap runs the format-split planner and inserts one linked block per same-
+  // format run (05). Optional (cx,cy) = the drop point (from the drag or the armed click); absent ->
+  // gap placement on the current page.
+  function placeArmedSourceLink(cx, cy) {
+    var a = __armedSourceLink; if (!a) return false;
+    __armedSourceLink = null;
+    document.body.classList.remove("is-arming-source-link");
+    // An object anchor (no start/len) is a figure link (07) -> always a new linked image block.
+    var isObject = !!(a.descriptor && a.descriptor.anchor && a.descriptor.anchor.len == null);
+    if (cx != null) {
+      if (!isObject) {
+        var el = document.elementFromPoint(cx, cy);
+        var blockEl = el && el.closest ? el.closest(".canvas-block") : null;
+        if (blockEl && isSourceLinkTextBlock(blockEl.__block)) return dropInlineSourceLink(a, blockEl.__block);
+      }
+      var pi = pageIndexFromPoint(cx, cy); if (pi >= 0) setActivePage(pi);
+      // #161 part 1: land the block(s) at the between-block gap under the cursor (where the drop-line
+      // showed), not at the current selection. Consumed by insertBlock, cleared after the placement.
+      var gap = sourceLinkDropGap(cx, cy);
+      if (gap) __sourceLinkDropAt = { pageIndex: gap.pageIndex, index: gap.index };
+    }
+    var result = isObject ? placeSourceLinkImage(a) : placeSourceLinkBlocks(a);
+    __sourceLinkDropAt = null; // one placement only -- never leak the gap into ordinary insertBlock calls
+    return result;
+  }
+  // 07: drop a source figure -> a new linked image block. The link is an OBJECT mark (anchor
+  // {nodeKey}, no start/len); the image block resolves its src/alt from the figure node via 01.
+  function placeSourceLinkImage(a) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor }); // object mark (len null)
+    master.doc = SD.toJSON(model); saveLibrary();
+    insertBlock({ type: "image", id: mintId(), sourceLink: { masterId: a.masterId, markId: mk.id } });
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel();
+    sourceToast("Linked image placed.");
+    return true;
+  }
+  // 05: gap placement -- run the format-split planner and insert ONE locked, live-linked text block
+  // per contiguous same-format run (each in the destination's matching preset). A single-format range
+  // yields one block; consecutive same-format nodes stay in one block joined by line breaks.
+  function placeSourceLinkBlocks(a) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var plan = SD.planLinkedBlocks(model, a.descriptor);
+    if (!plan.length) return false;
+    // Mint every link mark and PERSIST them to the master BEFORE inserting any block (#161): insertBlock
+    // renders the canvas, and the render resolver (resolveSourceLinkContent) reads master.doc to fill the
+    // linked copy live. Persisting AFTER the insert loop (the old order) meant that first render saw the
+    // pre-mark master.doc, markById returned null, and the block rendered blank + collapsed until an
+    // unrelated re-render. placeSourceLinkImage already persists before its insertBlock -- match it.
+    var markIds = plan.map(function (run) {
+      return SD.addMark(model, { type: "link", anchor: run.anchor, endAnchor: run.endAnchor }).id;
+    });
+    master.doc = SD.toJSON(model); saveLibrary();
+    plan.forEach(function (run, i) {
+      insertBlock({ type: SOURCE_LINK_BLOCK_TYPE[run.format] || "paragraph", id: mintId(), sourceLink: { masterId: a.masterId, markId: markIds[i] } });
+    });
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel(); // repaint so newly-linked passages highlight
+    sourceToast(plan.length > 1 ? ("Placed " + plan.length + " linked blocks.") : "Linked block placed.");
+    return true;
+  }
+  function slEscape(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  // 06: drop onto a text block -> append a locked, live-linked inline span to that block. The whole
+  // dropped range flattens to ONE link mark (you're merging into body prose; the 05 format-split is
+  // between-block only). Owned text around the span stays editable; the span is contenteditable=false
+  // (locked) and resolves live via 01's #120-style inline post-pass, baking at export.
+  function dropInlineSourceLink(a, block) {
+    var SD = window.SourceDoc;
+    var master = libComponents()[a.masterId];
+    if (!master || !master.doc) { sourceToast("The source is no longer available."); return false; }
+    var model = SD.fromJSON(master.doc);
+    var mk = SD.addMark(model, { type: "link", anchor: a.descriptor.anchor, endAnchor: a.descriptor.endAnchor });
+    master.doc = SD.toJSON(model); saveLibrary();
+    pushHistory();
+    var span = '<span data-source-link="' + mk.id + '" data-master="' + a.masterId + '">' + slEscape(SD.markText(model, mk)) + '</span>';
+    block.text = (block.text ? block.text + " " : "") + span;
+    reapplyBlock(block);
+    decorateSourceLinks();
+    if (_activeLeftSection === "source") renderEditSourcePanel();
+    sourceToast("Linked span added.");
+    return true;
+  }
+  // 04: the destination page under a drop point (its .frame -> .page[data-page-id] -> doc index).
+  function pageIndexFromPoint(cx, cy) {
+    var fr = frameElementUnder(cx, cy); if (!fr) return -1;
+    var pageEl = fr.querySelector(".page[data-page-id]");
+    var pid = pageEl && pageEl.getAttribute("data-page-id");
+    return pid ? (doc.pages || []).findIndex(function (p) { return p.id === pid; }) : -1;
+  }
+  // 04: the preferred placement gesture -- press the grab handle and drag the passage onto the
+  // canvas. A ghost follows the cursor; the page under the cursor lights up as the drop target;
+  // release resolves through the SAME placement the arm-then-click path uses (placeArmedSourceLink).
+  // Custom pointer events (not native DnD) so selecting text in the read-only panel still works.
+  function startSourceLinkDrag(desc, ev) {
+    hidePlaceBar();
+    var ghost = h("div", "source-link-ghost", "Linked copy"); document.body.appendChild(ghost);
+    document.body.classList.add("is-dragging-source-link");
+    function clearTarget() { var p = document.querySelector(".frame.is-drop-target"); if (p) p.classList.remove("is-drop-target"); }
+    // Dropping ONTO an editable text block appends an inline span there (06); dropping in a gap inserts
+    // a new block. Show the between-block drop-line only for the gap case; highlight the block for the
+    // inline case -- so the drag always previews exactly where the copy will land (#161 part 1).
+    var isObjDrag = !!(desc && desc.anchor && desc.anchor.len == null);
+    function overTextBlock(x, y) {
+      if (isObjDrag) return null; // a figure always becomes a new image block, never an inline span
+      var el = document.elementFromPoint(x, y); var be = el && el.closest ? el.closest(".canvas-block") : null;
+      return (be && isSourceLinkTextBlock(be.__block)) ? be : null;
+    }
+    function clearInlineTarget() { var b = document.querySelector(".canvas-block.is-sl-inline-target"); if (b) b.classList.remove("is-sl-inline-target"); }
+    function move(e) {
+      ghost.style.left = (e.clientX + 12) + "px"; ghost.style.top = (e.clientY + 12) + "px";
+      clearTarget(); clearInlineTarget();
+      var fr = frameElementUnder(e.clientX, e.clientY); if (fr) fr.classList.add("is-drop-target");
+      var tb = overTextBlock(e.clientX, e.clientY);
+      if (tb) { tb.classList.add("is-sl-inline-target"); hideSourceLinkDropLine(); }
+      else if (fr) { showSourceLinkDropLine(e.clientX, e.clientY); }
+      else { hideSourceLinkDropLine(); }
+    }
+    function up(e) {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      ghost.remove(); document.body.classList.remove("is-dragging-source-link"); clearTarget(); clearInlineTarget(); hideSourceLinkDropLine();
+      if (!frameElementUnder(e.clientX, e.clientY)) { sourceToast("Dropped outside the canvas — nothing placed."); return; }
+      __armedSourceLink = { masterId: __editSourceMasterId, descriptor: desc };
+      placeArmedSourceLink(e.clientX, e.clientY); // routes to inline-span (onto a text block) or gap placement
+    }
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    move(ev);
+  }
+  // Two-way jump (direction: canvas -> panel): clicking a linked block's indicator opens the Source
+  // tab and scrolls the panel to the exact source passage.
+  function jumpSourcePanelToMark(masterId, markId) {
+    __pendingSourceJumpMark = { masterId: masterId, markId: markId };
+    if (typeof applyLeftSection === "function") applyLeftSection("source"); // re-renders the panel, which honours the pending jump
+  }
+  // On-canvas link indicator: a small clickable badge on every placed linked block (editor chrome
+  // only -- never rendered into the shipped course). Idempotent; re-run after each render.
+  function decorateSourceLinks(scope) {
+    var root = scope || canvas; if (!root) return;
+    Array.prototype.forEach.call(root.querySelectorAll(".source-link-badge"), function (b) { b.remove(); });
+    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block"), function (node) {
+      node.classList.remove("is-source-linked");
+      var b = node.__block;
+      if (b && b.sourceLink && b.sourceLink.markId) {
+        node.classList.add("is-source-linked");
+        var badge = h("button", "source-link-badge"); badge.type = "button";
+        badge.innerHTML = window.Icon ? window.Icon("link") : "";
+        badge.title = "Linked from source — jump, or pick / create an alternate";
+        badge.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); openSourceLinkMenu({ kind: "block", block: b }, b.sourceLink.masterId, b.sourceLink.markId, e.clientX, e.clientY); });
+        node.appendChild(badge);
+      }
+    });
+    // 06: per-span indicator inside a mixed block -- each locked linked inline span gets its own
+    // contextual menu (jump + alternate), distinct from the whole-block badge above.
+    Array.prototype.forEach.call(root.querySelectorAll(".canvas-block span[data-source-link]"), function (sp) {
+      sp.classList.add("is-source-linked-span");
+      if (sp.__slWired) return; sp.__slWired = true;
+      sp.title = "Linked from source — jump, or pick / create an alternate";
+      sp.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var owner = sp.closest ? sp.closest(".canvas-block") : null;
+        if (!owner || !owner.__block) return;
+        openSourceLinkMenu({ kind: "span", block: owner.__block, spanEl: sp, markId: sp.getAttribute("data-source-link") }, sp.getAttribute("data-master"), sp.getAttribute("data-source-link"), e.clientX, e.clientY);
+      });
+    });
+  }
+  // Panel: highlight passages already linked into the OPEN document (a persistent cue, distinct from
+  // the find highlight). A link mark counts as "used here" when a block in the open doc points at it.
+  function paintPanelLinkedPassages(docCol, model) {
+    var SD = window.SourceDoc;
+    var used = {};
+    walkBlocks(doc, function (b) { if (b.sourceLink && b.sourceLink.masterId === __editSourceMasterId && b.sourceLink.markId) used[b.sourceLink.markId] = 1; });
+    (model.marks || []).forEach(function (m) {
+      if (m.type !== "link" || !used[m.id]) return;
+      SD.markSpans(model, m).forEach(function (sp) {
+        var el = docCol.querySelector('[data-node="' + sp.nodeKey + '"]');
+        if (el) el.classList.add("is-source-linked-passage");
+      });
+    });
+  }
+  // ==== source-link 08: alternates (create + pick) from the canvas ==============================
+  // Linked copy is locked; the sanctioned way to say it differently in ONE place is an alternate --
+  // a named fork registered on the source master (so it's visible + pushable from the Source stage,
+  // 10) that this single placement points at via altId. A location shows base until an alternate is
+  // picked or pushed to it (never automatic). Text alternates are span/range-contextual.
+  function sourceAltSnippet(s) { s = String(s == null ? "" : s); return s.length > 32 ? s.slice(0, 32) + "…" : s; }
+  // Alternate marks anchored identically to a link mark (its candidate alternates).
+  function sourceLinkAlternates(model, link) {
+    var SD = window.SourceDoc, a = link.anchor, end = link.endAnchor;
+    return (model.marks || []).filter(function (m) {
+      if (m.type !== "alternate" || SD.isObjectMark(m) !== SD.isObjectMark(link)) return false;
+      if (!m.anchor || m.anchor.nodeKey !== a.nodeKey || m.anchor.start !== a.start || m.anchor.len !== a.len) return false;
+      if (!!end !== !!m.endAnchor) return false;
+      return !end || (m.endAnchor.nodeKey === end.nodeKey && m.endAnchor.len === end.len);
+    });
+  }
+  // The altId a target (a whole linked block, or one inline span inside a block) currently points at.
+  function sourceLinkTargetAlt(target) {
+    if (target.kind === "block") return (target.block.sourceLink && target.block.sourceLink.altId) || null;
+    return target.spanEl ? (target.spanEl.getAttribute("data-alt") || null) : null;
+  }
+  // Point a target at an alternate (altId) or back to base (null). Block -> block.sourceLink.altId;
+  // span -> data-alt on that span inside the owning block's rich text. This block/span ONLY.
+  function setSourceLinkTargetAlt(target, altId) {
+    if (target.kind === "block") {
+      if (!target.block.sourceLink) return;
+      if (altId) target.block.sourceLink.altId = altId; else delete target.block.sourceLink.altId;
+    } else {
+      var host = document.createElement("div"); host.innerHTML = target.block.text || "";
+      var sp = host.querySelector('span[data-source-link="' + target.markId + '"]');
+      if (!sp) return;
+      if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt");
+      target.block.text = host.innerHTML;
+    }
+    pushHistory(); reapplyBlock(target.block); decorateSourceLinks(); scheduleSave();
+    sourceToast(altId ? "Alternate applied to this block." : "Reset to base wording.");
+  }
+  // Create a new alternate wording on the source master, then point THIS target at it. Text only in
+  // v1 (an object/figure alternate is whole-block; figure-swap storage is a follow-up).
+  function createSourceAlternate(target, masterId, markId) {
+    var SD = window.SourceDoc, master = libComponents()[masterId];
+    if (!master || !master.doc) return;
+    var model = SD.fromJSON(master.doc);
+    var link = SD.markById(model, markId); if (!link) return;
+    if (SD.isObjectMark(link)) { sourceToast("Object (figure) alternates are coming soon."); return; }
+    var base = SD.markText(model, link);
+    var shell = dsModalShell({
+      title: "Create an alternate",
+      subtitle: "A named fork of this passage, applied to this block only. It registers on the source, so you can reuse or push it later.",
+      primaryLabel: "Create alternate",
+      onPrimary: function () {
+        var wording = (ta.value || "").trim();
+        if (!wording) { ta.focus(); return; }
+        var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: wording, tag: (nameIn.value || "").trim(), baseText: base });
+        master.doc = SD.toJSON(model); saveLibrary();
+        setSourceLinkTargetAlt(target, alt.id);
+        shell.modal.close();
+      }
+    });
+    var nameIn = modalText(shell.body, "Name (optional)", "", "e.g. Short form");
+    var lbl = modalField(shell.body, "Wording");
+    var ta = h("textarea", "prop-text modal-field__control"); ta.rows = 3; ta.value = base; lbl.appendChild(ta);
+    setTimeout(function () { ta.focus(); ta.select(); }, 0);
+  }
+  // The per-target source-link menu (badge / span indicator): jump to source, pick base or an
+  // existing alternate, or create a new one. Reuses the canonical context menu.
+  function openSourceLinkMenu(target, masterId, markId, x, y) {
+    var SD = window.SourceDoc, master = libComponents()[masterId];
+    var cur = sourceLinkTargetAlt(target);
+    var items = [{ label: "Jump to source", onClick: function () { jumpSourcePanelToMark(masterId, markId); } }, { sep: true },
+      { label: "Base wording", active: !cur, onClick: function () { setSourceLinkTargetAlt(target, null); } }];
+    if (master && master.doc) {
+      var model = SD.fromJSON(master.doc);
+      var link = SD.markById(model, markId);
+      if (link) sourceLinkAlternates(model, link).forEach(function (alt) {
+        items.push({ label: (alt.tag ? alt.tag + " — " : "") + sourceAltSnippet(alt.alt), active: cur === alt.id, onClick: function () { setSourceLinkTargetAlt(target, alt.id); } });
       });
     }
-    // restore collapse state + wire collapse toggles
-    panes.forEach(function (o) {
-      var key = "authoring.lpane." + o.key;
-      var v = null; try { v = localStorage.getItem(key); } catch (e) {}
-      if (v === "1") o.el.classList.add("is-collapsed");
-      var head = o.el.querySelector(".lpane__head");
-      if (head) head.addEventListener("click", function (e) {
-        if (e.target.closest(".outliner-add-btn")) return; // let the + button through
-        o.el.classList.toggle("is-collapsed");
-        try { localStorage.setItem(key, o.el.classList.contains("is-collapsed") ? "1" : "0"); } catch (_) {}
-        syncSplits();
-      });
-    });
-    syncSplits();
+    items.push({ sep: true }, { label: "Create an alternate…", onClick: function () { createSourceAlternate(target, masterId, markId); } });
+    showContextMenu(x, y, items);
+  }
 
-    // each adjacent pair's split ratio is stored independently, so dragging one
-    // split only redistributes the two panes touching it, leaving the rest alone.
-    function applyShares() { panes.forEach(function (o) { o.el.style.flexGrow = String(o.share); }); }
-    splits.forEach(function (split, i) {
-      var a = panes[i], b = panes[i + 1];
-      if (!a || !b) return;
-      var combined = a.share + b.share;
-      var r = a.share / combined;
-      var storeKey = "authoring.lpane.split." + i;
-      try {
-        var s = localStorage.getItem(storeKey);
-        if (!s && i === 0) s = localStorage.getItem("authoring.lpane.split"); // pre-reorg key
-        if (s) r = Math.min(0.85, Math.max(0.15, parseFloat(s)));
-      } catch (e) {}
-      a.share = combined * r; b.share = combined * (1 - r);
-    });
-    applyShares();
-
-    splits.forEach(function (split, i) {
-      var a = panes[i], b = panes[i + 1];
-      if (!a || !b) return;
-      var combined = a.share + b.share;
-      split.addEventListener("mousedown", function (e) {
-        e.preventDefault(); split.classList.add("is-dragging");
-        function move(ev) {
-          var aRect = a.el.getBoundingClientRect(), bRect = b.el.getBoundingClientRect();
-          var top = aRect.top, span = (bRect.bottom - top) || 1;
-          var ratio = Math.min(0.85, Math.max(0.15, (ev.clientY - top) / span));
-          a.share = combined * ratio; b.share = combined * (1 - ratio);
-          applyShares();
-          try { localStorage.setItem("authoring.lpane.split." + i, String(ratio)); } catch (_) {}
+  // ==== source-link 09/10: live where-used + base-edit warning + alternate push =================
+  // The real, live where-used for a source link mark: every block (or inline span) in ANY document
+  // that references it, computed by walking the registry (like libraryWhereUsedDetail) so it never
+  // drifts from a stored list. altId per location = whether that placement shows base or a fork.
+  function sourceLinkWhereUsed(masterId, markId) {
+    var out = [], reg = registry; // the LIVE in-memory registry (getRegistry() returns a stale storage copy)
+    Object.keys(reg).forEach(function (code) {
+      var d = reg[code]; if (!d) return;
+      var title = (d.meta && d.meta.title) || code;
+      walkBlocks(d, function (b) {
+        if (b.sourceLink && b.sourceLink.masterId === masterId && (!markId || b.sourceLink.markId === markId)) {
+          out.push({ docCode: code, docTitle: title, blockId: b.id, markId: b.sourceLink.markId, altId: b.sourceLink.altId || null, kind: "block" });
         }
-        function up() { split.classList.remove("is-dragging"); document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); }
-        document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+        if (b.text && typeof b.text === "string" && b.text.indexOf("data-source-link=") !== -1) {
+          var probe = document.createElement("div"); probe.innerHTML = b.text;
+          Array.prototype.forEach.call(probe.querySelectorAll("span[data-source-link]"), function (sp) {
+            if (sp.getAttribute("data-master") !== masterId) return;
+            var mid = sp.getAttribute("data-source-link"); if (markId && mid !== markId) return;
+            out.push({ docCode: code, docTitle: title, blockId: b.id, markId: mid, altId: sp.getAttribute("data-alt") || null, kind: "span" });
+          });
+        }
       });
     });
+    return out;
+  }
+  // Set/clear a where-used location's altId in ITS OWN document (block field or inline span data-alt).
+  // Shared by the 09 fork + the 10 push.
+  function applyAltToLocation(reg, loc, altId) {
+    var d = reg[loc.docCode]; if (!d) return;
+    walkBlocks(d, function (b) {
+      if (b.id !== loc.blockId) return;
+      if (loc.kind === "span") {
+        var host = document.createElement("div"); host.innerHTML = b.text || "";
+        var sp = host.querySelector('span[data-source-link="' + loc.markId + '"]');
+        if (sp) { if (altId) sp.setAttribute("data-alt", altId); else sp.removeAttribute("data-alt"); b.text = host.innerHTML; }
+      } else if (b.sourceLink) {
+        if (altId) b.sourceLink.altId = altId; else delete b.sourceLink.altId;
+      }
+    });
+  }
+
+  // --- 09: base-edit warning + fork (fires at LOCK, matching the unlock->lock commit model) ---
+  var __sourceLinkOldText = null, __sourcePreEditModelJson = null;
+  // On unlock: snapshot each link mark's current wording (so "fork" can freeze it) + the whole model
+  // (so "cancel" can revert the edits). Only when the doc actually carries link marks.
+  function snapshotSourceLinkBase() {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    if (!SD || !model || !(model.marks || []).some(function (m) { return m.type === "link"; })) return;
+    __sourceLinkOldText = {};
+    (model.marks || []).forEach(function (m) { if (m.type === "link") __sourceLinkOldText[m.id] = SD.markText(model, m); });
+    __sourcePreEditModelJson = SD.toJSON(model);
+  }
+  // The blast radius of the just-finished edit session: base-showing locations of edited link marks.
+  function sourceBaseEditImpact() {
+    var SD = window.SourceDoc, model = __sourceDocModel;
+    if (!SD || !model || !__sourceLinkOldText) return { affected: [], pinned: [], editedMarks: [] };
+    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(__sourceActiveTopicId, null));
+  }
+  // "Keep as-is (fork)": freeze each edited link mark's OLD wording as an alternate on the master,
+  // and pin every affected (base-showing) location -- in whatever document uses it -- to that
+  // alternate. The source base then moves on; those placements keep the old words.
+  function forkAffectedToAlternate(impact) {
+    var SD = window.SourceDoc, model = __sourceDocModel, reg = registry, byMark = {};
+    impact.affected.forEach(function (loc) { (byMark[loc.markId] = byMark[loc.markId] || []).push(loc); });
+    Object.keys(byMark).forEach(function (markId) {
+      var link = SD.markById(model, markId); if (!link) return;
+      var oldText = __sourceLinkOldText[markId];
+      var alt = SD.addMark(model, { type: "alternate", anchor: link.anchor, endAnchor: link.endAnchor, alt: oldText, tag: "Frozen", baseText: oldText });
+      byMark[markId].forEach(function (loc) { applyAltToLocation(reg, loc, alt.id); });
+    });
+    saveRegistry(reg); // the alternate marks on the master persist via the lock's own commit
+  }
+  function finalizeSourceLock(topic, opts) {
+    flushSourceEditSession(topic, { prompt: opts.prompt });
+    __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
+  }
+  function revertSourceEditSession(topic) {
+    var SD = window.SourceDoc;
+    if (SD && __sourcePreEditModelJson && topic) {
+      __sourceDocModel = SD.fromJSON(__sourcePreEditModelJson); __sourceDocModelTopicId = topic.id;
+      persistSourceDocModel(topic, __sourceDocModel);
+    }
+    __sourceEditSession = null; __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    renderSourceArticle();
+    sourceToast("Edit cancelled.");
+  }
+  // The three-way warning shown at lock when the edit changed linked passages (09).
+  function showSourceBaseEditModal(topic, impact, opts) {
+    var n = impact.affected.length, resolved = false;
+    var forkBtn = window.VersoUI.Button({ variant: "secondary", label: "Keep as-is (fork)", onClick: function () {
+      resolved = true; forkAffectedToAlternate(impact); shell.modal.close(); finalizeSourceLock(topic, opts);
+      sourceToast("Kept " + n + " linked place" + (n === 1 ? "" : "s") + " on the old wording.");
+    } });
+    var shell = dsModalShell({
+      title: "This source is linked in " + n + " place" + (n === 1 ? "" : "s"),
+      subtitle: "Your edit changes wording that other documents link. Choose what those linked copies do.",
+      primaryLabel: "Update all",
+      cancelLabel: "Cancel edit",
+      extras: [forkBtn],
+      onPrimary: function () { resolved = true; shell.modal.close(); finalizeSourceLock(topic, opts); sourceToast("Updated " + n + " linked place" + (n === 1 ? "" : "s") + "."); },
+      onClose: function () { if (resolved) return; revertSourceEditSession(topic); } // Cancel / Escape / scrim = revert
+    });
+    shell.body.appendChild(h("div", "insp-hint", "Update all — the linked copies re-resolve to your new wording. Keep as-is — freeze their current wording as an alternate, then your source moves on. Cancel — undo this edit."));
+  }
+
+  window.__sourceLink = { // browser-verify hooks
+    sourceLinkWhereUsed: sourceLinkWhereUsed, snapshotSourceLinkBase: snapshotSourceLinkBase,
+    sourceBaseEditImpact: sourceBaseEditImpact, forkAffectedToAlternate: forkAffectedToAlternate,
+    pushSourceAlternate: pushSourceAlternate, applyAltToLocation: applyAltToLocation,
+    armSourceLinkPlacement: armSourceLinkPlacement, placeArmedSourceLink: placeArmedSourceLink,
+    jumpSourcePanelToMark: jumpSourcePanelToMark, panelSelectionDescriptor: panelSelectionDescriptor,
+    startSourceLinkDrag: startSourceLinkDrag, pageIndexFromPoint: pageIndexFromPoint,
+    openSourceLinkMenu: openSourceLinkMenu, createSourceAlternate: createSourceAlternate,
+    setSourceLinkTargetAlt: setSourceLinkTargetAlt, sourceLinkAlternates: sourceLinkAlternates,
+    isArmed: function () { return !!__armedSourceLink; }
+  };
+  // One-time global wiring: while a linked passage is armed, the next canvas click PLACES it (capture
+  // phase, before the canvas's own click-select), and Escape cancels arming.
+  if (typeof document !== "undefined" && !window.__sourceLinkWired) {
+    window.__sourceLinkWired = true;
+    document.addEventListener("click", function (e) {
+      if (!__armedSourceLink) return;
+      var cv = document.getElementById("canvas-viewport");
+      if (cv && cv.contains(e.target)) { e.preventDefault(); e.stopPropagation(); placeArmedSourceLink(e.clientX, e.clientY); }
+    }, true);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && __armedSourceLink) { e.preventDefault(); cancelArmedSourceLink(); } });
+  }
+  // (source-link 03) The SPEC 7 / #137 whole-topic +-insert (insertSourceLinkedBlock) is retired:
+  // the Edit Source tab is now a read-only viewer (02) and copy is placed as a range-linked block
+  // via select-then-place (armSourceLinkPlacement above), not a whole-topic libraryInstance.
+  // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
+  function jumpToSourceTopic(topicId) {
+    if (!topicId) return;
+    __sourceActiveTopicId = topicId;
+    try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, topicId); } catch (e) {}
+    setStage("source");
+  }
+  // Two-way link, direction 1: open the doc, land in Edit, and select the exact linked block.
+  function jumpToLinkedBlock(docCode, blockId) {
+    openCourseFromBrowser(docCode);
+    setStage("edit");
+    var b = blockById(blockId);
+    if (b) {
+      var pi = findPageOfBlock(b);
+      if (pi != null && pi >= 0) { focusFrame(pi); setActivePage(pi); }
+      reselectBlockNode(b, "block");
+    }
+  }
+  function wireLeftSwitcher() {
+    renderAssets();
+    renderComponentsPalette();
+    try { var saved = localStorage.getItem(LEFT_SECTION_KEY); if (LEFT_SECTIONS.indexOf(saved) !== -1) _activeLeftSection = saved; } catch (e) {}
+    applyLeftSection(_activeLeftSection);
   }
 
   // ---- mount / re-mount (preserves view) -----------------------------------
@@ -15392,6 +22605,10 @@
     canvas.classList.toggle("is-version-preview", !!activeVersion);
     updateVariantBadge();
     updateVersionBadge();
+    // uio-E-C04: keep the top-bar axis switches + the off-base return chip in sync (menu pick,
+    // undo/redo, doc swap) -- onVariantPick only mounts, so the label/chip refresh here.
+    syncVariantSwitch();
+    syncVersionSwitch();
     if (canvasEditable()) enableEditing(world); // #207 + ticket 15: version = editable flagship UNLESS collaborating (base-only)
     fitEmbeds();
     // fitEmbeds() resizes HTML/web-embed iframes to fit, changing their frames'
@@ -15402,8 +22619,9 @@
     renderStructure();
     renderAssets(); // keep the Blocks palette current
     renderComponentsPalette(); // keep the Components pane current (My Components / Blocks / Pages)
+    if (typeof syncCellChip === "function") syncCellChip(); // SPEC 7: reflect the doc's cell in the header chip after any rebuild
     renderModelView();
-    
+
     restoreSelection();
     
     updateHistoryButtons();
@@ -15520,6 +22738,11 @@
   function togglePanels() {
     var ws = document.querySelector(".workspace"); if (!ws) return;
     var hidden = !ws.classList.contains("is-panels-hidden");
+    // uio-F05-fb1: hiding the panels collapses every dock track to 0, and the settings sheet
+    // sits in one of them. Left alone it became a 0px-wide surface that was still "open" and
+    // still on the Escape layer stack -- invisible, but the next Escape went to it. Zen mode
+    // CLOSES the sheet instead, so what is on screen matches what is open.
+    if (hidden) closeSettingsModal();
     applyPanelsHidden(hidden);
     try { localStorage.setItem(PANELS_HIDDEN_KEY, hidden ? "1" : "0"); } catch (_) {}
     if (typeof positionBlockToolbar === "function") positionBlockToolbar(); // re-centre the static toolbar over the resized canvas
@@ -15642,8 +22865,14 @@
       if (pasteClipboard(e.shiftKey)) e.preventDefault();
     } else if (meta && (e.key === "p" || e.key === "P") && !isTextTarget(e.target)) {
       e.preventDefault(); enterDemo(); // Cmd+P = open preview
+    } else if (meta && e.key === ",") {
+      // uio-F06 keyboard contract. Cmd-, opens Settings where you left it; Alt+Cmd-, opens the
+      // settings for what is selected -- which IS the inspector, since the inspector holds the
+      // sheet's Block scope. So the modified form puts the sheet away and hands the dock back.
+      e.preventDefault();
+      if (e.altKey) openSelectionSettings(); else openSettingsModal();
     } else if (meta && (e.key === "k" || e.key === "K") && !isTextTarget(e.target)) {
-      e.preventDefault(); openQuickJump(); // quick-jump moved off Cmd+P
+      e.preventDefault(); openQuickJump(); // the one index: settings, actions, guide, pages, blocks
     } else if (meta && e.key === "\\" && !isTextTarget(e.target)) {
       e.preventDefault(); togglePanels(); // Cmd+\ = hide/show side panels (maximise canvas)
     } else if (meta && e.code === "Digit1") {
@@ -15900,50 +23129,248 @@
     zooming = false; targetZoom = 1; zoomAnchor = null;
     view.zoom = 1; view.x = mx - wx; view.y = my - wy; view.ready = true; applyView();
   }
-  // ---- Cmd+P quick-jump palette --------------------------------------------
+  // ---- uio-F06: one index, one palette (Cmd-K) -----------------------------
+  // The spine's keyboard contract: Cmd-K is find-anything over ONE index -- settings, actions,
+  // guide sections and the document's own pages and blocks. No surface owns a separate search
+  // box, which is why the user guide's own "Search the guide" field is retired in this change.
+  //
+  // The core below is PURE: it takes plain lists and a query string and returns ranked entries.
+  // No DOM, no doc, no editor state -- so the ranking and the guide parser are testable without
+  // booting the editor.
+  /* @f06-start */
+  // Intent words per settings section. The audit's finding was that section names are not
+  // guessable from what you actually want: a disclaimer lives under Header & Footer, confetti
+  // under Motion, the nav pill under Learner nav. Aliases let the index answer the intent
+  // rather than demanding you already know Verso's filing system.
+  var SETTINGS_ALIASES = {
+    canvas:       ["background", "backdrop", "interface", "light", "dark", "spellcheck", "spelling", "typo", "developer tools", "devtools", "json", "debug"],
+    preview:      ["breakpoint", "desktop", "tablet", "mobile", "screen size", "responsive"],
+    library:      ["shared components", "reusable", "master", "cross-course"],
+    docType:      ["geometry", "reflow", "paged", "frame", "slide", "interactive", "static", "layout mode", "preset", "format"],
+    backup:       ["restore", "snapshot", "recover", "copy"],
+    header:       ["logo", "brand", "masthead", "banner", "header & footer"],
+    footer:       ["disclaimer", "copyright", "nav bar", "small print", "header & footer"],
+    hfDefault:    ["new course default", "starting header", "starting footer", "reuse header"],
+    nav:          ["learner nav", "next", "previous", "progress", "pill"],
+    layout:       ["page width", "margins", "padding", "column", "gutter"],
+    endScreen:    ["completion", "finish", "exit", "congratulations", "certificate"],
+    theme:        ["colours", "colors", "palette", "tokens", "styling", "brand"],
+    fonts:        ["typeface", "custom font", "upload font", "woff", "otf", "ttf", "family"],
+    glossary:     ["definitions", "terms", "jargon", "acronym"],
+    motion:       ["animation", "confetti", "transition", "reduced motion", "effects"],
+    components:   ["my components", "custom blocks", "reusable"],
+    pipeline:     ["review", "viewer", "comments", "approval", "feedback", "sign-off"]
+  };
+  // Tie-break order only. It decides what the palette shows before you type, and which kind
+  // wins when two entries score identically; it never overrides a better text match.
+  var COMMAND_KINDS = ["action", "page", "setting", "guide", "block"];
+  function commandKindBias(kind) {
+    var i = COMMAND_KINDS.indexOf(kind);
+    return i === -1 ? 0 : (COMMAND_KINDS.length - i);
+  }
+  function commandNorm(s) { return String(s == null ? "" : s).toLowerCase(); }
+  // Flatten the four sources into ONE list of entries. Every entry carries the words it can be
+  // found by and a `ref` naming what to do with it; routing lives with the caller, not here.
+  function commandEntries(sources) {
+    sources = sources || {};
+    var out = [];
+    (sources.settings || []).forEach(function (s) {
+      out.push({ kind: "setting", label: s.title,
+        sub: s.tab === "system" ? "System settings" : "Project settings",
+        keywords: SETTINGS_ALIASES[s.key] || [], ref: { tab: s.tab, key: s.key } });
+    });
+    (sources.actions || []).forEach(function (a) {
+      out.push({ kind: "action", label: a.label, sub: a.sub || "Action",
+        keywords: a.keywords || [], ref: { id: a.id } });
+    });
+    (sources.guide || []).forEach(function (g) {
+      out.push({ kind: "guide", label: g.title, sub: "User guide", keywords: [], ref: { id: g.id } });
+    });
+    (sources.pages || []).forEach(function (p) {
+      out.push({ kind: "page", label: p.name, sub: "Page", keywords: [], ref: { pi: p.pi } });
+    });
+    (sources.blocks || []).forEach(function (b) {
+      out.push({ kind: "block", label: b.label, sub: b.sub, keywords: [], ref: { pi: b.pi, bi: b.bi } });
+    });
+    return out;
+  }
+  // Score one entry against a query. -1 means "no match, drop it". Every whitespace-separated
+  // token must appear somewhere in the entry, so "custom font" does not match every font row;
+  // the returned score is the strongest single-token match, so the best reason wins.
+  function scoreCommand(entry, q) {
+    var query = commandNorm(q).replace(/^\s+|\s+$/g, "");
+    var bias = commandKindBias(entry.kind);
+    if (!query) return bias;
+    var label = commandNorm(entry.label), sub = commandNorm(entry.sub);
+    var keys = (entry.keywords || []).map(commandNorm);
+    var keyText = keys.join(" ");
+    var hay = label + " " + sub + " " + keyText;
+    var tokens = query.split(/\s+/), best = -1;
+    for (var i = 0; i < tokens.length; i++) {
+      var t = tokens[i];
+      if (hay.indexOf(t) === -1) return -1; // one missing token disqualifies the entry
+      var s;
+      if (label.indexOf(t) === 0) s = 100;                       // the label starts with it
+      else if ((" " + label).indexOf(" " + t) !== -1) s = 80;     // a word of the label starts with it
+      else if (label.indexOf(t) !== -1) s = 60;                   // somewhere in the label
+      else if (keys.indexOf(t) !== -1) s = 55;                    // an exact intent word
+      else if ((" " + keyText).indexOf(" " + t) !== -1) s = 50;   // an intent word starts with it
+      else if (keyText.indexOf(t) !== -1) s = 40;                 // inside an intent word
+      else s = 20;                                                // only the category matched
+      if (s > best) best = s;
+    }
+    return best + bias;
+  }
+  function rankCommands(entries, q, limit) {
+    var scored = [];
+    for (var i = 0; i < entries.length; i++) {
+      var s = scoreCommand(entries[i], q);
+      if (s < 0) continue;
+      scored.push({ e: entries[i], s: s, i: i });
+    }
+    scored.sort(function (a, b) { return b.s - a.s || a.i - b.i; }); // stable: input order breaks ties
+    var out = [];
+    for (var j = 0; j < scored.length && (!limit || out.length < limit); j++) out.push(scored[j].e);
+    return out;
+  }
+  // Parse the user guide's own headings into index entries. The slug MUST match the one
+  // mdToHtml emits (same lowercase/strip/dedupe rules) or a guide result would scroll nowhere.
+  // Fenced code blocks are skipped so a `## ` inside an example is not indexed as a section.
+  function parseGuideHeadings(md) {
+    var lines = String(md == null ? "" : md).split("\n");
+    var out = [], seen = {}, inFence = false;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (/^```/.test(line)) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      var m = /^(##|###)\s+(.+?)\s*$/.exec(line);
+      if (!m) continue;
+      var raw = m[2];
+      var base = raw.toLowerCase().replace(/`[^`]*`/g, "").replace(/[*_]/g, "")
+        .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+      var slug = base, n = 2;
+      while (seen[slug]) { slug = base + "-" + n; n++; }
+      seen[slug] = true;
+      // "## 3. The workspace" reads as "The workspace" in a result row -- the number is filing,
+      // not meaning, and nobody searches for it.
+      out.push({ id: slug, title: raw.replace(/^\d+\.\s*/, ""), level: m[1].length });
+    }
+    return out;
+  }
+  /* @f06-end */
+  window.__commandIndex = { entries: commandEntries, score: scoreCommand, rank: rankCommands, guide: parseGuideHeadings }; // test hook
+
+  // The verbs the palette can run. Curated on purpose: every one is a real, existing action, and
+  // an action with no home elsewhere in the UI does not belong here either.
+  function commandActions() {
+    return [
+      { id: "demo",        label: "Preview in Demo mode",         sub: "Output",   keywords: ["play", "preview", "fullscreen", "learner view"], run: function () { enterDemo(); } },
+      { id: "publish",     label: "Send to publish",              sub: "Output",   keywords: ["queue", "package", "scorm", "release"], run: function () { var b = document.getElementById("send-to-publish-btn"); if (b) b.click(); } },
+      { id: "settings",    label: "Open settings",                sub: "App",      keywords: ["preferences", "options"], run: function () { openSettingsModal(); } },
+      { id: "guide",       label: "Open the user guide",          sub: "Help",     keywords: ["docs", "documentation", "manual", "help"], run: function () { openHelpModal(); } },
+      { id: "find",        label: "Find and replace",             sub: "Document", keywords: ["search text", "replace"], run: function () { openFindReplace(); } },
+      { id: "newPage",     label: "Add a page",                   sub: "Document", keywords: ["new page", "insert page"], run: function () { addPageAfterCurrent(); } },
+      { id: "undo",        label: "Undo",                         sub: "Document", keywords: ["step back", "revert"], run: function () { undo(); } },
+      { id: "redo",        label: "Redo",                         sub: "Document", keywords: ["step forward"], run: function () { redo(); } },
+      { id: "fit",         label: "Fit all pages",                sub: "View",     keywords: ["zoom to fit", "overview"], run: function () { fitAll(); } },
+      { id: "zoom100",     label: "Zoom to 100%",                 sub: "View",     keywords: ["actual size"], run: function () { zoomTo100(); } },
+      { id: "panels",      label: "Hide or show the side panels", sub: "View",     keywords: ["zen", "maximise canvas", "full width"], run: function () { togglePanels(); } },
+      { id: "stageSource", label: "Go to Source",                 sub: "Stage",    keywords: ["source stage"], run: function () { setStage("source"); } },
+      { id: "stageEdit",   label: "Go to Edit",                   sub: "Stage",    keywords: ["edit stage", "canvas"], run: function () { setStage("edit"); } },
+      { id: "stagePublish",label: "Go to Publish",                sub: "Stage",    keywords: ["publish stage"], run: function () { setStage("publish"); } }
+    ];
+  }
+  // The guide lives on disk, so its headings are fetched once on first use and cached. Opened
+  // from file:// the fetch fails and the palette simply carries no guide results -- the same
+  // graceful degradation the help modal already has.
+  var __guideIndexCache = null;
+  function loadGuideIndex(then) {
+    if (__guideIndexCache) { then(__guideIndexCache); return; }
+    if (typeof fetch !== "function") { __guideIndexCache = []; then(__guideIndexCache); return; }
+    fetch("docs/USER-GUIDE.md", { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.text() : ""; })
+      .then(function (md) { __guideIndexCache = parseGuideHeadings(md); then(__guideIndexCache); })
+      .catch(function () { __guideIndexCache = []; then(__guideIndexCache); });
+  }
+  // Everything the palette can find right now, from the live document + the settings tree.
+  function commandSources(guide) {
+    var settings = [];
+    ["system", "project"].forEach(function (tab) {
+      getSettingsSections(tab).forEach(function (s) { settings.push({ tab: tab, key: s.key, title: s.title }); });
+    });
+    var pages = [], blocks = [];
+    (doc && doc.pages ? doc.pages : []).forEach(function (p, pi) {
+      pages.push({ name: p.name, pi: pi });
+      (p.blocks || []).forEach(function (b, bi) { blocks.push({ label: blockLabel(b), sub: p.name, pi: pi, bi: bi }); });
+    });
+    return { settings: settings, actions: commandActions(), guide: guide || [], pages: pages, blocks: blocks };
+  }
+  function runCommandEntry(entry) {
+    if (!entry) return;
+    if (entry.kind === "setting") { openSettingsSection(entry.ref.tab, entry.ref.key); return; }
+    if (entry.kind === "action") {
+      var acts = commandActions();
+      for (var i = 0; i < acts.length; i++) if (acts[i].id === entry.ref.id) { acts[i].run(); return; }
+      return;
+    }
+    if (entry.kind === "guide") { openHelpModal(entry.ref.id); return; }
+    if (entry.kind === "page") { focusFrame(entry.ref.pi); setActivePage(entry.ref.pi); setSelection("page", entry.ref.pi); return; }
+    clearAllMulti(); selectBlock(entry.ref.pi, entry.ref.bi);
+  }
+  // ---- Cmd-K command palette -----------------------------------------------
+  var PALETTE_LIMIT = 40; // a palette you scroll is a list; this is a shortlist
   function openQuickJump() {
     if (document.querySelector(".qj-overlay")) return;
     var overlay = h("div", "qj-overlay");
     var box = h("div", "qj-box");
-    var input = h("input", "qj-input"); input.type = "text"; input.placeholder = "Jump to a page or block…"; input.spellcheck = false;
+    var input = h("input", "qj-input"); input.type = "text";
+    input.placeholder = "Find a setting, an action, a page or a guide section…"; input.spellcheck = false;
     var list = h("div", "qj-list");
     box.appendChild(input); box.appendChild(list); overlay.appendChild(box); document.body.appendChild(overlay);
-    var items = [];
-    doc.pages.forEach(function (p, pi) {
-      items.push({ label: p.name, sub: "Page", kind: "page", pi: pi });
-      (p.blocks || []).forEach(function (b, bi) { items.push({ label: blockLabel(b), sub: p.name, kind: "block", pi: pi, bi: bi }); });
-    });
-    var filtered = items.slice(), active = 0;
+    var entries = commandEntries(commandSources(__guideIndexCache));
+    var filtered = rankCommands(entries, "", PALETTE_LIMIT), active = 0;
     function draw() {
       list.innerHTML = "";
+      if (!filtered.length) { list.appendChild(h("div", "qj-empty", "Nothing matches.")); return; }
       filtered.forEach(function (it, idx) {
         var row = h("div", "qj-item" + (idx === active ? " is-active" : ""));
         row.appendChild(h("span", "qj-item__label", it.label));
+        // The result names the category it lives in, so choosing it is never a leap of faith.
         row.appendChild(h("span", "qj-item__sub", it.sub));
         row.addEventListener("mousedown", function (e) { e.preventDefault(); choose(it); });
         list.appendChild(row);
       });
     }
-    function choose(it) {
-      close();
-      if (it.kind === "page") { focusFrame(it.pi); setActivePage(it.pi); setSelection("page", it.pi); }
-      else { clearAllMulti(); selectBlock(it.pi, it.bi); }
+    function choose(it) { close(); runCommandEntry(it); }
+    function close() {
+      if (!overlay.parentNode) return;
+      overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      popLayer("palette"); // uio-F06: Escape is the layer stack's, not this surface's
     }
-    function close() { overlay.remove(); document.removeEventListener("keydown", onKey, true); }
     function onKey(e) {
-      if (e.key === "Escape") { e.preventDefault(); close(); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(active + 1, filtered.length - 1); draw(); }
+      // Escape is deliberately NOT handled here -- the F05 layer stack owns it, so a palette
+      // opened over the settings sheet closes the palette and leaves the sheet standing.
+      if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(active + 1, filtered.length - 1); draw(); }
       else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(active - 1, 0); draw(); }
       else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) choose(filtered[active]); }
     }
-    input.addEventListener("input", function () {
-      var q = input.value.toLowerCase();
-      filtered = items.filter(function (it) { return (it.label + " " + it.sub).toLowerCase().indexOf(q) !== -1; });
-      active = 0; draw();
-    });
+    function refilter() { filtered = rankCommands(entries, input.value, PALETTE_LIMIT); active = 0; draw(); }
+    input.addEventListener("input", refilter);
     overlay.addEventListener("mousedown", function (e) { if (e.target === overlay) close(); });
     document.addEventListener("keydown", onKey, true);
+    pushLayer("palette", close);
     draw(); input.focus();
+    // The guide's headings arrive from disk. When they land, fold them in and re-rank in place
+    // rather than making the author wait on a file read before the palette will open.
+    loadGuideIndex(function (guide) {
+      if (!overlay.parentNode || !guide.length) return;
+      var wasActive = active;
+      entries = commandEntries(commandSources(guide));
+      refilter();
+      active = Math.min(wasActive, Math.max(0, filtered.length - 1)); // don't yank the highlight
+      draw();
+    });
   }
   window.addEventListener("keyup", function (e) { if (e.code === "Space") { spaceHeld = false; canvas.classList.remove("is-pannable"); } });
   // ---- marquee (rubber-band) selection -------------------------------------
@@ -16222,7 +23649,10 @@
     inspector.innerHTML = ""; panelFields = {}; // self-clearing: the filter/resolve/row
     // handlers call this directly (not via renderInspector), so it must not double-append.
     var UI = window.VersoUI; // DS canonical control set (re-skin, issue #17)
-    inspector.appendChild(sub("Comments"));
+    // uio-O-W2 (OVL-07): the identity + sidecar controls are a section, not a bold line with no
+    // affordance. The filter and the list below are the panel's own rows.
+    var _cmtRoot = inspector;
+    inspector = panelSection(_cmtRoot, "Comments");
     // §12 slice 5: who am I (author identity) + sidecar transport
     var idn = commentIdentity();
     var idRow = h("div", "comment-identity");
@@ -16238,6 +23668,7 @@
       UI.Button({ variant: "secondary", full: true, label: "Export…", title: "Save comments as a sidecar JSON", onClick: function () { exportComments(); } }),
       UI.Button({ variant: "secondary", full: true, label: "Import…", title: "Merge a reviewer's comments file", onClick: function () { importComments(); } })
     ] }));
+    inspector = _cmtRoot;
     var list = (doc.comments || []);
     var openN = list.filter(function (c) { return !c.done; }).length;
     var resN = list.length - openN;
@@ -17247,26 +24678,33 @@
   }
 
   // ---- resizable side panels (persisted) -----------------------------------
-  function wireResizers() {
+  // uio-F05-fb1: every dock width restores + clamps through these two helpers, so a surface
+  // built later (the settings sheet) resizes exactly like the panels that ship in the HTML.
+  function restoreDockWidth(varName) {
+    var workspace = document.querySelector(".workspace"); if (!workspace) return;
+    try { var v = localStorage.getItem("authoring." + varName); if (v) workspace.style.setProperty("--" + varName, v); } catch (e) {}
+  }
+  // handle: the .panel-resizer element. side: which edge of the workspace the width is measured
+  // from. min/max: the clamp, so a dock can't be dragged past legibility or off the canvas.
+  function wirePanelResizer(handle, varName, side, min, max) {
+    if (!handle || handle.__resizeWired) return; handle.__resizeWired = true;
     var workspace = document.querySelector(".workspace");
-    function restore(varName) { try { var v = localStorage.getItem("authoring." + varName); if (v) workspace.style.setProperty("--" + varName, v); } catch (e) {} }
-    restore("left-w"); restore("right-w");
-    function wire(id, varName, side) {
-      var handle = document.getElementById(id);
-      var dragging = false;
-      handle.addEventListener("mousedown", function (e) { dragging = true; handle.classList.add("is-dragging"); document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; e.preventDefault(); });
-      window.addEventListener("mousemove", function (e) {
-        if (!dragging) return;
-        var rect = workspace.getBoundingClientRect();
-        var w = side === "left" ? (e.clientX - rect.left) : (rect.right - e.clientX);
-        w = Math.max(180, Math.min(560, w));
-        workspace.style.setProperty("--" + varName, w + "px");
-        try { localStorage.setItem("authoring." + varName, w + "px"); } catch (_) {}
-      });
-      window.addEventListener("mouseup", function () { if (dragging) { dragging = false; handle.classList.remove("is-dragging"); document.body.style.cursor = ""; document.body.style.userSelect = ""; } });
-    }
-    wire("resizer-left", "left-w", "left");
-    wire("resizer-right", "right-w", "right");
+    var dragging = false;
+    handle.addEventListener("mousedown", function (e) { dragging = true; handle.classList.add("is-dragging"); document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none"; e.preventDefault(); });
+    window.addEventListener("mousemove", function (e) {
+      if (!dragging) return;
+      var rect = workspace.getBoundingClientRect();
+      var w = side === "left" ? (e.clientX - rect.left) : (rect.right - e.clientX);
+      w = Math.max(min || 180, Math.min(max || 560, w));
+      workspace.style.setProperty("--" + varName, w + "px");
+      try { localStorage.setItem("authoring." + varName, w + "px"); } catch (_) {}
+    });
+    window.addEventListener("mouseup", function () { if (dragging) { dragging = false; handle.classList.remove("is-dragging"); document.body.style.cursor = ""; document.body.style.userSelect = ""; } });
+  }
+  function wireResizers() {
+    restoreDockWidth("left-w"); restoreDockWidth("right-w"); restoreDockWidth("sheet-w");
+    wirePanelResizer(document.getElementById("resizer-left"), "left-w", "left", 180, 560);
+    wirePanelResizer(document.getElementById("resizer-right"), "right-w", "right", 180, 560);
   }
 
   // ---- breakpoint switch (M6) ---------------------------------------------
@@ -17296,6 +24734,12 @@
         onClick: function () { setBreakpoint(bp); }
       });
     });
+    // edit-header-ia-v2: light/dark moved off its own face-up slot into this menu (rarely used).
+    // Divider under the size presets, then the palette toggle.
+    items.push({ sep: true });
+    items.push({ head: "Palette" });
+    items.push({ label: "Light", active: activeMode === "light", onClick: function () { setMode("light"); } });
+    items.push({ label: "Dark", active: activeMode === "dark", onClick: function () { setMode("dark"); } });
     showContextMenu(r.right, r.bottom + 4, items);
   }
   function wireBpSwitch() {
@@ -17753,14 +25197,8 @@
   // is the missing control the reporter needed: re-apply/repair the flagship's inline
   // weight boundary (e.g. lighter 'Rf') on shortened variant text. Built from canonical
   // prop-toggle buttons + the shared dsSelect weight picker (no bespoke controls).
-  var _copyFmtBtns = [];
-  function copyCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-  function refreshCopyFormatState() {
-    for (var i = 0; i < _copyFmtBtns.length; i++) {
-      var b = _copyFmtBtns[i];
-      b.el.classList.toggle("is-on", !!_activeCopyRow && copyCmdOn(b.cmd));
-    }
-  }
+  var _copyFormatBar = null; // the shared toggle-bar instance (has .refresh()) once built
+  function refreshCopyFormatState() { if (_copyFormatBar) _copyFormatBar.refresh(); }
   // Apply an inline font-weight span to the active row's selection (or the whole row when
   // nothing is selected) — mirrors the field inspector's applyWeightToSelection: raw
   // font-weight span => literal HTML that survives sanitizeFieldHtml and round-trips
@@ -17785,22 +25223,28 @@
     var host = document.getElementById("copyedit-tools");
     if (!host || !host.parentNode) return null;
     bar = h("div", "copyedit__format"); bar.id = "copyedit-format";
-    _copyFmtBtns = [];
-    var biu = h("div", "prop-toggle-row");
-    [["B", "bold"], ["I", "italic"], ["U", "underline"]].forEach(function (o) {
-      var b = h("button", "prop-toggle", o[0]);
-      b.title = o[1].charAt(0).toUpperCase() + o[1].slice(1) + " (selected text)";
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the row's selection
-      b.addEventListener("click", function () {
+    // #170/#158/#33: the shared canonical toggle-bar builder (B/I/U/Link/List) -- the same
+    // one the field inspector's Style row uses. The copy editor gains Link as a side effect
+    // of sharing one implementation (it had none before); same execCommand/createLink
+    // mechanic. List converts the FOCUSED row's underlying block type in place -- only
+    // shown when that row is a genuine top-level text-content block (t.host.type in
+    // TEXT_CONTENT_TYPES), never a quiz sub-field row (t.host has no .type). This bar is
+    // built ONCE and persists across every row focus, so visibility/state re-derive on
+    // every bar.refresh() (via refreshCopyFormatState, already wired to focus/keyup/mouseup).
+    var biu = buildFormatToggleBar({
+      getNode: function () { return _activeCopyRow && _activeCopyRow.tx; },
+      onChange: function () { if (!_activeCopyRow) return; commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant); },
+      isListToggleable: function () { return !!(_activeCopyRow && _activeCopyRow.t.key === "text" && _activeCopyRow.t.host && _activeCopyRow.t.host.type && TEXT_CONTENT_TYPES[_activeCopyRow.t.host.type]); },
+      isListBlock: function () { return !!(_activeCopyRow && _activeCopyRow.t.host.type === "list"); },
+      toggleListBlock: function () {
         if (!_activeCopyRow) return;
-        _activeCopyRow.tx.focus();
-        document.execCommand(o[1], false, null); // fires input -> commitCopyRow writes through
-        commitCopyRow(_activeCopyRow.t, _activeCopyRow.tx, _activeCopyRow.variant);
-        b.classList.toggle("is-on", copyCmdOn(o[1]));
-      });
-      _copyFmtBtns.push({ el: b, cmd: o[1] });
-      biu.appendChild(b);
+        pushHistory();
+        convertTextListBlockType(_activeCopyRow.t.host);
+        copyEditDirty = true; scheduleSave();
+        renderCopyEditorDoc(); renderCopyEditorTools(); // rows rebuild -- the converted row now reflects the new content/type
+      }
     });
+    _copyFormatBar = biu;
     bar.appendChild(biu);
     // Inline weight — capture the row's live range on mousedown (opening the select steals
     // focus + collapses the selection, same trick the field inspector's Weight uses).
@@ -17929,6 +25373,7 @@
     renderCopyEditorDoc(); // slices 2-3: paint + bind the course copy
     renderCopyEditorTools(); // slice 4: word count + Find & replace
     scheduleSpellcheck(); // P0: mark typos across the whole copy document
+    syncViewToggle(); // reflect Read in the header Build/Read control
   }
   function exitCopyEditor() {
     var st = window.copyEditorNextState({ open: copyEditorIsOpen() }, "exit");
@@ -17944,11 +25389,35 @@
         focusFrame(p); setActivePage(p); setSelection("page", p);
       }
     }
+    syncViewToggle(); // reflect Build in the header Build/Read control
   }
   function toggleCopyEditor() { if (copyEditorIsOpen()) exitCopyEditor(); else enterCopyEditor(); }
+  // SPEC 7 (decision 14): a Build/Read segmented control in the editor header is the in-flow
+  // way to switch between the authoring canvas (Build) and the per-doc copy view (Read = the
+  // copy editor). It stays in sync however the copy editor is opened/closed (rail button, Esc).
+  // Preview stays its own separate glyph.
+  function currentViewMode() { return copyEditorIsOpen() ? "read" : "build"; }
+  function mountViewToggle() {
+    if (typeof document === "undefined") return;
+    var host = document.getElementById("editor-view-toggle"); if (!host) return;
+    var U = window.VersoUI; if (!U || !U.SegmentedControl) return;
+    host.innerHTML = "";
+    host.appendChild(U.SegmentedControl({
+      size: "sm",
+      // edit-header-ia-v2 (feedback): glyphs, not words. Build = authoring canvas (square-pen);
+      // Read = the copy/read view (file-text). Titles carry the words for tooltip + a11y.
+      options: [{ value: "build", icon: "square-pen", title: "Build" }, { value: "read", icon: "file-text", title: "Read" }],
+      value: currentViewMode(),
+      onChange: function (v) {
+        if (v === "read") { if (!copyEditorIsOpen()) enterCopyEditor(); }
+        else if (copyEditorIsOpen()) exitCopyEditor();
+      }
+    }));
+  }
+  function syncViewToggle() { mountViewToggle(); } // re-render so the active segment reflects the real state
   function wireCopyEditor() {
-    var btn = document.getElementById("copy-editor-btn");
-    if (btn) btn.addEventListener("click", enterCopyEditor);
+    // side-rail-cleanup: the #copy-editor-btn rail button is retired; Read view is entered via the
+    // editor header's Build/Read toggle. Only the in-view exit + Escape are wired here now.
     var exit = document.getElementById("copyedit-exit");
     if (exit) exit.addEventListener("click", exitCopyEditor);
     document.addEventListener("keydown", function (e) {
@@ -18055,6 +25524,18 @@
     demoBpBtns = Array.prototype.slice.call(document.querySelectorAll("#demo-bp .bp-btn"));
     demoBpBtns.forEach(function (b) { b.addEventListener("click", function () { demoBp = b.getAttribute("data-bp"); renderDemo(); }); });
     document.getElementById("demo-enter").addEventListener("click", enterDemo);
+    // SPEC 7 (send-to-publish-wire): the editor-header glyph adds the active document to the standing
+    // publish queue via the ONE shared addToQueue -- its remembered preset (T2), no configure step,
+    // re-arming (never duplicating) a row that already exists, and toasting the running pending count.
+    var sendPub = document.getElementById("send-to-publish-btn");
+    if (sendPub && !sendPub.__wired) {
+      sendPub.__wired = true;
+      sendPub.addEventListener("click", function () {
+        if (activeDocId && registry[activeDocId]) addToQueue(activeDocId);
+        else publishToast("Open a document first to send it to the publish queue.");
+      });
+    }
+    syncSendToPublishCount(); // uio-E-C08: seed the pending count from the persisted queue at boot
     document.getElementById("demo-exit").addEventListener("click", exitDemo);
     document.getElementById("demo-prev").addEventListener("click", function () { stepDemo(-1); });
     document.getElementById("demo-next").addEventListener("click", function () { stepDemo(1); });
@@ -18364,9 +25845,8 @@
       return !!block;
     },
     closeTourBuilder: function () { closeTourBuilder(); },
-    // #75 save / recents dropdown — open under the top-bar history button.
-    openSaveMenu: function () { var b = document.getElementById("save-menu-btn"); openSaveMenu(b || document.body); },
-    closeSaveMenu: function () { closeSaveMenu(); },
+    // side-rail-cleanup slice 2: the #75 save/recents popover is retired -- the file picker
+    // (Editor.openBrowser) is now the one home for recents + file actions.
     // #74 card actions (also reached via each card's "…" menu) — exposed for wiring/verify.
     duplicateCourse: function (id) { duplicateCourse(id); },
     renameCourse: function (id) { renameCourse(id); },
@@ -18445,11 +25925,17 @@
       try { return window.renderPage(rp, activeTheme(), window.resolveHeaderFooter(rdoc, rp)); }
       finally { if (__rm) __rm(); }
     },
-    registerPipelineButton: function (label, onClick, accent) {
-      pipelineButtons.push({ label: label, onClick: onClick, accent: accent });
+    // uio-P-C05: `opts.direction` ("import" | "export") declares which stage the action belongs to.
+    // Omit it and the direction is guessed from the label, so every existing caller keeps working;
+    // declare it and the guess is never consulted. Anything inbound should declare it.
+    registerPipelineButton: function (label, onClick, accent, opts) {
+      var declared = opts && opts.direction;
+      pipelineButtons.push({ label: label, onClick: onClick, accent: accent, direction: PIPELINE_DIRECTIONS.indexOf(declared) !== -1 ? declared : null });
       var mount = document.getElementById("sidebar-pipeline-mount");
       if (mount) renderPipelineButtons(mount);
       renderToolbarPipeline(); // D6: keep the primary top-bar Export + ⋯ overflow in sync
+      // uio-P-C05: an import registered after boot has to reach the Source stage's Import menu too.
+      if (__activeStage === "source") renderSourceToolbar();
     },
     // Interact-mode test/automation hooks (used by the headless function tests
     // and any harness that needs to drive Interact mode programmatically).
@@ -18622,29 +26108,117 @@
       ".ctx-item--danger:hover{background:rgba(255,107,107,.16);color:#ff6b6b;}" +
       ".ctx-item--active{color:#0d99ff;font-weight:600;}" +
       ".ctx-item--active:hover{color:#fff;}" +
+      ".ctx-item--disabled{color:#8a8a8a;cursor:default;}" +
+      ".ctx-item--disabled:hover{background:transparent;color:#8a8a8a;}" +
+      ".ctx-item__hint{margin-left:auto;padding-left:14px;font-size:11px;color:#8a8a8a;}" +
       ".ctx-sep{height:1px;background:#3a3a3a;margin:5px 8px;}" +
       ".ctx-head{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0;color:#8a8a8a;}" +
+      // uio-O-W2 (OVL-13): submenus. The parent row keeps a trailing chevron; the panel sits to
+      // its right, overlapping by the menu's own padding so the pointer never crosses a gap.
+      ".ctx-item--parent{position:relative;}" +
+      ".ctx-item__chev{margin-left:auto;padding-left:14px;color:#8a8a8a;}" +
+      ".ctx-item--parent:hover .ctx-item__chev{color:#fff;}" +
+      ".ctx-menu--sub{position:absolute;left:100%;top:-5px;margin-left:-2px;display:none;}" +
+      ".ctx-menu--sub.is-flipped{left:auto;right:100%;margin-left:0;margin-right:-2px;}" +
+      ".ctx-item--parent:hover > .ctx-menu--sub{display:block;}" +
       ".canvas.is-variant-preview{outline:2px solid #8e44ad;outline-offset:-2px;}" +
       ".canvas.is-version-preview{outline:2px solid #0e9384;outline-offset:-2px;}";
     document.head.appendChild(s);
   }
-  function closeCtxMenu() { if (ctxMenuEl) { ctxMenuEl.remove(); ctxMenuEl = null; document.removeEventListener("mousedown", onCtxOutside, true); } }
+  function closeCtxMenu() {
+    if (!ctxMenuEl) return;
+    ctxMenuEl.remove(); ctxMenuEl = null;
+    document.removeEventListener("mousedown", onCtxOutside, true);
+    popLayer("ctx-menu"); // uio-F05: Escape is the layer stack's; focus returns to the trigger
+  }
   function onCtxOutside(e) { if (ctxMenuEl && !ctxMenuEl.contains(e.target)) closeCtxMenu(); }
-  function showContextMenu(x, y, items) {
-    ensureCtxStyle(); closeCtxMenu();
-    var m = h("div", "ctx-menu");
+  // uio-F05: opts.escalate = { label, tab, section } appends the spine's required route from
+  // this menu of verbs into the settings sheet, after a separator.
+  // uio-O-W2 (OVL-13): a menu never renders a section that has nothing in it. A heading whose
+  // group holds no actionable entry is dropped, and the separators that framed it go with it, so
+  // a menu can offer a section unconditionally and simply not show it when it is empty. PURE, so
+  // it is regression-guarded in tests/run.js.
+  function pruneEmptyMenuSections(items) {
+    var kept = [], i;
+    for (i = 0; i < (items || []).length; i++) {
+      var it = items[i];
+      if (it && it.head) {
+        var hasEntry = false;
+        for (var j = i + 1; j < items.length; j++) {
+          var nx = items[j];
+          if (!nx || nx.head) break;          // the next section starts: this one was empty
+          if (nx.sep) continue;               // a rule is furniture, not an entry
+          hasEntry = true; break;
+        }
+        if (!hasEntry) continue;              // drop the heading itself
+      }
+      kept.push(it);
+    }
+    // Collapse the separators left stranded by a dropped section: no leading rule, no trailing
+    // rule, never two in a row, and never a rule sitting directly under a heading.
+    var out = [];
+    for (i = 0; i < kept.length; i++) {
+      var k = kept[i];
+      if (k && k.sep) {
+        var prev = out[out.length - 1];
+        if (!prev || prev.sep || prev.head) continue;
+        var nextReal = null;
+        for (var n = i + 1; n < kept.length; n++) { if (kept[n] && !kept[n].sep) { nextReal = kept[n]; break; } }
+        if (!nextReal) continue;
+      }
+      out.push(k);
+    }
+    return out;
+  }
+  // Render one menu level. A `submenu` entry opens its own panel to the side on hover, so a
+  // section that would otherwise spend a third of the menu on rows you rarely want collapses to
+  // one row you can ignore. Submenus are display-only nesting -- they never introduce a second
+  // dismissal or a second Escape owner; the whole tree closes with its root.
+  function buildCtxMenuEl(items, isSub) {
+    var m = h("div", "ctx-menu" + (isSub ? " ctx-menu--sub" : ""));
     items.forEach(function (it) {
+      if (!it) return;
       if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
       if (it.head) { m.appendChild(h("div", "ctx-head", it.head)); return; }
-      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : ""), it.label);
-      el.addEventListener("click", function () { closeCtxMenu(); it.onClick(); });
+      // uio-P-C05: `disabled` + `hint` complete the DS ContextMenu contract — an entry can be listed
+      // as unavailable, with a trailing state word ("Soon"), instead of being hidden or renamed.
+      var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""), it.label);
+      if (it.hint) el.appendChild(h("span", "ctx-item__hint", it.hint));
+      if (it.submenu && it.submenu.length) {
+        el.classList.add("ctx-item--parent");
+        el.appendChild(h("span", "ctx-item__chev", "›"));
+        var sub = buildCtxMenuEl(pruneEmptyMenuSections(it.submenu), true);
+        el.appendChild(sub);
+        // Flip to the left when the panel would run off the window, measured on open rather
+        // than guessed, because a menu near the right edge is the normal case on a wide canvas.
+        el.addEventListener("mouseenter", function () {
+          sub.classList.remove("is-flipped");
+          var r = sub.getBoundingClientRect();
+          if (r.right > window.innerWidth - 8) sub.classList.add("is-flipped");
+        });
+        m.appendChild(el);
+        return;
+      }
+      if (!it.disabled) el.addEventListener("click", function () { closeCtxMenu(); if (it.onClick) it.onClick(); });
       m.appendChild(el);
     });
+    return m;
+  }
+  function showContextMenu(x, y, items, opts) {
+    ensureCtxStyle(); closeCtxMenu();
+    if (opts && opts.escalate) {
+      items = items.concat([{ sep: true }, {
+        label: opts.escalate.label || "All settings…",
+        onClick: function () { openSettingsSection(opts.escalate.tab || "project", opts.escalate.section || null); }
+      }]);
+    }
+    var m = buildCtxMenuEl(pruneEmptyMenuSections(items));
     document.body.appendChild(m);
     var r = m.getBoundingClientRect();
     m.style.left = Math.min(x, window.innerWidth - r.width - 8) + "px";
     m.style.top = Math.min(y, window.innerHeight - r.height - 8) + "px";
     ctxMenuEl = m;
+    pushLayer("ctx-menu", closeCtxMenu);
     setTimeout(function () { document.addEventListener("mousedown", onCtxOutside, true); }, 0);
   }
 
@@ -19097,9 +26671,11 @@
     if (!vs.length) return;
     var t = variantTargetForSelection();
     if (!t) return;
-    inspector.appendChild(sub("Variant text"));
+    var _varRoot = inspector;
+    inspector = panelSection(_varRoot, "Variant text");
     if (activeVariant) {
       inspector.appendChild(h("div", "insp-hint", "Previewing “" + activeVariant + "”. Switch to Flagship (top bar) to edit variant text."));
+      inspector = _varRoot;
       return;
     }
     inspector.appendChild(h("div", "insp-hint", "An alternate for a variant. Blank = inherit the flagship."));
@@ -19128,6 +26704,7 @@
         if (multiline) requestAnimationFrame(function () { autoGrowVariant(input); }); // size to content once in the DOM
       });
     });
+    inspector = _varRoot;
   }
 
   function isHiddenIn(node, variant) { var vv = node.variantVis; return !!(vv && vv.hide && vv.hide.indexOf(variant) !== -1); }
@@ -19197,30 +26774,78 @@
     items.push({ label: "Flagship", active: !activeVariant, onClick: function () { onVariantPick(""); } });
     variantNames().forEach(function (v) { items.push({ label: v, active: activeVariant === v, onClick: function () { onVariantPick(v); } }); });
     items.push({ sep: true });
-    items.push({ label: "+ New variant…", onClick: function () { onVariantPick("__new__"); } });
+    items.push({ label: "New variant…", onClick: function () { onVariantPick("__new__"); } });
     var r = anchor.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 6, items);
   }
+  // SPEC 7: the variant (outer axis) + version (inner axis) glyphs live at the left of the
+  // editor-window toolbar row (#editor-doc-axes). Fall back to the global bar's right group
+  // if the editor header isn't present (defensive; the header is static in index.html).
+  function axisSwitchHost() {
+    return document.getElementById("editor-doc-axes") || document.querySelector(".toolbar__group--right");
+  }
+  // edit-header-ia-v2: face-up NAMED dropdown (was a glyph-only trigger). Shows the active
+  // variant name ("Flagship" = base) at a glance; the name truncates with ellipsis (full name
+  // in the menu + title tooltip). Same click -> openVariantMenu; a control re-shape, not a re-wire.
   function renderVariantSwitch() {
-    var host = document.querySelector(".toolbar__group--right");
+    var host = axisSwitchHost();
     if (!host) return;
+    var Ic = window.Icon;
     if (!variantWrapEl) {
-      variantWrapEl = h("button", "tool variant-glyph"); variantWrapEl.type = "button";
+      variantWrapEl = h("button", "tool editor-window__axis-btn variant-glyph"); variantWrapEl.type = "button";
+      // uio-E-C04 (EDIT-08): the axis is NAMED in the bar (a muted "Variant" caption) so the two
+      // dropdowns aren't unlabelled twins; the value + caret follow.
+      variantWrapEl.innerHTML =
+        '<span class="axis-btn__axis">Variant</span>' +
+        '<span class="axis-btn__label"></span>' +
+        '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       variantWrapEl.addEventListener("click", function () { openVariantMenu(variantWrapEl); });
       host.insertBefore(variantWrapEl, host.firstChild);
     }
-    var Ic = window.Icon; variantWrapEl.innerHTML = Ic ? Ic("layers") : "";
     variantSwitchEl = variantWrapEl;
     syncVariantSwitch();
   }
   function syncVariantSwitch() {
     if (!variantWrapEl) return;
     var cur = activeVariant || "";
+    var lbl = variantWrapEl.querySelector(".axis-btn__label");
+    if (lbl) lbl.textContent = cur || "Flagship";
     variantWrapEl.classList.toggle("is-active", !!cur);
     variantWrapEl.setAttribute("aria-label", "Variant");
     variantWrapEl.title = cur
       ? ("Variant: " + cur + " (previewing) — switch or return to Flagship")
       : "Variant: Flagship — preview a variant";
+    syncAxisReturnChip();
+  }
+  // uio-E-C04 (EDIT-08): surface the off-base state in the BAR (not only a canvas badge). A chip
+  // appears the moment either axis leaves base; its wording tracks the real mode -- "Read-only"
+  // when the canvas is locked (variant preview, or a version preview while collaborating), or
+  // "Editing <version>" for the editable dynamic-flagship case (#207). One click returns to base.
+  var axisReturnChipEl = null;
+  function returnToBase() {
+    flushSave(); // commit any in-flight edit before dropping the active version/variant
+    activeVariant = null; activeVersion = null;
+    syncVariantSwitch(); syncVersionSwitch();
+    mount();
+  }
+  function syncAxisReturnChip() {
+    var host = axisSwitchHost();
+    if (!host) return;
+    var off = isPreview();
+    if (!off) { if (axisReturnChipEl) { axisReturnChipEl.remove(); axisReturnChipEl = null; } return; }
+    if (!axisReturnChipEl) {
+      axisReturnChipEl = h("span", "axis-return-chip");
+      var txt = h("span", "axis-return-chip__label");
+      var btn = h("button", "axis-return-chip__btn", "Return to base"); btn.type = "button";
+      btn.addEventListener("click", returnToBase);
+      axisReturnChipEl.appendChild(txt); axisReturnChipEl.appendChild(btn);
+      host.appendChild(axisReturnChipEl); // after the two axis buttons
+    }
+    var locked = !canvasEditable();
+    axisReturnChipEl.classList.toggle("axis-return-chip--locked", locked);
+    var label = axisReturnChipEl.querySelector(".axis-return-chip__label");
+    if (locked) { label.textContent = "Read-only"; axisReturnChipEl.title = "Previewing off base — the canvas is read-only. Return to base to edit."; }
+    else { label.textContent = "Editing " + (activeVersion || "version"); axisReturnChipEl.title = "Editing a software version off base. Return to base to edit the base document."; }
   }
   function previewVariant(v) { activeVariant = v; syncVariantSwitch(); mount(); }
   // Floating "Previewing variant · X" badge on the canvas — makes it obvious you're
@@ -19347,28 +26972,39 @@
     var r = anchor.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 6, items);
   }
+  // edit-header-ia-v2: face-up NAMED dropdown twin of the variant switch. Shows the active
+  // version name, or the base version's name, or "Base" when the axis has none yet.
   function renderVersionSwitch() {
-    var host = document.querySelector(".toolbar__group--right");
+    var host = axisSwitchHost();
     if (!host) return;
+    var Ic = window.Icon;
     if (!versionWrapEl) {
-      versionWrapEl = h("button", "tool version-glyph"); versionWrapEl.type = "button";
+      versionWrapEl = h("button", "tool editor-window__axis-btn version-glyph"); versionWrapEl.type = "button";
+      // uio-E-C04 (EDIT-08): named axis caption ("Version") + value + caret, twin of the variant switch.
+      versionWrapEl.innerHTML =
+        '<span class="axis-btn__axis">Version</span>' +
+        '<span class="axis-btn__label"></span>' +
+        '<span class="axis-btn__caret">' + (Ic ? Ic("chevron-down") : "") + '</span>';
       versionWrapEl.addEventListener("click", function () { openVersionMenu(versionWrapEl); });
       // FIX 4a: order encodes nesting — variant (outer axis) then version (inner axis),
       // left->right. Insert AFTER the variant glyph if present, else at the group head.
       if (variantWrapEl && variantWrapEl.parentNode === host) host.insertBefore(versionWrapEl, variantWrapEl.nextSibling);
       else host.insertBefore(versionWrapEl, host.firstChild);
     }
-    var Ic = window.Icon; versionWrapEl.innerHTML = Ic ? Ic("history") : "";
     syncVersionSwitch();
   }
   function syncVersionSwitch() {
     if (!versionWrapEl) return;
     var cur = activeVersion || "";
+    var vs = versionNames(); var base = vs.length ? vs[0] : "";
+    var lbl = versionWrapEl.querySelector(".axis-btn__label");
+    if (lbl) lbl.textContent = cur || base || "Base";
     versionWrapEl.classList.toggle("is-active", !!cur);
     versionWrapEl.setAttribute("aria-label", "Software version");
     versionWrapEl.title = cur
       ? ("Software version: " + cur + " (previewing, read-only) — switch or return to Base to edit")
       : "Software version: Base — preview a version";
+    syncAxisReturnChip();
   }
   function previewVersion(v) { flushSave(); activeVersion = v; syncVersionSwitch(); mount(); } // #207 FIX 3: flush an in-flight edit before switching so nothing is lost mid-caret
   // Floating teal version badge. #207 (FIX 1): the wording signals the MODE, not just the axis —
@@ -19410,6 +27046,97 @@
     }
     return null;
   }
+  // uio-O-W1 (OVL-14): ONE block verb list, two doors. Copy style, Save as component and
+  // Clear content used to be reachable only by right-clicking a canvas object — a gesture
+  // nothing in the UI advertises — so the inspector and the menu describing the same block
+  // shared almost no vocabulary. This is the single definition of that list. The canvas
+  // right-click and the inspector header's "..." overflow both render it, so the two doors
+  // cannot drift apart, and its foot names the way back into the inspector.
+  // target = { block, instance? } — the shape findTargetFromEvent returns.
+  function blockMenuItems(target) {
+    var items = [];
+    var block = target && target.block;
+    var host = (target && target.instance) || block;
+    var vs = variantNames();
+    if (block) {
+      items.push({ label: "Duplicate", onClick: function () { duplicateBlock(block); } });
+      items.push({ label: "Copy", onClick: function () { copySelection(); } });
+      if (clipboard.length) {
+        items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
+        items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
+      }
+      items.push({ label: "Copy style", onClick: function () { copyBlockStyle(block); } });
+      if (styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(block); } });
+      items.push({ label: "Move up", onClick: function () { moveBlock(block, -1); } });
+      items.push({ label: "Move down", onClick: function () { moveBlock(block, 1); } });
+      if (block.type === "group") items.push({ label: "Ungroup", onClick: function () { ungroupBlock(block); } });
+      items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(block); } });
+      // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
+      items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([block]); } });
+      if (canSplitAtBlock(block)) {
+        items.push({ sep: true });
+        items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(block); } });
+      }
+      items.push({ sep: true });
+      items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(block); } });
+    }
+    items.push({ sep: true });
+    // uio-O-W2 (OVL-13): these three groups used to be headings with a row per variant, and the
+    // variant heading rendered even with nothing under it ("Variants (none yet)") — a third of
+    // the menu spent on a feature the block does not use. Each is ONE row with a submenu now,
+    // and with no variants at all the whole family collapses to a single ordinary "Add
+    // variant…" entry. The "+" prefix is gone: it was a fourth style for "create" in a product
+    // that already has filled buttons, ghost add-rows and plain menu verbs.
+    if (vs.length) {
+      // Variant TEXT is edited in the Design panel (the block is selected, so the panel already
+      // shows its "Variant text" fields). The menu keeps only visibility + variant creation.
+      var variantSub = vs.map(function (v) {
+        return { label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } };
+      });
+      variantSub.push({ sep: true });
+      variantSub.push({ label: "New variant…", onClick: function () { newVariantPrompt(); } });
+      items.push({ label: "Variants", submenu: variantSub });
+    } else {
+      items.push({ label: "Add variant…", onClick: function () { newVariantPrompt(); } });
+    }
+    // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
+    // Only when the course has versions; while editing a version the toggle for THAT version
+    // sits first for quick reach (hide this block from the release you're authoring).
+    var versAll = versionNames();
+    if (versAll.length) {
+      var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
+      items.push({ label: "Software versions", submenu: ordered.map(function (v) {
+        return { label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } };
+      }) });
+    }
+    // #148: image / hotspot base image — a direct "Upload image for <variant>" that
+    // opens the file picker straight away and writes that variant's version (overrides[v].src).
+    if (block && IMG_VERSION_TYPES[block.type] && vs.length) {
+      var imgSub = [];
+      vs.forEach(function (v) {
+        var own = imgVariantSrc(block, v);
+        imgSub.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
+          uploadImageVariant(block, v, function () { reapplyBlock(block); reselectBlockNode(block, "block"); });
+        } });
+        if (own) imgSub.push({ label: "Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(block, v, null); reapplyBlock(block); reselectBlockNode(block, "block"); } });
+      });
+      items.push({ label: "Variant images", submenu: imgSub });
+    }
+    if (block) {
+      items.push({ sep: true });
+      items.push({ label: "Block settings", hint: "Inspector", onClick: function () { revealBlockSettings(block); } });
+    }
+    return items;
+  }
+  // The route the menu's foot names: select the block and open its own settings in the
+  // inspector, so the menu always hands off to the panel rather than dead-ending.
+  function revealBlockSettings(block) {
+    if (!block) return;
+    enteredBlock = block;
+    reselectBlockNode(block, "block");
+    renderInspector();
+    if (inspector && inspector.scrollTo) inspector.scrollTo({ top: 0 });
+  }
   function wireContextMenu() {
     canvas.addEventListener("contextmenu", function (e) {
       e.preventDefault(); // always replace the native menu on the canvas
@@ -19446,70 +27173,17 @@
       }
       if (target) {
         setSelection(target.type === "instance" ? "instance" : "block", target.node);
-        if (target.type === "block") {
-          items.push({ label: "Duplicate", onClick: function () { duplicateBlock(target.block); } });
-          items.push({ label: "Copy", onClick: function () { copySelection(); } });
-          if (clipboard.length) {
-            items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
-            items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
-          }
-          items.push({ label: "Copy style", onClick: function () { copyBlockStyle(target.block); } });
-          if (styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(target.block); } });
-          items.push({ label: "Move up", onClick: function () { moveBlock(target.block, -1); } });
-          items.push({ label: "Move down", onClick: function () { moveBlock(target.block, 1); } });
-          if (target.block.type === "group") {
-            items.push({ label: "Ungroup", onClick: function () { ungroupBlock(target.block); } });
-          }
-          items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(target.block); } });
-          // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
-          items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([target.block]); } });
-          if (canSplitAtBlock(target.block)) {
-            items.push({ sep: true });
-            items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(target.block); } });
-          }
-          items.push({ sep: true });
-          items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(target.block); } });
-        }
-        items.push({ sep: true });
-        items.push({ head: vs.length ? "Variants" : "Variants (none yet)" });
-        var host = target.instance || target.block;
-        // Variant TEXT is edited in the Design panel (this block is now selected,
-        // so the panel already shows its "Variant text" fields). The menu keeps
-        // only visibility + variant creation.
-        vs.forEach(function (v) {
-          items.push({ label: (isHiddenIn(host, v) ? "✓ " : "") + "Hide in " + v, onClick: function () { toggleHiddenIn(host, v); } });
-        });
-        // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
-        // Only when the course has versions; while editing a version the toggle for THAT version
-        // sits first for quick reach (hide this block from the release you're authoring).
-        var versAll = versionNames();
-        if (versAll.length) {
-          items.push({ head: "Software version" });
-          var ordered = activeVersion ? [activeVersion].concat(versAll.filter(function (v) { return v !== activeVersion; })) : versAll;
-          ordered.forEach(function (v) {
-            items.push({ label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } });
-          });
-        }
-        // #148: image / hotspot base image — a direct "Upload image for <variant>" that
-        // opens the file picker straight away and writes that variant's version (overrides[v].src).
-        if (target.block && IMG_VERSION_TYPES[target.block.type] && vs.length) {
-          items.push({ head: "Variant image versions" });
-          vs.forEach(function (v) {
-            var own = imgVariantSrc(target.block, v);
-            items.push({ label: (own ? "Replace image for " : "Upload image for ") + v, onClick: function () {
-              uploadImageVariant(target.block, v, function () { reapplyBlock(target.block); reselectBlockNode(target.block, "block"); });
-            } });
-            if (own) items.push({ label: "   Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(target.block, v, null); reapplyBlock(target.block); reselectBlockNode(target.block, "block"); } });
-          });
-        }
-        items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
+        // uio-O-W1 (OVL-14): one shared definition, rendered identically by the inspector's
+        // "..." overflow. An instance target keeps its variant/version section but not the
+        // block verbs (matching the previous behaviour).
+        items = items.concat(blockMenuItems(target.type === "block" ? target : { instance: target.instance }));
       } else {
         if (clipboard.length) { items.push({ label: "Paste", onClick: function () { pasteClipboard(); } }); items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } }); items.push({ sep: true }); }
         items.push({ head: "Variants" });
         items.push({ label: "✓ Flagship", onClick: function () { previewVariant(null); } });
         vs.forEach(function (v) { items.push({ label: "Preview: " + v, onClick: function () { previewVariant(v); } }); });
         items.push({ sep: true });
-        items.push({ label: "+ New variant…", onClick: function () { newVariantPrompt(); } });
+        items.push({ label: "New variant…", onClick: function () { newVariantPrompt(); } });
       }
       showContextMenu(e.clientX, e.clientY, items);
     });
@@ -19523,7 +27197,7 @@
   // unconditionally (in kit mode AND normal mode) — a pure reference to defined fns.
   window.__kit = {
     Icon: Icon, ICON_ALIAS: ICON_ALIAS, h: h,
-    sub: sub, propHeader: propHeader, optionalRow: optionalRow, repeatedList: repeatedList, renderContainerChrome: renderContainerChrome, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS, breadcrumb: breadcrumb, disclosure: disclosure, subDisclosure: subDisclosure,
+    panelSection: panelSection, propHeader: propHeader, optionalRow: optionalRow, repeatedList: repeatedList, renderContainerChrome: renderContainerChrome, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS, breadcrumb: breadcrumb, disclosure: disclosure, subDisclosure: subDisclosure,
     switchRow: switchRow, eyeRow: eyeRow, segmentedIconLive: segmentedIconLive,
     fieldRow: fieldRow, iconField: iconField, twoUp: twoUp,
     selectRow: selectRow, customSelectRow: customSelectRow,
@@ -19544,16 +27218,24 @@
   wireDemo();
   applyUiTheme(uiThemeIsLight()); // #44: restore the saved editor-chrome light/dark theme
   wireCopyEditor(); // #116: full-screen copy-editor view (rail glyph opens, Close/Esc returns)
+  mountViewToggle(); // SPEC 7: Build/Read segmented control in the editor header
   mountTopBar(); // #12: hydrate DS icons + promote Preview to the sole primary
+  mountDocSettingsBtn(); // edit-header-ia-v2: the header's Document-settings button (the cell chip's
+  // geometry/interactivity moved INTO its modal -- the "Document type" settings section)
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
+  mountPanelOverflow(); // uio-E-C05 (EDIT-09): wire the inspector panel's ⋯ overflow menu
+  mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
+  mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
   refreshCourseWeight(); // §308: initial course-weight readout
-  wireLeftPanes();
+  wireLeftSwitcher();
   wireRightTabs();
   // HH: restore the right-panel Design/Interact mode before the boot mount so the
   // canvas + panel render in the saved mode (setInteractMode persists it on change).
   try { if (localStorage.getItem(INTERACT_MODE_KEY) === "1") { interactMode = true; canvas.classList.add("is-interact"); syncRightTabs(); } } catch (e) {}
   window.addEventListener("keydown", function (e) { if (e.key === "Escape" && picking) { endPick(); renderInspector(); } });
+  document.addEventListener("selectionchange", onCanvasSelectionChange); // floating-format-bar: above-selection B/I/U on the Edit canvas
+  window.addEventListener("scroll", hideCanvasFmtBar, true); // keep the fixed bar from lagging the selection on scroll
   wireResizers();
   renderVariantSwitch();
   renderVersionSwitch(); // #206: software-version switcher (second top-bar glyph)
@@ -19562,6 +27244,10 @@
   // unconditionally (verso-format.js loads AFTER editor.js) — exportVersoPackage guards
   // on window.VersoFormat at click time.
   window.Editor.registerPipelineButton("Export .verso (project)", exportVersoPackage, false);
+  // Product Rail Epic 6 (T4): fast-track the open document into the persistent Publish queue with its
+  // remembered preset, no configure step -- the early-stage single-export path. Sits in the top-bar
+  // overflow beside the other IO actions; the Publish stage's picker rows are the other entry point.
+  window.Editor.registerPipelineButton("Send to publish queue", function () { if (activeDocId && registry[activeDocId]) addToQueue(activeDocId); }, false);
   // #69: the guarded browser->file cutover. Registered ONLY when the native store glue is
   // present (Verso desktop shell with the rebuilt bridge) -> invisible in a plain browser,
   // so it can never be triggered where it cannot safely run.

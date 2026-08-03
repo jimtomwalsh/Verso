@@ -61,7 +61,7 @@ section("syntax");
 ["src/render.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -1651,7 +1651,7 @@ section("#81 Help markdown renderer");
   ok("#8 continuation stops at next bullet", md("- one\n  wrapped\n- two") === "<ul><li>one wrapped</li><li>two</li></ul>");
   ok("#8 continuation stops at a blank line", md("- one\n\npara").indexOf("<li>one</li></ul>") !== -1 && md("- one\n\npara").indexOf("<p>para</p>") !== -1);
   ok("horizontal rule", md("---") === "<hr>");
-  ok("blockquote wraps", md("> hi").indexOf("<blockquote>") === 0);
+  ok("blockquote wraps", md("> hi").indexOf("<blockquote") === 0);
   // HTML in the source is escaped (defensive — trusted content, still no injection)
   ok("escapes angle brackets", md("a <script> b").indexOf("&lt;script&gt;") !== -1);
   ok("no live tag leaks", md("<img onerror=x>").indexOf("<img") === -1);
@@ -1704,14 +1704,20 @@ section("#8 docs reader (TOC + search)");
 (function () {
   var ed = src("src/editor.js");
   ok("#8 reader builds the two-pane split (nav + reading pane)", /modal-box--docs/.test(ed) && /docs-split/.test(ed) && /docs-nav/.test(ed));
-  ok("#8 sidebar has a search input", /docs-search__input/.test(ed) && /Search the guide/.test(ed));
+  // uio-F06 (OVL-21) RETARGETED: the guide's own search box is retired. It was a third search
+  // field over a third index; guide sections now live in the one Cmd-K index. The TOC stays,
+  // because a contents list is navigation, not search.
+  ok("#8 sidebar has NO search input of its own (one index, Cmd-K)", !/docs-search__input/.test(ed) && !/placeholder = "Search the guide"/.test(ed));
   ok("#8 TOC built from the guide's h2/h3 heading ids", /function buildDocsNav[\s\S]{0,400}querySelectorAll\("h2\[id\], h3\[id\]"\)/.test(ed));
   ok("#8 TOC item scrolls the reading pane to its heading", /docs-toc__item[\s\S]{0,400}addEventListener\("click"[\s\S]{0,80}scrollToHead/.test(ed));
   ok("#8 scroll-spy highlights the active section", /body\.addEventListener\("scroll"[\s\S]{0,600}is-active/.test(ed));
-  ok("#8 search filters the TOC + shows a no-match state", /function runSearch[\s\S]{0,400}is-hidden[\s\S]{0,200}docs-toc__empty|noHits\.style\.display/.test(ed));
-  ok("#8 Escape clears a live search before closing", /activeElement === search && search\.value[\s\S]{0,80}runSearch\(""\)/.test(ed));
+  ok("#8 the guide's TOC filter went with the search box (no orphan runSearch)", !/function runSearch/.test(ed) && !/docs-toc__empty/.test(ed));
+  // uio-F06 RETARGETED: Escape used to be the guide's own capture handler, clearing its search
+  // first. The guide now joins the F05 layer stack, so Escape closes the topmost layer only.
+  ok("#8 the guide is a layer, so Escape closes the topmost surface only", /pushLayer\("help", close\)/.test(ed) && /popLayer\("help"\)/.test(ed));
+  ok("#8 a guide result lands on its section, not the top of the guide", /function openHelpModal\(focusId\)/.test(ed) && /if \(focusId\)[\s\S]{0,220}scrollToHead\(body, target\)/.test(ed));
   ok("#8 CSS: TOC active item reuses the accent-quiet/accent token pair", /\.docs-toc__item\.is-active\s*\{[^}]*var\(--accent-quiet\)[^}]*var\(--accent\)/.test(src("editor.css")));
-  ok("#8 CSS: search converges to the ring-wrapper focus-within pattern", /\.docs-search:focus-within\s*\{[^}]*var\(--accent\)/.test(src("editor.css")));
+  ok("#8 CSS: the retired search box left no dead rules behind", !/\.docs-search/.test(src("editor.css")) && !/\.docs-toc__empty/.test(src("editor.css")));
 })();
 
 // ---- #8 docs auto-maintenance — the drift checker tool (code is truth) -----------------
@@ -2044,7 +2050,8 @@ section("#71 recents");
   if (!m) { ok("locate @pure-recents fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { stampDocUpdatedAt: stampDocUpdatedAt, stampDocOpenedAt: stampDocOpenedAt, recentsCompare: recentsCompare," +
-    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime };")();
+    " courseMatchesQuery: courseMatchesQuery, formatRelativeTime: formatRelativeTime, stampMasterVersion: stampMasterVersion," +
+    " docMatchesProductStage: docMatchesProductStage, tagDocProductStage: tagDocProductStage };")();
 
   // stampers: write the scalar onto meta, create meta if absent, never touch media.
   var d = { meta: { title: "A", code: "A" }, pages: [{ blocks: [{ type: "image", src: "data:image/png;base64,AAA" }] }] };
@@ -2092,6 +2099,243 @@ section("#71 recents");
   ok("one hour singular", g.formatRelativeTime(NOW - 60 * 60 * 1000, NOW) === "1 hour ago");
   ok("days", g.formatRelativeTime(NOW - 3 * 24 * 3600 * 1000, NOW) === "3 days ago");
   ok("future clamps to just now", g.formatRelativeTime(NOW + 5000, NOW) === "just now");
+
+  // Product Rail: master version/updatedAt stamp -- bumps on the stamp call, stable
+  // (unchanged) across any read that doesn't call it.
+  var master = { name: "Topic" };
+  g.stampMasterVersion(master, 1000);
+  ok("stamps updatedAt onto the master", master.updatedAt === 1000);
+  var readOnly = master.updatedAt; // a "read" -- must not itself bump anything
+  ok("a read is stable (unchanged) until the next stamp call", master.updatedAt === readOnly && master.updatedAt === 1000);
+  g.stampMasterVersion(master, 2000);
+  ok("re-stamping bumps to the new value (content changed again)", master.updatedAt === 2000);
+  ok("stampMasterVersion is null-safe", g.stampMasterVersion(null, 1000) === null);
+
+  // Product Rail #1: Product/Stage filter predicate + tagger, over a fixture mix of
+  // tagged and untagged docs. Untagged docs must behave exactly as today (match any
+  // "no constraint" filter, never a specific Product/Stage one).
+  var untagged = { meta: { title: "Legacy course", code: "LEGACY" } };
+  var tagged1 = { meta: { title: "Radar 101", code: "R101", productId: "prod-a", stage: "elearning" } };
+  var tagged2 = { meta: { title: "Radar deck", code: "R-DECK", productId: "prod-a", stage: "presentations" } };
+  var taggedOther = { meta: { title: "Other product", code: "OTHER", productId: "prod-b", stage: "elearning" } };
+  ok("no filter (both falsy) matches every doc, tagged or not", g.docMatchesProductStage(untagged, null, null) === true && g.docMatchesProductStage(tagged1, null, null) === true);
+  ok("productId filter excludes an untagged doc", g.docMatchesProductStage(untagged, "prod-a", null) === false);
+  ok("productId filter excludes a doc tagged to a different product", g.docMatchesProductStage(taggedOther, "prod-a", null) === false);
+  ok("productId filter matches a doc tagged to that product (any stage)", g.docMatchesProductStage(tagged1, "prod-a", null) === true && g.docMatchesProductStage(tagged2, "prod-a", null) === true);
+  ok("productId+stage filter narrows to the exact stage", g.docMatchesProductStage(tagged1, "prod-a", "elearning") === true && g.docMatchesProductStage(tagged2, "prod-a", "elearning") === false);
+  ok("stage-only filter (no productId) still excludes an untagged doc", g.docMatchesProductStage(untagged, null, "elearning") === false);
+
+  var freshDoc = { meta: { title: "New course", code: "NEW" } };
+  g.tagDocProductStage(freshDoc, "prod-a", "elearning");
+  ok("tagDocProductStage writes productId/stage onto meta only", freshDoc.meta.productId === "prod-a" && freshDoc.meta.stage === "elearning" && freshDoc.meta.title === "New course");
+  g.tagDocProductStage(freshDoc, null, null);
+  ok("tagDocProductStage(null,null) clears the tags back to untagged", freshDoc.meta.productId === undefined && freshDoc.meta.stage === undefined);
+  ok("tagDocProductStage is null-safe", g.tagDocProductStage(null, "x", "y") === null);
+})();
+
+// ---- SPEC 7: file picker — doc browser grouped by geo (pure) ----
+section("editor-rework file-picker grouping");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-browser-geo-start \*\/([\s\S]*?)\/\* @pure-browser-geo-end \*\//);
+  if (!m) { ok("locate @pure-browser-geo fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { groupDocIdsByGeo: groupDocIdsByGeo, BROWSER_GEO_ORDER: BROWSER_GEO_ORDER };")();
+  var reg = { a: { geo: "reflow" }, b: { geo: "paged" }, c: { geo: "reflow" }, d: { geo: "frame" }, e: { geo: "unknownGeo" } };
+  var geoOf = function (doc) { return doc.geo; };
+  var groups = g.groupDocIdsByGeo(["a", "b", "c", "d", "e"], reg, geoOf);
+  ok("groups appear in canonical geo order (reflow, frame, paged)", groups.map(function (x) { return x.geo; }).join(",") === "reflow,frame,paged");
+  ok("reflow group holds the reflow docs + unknown-geo fallback", groups[0].ids.sort().join(",") === "a,c,e");
+  ok("frame group holds the frame doc", groups[1].ids.join(",") === "d");
+  ok("paged group holds the paged doc", groups[2].ids.join(",") === "b");
+  ok("an empty geo produces no group", g.groupDocIdsByGeo(["b"], reg, geoOf).map(function (x) { return x.geo; }).join(",") === "paged");
+  ok("ids with no registry doc are dropped", g.groupDocIdsByGeo(["a", "ghost"], reg, geoOf)[0].ids.join(",") === "a");
+  ok("null-safe on empty input", g.groupDocIdsByGeo(null, reg, geoOf).length === 0);
+  // the browser is product-scoped + auto-opens on a zero-tab Edit landing
+  ok("the browser filters by the product scope (docMatchesProductStage)", /courseMatchesQuery\(registry\[id\], browserQuery\) && docMatchesProductStage\(registry\[id\], scope, null\)/.test(t));
+  ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(t));
+  ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(t) && /cell\.interactive \? "Interactive" : "Static"/.test(t));
+})();
+
+// ---- SPEC 7: product-filtered tab scope (pure predicate) ----
+// ---- SPEC 7: matrix doc-type model (geo x interactive) -- pure, headless ----
+section("editor-rework matrix doc-type");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-doctype-start \*\/([\s\S]*?)\/\* @pure-doctype-end \*\//);
+  if (!m) { ok("locate @pure-doctype fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { docCell: docCell, tagDocCell: tagDocCell, presetToCell: presetToCell," +
+    " cellToPreset: cellToPreset, condToolsFor: condToolsFor, isValidGeo: isValidGeo," +
+    " DOCTYPE_PRESETS: DOCTYPE_PRESETS, DOCTYPE_GEOS: DOCTYPE_GEOS };")();
+
+  // NON-REGRESSION (the critical one): an untagged legacy doc resolves to the today
+  // default {reflow, interactive:true}, so no migration is needed and it opens unchanged.
+  var legacy = { meta: { title: "Legacy course", code: "LEGACY" } };
+  var lc = g.docCell(legacy);
+  ok("untagged doc defaults to {reflow, interactive:true}", lc.geo === "reflow" && lc.interactive === true);
+  ok("docCell on a doc with no meta is null-safe", g.docCell({}).geo === "reflow" && g.docCell(null).interactive === true);
+
+  // docCell resolution: valid geo passes through; an out-of-range geo falls back to
+  // reflow; interactive is STRICT -- only an explicit false is static.
+  ok("valid geo passes through", g.docCell({ meta: { geo: "paged" } }).geo === "paged");
+  ok("out-of-range geo -> reflow", g.docCell({ meta: { geo: "isometric" } }).geo === "reflow");
+  ok("explicit interactive:false is the only way to static", g.docCell({ meta: { interactive: false } }).interactive === false);
+  ok("absent interactive stays interactive (legacy)", g.docCell({ meta: { geo: "frame" } }).interactive === true);
+
+  // presetToCell: all five presets map to the right cell; unknown -> null.
+  ok("preset elearning -> reflow/interactive", (function () { var c = g.presetToCell("elearning"); return c.geo === "reflow" && c.interactive === true; })());
+  ok("preset deck -> frame/interactive", (function () { var c = g.presetToCell("deck"); return c.geo === "frame" && c.interactive === true; })());
+  ok("preset onepager -> paged/static", (function () { var c = g.presetToCell("onepager"); return c.geo === "paged" && c.interactive === false; })());
+  ok("preset quickstart -> paged/static", (function () { var c = g.presetToCell("quickstart"); return c.geo === "paged" && c.interactive === false; })());
+  ok("preset webdoc -> reflow/static", (function () { var c = g.presetToCell("webdoc"); return c.geo === "reflow" && c.interactive === false; })());
+  ok("unknown preset -> null", g.presetToCell("hologram") === null);
+  ok("all five presets are covered", g.DOCTYPE_PRESETS.length === 5 && g.DOCTYPE_PRESETS.every(function (p) { return g.isValidGeo(p.geo) && typeof p.interactive === "boolean"; }));
+
+  // cellToPreset: names a cell when a preset covers it; a recombination outside the five
+  // presets (e.g. frame + static) returns null -- the matrix allows more than the presets.
+  ok("cell {reflow,true} -> elearning", g.cellToPreset("reflow", true) === "elearning");
+  ok("cell {frame,false} is a recombination -> null", g.cellToPreset("frame", false) === null);
+
+  // condToolsFor: the geometry tool lists per the spec; unknown geo -> reflow set; the
+  // returned array is a copy (mutating it must not corrupt the shared table).
+  ok("paged tools", g.condToolsFor("paged").join("|") === "Margins|Running header / footer|Page breaks|Page numbers");
+  ok("frame tools", g.condToolsFor("frame").join("|") === "Frame size / aspect|Slide transitions|Animation");
+  ok("reflow tools", g.condToolsFor("reflow").join("|") === "Breakpoint preview");
+  ok("unknown geo -> reflow tools", g.condToolsFor("nope").join("|") === "Breakpoint preview");
+  (function () { var a = g.condToolsFor("paged"); a.push("HACK"); ok("condToolsFor returns a copy (no shared-table mutation)", g.condToolsFor("paged").length === 4); })();
+
+  // tagDocCell round-trip: writes onto meta ONLY (never touches content); a clear reverts
+  // to the default resolution; null-safe.
+  var d = { meta: { title: "T", code: "C" }, pages: [{ blocks: [{ type: "image", src: "data:x" }] }] };
+  g.tagDocCell(d, "paged", false);
+  ok("tagDocCell writes geo/interactive onto meta only", d.meta.geo === "paged" && d.meta.interactive === false && d.meta.title === "T");
+  ok("tagDocCell leaves content untouched", d.pages[0].blocks[0].src === "data:x");
+  ok("round-trips through docCell", g.docCell(d).geo === "paged" && g.docCell(d).interactive === false);
+  g.tagDocCell(d, "reflow", true);
+  ok("re-tagging updates the cell", d.meta.geo === "reflow" && d.meta.interactive === true);
+  g.tagDocCell(d, "bogus", "maybe");
+  ok("invalid geo clears geo; non-boolean interactive clears interactive", d.meta.geo === undefined && d.meta.interactive === undefined);
+  ok("a cleared doc resolves back to the default", g.docCell(d).geo === "reflow" && g.docCell(d).interactive === true);
+  ok("tagDocCell is null-safe", g.tagDocCell(null, "paged", true) === null);
+})();
+
+// ---- SPEC 7: product-filtered tab scope (pure predicate) ----
+section("editor-rework tab scope");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-tabscope-start \*\/([\s\S]*?)\/\* @pure-tabscope-end \*\//);
+  if (!m) { ok("locate @pure-tabscope fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { visibleTabIds: visibleTabIds };")();
+  var reg = {
+    a: { meta: { title: "A", productId: "prod-a" } },
+    b: { meta: { title: "B", productId: "prod-b" } },
+    a2: { meta: { title: "A2", productId: "prod-a" } },
+    leg: { meta: { title: "Legacy" } } // untagged
+  };
+  var open = ["a", "b", "a2", "leg"];
+  ok("All products ('') shows every open tab", g.visibleTabIds(open, reg, "").join(",") === "a,b,a2,leg");
+  ok("All products (null) shows every open tab", g.visibleTabIds(open, reg, null).join(",") === "a,b,a2,leg");
+  ok("prod-a scope shows only prod-a tabs", g.visibleTabIds(open, reg, "prod-a").join(",") === "a,a2");
+  ok("prod-b scope shows only prod-b tabs", g.visibleTabIds(open, reg, "prod-b").join(",") === "b");
+  ok("an untagged doc never shows under a specific product", g.visibleTabIds(open, reg, "prod-a").indexOf("leg") === -1);
+  ok("a scope with no open tabs -> empty", g.visibleTabIds(open, reg, "prod-c").length === 0);
+  ok("ids with no registry entry are dropped", g.visibleTabIds(["a", "ghost"], reg, "").join(",") === "a");
+  ok("null-safe on empty inputs", g.visibleTabIds(null, reg, "").length === 0 && g.visibleTabIds(open, null, "").length === 0);
+})();
+
+// ---- SPEC 7: static fallback — interactive-block palette filter (pure) ----
+section("editor-rework static-fallback palette filter");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-doctype-start \*\/([\s\S]*?)\/\* @pure-doctype-end \*\//);
+  if (!m) { ok("locate @pure-doctype fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { isInteractiveBlockType: isInteractiveBlockType, paletteAllowsType: paletteAllowsType, INTERACTIVE_BLOCK_TYPES: INTERACTIVE_BLOCK_TYPES };")();
+  ["quiz", "hotspot", "checkbox", "navButton", "accordion", "cardReveal", "sequence", "cardDeck", "htmlEmbed", "webEmbed"].forEach(function (ty) {
+    ok(ty + " is an interactive type", g.isInteractiveBlockType(ty) === true);
+  });
+  ["heading", "paragraph", "image", "table", "divider", "columns", "quote", "list"].forEach(function (ty) {
+    ok(ty + " is a static-safe type", g.isInteractiveBlockType(ty) === false);
+  });
+  // an interactive cell offers everything; a static cell hides interactive types but keeps static ones
+  ok("interactive cell offers a quiz", g.paletteAllowsType("quiz", true) === true);
+  ok("static cell hides a quiz", g.paletteAllowsType("quiz", false) === false);
+  ok("static cell still offers a heading", g.paletteAllowsType("heading", false) === true);
+  ok("legacy/undefined interactivity behaves as interactive (offers everything)", g.paletteAllowsType("quiz", undefined) === true);
+  // the editor filters the LIBRARY through this predicate against the doc's cell
+  ok("renderAssets gates the palette on the cell's interactivity (type via item.make)", /item\.__bt = item\.type \|\| \(item\.make \? \(item\.make\(\) \|\| \{\}\)\.type : null\);[\s\S]{0,120}if \(!paletteAllowsType\(item\.__bt, cellInteractive\)\) return;/.test(t));
+  ok("existing blocks are never dropped by the filter (palette-only)", /this only gates what NEW content can be added/.test(t));
+})();
+
+// ---- SPEC 7: cell switcher + tiered mutability (wiring) ----
+section("editor-rework cell switcher");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  // edit-header-ia-v2: the cell chip left the header bar; geometry/interactivity now live in the
+  // Document settings modal's "Document type" section (buildDocTypeBody). The cell MODEL is unchanged.
+  ok("the cell chip is retired from the header bar", html.indexOf('id="editor-cell-chip"') === -1);
+  ok("Document type is a settings section (first in the Project tab)", /\{ key: "docType", title: "Document type", build: buildDocTypeBody \}/.test(e));
+  ok("buildDocTypeBody offers the three geometries + an Interactive toggle (reusing the cell model)", /function buildDocTypeBody\(host\)[\s\S]{0,400}segmentedLive\("Geometry"[\s\S]{0,260}setCellGeo\(v\)[\s\S]{0,160}switchRow\("Interactive"[\s\S]{0,80}setCellInteractive\(on\)/.test(e));
+  ok("interactivity toggles are IMMEDIATE (no warning)", /function setCellInteractive\(on\)[\s\S]{0,200}applyCellChange\(c\.geo, on\); \/\/ immediate, no warning/.test(e));
+  ok("a geometry-mode change is GUARDED by a reflow warning", /function setCellGeo\(geo\)[\s\S]{0,320}confirmModal\("Change layout mode\?"/.test(e));
+  ok("the geometry change re-renders the canvas via applyCellChange -> mount", /function applyCellChange\(geo, interactive\)[\s\S]{0,220}tagDocCell\(doc, geo, interactive\);[\s\S]{0,80}mount\(\);/.test(e));
+  ok("the change writes the cell through the pure doc-type model, then saves", /window\.__docType\.tagDocCell\(doc, geo, interactive\);\s*\n\s*saveRegistry\(registry\);/.test(e));
+  ok("a geometry change re-renders the open Document settings so the segmented reflects it", /if \(sm && !sm\.hidden && typeof renderSettingsBody === "function"\) renderSettingsBody\(\);/.test(e));
+})();
+
+// ---- SPEC 7: capability inspector (Document context) ----
+section("editor-rework capability inspector");
+(function () {
+  var e = src("src/editor.js");
+  ok("the Document inspector leads with a Document type section", /renderDocumentInspector\(\)[\s\S]{0,700}sectionGroup\("Layout", "Document type"/.test(e));
+  ok("it reads the cell from the pure doc-type model", /window\.__docType\.docCell\(doc\)[\s\S]{0,500}CELL_GEO_LABEL\[_cell\.geo\]/.test(e));
+  ok("it renders the geometry-specific tools from condToolsFor", /window\.__docType\.condToolsFor\(_cell\.geo\)[\s\S]{0,220}tools\.forEach/.test(e));
+  ok("the cell summary points at Document settings (cell chip retired)", /change it in Document settings \(the sliders button in the editor header\)/.test(e));
+  ok("the Document type section comes before the Canvas/Appearance section", e.indexOf('sectionGroup("Layout", "Document type"') < e.indexOf('sectionGroup("Appearance", "Canvas"'));
+})();
+
+// ---- SPEC 7: canvas geometry helpers (pure) ----
+section("editor-rework canvas geometry");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-geo-canvas-start \*\/([\s\S]*?)\/\* @pure-geo-canvas-end \*\//);
+  if (!m) { ok("locate @pure-geo-canvas fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { worldGeoClass: worldGeoClass, frameContentOverflows: frameContentOverflows };")();
+  ok("reflow -> geo-reflow", g.worldGeoClass("reflow") === "geo-reflow");
+  ok("frame -> geo-frame", g.worldGeoClass("frame") === "geo-frame");
+  ok("paged -> geo-paged", g.worldGeoClass("paged") === "geo-paged");
+  ok("unknown geo falls back to geo-reflow", g.worldGeoClass("isometric") === "geo-reflow" && g.worldGeoClass(undefined) === "geo-reflow");
+  ok("content taller than the frame overflows", g.frameContentOverflows(900, 720) === true);
+  ok("content within the frame does not overflow", g.frameContentOverflows(700, 720) === false);
+  ok("a 2px slack avoids false positives at the boundary", g.frameContentOverflows(721, 720) === false && g.frameContentOverflows(723, 720) === true);
+  ok("a zero-height frame never reports overflow", g.frameContentOverflows(500, 0) === false);
+})();
+
+// ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
+section("product-rail ProductsStore");
+(function () {
+  var ed = src("src/editor.js");
+  var pureFence = ed.match(/\/\* @pure-start \*\/([\s\S]*?)\/\* @pure-end \*\//);
+  if (!pureFence) { ok("locate @pure fence", false); return; }
+  var adapterFence = ed.match(/\/\* @products-adapter-start \*\/([\s\S]*?)\/\* @products-adapter-end \*\//);
+  if (!adapterFence) { ok("locate @products-adapter fence", false); return; }
+  var fake = {}; // a minimal Storage-like stub, isolated per test run
+  var fakeLocalStorage = {
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(fake, k) ? fake[k] : null; },
+    setItem: function (k, v) { fake[k] = v; }
+  };
+  // Extracted from the REAL source (not re-typed), so this can't silently drift from
+  // what actually ships: the durable-write core (writeStore) + the real adapter object.
+  var g = new Function("localStorage",
+    pureFence[1] + adapterFence[1] +
+    "\nreturn { browserProductsAdapter: browserProductsAdapter };"
+  )(fakeLocalStorage);
+  ok("readProducts is null before any write (no stray default)", g.browserProductsAdapter.readProducts() === null);
+  var payload = JSON.stringify({ "prod-a": { id: "prod-a", name: "Radar", createdAt: 1000 } });
+  var wr = g.browserProductsAdapter.writeProducts(payload);
+  ok("writeProducts reports ok", wr.ok === true);
+  ok("readProducts round-trips the exact JSON just written", g.browserProductsAdapter.readProducts() === payload);
+  ok("round-tripped JSON parses back to the same shape", JSON.parse(g.browserProductsAdapter.readProducts())["prod-a"].name === "Radar");
 })();
 
 // ---- #67: .verso portable package (zip codec + round-trip) ----------------
@@ -2335,19 +2579,45 @@ section("#69 migration cutover");
   ok("libraryAdapter uses the same pickStorageAdapter seam as the registry", /function libraryAdapter\(\) \{ return pickStorageAdapter\(storageBackend\(\), window\.__storageAdapter, browserLibraryAdapter\); \}/.test(ed));
   ok("loadLibrary reads via libraryAdapter, not a hardcoded localStorage call", /function loadLibrary\(\) \{[\s\S]{0,200}libraryAdapter\(\)\.readLibrary\(\)/.test(ed));
   ok("saveLibrary writes via libraryAdapter, not a hardcoded localStorage call", /function saveLibrary\(\) \{ try \{ libraryAdapter\(\)\.writeLibrary\(JSON\.stringify\(window\.LibraryStore\)\); \} catch \(e\) \{\} \}/.test(ed));
+  // WIRING (Product Rail #1): ProductsStore mirrors the exact same seam pattern.
+  ok("productsAdapter uses the same pickStorageAdapter seam as the registry/library", /function productsAdapter\(\) \{ return pickStorageAdapter\(storageBackend\(\), window\.__storageAdapter, browserProductsAdapter\); \}/.test(ed));
+  ok("loadProducts reads via productsAdapter, not a hardcoded localStorage call", /function loadProducts\(\) \{[\s\S]{0,200}productsAdapter\(\)\.readProducts\(\)/.test(ed));
+  ok("saveProducts writes via productsAdapter, not a hardcoded localStorage call", /function saveProducts\(\) \{ try \{ productsAdapter\(\)\.writeProducts\(JSON\.stringify\(window\.ProductsStore\)\); \} catch \(e\) \{\} \}/.test(ed));
+  ok("store-native.js carries the same readProducts/writeProducts pair as readLibrary/writeLibrary", /readProducts: function \(\) \{ return productsCache; \}/.test(src("src/store-native.js")) && /writeProducts: function \(json\)/.test(src("src/store-native.js")));
+  // WIRING (Product Rail): "Promote to Product" -- folded into the file picker's per-card menu
+  // (side-rail-cleanup slice 2); parameterised by the specific card's doc, writes ONLY its meta.
+  ok("'Promote to Product…' is wired into the file picker's per-card menu, on the card's doc", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ed));
+  ok("promoteToProductModal has ONE UI call site (the per-card menu) + its definition", (ed.match(/promoteToProductModal\(/g) || []).length === 2);
+  var ptmStart = ed.indexOf("function promoteToProductModal(targetDoc)");
+  ok("promoteToProductModal found (parameterised by targetDoc)", ptmStart !== -1);
+  var ptmBody = ed.slice(ptmStart, ptmStart + 2900);
+  ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
+  ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Format"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
+  ok("writes ONLY the target doc's meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(td, pid, stage\);[\s\S]{0,800}saveRegistry\(registry\);/.test(ptmBody));
+  // spec 2d bridge: the card's OWN declared variants ride onto the Product. Asserted on `td`,
+  // not `doc` -- Promote moved into the file picker's per-card menu, so the open document is
+  // not necessarily the one being promoted.
+  ok("spec 2d bridge: Promote carries the card's doc.variants onto the Product (union) so its variant workflow is reachable", /td\.variants && td\.variants\.length[\s\S]{0,400}setProductVariants\(pid, merged\)/.test(ptmBody));
+  ok("A1: onPrimary dismisses the modal (shell.modal.close) + refreshes the product context (mountProductPicker)", /saveRegistry\(registry\);\s*\n\s*shell\.modal\.close\(\);\s*\n\s*mountProductPicker\(\);/.test(ptmBody));
+  ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
   ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(ed));
   ok("migrate button registered only when __nativeStore present", /if \(window\.__nativeStore\) window\.Editor\.registerPipelineButton\("Migrate to file storage \(beta\)", migrateToFileBackendPrompt/.test(ed));
   // WIRING: the Swift bridge grew the ops the native store glue posts.
   var swift = src("desktop/AuthoringTool.swift");
-  ["storePutRegistry", "storeGetRegistry", "storePutLibrary", "storeGetLibrary", "storePutBackupB64", "storeFileSize", "storeReload"].forEach(function (op) {
+  ["storePutRegistry", "storeGetRegistry", "storePutLibrary", "storeGetLibrary", "storePutProducts", "storePutBackupB64", "storeFileSize", "storeReload"].forEach(function (op) {
     ok("Swift handleBackup handles op " + op, swift.indexOf('op == "' + op + '"') !== -1);
   });
   ok("Swift injects the on-disk registry at document-start", /addUserScript\(registryInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskRegistryB64/.test(swift));
   ok("Swift injects the on-disk library at document-start (#18)", /addUserScript\(libraryInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskLibraryB64/.test(swift));
+  // REGRESSION (Product Rail data-loss bug, found via James's live testing): writeProducts
+  // posts storePutProducts, but the Swift shell never grew a case for it (nor a boot
+  // injection) -- every Product/topic was silently non-durable in the real app. Guards both halves.
+  ok("Swift injects the on-disk products store at document-start", /addUserScript\(productsInjectionScript\(\)\)/.test(swift) && /window\.__versoDiskProductsB64/.test(swift));
   ok("Swift reload refreshes the registry injection", /@objc func reload\(\) \{ refreshRegistryInjection\(\)/.test(swift));
-  ok("Swift refreshRegistryInjection rebuilds BOTH the registry and library scripts", /func refreshRegistryInjection\(\) \{[\s\S]{0,200}addUserScript\(registryInjectionScript\(\)\)[\s\S]{0,100}addUserScript\(libraryInjectionScript\(\)\)/.test(swift));
+  ok("Swift refreshRegistryInjection rebuilds registry, library, AND products scripts", /func refreshRegistryInjection\(\) \{[\s\S]{0,300}addUserScript\(registryInjectionScript\(\)\)[\s\S]{0,100}addUserScript\(libraryInjectionScript\(\)\)[\s\S]{0,100}addUserScript\(productsInjectionScript\(\)\)/.test(swift));
   ok("Swift storePutLibrary writes library.json and refreshes injections", /op == "storePutLibrary"[\s\S]{0,600}library\.json[\s\S]{0,300}refreshRegistryInjection\(\)/.test(swift));
+  ok("Swift storePutProducts writes products.json and refreshes injections", /op == "storePutProducts"[\s\S]{0,600}products\.json[\s\S]{0,300}refreshRegistryInjection\(\)/.test(swift));
   ok("Swift storePath rejects absolute / parent-escape paths", /func storePath[\s\S]{0,160}hasPrefix\("\/"\)[\s\S]{0,40}contains\("\.\."\)/.test(swift));
   // REGRESSION: editor.js's __versoBackupReply must CHAIN store-native's, not clobber it.
   ok("editor.js chains a prior __versoBackupReply owner", /__prevBackupReply = window\.__versoBackupReply[\s\S]{0,320}typeof __prevBackupReply === "function"\) __prevBackupReply\(id, result\)/.test(ed));
@@ -2450,9 +2720,15 @@ section("#19 stable-id master snapshot");
   var copyIdx = etxt.indexOf("getComponents()[k] = clone(comp); saveRegistry(registry); mount();");
   ok("'Copy to course' handler found", copyIdx !== -1);
   ok("'Copy to course' preserves ids (no remint)", copyIdx !== -1 && etxt.slice(copyIdx - 20, copyIdx + 80).indexOf("remintIds") === -1);
-  var saveIdx = etxt.indexOf("window.LibraryStore.components[selectedKey] = clone(doc.components[selectedKey]);");
+  var saveIdx = etxt.indexOf("var promoted = clone(doc.components[selectedKey]);");
   ok("'Save to library' handler found", saveIdx !== -1);
-  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 100).indexOf("remintIds") === -1);
+  ok("'Save to library' preserves ids (no remint)", saveIdx !== -1 && etxt.slice(saveIdx - 20, saveIdx + 220).indexOf("remintIds") === -1);
+  // Product Rail: the SAME handler is the sole content-mutation site, so it's where both
+  // the version stamp and the owner-Product tag stamp bump/land -- both BEFORE the master
+  // lands in the shared store.
+  var psaveBody = etxt.slice(saveIdx, saveIdx + 700);
+  ok("'Save to library' stamps the version BEFORE the master lands in the shared store", /stampMasterVersion\(promoted, Date\.now\(\)\)[\s\S]{0,600}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
+  ok("'Save to library' also stamps the owner-Product tag BEFORE the master lands", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)[\s\S]{0,300}window\.LibraryStore\.components\[selectedKey\] = promoted;/.test(psaveBody));
 
   // 3. The contract is documented at remintIds' own definition, so #20/#21/#24 don't
   // add a 5th call site that touches library-resident content.
@@ -2530,6 +2806,16 @@ section("YY asset-seam");
   ok("source ref left intact by resolve", sdoc.pages[0].blocks[0].sources[0].visual === "asset:SRCVID");
   srestore();
   ok("source KEPT for GC (persists across sessions)", rw.collectAssetRefs(sdoc).sort().join(",") === "SCR,SRCVID");
+
+  // Bulk "Purge all sources" (editor Advanced section) deletes block.sources wholesale.
+  // Once gone, collectAssetRefs must stop keeping the purged ids -- same GC contract as the
+  // per-source Remove above, but for every source on the board at once.
+  var pgdoc = { pages: [{ blocks: [
+    { type: "hotspot", screens: [{ visual: "asset:SCR" }], sources: [{ id: "src1", visual: "asset:SRCVID" }, { id: "src2", visual: "asset:SRCVID2" }] }
+  ] }] };
+  ok("purge: sources present before purge", rw.collectAssetRefs(pgdoc).sort().join(",") === "SCR,SRCVID,SRCVID2");
+  delete pgdoc.pages[0].blocks[0].sources;
+  ok("purge: sources gone from GC refs after purge", rw.collectAssetRefs(pgdoc).join(",") === "SCR");
 
   // A harvested screen carries provenance `source:{id,t}` (which source frame it came from).
   // That's inert data (id string + number) — it must add NO asset ref (no export/GC impact);
@@ -3632,7 +3918,7 @@ section("#127 blockStyles (per-type default appearance cascade)");
   // the theme panel edits captured defaults.
   ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?doc\.theme\.blockStyles = \{\};[\s\S]*?return doc\.theme\.blockStyles;/.test(e));
   ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(e) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(e));
-  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(e) && /function blockStylesEditor\(c\)/.test(e));
+  ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(e) && /function blockStylesEditor\(intro, listHost\)/.test(e));
 })();
 
 // ---- #128: document + version the doc.theme design-spec contract (ADR 0002) --
@@ -3685,6 +3971,10 @@ section("#159/#163 frontend conformance gate");
       sectionGroup: n(/sectionGroup\("/g, c),          // canonical taxonomy sections (want UP)
       subHeader: n(/[^_.]sub\("/g, c),                 // raw sub("...") headers (want DOWN)
       disclosure: n(/disclosure\("/g, c),              // ad-hoc collapsibles (want DOWN)
+      // uio-O-W2 (OVL-07): the retired section chromes. One notation means these class names
+      // never come back — a second header style is how the same glyph ended up meaning
+      // "section" in one panel and "sub-section" in another.
+      retiredSection: n(/"insp-sub/g, c) + n(/"subdisc/g, c) + n(/disc__(?:head|title|body|caret)/g, c),
       // interaction-feel §2,§4: no native dialogs.
       rawDialog: n(/(?:^|[^\w.])(?:prompt|confirm)\s*\(/g, c), // raw prompt()/confirm() (want DOWN)
       // panel-ia §4: canonical controls, not hand-rolled.
@@ -3715,9 +4005,15 @@ section("#159/#163 frontend conformance gate");
     // (panel-ia §3: sub() is allowed as an in-section label, never as a section header) — that
     // is why the floor is 28, not 0. The other three checks stay warn-ratchets until their
     // gating tickets land (raw-dialog #156, label-parity #157, canonical-control rawSelect review).
-    sectionGroup: { base: 41, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens)" },
-    subHeader:    { base: 28, dir: "down", enforce: true,  ticket: "#163 (residual = legit in-section sub-labels)" },
-    disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "#163 (ad-hoc collapsibles capped)" },
+    sectionGroup: { base: 44, dir: "up",   enforce: true,  ticket: "#163 (taxonomy adoption — ENFORCED; +1 = #216 hotspot Screens, +1 = tour-source-purge Advanced section, +1 = SPEC 7 Document-type capability section, +1 = uio-F05 settings sheet sections)" },
+    // uio-O-W2 (OVL-07) re-anchored subHeader 28 -> 0. The old floor sanctioned sub() as an
+    // "in-section label"; the overlay audit found that is exactly the third header style, so a
+    // group of rows is a section now and there is no bold heading without a chevron left.
+    subHeader:    { base: 0,  dir: "down", enforce: true,  ticket: "OVL-07 (one notation — a group of rows is a section)" },
+    // The 5 remaining disclosure() calls are ADAPTERS over that one section, not a rival
+    // chrome; the floor caps them so no sixth way to open a group appears.
+    disclosure:   { base: 5,  dir: "down", enforce: true,  ticket: "OVL-07 (named adapters over the one section)" },
+    retiredSection: { base: 0, dir: "down", enforce: true, ticket: "OVL-07 (retired chromes stay retired)" },
     rawDialog:    { base: 0,  dir: "down", enforce: true,  ticket: "#163 (#156 landed — no native dialogs)" },
     // rawSelect review landed: every editor dropdown routes through VersoUI.Select (the dsSelect
     // helper). VersoUI.Select's own h("select") lives in ui-kit.js, which this gate does not
@@ -3766,6 +4062,8 @@ section("#159/#163 frontend conformance gate");
   ok("gate trips (ENFORCED): adding a raw confirm() hard-fails the rawDialog check", !passes("rawDialog", addDialog.rawDialog) && addDialog.rawDialog === m.rawDialog + 1);
   var addSub = measure(e + '\nbody.appendChild(sub("New section"));');
   ok("gate trips (ENFORCED): adding a raw sub() header hard-fails the subHeader check", !passes("subHeader", addSub.subHeader) && addSub.subHeader === m.subHeader + 1);
+  var addRetired = measure(e + '\nbody.appendChild(h("div", "insp-sub", title));');
+  ok("gate trips (ENFORCED): reviving a retired section chrome hard-fails", !passes("retiredSection", addRetired.retiredSection) && addRetired.retiredSection === m.retiredSection + 1);
   var addSelect = measure(e + '\nvar x = h("select", "prop-select");');
   ok("gate trips (ENFORCED): adding a raw <select> hard-fails the rawSelect check", !passes("rawSelect", addSelect.rawSelect) && addSelect.rawSelect === m.rawSelect + 1);
   var addBg = measure(e + '\ncolourControl("Background", v, fn, host);');
@@ -4011,9 +4309,30 @@ section("P2 auto page-naming");
   setTitle(pS, "");        ok("setTitle: empty clears override", pS.title === undefined);
   setTitle(pS, "New one"); ok("setTitle: sets override", pS.title === "New one");
   setTitle(pS, "Auto");    ok("setTitle: value == first copy clears override (stays auto)", pS.title === undefined);
+  // uio-E-C07 (EDIT-12): split naming — clean base + "· K of M", never accumulating "(cont.)".
+  var strip = win.__stripSplitSuffix, renumber = win.__renumberSplitFamily;
+  ok("stripSplitSuffix drops a trailing (cont.)", strip("Getting Connected (cont.)") === "Getting Connected");
+  ok("stripSplitSuffix drops REPEATED (cont.)", strip("Getting Connected (cont.) (cont.)") === "Getting Connected");
+  ok("stripSplitSuffix drops a trailing '· N of M'", strip("Getting Connected · 2 of 3") === "Getting Connected");
+  ok("stripSplitSuffix of empty -> 'Page'", strip("") === "Page");
+  var sd = { pages: [
+    { id: "p1", chapterId: "c1", name: "Intro" },
+    { id: "p2", chapterId: "c1", name: "Base (cont.)" },
+    { id: "p3", chapterId: "c1", name: "Base" },
+    { id: "p4", chapterId: "c1", name: "Base · 9 of 9" },
+    { id: "p5", chapterId: "c2", name: "Base" }
+  ] };
+  renumber(sd, "p2");
+  ok("renumberSplitFamily numbers the contiguous same-base run 'Base · K of M'", sd.pages[1].name === "Base · 1 of 3" && sd.pages[2].name === "Base · 2 of 3" && sd.pages[3].name === "Base · 3 of 3");
+  ok("renumberSplitFamily leaves other-base + other-chapter pages alone", sd.pages[0].name === "Intro" && sd.pages[4].name === "Base");
+  var solo = { pages: [{ id: "s1", chapterId: "c1", name: "Base · 1 of 1 (cont.)" }] };
+  renumber(solo, "s1");
+  ok("renumberSplitFamily collapses a lone page back to the clean base", solo.pages[0].name === "Base");
   // wiring guards: display routes through the helper; rename writes page.title, not page.name
   ok("frame-label uses pageDisplayName", /frame-label__name", pageDisplayName\(page, doc\)/.test(etxt));
-  ok("outliner tree name uses pageDisplayName", /tree-page__name"[\s\S]{0,120}pageDisplayName\(page, doc\)/.test(etxt));
+  // uio-E-C07 (EDIT-12): the outliner row splits the derived number into its own column; the name
+  // shows only the title part (frame-label on the canvas keeps the combined pageDisplayName).
+  ok("outliner tree row has a number column + title-only name", /tree-page__num", pageNumberOf\(page, doc\)/.test(etxt) && /tree-page__name"[\s\S]{0,140}pageTitlePart\(page\)/.test(etxt));
   ok("inline rename writes via setPageTitle", /setPageTitle\(page, v\)/.test(etxt));
 })();
 
@@ -4399,9 +4718,9 @@ section("#20 library-instance mirror");
   // same order as componentGrid's resolveComponentDef -- single-source, bakes at export.
   var libStart = rtxt.indexOf("libraryInstance: function (block)");
   ok("render.js defines BLOCKS.libraryInstance", libStart !== -1);
-  var libBody = rtxt.slice(libStart, libStart + 1400);
+  var libBody = rtxt.slice(libStart, libStart + 1700);
   ok("resolves doc override -> shared library -> built-in", /docComps && docComps\[block\.ref\]\) \|\| libComps\[block\.ref\] \|\| \(window\.COMPONENTS \|\| \{\}\)\[block\.ref\]/.test(libBody));
-  ok("renders a cloneData() COPY of the master, never the live object (editor-safety)", /var content = cloneData\(def\.template\);[\s\S]{0,600}var node = renderBlock\(content\)/.test(libBody));
+  ok("renders a cloneData() COPY of the master, never the live object (editor-safety)", /var content = cloneData\(facetTemplate\);[\s\S]{0,600}var node = renderBlock\(content\)/.test(libBody));
   ok("applies #21 overrides onto the CLONE, not the live master", /if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody));
   ok("marks the wrapper node for the editor-only opacity rule", /data-library-instance/.test(libBody));
 
@@ -4417,7 +4736,7 @@ section("#20 library-instance mirror");
   // (prop-component--instance), and offers Detach as the only structural action in v1.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
   ok("renderLibraryInstanceBody found", lbStart !== -1);
-  var lbBody = etxt.slice(lbStart, lbStart + 2800);
+  var lbBody = etxt.slice(lbStart, lbStart + 5000);
   ok("reuses the canonical instance header (same class componentGrid cards use)", /"prop-component prop-component--instance"/.test(lbBody));
   ok("offers a Detach action, disabled when the master is missing", /detachB\.disabled = !def/.test(lbBody));
 
@@ -4426,7 +4745,7 @@ section("#20 library-instance mirror");
   // call remintIds, or every detached instance of the same master would collide.
   var daStart = etxt.indexOf("function detachLibraryInstance(block)");
   ok("detachLibraryInstance found", daStart !== -1);
-  var daBody = etxt.slice(daStart, daStart + 1300);
+  var daBody = etxt.slice(daStart, daStart + 1600);
   ok("detach mints a FRESH remint of the master's current (override-baked) template", /var fresh = remintIds\(withOverrides\)/.test(daBody));
   ok("detach bakes in the author's overrides, not the master's raw content", /if \(block\.overrides && window\.applyInstanceOverrides\) window\.applyInstanceOverrides\(withOverrides, block\.overrides\)/.test(daBody));
   ok("detach replaces the wrapper's fields in place (stays the same page-tree node)", /Object\.keys\(block\)\.forEach\(function \(k\) \{ delete block\[k\]; \}\)/.test(daBody));
@@ -4436,6 +4755,58 @@ section("#20 library-instance mirror");
   var css = src("editor.css");
   ok("editor.css disables pointer-events on nested canvas-blocks inside a library instance", /\[data-library-instance\] \.canvas-block \{ pointer-events: none; \}/.test(css));
   ok("course.css does not reference the library-instance marker (editor-chrome only)", src("src/course.css").indexOf("data-library-instance") === -1);
+})();
+
+// ---- Product Rail: tag vocabulary + reserved owning-Product tag --------------
+section("product-rail tag vocabulary");
+(function () {
+  var etxt = src("src/editor.js");
+
+  // 1. PURE: the tag-vocab fence, extracted headlessly.
+  var tStart = etxt.indexOf("/* @tag-vocab-start */");
+  var tEnd = etxt.indexOf("/* @tag-vocab-end */");
+  var mod = new Function(etxt.slice(tStart, tEnd) +
+    "\nreturn { ownerProductTagValue: ownerProductTagValue, stampOwnerProductTag: stampOwnerProductTag," +
+    " addTechnologyTag: addTechnologyTag, removeMasterTag: removeMasterTag, matchTagVocabulary: matchTagVocabulary };")();
+  ok("tag-vocab functions extracted", typeof mod.stampOwnerProductTag === "function");
+
+  // stampOwnerProductTag: stamped once, from a Product context; absent when there is none.
+  var m1 = { name: "Topic" };
+  mod.stampOwnerProductTag(m1, "prod-a");
+  ok("stamps a reserved tag from the given productId", m1.tags.length === 1 && m1.tags[0].value === "product:prod-a" && m1.tags[0].reserved === true);
+  mod.stampOwnerProductTag(m1, "prod-b");
+  ok("never re-stamps once a reserved tag already exists", m1.tags.filter(function (t) { return t.reserved; }).length === 1 && m1.tags[0].value === "product:prod-a");
+  var m2 = {};
+  mod.stampOwnerProductTag(m2, null);
+  ok("no Product context -> tags initialised but no reserved tag (nothing to attribute)", Array.isArray(m2.tags) && m2.tags.length === 0);
+  ok("stampOwnerProductTag is null-safe", mod.stampOwnerProductTag(null, "prod-a") === null);
+
+  // addTechnologyTag / removeMasterTag: freeform, no dupes, reserved tag is protected.
+  var m3 = { tags: [{ value: "product:prod-a", reserved: true }] };
+  mod.addTechnologyTag(m3, "radar");
+  mod.addTechnologyTag(m3, "radar"); // duplicate, ignored
+  ok("adds a freeform technology tag, de-duped", m3.tags.length === 2 && m3.tags.filter(function (t) { return t.value === "radar"; }).length === 1);
+  mod.removeMasterTag(m3, "product:prod-a");
+  ok("ordinary tag-editing CANNOT remove the reserved tag", m3.tags.some(function (t) { return t.reserved; }));
+  mod.removeMasterTag(m3, "radar");
+  ok("a freeform tag CAN be removed", !m3.tags.some(function (t) { return t.value === "radar"; }));
+
+  // matchTagVocabulary: autocomplete-first, "propose new" only on a genuine non-match.
+  var vocab = ["radar", "radar-jamming", "acoustic"];
+  ok("empty query -> no matches, not exact (nothing to propose either)", mod.matchTagVocabulary(vocab, "").matches.length === 0 && mod.matchTagVocabulary(vocab, "").exact === false);
+  ok("a substring query surfaces autocomplete matches", mod.matchTagVocabulary(vocab, "radar").matches.length === 2);
+  ok("an exact existing tag is flagged exact (never proposed as new)", mod.matchTagVocabulary(vocab, "acoustic").exact === true);
+  ok("a genuine non-match has no matches and is not exact -> caller falls back to propose-new", mod.matchTagVocabulary(vocab, "thermal").matches.length === 0 && mod.matchTagVocabulary(vocab, "thermal").exact === false);
+
+  // 2. editor.js wiring: promotion to the shared library stamps the reserved tag from
+  // THIS course's Product context (doc.meta.productId), exactly once, at promotion time.
+  var doSaveIdx = etxt.indexOf("function doSave() {\n          pushHistory();\n          // #19: plain clone()");
+  ok("promote-to-library doSave() found", doSaveIdx !== -1);
+  var doSaveBody = etxt.slice(doSaveIdx, doSaveIdx + 1200);
+  ok("stamps the reserved owning-Product tag from doc.meta.productId at promotion time", /stampOwnerProductTag\(promoted, doc\.meta && doc\.meta\.productId\)/.test(doSaveBody));
+  var stampIdx = doSaveBody.indexOf("stampOwnerProductTag(promoted");
+  var storeIdx = doSaveBody.indexOf("window.LibraryStore.components[selectedKey] = promoted;");
+  ok("stamping happens BEFORE the master lands in the shared store", stampIdx !== -1 && storeIdx !== -1 && stampIdx < storeIdx);
 })();
 
 // ---- #21: instance local overrides + structure reconciliation + detach/relink ----
@@ -4484,7 +4855,7 @@ section("#21 instance overrides + reconciliation + relink");
   // 3. editor.js wiring: renderLibraryInstanceBody reconciles-on-open (prunes + persists +
   // surfaces a drop), then lists override fields via the canonical fieldRow control.
   var lbStart = etxt.indexOf("function renderLibraryInstanceBody(node)");
-  var lbBody2 = etxt.slice(lbStart, lbStart + 2800);
+  var lbBody2 = etxt.slice(lbStart, lbStart + 4000);
   ok("reconciles on open via reconcileOverrides(def.template, ...)", /var rec = reconcileOverrides\(def\.template, block\.overrides \|\| \{\}\)/.test(lbBody2));
   ok("prunes the block's overrides to the living set", /block\.overrides = rec\.living/.test(lbBody2));
   ok("surfaces a drop with the warn hint class", /insp-hint insp-hint--warn/.test(lbBody2));
@@ -4496,7 +4867,7 @@ section("#21 instance overrides + reconciliation + relink");
   // 4. Detach discards overrides (they were keyed to the mirror) and leaves a __linkedFrom
   // breadcrumb; Relink is gated on it and gives a lossy-edit warning before acting.
   var daStart2 = etxt.indexOf("function detachLibraryInstance(block)");
-  var daBody2 = etxt.slice(daStart2, daStart2 + 1350);
+  var daBody2 = etxt.slice(daStart2, daStart2 + 1600);
   ok("detach records __linkedFrom for a future relink", /block\.__linkedFrom = ref/.test(daBody2));
 
   var rlStart = etxt.indexOf("function relinkToLibrary(block, ref)");
@@ -4523,8 +4894,9 @@ section("#24 where-used + impact preview + push-update");
   var wuStart = etxt.indexOf("/* @where-used-start */");
   var wuEnd = etxt.indexOf("/* @where-used-end */");
   var pureBody = etxt.slice(wbStart, wbEnd) + etxt.slice(wuStart, wuEnd);
-  var mod = new Function(pureBody + "\nreturn { libraryWhereUsed: libraryWhereUsed };")();
+  var mod = new Function(pureBody + "\nreturn { libraryWhereUsed: libraryWhereUsed, libraryWhereUsedDetail: libraryWhereUsedDetail };")();
   ok("libraryWhereUsed extracted", typeof mod.libraryWhereUsed === "function");
+  ok("libraryWhereUsedDetail extracted", typeof mod.libraryWhereUsedDetail === "function");
 
   function mkCourse(refs) {
     return { pages: [{ blocks: refs.map(function (ref) { return { type: "libraryInstance", ref: ref }; }) }] };
@@ -4543,9 +4915,23 @@ section("#24 where-used + impact preview + push-update");
   var nested = { "C-4": { pages: [{ blocks: [{ type: "frame", children: [{ type: "libraryInstance", ref: "comp-c" }] }] }] } };
   ok("finds a nested libraryInstance (inside a frame's children)", mod.libraryWhereUsed("comp-c", nested).instances === 1);
 
+  // Product Rail (source-stage-info-panel): libraryWhereUsedDetail is the per-usage
+  // sibling -- one entry per referencing block, carrying the document title + block
+  // id (so a caller can label AND jump to each usage), not just aggregate counts.
+  var registryTitled = {
+    "C-1": { meta: { title: "Course One" }, pages: [{ blocks: [{ type: "libraryInstance", ref: "topic-x", id: "b_1" }] }] },
+    "C-2": { meta: { title: "Course Two" }, pages: [{ blocks: [{ type: "libraryInstance", ref: "topic-x", id: "b_2" }, { type: "libraryInstance", ref: "topic-x", id: "b_3" }] }] },
+    "C-3": { pages: [{ blocks: [] }] } // no reference at all
+  };
+  var detail = mod.libraryWhereUsedDetail("topic-x", registryTitled);
+  ok("libraryWhereUsedDetail returns one entry per referencing block (3 total)", detail.length === 3);
+  ok("each entry carries docCode + docTitle + blockId", detail[0].docCode === "C-1" && detail[0].docTitle === "Course One" && detail[0].blockId === "b_1");
+  ok("a doc with no meta.title falls back to its code", mod.libraryWhereUsedDetail("comp-nowhere", { "C-9": { meta: {}, pages: [{ blocks: [{ type: "libraryInstance", ref: "comp-nowhere", id: "b_9" }] }] } })[0].docTitle === "C-9");
+  ok("a ref used nowhere -> empty list, never throws", mod.libraryWhereUsedDetail("nothing-here", registryTitled).length === 0);
+
   // 2. WIRING: the Component Library panel shows the where-used count per master.
   var lStart = etxt.indexOf("function buildLibraryBody(c)");
-  var lBody = etxt.slice(lStart, lStart + 10900);
+  var lBody = etxt.slice(lStart, lStart + 11200);
   ok("buildLibraryBody computes where-used per master via the registry", /var usage = libraryWhereUsed\(k, getRegistry\(\)\)/.test(lBody));
   ok("shows a 'Used in N course(s) / M instance(s)' meta line", /"Used in " \+ usage\.courses/.test(lBody));
   ok("shows 'Not placed anywhere yet' when usage is zero", /Not placed anywhere yet/.test(lBody));
@@ -4594,7 +4980,7 @@ section("#23 axis-owning library masters");
   // 2. render.js wiring: BLOCKS.libraryInstance resolves axis content BEFORE instance
   // overrides (axis first, instance override wins on top -- the agreed precedence).
   var libStart = rtxt.indexOf("libraryInstance: function (block)");
-  var libBody2 = rtxt.slice(libStart, libStart + 1100);
+  var libBody2 = rtxt.slice(libStart, libStart + 1300);
   ok("axis-resolves via the per-pass hook before applying instance overrides", /content = resolveLibraryAxisContent\(content, window\.__libraryAxisContext\);[\s\S]{0,150}if \(block\.overrides\) applyInstanceOverrides\(content, block\.overrides\)/.test(libBody2));
 
   // 3. editor.js wiring: currentDoc() keeps the hook in sync (variant never null --
@@ -4608,7 +4994,7 @@ section("#23 axis-owning library masters");
   // 4. editor.js wiring: detach bakes axis content (same principle as #21's override bake),
   // BEFORE instance overrides -- same precedence as render.js.
   var daStart = etxt.indexOf("function detachLibraryInstance(block)");
-  var daBody = etxt.slice(daStart, daStart + 1300);
+  var daBody = etxt.slice(daStart, daStart + 1600);
   ok("detach bakes axis content via resolveLibraryAxisContent", /withOverrides = window\.resolveLibraryAxisContent\(withOverrides, window\.__libraryAxisContext\)/.test(daBody));
   var axisIdx = daBody.indexOf("resolveLibraryAxisContent(withOverrides");
   var ovIdx = daBody.indexOf("applyInstanceOverrides(withOverrides");
@@ -4619,6 +5005,64 @@ section("#23 axis-owning library masters");
   ok("buildPackage sets the variant half of the hook (never null)", /window\.__libraryAxisContext = \{ variant: opts\.variant \|\| \(baseDoc\.heroVariant \|\| "hero"\), version: null \}/.test(extxt));
   ok("serializeVersionedPages sets version per-pass in the multi-version loop", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = v; \/\/ #23/.test(extxt));
   ok("serializeVersionedPages sets version on the no-wrapper (<2 versions) path too", /if \(window\.__libraryAxisContext\) window\.__libraryAxisContext\.version = \(versions && versions\[0\]\) \|\| null;/.test(extxt));
+})();
+
+// ---- Product Rail: facet pointer + {topic×variant×facet} schema --------------
+section("product-rail facet pointer schema");
+(function () {
+  var rtxt = src("src/render.js");
+  var etxt = src("src/editor.js");
+
+  // 1. PURE: resolveFacetTemplate.
+  var fStart = rtxt.indexOf("function resolveFacetTemplate(def, facetPointer)");
+  var fEnd = rtxt.indexOf("window.resolveFacetTemplate = resolveFacetTemplate;");
+  var fBody = rtxt.slice(fStart, fEnd);
+  var mod = new Function(fBody + "\nreturn { resolveFacetTemplate: resolveFacetTemplate };")();
+  ok("resolveFacetTemplate extracted", typeof mod.resolveFacetTemplate === "function");
+
+  var master = {
+    template: { id: "root", type: "frame", children: [{ id: "t", type: "heading", text: "Base" }] },
+    facets: {
+      technical: { name: "Technical", template: { id: "root-t", type: "frame", children: [{ id: "tt", type: "heading", text: "Technical detail" }] } },
+      dotpoint: { name: "Dot-point", template: { id: "root-d", type: "frame", children: [{ id: "dd", type: "heading", text: "Dot points" }] } }
+    }
+  };
+  ok("no pointer -> falls back to def.template", mod.resolveFacetTemplate(master, undefined).children[0].text === "Base");
+  ok("a matching pointer resolves that facet's own template", mod.resolveFacetTemplate(master, "technical").children[0].text === "Technical detail");
+  ok("a different pointer resolves a DIFFERENT facet", mod.resolveFacetTemplate(master, "dotpoint").children[0].text === "Dot points");
+  ok("an unknown pointer falls back to def.template (no crash)", mod.resolveFacetTemplate(master, "no-such-facet").children[0].text === "Base");
+  var plain = { template: { id: "root2", type: "frame", children: [] } };
+  ok("a master with no facets at all behaves exactly as before", mod.resolveFacetTemplate(plain, "technical") === plain.template);
+  ok("null def -> null (no crash)", mod.resolveFacetTemplate(null, "technical") === null);
+
+  // Purity: resolving never mutates the master (it's a pure function of (topic, pointer)).
+  var before = JSON.stringify(master);
+  mod.resolveFacetTemplate(master, "technical");
+  ok("resolving a facet never mutates the master", JSON.stringify(master) === before);
+
+  // docTypeRenderings is a structurally distinct field from facets -- the resolver only
+  // ever reads def.facets, so a doc-type rendering is never reachable via a facet pointer.
+  var visualMaster = { template: { id: "vroot", type: "frame", children: [] }, docTypeRenderings: { interactive: { template: { id: "vi", type: "frame", children: [{ id: "vit", type: "heading", text: "Interactive" }] } } } };
+  ok("docTypeRenderings is never read by the facet resolver (structurally distinct)", mod.resolveFacetTemplate(visualMaster, "interactive") === visualMaster.template);
+
+  // 2. render.js wiring: BLOCKS.libraryInstance resolves the facet pointer before cloning.
+  var libStart = rtxt.indexOf("libraryInstance: function (block)");
+  var libBody = rtxt.slice(libStart, libStart + 900);
+  ok("libraryInstance resolves block.facet via resolveFacetTemplate before cloning", /var facetTemplate = resolveFacetTemplate\(def, block\.facet\);[\s\S]{0,200}var content = cloneData\(facetTemplate\);/.test(libBody));
+
+  // 3. editor.js wiring: detach bakes the resolved facet (not unconditionally def.template),
+  // and drops the pointer along with every other own key -- no live pointer survives a fork.
+  var daStart = etxt.indexOf("function detachLibraryInstance(block)");
+  var daBody = etxt.slice(daStart, daStart + 1600);
+  ok("detach resolves the facet actually showing before baking", /var facetTemplate = window\.resolveFacetTemplate \? window\.resolveFacetTemplate\(def, block\.facet\) : \(def && def\.template\);/.test(daBody));
+  ok("detach clones the RESOLVED facet template", /var withOverrides = clone\(facetTemplate\);/.test(daBody));
+  ok("detach drops block.facet along with every other own key (no live pointer survives a fork)", /Object\.keys\(block\)\.forEach\(function \(k\) \{ delete block\[k\]; \}\);/.test(daBody));
+
+  // 4. editor.js wiring: the facet switcher only ever reads def.facets, never
+  // def.docTypeRenderings -- so a doc-type rendering can never appear as an author picker.
+  ok("facet picker is gated on def.facets", etxt.indexOf('if (def && def.facets && typeof def.facets === "object")') !== -1);
+  ok("no picker anywhere reads def.docTypeRenderings (structurally distinct, export-time only)", etxt.indexOf("def.docTypeRenderings") === -1);
+  ok("switching the facet select applies immediately (dsSelect onChange), no confirmModal", /var fSel = dsSelect\(facetOpts, curFacet, function \(v\) \{[\s\S]{0,150}if \(v\) block\.facet = v; else delete block\.facet;/.test(etxt));
 })();
 
 // ---- #22: section + page library masters ------------------------------------
@@ -4705,7 +5149,7 @@ section("outliner multi-select any-scope");
   ok("cmd/ctrl toggles multi at any depth", /e\.metaKey \|\| e\.ctrlKey[\s\S]*?toggleMulti\(block\)/.test(h));
   ok("BOTH top-level AND nested rows use the shared handler", (etxt.match(/handleBlockRowClick\(e, pi, block, bi, 0\)/) && etxt.match(/handleBlockRowClick\(e, pi, block, bi, depth\)/)) != null);
   // the pre-existing filter that dropped nested blocks on re-render is now nesting-aware
-  ok("renderStructure keeps nested selections (findBlockParent, not top-level-only)", /multiSel = multiSel\.filter\(function \(b\) \{\s*\n\s*for \(var pi = 0; pi < doc\.pages\.length; pi\+\+\) if \(findBlockParent/.test(etxt));
+  ok("renderStructure keeps nested selections (findBlockParent, not top-level-only)", /multiSel = multiSel\.filter\(function \(b\) \{\s*\n\s*for \(var pi = 0; pi < doc\.pages\.length; pi\+\+\) \{ var pg = doc\.pages\[pi\]; if \(pg && findBlockParent/.test(etxt));
   // actions on the whole set: delete + group resolve nested via findBlockParent
   var del = etxt.slice(etxt.indexOf("function deleteSelection"), etxt.indexOf("function deleteSelection") + 900);
   ok("multi-delete removes NESTED blocks too (findBlockParent)", /if \(multiSel\.length\)[\s\S]*?findBlockParent\(doc\.pages\[pi\]\.blocks, b\)[\s\S]*?parentArray\.splice/.test(del));
@@ -4824,7 +5268,9 @@ section("auto-gate all interactions");
   ok("editor sets __gateAllInteractions on export", /window\.__gateAllInteractions = renderDoc\.gateAllInteractions \|\| null/.test(ed));
   ok("editor sets __gateAllInteractions on preview", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ed));
   ok("render stamps data-gate-all from the hook", /if \(window\.__gateAllInteractions\) root\.setAttribute\("data-gate-all", "1"\)/.test(rn));
-  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!doc\.gateAllInteractions;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
+  // uio-F03: the switch now reads the RESOLVED value down the scope ladder (System -> Course)
+  // and clears the course flag on Reset; the stored data is unchanged.
+  ok("inspector writes doc.gateAllInteractions (default off)", /switchRow\("Require all interactions before Next", function \(\) \{ return !!courseGateRes\.value;[\s\S]*?doc\.gateAllInteractions = true; else delete doc\.gateAllInteractions/.test(ed));
   // state buckets for the new signals
   ok("runtime adds viewed/revealed/quizDone/sequenceDone/accordionDone buckets", /var state = \{ visited: \{\}, watched: \{\}, checked: \{\}, viewed: \{\}, revealed: \{\}, quizDone: \{\}, sequenceDone: \{\}, accordionDone: \{\} \}/.test(rt));
   // completion emitters (decoupled, bubbling)
@@ -4888,7 +5334,9 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   ok("export sets __gateAllInteractions (no longer stale-global)", /window\.__gateAllInteractions = doc\.gateAllInteractions \|\| null/.test(ex));
   ok("export sets __gateMessage", /window\.__gateMessage = doc\.gateMessage \|\| null/.test(ex));
   // authoring: per-page override in the page inspector + course-level message field
-  ok("page inspector writes tri-state page.gateInteractions", /if \(v === "on"\) page\.gateInteractions = true;\s*else if \(v === "off"\) page\.gateInteractions = false;\s*else delete page\.gateInteractions;/.test(ed));
+  // uio-F03: still tri-state DATA (true / false / absent = inherit), but the picker's explicit
+  // "inherit" option is gone — the switch shows the resolved value and Reset clears the page flag.
+  ok("page inspector writes tri-state page.gateInteractions", /page\.gateInteractions = !!v;/.test(ed) && /delete page\.gateInteractions;/.test(ed));
   ok("progression panel exposes the reminder-message field", /gmIn\.value = doc\.gateMessage \|\| "";[\s\S]*?if \(v\) doc\.gateMessage = v; else delete doc\.gateMessage/.test(ed));
 })();
 
@@ -4998,7 +5446,7 @@ section("#168 learner-nav single source");
   // The Settings 'Learner nav' tab must resolve the CANONICAL footer nav (footerCourseNav),
   // not the FIRST courseNav eachCourseNav yields (header -> footer -> pages), which drifts to
   // a legacy/header stray away from the footer nav the author edits on the canvas.
-  ok("Settings 'Learner nav' tab uses footerCourseNav (not first-found)", /key: "nav", title: "Learner nav", build: function \(host\) \{ var n = footerCourseNav\(\);/.test(e));
+  ok("Settings 'Learner nav' sections use footerCourseNav (not first-found)", /function navSettingsSections\(\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(e));
   ok("old first-found pattern is gone from the nav tab", !/title: "Learner nav"[\s\S]{0,120}eachCourseNav\(function \(x\) \{ if \(!n\) n = x; \}\)/.test(e));
   // footerCourseNav resolves ONLY the footer region's courseNav (the single creatable instance).
   var fn = slice(e, "function footerCourseNav()", "\n  }");
@@ -5104,7 +5552,9 @@ section("select-first / progressive drill");
   ok("extra block tier gated to plain text blocks (navButton keeps bespoke inspector)", /!n\.matches\("\[data-edit\]"\) \|\| getSelectionTypeForBlock\(n\.__block\) === "field"\) inner\.push\(\{ kind: "block"/.test(t));
   ok("edit drill step selects the field AND enters the caret", /l\.kind === "edit"\) \{ selectFieldNode\(l\.node\); enterTextEdit\(l\.node\)/.test(t));
   ok("block drill tier forces a block selection for a data-edit text node", /getAttribute\("data-edit"\) != null && l\.node\.__block\) \{ blurActiveText\(\); setSelection\("block", l\.node\)/.test(t));
-  ok("field/type inspector ends with a back-to-block affordance not the block footer", /insp-backlink[\s\S]*?reselectBlockNode\(selection\.block, "block"\)/.test(t) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(t));
+  // uio-E-C02: a top-level text field inspector now shows the block chrome in one scroll (no jump
+  // link); the back-to-block link survives only for the non-text / version-edit fallback branch.
+  ok("field/type inspector keeps the back-to-block link only for the non-text fallback", /insp-backlink[\s\S]*?reselectBlockNode\(selection\.block, "block"\)/.test(t) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(t));
   ok("capture handler bails out in click-to-edit mode", /if \(!twoStateText\(\)\) return;\s*\/\/ click-to-edit/.test(t));
   // LEAF-FIRST (James 2026-07-12): a plain click selects the INNERMOST non-edit level
   // (the element under the cursor), not the outermost container; Escape steps outward.
@@ -5286,7 +5736,7 @@ section("copy/paste style");
   ok("copyBlockStyle lifts only presentation keys from STYLE_KEYS", /"box"/.test(_sk) && /"styleRef"/.test(_sk) && /"colorMap"/.test(_sk) && /function copyBlockStyle\(block\)[\s\S]*?STYLE_KEYS\.forEach\(function \(k\) \{ if \(block\[k\] !== undefined\) out\[k\] = clone\(block\[k\]\)/.test(e));
   ok("STYLE_KEYS excludes content/identity", !/STYLE_KEYS = \[[^\]]*"(text|html|src|children|items|type|id|questions)"/.test(e));
   ok("pasteBlockStyle writes the clipboard keys onto the target + mounts", /function pasteBlockStyle\(block\)[\s\S]*?Object\.keys\(styleClipboard\)\.forEach\(function \(k\) \{ block\[k\] = clone\(styleClipboard\[k\]\); \}\);[\s\S]*?mount\(\)/.test(e));
-  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(target\.block\); \}/.test(e) && /if \(styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(target\.block\); \}/.test(e));
+  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(e) && /if \(styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(e));
 })();
 
 section("ctx copy/paste");
@@ -5423,9 +5873,15 @@ section("card-reveal flip / off modes");
   // Face DESCENDANTS are culled explicitly: a child that layer-promotes (own stacking
   // context, e.g. the authored front's blocks) escapes the parent face's backface cull.
   ok("flip face descendants carry their own backface cull", /data-reveal-style="flip"\] \.card-reveal__cover \*,\s*\.card-reveal\[data-reveal-style="flip"\] \.card-reveal__content \* \{\s*backface-visibility: hidden/.test(css));
-  // .card-reveal__front must NOT create a stacking context (position/z-index) — that is
-  // the layer-promotion that painted the front mirrored over the back.
-  ok("front face declares no position/z-index", (function () { var m = css.match(/\.card-reveal__front \{([\s\S]*?)\}/); return !!m && m[1].indexOf("z-index") === -1 && m[1].indexOf("position") === -1; })());
+  // REGRESSION (James 2026-07-27, GH #82): being an unpositioned flow child of the
+  // z-indexed .card-reveal__cover left the front face UNCLICKABLE in real Chrome — every
+  // point inside it hit-tested back to the cover, so double-click-to-edit never reached
+  // the authored block (the back face has no such wrapper, so it never showed the bug).
+  // .card-reveal__front now stacks explicitly (position+z-index) to fix hit-testing;
+  // the belt-and-braces descendant cull below already covers it, so backface culling on
+  // flip is unaffected (stress-tested with a will-change/filter/transform descendant —
+  // no bleed-through onto the back face).
+  ok("front face stacks explicitly to stay hit-testable", (function () { var m = css.match(/\.card-reveal__front \{([\s\S]*?)\}/); return !!m && /z-index:\s*1\b/.test(m[1]) && /position:\s*relative\b/.test(m[1]); })());
   ok("flip faces hide their backface; content pre-rotated", /data-reveal-style="flip"\][\s\S]*?backface-visibility: hidden/.test(css) && /data-reveal-style="flip"\] \.card-reveal__content \{ transform: rotateY\(180deg\)/.test(css));
   ok("flip animation honours prefers-reduced-motion", /@media \(prefers-reduced-motion: reduce\) \{\s*\.card-reveal\[data-reveal-style="flip"\] \.card-reveal__card \{ transition: none; \}/.test(css));
   // runtime: flip cards flip on full-card click (guarded against interactive children)
@@ -5777,7 +6233,7 @@ section("clear content #174");
 
   // wiring guards: exposed on both surfaces + gated
   ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? multiSel\.slice\(\) : block\); \}/.test(e));
-  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[target\.block\]\); \}/.test(e));
+  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(e));
   ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
@@ -5825,30 +6281,73 @@ section("richer bullet lists");
   ok("css custom-glyph ::before markers", /\[data-list-marker="custom"\] li::before \{ content: var\(--li-marker/.test(css));
   ok("css applies to inline lists in any field", /\.body-copy ul, \.body-copy ol/.test(css));
   ok("css nested levels distinct markers", /\.body-list ul ul, \.body-copy ul ul ul \{ list-style-type: square/.test(css));
-  // #9: List is a single inline-format toggle BUTTON in the B/I/U/Link bar (was a switchEl).
+  // #170/#33: List is a single toggle BUTTON in the shared B/I/U/Link/List bar, whose
+  // on-state reads block.type (not queryCommandState) and whose click CONVERTS the whole
+  // block to/from the dedicated "list" type (was a switchEl, then an inline execCommand).
   ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
   ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
-  ok("editor list marker controls render when the list is on OR the field root is a list", /if \(rootIsList \|\| listOn\(\)\) \{[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);[\s\S]*?customSelectRow\("Bullet style"/.test(e));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
-  // detect it, drop the meaningless on/off toggle, and always surface the marker settings.
+  // marker settings always show for it; the TYPE-conversion toggle only shows for a
+  // genuine top-level list block (gated separately, in the shared bar, on obj.type).
   ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
-  ok("editor hides the List toggle for a root-list field", /if \(!rootIsList\) \{\s*var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e));
-  ok("editor list off-branch clears both ul and ol", /queryCommandState\("insertOrderedList"\)\) document\.execCommand\("insertOrderedList"[\s\S]*?queryCommandState\("insertUnorderedList"\)\) document\.execCommand\("insertUnorderedList"/.test(e));
+  ok("List toggle visibility is gated on obj.type in TEXT_CONTENT_TYPES, not rootIsList directly", /isListToggleable: function \(\) \{ return field === "text" && !!obj && !!obj\.type && !!TEXT_CONTENT_TYPES\[obj\.type\]; \}/.test(e));
+  // The canvas's own removed switchRow pair (line above) stays the precise regression
+  // guard for THIS bar. source-stage-wysiwyg-editing later gave Source stage's own,
+  // separate topic-body toolbar a legitimate execCommand("insertUnorderedList") --
+  // free-flowing wiki prose has no block-type system to convert, unlike a canvas text
+  // block, so inline execCommand is the correct fit there, not a regression of this one.
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(e));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
   ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
-  ok("settings glyph (left rail) is wired to open the modal", /getElementById\("rail-settings-btn"\)[\s\S]*?openSettingsModal\(/.test(e));
+  ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(e));
   var ecss = src("editor.css");
   ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
   ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(e));
-  ok("settings PROJECT tab = the document sections (rail order)", /key: "headerFooter", title: "Header & Footer", build: buildHeaderFooterBody[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(e));
-  ok("settings dialog = left rail + content pane (one section at a time)", /function renderSettingsBody\(\)[\s\S]*?settingsModal\.nav\.innerHTML = ""[\s\S]*?settings-nav__item[\s\S]*?section\.build\(settingsModal\.content\)/.test(e));
+  ok("settings PROJECT tab = the document sections (rail order)", /key: "header", title: "Header", build: buildHeaderBody[\s\S]*?key: "footer", title: "Footer"[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(e));
+  // uio-F05: the 220px nav rail + one-section-at-a-time are GONE. The sheet body is one scroll
+  // of canonical sectionGroups, so it reads like the inspector docked beside it.
+  ok("settings sheet = ONE scroll of canonical sections, no nav rail", /function renderSettingsBody\(\)[\s\S]*?sections\.forEach\(function \(s\) \{\s*\n\s*var sec = sectionGroup\("settings:" \+ s\.key, s\.title/.test(e)
+    && !/settings-nav__item/.test(e) && !/settingsModal\.nav/.test(e));
+  ok("every section still builds into the rebound `inspector`, so all 15 builders keep working", /inspector = body;\s*\n\s*try \{ s\.build\(body\); \} finally \{ inspector = _ins; \}/.test(e));
   ok("open modal stays in sync via refreshSettingsPanes in renderInspector", /function renderInspector\(\)[\s\S]*?refreshSettingsPanes\(\)/.test(e) && /function refreshSettingsPanes\(\) \{ if \(settingsModal && settingsModal\.active\) renderSettingsBody/.test(e));
-  ok("settings dialog is fixed-size (no resize on tab switch)", /\.modal-box\.modal-box--settings \{[\s\S]*?height: min\(88vh, 800px\)/.test(ecss) && /\.settings-content \{ flex: 1 1 auto; overflow-y: auto/.test(ecss));
+  // uio-F05: right-docked sheet, not a centred dialog. It takes the inspector's own column and
+  // widens it, so the canvas is squeezed exactly once and never covered.
+  ok("the sheet is right-docked in the inspector's column, no scrim", /\.workspace > \.settings-sheet \{ grid-column: 4; \}/.test(ecss)
+    && /\.workspace\.has-sheet \{ --dock-w: var\(--sheet-w, var\(--panel-sheet-width, 400px\)\); \}/.test(ecss)
+    && !/\.modal-box\.modal-box--settings/.test(ecss));
+  // uio-F05-fb1: the dock column reads --dock-w, so the inspector and the sheet each keep their
+  // OWN persisted width. Reading --right-w directly let a dragged inspector width (set INLINE on
+  // .workspace, which outranks the .has-sheet class rule) force the sheet open at 264px or less.
+  ok("the dock column is --dock-w, so the sheet never inherits the inspector's dragged width",
+    /grid-template-columns: var\(--rail-w, 44px\) var\(--left-w\) 1fr var\(--dock-w\);/.test(ecss)
+    && /--sheet-w: var\(--panel-sheet-width, 400px\);/.test(ecss)
+    && /--dock-w: var\(--right-w\);/.test(ecss));
+  ok("the canvas overlay bar follows the dock, not the inspector specifically", /right: var\(--dock-w, 248px\);/.test(ecss));
+  ok("the sheet carries its own drag handle, persisted as sheet-w", /var grip = h\("div", "panel-resizer"\); grip\.id = "resizer-sheet";[\s\S]{0,120}wirePanelResizer\(grip, "sheet-w", "right", 340, 720\)/.test(e)
+    && /restoreDockWidth\("left-w"\); restoreDockWidth\("right-w"\); restoreDockWidth\("sheet-w"\);/.test(e)
+    && /\.settings-sheet \.panel-resizer \{ left: -3px; \}/.test(ecss));
+  // The sheet's rows used to sit flush against both edges (padding was `<pad> 0`). It now takes
+  // the same 12px gutter as the inspector's own .panel-section host, so the two read alike.
+  ok("the sheet body has the inspector's 12px gutter, not a flush edge", /\.settings-content \{[\s\S]{0,160}padding: 12px;/.test(ecss));
+  // Cmd+\ collapses every dock track to 0. The sheet lives in one, so hiding the panels used to
+  // leave it 0px wide but still open and still on the Escape layer stack.
+  ok("hiding the panels closes the sheet rather than leaving a 0px ghost layer",
+    /var hidden = !ws\.classList\.contains\("is-panels-hidden"\);[\s\S]{0,420}if \(hidden\) closeSettingsModal\(\);\s*\n\s*applyPanelsHidden\(hidden\);/.test(e));
+  // The two settings triggers are different SCOPES, so they must not wear the same glyph.
+  ok("document settings and app settings use different glyphs", /id="doc-settings-btn" data-lucide="sliders-horizontal"/.test(src("index.html"))
+    && /id="rail-settings-btn" data-lucide="settings"/.test(src("index.html"))
+    && /"sliders-horizontal":/.test(src("src/icons.js")));
+  ok("opening the sheet supersedes the inspector rather than stacking beside it", /\.workspace\.has-sheet > \.panel--right \{ display: none; \}/.test(ecss));
+  ok("Source and Publish hand back the last column so they are squeezed too", /\.workspace\.has-sheet > \.source-stage,\s*\n\.workspace\.has-sheet > \.publish-stage \{ grid-column: 2 \/ 4; \}/.test(ecss));
+  ok("the sheet width is a DS structural token, beside the other dock widths", /--panel-sheet-width: 400px;/.test(src("design-system/tokens/spacing.css")));
+  ok("a docked surface takes the panel title token, not the modal one", /\.settings-title \{ font: var\(--type-panel-title\)/.test(ecss));
+  ok("the content pane still scrolls, and sections are collapsed by default", /\.settings-content \{[\s\S]{0,120}overflow-y: auto/.test(ecss)
+    && /function defaultCollapsed\(type\) \{ return !!DEFAULT_COLLAPSED\[type\] \|\| \/\^settings:\/\.test\(type\); \}/.test(e));
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
-  ok("settings surface re-skinned to the DS (VersoUI tabs+button, surface-selected rail)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "primary", label: "Done"/.test(e) && /\.settings-nav__item\.is-active \{ background: var\(--surface-selected\)/.test(ecss));
+  ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(e) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(e));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
@@ -5881,11 +6380,12 @@ section("list discoverability + spacing");
   var e = src("src/editor.js");
   ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
-  // #9: the List TOGGLE folds into the inline-format bar; the sub("List") header now heads
-  // only the marker-settings section, shown when the field is a list (rootIsList || listOn).
-  ok("List toggle folded into the inline-format bar (prop-toggle) drives inline lists", /var listB = h\("button", "prop-toggle prop-toggle--icon"[\s\S]*?document\.execCommand\("insertUnorderedList"/.test(e));
-  ok("List marker section is gated on rootIsList || listOn() and headed by sub(List)", /if \(rootIsList \|\| listOn\(\)\) \{\s*inspector\.appendChild\(sub\("List"\)\);/.test(e));
-  ok("no paragraph<->list block-type conversion", !/textBlockToList/.test(e) && !/function listToTextBlock/.test(e));
+  // #170/#33: the List toggle folds into the shared inline-format bar as a whole
+  // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
+  // heads only the marker-settings section, shown when the field root is a list.
+  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(e));
+  ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);/.test(e));
+  ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(e) && /block\.__priorTextType/.test(e));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();
 
@@ -6198,7 +6698,7 @@ section("#148 per-variant image versions (authoring)");
   ok("upload writes via the pure asset ref channel (hoist-safe)", /setImgVariantSrc\(block, variant, assetRef\(r\.result, f\)\)/.test(e));
   // slice 2: right-click "Upload image for <variant>" (direct file picker) + on-canvas
   // version-cycle badge (author-only transient <img>.src swap, WeakMap, never doc state).
-  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[target\.block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(target\.block, v/.test(e));
+  ok("right-click offers per-variant image upload for image/hotspot blocks", /IMG_VERSION_TYPES\[block\.type\] && vs\.length[\s\S]{0,240}"Upload image for "\) \+ v[\s\S]{0,120}uploadImageVariant\(block, v/.test(e));
   ok("on-canvas version-cycle badge decorates image blocks with versions", /function decorateVariantVersionBadges\(scope\)[\s\S]*?hasImageVersions\(block\)[\s\S]*?"variant-cycle"/.test(e));
   ok("cycle preview is author-only + never mutates the doc (WeakMap base-el swap)", /var imgVersionPreview = new WeakMap\(\);/.test(e) && /function applyImageVersionPreview\(node, block\)[\s\S]*?imgVariantSrc\(block, v\) \|\| baseImgSrc\(block\)[\s\S]*?replaceChild\(next, cur\)/.test(e)); // #215: hotspot base = entry.visual via baseImgSrc
   // #148 cleanup: an inline-SVG base (image OR hotspot) must swap too, not just a raster
@@ -6454,6 +6954,54 @@ section("columns colWidths guards");
   ok("handles yield to edge bands while a block is dragged", /body\.is-dragging-block \.col-resize-handle\s*\{\s*pointer-events:\s*none/.test(css));
 })();
 
+// ---- swap-columns affordance (hover glyph, swaps adjacent columns) ------------
+section("swap-columns affordance");
+(function () {
+  var e = src("src/editor.js");
+
+  // 1. PURE: swapColumns, extracted headlessly.
+  var m = e.match(/\/\* @swap-columns-start \*\/([\s\S]*?)\/\* @swap-columns-end \*\//);
+  if (!m) { ok("locate @swap-columns fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { swapColumns: swapColumns };")();
+
+  var block = { type: "columns", columns: [["A"], ["B"], ["C"]] };
+  g.swapColumns(block, 0);
+  ok("swaps the first adjacent pair, leaves the third column untouched", JSON.stringify(block.columns) === JSON.stringify([["B"], ["A"], ["C"]]));
+  g.swapColumns(block, 1);
+  ok("swaps a DIFFERENT adjacent pair (index 1/2), not always the first", JSON.stringify(block.columns) === JSON.stringify([["B"], ["C"], ["A"]]));
+
+  var withWidths = { type: "columns", columns: [["A"], ["B"]], colWidths: [300, 500] };
+  g.swapColumns(withWidths, 0);
+  ok("colWidths swap alongside their columns (custom widths follow the content)", JSON.stringify(withWidths.colWidths) === JSON.stringify([500, 300]));
+
+  var mismatchedWidths = { type: "columns", columns: [["A"], ["B"], ["C"]], colWidths: [100, 200] }; // stale (count mismatch)
+  g.swapColumns(mismatchedWidths, 0);
+  ok("stale/mismatched colWidths are left untouched (never corrupted)", JSON.stringify(mismatchedWidths.colWidths) === JSON.stringify([100, 200]));
+
+  var noWidths = { type: "columns", columns: [["A"], ["B"]] };
+  g.swapColumns(noWidths, 0);
+  ok("a block with no colWidths at all swaps cleanly (no crash, no field invented)", noWidths.colWidths === undefined && JSON.stringify(noWidths.columns) === JSON.stringify([["B"], ["A"]]));
+
+  ok("swapColumns is null-safe", g.swapColumns(null, 0) === null);
+  ok("swapColumns no-ops on a non-columns block (defensive)", (function () { var b = { type: "paragraph" }; return g.swapColumns(b, 0) === b && !("columns" in b); })());
+
+  // 2. WIRING: the swap glyph is attached in the columns decorate branch, alongside the
+  // existing resize handles, and mutates via swapColumns (never a bespoke inline swap).
+  ok("swap glyph attached in the columns decorate branch", /attachColumnSwaps\(node, block\)/.test(e));
+  ok("swap button uses the canonical iconBtn + Icon(\"arrow-left-right\")", /iconBtn\("arrow-left-right", "Swap these two columns"\)/.test(e));
+  ok("swap click pushes history, mutates via swapColumns, then reapplies + reselects", /pushHistory\(\);\s*\n\s*swapColumns\(block, i\);\s*\n\s*reapplyStructural\(findPageOfBlock\(block\)\);\s*\n\s*reselectBlockNode\(block, "block"\);/.test(e));
+  ok("swap button keeps the field/gap pointer semantics (mousedown/pointerdown preventDefault + stopPropagation)", /btn\.addEventListener\("pointerdown", function \(e\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}\);/.test(e));
+
+  // 3. icons.js: a real vendored Lucide glyph, not a placeholder/ad-hoc SVG.
+  var icons = src("src/icons.js");
+  ok("arrow-left-right is a vendored Lucide glyph (icons.js), not an inline one-off <svg>", /"arrow-left-right":\s*"<path/.test(icons));
+
+  // 4. css: hover-revealed, positioned absolute, yields to drag/resize like its siblings.
+  var css = src("editor.css");
+  ok("col-swap-btn is absolutely positioned + hover-revealed (mirrors the resize handle's reveal pattern)", /\.col-swap-btn\s*\{[^}]*position:\s*absolute/.test(css) && /:hover \.col-swap-btn/.test(css));
+  ok("col-swap-btn yields to drag/resize (no competing pointer targets)", /body\.is-dragging-block \.col-swap-btn/.test(css) && /body\.is-col-resizing \.col-swap-btn/.test(css));
+})();
+
 // ---- Enter commits + blurs a single-line inspector field (not textarea) --------
 section("inspector Enter-to-blur");
 (function () {
@@ -6476,7 +7024,13 @@ section("project auto-backup");
   ok("folder reconnects on boot + doc switch", /window\.addEventListener\("load", function \(\) \{ initReviewAutoIngest\(\); connectBackupFolder\(\)/.test(e) && /connectBackupFolder\(\); \/\/ re-point auto-backup/.test(e));
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(e) && /saveBackupHandle\(activeDocId, h\)/.test(e));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(e) && /Backup OFF — this course is NOT being saved/.test(e) && /No backup folder — this course is NOT being saved anywhere/.test(e) && /\? "Reconnect folder" : "Choose folder"/.test(e));
-  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(doc && doc\.backupRequired\)\)/.test(e));
+  ok("Slice 2: new docs require a backup folder + auto-prompt the picker", /backupRequired: true/.test(e) && /createBlankDoc\(title, code, \{[^}]*\}\);\s*modal\.remove\(\);[\s\S]{0,400}bindProjectFolder\(\);/.test(e) && /showBackupBanner\(!!\(doc && doc\.backupRequired\)\)/.test(e));
+  // SPEC 7 create flow: the new-doc dialog resolves the chosen preset to a matrix cell and
+  // stamps the new doc with its Product + {geo, interactive}; createBlankDoc applies both.
+  ok("create flow resolves the preset to a cell", /var cell = \(DT && DT\.presetToCell\(newDocPreset\)\)/.test(e));
+  ok("create flow passes productId + geo + interactive into createBlankDoc", /createBlankDoc\(title, code, \{ productId: newDocProduct, geo: cell\.geo, interactive: cell\.interactive \}\)/.test(e));
+  ok("createBlankDoc stamps the Product + cell onto the new doc", /if \(opts\.productId\) tagDocProductStage\(newDoc, opts\.productId, null\)/.test(e) && /if \(opts\.geo\) tagDocCell\(newDoc, opts\.geo, opts\.interactive\)/.test(e));
+  ok("create flow offers a ChoiceCards preset grid from the doc-type model", /window\.VersoUI\.ChoiceCards\(\{[\s\S]{0,200}DT\.PRESETS\.map/.test(e));
   ok("Backup section registered at the top of Project settings", /\{ key: "backup", title: "Backup", build: buildBackupBody \}/.test(e));
   ok("schema CSV has a pure text builder for reuse", /window\.__schemaCsv = schemaCsvText/.test(src("src/schema.js")));
   ok("backup-off banner styled (loud, [hidden]-toggled)", /#backup-off-banner\s*\{[\s\S]{0,320}position: fixed/.test(src("editor.css")) && /#backup-off-banner\[hidden\] \{ display: none; \}/.test(src("editor.css")));
@@ -7051,10 +7605,15 @@ section("panel-standards");
   ].forEach(function (sig) { ok("primitive present: " + sig, t.indexOf(sig) !== -1); });
   // open-state persisted (decision 2)
   ok("openSections persisted to localStorage", /authoring\.panels-open/.test(t) && /function saveOpenSections/.test(t));
-  // Header & Footer is converted: nests + switch + icon-align + eye, NO word-boolean segments
-  var region = slice(t, "function buildHeaderFooterBody", "// Page layout = per-breakpoint");
-  ok("HF: header nest", /subDisclosure\("hf\.header"/.test(region));
-  ok("HF: footer nest", /subDisclosure\("hf\.footer"/.test(region));
+  // Header & Footer is converted: switch + icon-align + eye, NO word-boolean segments.
+  // OVL-07 promoted the two nests to sheet SECTIONS of their own, so the switch/summary/Reset
+  // they carried now ride the section header (hfSectionOpts) instead of a nested twirl.
+  var region = slice(t, "function headerFooterConfig", "// Page layout = per-breakpoint");
+  ok("HF: header + footer are their own sections, switch and all",
+    /key: "header", title: "Header", build: buildHeaderBody, opts: function \(\) \{ return hfSectionOpts\(true\); \}/.test(t)
+    && /key: "footer", title: "Footer", build: buildFooterBody, opts: function \(\) \{ return hfSectionOpts\(false\); \}/.test(t));
+  ok("HF: the section header keeps the switch, the summary and Reset",
+    /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(t));
   ok("HF: switch rows (Underline/Top rule/Pin)", /switchRow\("Underline"/.test(region) && /switchRow\("Top rule"/.test(region) && /switchRow\("Pin to top"/.test(region));
   ok("HF: alignment as icon segments", /segmentedIconLive\("Align"/.test(region));
   ok("HF: disclaimer as eye", /eyeRow\("Disclaimer"/.test(region));
@@ -7069,10 +7628,11 @@ section("panel-standards");
   if (residuals.length) console.error("    offenders: " + residuals.join(" · "));
   // nav (slice 2) converted to nests
   var navRegion = slice(t, "function courseNavControls", "function navButtonsNest");
-  ok("Nav: nested (Buttons/Pill/Progression/Sections)", /subDisclosure\("nav\.buttons"/.test(t) && /subDisclosure\("nav\.pill"/.test(t) && /subDisclosure\("nav\.sections"/.test(t));
+  ok("Nav: five groups, described once (Buttons/Pill/Progression/Sections/Tour)", /key: "nav\.buttons", title: "Buttons"/.test(t) && /key: "nav\.pill", title: "Progress pill"/.test(t) && /key: "nav\.sections", title: "Sections"/.test(t));
   ok("Nav: no word booleans in courseNavControls", !/\["(off|on|show|hide)",\s*(true|false)\]/i.test(navRegion));
   // nav promoted to a TOP-LEVEL disclosure (keeps its nests at level 2, not 3-deep under Footer)
-  ok("Nav: 'Learner nav' is a settings section", /key: "nav", title: "Learner nav"/.test(t));
+  ok("Nav: with a bar its groups ARE the settings sections; with none, one that says so",
+    /key: "nav", title: "Learner nav"/.test(t) && /courseNavNests\(n\)\.map/.test(t));
   var hfChildren = slice(t, "function headerFooterChildrenEditor", "function makeCourseNav");
   ok("Nav: not rendered inline in header/footer children editor", hfChildren.indexOf("courseNavControls(") === -1);
   // issue #11 DS-conformance (panel scope): the converted Header & Footer body
@@ -7251,7 +7811,11 @@ section("onboarding tour retired");
   ok("runtime bindTour removed", rt.indexOf("function bindTour") === -1 && rt.indexOf("bindTour(root)") === -1 && rt.indexOf("bindTour: bindTour") === -1);
   ok("export no longer stamps __tour", ex.indexOf("__tour") === -1);
   ok("editor __tour hooks + buildTourBody removed", e.indexOf("__tour") === -1 && e.indexOf("buildTourBody") === -1);
-  ok("no Guided tour settings tab", e.indexOf('key: "tour"') === -1 && e.indexOf('title: "Guided tour"') === -1);
+  // The retired ONBOARDING overlay tour had its own settings tab. The learner coach-mark tour
+  // (block.tour) is a nav group, and OVL-07 made that group a section descriptor of its own.
+  ok("no Guided tour settings tab", e.indexOf('key: "tour"') === -1
+    && e.indexOf('key: "nav.tour", title: "Guided tour"') !== -1
+    && !/key: "tour", title: "Guided tour"/.test(e));
   ok("course.css tour styles removed", css.indexOf(".tour-ring") === -1 && css.indexOf(".tour-bubble") === -1 && css.indexOf(".tour-layer") === -1);
   ok("normalizeDoc strips a stale doc.tour blob", /if \(d\.tour != null\) delete d\.tour;/.test(e));
 })();
@@ -7319,11 +7883,14 @@ section("panel system v2 — layout engine");
     ok("#164: reset restores the collapsed defaults", PL.isCollapsed("Light/Dark") === true && PL.isCollapsed("Appearance") === false);
   })();
   // Phase 1b: sectionGroup wrapper + buffer emit in ranked order; edit-mode drag; layout bar
-  ok("sectionGroup tags section type + collapse from PanelLayout", /function sectionGroup\(type, title, buildFn\)[\s\S]*?setAttribute\("data-section-type", type\)[\s\S]*?window\.PanelLayout\.isCollapsed\(type\)/.test(e));
+  ok("sectionGroup tags section type + collapse from PanelLayout", /function sectionGroup\(type, title, buildFn, opts\)[\s\S]*?window\.PanelLayout\.isCollapsed\(type\)[\s\S]*?setAttribute\("data-section-type", type\)/.test(e));
   ok("endSections emits in PanelLayout order", /function endSections\(container\)[\s\S]*?window\.PanelLayout\.orderSections\(_sectionBuf\)\.forEach/.test(e));
   ok("collapse toggle persists via setCollapsed", /window\.PanelLayout\.setCollapsed\(type, nowCollapsed\)/.test(e));
   ok("edit-mode wires section drag → PanelLayout.move + re-render", /function wireSectionDrag\(container\)[\s\S]*?window\.PanelLayout\.move\(dragged, order\.indexOf\(target\)\);\s*renderInspector\(\)/.test(e));
-  ok("Edit-layout bar only shows on panels with v2 sections (data-section-type)", /function maybeRenderLayoutBar\(\) \{ if \(inspector\.querySelector\("\.insp-section\[data-section-type\]"\)\) renderPanelLayoutBar\(\)/.test(e));
+  // uio-E-C05 (EDIT-09): the reorder entry moved to the panel ⋯ menu; the bar is now the on-state
+  // banner only. maybeRenderLayoutBar toggles the ⋯ visibility + renders the banner only where
+  // reorderable sections exist (panelHasReorderableSections reads .insp-section[data-section-type]).
+  ok("Edit-layout entry + banner gate on panels with v2 sections", /function panelHasReorderableSections\(\) \{ return !!inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(e) && /function maybeRenderLayoutBar\(\) \{[\s\S]{0,600}panelHasReorderableSections\(\)[\s\S]{0,400}renderPanelLayoutBar\(\)/.test(e));
   ok("layout bar has Edit + Reset (reset → PanelLayout.reset)", /reset\.addEventListener\("click", function \(\) \{ window\.PanelLayout\.reset\(\); renderInspector\(\); \}\)/.test(e));
   // Phase 2a: unified colorField (D5) — normalized value + resolver + token/custom/per-mode + recents
   ok("resolveColorField: token→var, per-mode→mode value, else hex", /window\.resolveColorField = function \(v, mode\) \{[\s\S]*?if \(v\.token\) return "var\(--color-" \+ v\.token \+ "\)";[\s\S]*?if \(v\.light \|\| v\.dark\) return \(mode === "dark" \? v\.dark : v\.light\)/.test(e));
@@ -7337,13 +7904,21 @@ section("panel system v2 — layout engine");
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(e));
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(e) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(e));
   ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
-  // Phase 5 (D6): Export = primary top-bar button; secondary IO in a ⋯ overflow
-  ok("renderToolbarPipeline: primary Export (accent button) + ⋯ overflow into #pipeline-actions", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("pipeline-actions"\)[\s\S]*?pipelineButtons\.filter\(function \(b\) \{ return b\.accent; \}\)\[0\][\s\S]*?primary\.textContent = "Export"/.test(e));
-  ok("overflow menu = non-accent pipeline actions + Publish to Viewer", /pipelineButtons\.filter\(function \(b\) \{ return !b\.accent; \}\)\.forEach[\s\S]*?showContextMenu\(r\.right/.test(e));
+  // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
+  // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
+  // control plus an overflow of the outbound actions, and Source took the imports.
+  ok("renderToolbarPipeline renders into #publish-io (relocated off the rail)", /function renderToolbarPipeline\(\)[\s\S]*?getElementById\("publish-io"\)/.test(e) && !/getElementById\("pipeline-actions"\)/.test(e));
+  ok("the overflow lists every OUTBOUND pipeline action + Publish to Viewer", /var items = outbound\.map\(function \(b\) \{ return \{ label: b\.label, onClick: b\.onClick \}; \}\);[\s\S]{0,160}Publish to Viewer…/.test(e));
+  ok("#pipeline-actions is gone from the rail (relocated to the Publish stage)", !/id="pipeline-actions"/.test(src("index.html")) && !/left-rail__pipeline/.test(src("index.html")));
+  ok("the Publish queue head builds #publish-io beside the Publish button + fills it", /var io = h\("div", "publish-io"\); io\.id = "publish-io";[\s\S]{0,600}renderToolbarPipeline\(\);/.test(e));
   ok("toolbar pipeline stays in sync on registerPipelineButton", /if \(mount\) renderPipelineButtons\(mount\);\s*renderToolbarPipeline\(\)/.test(e));
   // Phase 6 (D7): raw window.prompt/confirm replaced by shared in-app modals
   ok("promptModal + confirmModal route through the DS modal shell (VersoUI.Modal via dsModalShell)", /function dsModalShell\(opts\)[\s\S]*?window\.VersoUI\.Modal\([\s\S]*?function promptModal\(title, label, initial, onOk, subtitle\)[\s\S]*?dsModalShell\(\{[\s\S]*?function confirmModal\(title, message, onOk, opts\)[\s\S]*?dsModalShell\(\{/.test(e));
-  ok("modals: Enter submits, Escape closes", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}[\s\S]*?else if \(e\.key === "Escape"\)/.test(e));
+  // uio-F05: Enter is still the modal's own submit. Escape moved to the ONE layer stack, so a
+  // confirm raised over the settings sheet takes the next Escape and leaves the sheet standing.
+  ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(e)
+    && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(e));
+  ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(e));
   ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(e) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(e));
   ok("only the 2-mode import-merge stays raw confirm (semantics don't map to OK/Cancel)", (e.match(/window\.(prompt|confirm)\(/g) || []).length === 1);
   // Phase 7 (D3): the flagship field inspector adopts the sectionGroup taxonomy (Type + Content)
@@ -7453,7 +8028,7 @@ section("hotspot per-card size");
   ok("editor: findBlockParent resolves hotspot card-block children (#215)", /var hArrs = hotspotCardArrays\(b\);[\s\S]{0,160}findBlockParent\(hArrs\[hz\], targetBlock\)/.test(e));
   ok("editor: remintIds descends hotspot card blocks (#215)", /if \(Array\.isArray\(node\.screens\)\) node\.screens\.forEach\(function \(s\) \{\s*\n\s*if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) m\.blocks\.forEach\(remintIds\); \}\);/.test(e));
   ok("editor: insertLoc resolves the selected block's own container via findBlockParent", /function insertLoc\(\) \{[\s\S]{0,200}var loc = findBlockParent\(page\.blocks, selection\.block\);[\s\S]{0,120}return \{ array: loc\.parentArray, index: loc\.index \+ 1 \};/.test(e));
-  ok("editor: insertBlock + pasteClipboard use insertLoc (not top-level-only)", /var L = insertLoc\(\);\s*L\.array\.splice\(L\.index, 0, block\);/.test(e) && /var L = insertLoc\(\);[\s\S]{0,260}L\.array\.splice\(L\.index \+ i, 0, c\);/.test(e));
+  ok("editor: insertBlock (default path) + pasteClipboard use insertLoc (not top-level-only)", /L = insertLoc\(\);\s*\}\s*L\.array\.splice\(L\.index, 0, block\);/.test(e) && /var L = insertLoc\(\);[\s\S]{0,260}L\.array\.splice\(L\.index \+ i, 0, c\);/.test(e));
   ok("render: walkBlocks descends hotspot card blocks (#215 screens[].markers[].blocks)", /if \(Array\.isArray\(b\.screens\)\) b\.screens\.forEach\(function \(s\) \{ if \(s && Array\.isArray\(s\.markers\)\) s\.markers\.forEach\(function \(m\) \{ if \(m && Array\.isArray\(m\.blocks\)\) walkBlocks\(m\.blocks, fn\); \}\); \}\);/.test(r));
   // the old inPopover exclusion (children not drop targets / not draggable) is GONE
   // — popover cards are full editing containers now.
@@ -7586,6 +8161,36 @@ section("UI kit seam");
   });
   // The boot is gated so kit mode defines primitives without booting the editor.
   ok("editor boot gated by !__KIT_MODE", /if \(!window\.__KIT_MODE\) \{[\s\S]{0,80}loadTheme\(\);/.test(e));
+  // Regression (the __kit export is boot-critical): the literal is evaluated INLINE at boot,
+  // before init, so ONE name in it that no longer exists throws a ReferenceError and kills the
+  // whole editor boot -- no top bar, no stage switch, no course switcher. That is exactly what
+  // happened when the flat sub() header was retired and `sub: sub` was left behind. Every value
+  // in the literal must still resolve, either as a local in editor.js or as a window global put
+  // there by a sibling src file (Icon comes from src/icons.js).
+  (function () {
+    var lit = /window\.__kit\s*=\s*\{([\s\S]*?)\n\s*\};/.exec(e);
+    ok("__kit export literal is parseable", !!lit);
+    if (!lit) return;
+    var globals = "";
+    ["src/icons.js", "src/render.js", "src/persist.js"].forEach(function (f) {
+      try { globals += src(f); } catch (_) {}
+    });
+    var names = [];
+    lit[1].replace(/(\w+)\s*:\s*([A-Za-z_$][\w$]*)/g, function (_, key, val) { names.push(val); return _; });
+    ok("__kit export literal has entries", names.length > 10);
+    // Match declarations at the editor IIFE's own top level only (two-space indent, the file's
+    // convention). A deeper-indented `var sub = ...` inside some unrelated function is NOT in
+    // scope at the export site, and counting it would let the exact bug through.
+    var missing = names.filter(function (n) {
+      if (new RegExp("^  (?:function|var|const|let) " + n + "\\b", "m").test(e)) return false;
+      if (new RegExp("window\\." + n + "\\s*=").test(e + globals)) return false;
+      return true;
+    });
+    ok("every __kit export resolves to a definition" + (missing.length ? " (undefined: " + missing.join(", ") + ")" : ""), missing.length === 0);
+  })();
+  // The retired flat section header must not come back: sectionGroup (via panelSection) is the
+  // ONE section implementation, so a second one can't reintroduce the mixed-chrome panels.
+  ok("flat sub() section header stays retired", !/function sub\(title\)/.test(e));
   // Regression (HTML-embed colours reverting on hard reload): boot MUST push the theme
   // into embed iframes after the initial mount — reapplyTheme is the only boot-reachable
   // caller of pushEmbedTheme (+ binds the theme-shim-ready re-push for late iframes).
@@ -7639,8 +8244,10 @@ section("UI kit seam");
   // canonical VersoUI controls (PanelSection / FieldRow / SegmentedControl /
   // Breadcrumb), matching design-system/ui_kits/editor/Inspector.jsx. Re-skin
   // only — the io.get/set + pushHistory + optionalRow wiring is unchanged.
-  ok("#14: panelSection helper delegates to VersoUI.PanelSection (returns the section body)",
-     /function panelSection\(host, title, opts\)[\s\S]{0,400}window\.VersoUI\.PanelSection\(\{ title: title[\s\S]{0,220}sec\.querySelector\("\.insp-section__body"\)/.test(e));
+  // OVL-07: panelSection is now an adapter over the ONE sectionGroup (it used to build
+  // VersoUI.PanelSection and fall back to a flat sub() header — two section chromes in a panel).
+  ok("#14: panelSection helper builds the canonical section (returns the section body)",
+     /function panelSection\(host, title, opts\)[\s\S]{0,400}sectionGroup\(null, title[\s\S]{0,300}sec\.querySelector\("\.insp-section__body"\)/.test(e));
   ok("#14: alignSeg builds a DS FieldRow + VersoUI.SegmentedControl (inline-labelled align)",
      /function alignSeg\(label, current, options, onPick\)[\s\S]{0,260}window\.VersoUI\.SegmentedControl\(\{[\s\S]{0,180}window\.VersoUI\.FieldRow\(\{ label: label/.test(e));
   ok("#14: container chrome emits sections via panelSection (not the flat sub/insp-sub header)",
@@ -7661,7 +8268,9 @@ section("UI kit seam");
      /if \(window\.VersoUI && window\.VersoUI\.Breadcrumb\) \{[\s\S]{0,320}window\.VersoUI\.Breadcrumb\(\{ items: items \}\)/.test(e));
   ok("#14: DS PanelSection wrappers stay OUT of the PanelLayout drag set (no data-section-type)",
      /inspector\.querySelector\("\.insp-section\[data-section-type\]"\)/.test(e));
-  ok("chrome not yet wired into a real block inspector (no user-visible change)", !/render(Block|Field|Instance|Embed|NavButton|Page)Inspector[\s\S]{0,4000}renderContainerChrome\(/.test(e));
+  // (Retired) the old "chrome not yet wired" seam guard: renderContainerChrome is now fully
+  // wired via renderBlockTwoLevel (every block inspector) and, since uio-E-C02, the text field
+  // inspector too. See the "uio-E-C02" section for the field-inspector wiring assertions.
   // P0 code-review fixes.
   ok("plus/minus glyphs are canonical Lucide (icons.js, not inline one-offs)", /"plus":/.test(src("src/icons.js")) && /"minus":/.test(src("src/icons.js")));
   ok("propHeader/optionalRow reuse Icon(\"plus\") / Icon(\"minus\") (no inline glyph)", /add\.innerHTML = Icon\("plus"\)/.test(e) && /rm\.innerHTML = Icon\("minus"\)/.test(e));
@@ -7679,7 +8288,9 @@ section("UI kit seam");
   ok("generic two-level shell defined (renderBlockTwoLevel)", /function renderBlockTwoLevel\(node, label, decl, renderContent, io, handlers\) \{/.test(e));
   ok("hotspot + sequence dispatched to the two-level shell (#160: hotspot depth-pure)", /renderBlockTwoLevel\(node, "Image hotspots", CONTENT_PURE_DECL/.test(e) && /renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\)/.test(e));
   ok("shell: crumbs, container chrome (actions-only at content level for a pureContent block), then specific content when entered (#160 depth-pure)",
-    /renderLayerCrumbs\(block, label\);[\s\S]{0,400}var chromeDecl = \(atContent && decl && decl\.pureContent\) \? ACTIONS_ONLY_DECL : decl;\s*renderContainerChrome\(inspector, chromeDecl[\s\S]{0,200}if \(atContent\) \{\s*renderContent\(node\);[\s\S]{0,200}Edit " \+ \(label/.test(e));
+    // uio-F04 (EDIT-06): a source-linked block's provenance line is appended between the crumb and the
+    // container chrome, so the window here allows for it.
+    /renderLayerCrumbs\(block, label\);\s*var prov = renderSourceLinkProvenance\(block\);\s*if \(prov\) inspector\.appendChild\(prov\);[\s\S]{0,400}var chromeDecl = \(atContent && decl && decl\.pureContent\) \? ACTIONS_ONLY_DECL : decl;\s*renderContainerChrome\(inspector, chromeDecl[\s\S]{0,200}if \(atContent\) \{\s*renderContent\(node\);[\s\S]{0,200}Edit " \+ \(label/.test(e));
   // #160: the depth-pure decls + actions-only swap exist.
   ok("#160 depth-pure decls (CONTENT_PURE_DECL / IMAGE_PURE_DECL / ACTIONS_ONLY_DECL)", /var CONTENT_PURE_DECL = \{ fill: false, stroke: false, radius: false, pureContent: true \};/.test(e) && /var IMAGE_PURE_DECL = \{ fill: false, stroke: true, radius: false, pureContent: true \};/.test(e) && /var ACTIONS_ONLY_DECL = \{ align: false, valign: false, width: false, padding: false, gap: false, spacing: false, fill: false, stroke: false, radius: false, actions: true \};/.test(e));
   ok("layer breadcrumb: page + container ancestry, each crumb selects that layer", /function blockAncestry\(block\)/.test(e) && /function renderLayerCrumbs\(block, label\)/.test(e) && /kind: "page"/.test(e));
@@ -7696,16 +8307,16 @@ section("UI kit seam");
   ok("frame Block level = container decl (padding/gap/radius/fill/stroke-switch)", /renderBlockTwoLevel\(node, "Card", \{ padding: true, gap: true, radius: true, fill: true, stroke: "switch" \}/.test(e));
   ok("group Block level = CONTENT_DECL (invisible, spacing+actions)", /renderBlockTwoLevel\(node, "Group", CONTENT_DECL, renderFrameContent\)/.test(e));
   ok("frame io maps padding/background/border to the real fields", /if \(k === "padX"\)[\s\S]{0,80}block\.padding[\s\S]{0,400}block\.background[\s\S]{0,200}block\.border = true/.test(e));
-  ok("frame Content = children (Inside) + actions (renderFrameContent)", /function renderFrameContent\(node\) \{[\s\S]{0,400}sub\("Inside"\)[\s\S]{0,2200}Convert to group/.test(e));
+  ok("frame Content = children (Inside) + actions (renderFrameContent)", /function renderFrameContent\(node\) \{[\s\S]{0,400}panelSection\(_frameRoot, "Inside"\)[\s\S]{0,2200}Convert to group/.test(e));
   // Ticket 7 (1/n) — image two-level (image params = content). #88: the box STROKE is
   // exposed (IMAGE_DECL) with an io mapping it to block.box so a border can be removed.
   ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(e));
   ok("#88 IMAGE_DECL exposes the box stroke (fill/radius stay off)", /var IMAGE_DECL = \{ fill: false, stroke: true, radius: false \};/.test(e));
   ok("#88 imageChromeIo maps hasStroke/colour/width to block.box + clears legacy border", /function imageChromeIo\(block\)[\s\S]{0,400}return !!\(block\.box && block\.box\.border\)[\s\S]{0,900}block\.box\.border = true;[\s\S]{0,200}delete block\.box\.border; delete block\.box\.borderColor; delete block\.box\.borderWidth;[\s\S]{0,120}delete block\.border;/.test(e));
-  ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,900}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
+  ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,1100}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
   // Ticket 7 (2/n) — text blocks (heading/paragraph/note) two-level.
   ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(e));
-  ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,200}sub\("Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
+  ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,250}panelSection\(inspector, "Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
   // Ticket 7 (3/n) — content-less blocks (spacer, divider).
   ok("renderContentlessBlock delegates to the all-in-one shell (body = specific)", /function renderContentlessBlock\(node, label, renderBody\) \{[\s\S]{0,200}renderBlockTwoLevel\(node, label, BOX_ONLY_DECL, function \(n\) \{ if \(renderBody\) renderBody\(n\); \}\)/.test(e));
   ok("spacer + divider dispatched as content-less", /if \(block\.type === "spacer"\) \{ renderContentlessBlock\(node, "Spacer", renderSpacerBody\); return; \}/.test(e) && /if \(block\.type === "divider"\) \{ renderContentlessBlock\(node, "Divider"/.test(e));
@@ -7718,10 +8329,10 @@ section("UI kit seam");
   ok("specialized inspectors omit their own head + footer (shell provides them)", (e.match(/head omitted \(two-level breadcrumb/g) || []).length >= 1 && (e.match(/footer omitted \(spacing \+ actions at Block level\)/g) || []).length >= 2);
   // Ticket 8 (4/n) — componentGrid single-level.
   ok("componentGrid dispatched single-level (renderComponentGridBody)", /if \(block\.type === "componentGrid"\) \{ renderContentlessBlock\(node, "Component grid", renderComponentGridBody\); return; \}/.test(e));
-  ok("renderComponentGridBody = grid layout (template/instances)", /function renderComponentGridBody\(node\)/.test(e) && /sub\("Grid Layout"\)/.test(e) && /Component Template/.test(e));
+  ok("renderComponentGridBody = grid layout (template/instances)", /function renderComponentGridBody\(node\)/.test(e) && /panelSection\(inspector, "Grid Layout"\)/.test(e) && /Component Template/.test(e));
   // Ticket 8 (5/n) — checkbox single-level.
   ok("checkbox dispatched single-level (renderCheckboxBody)", /if \(block\.type === "checkbox"\) \{ renderContentlessBlock\(node, "Checkbox", renderCheckboxBody\); return; \}/.test(e));
-  ok("renderCheckboxBody = acknowledgement + require-to-continue gate", /function renderCheckboxBody\(node\)/.test(e) && /sub\("Acknowledgement"\)/.test(e) && /Require to continue/.test(e));
+  ok("renderCheckboxBody = acknowledgement + require-to-continue gate", /function renderCheckboxBody\(node\)/.test(e) && /panelSection\(inspector, "Acknowledgement"\)/.test(e) && /Require to continue/.test(e));
   // Ticket 8 (6/n) — cardReveal wrapped in two-level.
   ok("cardReveal wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "cardReveal"\) \{ renderBlockTwoLevel\(node, "Card reveal", CONTENT_PURE_DECL, renderCardRevealInspector\); return; \}/.test(e));
   // Ticket 8 (7/n) — embed (htmlEmbed/webEmbed) wrapped in two-level.
@@ -7785,6 +8396,89 @@ section("Icon accessor (Lucide offline)");
   ok("every registered Icon renders valid non-empty svg (" + (Icon.names().length - bad.length) + "/" + Icon.names().length + ")", bad.length === 0);
 })();
 
+// ---- uio-SK06: UI-spine negative-space ratchet (HARD FAIL) --------------
+// Front-loaded adherence gate for the UI Overhaul epic. The spine's save contract
+// (design-system/readme.md, section "The UI spine") is: settings/overlay surfaces are
+// autosave + live-apply + Undo — there is NO Save/Apply/Cancel/Done anywhere in a
+// settings surface; Close + Undo (⌘Z) are the only commit-adjacent controls, and a
+// Modal exists only for a destructive confirm or a blocking run.
+//
+// This ratchet forbids the RETIRED pattern immediately (a reintroduced commit button
+// in a settings surface), mirroring the gate-ok allowlist the UI-kit gate uses:
+//   `spine-ok`   — a sanctioned decision surface (the confirm/prompt modal primitive).
+//   `spine-todo` — known pre-F05 debt (the settings-in-modal + fake Done), which the
+//                  non-modal overlay sheet (uio-F05) removes. Frozen: it may go down,
+//                  never up.
+// A NEW, unmarked Save/Apply/Cancel/Done button fails the suite — that is exactly a
+// commit button reintroduced into a settings surface.
+section("uio-SK06 UI-spine save-contract ratchet (HARD FAIL)");
+(function () {
+  var e = src("src/editor.js");
+  var lines = e.split("\n");
+  var COMMIT = /label:\s*(?:opts\.[a-zA-Z]+Label\s*\|\|\s*)?["'](?:Save|Apply|Cancel|Done)["']/;
+  var offenders = lines.filter(function (l) { return COMMIT.test(l) && !/spine-ok|spine-todo/.test(l); });
+  ok("spine save contract: no unmarked Save/Apply/Cancel/Done commit button in the chrome", offenders.length === 0);
+  offenders.forEach(function (l) { console.error("    commit-btn (needs spine-ok, or remove per the save contract): " + l.trim()); });
+  // Debt freeze: the pre-F05 settings-in-modal commit button(s) are a known, finite set
+  // that uio-F05 removes. This count must not grow.
+  var debt = lines.filter(function (l) { return COMMIT.test(l) && /spine-todo/.test(l); });
+  ok("spine debt frozen: pre-F05 settings-in-modal commit buttons <= 1 (uio-F05 removes them)", debt.length <= 1);
+})();
+
+// ---- uio-F01: shared settings/overlay row anatomy ----------------------
+// The UI spine's "shared row" (design-system/readme.md): ONE row reused across
+// sheet / popover / inspector — fixed label column · control · optional inheritance
+// tail · hover overflow. fieldRow / switchRow / eyeRow all build via one settingsRow
+// primitive; the label width is one DS token; switch rows fold into the row (no
+// divergent switch-row anatomy). The tail/overflow are slots only (uio-F03 fills them).
+section("uio-F01 shared settings row anatomy");
+(function () {
+  var e = src("src/editor.js");
+  var css = src("editor.css");
+  var tokens = src("design-system/tokens/spacing.css");
+  var dts = src("design-system/components/controls/FieldRow.d.ts");
+  // The one shared-row primitive exists and is test-exposed.
+  ok("settingsRow primitive defined", /function settingsRow\(opts\)/.test(e));
+  ok("settingsRow exposed for tests (window.__settingsRow)", /window\.__settingsRow\s*=\s*settingsRow/.test(e));
+  // fieldRow / switchRow / eyeRow route through it — no hand-rolled row wrapper.
+  ok("fieldRow routes through settingsRow", /function fieldRow\([\s\S]{0,900}?settingsRow\(/.test(e));
+  ok("switchRow uses the shared row (toggle variant)", /function switchRow\([\s\S]{0,400}?insp-row--toggle/.test(e));
+  ok("eyeRow uses the shared row (toggle variant)", /function eyeRow\([\s\S]{0,900}?insp-row--toggle/.test(e));
+  ok("no editor.js helper builds the divergent switch-row wrapper", e.indexOf('h("div", "switch-row")') === -1);
+  // One tokenized fixed label column, shared with the DS FieldRow contract.
+  ok("DS defines the shared label-width token (--field-label-w: 76px)", /--field-label-w:\s*76px/.test(tokens));
+  ok("insp-row label column uses the token", /\.insp-row__label\s*\{[^}]*--field-label-w/.test(css));
+  // Row metrics ride density tokens, not ad-hoc px.
+  ok("insp-row rides --row-height", /\.insp-row\s*\{[^}]*min-height:\s*var\(--row-height\)/.test(css));
+  ok("insp-row label rides --text-xs", /\.insp-row__label\s*\{[^}]*font-size:\s*var\(--text-xs\)/.test(css));
+  // The divergent switch-row metrics are gone (converged onto the shared anatomy).
+  ok("switch-row converged (no space-between / 9px)", !/\.switch-row\s*\{[^}]*justify-content:\s*space-between/.test(css) && !/\.switch-row\s*\{[^}]*margin-top:\s*9px/.test(css));
+  // The tail + overflow slots exist (uio-F03 fills the scope logic).
+  ok("inheritance-tail slot styled (accent override dot)", /\.insp-row__tail\s*\{/.test(css) && /\.insp-row__override-dot\s*\{[^}]*var\(--accent\)/.test(css));
+  ok("hover overflow slot styled (opacity 0, revealed on row hover — no reflow)", /\.insp-row__overflow\s*\{[^}]*opacity:\s*0/.test(css) && /\.insp-row:hover \.insp-row__overflow/.test(css));
+  // The DS FieldRow contract carries the two new optional slots + aligned default.
+  ok("FieldRow.d.ts declares inheritanceTail slot", /inheritanceTail\?:/.test(dts));
+  ok("FieldRow.d.ts declares overflow slot", /overflow\?:/.test(dts));
+  ok("FieldRow.d.ts labelWidth default aligned to 76", /Default 76/.test(dts));
+})();
+
+// ---- uio-F02: density baseline — type on tokens + focus ring -------------
+// The density baseline (design-system/readme.md "Visual foundations") grounds chrome
+// type on the --text-* scale. All exact-match sizes (10/11/12px) AND the half-step drift
+// (10.5/11.5/12.5px, snapped down per James's type-scale decision) are tokenized. This
+// guard freezes it: no bare integer- or half-step font-size may return to the chrome CSS.
+section("uio-F02 density baseline — type tokens + focus ring");
+(function () {
+  var css = src("editor.css");
+  var bare = (css.match(/font-size:\s*1[012](\.5)?px\b/g) || []);
+  ok("editor.css: no bare 10/10.5/11/11.5/12/12.5px font-size (use the --text-* scale)", bare.length === 0);
+  if (bare.length) console.error("    bare font-size: " + bare.slice(0, 8).join(" · "));
+  ok("editor.css: the --text-* tokens are in use for chrome type", /font-size:\s*var\(--text-xs\)/.test(css));
+  // Canonical keyboard focus ring on interactive chrome (SRC-15) — accent outline on
+  // :focus-visible, scoped to chrome control classes.
+  ok("editor.css: canonical focus ring on interactive chrome", /\.vds-btn:focus-visible[\s\S]{0,260}outline:\s*2px solid var\(--accent\)/.test(css));
+})();
+
 // ---- UI kit conformance gate (ticket 4 — WARN-ONLY phase) --
 // Warns (does not fail) on blocks that still hand-append container chrome instead
 // of calling renderContainerChrome. Blocks migrate in tickets 8-9; ticket 9 flips
@@ -7826,12 +8520,32 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   var uiKit = src("src/ui-kit.js");
 
   // (item 4) DS token files present + imported by the editor entry CSS.
+  // fonts.css is the exception: the editor vendors its faces via local
+  // @font-face rules (offline / air-gap) and does NOT @import the DS font
+  // token file, so it is checked for presence only, not for import.
   var TOKEN_FILES = ["colors.css", "typography.css", "spacing.css", "effects.css", "fonts.css"];
+  var IMPORTED_TOKEN_FILES = ["colors.css", "typography.css", "spacing.css", "effects.css"];
   TOKEN_FILES.forEach(function (f) {
     ok("DS token file present: design-system/tokens/" + f,
        fs.existsSync(path.join(ROOT, "design-system/tokens", f)));
+  });
+  IMPORTED_TOKEN_FILES.forEach(function (f) {
     ok("editor.css imports design-system/tokens/" + f,
        new RegExp('@import\\s+"design-system/tokens/' + f.replace(".", "\\.") + '"').test(css));
+  });
+  ok("editor.css does NOT import the DS font token file (fonts vendored locally, no CDN)",
+     !/@import\s+"design-system\/tokens\/fonts\.css"/.test(css));
+
+  // (air-gap invariant) NO shipping CSS may reach an external font CDN. The
+  // editor claims "no external network calls at all" / "no phone-home"; a
+  // Google Fonts @import in any editor-loaded stylesheet silently breaks that
+  // and any IT/security air-gap review. Guard every CSS the editor pulls in.
+  var CDN_FONT_CSS = ["editor.css", "src/course.css",
+                      "design-system/tokens/fonts.css", "design-system/styles.css"];
+  CDN_FONT_CSS.forEach(function (f) {
+    var body = src(f);
+    ok("no external font-CDN reference in " + f + " (fonts.googleapis/gstatic)",
+       !/fonts\.googleapis\.com|fonts\.gstatic\.com/.test(body));
   });
   // #21 teardown: the legacy ui-alias layer is DELETED. No alias definitions
   // (`--ui-x: ...`) may remain in the editor entry CSS — the chrome references
@@ -7939,11 +8653,11 @@ section("ui-kit #10 DS control set");
   if (!U || !U._pure) return;
   var P = U._pure;
 
-  // All 23 named DS primitives (+ BlockGrid) are exported as factories.
+  // All 24 named DS primitives (+ BlockGrid) are exported as factories.
   var NAMES = ["Icon", "Button", "IconButton", "IconField", "TextField", "FieldRow", "TwoUp",
     "SegmentedControl", "Switch", "SwitchRow", "Select", "Checkbox", "ColorField",
     "Panel", "PanelSection", "Breadcrumb", "Tabs", "DocumentTab",
-    "TreeItem", "BlockPaletteItem", "BlockTile", "BlockGrid", "Badge",
+    "TreeItem", "BlockPaletteItem", "BlockTile", "BlockGrid", "Badge", "ToggleChip",
     "Modal", "ContextMenu", "Tooltip"];
   NAMES.forEach(function (n) { ok("VersoUI exports " + n + "()", typeof U[n] === "function"); });
 
@@ -7973,6 +8687,9 @@ section("ui-kit #10 DS control set");
   ok("iconBtnClass lg/active/danger", P.iconBtnClass("lg", true, true) === "vds-iconbtn vds-iconbtn--lg is-active is-danger");
   ok("badgeClass neutral/md default", P.badgeClass() === "vds-badge vds-badge--neutral vds-badge--md");
   ok("badgeClass component/sm", P.badgeClass("component", "sm") === "vds-badge vds-badge--component vds-badge--sm");
+  ok("toggleChipClass at rest", P.toggleChipClass() === "vds-chip");
+  ok("toggleChipClass active", P.toggleChipClass(true) === "vds-chip is-on");
+  ok("toggleChipClass active + disabled (a permanent baseline, e.g. Flagship)", P.toggleChipClass(true, true) === "vds-chip is-on is-disabled");
 
   // Tri-state checkbox aria + tree indent maths.
   ok("checkAria mixed wins over checked", P.checkAria(true, true) === "mixed");
@@ -7998,6 +8715,987 @@ section("ui-kit #10 DS control set");
   // index.html loads the library before editor.js (so switchEl can find it).
   var idx = src("index.html");
   ok("index.html loads ui-kit.js before editor.js", idx.indexOf("src/ui-kit.js") !== -1 && idx.indexOf("src/ui-kit.js") < idx.indexOf("src/editor.js"));
+})();
+
+// ---- product-rail-left-rail-and-topbar-3-stage: rail segment switch + product context ----
+section("Product Rail: 3-stage rail + product dropdown");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @stage-rail-start \*\/([\s\S]*?)\/\* @stage-rail-end \*\//);
+  if (!m) { ok("locate @stage-rail fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { isValidStage: isValidStage, stageWorkspaceClass: stageWorkspaceClass, productSelectOptions: productSelectOptions };")();
+
+  ok("isValidStage accepts source/edit/publish", g.isValidStage("source") && g.isValidStage("edit") && g.isValidStage("publish"));
+  ok("isValidStage rejects anything else", g.isValidStage("document") === false && g.isValidStage("") === false && g.isValidStage() === false);
+
+  // Edit renders through the ORIGINAL grid (no modifier class) -- today's editing
+  // experience must be byte-for-byte unchanged; Source/Publish get their own class.
+  ok("stageWorkspaceClass('edit') -> no class (unchanged layout)", g.stageWorkspaceClass("edit") == null);
+  ok("stageWorkspaceClass('source')", g.stageWorkspaceClass("source") === "workspace--stage-source");
+  ok("stageWorkspaceClass('publish')", g.stageWorkspaceClass("publish") === "workspace--stage-publish");
+
+  // productSelectOptions: "All products" first, then every ProductsStore entry by name.
+  var opts = g.productSelectOptions({ b: { id: "b", name: "Beta" }, a: { id: "a", name: "Alpha" } });
+  ok("productSelectOptions leads with All products", opts[0].value === "" && opts[0].label === "All products");
+  ok("productSelectOptions sorts the rest by name", opts[1].label === "Alpha" && opts[2].label === "Beta");
+  ok("productSelectOptions handles an empty/missing store", g.productSelectOptions({}).length === 1 && g.productSelectOptions(undefined).length === 1);
+  ok("productSelectOptions falls back to id when a product has no name", g.productSelectOptions({ x: {} })[1].label === "x");
+
+  // product-scope-persist: the active product survives a refresh (mirrors STAGE_PERSIST_KEY).
+  ok("setActiveProduct persists to verso.activeProduct (removes the pref on 'All products')", /var PRODUCT_PERSIST_KEY = "verso\.activeProduct";/.test(e) && /function setActiveProduct\(id\)[\s\S]{0,220}localStorage\.setItem\(PRODUCT_PERSIST_KEY, __activeProduct\)[\s\S]{0,120}removeItem\(PRODUCT_PERSIST_KEY\)/.test(e));
+  ok("restoreActiveProduct validates the stored id against ProductsStore + clears a stale one", /function restoreActiveProduct\(\)[\s\S]{0,320}window\.ProductsStore\[saved\]\) __activeProduct = saved;[\s\S]{0,120}removeItem\(PRODUCT_PERSIST_KEY\)/.test(e));
+  ok("mountProductPicker restores the persisted scope on first mount (boot)", /function mountProductPicker\(\)[\s\S]{0,120}restoreActiveProduct\(\);/.test(e));
+
+  // index.html wiring: exactly 3 rail segments (Source/Edit/Publish free-form, no
+  // gating), Edit active by default (preserves today's boot-straight-into-canvas
+  // behaviour), the pinned bottom actions untouched, and a top-bar product-picker host.
+  var idx = src("index.html");
+  ok("rail has exactly the 3 new segments", /id="rail-tab-source"/.test(idx) && /id="rail-tab-edit"/.test(idx) && /id="rail-tab-publish"/.test(idx));
+  ok("old single Document tab is gone", idx.indexOf('id="rail-tab-document"') === -1);
+  ok("Edit is the default active segment", /id="rail-tab-edit" data-rail-tab="edit"[^>]*class="[^"]*"|class="rail-btn rail-tab is-active" id="rail-tab-edit"/.test(idx));
+  // side-rail-cleanup slice 2: the rail keeps Help + Settings; the Recents/file-actions popover is
+  // retired (recents + Promote/Remove/store-path folded into the file picker).
+  ok("pinned bottom rail actions = Settings + Help/Docs; the save-menu popover is retired", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && !/id="save-menu-btn"/.test(idx));
+  ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
+  ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(e) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(e));
+  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(e) && /\.vbrowser__foot/.test(src("editor.css")));
+  ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
+  // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
+  ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(e) && /function mountProductPicker/.test(e));
+  ok("newProductPrompt creates a Product then selects it (create + setActiveProduct + rebuild)", /function newProductPrompt\(\)[\s\S]{0,260}createProduct\(name\);[\s\S]{0,120}setActiveProduct\(prod\.id\);[\s\S]{0,80}mountProductPicker\(\);/.test(e));
+  // new-product-empty-landing: '+ New Product' lands on the Edit-stage document browser (empty for a
+  // Product with zero docs, since renderBrowserGrid filters by the active product scope).
+  ok("newProductPrompt lands on the Edit-stage document browser (setStage edit + openBrowser)", /function newProductPrompt\(\)[\s\S]{0,900}setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(e));
+  ok("the browser header carries a 'New Product' action wired to newProductPrompt", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,120}newProductPrompt\(\);/.test(e));
+  ok("the document browser is scoped to the active product (empty state for a zero-doc Product)", /function renderBrowserGrid\(\)[\s\S]{0,400}getActiveProduct\(\)[\s\S]{0,300}docMatchesProductStage\(registry\[id\], scope, null\)/.test(e));
+  ok("a document created from the browser pre-stamps the active Product (createBlankDoc gets its id)", /var newDocProduct = \(typeof getActiveProduct === "function"\) \? getActiveProduct\(\) : "";/.test(e) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(e));
+  ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
+  ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
+
+  // setStage()/mountLeftRail() wiring: source-string checks (mirrors the ui-kit-#10
+  // "drop-in wiring" style above) since these functions are DOM-bound, not pure.
+  ok("setStage() gates on isValidStage before touching the DOM", /function setStage\(stage\) \{\s*if \(!isValidStage\(stage\)\) return;/.test(e));
+  ok("setStage() toggles is-active across all 3 rail-tab buttons", /STAGE_IDS\.forEach\(function \(s\) \{\s*var btn = document\.getElementById\("rail-tab-" \+ s\);/.test(e));
+  ok("setStage() shows/hides both placeholder regions", /document\.getElementById\("stage-source"\); if \(srcEl\) srcEl\.hidden = stage !== "source";/.test(e) && /document\.getElementById\("stage-publish"\); if \(pubEl\) pubEl\.hidden = stage !== "publish";/.test(e));
+  ok("mountLeftRail() reconciles to __activeStage on mount (single source of truth)", /setStage\(__activeStage\);/.test(e));
+  ok("mountProductPicker() builds a VersoUI.Select from ProductsStore", /U\.Select\(\{\s*options: productSelectOptions\(window\.ProductsStore\)/.test(e));
+  ok("boot mounts the product picker alongside the left rail", /mountLeftRail\(\);[\s\S]{0,160}mountProductPicker\(\);/.test(e));
+  ok("__productRail exposes the shared product-context getter/setter (read by every stage)", /window\.__productRail\.getActiveProduct = getActiveProduct;/.test(e) && /window\.__productRail\.setActiveProduct = setActiveProduct;/.test(e));
+
+  // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
+  var renderJs = src("src/render.js");
+  ok("render() never reads the rail/product-picker state", renderJs.indexOf("stageWorkspaceClass") === -1 && renderJs.indexOf("__activeStage") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no stage-placeholder/product-picker chrome classes", courseCss.indexOf("stage-placeholder") === -1 && courseCss.indexOf("product-picker") === -1);
+})();
+
+// ---- product-rail-source-stage-nav-article: Source stage left-nav + flowing article ----
+section("Product Rail: Source stage nav + article");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
+  if (!m) { ok("locate @source-stage fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { isValidFacet: isValidFacet, topicMatchesQuery: topicMatchesQuery, filterTopics: filterTopics," +
+    " groupTopicsByProduct: groupTopicsByProduct, canonicalizeTopicOrder: canonicalizeTopicOrder," +
+    " resolveSectionFacetText: resolveSectionFacetText };")();
+  // structMoveTopic itself isn't extracted here (unlike structMoveSection) -- it reads/
+  // writes the real libComponents()/saveLibrary() globals to look up drag/ref topics by id
+  // across the whole library, so it's exercised via the browser-verify pass instead, the
+  // same tier createTopic and its siblings already use.
+
+  ok("isValidFacet accepts technical/digestible/dotpoint", g.isValidFacet("technical") && g.isValidFacet("digestible") && g.isValidFacet("dotpoint"));
+  ok("isValidFacet rejects anything else", g.isValidFacet("flagship") === false && g.isValidFacet() === false);
+
+  ok("topicMatchesQuery: empty query matches all", g.topicMatchesQuery({ name: "Radar basics" }, "") === true && g.topicMatchesQuery({ name: "x" }, null) === true);
+  ok("topicMatchesQuery: case-insensitive substring", g.topicMatchesQuery({ name: "Radar basics" }, "BASICS") === true);
+  ok("topicMatchesQuery: non-match -> false", g.topicMatchesQuery({ name: "Radar basics" }, "acoustic") === false);
+
+  var comps = {
+    t1: { id: "t1", kind: "topic", name: "Radar overview", productId: "prod-a" },
+    t2: { id: "t2", kind: "topic", name: "Battery life", productId: "prod-a" },
+    t3: { id: "t3", kind: "topic", name: "Other product topic", productId: "prod-b" },
+    t4: { id: "t4", kind: "topic", name: "Unassigned topic" },
+    blk: { id: "blk", kind: "composed", name: "Not a topic" }
+  };
+  ok("filterTopics: only kind:topic masters, 'All products' (falsy) -> every topic incl. unassigned", g.filterTopics(comps, "", "").length === 4);
+  ok("filterTopics: excludes non-topic masters", g.filterTopics(comps, "", "").every(function (t) { return t.kind === "topic"; }));
+  ok("filterTopics: narrows to the active product", g.filterTopics(comps, "prod-a", "").length === 2 && g.filterTopics(comps, "prod-b", "").length === 1);
+  ok("filterTopics: a product filter excludes unassigned topics", g.filterTopics(comps, "prod-a", "").some(function (t) { return t.id === "t4"; }) === false);
+  ok("filterTopics: search narrows further within the product filter", g.filterTopics(comps, "prod-a", "battery").length === 1);
+  ok("filterTopics: handles an empty/missing library", g.filterTopics({}, "", "").length === 0 && g.filterTopics(undefined, "", "").length === 0);
+
+  var products = { "prod-a": { id: "prod-a", name: "Alpha" }, "prod-b": { id: "prod-b", name: "Beta" } };
+  var groups = g.groupTopicsByProduct(g.filterTopics(comps, "", ""), products);
+  ok("groupTopicsByProduct: one group per productId + an Unassigned bucket", groups.length === 3);
+  ok("groupTopicsByProduct: groups sorted by product name, Unassigned last", groups[0].label === "Alpha" && groups[1].label === "Beta" && groups[2].label === "Unassigned");
+  // source-stage-topic-reorder: within a group, topics sort by their canonical drag `order`
+  // (author-chosen), not by name -- callers canonicalize order first (see below).
+  var orderedComps = {
+    o1: { id: "o1", kind: "topic", name: "Radar overview", productId: "prod-a", order: 1 },
+    o2: { id: "o2", kind: "topic", name: "Battery life", productId: "prod-a", order: 0 }
+  };
+  var orderedGroups = g.groupTopicsByProduct(g.filterTopics(orderedComps, "", ""), products);
+  ok("groupTopicsByProduct: topics within a group sorted by order, not name", orderedGroups[0].topics[0].name === "Battery life" && orderedGroups[0].topics[1].name === "Radar overview");
+
+  // canonicalizeTopicOrder: assigns a stable, dense order per Product group -- a topic
+  // with no order yet sorts to the end of ITS group, alphabetically among its equally-
+  // unordered siblings, so a freshly created/imported topic appends rather than jumping
+  // into an author's chosen order. Order is scoped per-group (cross-group position is
+  // meaningless), and restamped to a dense 0..n-1 range after sorting.
+  var unordered = [
+    { id: "u1", name: "Zebra", productId: "prod-a" },
+    { id: "u2", name: "Alpha topic", productId: "prod-a" },
+    { id: "u3", name: "Only one", productId: "prod-b" }
+  ];
+  g.canonicalizeTopicOrder(unordered);
+  ok("canonicalizeTopicOrder: no-order topics fall back to alpha order within their group", unordered[0].order === 1 && unordered[1].order === 0);
+  ok("canonicalizeTopicOrder: a lone topic in its own group still gets order 0", unordered[2].order === 0);
+  var mixed = [
+    { id: "m1", name: "Has an order", productId: "prod-a", order: 5 },
+    { id: "m2", name: "No order yet", productId: "prod-a" }
+  ];
+  g.canonicalizeTopicOrder(mixed);
+  ok("canonicalizeTopicOrder: an explicit order always sorts before a topic with none", mixed[0].order === 0 && mixed[1].order === 1);
+
+  var sec = { heading: "H", facets: { technical: "tech text", dotpoint: "dot text" } };
+  ok("resolveSectionFacetText: returns the requested facet when present", g.resolveSectionFacetText(sec, "dotpoint") === "dot text");
+  ok("resolveSectionFacetText: falls back to technical when the requested facet is missing", g.resolveSectionFacetText(sec, "digestible") === "tech text");
+  var secNoTech = { heading: "H", facets: { dotpoint: "only this" } };
+  ok("resolveSectionFacetText: falls back to whichever facet IS present when technical is also missing", g.resolveSectionFacetText(secNoTech, "digestible") === "only this");
+  ok("resolveSectionFacetText: a section with no facets at all -> empty string, never throws", g.resolveSectionFacetText({ heading: "H" }, "technical") === "");
+  ok("resolveSectionFacetText: null-safe", g.resolveSectionFacetText(null, "technical") === "");
+
+  // index.html wiring: the real left-nav + article shell (not the old centered
+  // placeholder), plus the mount points renderSourceStage()/mountSourceStageSearch()
+  // target.
+  var idx = src("index.html");
+  ok("stage-source is the real source-stage shell, not the .stage-placeholder centered stand-in", /class="source-stage" id="stage-source"/.test(idx));
+  ok("source-stage nav + search + topic-list + article mount points present", /id="source-stage-search"/.test(idx) && /id="source-topic-list"/.test(idx) && /id="source-stage-article"/.test(idx));
+  ok("stage-publish is the real 2-pane publish stage (pick + queue), not the placeholder", /class="publish-stage" id="stage-publish"/.test(idx) && /id="publish-pick"/.test(idx) && /id="publish-queue"/.test(idx));
+
+  // Wiring: setStage("source") triggers a render; the topic list re-renders on both
+  // search input and the shared product-context change (Epic 1's dropdown).
+  ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
+  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(e));
+  ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(e));
+  ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("div", "vbrowser__search source-stage__search-field"\)/.test(e));
+  // (facet SegmentedControl + per-section MarkdownLite column rendering retired with the section-cells path)
+
+  // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
+  var renderJs = src("src/render.js");
+  ok("render() never reads Source-stage state", renderJs.indexOf("__sourceActiveTopicId") === -1 && renderJs.indexOf("renderSourceStage") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no source-stage chrome classes", courseCss.indexOf("source-stage") === -1);
+})();
+
+// ---- product-rail-publish-queue-t1: persistent publish queue store + pane + run ----
+// The Publish stage is a persistent queue of per-document jobs (AE render-queue model). The STATE
+// is a pure store (add / remove / run / complete transitions); the pane UI + the buildPackage run
+// loop mount on top and are browser-verified. This section guards the pure store + the wiring.
+section("Product Rail: Publish queue store (T1)");
+(function () {
+  var PQ = require(path.join(ROOT, "src/publish-queue.js"));
+  var q = PQ.create();
+  ok("create() is an empty queue", q.rows.length === 0 && q._seq === 0);
+  var r1 = PQ.addDoc(q, "COURSE-A", { title: "Course A" });
+  ok("addDoc queues one row per document with a stable id + pending status", q.rows.length === 1 && r1.docId === "COURSE-A" && r1.status === "pending" && !!r1.id);
+  ok("addDoc defaults the title from meta and a preset id", r1.title === "Course A" && r1.preset === "master");
+  var r1b = PQ.addDoc(q, "COURSE-A", { title: "Course A (renamed)" });
+  ok("re-adding the same document RE-ARMS its row (no duplicate)", q.rows.length === 1 && r1b.id === r1.id && r1b.title === "Course A (renamed)");
+  var r2 = PQ.addDoc(q, "COURSE-B", { title: "Course B" });
+  ok("a second distinct document is a second row", q.rows.length === 2 && r2.id !== r1.id);
+  ok("pendingRows lists both while both are pending", PQ.pendingRows(q).length === 2 && PQ.hasPending(q) === true);
+  PQ.setStatus(q, r1.id, "running");
+  ok("setStatus running clears any prior result and drops it out of pending", PQ.rowById(q, r1.id).status === "running" && PQ.rowById(q, r1.id).result === null && PQ.pendingRows(q).length === 1);
+  PQ.setStatus(q, r1.id, "done", { to: "download", path: "COURSE-A_V001_SCORM.zip" });
+  ok("setStatus done records the result path and stays out of pending", PQ.rowById(q, r1.id).status === "done" && PQ.rowById(q, r1.id).result.path.indexOf("COURSE-A") === 0 && PQ.pendingRows(q).length === 1);
+  ok("an unknown status is ignored (never a stray state)", (function () { PQ.setStatus(q, r1.id, "wat"); return PQ.rowById(q, r1.id).status === "done"; })());
+  ok("re-adding a done document re-arms it to pending (re-publish)", (function () { PQ.addDoc(q, "COURSE-A", {}); return PQ.rowById(q, r1.id).status === "pending" && PQ.rowById(q, r1.id).result === null; })());
+  PQ.removeRow(q, r2.id);
+  ok("removeRow drops just that row", q.rows.length === 1 && PQ.rowByDoc(q, "COURSE-B") === null);
+  ok("the queue round-trips through toJSON/fromJSON", (function () {
+    var back = PQ.fromJSON(JSON.parse(JSON.stringify(PQ.toJSON(q))));
+    return back.rows.length === 1 && back.rows[0].docId === "COURSE-A" && back._seq === q._seq;
+  })());
+  ok("fromJSON reverts a mid-run 'running' row to pending (a reload can't leave it stuck)", (function () {
+    var mid = PQ.create(); var rr = PQ.addDoc(mid, "X", {}); PQ.setStatus(mid, rr.id, "running");
+    var back = PQ.fromJSON(JSON.parse(JSON.stringify(PQ.toJSON(mid))));
+    return back.rows[0].status === "pending";
+  })());
+  ok("fromJSON is tolerant of a malformed blob (starts empty, never throws)", PQ.fromJSON(null).rows.length === 0 && PQ.fromJSON({ rows: "nope" }).rows.length === 0);
+  ok("fromJSON drops rows with no docId", PQ.fromJSON({ rows: [{ title: "orphan" }, { docId: "Y" }] }).rows.length === 1);
+
+  // Editor wiring (grep guards -- the DOM behaviour is browser-verified)
+  var e = src("src/editor.js");
+  ok("setStage('publish') mounts the publish stage", /if \(stage === "publish"\) mountPublishStage\(\);/.test(e));
+  ok("the queue persists through the durable key/value writer", /writeStore\(localStorage, PUBLISH_QUEUE_KEY, JSON\.stringify\(PQ\.toJSON\(__publishQueue\)\)\)/.test(e));
+  ok("Publish-run builds each pending row via SCORMExport.buildPackage and restores the active doc", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e) && /if \(activeDocId !== originalId && registry\[originalId\]\) switchDoc\(originalId\)/.test(e));
+  ok("index.html loads publish-queue.js before editor.js", (function () {
+    var idx = src("index.html"); return idx.indexOf("src/publish-queue.js") > -1 && idx.indexOf("src/publish-queue.js") < idx.indexOf("src/editor.js");
+  })());
+})();
+
+// ---- product-rail-whole-family-export-release-record: the append-only release log ----
+// Every completed Publish run appends ONE immutable release record. The ReleaseHistory model is a
+// pure, DOM-free store (no Date.now/Math.random -- the caller supplies createdAt); append-only, minted
+// releaseId, reverse-chron list, round-trips. The editor wiring writes it once per run in finish().
+section("Product Rail: Release history store (whole-family export)");
+(function () {
+  var RH = require(path.join(ROOT, "src/release-history.js"));
+  var e = src("src/editor.js");
+  var s = RH.create();
+  ok("create() -> empty append-only store", s.releases.length === 0 && s._seq === 0);
+  var r1 = RH.append(s, { productId: "prodA", createdAt: 1000, entries: [{ docId: "d1", title: "Doc 1", exportFormat: "scorm12", version: "V001" }] });
+  ok("append mints a releaseId + freezes the verso-release shape", r1 && r1.type === "verso-release" && r1.schema === RH.SCHEMA && r1.releaseId === "rel-1" && r1.productId === "prodA" && r1.createdAt === 1000 && r1.entries.length === 1);
+  ok("append deep-clones entries (later caller mutation can't reach into the record)", (function () { var src = [{ docId: "d9", title: "X" }]; var rec = RH.append(s, { createdAt: 2000, entries: src }); src[0].title = "MUTATED"; return rec.entries[0].title === "X"; })());
+  var r3 = RH.append(s, { createdAt: 3000, entries: [{ docId: "d2" }, { docId: "d3" }] });
+  ok("append is the ONLY mutation -- no update/remove is exported", typeof RH.update === "undefined" && typeof RH.remove === "undefined" && typeof RH.setStatus === "undefined");
+  ok("list() is reverse-chronological (newest first)", (function () { var l = RH.list(s); return l[0].createdAt === 3000 && l[l.length - 1].createdAt === 1000; })());
+  ok("round-trips through toJSON/fromJSON (records + the id counter preserved)", (function () { var back = RH.fromJSON(JSON.parse(JSON.stringify(RH.toJSON(s)))); return back.releases.length === s.releases.length && back._seq === s._seq && back.releases[0].releaseId === "rel-1"; })());
+  ok("fromJSON drops a malformed record with no entries array", (function () { var back = RH.fromJSON({ _seq: 5, releases: [{ releaseId: "rel-x" }, { releaseId: "rel-y", entries: [] }] }); return back.releases.length === 1 && back.releases[0].releaseId === "rel-y"; })());
+
+  // Editor wiring: the store loads/saves through the durable seam, and a run writes exactly one record.
+  ok("release history loads + persists through the durable key/value seam", /RELEASE_HISTORY_KEY = "authoring.releaseHistory"/.test(e) && /writeStore\(localStorage, RELEASE_HISTORY_KEY, JSON\.stringify\(RH\.toJSON\(__releaseHistory\)\)\)/.test(e));
+  ok("runPublishQueue accumulates a release entry per row and appends ONE record on finish", /runEntries\.push\(releaseEntryForRow\(row, res, variant\)\);/.test(e) && /if \(runEntries\.length && window\.ReleaseHistory\) \{[\s\S]{0,220}ReleaseHistory\.append\(releaseHistory\(\), \{ productId: getActiveProduct\(\), createdAt: Date\.now\(\), entries: runEntries \}\);/.test(e));
+  ok("a release entry carries the doc identity, export options + source-version stamps (auditable)", /function releaseEntryForRow\(row, result, variant\)[\s\S]{0,700}exportFormat: opts\.format[\s\S]{0,400}groundTruthVersions: gtv/.test(e));
+  ok("the release entry's groundTruthVersions snapshot is captured BEFORE the baseline reset", /runEntries\.push\(releaseEntryForRow\(row, res, variant\)\);[\s\S]{0,600}snapshotGroundTruthBaseline\(registry\[row\.docId\]\)/.test(e));
+  // uio-P-C03 flipped the DEFAULT: reverse-chron and per-release expansion are unchanged, but the
+  // section is now open and fills the pane's empty half instead of hiding collapsed below the queue.
+  ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
+  // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover.
+  // uio-F04 moved BOTH onto the shared resolver (f04DocFacts), so neither phrases the number itself.
+  // uio-P-C01 (PUB-01): on Publish the alignment fact is drawn as the labelled Meter, still fed by
+  // the same shared resolver.
+  ok("the Publish pick rows show the alignment meter from the shared resolver", /var facts = d\.facts \|\| f04DocFacts\(d\.id\);[\s\S]{0,600}f04AlignmentMeter\(facts\.alignment, "publish-pickrow__align"\)/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
+  ok("the Edit-stage storage popover shows a live 'Source alignment' readout (from f04DocFacts)", /var stFacts = f04DocFacts\(activeDocId\);[\s\S]{0,120}row\("Source alignment", stFacts\.alignment\.label\)/.test(e));
+  ok("index.html loads release-history.js before editor.js", (function () {
+    var idx = src("index.html"); return idx.indexOf("src/release-history.js") > -1 && idx.indexOf("src/release-history.js") < idx.indexOf("src/editor.js");
+  })());
+})();
+
+// ---- product-rail-publish-queue-t2: app-level output presets ----
+// A preset is a named bundle of export-option overrides applied onto defaultOptions() at publish time.
+// 3 built-ins ship; authors save/rename/delete their own; a doc remembers its last-used preset. Pure
+// store + resolution here; the row dropdown / save-as modal are browser-verified.
+section("Product Rail: Publish presets (T2)");
+(function () {
+  var PP = require(path.join(ROOT, "src/publish-presets.js"));
+  var s = PP.create();
+  ok("three built-ins ship (Master / Review copy / Lightweight)", (function () {
+    var b = PP.builtins(); return b.length === 3 && b[0].id === "master" && b[1].id === "review" && b[2].id === "lightweight";
+  })());
+  ok("Master applies no overrides; Review copy sets reviewFile; Lightweight lowers maxImageDim", (function () {
+    return Object.keys(PP.optionsFor(s, "master")).length === 0
+      && PP.optionsFor(s, "review").reviewFile === true && PP.optionsFor(s, "review").learnerTheme === false
+      && PP.optionsFor(s, "lightweight").maxImageDim === 1200;
+  })());
+  ok("an unknown preset id resolves to Master (never strands a row)", PP.presetById(s, "nope").id === "master" && Object.keys(PP.optionsFor(s, "nope")).length === 0);
+  var custom = PP.saveCustom(s, "My tight build", { optimiseMedia: true, imageQuality: 0.6 });
+  ok("saveCustom adds an app-global custom preset with its overrides", (function () {
+    return custom.id.indexOf("preset-") === 0 && !custom.builtin && PP.optionsFor(s, custom.id).imageQuality === 0.6 && PP.allPresets(s).length === 4;
+  })());
+  ok("renameCustom renames a custom preset; a built-in can't be renamed", (function () {
+    PP.renameCustom(s, custom.id, "Tight"); PP.renameCustom(s, "master", "Nope");
+    return PP.presetName(s, custom.id) === "Tight" && PP.presetName(s, "master") === "Master";
+  })());
+  ok("a doc remembers its last-used preset; a re-visit recalls it", (function () {
+    PP.setLastForDoc(s, "COURSE-A", custom.id);
+    return PP.lastForDoc(s, "COURSE-A") === custom.id && PP.lastForDoc(s, "COURSE-UNSEEN") === "master";
+  })());
+  ok("deleting a custom preset falls its documents back to Master", (function () {
+    PP.deleteCustom(s, custom.id);
+    return PP.allPresets(s).length === 3 && PP.lastForDoc(s, "COURSE-A") === "master";
+  })());
+  ok("the preset store round-trips through toJSON/fromJSON (built-ins are never persisted as custom)", (function () {
+    var s2 = PP.create(); var c = PP.saveCustom(s2, "Keep", { reviewFile: true }); PP.setLastForDoc(s2, "D", c.id);
+    var back = PP.fromJSON(JSON.parse(JSON.stringify(PP.toJSON(s2))));
+    return back.custom.length === 1 && back.custom[0].name === "Keep" && PP.lastForDoc(back, "D") === c.id && PP.allPresets(back).length === 4;
+  })());
+  ok("fromJSON drops any built-in id smuggled into custom + tolerates a malformed blob", PP.fromJSON({ custom: [{ id: "master", name: "x" }, { id: "p9", name: "ok" }] }).custom.length === 1 && PP.fromJSON(null).custom.length === 0);
+
+  // Editor wiring (grep guards -- the dropdown + modal are browser-verified)
+  var e = src("src/editor.js");
+  ok("the run loop packages each row with its resolved preset options, not bare defaults", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e));
+  ok("publishOptionsForRow merges the preset overrides onto defaultOptions()", /Object\.assign\(base, PP\.optionsFor\(publishPresets\(\), row\.preset \|\| "master"\)\)/.test(e));
+  ok("adding a doc recalls its last-used preset (zero-config re-queue)", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e));
+  ok("index.html loads publish-presets.js", src("index.html").indexOf("src/publish-presets.js") > -1);
+
+  // T4: one shared addToQueue action + the Edit-stage top-bar entry point
+  // uio-P-C06 added an options argument (quiet batching); the one shared action is unchanged.
+  ok("both entry points call the one shared addToQueue action", /function addToQueue\(docId, opts\)/.test(e) && /function addDocToPublishQueue\(docId\) \{ addToQueue\(docId\); \}/.test(e));
+  ok("the shared action recalls the doc's last-used preset and toasts the pending count", /PP\.lastForDoc\(publishPresets\(\), docId\)/.test(e) && /publishToast\("Added to the publish queue/.test(e));
+  ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
+  // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
+  ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\);/.test(e) && !/Send to publish — coming soon/.test(e));
+})();
+
+// ---- product-rail-publish-queue-t3: remembered save path + version preview ----
+// A published package now has somewhere to land and a name that steps. The model holds the Product
+// ROOT folder every output inherits, the per-output OVERRIDE, and the version ledger; the File System
+// Access handles live in IndexedDB under the keys this model computes, so the model stays pure.
+// Grilled decisions it encodes: one folder pick per Product (not per row), and never a silent
+// overwrite -- a new incremented version by default, overwrite only on an explicit per-row opt-in.
+section("Product Rail: Publish save paths + version ledger (T3)");
+(function () {
+  var PA = require(path.join(ROOT, "src/publish-paths.js"));
+  var e = src("src/editor.js"), css = src("editor.css");
+
+  // --- keys: one output = one document + one variant ---
+  ok("a path key is doc + variant, and flagship is the empty variant", PA.pathKey("D1", "coastal") === "D1::coastal" && PA.pathKey("D1", null) === "D1::" && PA.pathKey("D1", "") === "D1::");
+  ok("a variant keys separately from its flagship, so the two never share a folder or a version", PA.pathKey("D1", null) !== PA.pathKey("D1", "coastal"));
+  ok("handle keys are namespaced so publish handles can't collide with the backup/review ones", PA.rootHandleKey("prodA") === "publish:root:prodA" && PA.rowHandleKey("D1::") === "publish:row:D1::");
+
+  // --- the tidy tree an inherited root nests into ---
+  ok("folder segments are Product / doc-variant", (function () { var s = PA.folderSegments("Acme Product Line", "ACME-101", "coastal"); return s.length === 2 && s[0] === "Acme-Product-Line" && s[1] === "ACME-101-coastal"; })());
+  ok("a flagship contributes no variant suffix", PA.folderSegments("Acme", "ACME-101", null).join("/") === "Acme/ACME-101");
+  ok("a blank product name contributes no segment rather than a folder called '-'", PA.folderSegments("", "ACME-101", null).join("/") === "ACME-101" && PA.folderSegments("///", "ACME-101", null).join("/") === "ACME-101");
+  ok("unsafe characters are scrubbed and a nameless document still gets a folder", PA.folderSafe("A/B:C*?") === "A-B-C" && PA.folderSegments("P", "", null)[1] === "document");
+
+  // --- resolution: override > inherited root > download ---
+  var s = PA.create();
+  var ctx = { productId: "prodA", productName: "Acme", docId: "D1", docCode: "ACME-101", variant: null };
+  ok("nothing set means the output downloads (blank until set -- no invented convention)", (function () { var d = PA.resolve(s, ctx); return d.kind === "download" && d.label === "Downloads" && d.handleKey === null; })());
+  ok("the download destination says why in words an author can read", /downloads/i.test(PA.resolve(s, ctx).hint));
+  PA.setRoot(s, "prodA", "Drops");
+  ok("a Product root is inherited by the output and nests into Product/doc-variant", (function () {
+    var d = PA.resolve(s, ctx);
+    return d.kind === "root" && d.inherited === true && d.label === "Drops" && d.segments.join("/") === "Acme/ACME-101" && d.chip === "Drops/Acme/ACME-101/" && d.handleKey === "publish:root:prodA";
+  })());
+  ok("ONE root pick covers every output -- a variant inherits it too, into its own subfolder", (function () {
+    var d = PA.resolve(s, { productId: "prodA", productName: "Acme", docId: "D1", docCode: "ACME-101", variant: "coastal" });
+    return d.kind === "root" && d.chip === "Drops/Acme/ACME-101-coastal/";
+  })());
+  PA.setRowPath(s, PA.pathKey("D1", null), "Elsewhere");
+  ok("a per-output path OVERRIDES the inherited root, and writes straight in (no nesting)", (function () {
+    var d = PA.resolve(s, ctx);
+    return d.kind === "row" && d.inherited === false && d.chip === "Elsewhere/" && d.segments.length === 0 && d.handleKey === "publish:row:D1::";
+  })());
+  ok("the override is per-output: the variant beside it still inherits the root", PA.resolve(s, { productId: "prodA", productName: "Acme", docId: "D1", docCode: "ACME-101", variant: "coastal" }).kind === "root");
+  ok("clearing the override falls back to the root, not to download", (function () { PA.clearRowPath(s, PA.pathKey("D1", null)); return PA.resolve(s, ctx).kind === "root"; })());
+  ok("clearing the root falls its outputs back to download", (function () { PA.clearRoot(s, "prodA"); return PA.resolve(s, ctx).kind === "download"; })());
+  ok("resolve degrades on junk instead of throwing", PA.resolve(null, null).kind === "download" && PA.resolve(PA.create(), {}).kind === "download");
+
+  // --- the version ledger: never a silent overwrite ---
+  var suggest = function (last) { return last ? last.replace(/(\d+)$/, function (n) { return String(+n + 1).padStart(n.length, "0"); }) : "V001"; };
+  var v = PA.create(), k = PA.pathKey("D1", null);
+  ok("nothing published yet starts at V001", PA.nextVersion(v, k, { suggest: suggest }) === "V001" && PA.lastVersion(v, k) === null);
+  PA.recordVersion(v, k, "V001");
+  ok("the default steps to a new version every run (the previous export survives)", PA.nextVersion(v, k, { suggest: suggest }) === "V002");
+  ok("'replace current version' reuses the last one -- the only way to overwrite, and it is opt-in", PA.nextVersion(v, k, { replace: true, suggest: suggest }) === "V001");
+  ok("replace on an output that never published still starts at V001 rather than reusing nothing", PA.nextVersion(v, PA.pathKey("D9", null), { replace: true, suggest: suggest }) === "V001");
+  ok("a variant versions independently of its flagship", (function () { PA.recordVersion(v, PA.pathKey("D1", "coastal"), "V007"); return PA.nextVersion(v, PA.pathKey("D1", "coastal"), { suggest: suggest }) === "V008" && PA.nextVersion(v, k, { suggest: suggest }) === "V002"; })());
+  ok("a suggest function that throws degrades to the last version, not a broken preview", PA.nextVersion(v, k, { suggest: function () { throw new Error("boom"); } }) === "V001");
+  ok("recordVersion refuses a blank version rather than storing an empty name", (function () { PA.recordVersion(v, k, ""); PA.recordVersion(v, k, null); return PA.lastVersion(v, k) === "V001"; })());
+
+  // --- persistence: labels + versions round-trip; handles never enter the blob ---
+  ok("the store round-trips through toJSON/fromJSON", (function () {
+    var s2 = PA.create(); PA.setRoot(s2, "prodA", "Drops"); PA.setRowPath(s2, "D1::coastal", "Elsewhere"); PA.recordVersion(s2, "D1::", "V004");
+    var back = PA.fromJSON(JSON.parse(JSON.stringify(PA.toJSON(s2))));
+    return PA.rootLabel(back, "prodA") === "Drops" && PA.rowLabel(back, "D1::coastal") === "Elsewhere" && PA.lastVersion(back, "D1::") === "V004";
+  })());
+  ok("a directory handle is never serialised into the blob (only its label)", (function () {
+    var s2 = PA.create(); PA.setRoot(s2, "prodA", "Drops");
+    var blob = JSON.stringify(PA.toJSON(s2));
+    return blob.indexOf("Drops") > -1 && blob.indexOf("handle") === -1 && Object.keys(PA.toJSON(s2).roots.prodA).join() === "label";
+  })());
+  ok("fromJSON is tolerant of a malformed blob (starts empty, never throws)", Object.keys(PA.fromJSON(null).roots).length === 0 && Object.keys(PA.fromJSON({ roots: "nope", rows: 7 }).rows).length === 0);
+  ok("fromJSON drops an entry with no label rather than resolving to a blank folder", Object.keys(PA.fromJSON({ roots: { a: {}, b: { label: "ok" } } }).roots).join() === "b");
+  ok("the model is DOM-free and time-free, so it is reproducible", (function () {
+    var t = src("src/publish-paths.js").replace(/^\s*\/\/.*$/gm, "");
+    return !/\bwindow\.(?!PublishPaths)/.test(t) && !/document\./.test(t) && !/Date\.now|Math\.random/.test(t);
+  })());
+
+  // --- editor wiring (grep guards -- the picker + write path are browser-verified) ---
+  ok("the path store persists through the same durable key/value seam as the queue", /PUBLISH_PATHS_KEY = "authoring\.publishPaths"/.test(e) && /writeStore\(localStorage, PUBLISH_PATHS_KEY, JSON\.stringify\(PA\.toJSON\(__publishPaths\)\)\)/.test(e));
+  ok("directory handles persist in the existing keyed-handle IndexedDB store, under the model's keys", /saveBackupHandle\(handleKey, h\)/.test(e) && /loadBackupHandle\(handleKey\)/.test(e) && /pickPublishDir\(PA\.rootHandleKey\(pid\)\)/.test(e) && /pickPublishDir\(PA\.rowHandleKey\(dest\.key\)\)/.test(e));
+  ok("a remembered handle whose permission lapsed resolves to null so the run downloads instead", /dirPermission\(h, false\)[\s\S]{0,160}perm === "granted" \? h : null/.test(e));
+  ok("the filename preview asks the ledger for the next version, not defaultOptions' frozen V001", /out\.version = PA\.nextVersion\(publishPaths\(\), PA\.pathKey\(row\.docId, out\.variant\),\s*\n?\s*\{ replace: !!row\.replaceVersion, suggest: SX && SX\.suggestVersion \}\)/.test(e));
+  ok("the increment rule stays in the exporter -- the ledger is handed suggestVersion, not a copy of it", /suggest: SX && SX\.suggestVersion/.test(e) && !/padStart/.test(src("src/publish-paths.js")));
+  ok("an inherited root nests before writing; an override writes straight in", /publishEnsureDir\(root, dest\.segments\)/.test(e) && /getDirectoryHandle\(seg, \{ create: true \}\)/.test(e));
+  ok("delivery writes the package into the resolved folder via a File System Access writable", /function deliverPublishPackage\(row, variant, pkg\)[\s\S]{0,700}getFileHandle\(pkg\.name, \{ create: true \}\)[\s\S]{0,200}createWritable\(\)/.test(e));
+  ok("no folder, no handle, or a failed write all fall back to the download -- a publish never fails for want of a folder", /if \(!dest \|\| dest\.kind === "download"\) return Promise\.resolve\(downloadPublishPackage\(pkg\)\)/.test(e) && /if \(!root\) return downloadPublishPackage\(pkg\)/.test(e) && /folder write failed, downloading instead[\s\S]{0,80}return downloadPublishPackage\(pkg\)/.test(e));
+  ok("the version is recorded only AFTER the package lands, so a failed write never burns a number", /results\.push\(res\);[\s\S]{0,320}PA\.recordVersion\(publishPaths\(\), PA\.pathKey\(row\.docId, opts\.variant\), opts\.version\)/.test(e));
+  ok("the run expands a row into one package per output, sequentially", /var outs = publishRowOutputs\(row\), results = \[\];\s*\n\s*outs\.reduce\(function \(chain, variant\)/.test(e));
+  ok("the outputs it expands to come from the SAME f04 fact the row's chip states", /function publishRowOutputs\(row\)[\s\S]{0,420}f04OutputsFact\(d && d\.variants\)[\s\S]{0,120}fact\.variants\.length \? \[null\]\.concat\(fact\.variants\) : \[null\]/.test(e));
+  ok("a preset that pins one variant narrows the row to that single output", /if \(pinned\) return \[String\(pinned\)\]/.test(e));
+  ok("the Product folder is set once in the pane head, not per row", /var rootChip = publishRootChip\(\);\s*\n\s*if \(rootChip\) actions\.appendChild\(rootChip\);/.test(e) && /function publishRootChip\(\)/.test(e));
+  ok("the destination popover builds one path row per output, each with its own picker", /function openPublishDestPopover\(anchor, rowId\)[\s\S]{0,900}publishRowOutputs\(row\)\.forEach\(function \(v\)[\s\S]{0,900}publish-destrow/.test(e));
+  ok("an overridden row offers Reset, and its tooltip names what Reset restores (the spine's inheritance tail)", /label: "Reset"[\s\S]{0,400}rst\.title = rootLbl \? "Go back to inheriting the Product folder/.test(e));
+  ok("'replace current version' is a canonical SwitchRow on the row, defaulting off", /U\.SwitchRow\(\{\s*\n?\s*label: "Replace current version"/.test(e) && /checked: !!row\.replaceVersion/.test(e));
+  ok("a new queue row starts with replaceVersion off, and a garbled stored flag is read as off", (function () {
+    var PQ = require(path.join(ROOT, "src/publish-queue.js"));
+    var q = PQ.create(); var r = PQ.addDoc(q, "D1", {});
+    var back = PQ.fromJSON({ rows: [{ docId: "D2", replaceVersion: "yes" }, { docId: "D3", replaceVersion: true }] });
+    return r.replaceVersion === false && back.rows[0].replaceVersion === false && back.rows[1].replaceVersion === true;
+  })());
+  ok("the popover + path rows are styled, not unstyled markup", /\.chrome-pop--publish-dest \{/.test(css) && /\.publish-destrow__path\.is-inherited \{/.test(css) && /\.publish-chip--root \{/.test(css));
+  ok("index.html loads publish-paths.js before editor.js", (function () {
+    var idx = src("index.html"); return idx.indexOf("src/publish-paths.js") > -1 && idx.indexOf("src/publish-paths.js") < idx.indexOf("src/editor.js");
+  })());
+})();
+
+// ---- product-rail-staleness-tracking: Ground-Truth staleness (export-is-publish) ----
+section("Product Rail: Ground-Truth staleness");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @gt-staleness-start \*\/([\s\S]*?)\/\* @gt-staleness-end \*\//);
+  if (!m) { ok("locate @gt-staleness fence", false); return; }
+  // Inject the module deps the fenced core reaches for: a generic recursive block walk (mirrors the
+  // real walkBlocks visiting nested children) and a LibraryStore accessor.
+  var LIB = {};
+  var pre = "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b);" +
+            " ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.blocks); }\n" +
+            "function libComponents(){ return LIB; }\n";
+  var g = new Function("LIB", pre + m[1] + "\nreturn { docLinkedMasterIds: docLinkedMasterIds, driftedMasterIds: driftedMasterIds, groundTruthStaleCount: groundTruthStaleCount, currentMasterVersions: currentMasterVersions, snapshotGroundTruthBaseline: snapshotGroundTruthBaseline };")(LIB);
+
+  // A doc linking two distinct masters (one nested inside a column), plus a non-linked block.
+  var doc = { meta: {}, blocks: [
+    { type: "paragraph", id: "p1", sourceLink: { masterId: "mA", markId: "k1" } },
+    { type: "heading", id: "h1" },
+    { type: "columns", id: "c1", columns: [ [ { type: "image", id: "im1", sourceLink: { masterId: "mB", markId: "k2" } } ] ] },
+    { type: "paragraph", id: "p2", sourceLink: { masterId: "mA", markId: "k3" } } // same master again -> distinct still 2
+  ] };
+  var ids = g.docLinkedMasterIds(doc).sort();
+  ok("docLinkedMasterIds collects distinct linked masters incl. nested (mA, mB)", ids.length === 2 && ids[0] === "mA" && ids[1] === "mB");
+
+  // no-linked-content -> null (no badge, not a misleading 0)
+  ok("no linked Ground Truth content -> null", g.groundTruthStaleCount({ meta: {}, blocks: [ { type: "paragraph", id: "x" } ] }, { mA: 5 }) === null);
+
+  // never exported (no baseline) -> every linked master counts as changed
+  ok("no baseline (never exported) -> all linked masters counted", g.groundTruthStaleCount(doc, { mA: 10, mB: 20 }) === 2);
+
+  // zero-change: baseline equals current stamps -> 0
+  var docPub = { meta: { lastPublishedGroundTruthVersions: { mA: 10, mB: 20 } }, blocks: doc.blocks };
+  ok("baseline matches current stamps -> 0 changed", g.groundTruthStaleCount(docPub, { mA: 10, mB: 20 }) === 0);
+
+  // N-changed: one master bumped since baseline -> 1
+  ok("one linked master bumped since baseline -> 1 changed", g.groundTruthStaleCount(docPub, { mA: 11, mB: 20 }) === 1);
+
+  // snapshotGroundTruthBaseline records current stamps and zeroes the count
+  LIB.mA = { updatedAt: 30 }; LIB.mB = { updatedAt: 40 };
+  var fresh = { meta: {}, blocks: doc.blocks };
+  g.snapshotGroundTruthBaseline(fresh);
+  ok("snapshot writes doc.meta.lastPublishedGroundTruthVersions from live stamps", fresh.meta.lastPublishedGroundTruthVersions.mA === 30 && fresh.meta.lastPublishedGroundTruthVersions.mB === 40);
+  ok("after snapshot the staleness count is 0 (freshly published baseline)", g.groundTruthStaleCount(fresh, g.currentMasterVersions()) === 0);
+
+  // uio-F04: the count is DERIVED from the id list -- one computation, so a drift badge and a drift
+  // list can never disagree about what changed.
+  ok("driftedMasterIds names WHICH masters changed", g.driftedMasterIds(docPub, { mA: 11, mB: 20 }).join(",") === "mA");
+  ok("driftedMasterIds keeps the same null contract (no linked content)", g.driftedMasterIds({ meta: {}, blocks: [ { type: "paragraph", id: "x" } ] }, { mA: 5 }) === null);
+  ok("the count is exactly the length of that list, always", (function () {
+    var cases = [[docPub, { mA: 11, mB: 21 }], [docPub, { mA: 10, mB: 20 }], [doc, { mA: 1, mB: 2 }]];
+    return cases.every(function (c) { return g.groundTruthStaleCount(c[0], c[1]) === g.driftedMasterIds(c[0], c[1]).length; });
+  })());
+})();
+
+// ---- product-rail-source-alignment-metric: % linked-to-approved-source vs novel ----
+section("Product Rail: source-alignment metric");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @src-align-start \*\/([\s\S]*?)\/\* @src-align-end \*\//);
+  if (!m) { ok("locate @src-align fence", false); return; }
+  // Inject the two module deps the fenced core uses: frWords (HTML-stripping word count) + walkBlocks.
+  var pre = "function frWords(v){ var s=String(v==null?'':v).replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&[a-z0-9#]+;/gi,''); var w=s.match(/\\S+/g); return w?w.length:0; }\n" +
+            "function walkBlocks(doc, cb){ (function rec(list){ (list||[]).forEach(function(b){ if(!b) return; if(Array.isArray(b)){ rec(b); return; } cb(b); ['blocks','children','items','cells','columns','pages'].forEach(function(k){ if(Array.isArray(b[k])) rec(b[k]); }); }); })(doc && doc.pages); }\n";
+  var g = new Function(pre + m[1] + "\nreturn { sourceAlignment: sourceAlignment, sourceAlignmentPct: sourceAlignmentPct, sourceLinkedSpanWords: sourceLinkedSpanWords };")();
+
+  var doc = { pages: [ { blocks: [
+    { type: "paragraph", text: "one two three four" },                                   // 4 novel
+    { type: "paragraph", text: "aa bb cc dd", sourceLink: { markId: "m1" } },            // 4 linked (whole block)
+    { type: "paragraph", text: "pre <span data-source-link=\"m2\">linked words here</span> post" } // 5 total, 3 linked
+  ] } ] };
+  var a = g.sourceAlignment(doc);
+  ok("sourceAlignment sums total prose words across pages + nested blocks", a.totalWords === 13);
+  ok("a whole source-linked block counts ALL its words as linked", (function () { var d2 = { pages: [ { blocks: [ { type: "paragraph", text: "aa bb cc dd", sourceLink: { markId: "m1" } } ] } ] }; return g.sourceAlignment(d2).linkedWords === 4; })());
+  ok("an inline data-source-link span counts only its inner words as linked", g.sourceLinkedSpanWords("pre <span data-source-link=\"m2\">linked words here</span> post") === 3);
+  ok("sourceAlignment linked = whole-block + inline-span words (4 + 3 here)", a.linkedWords === 7);
+  ok("ratio = linked / total, pct rounds it", Math.abs(a.ratio - 7 / 13) < 1e-9 && g.sourceAlignmentPct(doc) === 54);
+  ok("a doc with no prose -> null pct (not a misleading 0%)", g.sourceAlignmentPct({ pages: [ { blocks: [ { type: "image", src: "x" } ] } ] }) === null);
+  ok("a fully-novel doc -> 0% linked", g.sourceAlignmentPct({ pages: [ { blocks: [ { type: "paragraph", text: "all my own words here" } ] } ] }) === 0);
+})();
+
+// ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
+section("Product Rail: Source stage variant columns");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
+  if (!m) { ok("locate @source-stage fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { declaredVariantsForProduct: declaredVariantsForProduct, sectionOverrideVariants: sectionOverrideVariants," +
+    " sectionActiveVariants: sectionActiveVariants, sectionColumns: sectionColumns };")();
+
+  var products = { "prod-a": { id: "prod-a", name: "Alpha", variants: ["coastal", "desert"] }, "prod-b": { id: "prod-b", name: "Beta" } };
+  ok("declaredVariantsForProduct returns the Product's own declared list", JSON.stringify(g.declaredVariantsForProduct(products, "prod-a")) === JSON.stringify(["coastal", "desert"]));
+  ok("declaredVariantsForProduct: a Product with no variants field -> empty", g.declaredVariantsForProduct(products, "prod-b").length === 0);
+  ok("declaredVariantsForProduct: unknown/absent product -> empty, never throws", g.declaredVariantsForProduct(products, "prod-z").length === 0 && g.declaredVariantsForProduct(products, null).length === 0);
+
+  var secWithOverride = { heading: "H", facets: { technical: "flagship text" }, overrides: { coastal: { facets: { technical: "coastal text" } } } };
+  var secPlain = { heading: "H2", facets: { technical: "same everywhere" } };
+  ok("sectionOverrideVariants lists exactly the variants a section has its OWN content for", JSON.stringify(g.sectionOverrideVariants(secWithOverride)) === JSON.stringify(["coastal"]));
+  ok("sectionOverrideVariants: a section with no overrides at all -> empty", g.sectionOverrideVariants(secPlain).length === 0);
+
+  ok("sectionActiveVariants: only the toggled variants THIS section actually diverges for", JSON.stringify(g.sectionActiveVariants(secWithOverride, ["coastal", "desert"])) === JSON.stringify(["coastal"]));
+  ok("sectionActiveVariants: a plain section stays empty regardless of what's toggled", g.sectionActiveVariants(secPlain, ["coastal", "desert"]).length === 0);
+  ok("sectionActiveVariants: nothing toggled -> empty", g.sectionActiveVariants(secWithOverride, []).length === 0);
+
+  // sectionColumns: length 1 (Flagship only, no column chrome) when nothing toggled
+  // diverges here; length >1 (Flagship + each diverging toggled variant, in order)
+  // otherwise. Two variants toggled together -> exactly Flagship + the two, in order.
+  var oneCol = g.sectionColumns(secPlain, ["coastal", "desert"], "technical");
+  ok("a section with no divergence for anything toggled stays single-column", oneCol.length === 1 && oneCol[0].variant === null && oneCol[0].text === "same everywhere");
+  var twoCol = g.sectionColumns(secWithOverride, ["coastal"], "technical");
+  ok("toggling the ONE variant this section diverges for -> Flagship + that variant", twoCol.length === 2 && twoCol[0].variant === null && twoCol[0].text === "flagship text" && twoCol[1].variant === "coastal" && twoCol[1].text === "coastal text");
+  var secBoth = { heading: "H3", facets: { technical: "flagship" }, overrides: { coastal: { facets: { technical: "coastal" } }, desert: { facets: { technical: "desert" } } } };
+  var threeCol = g.sectionColumns(secBoth, ["coastal", "desert"], "technical");
+  ok("two variants toggled together -> exactly Flagship + the two, in toggle order", threeCol.length === 3 && threeCol.map(function (c) { return c.variant; }).join(",") === ",coastal,desert");
+  ok("a toggled variant this section has no override for is excluded from its columns", g.sectionColumns(secWithOverride, ["coastal", "desert"], "technical").length === 2);
+  var secOverrideMissingFacet = { heading: "H4", facets: { technical: "flagship tech" }, overrides: { coastal: { facets: { dotpoint: "coastal dots" } } } };
+  ok("an override column falls back through the same facet-fallback rule as Flagship", g.sectionColumns(secOverrideMissingFacet, ["coastal"], "digestible")[1].text === "coastal dots");
+
+  // index.html / wiring.
+  var idx = src("index.html");
+  ok("no separate variant-pills mount point -- the article rebuilds head+pills+sections together", idx.indexOf('id="source-stage-variant-pills"') === -1);
+  ok("switching topics resets the toggled-variant selection", /__sourceActiveVariants = \[\]; \/\/ a different topic may have a different variant set/.test(e));
+  ok("a Product with no declared variants renders no pill row at all", /if \(!declared\.length\) return null;/.test(e));
+  ok("setProductVariants writes onto the Product, never invents one", /function setProductVariants\(productId, variants\) \{\s*var p = productId && window\.ProductsStore\[productId\]; if \(!p\) return null;/.test(e));
+  ok("__productRail exposes setProductVariants (fixture/future-authoring write path)", /window\.__productRail = \{ createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants,/.test(e));
+  ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
+  ok("lifecycle: deleteProductSource removes the master + every topic tagged to the Product", /function deleteProductSource\(pid\)[\s\S]{0,400}c\.kind === "topic" && c\.productId === pid[\s\S]{0,200}delete comps\[product\.groundTruthId\]/.test(e));
+  ok("lifecycle: deleteProduct clears the source, unlinks its courses, and removes the entry", /function deleteProduct\(pid\)[\s\S]{0,200}deleteProductSource\(pid\);\s*unlinkAllCoursesFromProduct\(pid\);\s*delete window\.ProductsStore\[pid\]/.test(e));
+  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,400}if \(linked\) \{[\s\S]{0,120}"Remove from Product"[\s\S]{0,600}unlinkDocFromProduct\(d\)/.test(e));
+
+  // Chrome-only invariant.
+  var renderJs = src("src/render.js");
+  ok("render() never reads variant-column pill state", renderJs.indexOf("__sourceActiveVariants") === -1 && renderJs.indexOf("buildVariantPillsRow") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no variant-column/toggle-chip chrome classes", courseCss.indexOf("vds-chip") === -1 && courseCss.indexOf("source-stage__col") === -1);
+})();
+
+// ---- product-rail-md-topic-import: "New Topic" / "Import from Markdown…" UI, the
+// console-free path this whole ticket exists for ----
+section("Product Rail: New Topic / Import from Markdown UI");
+(function () {
+  var e = src("src/editor.js");
+
+  // Mount point + wiring: rendered once per renderSourceStage(), alongside the search field.
+  var idx = src("index.html");
+  ok("index.html has the nav-actions mount point between search and the topic list", /id="source-stage-search"[\s\S]{0,80}id="source-stage-nav-actions"[\s\S]{0,80}id="source-topic-list"/.test(idx));
+  // /verso-frontend audit 2026-07-27: consolidated into ONE state-reactive toolbar row
+  // (renderSourceToolbar, icon-only IconButton), built inside renderSourceTopicList
+  // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,900}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(e));
+  // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
+  ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
+  ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(e) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(e));
+  // uio-P-C05: the Import button now opens the whole inbound menu (Markdown + the registered
+  // import pipelines that used to sit on the Publish pane); Markdown is still its first entry.
+  ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
+    /icon: "download", label: "Import…"/.test(e) && /label: "Markdown…", onClick: importMarkdownModal/.test(e));
+  ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
+
+  // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
+  // LibraryStore write, not a course edit).
+  ok("newTopicModal is blocked when no Product is active", /function newTopicModal\(\) \{\s*var productId = getActiveProduct\(\);\s*if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
+  ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(e));
+  var ntmStart = e.indexOf("function newTopicModal()");
+  var ntmBody = e.slice(ntmStart, ntmStart + 900);
+  ok("newTopicModal never calls pushHistory() (LibraryStore write, not a doc edit)", ntmBody.indexOf("pushHistory()") === -1);
+  // new-product first-run: "start writing" mints the unified master immediately (via renderSourceStage
+  // -> ensureUnifiedDocForActiveProduct), matching the import path, instead of leaving a loose topic.
+  ok("newTopicModal mints the unified master immediately (renderSourceStage, not a loose renderSourceArticle)", /var topic = createTopic\(name, productId, \[\]\);[\s\S]{0,120}__sourceActiveTopicId = topic\.id;[\s\S]{0,500}renderSourceStage\(\);/.test(ntmBody) && ntmBody.indexOf("renderSourceTopicList();\n      renderSourceArticle();") === -1);
+
+  // Import from Markdown: same active-Product gate, blocked without a chosen file, and
+  // the variant file list is the Product's OWN declared variants (no free-form entry).
+  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,900}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
+  ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(e));
+  ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(e));
+  ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(e));
+
+  // /verso-frontend Tier 2 fix: a Product with NO declared variants only ever needs ONE
+  // file, so it matches the established one-click precedent exactly (glossary's importCsv
+  // -- click, native picker opens immediately, no intermediate modal). The modal only
+  // exists for the multi-file case a single click structurally can't do.
+  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);\s*checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{\s*finishMarkdownImport\(baseParse, \[\], productId, meta\);\s*\}\);\s*\}\);\s*\}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(e));
+  var dsModalShellIdxInImport = e.indexOf("var shell = dsModalShell({", e.indexOf("function importMarkdownModal()"));
+  ok("the multi-file modal path is reached only AFTER the no-variant early return", dsModalShellIdxInImport > e.indexOf('inp.click();\n      return;'));
+
+  // /verso-frontend Tier 2 fix: the result summary goes through the canonical
+  // confirmModal, never a raw window.alert (Tier 1 checklist item 1 explicitly bans
+  // raw alert/confirm for anything beyond a single-sentence hard failure).
+  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId, meta\) \{[\s\S]{0,1800}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(e));
+  ok("a fresh-Product import lands in the unified stage (renderSourceStage) so topics->unified migration fires, not the retired topic view", /var result = importParsedTopics\(baseParse\.topics, productId,[\s\S]{0,900}renderSourceStage\(\);/.test(e));
+  ok("finishMarkdownImport is the single tail shared by both the one-click and modal import paths", (e.match(/finishMarkdownImport\(/g) || []).length === 3); // definition + the 2 call sites
+
+  // importParsedTopics: pure shape conversion (parse-result section -> real
+  // {id,heading,facets,overrides} section), exposed for headless/browser-verify use.
+  ok("__productRail exposes importParsedTopics / importMarkdownModal (headless/browser-verify hooks)",
+    /window\.__productRail\.importParsedTopics = importParsedTopics;/.test(e) && /window\.__productRail\.importMarkdownModal = importMarkdownModal;/.test(e));
+  ok("importParsedTopics writes ONLY the technical facet from imported text", /facets: \{ technical: s\.text \}/.test(e));
+  ok("a variant override becomes section.overrides[v].facets.technical, mirroring the shipped divergeSectionVariant shape", /sec\.overrides\[v\] = \{ facets: \{ technical: s\.overrides\[v\] \}, lastImportedText: s\.overrides\[v\] \};/.test(e));
+  ok("each NEW imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections, \{ key: t\.key, source: sourceStamp, variantSources: meta\.variantMeta, historyEntry: historyEntry \}\);/.test(e));
+
+  // Chrome-only invariant + no proprietary content ever hard-coded as a fixture.
+  var renderJs2 = src("src/render.js");
+  ok("render() never reads the New Topic / Import UI's state", renderJs2.indexOf("importMarkdownModal") === -1 && renderJs2.indexOf("mountSourceStageActions") === -1);
+  ok("no product/course names hard-coded into the importer or its tests (public-repo hygiene)", !/RfLink|RfPatrol|DroneSentry|DroneShield/i.test(e));
+})();
+
+// ---- product-rail-md-topic-import follow-ups: bulk-select+delete, re-import reconcile,
+// conflict flag, provenance display ----
+section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
+(function () {
+  var e = src("src/editor.js");
+
+  // Source v2 cleanup (spec 2c section 7.6): the per-topic bulk-select / delete / move-to-Product
+  // / needs-review machinery was REMOVED with the topic navigator (the unified TOC replaced it).
+  // Its former assertions are gone with it; the guard below proves the dead code did not linger.
+  ok("the topic-management actions are gone (no select mode / bulk delete / move / review filter)", (function () {
+    return !/__sourceSelectModeActive/.test(e) && !/__sourceSelectedTopicIds/.test(e) && !/__sourceReviewFilterActive/.test(e)
+      && !/function deleteSelectedTopics/.test(e) && !/function moveSelectedTopicsModal/.test(e)
+      && !/function topicNeedsReview/.test(e) && !/function structMoveTopic/.test(e) && !/function exitSelectMode/.test(e);
+  })());
+  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
+
+  // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
+  // confirms with the author first, and covers both "no ambiguity" fast-paths.
+  ok("an already-bound filename (or a Product with no prior imports at all) skips the check entirely -- no ambiguity to ask about", /function checkRenamedSource\(productId, meta, parsedTopics, onDone\) \{[\s\S]{0,600}if \(alreadyBound \|\| !allForProduct\.length\) \{ onDone\(meta\); return; \}/.test(e));
+  ok("no rename candidate found -> proceeds silently as a genuinely new source", /var candidate = window\.MarkdownImport\.detectRenamedSource\(filesToKeys, parsedTopics\.map\(function \(t\) \{ return t\.key; \}\)\);\s*if \(!candidate\) \{ onDone\(meta\); return; \}/.test(e));
+  ok("a real candidate always asks first (dsModalShell, explicit Yes/No choice), never silently re-stamps", /title: "Same manual, new filename\?",[\s\S]{0,300}primaryLabel: "Yes, same manual",[\s\S]{0,200}label: "No, keep separate",/.test(e));
+  ok("accepting the rename re-stamps EVERY topic under the old filename (not just the matched ones) to the new name, then proceeds", /allForProduct\.forEach\(function \(t\) \{ if \(t\.source\.file === candidate\.file\) t\.source\.file = meta\.file; \}\);\s*saveLibrary\(\);\s*shell\.modal\.close\(\);\s*onDone\(meta\);/.test(e));
+  ok("declining keeps the two sources separate -- onDone still fires so the import completes as a genuinely new lineage", /onClick: function \(\) \{ shell\.modal\.close\(\); onDone\(meta\); \}/.test(e));
+  ok("both import paths run the rename check BEFORE finishMarkdownImport, never bypass it", (e.match(/checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{/g) || []).length === 2);
+
+  // Re-import reconcile: createTopic carries optional key/source/variantSources so a
+  // LATER import of the same (Product, file) can find and update instead of duplicating.
+  ok("createTopic accepts optional key/source/variantSources, a blank New Topic passes none of them", /function createTopic\(name, productId, sections, extra\) \{/.test(e) &&
+    /if \(extra && extra\.key != null\) topic\.key = extra\.key;/.test(e) && /if \(extra && extra\.source\) topic\.source = extra\.source;/.test(e));
+  ok("existing topics are matched for reconcile ONLY within the same Product + source file (never cross-Product, never a differently-named file)", /return t\.kind === "topic" && t\.productId === productId && t\.source && t\.source\.file === meta\.file;/.test(e));
+  ok("a fresh topic with no existing (Product,file,key) match still creates normally (first import, or a genuinely new topic in an updated manual)", /var existingTopic = existingForSource\.filter\(function \(et\) \{ return et\.key === t\.key; \}\)\[0\];\s*if \(!existingTopic\) \{/.test(e));
+  ok("applySectionReconcile: a 'create' verdict appends a brand-new section with lastImportedText already stamped", /function applySectionReconcile\(topic, existingSec, freshSection, decision\) \{\s*if \(decision\.action === "create"\) \{\s*var sec = \{ id: "sec-" \+ Math\.random\(\)\.toString\(36\)\.slice\(2, 8\), key: freshSection\.key, heading: freshSection\.heading, facets: \{ technical: freshSection\.text \}, lastImportedText: freshSection\.text \};/.test(e));
+  ok("applySectionReconcile: 'update'/'track' adopt the fresh text and clear any stale flag; 'flag' leaves the author's text untouched", /if \(decision\.action === "update" \|\| decision\.action === "track"\) \{\s*existingSec\.facets\.technical = freshSection\.text;\s*existingSec\.lastImportedText = freshSection\.text;\s*delete existingSec\.sourceUpdate;\s*\} else if \(decision\.action === "flag"\) \{\s*existingSec\.sourceUpdate = \{ text: freshSection\.text \};/.test(e));
+  ok("variant overrides go through the SAME reconcile safety as the Flagship text, not a raw overwrite", /function applyVariantReconcile\(sec, variant, freshText, decision\) \{/.test(e) && /sec\.overrides\[variant\]\.sourceUpdate = \{ text: freshText \};/.test(e));
+  ok("importParsedTopics reports created/updated/flagged counts separately, not one lumped total", /return \{ topicCount: topicCount, sectionCount: sectionCount, updatedCount: updatedCount, flaggedCount: flaggedCount \};/.test(e));
+
+  // Provenance capture: version + publish date are optional, asked once per file
+  // regardless of the one-click or multi-file path (neither a native picker nor the
+  // file-input modal has anywhere to type free text).
+  ok("promptImportProvenance is a lightweight modal (dsModalShell + modalText rows), not a bespoke dialog", /function promptImportProvenance\(fileEntries, onDone\) \{[\s\S]{0,300}dsModalShell\(\{/.test(e));
+  ok("the one-click (no-variant) path collects provenance for its single file before parsing/writing anything", /promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);/.test(e));
+  ok("the multi-file modal path collects provenance for EVERY file (Flagship + each variant), not just the primary", /var entries = \[\{ key: "flagship", label: "Manual \(Flagship\)", file: primaryFile\.name \}\]\s*\.concat\(variantNames\.map\(function \(v\) \{ return \{ key: v, label: v, file: variantFiles\[v\]\.name \}; \}\)\);/.test(e));
+
+  // (the per-section 'Source updated' conflict pill retired with the section-cells path; the Badge
+  // warning tone it introduced stays in the DS and is still asserted below)
+  ok("Badge's canonical tone set was extended with 'warning' (design-system/components/structure/Badge), not hacked via an inline style override", /tone === "danger" \|\| tone === "warning" \|\| tone === "component"/.test(src("src/ui-kit.js")) &&
+    /\.vds-badge--warning \{ background: var\(--warning, #e0a83e\); color: #1a1a1a; \}/.test(src("editor.css")));
+  ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(e));
+  // product-rail-review-diff: a real line-level diff (LineDiff), not two flat side-by-side blocks.
+  ok("the review compares via the real LineDiff.diff, not a flat two-block dump", /var ops = window\.LineDiff \? window\.LineDiff\.diff\(sec\.facets\.technical \|\| "", sec\.sourceUpdate\.text \|\| ""\) : \[\];/.test(e));
+  ok("each diff op renders on its own line with a type-specific class (removed/added/same), + and − prefixes", /var prefix = op\.type === "removed" \? "− " : op\.type === "added" \? "\+ " : "  ";/.test(e) &&
+    /h\("div", "source-stage__diff-line source-stage__diff-line--" \+ op\.type, prefix \+ op\.text\)/.test(e));
+  ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(e));
+
+  // Provenance MOVED under the document header (source-provenance-bug); the sidebar keeps only Linked in.
+  ok("provenance renders under the document header, not the sidebar", /headEl\.appendChild\(renderSourceProvenanceLine\(topic\)\);/.test(e) && /function renderSourceProvenanceLine\(topic\)[\s\S]{0,220}"Imported from " \+ \(src\.file/.test(e));
+  ok("the sidebar Source section no longer carries the provenance line (single source of truth)", /panelSection\(host, "Source", \{ collapsible: true \}\);[\s\S]{0,200}libraryWhereUsedDetail/.test(e) && e.indexOf('"Authored in Verso (no imported source)."') === -1);
+  // bug fix: a unified master reports its real imported source (not "authored in Verso").
+  ok("resolveTopicSource inherits an imported stamp from an archived constituent of a master", /function resolveTopicSource\(topic\)[\s\S]{0,280}topic\.sourceMaster[\s\S]{0,200}t\.archivedInto === topic\.id && t\.source\) return t\.source/.test(e));
+  ok("migrateProductToUnifiedDoc copies the constituents' imported source onto the master", /if \(!master\.source\) \{\s*var imported = topics\.filter\(function \(t\) \{ return t && t\.source; \}\)\[0\];[\s\S]{0,120}master\.source = imported\.source;/.test(e));
+
+  // Chrome-only invariant.
+  var renderJs3 = src("src/render.js");
+  ok("render() never reads bulk-select/reconcile/provenance state", renderJs3.indexOf("__sourceSelectedTopicIds") === -1 && renderJs3.indexOf("reconcileSection") === -1 && renderJs3.indexOf("sourceUpdate") === -1);
+})();
+
+// ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
+section("Product Rail: Source stage info panel");
+(function () {
+  var e = src("src/editor.js");
+
+  // index.html: a real right pane, not a placeholder, mounted alongside the nav/article.
+  var idx = src("index.html");
+  ok("source-stage__info mount point present", /id="source-stage-info"/.test(idx));
+
+  // Wiring: renderSourceArticle() drives the info panel from the SAME topic-selection
+  // state as the article -- one source of truth, no separate re-fetch/resync path.
+  ok("no topic selected -> info panel explicitly cleared (not left stale from the last topic)", /renderSourceInfoPanel\(null\);\s*\n\s*return;/.test(e));
+  ok("a selected topic drives the info panel from the SAME render pass as the article", /renderSourceInfoPanel\(topic\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\n\s*\/\/ Product Rail \(source-stage-info-panel\)/.test(e));
+
+  // renderSourceInfoPanel: reuses the canonical panelSection() helper (not a one-off
+  // block) for both "Linked in" and "History" -- the same section chrome every other
+  // side panel in the app uses.
+  ok("'Linked in (N)' is a sub-head folded into the Source section (both are document-origin facts)", /source-info__subhead", "Linked in \(" \+ used\.length \+ "\)"/.test(e));
+  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\)/.test(e));
+  // #163: the standalone Comments accordion is retired. Comments live ONLY in the Marks section's
+  // Comments filter tab, so the info panel never double-renders them. The legacy !hasDoc branch ends
+  // at its Linked-in loop (no renderSourceCommentsPanel call), and the function itself is gone.
+  ok("the standalone renderSourceCommentsPanel accordion is retired (#163)", !/function renderSourceCommentsPanel\(/.test(e) && !/renderSourceCommentsPanel\(host, topic\)/.test(e));
+  ok("the Marks section carries a Comments filter tab -- comments' single home", /SOURCE_MARK_FILTERS = \[[\s\S]{0,320}\{ key: "comment", label: "Notes", title: "Comments"/.test(e));
+  ok("the legacy !hasDoc branch renders only the Linked-in list, then closes (no comments accordion)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);\s*\n\s*\}\);\s*\n\s*\}\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
+  ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
+  ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
+  ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(e) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(e));
+  // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
+  // not a flat Created/Updated pair -- traces every import (and any edit since) back to
+  // how the topic entered the platform, newest first.
+  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic\) \{[\s\S]{0,220}var body = panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\);/.test(e));
+  // uio-S-C04 (SRC-11): the timeline states each day's date ONCE (grouped), not on every row.
+  ok("History groups by day — the date is stated once per day run", /var lastDate = null;[\s\S]{0,260}var showDate = d !== lastDate; lastDate = d;[\s\S]{0,120}date: showDate \? d : null/.test(e));
+  // Timeline promoted to a real DSLMS component (design-system/components/structure/
+  // Timeline) rather than left as ad-hoc dot/line DOM in editor.js -- /verso-frontend
+  // ruled this converge-now given it's built entirely from already-anchored tokens
+  // reused inside the canonical panelSection(), same trajectory ToggleChip/Badge took.
+  var uk = src("src/ui-kit.js");
+  ok("VersoUI.Timeline exists and is exported", /function Timeline\(props\) \{/.test(uk) && /Timeline: Timeline,/.test(uk));
+  ok("Timeline renders a dot + optional date/label/detail per entry, canonical vds- classes", /h\("div", "vds-timeline"\)/.test(uk) && /h\("div", "vds-timeline__node"\)/.test(uk) &&
+    /h\("div", "vds-timeline__dot"\)/.test(uk) && /if \(entry\.date\) content\.appendChild\(h\("div", "vds-timeline__date", entry\.date\)\);/.test(uk));
+  var dsTimelineDts = src("design-system/components/structure/Timeline.d.ts");
+  ok("Timeline's DSLMS contract (.d.ts) exists with the entries prop", /interface TimelineProps/.test(dsTimelineDts) && /entries: TimelineEntry\[\];/.test(dsTimelineDts));
+  ok("readme.md's canonical control list includes Timeline under structure/", /\*\*structure\/\*\* · `TreeItem` · `BlockPaletteItem` · `BlockTile` \+ `BlockGrid` · `Badge` · `Meter` · `Timeline`/.test(src("design-system/readme.md")));
+  ok("editor.css styles the canonical .vds-timeline* classes, not the old source-stage__timeline ad-hoc names", /\.vds-timeline \{/.test(src("editor.css")) && src("editor.css").indexOf(".source-stage__timeline") === -1);
+  ok("timeline rows sort newest-first across both provenance streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
+  ok("a hand-created topic with neither stream still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rows\.length\) rows = \[\{ ts: topic\.createdAt \|\| 0, importedAt: topic\.createdAt, label: "Created", detail: null \}\];/.test(e));
+  ok("a legacy edit newer than the last import leads with a synthetic 'Last edited' node (only when there are no doc commits)", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
+  ok("timeline entries render through the canonical VersoUI.Timeline, not hand-built dot/line DOM", /body\.appendChild\(window\.VersoUI\.Timeline\(\{ entries: entries \}\)\);/.test(e));
+
+  // Data side: each import call (first-time create AND every later reconcile) appends
+  // one history entry, never overwrites the log -- the whole point is a full trace.
+  ok("a brand-new topic's first history entry is stamped at creation via createTopic's extra.historyEntry", /if \(extra && extra\.historyEntry\) topic\.history = \[extra\.historyEntry\];/.test(e));
+  ok("a reconciled (already-existing) topic APPENDS to its history, never replaces it", /existingTopic\.history = existingTopic\.history \|\| \[\];\s*existingTopic\.history\.push\(\{/.test(e));
+  // REGRESSION (caught by browser-verify): updatedAt must be stamped with the SAME
+  // sourceStamp.importedAt as the history entry it belongs to, never a separate
+  // Date.now() -- a fresh call would read a few ms later than the entry's own
+  // timestamp, making renderHistoryTimeline's "is there activity since the last
+  // import" check wrongly true on EVERY reconcile and show a phantom "Last edited"
+  // node even when nothing was hand-edited.
+  ok("reconcile's updatedAt reuses sourceStamp.importedAt, not a fresh Date.now() (avoids a phantom 'Last edited' node)", /existingTopic\.updatedAt = sourceStamp \? sourceStamp\.importedAt : Date\.now\(\);/.test(e));
+  ok("each reconcile's history entry counts THIS run's created/updated/flagged sections, separate from the whole-import summary totals", /var runCreated = 0, runUpdated = 0, runFlagged = 0;/.test(e) &&
+    /sectionsCreated: runCreated, sectionsUpdated: runUpdated, sectionsFlagged: runFlagged/.test(e));
+  ok("a variant-override flag also counts toward the topic's OWN run tally, not just the global summary", /if \(vDecision\.action === "flag"\) \{ flaggedCount\+\+; runFlagged\+\+; \}/.test(e));
+
+  // createTopic now stamps updatedAt alongside createdAt (both start equal -- "just
+  // created" IS "just updated" until a future editing ticket bumps it independently).
+  ok("createTopic stamps updatedAt alongside createdAt", /createdAt: now, updatedAt: now \};/.test(e));
+
+  // Chrome-only invariant.
+  var renderJs = src("src/render.js");
+  ok("render() never reads the info-panel state", renderJs.indexOf("renderSourceInfoPanel") === -1 && renderJs.indexOf("libraryWhereUsedDetail") === -1);
+  var courseCss = src("src/course.css");
+  ok("course.css carries no info-panel chrome classes", courseCss.indexOf("source-stage__info") === -1 && courseCss.indexOf("source-stage__linked-row") === -1);
+})();
+
+// ---- product-rail-markdown-lite-content-render: shared topic-copy render primitive ----
+// DOM-free (string in, HTML string out), so require it directly like ui-kit's _pure.
+section("markdown-lite content render");
+(function () {
+  var M;
+  try { M = require(path.join(ROOT, "src/markdown-lite.js")); } catch (e) { ok("require src/markdown-lite.js", false); return; }
+  ok("require src/markdown-lite.js", !!M && !!M._pure && typeof M.render === "function");
+  // serialize(node) is the reverse of render() (DOM-in, markdown-lite string-out) for
+  // the Source-stage contentEditable editing surface (source-stage-wysiwyg-editing).
+  // It needs a real DOM (document.createElement etc.), which this Node test harness
+  // doesn't have (no jsdom -- the app is dependency-free) -- so beyond confirming it's
+  // exported, its actual round-trip fidelity is verified via real browser-verify, not
+  // a pure-logic fixture here.
+  ok("MarkdownLite.serialize is exported", typeof M.serialize === "function");
+  if (!M || !M._pure) return;
+  var P = M._pure;
+
+  ok("plain text with no markers", M.render("just plain text") === "<p>just plain text</p>");
+  ok("bold", M.render("this is **bold** text") === "<p>this is <strong>bold</strong> text</p>");
+  ok("inline code", M.render("run `verso build` now") === '<p>run <code class="md-lite-code">verso build</code> now</p>');
+  ok("bullets", M.render("- one\n- two\n- three") === "<ul><li>one</li><li>two</li><li>three</li></ul>");
+  ok("mixed: paragraph then bullets", M.render("Intro **text**.\n\n- `a`\n- b") ===
+    '<p>Intro <strong>text</strong>.</p><ul><li><code class="md-lite-code">a</code></li><li>b</li></ul>');
+  ok("multi-line paragraph collapses newlines to spaces", M.render("line one\nline two") === "<p>line one line two</p>");
+
+  // Ordered (numbered) lists -- consecutive "N. " lines group into one <ol>, exactly
+  // like "- " bullets group into <ul>. Root cause of a real reported bug: without this,
+  // numbered lines fell into the generic paragraph path and collapsed their newlines
+  // into spaces in VIEW mode while a raw-textarea EDIT surface still showed every \n,
+  // so a manual's numbered steps looked like one run-on line to a reader.
+  ok("numbered list", M.render("1. one\n2. two\n3. three") === '<ol start="1"><li>one</li><li>two</li><li>three</li></ol>');
+  ok("numbered list starting past 1 keeps its own start", M.render("5. five\n6. six") === '<ol start="5"><li>five</li><li>six</li></ol>');
+  ok("numbered list items render inline formatting", M.render("1. **bold** item\n2. `code` item") ===
+    '<ol start="1"><li><strong>bold</strong> item</li><li><code class="md-lite-code">code</code> item</li></ol>');
+  ok("a bullet run and a numbered run don't merge into each other", M.render("- a\n- b\n1. c\n2. d") ===
+    "<ul><li>a</li><li>b</li></ul>" + '<ol start="1"><li>c</li><li>d</li></ol>');
+  ok("mixed: paragraph then numbered list", M.render("Steps:\n\n1. first\n2. second") ===
+    "<p>Steps:</p>" + '<ol start="1"><li>first</li><li>second</li></ol>');
+  ok("empty input -> empty string", M.render("") === "" && M.render(null) === "" && M.render(undefined) === "");
+
+  // Malformed/unmatched markers degrade to literal text, never throw or break markup.
+  ok("unclosed bold stays literal", M.render("an **unclosed bold") === "<p>an **unclosed bold</p>");
+  ok("unclosed inline code stays literal", M.render("an `unclosed code") === "<p>an `unclosed code</p>");
+  ok("stray single asterisks stay literal", M.render("2 * 3 * 4") === "<p>2 * 3 * 4</p>");
+
+  // HTML in stored text is escaped, never injected as markup (XSS/authoring-safety).
+  ok("HTML in input is escaped", M.render("<script>alert(1)</" + "script>") === "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
+  ok("escapeHtml is the seam used before marker parsing", P.escapeHtml("<b>&") === "&lt;b&gt;&amp;");
+
+  // A literal <br> (carried over from manual-to-markdown conversions, e.g. multi-line
+  // table cells) survives escaping as text and renders back as a real line break --
+  // ONLY that one fixed tag, so it can't reopen an HTML-injection path.
+  ok("literal <br> becomes a real line break", M.render("line one<br>line two") === "<p>line one<br>line two</p>");
+  ok("self-closing <br/> also works", M.render("a<br/>b") === "<p>a<br>b</p>");
+  ok("other tags stay fully escaped, not just <br>", M.render("<div>x</div>") === "<p>&lt;div&gt;x&lt;/div&gt;</p>");
+
+  // GFM-style pipe tables: header + "|---|---|" separator + data rows.
+  ok("simple table", M.render("| A | B |\n|---|---|\n| 1 | 2 |") ===
+    '<table class="md-lite-table"><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>');
+  ok("table cells render bold/code/br like any other inline text", M.render("| A | B |\n|---|---|\n| **x** | `y`<br>z |") ===
+    '<table class="md-lite-table"><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td><strong>x</strong></td><td><code class="md-lite-code">y</code><br>z</td></tr></tbody></table>');
+  ok("ragged rows (fewer cells) don't throw", M.render("| A | B | C |\n|---|---|---|\n| 1 | 2 |") ===
+    '<table class="md-lite-table"><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>');
+  ok("text before and after a table stay separate paragraphs", M.render("Intro.\n\n| A |\n|---|\n| 1 |\n\nOutro.") ===
+    '<p>Intro.</p><table class="md-lite-table"><thead><tr><th>A</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table><p>Outro.</p>');
+  ok("a lone pipe-row with no separator is NOT a table (stays a paragraph)", M.render("| not a table |") === "<p>| not a table |</p>");
+  ok("_pure table helpers exposed", typeof P.isTableRow === "function" && typeof P.isTableSeparatorRow === "function" && typeof P.splitTableRow === "function");
+  ok("isTableRow / isTableSeparatorRow / splitTableRow behave", P.isTableRow("| a | b |") === true && P.isTableRow("no pipes") === false &&
+    P.isTableSeparatorRow("|---|---|") === true && P.isTableSeparatorRow("| a | b |") === false &&
+    JSON.stringify(P.splitTableRow("| a | b |")) === JSON.stringify(["a", "b"]));
+
+  // One shared render path: index.html loads it, and it's declared DOM-free/chrome-agnostic
+  // (no hard-coded coupling to editor.js or render.js — callers wire it in per surface).
+  var idx = src("index.html");
+  ok("index.html loads markdown-lite.js", idx.indexOf("src/markdown-lite.js") !== -1);
+})();
+
+// ---- product-rail-md-topic-import: heading-depth-aware Markdown -> topics/sections ----
+section("markdown manual import (parse + variant merge)");
+(function () {
+  var MI;
+  try { MI = require(path.join(ROOT, "src/markdown-import.js")); } catch (e) { ok("require src/markdown-import.js", false); return; }
+  ok("require src/markdown-import.js", !!MI && typeof MI.parse === "function" && typeof MI.mergeVariant === "function");
+  if (!MI) return;
+
+  ok("empty input -> no topics, a warning", (function () {
+    var r = MI.parse("");
+    return r.topics.length === 0 && r.warnings.length === 1;
+  })());
+
+  ok("# = topic, ## = section, body attaches to the current section", (function () {
+    var r = MI.parse("# Intro\n\nTop text.\n\n## First\n\nFirst body.\n\n## Second\n\nSecond body.");
+    return r.topics.length === 1 && r.topics[0].name === "Intro" &&
+      r.topics[0].sections.length === 2 &&
+      r.topics[0].sections[0].heading === "First" && r.topics[0].sections[0].text === "First body." &&
+      r.topics[0].sections[1].heading === "Second" && r.topics[0].sections[1].text === "Second body." &&
+      r.warnings.length === 1; // "Top text." before the first ## is unattached -> flagged, not silently dropped
+  })());
+
+  ok("numeric prefix determines depth REGARDLESS of literal #/##/### count (the real-world anomaly)", (function () {
+    // "5.3" is deliberately marked as a single # here, like the real conversion that motivated
+    // this -- it must still land as a SECTION of topic "5", not a sibling topic.
+    var md = "# 5 Operation\n\n## 5.1 One\n\nA.\n\n## 5.2 Two\n\nB.\n\n# 5.3 Three\n\nC.";
+    var r = MI.parse(md);
+    return r.topics.length === 1 && r.topics[0].key === "5" &&
+      r.topics[0].sections.length === 3 &&
+      r.topics[0].sections[2].key === "5.3" && r.topics[0].sections[2].heading === "Three" && r.topics[0].sections[2].text === "C.";
+  })());
+
+  ok("the displayed name/heading never carries the numeric prefix (avoids duplicating the nav list's own structure)", (function () {
+    var r = MI.parse("# 5 Operation\n\n## 5.3 Detection Overview\n\nBody.");
+    return r.topics[0].name === "Operation" && r.topics[0].sections[0].heading === "Detection Overview";
+  })());
+
+  ok("non-numeric headings fall back to literal heading level", (function () {
+    var r = MI.parse("# RfLink Manual\n\n## Contact Information\n\nContact body.");
+    return r.topics.length === 1 && r.topics[0].name === "RfLink Manual" &&
+      r.topics[0].sections.length === 1 && r.topics[0].sections[0].heading === "Contact Information";
+  })());
+
+  ok("depth 3+ folds into the current section as a bold line, not its own section", (function () {
+    var r = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nSetup body.\n\n### 1.1.1 Sub-step\n\nSub body.");
+    var sec = r.topics[0].sections[0];
+    return r.topics[0].sections.length === 1 && sec.text.indexOf("Setup body.") !== -1 &&
+      sec.text.indexOf("**Sub-step**") !== -1 && sec.text.indexOf("Sub body.") !== -1;
+  })());
+
+  ok("a topic with no ## underneath it gets a warning, not a silent empty topic", (function () {
+    var r = MI.parse("# Just a title\n\nSome text with no section heading at all.");
+    return r.topics.length === 1 && r.topics[0].sections.length === 0 &&
+      r.warnings.some(function (w) { return /no sections/.test(w); });
+  })());
+
+  ok("mergeVariant writes matching sections as overrides, keyed the same way as parse()", (function () {
+    var base = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nFlagship setup text.").topics;
+    var variant = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nVariant setup text.");
+    var warnings = MI.mergeVariant(base, variant, "coastal");
+    return warnings.length === 0 && base[0].sections[0].overrides &&
+      base[0].sections[0].overrides.coastal === "Variant setup text." &&
+      base[0].sections[0].text === "Flagship setup text."; // Flagship text untouched
+  })());
+
+  ok("a section that exists ONLY in the variant file is added to the base topic with blank Flagship text", (function () {
+    var base = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nFlagship text.").topics;
+    var variant = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nV text.\n\n## 1.2 Extra\n\nOnly-in-variant text.");
+    var warnings = MI.mergeVariant(base, variant, "coastal");
+    var extra = base[0].sections.filter(function (s) { return s.key === "1.2"; })[0];
+    return !!extra && extra.text === "" && extra.overrides.coastal === "Only-in-variant text." &&
+      warnings.some(function (w) { return /only exists in the "coastal" file/.test(w); });
+  })());
+
+  ok("a topic that exists ONLY in the variant file is added with blank Flagship content", (function () {
+    var base = MI.parse("# 1 Intro\n\n## 1.1 Setup\n\nFlagship text.").topics;
+    var variant = MI.parse("# 2 Variant-only chapter\n\n## 2.1 Sub\n\nVariant-only text.");
+    var warnings = MI.mergeVariant(base, variant, "coastal");
+    var extraTopic = base.filter(function (t) { return t.key === "2"; })[0];
+    return base.length === 2 && !!extraTopic && extraTopic.sections[0].overrides.coastal === "Variant-only text." &&
+      warnings.some(function (w) { return /Topic "Variant-only chapter" only exists in the "coastal" file/.test(w); });
+  })());
+
+  var idxMI = src("index.html");
+  ok("index.html loads markdown-import.js", idxMI.indexOf("src/markdown-import.js") !== -1);
+
+  // reconcileSection: the re-import safety decision -- never silently overwrite a section
+  // that changed on BOTH sides since the last import, always safe to auto-apply when only
+  // the source changed, always a no-op when only the author changed it.
+  ok("no existing section at all -> create", MI.reconcileSection(null, "fresh").action === "create");
+  ok("source unchanged since last import -> noop, regardless of local edits", MI.reconcileSection({ text: "author's own text", lastImportedText: "old" }, "old").action === "noop");
+  ok("only the source changed (local text still matches what was last imported) -> safe auto-update", MI.reconcileSection({ text: "old", lastImportedText: "old" }, "new-from-source").action === "update");
+  ok("both source AND local text changed since last import -> flag, never auto-overwrite", MI.reconcileSection({ text: "author's edit", lastImportedText: "old" }, "new-from-source").action === "flag");
+  ok("pre-tracking section (no lastImportedText) whose text already matches the fresh import -> starts tracking silently", MI.reconcileSection({ text: "same", lastImportedText: null }, "same").action === "track");
+  ok("pre-tracking section (no lastImportedText) whose text differs -> flag, never silently adopt tracking over unknown hand-authored content", MI.reconcileSection({ text: "hand-authored", lastImportedText: undefined }, "fresh-from-source").action === "flag");
+
+  // detectRenamedSource: rename-tolerant matching (product-rail-rename-tolerant-match) --
+  // never auto-applies, just proposes a candidate for the caller to confirm.
+  ok("no existing files at all -> no candidate", MI.detectRenamedSource({}, ["1", "1.1"]) === null);
+  ok("no fresh keys -> no candidate (nothing to compare)", MI.detectRenamedSource({ "old.md": ["1"] }, []) === null);
+  ok("substantial overlap (>=50%) with one other file -> that file is the candidate, with matched/total counts", (function () {
+    var r = MI.detectRenamedSource({ "old.md": ["1", "1.1", "1.2"] }, ["1", "1.1", "1.2", "1.3"]);
+    return r && r.file === "old.md" && r.matched === 3 && r.total === 4;
+  })());
+  ok("below the 50% threshold -> no candidate (avoids a false-positive rename guess on thin overlap)", MI.detectRenamedSource({ "old.md": ["1"] }, ["1", "2", "3", "4"]) === null);
+  ok("exactly at the 50% threshold counts as a match", (function () {
+    var r = MI.detectRenamedSource({ "old.md": ["1", "2"] }, ["1", "2", "3", "4"]);
+    return r && r.file === "old.md";
+  })());
+  ok("multiple candidate files -> picks the one with the MOST matches, not just the first crossing the threshold", (function () {
+    var r = MI.detectRenamedSource({ "a.md": ["1", "2"], "b.md": ["1", "2", "3"] }, ["1", "2", "3"]);
+    return r && r.file === "b.md" && r.matched === 3;
+  })());
+})();
+
+// ---- product-rail-review-diff: dependency-free line-level diff for the "Source updated" review ----
+section("line diff (LineDiff)");
+(function () {
+  var LD;
+  try { LD = require(path.join(ROOT, "src/line-diff.js")); } catch (e) { ok("require src/line-diff.js", false); return; }
+  ok("require src/line-diff.js", !!LD && typeof LD.diff === "function");
+  if (!LD) return;
+
+  ok("identical text -> every line 'same'", JSON.stringify(LD.diff("a\nb", "a\nb")) === JSON.stringify([{ type: "same", text: "a" }, { type: "same", text: "b" }]));
+  ok("a changed middle line -> surrounding lines stay 'same', only the changed one diffs", JSON.stringify(LD.diff("a\nb\nc", "a\nX\nc")) ===
+    JSON.stringify([{ type: "same", text: "a" }, { type: "removed", text: "b" }, { type: "added", text: "X" }, { type: "same", text: "c" }]));
+  ok("a pure addition -> only 'added' ops, nothing marked removed", JSON.stringify(LD.diff("a", "a\nb")) === JSON.stringify([{ type: "same", text: "a" }, { type: "added", text: "b" }]));
+  ok("a pure removal -> only 'removed' ops, nothing marked added", JSON.stringify(LD.diff("a\nb", "a")) === JSON.stringify([{ type: "same", text: "a" }, { type: "removed", text: "b" }]));
+  ok("completely different text -> old fully removed, new fully added (no false 'same' matches)", JSON.stringify(LD.diff("x\ny", "p\nq")) ===
+    JSON.stringify([{ type: "removed", text: "x" }, { type: "removed", text: "y" }, { type: "added", text: "p" }, { type: "added", text: "q" }]));
+  ok("both empty -> one 'same' blank-line op, never throws (\"\".split(\"\\n\") is one empty-string element, not zero)", JSON.stringify(LD.diff("", "")) === JSON.stringify([{ type: "same", text: "" }]));
+  ok("null-safe on both sides (coerced to \"\", same as the empty-string case)", JSON.stringify(LD.diff(null, undefined)) === JSON.stringify([{ type: "same", text: "" }]));
+
+  var idxLD = src("index.html");
+  ok("index.html loads line-diff.js", idxLD.indexOf("src/line-diff.js") !== -1);
 })();
 
 // resolveVariant must recurse into NESTED containers (columns / frame-group children /
@@ -8256,8 +9954,9 @@ section("ui-kit #10 DS control set");
     /function currentDoc\(\) \{\s*var d = doc;\s*if \(activeVariant\) d = window\.resolveVariant\(d, activeVariant\);\s*if \(activeVersion\) \{/.test(e));
   ok("isPreview() stays the conservative read-only gate (both axes)", /function isPreview\(\) \{ return !!activeVariant \|\| !!activeVersion; \}/.test(e));
   ok("setDoc drops a stale activeVersion the new doc lacks", /if \(activeVersion && \(doc\.versions \|\| \[\]\)\.indexOf\(activeVersion\) === -1\) activeVersion = null;/.test(e));
-  // SWITCHER: glyph, menu, newest = default, Base entry, order after the variant glyph.
-  ok("version glyph uses the 'history' icon", /versionWrapEl\.innerHTML = Ic \? Ic\("history"\)/.test(e));
+  // SWITCHER: face-up named dropdown (edit-header-ia-v2), menu, newest = default, Base entry,
+  // order after the variant control.
+  ok("version switch is a face-up axis button, named axis + words (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,400}axis-btn__axis">Version<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/versionWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
   ok("newest version = the shipping default (last-created)", /var def = vs\.length \? vs\[vs\.length - 1\] : null;/.test(e));
   ok("newest version is tagged '· default' in the menu", /v === def \? "  · default" : ""/.test(e));
   ok("menu offers Base as the editable anchor (null activeVersion)", /active: !activeVersion, onClick: function \(\) \{ onVersionPick\(""\); \}/.test(e));
@@ -8278,6 +9977,1377 @@ section("ui-kit #10 DS control set");
   ok("editor.css defines the teal version preview ring + badge (DSLMS --preview-version)", /\.canvas\.is-version-preview \{ box-shadow: inset 0 0 0 3px #0e9384/.test(css) && /\.version-preview-badge \{/.test(css));
   var ds = src("design-system/tokens/colors.css");
   ok("DSLMS anchors the version-axis hue (--preview-version)", /--preview-version: var\(--teal-500\);/.test(ds));
+})();
+
+// edit-header-ia-v2: the two-row editor header collapses to ONE bar with three
+// divider-separated zones (tabs | doc | output); variant/version become face-up named
+// dropdowns; light/dark moves into the Preview chevron menu; a Document-settings button
+// opens the settings modal's Project tab.
+section("edit-header-ia-v2: single-bar three-zone editor header");
+(function () {
+  var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
+  // MARKUP: one bar, three zones, two hairline seps, no leftover two-row structure.
+  // uio-E-C01 (EDIT-07): the doc header was merged UP into the single global .toolbar. The
+  // separate editor-window bar/wrapper is gone; the three zones are now direct children of .toolbar.
+  ok("doc zones merged into the single .toolbar (no separate editor-window bar)", html.indexOf("editor-window__bar") === -1 && html.indexOf('id="editor-window-header"') === -1 && html.indexOf("editor-window__tabrow") === -1 && html.indexOf("editor-window__toolrow") === -1);
+  ok("three zones: tabs | doc | output", /editor-window__zone--tabs/.test(html) && /editor-window__zone--doc/.test(html) && /editor-window__zone--output/.test(html));
+  ok("two hairline dividers between the zones", (html.match(/editor-window__sep/g) || []).length >= 2);
+  ok("Document-settings button lives in the header", /id="doc-settings-btn"/.test(html));
+  ok("standalone #mode-toggle is retired from the header", html.indexOf('id="mode-toggle"') === -1);
+  ok("Build/Read toggle + axes host present in the doc zone (cell chip retired)", html.indexOf('id="editor-cell-chip"') === -1 && /id="editor-view-toggle"/.test(html) && /id="editor-doc-axes"/.test(html));
+  // FACE-UP DROPDOWNS: variant is a WORDS-ONLY named axis button (no leading glyph; caret only).
+  ok("variant switch is a face-up axis button, named axis + words (no leading glyph)", /variantWrapEl = h\("button", "tool editor-window__axis-btn variant-glyph"\)[\s\S]{0,400}axis-btn__axis">Variant<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(e) && !/variantWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
+  ok("syncVariantSwitch writes the name (Flagship = base) to the label", /var lbl = variantWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| "Flagship"/.test(e));
+  ok("syncVersionSwitch writes the version name (base / Base) to the label", /var lbl = versionWrapEl\.querySelector\("\.axis-btn__label"\);[\s\S]{0,80}lbl\.textContent = cur \|\| base \|\| "Base"/.test(e));
+  // LIGHT/DARK now lives in the Preview chevron menu (size presets + palette, divider between).
+  ok("Preview chevron menu adds a Palette section with light/dark -> setMode", /head: "Palette"[\s\S]{0,220}setMode\("light"\)[\s\S]{0,120}setMode\("dark"\)/.test(e) && /function openPreviewBpMenu/.test(e));
+  // DOC-SETTINGS button opens the settings modal on the Project tab + wired at boot.
+  ok("mountDocSettingsBtn opens the settings modal on the Project tab", /function mountDocSettingsBtn\(\)[\s\S]{0,240}openSettingsModal\("project"\)/.test(e));
+  ok("mountDocSettingsBtn is wired at boot", /mountDocSettingsBtn\(\); \/\/ edit-header-ia-v2/.test(e));
+  // CSS: single-row bar + zones + face-up axis button + hairline sep.
+  ok("editor.css shows the doc zones only in Edit (.toolbar--edit)", /\.editor-window__zone \{/.test(css) && /\.toolbar\.toolbar--edit \.editor-window__zone \{ display: flex; \}/.test(css));
+  ok("editor.css defines the face-up axis button with ellipsis label", /\.editor-window__axis-btn \{/.test(css) && /\.axis-btn__label \{[^}]*text-overflow: ellipsis/.test(css));
+  ok("editor.css defines the low-contrast hairline sep (border-subtle)", /\.editor-window__sep \{[^}]*background: var\(--border-subtle\)/.test(css));
+  // TAB OVERFLOW (feedback): a long tab list scrolls INSIDE the tabs zone; the doc + output zones
+  // stay put. The bar never scrolls; the tabs zone shrinks (min-width:0) + its strip scrolls.
+  ok("setStage toggles toolbar--edit so doc zones show in Edit only", /classList\.toggle\("toolbar--edit", stage === "edit"\)/.test(e) && /\.toolbar \{[\s\S]{0,200}var\(--toolbar-height/.test(css));
+  ok("the tabs zone shrinks + its strip scrolls internally", /\.editor-window__zone--tabs \{[^}]*min-width: 0/.test(css) && /\.editor-window__zone--tabs \.toolbar-tabs \{[^}]*min-width: 0; overflow-x: auto/.test(css));
+  ok("doc + output zones are fixed-size (never pushed by tabs)", /\.editor-window__zone--doc, \.editor-window__zone--output \{ flex: 0 0 auto; \}/.test(css));
+})();
+
+// uio-E-C01 (EDIT-07): recover the Edit canvas. Two stacked bars -> one 40px .toolbar; the
+// workspace grid loses the second row; all shell widths resolve to DSLMS structural tokens.
+section("uio-E-C01: recovered canvas — one 40px bar, single-row shell, token widths");
+(function () {
+  var css = src("editor.css"), spacing = src("design-system/tokens/spacing.css");
+  // ONE bar at the DS toolbar height (no 44px literal on the bar).
+  ok(".toolbar height resolves to --toolbar-height (40px), not a literal", /\.toolbar \{[\s\S]*?height: var\(--toolbar-height/.test(css));
+  // SINGLE-ROW workspace: the old `grid-template-rows: auto 1fr` (bar row + body row) is gone.
+  ok("workspace is a single grid row (second bar-row removed)", /\.workspace \{[\s\S]*?grid-template-rows: 1fr;/.test(css) && !/\.workspace \{[\s\S]*?grid-template-rows: auto 1fr;/.test(css));
+  // SHELL WIDTHS bound to DSLMS tokens (kills the 240-vs-280 fallback drift).
+  ok("shell widths default to DSLMS structural tokens", /--left-w: var\(--panel-left-width/.test(css) && /--right-w: var\(--panel-right-width/.test(css));
+  // DSLMS owns the rail token the spine names.
+  ok("--rail-w is defined in DSLMS spacing tokens", /--rail-w:\s*44px/.test(spacing));
+})();
+
+// uio-E-C02 (EDIT-02): one inspector scroll, no cross-panel jump link. Editing a top-level text
+// block shows the SAME block chrome as block-select, right below Type (James's option A,
+// 2026-07-30) — reversing the 2026-07-08 Type-only drill split.
+section("uio-E-C02: text field inspector — one scroll, block chrome, no jump link");
+(function () {
+  var e = src("src/editor.js");
+  // The field inspector wires the SAME container chrome + decl the block two-level uses.
+  ok("field inspector renders block chrome for a top-level text block", /showBlockChrome = blk && blk\.type && TEXT_CONTENT_TYPES\[blk\.type\] && !versionEditable\(\)/.test(e) && /if \(showBlockChrome\) \{[\s\S]{0,240}renderContainerChrome\(inspector, CONTENT_DECL, blockChromeIo\(blk\), blockChromeHandlers\(blk\)\)/.test(e));
+  // The jump link is gone for text; it survives only in the non-text / version-edit fallback.
+  ok("no jump link when block chrome is shown (backHint is the else branch)", /if \(showBlockChrome\) \{[\s\S]{0,400}\} else \{[\s\S]{0,400}insp-backlink/.test(e));
+})();
+
+// uio-E-C04 (EDIT-08): the two axis dropdowns are NAMED (muted Variant/Version caption), and the
+// moment either leaves base a chip appears in the bar with a one-click Return to base; its wording
+// tracks the real mode (read-only vs editing the dynamic-flagship version).
+section("uio-E-C04: labelled variant/version axes + off-base return chip");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("both axis buttons carry a muted axis-name caption", /axis-btn__axis">Variant</.test(e) && /axis-btn__axis">Version</.test(e) && /\.axis-btn__axis \{[^}]*color: var\(--text-tertiary\)/.test(css));
+  ok("an off-base chip appears when previewing (isPreview) with Return to base", /function syncAxisReturnChip\(\)[\s\S]{0,200}var off = isPreview\(\)/.test(e) && /axis-return-chip__btn", "Return to base"/.test(e));
+  ok("chip wording tracks the real edit mode (read-only vs editing)", /var locked = !canvasEditable\(\)[\s\S]{0,240}"Read-only"[\s\S]{0,240}"Editing "/.test(e));
+  ok("Return to base clears BOTH axes and flushes", /function returnToBase\(\) \{[\s\S]{0,160}activeVariant = null; activeVersion = null;[\s\S]{0,80}mount\(\)/.test(e));
+  ok(".axis-return-chip has a locked (danger) variant + a button", /\.axis-return-chip \{/.test(css) && /\.axis-return-chip--locked \{/.test(css) && /\.axis-return-chip__btn \{/.test(css));
+})();
+
+// uio-E-C05 (EDIT-09/10): demote the two power-user affordances. The live JSON model hides behind
+// an off-by-default "Developer tools" system setting; "Edit layout" leaves the inspector top for
+// the panel ⋯ overflow menu, and its on-state becomes a scope-stating banner.
+section("uio-E-C05: JSON model behind Developer tools + reorder in the panel overflow menu");
+(function () {
+  var e = src("src/editor.js"), html = src("index.html");
+  // EDIT-10: developer-tools gate, off by default.
+  ok("Developer tools setting defaults OFF and gates the model panel", /function devToolsOn\(\) \{ try \{ return localStorage\.getItem\("authoring\.devtools"\) === "on"/.test(e) && /function applyDevToolsVisibility\(\)[\s\S]{0,160}modelDetails\.hidden = !on/.test(e));
+  ok("a Developer tools switch lives in system settings", /switchRow\("Developer tools", function \(\) \{ return devToolsOn\(\); \}/.test(e));
+  ok("the model view is enforced hidden at boot", /applyDevToolsVisibility\(\); \/\/ enforce the default-off state at boot/.test(e));
+  // EDIT-09: reorder demoted to the panel overflow menu; banner states scope.
+  ok("the panel has an overflow (⋯) button, hidden until it applies", /id="panel-overflow-btn"[^>]*hidden/.test(html) && /var ov = document\.getElementById\("panel-overflow-btn"\); if \(ov\) ov\.hidden = !has/.test(e));
+  ok("the overflow menu carries the demoted Reorder entry", /openPanelOverflowMenu[\s\S]{0,400}"Reorder inspector sections…"/.test(e));
+  ok("the layout bar is now an on-state banner stating the scope", /if \(!panelEditMode\) return;[\s\S]{0,200}insp-layout-bar__scope"/.test(e));
+})();
+
+// uio-E-C08 (EDIT-15): the rail names its three stages (icon over a caption), and "Send to publish"
+// is a labelled secondary button carrying the pending queue count.
+section("uio-E-C08: named stage rail + labelled Send-to-publish w/ count");
+(function () {
+  var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
+  // each stage tab = an icon span + a caption naming the stage
+  ok("rail stage tabs carry an icon span + a caption label", /rail-tab__icon" data-lucide="book-open"[\s\S]{0,80}rail-tab__label">Source</.test(html) && /rail-tab__label">Edit</.test(html) && /rail-tab__label">Publish</.test(html));
+  ok("the rail tab is styled icon-over-caption", /\.rail-tab \{ flex-direction: column;[\s\S]{0,300}\.rail-tab__label \{ font-size: var\(--text-2xs\)/.test(css));
+  // Send to publish = labelled button + a count span, wired to the pending count
+  ok("Send to publish is a labelled button with a count span", /editor-window__publish"[^>]*id="send-to-publish-btn"[\s\S]{0,200}publish-label">Send to publish<[\s\S]{0,120}id="send-to-publish-count"/.test(html));
+  ok("the button is styled as a labelled secondary button (not a bare .tool)", /\.editor-window__publish \{[\s\S]{0,200}border: 1px solid var\(--border-input/.test(css) && !/class="tool editor-window__publish"/.test(html));
+  ok("syncSendToPublishCount reflects pendingRows on the badge", /function syncSendToPublishCount\(\)[\s\S]{0,200}PQ\.pendingRows\(publishQueue\(\)\)\.length[\s\S]{0,120}el\.hidden = !n/.test(e) && /renderPublishQueue[\s\S]{0,400}syncSendToPublishCount\(\);/.test(e));
+})();
+
+// uio-S-C05 (SRC-13): product-scope actions (incl. destructive delete) move OUT of the top nav
+// toolbar into a footer strip pinned to the bottom of the Source rail; New topic + Import stay on top.
+section("uio-S-C05: Source product actions moved to a rail footer strip");
+(function () {
+  var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
+  ok("the Source nav has a footer strip element", /id="source-stage-nav-footer"/.test(html) && /\.source-stage__nav-footer \{[^}]*border-top: 1px solid/.test(css));
+  ok("Product actions render into the footer (not the top toolbar row)", /source-stage-nav-footer"\);[\s\S]{0,320}label: "Product actions"[\s\S]{0,400}footer\.appendChild/.test(e));
+  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,400}label: "Import…"[\s\S]{0,300}host\.appendChild\(row\)/.test(e));
+})();
+
+// uio-S-C03 (SRC-03): mark cards never overlap the prose — while any card is open the article
+// reserves a right-margin lane (padding-right) so the measure shifts clear of the card zone.
+section("uio-S-C03: source mark cards clamp to a reserved right lane");
+(function () {
+  var css = src("editor.css");
+  ok("the article reserves a right lane when a where/alt/comment card is open (:has)", /\.source-stage__article:has\(\[data-source-wherepanel\]\)[\s\S]{0,220}data-source-commentthread\]\) \{ padding-right: 312px; \}/.test(css));
+  ok("the lane is desktop-scoped (min-width) so narrow screens aren't over-squeezed", /@media \(min-width: 1181px\) \{[\s\S]{0,260}padding-right: 312px/.test(css));
+  // SRC-02: the where-used zero state reads as an invitation, and the title isn't the contradictory "Linked in 0".
+  var e = src("src/editor.js");
+  ok("where-used zero state is an invitation (not 'not linked')", /Not used in a course yet — place this passage from the Edit stage/.test(e));
+  ok("where-used title avoids 'Linked in 0' (neutral when count is 0)", /used\.length \? \("Linked in " \+ used\.length\) : "Where used"/.test(e));
+})();
+
+// uio-S-C02 (SRC-05): one search field carrying the in-field match navigator + a replace glyph that
+// reveals the replace row on demand (disabled with a reason when the source is locked).
+section("uio-S-C02: one Source search field + in-field match nav + reveal-on-demand replace");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  // in-field adornment holds the match nav + a replace-toggle glyph
+  ok("the match nav + replace glyph sit IN the field (source-search__adorn)", /var adorn = h\("div", "source-search__adorn"\);[\s\S]{0,200}findNav\.id = "source-find-nav";[\s\S]{0,300}icon: "replace"[\s\S]{0,600}search\.appendChild\(adorn\)/.test(e) && /\.source-search__adorn \{/.test(css));
+  // replace row is revealed on demand (gated on __sourceReplaceOpen), not always shown
+  ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(e) && /if \(unified && __sourceReplaceOpen\) \{/.test(e));
+  // when locked, the row disables the inputs/buttons + states the reason
+  ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
+})();
+
+// uio-P-C05 (PUB-13): "Import & export" put an INBOUND pipeline on the publish screen, beside the
+// Publish button, and buried the output formats in a menu whose label was half irrelevant. Import
+// moves to Source; the pane's named control becomes Format, which states what will be emitted and
+// lists the unavailable formats once with a "soon" state.
+section("uio-P-C05: format control on Publish, import on Source");
+(function () {
+  var e = src("src/editor.js"), x = src("src/export.js"), css = src("editor.css"), ds = src("design-system/components/overlays/ContextMenu.d.ts");
+  var m = e.match(/\/\* @publish-format-start \*\/([\s\S]*?)\/\* @publish-format-end \*\//);
+  if (!m) { ok("locate @publish-format fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { pipelineDirection: pipelineDirection, pipelineDirectionOf: pipelineDirectionOf, pipelineByDirection: pipelineByDirection, importMenuLabel: importMenuLabel, publishFormatRows: publishFormatRows, publishFormatSummary: publishFormatSummary };")();
+
+  // --- direction is DECLARED at registration; the label is only the fallback ---
+  ok("a declared direction wins over the label", g.pipelineDirectionOf({ label: "Import CSV", direction: "export" }) === "export" && g.pipelineDirectionOf({ label: "Ingest CSV", direction: "import" }) === "import");
+  ok("an undeclared action still falls back to its label", g.pipelineDirectionOf({ label: "Import CSV" }) === "import" && g.pipelineDirectionOf({ label: "Export JSON" }) === "export");
+  ok("a junk direction is ignored rather than trusted", g.pipelineDirectionOf({ label: "Import CSV", direction: "sideways" }) === "import" && g.pipelineDirectionOf({ label: "Export JSON", direction: null }) === "export");
+  ok("the seam accepts a direction and only stores a valid one", /registerPipelineButton: function \(label, onClick, accent, opts\)/.test(e) && /direction: PIPELINE_DIRECTIONS\.indexOf\(declared\) !== -1 \? declared : null/.test(e));
+  ok("the inbound registrations declare themselves (they don't rely on the guess)", /registerPipelineButton\("Import CSV", pick, false, \{ direction: "import" \}\)/.test(src("src/csv.js")) && /registerPipelineButton\("Import Schema", importSchema, false, \{ direction: "import" \}\)/.test(src("src/schema.js")));
+
+  // --- the label fallback itself, for callers that never declare ---
+  ok("an Import-named action is inbound, everything else outbound", g.pipelineDirection("Import CSV") === "import" && g.pipelineDirection("Import Schema") === "import" && g.pipelineDirection("Export SCORM") === "export" && g.pipelineDirection("Reset Workspace") === "export");
+  ok("'Important' is not an import (the word boundary is real)", g.pipelineDirection("Important notes") === "export");
+  ok("a missing label degrades to outbound, so nothing silently lands on Source", g.pipelineDirection(null) === "export" && g.pipelineDirection("") === "export");
+  var btns = [{ label: "Import CSV", direction: "import" }, { label: "Export SCORM" }, { label: "Import Schema" }, { label: "Export JSON" }];
+  ok("declared and guessed entries split into the same two halves, losing nothing", g.pipelineByDirection(btns, "import").length === 2 && g.pipelineByDirection(btns, "export").length === 2);
+  ok("junk entries never crash the split", g.pipelineByDirection([null, undefined], "export").length === 0 && g.pipelineByDirection(null, "import").length === 0);
+
+  // --- menu copy: under an "Import" head the prefix is noise; every import opens a picker ---
+  ok("the prefix is dropped and an ellipsis added", g.importMenuLabel("Import CSV") === "CSV…" && g.importMenuLabel("Import Schema") === "Schema…");
+  ok("an entry that already ends in an ellipsis is left alone", g.importMenuLabel("Import from Markdown…") === "from Markdown…");
+  ok("a label that is only the word Import survives as itself", g.importMenuLabel("Import") === "Import…");
+
+  // --- formats stated ONCE, with availability as a state rather than a renamed label ---
+  var fmts = [{ value: "scorm12", label: "SCORM 1.2", enabled: true }, { value: "scorm2004", label: "SCORM 2004", enabled: false }, { value: "xapi", label: "xAPI / Tin Can", enabled: false }];
+  var rowsF = g.publishFormatRows(fmts, "scorm12");
+  ok("every format is listed, none hidden", rowsF.length === 3);
+  ok("the emitted format is marked selected and available", rowsF[0].selected === true && rowsF[0].available === true && rowsF[0].hint === "");
+  ok("unavailable formats carry a plain 'Soon' state, not a renamed label", rowsF[1].hint === "Soon" && rowsF[1].label === "SCORM 2004" && rowsF[1].available === false);
+  ok("the exporter's own list stopped gluing '(soon)' into the names", /\{ value: "scorm2004", label: "SCORM 2004", enabled: false \}/.test(x) && !/label: "[^"]*\(soon\)"/.test(x));
+  ok("the export modal still says 'soon' where it renders the option", /f\.label \+ \(f\.enabled \? "" : " \(soon\)"\)/.test(x));
+  ok("the format list is published once, for every surface to read", /function formats\(\)/.test(x) && /formats: formats,/.test(x) && /SX\.formats\(\)/.test(e));
+
+  // --- the stated format is READ from the presets; it is never a second setting ---
+  ok("an empty queue states the default format", g.publishFormatSummary(fmts, [], "scorm12").label === "SCORM 1.2");
+  ok("rows that agree state that one format", g.publishFormatSummary(fmts, ["scorm12", "scorm12"], "scorm12").label === "SCORM 1.2");
+  ok("rows whose presets disagree read Mixed, rather than picking a winner", g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").mixed === true && g.publishFormatSummary(fmts, ["scorm12", "xapi"], "scorm12").label === "Mixed");
+  ok("an unknown format id still states something, not a blank", g.publishFormatSummary(fmts, ["mystery"], "scorm12").label === "mystery");
+  ok("the summary is derived from each row's resolved preset options", /var values = rows\.map\(function \(r\) \{ return publishOptionsForRow\(r\)\.format \|\| base; \}\);/.test(e));
+  ok("the Publish pane sets no format of its own (the menu only states where it is set)", /items\.push\(\{ head: "Set by the output preset on each queued document\." \}\);/.test(e) && !/opts\.format =/.test(e));
+
+  // --- the pane's control ---
+  ok("#publish-io holds a Format control stating the selected format", /var fmtLabel = "Format: " \+ summary\.label;/.test(e) && /label: fmtLabel, title: fmtTitle, onClick: function \(\) \{ openPublishFormatMenu\(btn\); \}/.test(e));
+  ok("the 'Import & export' button is gone from the Publish pane", !/label: "Import & export"/.test(e));
+  ok("the outbound leftovers keep a home in a quiet overflow, not the named control", /var outbound = pipelineByDirection\(pipelineButtons, "export"\);/.test(e) && /label: "Other export actions"/.test(e));
+  ok("the head lays the Format control out beside its overflow", /\.publish-io \{ display: inline-flex; align-items: center; gap: 4px; \}/.test(css));
+
+  // --- import now lives on Source, routed to the SAME handlers (no second importer) ---
+  ok("the Source rail's one Import button opens the inbound menu", /label: "Import…", onClick: function \(ev\)[\s\S]{0,220}openSourceImportMenu\(r\.left, r\.bottom \+ 4\)/.test(e));
+  ok("the menu leads with Markdown, then every registered import", /function openSourceImportMenu\(x, y\) \{[\s\S]{0,120}label: "Markdown…", onClick: importMarkdownModal[\s\S]{0,220}pipelineByDirection\(pipelineButtons, "import"\)/.test(e));
+  ok("it reuses each registered handler rather than rebuilding an importer", /items\.push\(\{ label: importMenuLabel\(b\.label\), onClick: b\.onClick \}\)/.test(e));
+  ok("an import registered after boot still reaches the Source menu", /if \(__activeStage === "source"\) renderSourceToolbar\(\);/.test(e));
+
+  // --- the menu primitive grew the states this needs, per the DS contract ---
+  ok("showContextMenu supports disabled + a trailing hint", /\(it\.disabled \? " ctx-item--disabled" : ""\)/.test(e) && /if \(it\.hint\) el\.appendChild\(h\("span", "ctx-item__hint", it\.hint\)\);/.test(e));
+  ok("a disabled entry is not clickable and a missing handler cannot throw", /if \(!it\.disabled\) el\.addEventListener\("click", function \(\) \{ closeCtxMenu\(\); if \(it\.onClick\) it\.onClick\(\); \}\);/.test(e));
+  ok("the disabled + hint states are styled", /\.ctx-item--disabled\{/.test(e) && /\.ctx-item__hint\{/.test(e));
+  ok("the DS ContextMenu contract documents the hint", /hint\?: string;/.test(ds));
+})();
+
+// uio-F04 (SRC-12 / EDIT-06 / PUB-01/02/14/15): four facts — alignment, drift, where-used and
+// variants-as-outputs — used to be phrased (and sometimes computed) separately in each stage. This
+// section pins the ONE resolver they now all read: its bands, its honest not-indexed and
+// never-published states, and the roll-up that makes the Source top bar and a Publish row agree.
+section("uio-F04: cross-stage data surfacing");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
+  if (!m) { ok("locate @f04 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { band: f04Band, alignmentFact: f04AlignmentFact, rollUp: f04RollUpAlignment," +
+    " driftFact: f04DriftFact, whereUsedFact: f04WhereUsedFact, outputsFact: f04OutputsFact, BANDS: F04_BANDS };")();
+
+  // --- bands: >=85 verified / 60-84 mixed / <60 mostly novel, boundaries included ---
+  ok("band >=85 is verified (boundary included)", g.band(85).key === "verified" && g.band(100).key === "verified");
+  ok("band 60-84 is mixed (both boundaries)", g.band(60).key === "mixed" && g.band(84).key === "mixed");
+  ok("band <60 is mostly novel, 0 included", g.band(59).key === "novel" && g.band(0).key === "novel");
+  ok("no percent -> no band", g.band(null) === null);
+
+  // --- alignment: the number, the band, the tone, the sentence ---
+  var a = g.alignmentFact({ linkedWords: 78, totalWords: 100 }, true);
+  ok("alignment states the rounded percent and its band", a.pct === 78 && a.band === "mixed" && a.label === "78% aligned");
+  ok("alignment tone follows the band (mixed -> warning)", a.tone === "warning" && g.alignmentFact({ linkedWords: 9, totalWords: 10 }, true).tone === "success");
+  ok("the bottom band reads as a fact, not an alarm (neutral, not danger)", g.alignmentFact({ linkedWords: 1, totalWords: 10 }, true).tone === "neutral");
+  ok("a fully-linked document is 100% verified", g.alignmentFact({ linkedWords: 40, totalWords: 40 }, true).pct === 100);
+
+  // --- not indexed: a document with no prose, and a Product with no approved source ---
+  var noProse = g.alignmentFact({ linkedWords: 0, totalWords: 0 }, true);
+  ok("a document with no prose is 'Not indexed', never 0%", noProse.indexed === false && noProse.pct === null && noProse.label === "Not indexed");
+  ok("the no-prose reason names the missing prose", /no prose here to measure/.test(noProse.title));
+  var noSource = g.alignmentFact({ linkedWords: 0, totalWords: 500 }, false);
+  ok("prose but no approved source to measure against is also 'Not indexed', not 0%", noSource.indexed === false && noSource.pct === null);
+  ok("the no-source reason names the missing source document", /no approved source document/.test(noSource.title));
+  ok("a fully-novel INDEXED document is a real 0%, not 'Not indexed'", g.alignmentFact({ linkedWords: 0, totalWords: 500 }, true).pct === 0);
+
+  // --- roll-up: several documents as one number, by summing the SAME word counts ---
+  var d1 = g.alignmentFact({ linkedWords: 80, totalWords: 100 }, true);
+  var d2 = g.alignmentFact({ linkedWords: 20, totalWords: 100 }, true);
+  ok("the roll-up is word-weighted across documents (100/200 -> 50%)", g.rollUp([d1, d2]).pct === 50);
+  ok("ONE document's roll-up IS that document's number (this is what makes Source and Publish agree)", g.rollUp([d1]).pct === d1.pct);
+  ok("a roll-up over nothing is 'Not indexed'", g.rollUp([]).indexed === false && g.rollUp([noProse]).indexed === false);
+  ok("a not-indexed document contributes no words to a roll-up", g.rollUp([d1, noProse]).pct === d1.pct);
+
+  // --- drift: the four states, including the never-published document ---
+  var unlinked = g.driftFact(null, false);
+  ok("a document linking no source says nothing (no drift badge at all)", unlinked.state === "unlinked" && unlinked.label === "");
+  var never = g.driftFact(["mA", "mB"], false);
+  ok("a NEVER-published document reports 'unpublished', not '2 changed'", never.state === "unpublished" && never.count === 0 && never.label === "");
+  ok("the never-published reason says there is nothing to have drifted from", /Never published/.test(never.title));
+  var current = g.driftFact([], true);
+  ok("a published document with nothing changed stays quiet", current.state === "current" && current.label === "");
+  var drifted = g.driftFact(["mA", "mB"], true);
+  ok("a published document with changed source counts them and warns", drifted.state === "drifted" && drifted.count === 2 && drifted.label === "2 changed" && drifted.tone === "warning");
+  ok("drift carries the ids so a caller can list WHICH source changed", drifted.ids.join(",") === "mA,mB");
+  ok("drift singular/plural reads correctly", /1 linked source document changed/.test(g.driftFact(["mA"], true).title) && /2 linked source documents changed/.test(drifted.title));
+
+  // --- where-used: distinct DOCUMENTS, not raw placements ---
+  var used = g.whereUsedFact([{ docCode: "c1" }, { docCode: "c1" }, { docCode: "c2" }]);
+  ok("where-used counts distinct documents, not placements", used.docs === 2 && used.places === 3 && used.label === "Linked in 2");
+  ok("where-used states both numbers in its tooltip", /2 documents across 3 places/.test(used.title));
+  ok("an unused passage says so plainly", g.whereUsedFact([]).docs === 0 && g.whereUsedFact([]).label === "Not linked");
+
+  // --- variants as outputs: one document = flagship + N variants = N+1 packages ---
+  var out = g.outputsFact(["Coastal", "Desert"]);
+  ok("a document with 2 variants is 3 outputs, flagship first", out.count === 3 && out.names.join(",") === "Flagship,Coastal,Desert");
+  ok("the outputs tooltip names every package", /3 packages: Flagship, Coastal, Desert/.test(out.title));
+  ok("a document with no variants is one output (Flagship)", g.outputsFact([]).count === 1 && g.outputsFact(null).count === 1);
+  ok("empty variant names are ignored, never shipped as a blank package", g.outputsFact(["", null, "Pro"]).count === 2);
+
+  // --- the wiring: every surface reads the SAME resolver, none re-computes ---
+  ok("the adapter binds the resolver to the EXISTING Product Rail helpers, not new ones",
+    /alignment: f04AlignmentFact\(sourceAlignment\(d\), f04SourceIndexed\(d\)\)/.test(e) &&
+    /drift: f04DriftFact\(driftedMasterIds\(d, vers\), f04Published\(docId\)\)/.test(e) &&
+    /outputs: f04OutputsFact\(d\.variants\)/.test(e));
+  ok("'has this ever published' comes from the release log, not a second record", /function f04Published\(docId\)[\s\S]{0,220}RH\.lastPublishedFor\(releaseHistory\(\), docId\)/.test(e));
+  ok("where-used comes from sourceLinkWhereUsed, not a stored list", /f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, null\)\)/.test(e));
+  ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(e));
+  ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(e) && /\.source-stage__facts/.test(src("editor.css")));
+  ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,400}f04AlignmentMeter\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
+  ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(src("editor.css")));
+  ok("every fact is drawn as the canonical DS Badge, quiet, never a bespoke chip", /function f04Badge\(fact, cls\)[\s\S]{0,320}U\.Badge\(\{ tone: fact\.tone \|\| "neutral", quiet: true, size: "sm"/.test(e));
+  ok("the retired one-off alignment + staleness chips are gone from the picker", !/publish-pickrow__stale/.test(e) && !/apct \+ "% source"/.test(e));
+  ok("a read API is exposed for the tickets that consume this layer (P-C01 / P-C08)", /window\.__f04 = \{[\s\S]{0,400}docFacts: f04DocFacts[\s\S]{0,400}productFacts: f04ProductFacts/.test(e));
+})();
+
+// uio-P-C01 (PUB-01): the alignment number on Publish is drawn as a labelled, banded METER --
+// label, track whose fill carries the band tone, value in the same tone -- with a distinct
+// "Not indexed" state. The meter EXPLAINS the number; it never computes one. Its model is pure
+// (fed only by the F04 alignment fact) and the DS gained the Meter component BEFORE its first use.
+section("uio-P-C01: alignment meter on Publish");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), kit = src("src/ui-kit.js");
+  var m = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
+  if (!m) { ok("locate @f04 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { meterModel: f04AlignmentMeterModel, alignmentFact: f04AlignmentFact };")();
+  var fact = function (pct, indexed) { return g.alignmentFact({ linkedWords: pct, totalWords: 100 }, indexed !== false); };
+
+  // --- band boundaries drive the meter's tone + band name (>=85 / 60-84 / <60) ---
+  ok("85% meters as the top band (success, 'Verified') -- boundary included",
+    g.meterModel(fact(85)).tone === "success" && g.meterModel(fact(85)).bandLabel === "Verified" && g.meterModel(fact(100)).tone === "success");
+  ok("60-84% meters as the middle band (warning, 'Mixed') -- both boundaries",
+    g.meterModel(fact(60)).tone === "warning" && g.meterModel(fact(84)).bandLabel === "Mixed");
+  ok("<60% meters as the bottom band (neutral, 'Mostly novel'), 0 included",
+    g.meterModel(fact(59)).tone === "neutral" && g.meterModel(fact(0)).bandLabel === "Mostly novel");
+  ok("the meter's value text is the fact's own percent, verbatim", g.meterModel(fact(78)).value === "78%" && g.meterModel(fact(78)).pct === 78);
+  ok("the meter's tooltip is the fact's own sentence, not a rephrasing", g.meterModel(fact(78)).title === fact(78).title);
+
+  // --- not indexed: its own state, never a 0% fill ---
+  var ni = g.meterModel(fact(0, false));
+  ok("a not-indexed fact meters as 'Not indexed' with NO percent", ni.indexed === false && ni.pct === null && ni.value === "Not indexed");
+  ok("not-indexed keeps the fact's reason as its tooltip", /no approved source document/.test(ni.title));
+  ok("a missing fact also reads 'Not indexed', never a crash or a 0%", g.meterModel(null).pct === null && g.meterModel(null).value === "Not indexed");
+  ok("a genuinely 0%-aligned INDEXED document is a real 0% meter, not 'Not indexed'",
+    g.meterModel(fact(0)).indexed === true && g.meterModel(fact(0)).value === "0%");
+
+  // --- the DS gained the Meter BEFORE its first use (contract + kit + css) ---
+  ok("the DS Meter contract exists (structure/Meter.d.ts + .prompt.md)",
+    /export function Meter\(props: MeterProps\)/.test(src("design-system/components/structure/Meter.d.ts")) &&
+    /Not indexed/.test(src("design-system/components/structure/Meter.prompt.md")));
+  ok("VersoUI.Meter renders label + track + value with role=meter",
+    /function Meter\(props\)[\s\S]{0,900}setAttribute\("role", "meter"\)[\s\S]{0,900}vds-meter__track/.test(kit) && /Meter: Meter/.test(kit));
+  ok("the meter's fill width is clamped and null stays null (no 0% fill for not-indexed)", (function () {
+    var mm = kit.match(/meterPct: function \(pct\) \{([\s\S]*?)\},/);
+    if (!mm) return false;
+    var f = new Function("pct", mm[1]);
+    return f(140) === 100 && f(-5) === 0 && f(null) === null && f(72) === 72;
+  })());
+  ok("the meter's band classes are styled from DS tokens, tone as fill + ink",
+    /\.vds-meter--success \.vds-meter__fill \{ background: var\(--success\)/.test(css) &&
+    /\.vds-meter--warning \.vds-meter__value \{ color: var\(--warning\)/.test(css) &&
+    /\.vds-meter--notindexed \.vds-meter__track \{ background: none; border: 1px dashed var\(--border-strong\)/.test(css));
+  ok("the spine names the Meter as the one sanctioned non-Badge fact drawing",
+    /canonical labelled `Meter`/.test(src("design-system/readme.md")));
+
+  // --- wiring: ONE renderer, both Publish rows, same fact object ---
+  ok("f04AlignmentMeter draws the canonical DS Meter from the pure model",
+    /function f04AlignmentMeter\(fact, cls\)[\s\S]{0,300}f04AlignmentMeterModel\(fact\)[\s\S]{0,300}U\.Meter\(\{ label: "Alignment", pct: m\.pct, tone: m\.tone, value: m\.value, bandLabel: m\.bandLabel \}\)/.test(e));
+  ok("the picker row and the queue row call the SAME meter renderer",
+    /f04AlignmentMeter\(facts\.alignment, "publish-pickrow__align"\)/.test(e) &&
+    /f04AlignmentMeter\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
+  ok("the meter model is exposed on the F04 read API for the harness", /alignmentMeterModel: f04AlignmentMeterModel/.test(e));
+})();
+
+// uio-P-C04 (PUB-12): the picker had no scope, count, search or sort — only alphabetical — so the
+// two orderings that decide publishing work (most drifted first, least recently published first)
+// were unreachable. The whole view is a pure function of the decorated rows.
+section("uio-P-C04: picker scope + count + search + sort + needs-attention");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  var m = e.match(/\/\* @publish-pick-start \*\/([\s\S]*?)\/\* @publish-pick-end \*\//);
+  if (!m) { ok("locate @publish-pick fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { publishPickView: publishPickView, publishNeedsAttention: publishNeedsAttention, PUBLISH_SORTS: PUBLISH_SORTS };")();
+  var view = g.publishPickView, needs = g.publishNeedsAttention;
+
+  var rows = [
+    { id: "a", title: "Zebra handbook", drift: 0, lastAt: 3000 },
+    { id: "b", title: "Alpha guide",    drift: 3, lastAt: 1000 },
+    { id: "c", title: "Mid card",       drift: 1, lastAt: 0    },   // never published
+    { id: "d", title: "Beta manual",    drift: 0, lastAt: 2000 }
+  ];
+  var ids = function (r) { return r.map(function (x) { return x.id; }).join(""); };
+
+  ok("the three orderings are Title / Drift / Last published", g.PUBLISH_SORTS.map(function (s) { return s.key; }).join() === "title,drift,last");
+  ok("title sort is alphabetical", ids(view(rows, { sort: "title" })) === "bdca");
+  ok("drift sort puts the most drifted first", ids(view(rows, { sort: "drift" })) === "bcda");
+  ok("a drift tie falls back to title, so the order is stable not arbitrary", ids(view(rows, { sort: "drift" })).slice(2) === "da");
+  // the trap: a never-published doc has lastAt 0, which a naive ascending sort treats as "oldest"
+  // by accident. It IS the most overdue, so it must lead deliberately — asserted, not incidental.
+  ok("last-published sort leads with NEVER published, then oldest first", ids(view(rows, { sort: "last" })) === "cbda");
+  ok("search matches the title, case-insensitively", ids(view(rows, { query: "MANUAL" })) === "d" && ids(view(rows, { query: "a" })) === "bdca");
+  ok("a search that matches nothing returns nothing (not everything)", view(rows, { query: "zzz" }).length === 0);
+  ok("needs attention = drifted OR never published", needs({ drift: 2, lastAt: 5 }) === true && needs({ drift: 0, lastAt: 0 }) === true && needs({ drift: 0, lastAt: 5 }) === false);
+  ok("the attention filter keeps only those", ids(view(rows, { filter: "attention", sort: "title" })) === "bc");
+  ok("search and filter compose", ids(view(rows, { filter: "attention", query: "card" })) === "c");
+  ok("the view never mutates the array it was handed", (function () { view(rows, { sort: "drift" }); return ids(rows) === "abcd"; })());
+  ok("a junk row set degrades to empty, not a throw", view(null, {}).length === 0 && view([null], {}).length === 0);
+
+  // --- the header states scope + the count of what is SHOWN, from the same array ---
+  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", \[pname, String\(docs\.length\)\]\.filter\(Boolean\)\.join\(" · "\)\)\)/.test(e));
+  // uio-F04: the drift number now comes from the shared resolver's fact, not a second staleness call.
+  ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);\s*return \{ id: d\.id, title: d\.title, drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
+
+  // --- sort is a MENU, not a cycling button: three orderings a cycle would hide ---
+  ok("sort opens the canonical menu with the current ordering ticked", /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Order by" \}\]\.concat\(PUBLISH_SORTS\.map/.test(e) && /active: __publishPickSort === s\.key/.test(e));
+  // it reuses the pane's EXISTING menu-opening value control (the queue row's preset chip) rather
+  // than inventing a second chrome for the same job.
+  ok("the sort trigger is a publish-chip, like its sibling the preset chip", /h\("button", "publish-chip publish-pick__sort"\)/.test(e) && /\.publish-pick__sort \{ flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; \}/.test(css));
+
+  // --- search reuses the SIBLING stage's field, not a new one ---
+  ok("search reuses the Source rail's search field pattern", /var search = h\("div", "vbrowser__search publish-pick__search"\);/.test(e) && /placeholder = "Search documents"/.test(e));
+  ok("typing keeps focus + caret (a re-render must not eject you from the field)", /var again = document\.querySelector\("\.publish-pick__search \.vbrowser__search-input"\);[\s\S]{0,140}again\.setSelectionRange\(again\.value\.length, again\.value\.length\)/.test(e));
+
+  // --- needs-attention is offered only when something needs it ---
+  ok("the attention filter appears only when the count is non-zero", /if \(attention && U && U\.SegmentedControl\)/.test(e));
+  ok("and it resets itself if the last attention row goes away", /else if \(__publishPickFilter !== "all"\) \{ __publishPickFilter = "all"; \}/.test(e));
+  ok("both segments carry live counts", /label: "All " \+ all\.length/.test(e) && /label: "Needs attention " \+ attention/.test(e));
+
+  // --- the header/search stay put; only the list scrolls ---
+  ok("the pick pane stopped scrolling as one strip", /\.publish-stage__pick \{[^}]*overflow: hidden;/.test(css) && /\.publish-stage__pick > \.publish-picklist \{ flex: 1 1 auto; min-height: 0; overflow-y: auto;/.test(css));
+  // the header runs edge-to-edge under its hairline, so the pane holds no padding for it to fight
+  // (a negative-margin bleed clipped the first character — caught in the browser, not headlessly).
+  ok("the pane has no padding of its own; each region carries its inset", /\.publish-stage__pick \{[^}]*padding: 0;\s*\}/.test(css) && !/\.publish-pick__head \{[^}]*margin: -12px/.test(css));
+  // vbrowser__search ships fixed at 260px and a `full` button at 100%; inside a 12px inset both
+  // overhang the pane. Every rail that embeds them overrides the width — same override here.
+  // (Both overflows were found by MEASURING the live pane, not by reading the markup.)
+  ok("the embedded search + full-width button are re-fitted to the inset column", /\.publish-pick__search\.vbrowser__search \{ width: auto;/.test(css) && /\.publish-stage__pick > \.publish-pane__addcur \{ width: auto; \}/.test(css));
+  ok("an empty RESULT reads differently from an empty product", /all\.length\s*\n?\s*\? "No document matches that\."/.test(e));
+})();
+
+// uio-P-C06 (PUB-04): bulk publishing had no bulk controls — a dozen documents meant a dozen "+"
+// clicks. The picker rows now lead with a tick box and the pane ends with "Queue selected (N)".
+// The rule the whole feature rests on: filtering is a LENS, never an edit. Search, filter and sort
+// leave the selection alone, and the footer states how much of it the current lens is hiding.
+section("uio-P-C06: picker multi-select + queue selected");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  var m = e.match(/\/\* @publish-sel-start \*\/([\s\S]*?)\/\* @publish-sel-end \*\//);
+  if (!m) { ok("locate @publish-sel fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { ids: publishSelectedIds, hiddenBy: publishHiddenBy, summary: publishSelectionSummary };")();
+
+  var rows = [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }, { id: "c", title: "Cara" }];
+  var sel = { a: true, c: true };
+  var sum = function (visible, opts) { return g.summary(sel, visible, rows, opts); };
+
+  ok("selected ids come back in the order the list gives them", g.ids(sel, rows).join() === "a,c");
+  ok("an empty selection selects nothing", g.ids({}, rows).length === 0 && g.ids(null, rows).length === 0);
+  ok("an id with no document behind it can never be queued", g.ids({ zzz: true }, rows).length === 0);
+  ok("junk rows degrade to an empty list, not a throw", g.ids(sel, null).length === 0 && g.ids(sel, [null]).length === 0);
+
+  // THE decision this ticket makes, reversed from the first cut: a tick SURVIVES search and filter.
+  // One incidental keystroke must not destroy five deliberate choices that cannot be undone. The
+  // hazard of queueing something off screen is answered by SAYING SO, not by throwing ticks away.
+  var hid = sum([rows[0]], { query: "alp" });
+  ok("a ticked row that is filtered away stays selected", hid.selected === 2 && hid.ids.join() === "a,c");
+  ok("the footer states how many of the selection are off screen", hid.hidden === 1 && hid.hiddenLabel === "2 selected · 1 hidden by search");
+  ok("the button offers to queue the WHOLE selection, hidden rows included", hid.queueLabel === "Queue selected (2)");
+  ok("nothing in the summary mutates the selection it was handed", (function () { g.summary(sel, [], rows, {}); return Object.keys(sel).sort().join() === "a,c"; })());
+  ok("hiding every ticked row still reports a live selection", (function () { var s = sum([rows[1]], { query: "bet" }); return s.selected === 2 && s.hidden === 2 && s.visible === 0; })());
+  ok("an empty visible list still reports the selection, so its footer can't vanish", sum([], { query: "zzz" }).selected === 2);
+
+  // the hidden line names the lens the author is actually using
+  ok("the lens is named the way the author would name it", g.hiddenBy("alp", "all") === "search" && g.hiddenBy("", "attention") === "the filter" && g.hiddenBy("alp", "attention") === "search and filter");
+  ok("with no lens on, nothing can be hidden by one", g.hiddenBy("", "all") === "the current view" && g.hiddenBy("   ", null) === "the current view");
+  ok("no hidden rows means no hidden line at all", sum(rows, {}).hiddenLabel === "" && sum(rows, {}).hidden === 0);
+
+  // --- select-all is the ONE deliberate asymmetry: it counts the VISIBLE rows ---
+  ok("some visible rows ticked reads as mixed, not on", sum(rows, {}).mixed === true && sum(rows, {}).all === false);
+  ok("every visible row ticked reads as on", g.summary({ a: 1, b: 1, c: 1 }, rows, rows, {}).all === true && g.summary({ a: 1, b: 1, c: 1 }, rows, rows, {}).mixed === false);
+  ok("nothing ticked is neither on nor mixed", g.summary({}, rows, rows, {}).all === false && g.summary({}, rows, rows, {}).mixed === false);
+  ok("an empty list is not 'all selected'", g.summary({}, [], rows, {}).all === false && g.summary({}, [], rows, {}).visibleTotal === 0);
+  ok("select-all counts only what is shown, even while rows are hidden", hid.visible === 1 && hid.visibleTotal === 1 && hid.all === true);
+
+  // --- the labels state the size of the action, and the reason when it can't run ---
+  var l0 = g.summary({}, rows, rows, {}), l2 = sum(rows, {});
+  ok("the button carries the count once something is ticked", l2.queueLabel === "Queue selected (2)" && l0.queueLabel === "Queue selected");
+  ok("select-all names the total, then switches to a progress count", l0.allLabel === "Select all 3" && l2.allLabel === "2 of 3 selected");
+  ok("a dead button states its reason; a live one has none", /^Tick documents above/.test(l0.reason) && l2.reason === "");
+  ok("the summary survives junk arguments", g.summary(null, null, null, null).selected === 0 && g.summary(null, null, null, null).queueLabel === "Queue selected");
+
+  // --- wiring: the render READS the selection; nothing in it writes back ---
+  ok("the render only reads the selection", /var sel = publishSelectionSummary\(__publishPickSel, docs, all, \{ query: __publishPickQuery, filter: __publishPickFilter \}\);/.test(e));
+  ok("no render path prunes the selection to the visible rows", !/__publishPickSel = publishSelectionInView/.test(e) && !/publishSelectionInView/.test(e));
+  ok("the picker rows are built once and shared by the render and the batch", /function publishPickRows\(\)/.test(e) && /var all = publishPickRows\(\);/.test(e) && /var ids = publishSelectedIds\(__publishPickSel, publishPickRows\(\)\);/.test(e));
+  ok("selection is session-only view state, like the search it lives beside", /var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title", __publishPickSel = \{\};/.test(e));
+
+  // --- the control is the canonical DS Checkbox, not a hand-rolled box ---
+  ok("each row leads with the canonical DS Checkbox", /if \(U && U\.Checkbox\) \{\s*\n\s*var box = U\.Checkbox\(\{\s*\n\s*checked: !!__publishPickSel\[d\.id\]/.test(e) && /box\.classList\.add\("publish-pickrow__sel"\)/.test(e));
+  ok("select-all uses the same Checkbox's mixed state", /U\.Checkbox\(\{\s*\n\s*checked: sel\.all, mixed: sel\.mixed, label: sel\.allLabel/.test(e) && /mixed\?: boolean;/.test(src("design-system/components/controls/Checkbox.d.ts")));
+  ok("select-all touches only the rows it shows, leaving hidden ticks alone", /docs\.forEach\(function \(r\) \{ if \(v\) __publishPickSel\[r\.id\] = true; else delete __publishPickSel\[r\.id\]; \}\);/.test(e));
+  ok("the DS checkbox ships at 14px, so the row needs no size of its own", /\.vds-check__box \{[^}]*width: 14px; height: 14px;/.test(css) && /\.publish-pickrow__sel \{ flex: 0 0 auto; \}/.test(css));
+
+  // --- the batch action: disabled with a stated reason, exactly like the Publish button ---
+  // a live selection with every row filtered away KEEPS its footer, or the ticks are stranded
+  ok("the footer survives as long as there is anything to select or anything selected", /if \(docs\.length \|\| sel\.selected\) \{\s*\n\s*var foot = h\("div", "publish-pick__foot"\);/.test(e));
+  ok("Queue selected is disabled and states why when nothing is ticked", /if \(!sel\.selected\) \{ qs\.setAttribute\("disabled", "disabled"\); qs\.title = sel\.reason; \}/.test(e));
+  ok("the hidden line offers one Clear for the whole selection, hidden rows included", /if \(sel\.hidden\) \{[\s\S]{0,400}__publishPickSel = \{\}; renderPublishPick\(\);/.test(e) && /U\.Button\(\{ variant: "ghost", size: "sm", label: "Clear"/.test(e));
+  ok("the footer is pinned under the scrolling list, on the pane's own inset", /\.publish-pick__foot \{ flex: 0 0 auto;[^}]*padding: 8px 12px; border-top: 1px solid var\(--border-subtle\); \}/.test(css));
+
+  // --- queueing a batch reuses the single-document path, and clears the ticks afterwards ---
+  ok("every selected document goes through the same addToQueue as the '+'", /ids\.forEach\(function \(id\) \{ addToQueue\(id, \{ quiet: true \}\); \}\);/.test(e));
+  ok("quiet suppresses the toast only — the queue is still saved per document", /if \(!\(opts && opts\.quiet\)\) publishToast\("Added to the publish queue/.test(e) && /function addToQueue\(docId, opts\) \{[\s\S]{0,400}savePublishQueue\(\);/.test(e));
+  ok("a batch confirms once, naming how many went in", /publishToast\("Added " \+ ids\.length \+ " document" \+ \(ids\.length === 1 \? "" : "s"\)/.test(e));
+  ok("the ticks are cleared after the batch is handed over", /ids\.forEach[\s\S]{0,80}__publishPickSel = \{\};\s*\n\s*renderPublishPick\(\);/.test(e));
+  ok("an empty selection queues nothing at all", /if \(!ids\.length\) return;/.test(e));
+  // multi-select is ADDITIVE: the per-row "+" is still there
+  ok("the per-row '+' still queues one document on its own", /label: "Add “" \+ d\.title \+ "” to the publish queue", onClick: function \(\) \{ addDocToPublishQueue\(d\.id\); \}/.test(e));
+})();
+
+// uio-O-W1 (OVL-06/09/14/23): the overlay VOCABULARY pass. Four separate dialects replaced by
+// one: the settings surface stops faking a commit and states its real save contract; a
+// cross-reference to a setting another surface owns becomes a live value plus a link, never an
+// instruction to go and look; the block's verbs get a second, advertised door built from ONE
+// menu definition; and help prose gets one small typographic system instead of inventing sizes.
+section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu, help type)");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), typo = src("design-system/tokens/typography.css");
+
+  // --- OVL-09: the fake Done is gone; the surface states its contract ------------------
+  ok("the settings footer no longer offers a commit button", !/label: "Done"/.test(e));
+  ok("it states the real contract instead (live apply + autosave + Undo)",
+    /settings-foot__contract", "Changes apply live, saved automatically\. Undo with " \+ MOD_KEY \+ "Z\."/.test(e));
+  ok("the only footer control is a plain Close, not the accent",
+    /VersoUI\.Button\(\{ variant: "secondary", label: "Close", onClick: closeSettingsModal \}\)/.test(e));
+  // uio-F05 SUPERSEDES the third dismissal. There is no scrim to click, and dismissing on a
+  // canvas click would make the canvas unusable while the sheet is open — the one thing the
+  // sheet exists to allow. Close and Esc (via the layer stack) are the two remaining ways.
+  ok("the surface is dismissed two ways (Close, Esc) and never by clicking the canvas",
+    /pushLayer\("settings", closeSettingsModal\)/.test(e)
+    && /popLayer\("settings"\)/.test(e)
+    && !/if \(e\.target === overlay\) closeSettingsModal/.test(e));
+  ok("the contract line and the Close button share the footer", /\.settings-foot \{[^}]*justify-content: space-between;/.test(css) && /\.settings-foot__contract \{/.test(css));
+  // the pre-F05 spine debt this ticket was allowed to carry is now spent
+  ok("the pre-F05 save-contract debt marker went with the button it excused", e.indexOf("spine-todo") === -1);
+  ok("one spelling of the modifier key, so printed shortcuts never disagree", /var MOD_KEY = \(function \(\) \{/.test(e));
+
+  // --- OVL-06: cross-references are links, not instructions ---------------------------
+  ok("there is ONE cross-reference row, built on the shared settings row", /function crossRefRow\(opts\)[\s\S]{0,900}return settingsRow\(\{ label: opts\.label/.test(e));
+  ok("it always carries a live value slot and a navigating link", /insp-xref__value/.test(e) && /insp-xref__link/.test(e) && /link\.addEventListener\("click", function \(\) \{ if \(opts\.onNavigate\) opts\.onNavigate\(\); \}\)/.test(e));
+  // uio-F05: with no nav rail to highlight, landing means EXPANDING the named section and
+  // scrolling it into view inside the one scroll.
+  ok("the link lands on a NAMED settings section, not the top of the tree", /function openSettingsSection\(tab, sectionKey\)[\s\S]{0,320}revealSettingsSection\(sectionKey\)/.test(e)
+    && /function revealSettingsSection\(key\)[\s\S]{0,600}scrollIntoView/.test(e));
+  // the three dead-prose references named by the audit are gone, each replaced by a row
+  ok("'edit it in the Learner nav panel' is gone", e.indexOf("edit it in the Learner nav panel") === -1);
+  ok("the nav row states its live section count and links to Learner nav",
+    /label: "Nav bar",\s*\n\s*value: navSecs \?[\s\S]{0,400}openSettingsSection\("project", "nav"\)/.test(e));
+  ok("'Add a footer nav bar in Header & Footer first' is gone", e.indexOf("Add a footer nav bar in Header & Footer first") === -1);
+  ok("with no nav bar the row still shows a value plus the link that adds one",
+    /value: "Not added", linkLabel: "Footer"[\s\S]{0,220}openSettingsSection\("project", "footer"\)/.test(e));
+  ok("'preview a variant from the top-bar switcher' is gone", e.indexOf("preview a variant from the top-bar switcher)") === -1);
+  ok("the image panel shows which variant is live and opens the switcher",
+    /label: "Previewing", value: activeVariant \|\| "Flagship", linkLabel: "Variant switcher"[\s\S]{0,200}openVariantMenu\(variantSwitchEl\)/.test(e));
+  ok("the cross-reference row is styled once, not per site", /\.insp-xref \{/.test(css) && /\.insp-xref__link \{/.test(css));
+
+  // --- OVL-14: one verb list, two doors ----------------------------------------------
+  ok("the block verbs have ONE definition", /function blockMenuItems\(target\) \{/.test(e));
+  // the block-menu verbs are written exactly once in the whole file (the outliner's own
+  // tree menu is a different surface with different verbs, so it is not counted here)
+  var verbs = ["Copy style", "Move up", "Move down"];
+  var once = verbs.filter(function (v) { return (e.split('label: "' + v + '"').length - 1) === 1; });
+  ok("no block verb is written twice (the two doors cannot drift): " + once.length + "/" + verbs.length, once.length === verbs.length);
+  ok("exactly two doors call the one definition", (e.split("blockMenuItems(").length - 1) === 3); // 1 definition + 2 call sites
+  // the canvas handler's block branch builds nothing of its own any more
+  var canvasBranch = (e.match(/setSelection\(target\.type === "instance" \? "instance" : "block", target\.node\);([\s\S]*?)\} else \{/) || [])[1] || "";
+  ok("the right-click handler no longer keeps a private copy of the verbs", canvasBranch.indexOf("label:") === -1);
+  ok("door 1 - the canvas right-click renders that list", /items = items\.concat\(blockMenuItems\(target\.type === "block" \? target : \{ instance: target\.instance \}\)\)/.test(e));
+  ok("door 2 - the inspector header's overflow renders the SAME list", /showContextMenu\(r\.right, r\.bottom \+ 4, blockMenuItems\(\{ block: block \}\)\)/.test(e));
+  ok("the overflow is the canonical menu glyph and says what it opens", /insp-crumbs__more"\);[\s\S]{0,200}Icon\("more-horizontal"\)[\s\S]{0,120}"Block actions"/.test(e));
+  ok("the menu's foot names its way back into the inspector", /label: "Block settings", hint: "Inspector", onClick: function \(\) \{ revealBlockSettings\(block\); \}/.test(e));
+  ok("that route really opens the block's own settings", /function revealBlockSettings\(block\)[\s\S]{0,220}enteredBlock = block;[\s\S]{0,120}reselectBlockNode\(block, "block"\)/.test(e));
+  ok("the overflow is styled once, beside the breadcrumb", /\.insp-crumbs__more \{/.test(css));
+
+  // --- OVL-23: one help typographic system -------------------------------------------
+  ok("the help type system is four DS tokens, not ad-hoc CSS",
+    /--help-text:\s*var\(--text-sm\)/.test(typo) && /--help-leading:\s*1\.6/.test(typo)
+    && /--help-measure:\s*400px/.test(typo) && /--help-step-indent:/.test(typo));
+  ok("help prose reads at the token size and rhythm", /\.help-doc \{[^}]*font-size: var\(--help-text\); line-height: var\(--help-leading\);/.test(css));
+  ok("the measure is capped at ~62 characters", /\.help-doc > \* \{ max-width: var\(--help-measure\); \}/.test(css));
+  ok("wide content scrolls instead of squeezing the measure", /\.help-doc > table, \.help-doc > pre \{ max-width: 100%; \}/.test(css));
+  ok("headings come off the shared --text-* ramp, inventing no size",
+    /\.help-doc h1 \{ font-size: var\(--text-lg\)/.test(css) && /\.help-doc h2 \{ font-size: var\(--text-md\); \}/.test(css)
+    && /\.help-doc h3 \{ font-size: var\(--help-text\); \}/.test(css) && !/\.help-doc h[1-4] \{ font-size: 1[0-9](\.[0-9])?px/.test(css));
+  ok("there is ONE callout box, with three tones drawn off it",
+    /\.help-doc \.help-callout \{/.test(css) && /\.help-callout--reassure \{ border-left-color: var\(--success/.test(css)
+    && /\.help-callout--caution \{ border-left-color: var\(--warning/.test(css));
+  ok("numbered steps get one chip treatment", /\.help-doc ol \{[^}]*counter-reset: help-step;/.test(css) && /\.help-doc ol > li::before \{/.test(css));
+  ok("monospace is reserved for code and paths", /\.help-doc code \{\s*\n\s*font-family: var\(--font-mono\)/.test(css));
+  // the divergence that made help read as a different product: generic modal prose was silently
+  // re-setting the guide's size and rhythm. It now stops at the docs modal.
+  ok("generic modal prose no longer overrides the help system", /\.modal-box:not\(\.modal-box--docs\) p \{/.test(css) && !/^\.modal-box p \{/m.test(css));
+
+  // --- pure: the renderer's share of the help system ----------------------------------
+  var t = e.match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
+  if (!t) { ok("locate @md fence", false); return; }
+  var md = new Function(t[1] + "\nreturn mdToHtml;")();
+  ok("a callout is toned by the label the author already writes",
+    md("> **Note.** a").indexOf("help-callout help-callout--note") !== -1
+    && md("> **Tip.** a").indexOf("help-callout--reassure") !== -1
+    && md("> **Reassurance.** a").indexOf("help-callout--reassure") !== -1
+    && md("> **Caution.** a").indexOf("help-callout--caution") !== -1);
+  ok("an unlabelled quote falls back to the neutral tone, never to no style",
+    md("> plain").indexOf("help-callout help-callout--note") !== -1);
+  ok("a printed shortcut renders as the menu's chip", md("press ⌘P now").indexOf("<kbd class=\"help-kbd\">⌘P</kbd>") !== -1);
+  ok("modifier runs stay one chip", md("⌘⇧G").indexOf("<kbd class=\"help-kbd\">⌘⇧G</kbd>") !== -1);
+  ok("a shortcut quoted as code stays code", md("`⌘` = Cmd").indexOf("<code>⌘</code>") !== -1 && md("`⌘` = Cmd").indexOf("<code><kbd") === -1);
+  ok("chips survive inside bold and table cells",
+    md("**⌘D** dupes").indexOf("<strong><kbd class=\"help-kbd\">⌘D</kbd></strong>") !== -1
+    && md("| Do | Key |\n|---|---|\n| Undo | ⌘Z |").indexOf("<kbd class=\"help-kbd\">⌘Z</kbd>") !== -1);
+  ok("prose with no shortcut is untouched", md("plain words") === "<p>plain words</p>");
+})();
+
+// uio-P-C03 (PUB-10): release history answers "what did we ship?", so it fills the pane's empty
+// half instead of hiding collapsed below the queue — and every picker row states when that document
+// last actually went out.
+section("uio-P-C03: release history fills the empty half + last-published per row");
+(function () {
+  var RH = require(path.join(ROOT, "src/release-history.js"));
+  var e = src("src/editor.js"), css = src("editor.css");
+
+  // --- pure: releaseSummary states count / preset / destination / outcome ---
+  var store = RH.create();
+  RH.append(store, { createdAt: 1000, entries: [
+    { docId: "a", title: "A", version: "v1.4", preset: "LMS · production", destination: "Downloads", status: "done" },
+    { docId: "b", title: "B", version: "v0.9", preset: "LMS · production", destination: "Downloads", status: "done" }
+  ] });
+  RH.append(store, { createdAt: 2000, entries: [
+    { docId: "a", title: "A", version: "v1.5", preset: "Master", destination: "Downloads", status: "done" },
+    { docId: "c", title: "C", version: "v0.1", preset: "Review copy", destination: "", status: "error" }
+  ] });
+  var newest = RH.list(store)[0], oldest = RH.list(store)[1];
+  var sNew = RH.releaseSummary(newest), sOld = RH.releaseSummary(oldest);
+  ok("a clean release reports Published", sOld.outcome === "Published" && sOld.ok === true && sOld.failed === 0);
+  ok("a partly-failed release reports its failures, not a clean pass", sNew.outcome === "1 failed" && sNew.ok === false && sNew.published === 1);
+  ok("the doc count is per DOCUMENT and pluralises", sOld.docLabel === "2 documents" && RH.releaseSummary({ entries: [{ docId: "z" }] }).docLabel === "1 document");
+  ok("one preset names itself; several collapse to a count", sOld.presetLabel === "LMS · production" && sNew.presetLabel === "2 presets");
+  ok("a destination the run never reached is not listed", sNew.destinations.join() === "Downloads");
+  ok("releaseSummary survives a malformed record", RH.releaseSummary(null).docCount === 0 && RH.releaseSummary({}).outcome === "Published");
+
+  // --- pure: lastPublishedFor is the per-row provenance line ---
+  var lastA = RH.lastPublishedFor(store, "a");
+  ok("last published reads the NEWEST release carrying that document", lastA && lastA.at === 2000 && lastA.version === "v1.5");
+  ok("a document that only ever FAILED counts as never published", RH.lastPublishedFor(store, "c") === null);
+  ok("an unknown document is never published", RH.lastPublishedFor(store, "nope") === null);
+  ok("an older record with no status still counts as published (forward-compatible)",
+    RH.lastPublishedFor((function () { var s2 = RH.create(); RH.append(s2, { createdAt: 5, entries: [{ docId: "old", version: "v1" }] }); return s2; })(), "old").version === "v1");
+
+  // --- the record now captures what a history row has to state ---
+  ok("the entry captures preset, destination and status", /preset: PP \? PP\.presetName\(publishPresets\(\), row\.preset \|\| "master"\) : ""/.test(e) && /destination: failed \? "" : \(result\.to === "download" \? "Downloads"/.test(e) && /status: failed \? "error" : "done"/.test(e));
+  ok("a FAILED row is recorded too (a run that partly failed can't report a clean Published)", /var err = \{ to: "error", path: String\(\(e && e\.message\) \|\| e\) \};\s*\n\s*runEntries\.push\(releaseEntryForRow\(row, err\)\);/.test(e) && /runEntries\.push\(releaseEntryForRow\(row, gone\)\)/.test(e));
+
+  // --- it OWNS the empty half: open by default, canonical section, states its empty state ---
+  ok("history is a canonical PanelSection, open by default", /panelSection\(host, "Release history", \{ collapsible: true, defaultOpen: true, divider: true \}\)/.test(e));
+  ok("history no longer vanishes when empty — it states the empty state", /if \(!releases\.length\) \{[\s\S]{0,200}Nothing published yet — queue a document above/.test(e) && !/if \(!releases\.length\) return;/.test(e));
+  ok("the queue scrolls in its own region so history can take the remaining space", /var scroller = h\("div", "publish-queue__body"\);/.test(e) && /\.publish-queue__body \{ flex: 0 1 auto; min-height: 0; overflow-y: auto; \}/.test(css) && /\.publish-history \{ flex: 1 1 auto; min-height: 0;/.test(css));
+  ok("the pane itself stopped scrolling as one strip", /\.publish-stage__queue \{[^}]*overflow: hidden;/.test(css));
+  ok("a release row states count, preset, destination and outcome", /publish-release__count", s\.docLabel/.test(e) && /publish-release__preset", s\.presetLabel/.test(e) && /publish-release__dest", s\.destinationLabel/.test(e) && /U\.Badge\(\{ tone: s\.ok \? "success" : "danger", quiet: true, children: s\.outcome \}\)/.test(e));
+  // the outcome pill is the CANONICAL DS Badge, not a one-off — and the quiet variant it needs was
+  // added to the DS (contract + kit + css) rather than improvised at the call site.
+  ok("the outcome pill is the canonical Badge, and its quiet variant lives in the DS", /quiet\?: boolean;/.test(src("design-system/components/structure/Badge.d.ts")) && /badgeClass: function \(tone, size, quiet\)/.test(src("src/ui-kit.js")) && /\.vds-badge--success\.vds-badge--quiet \{ background: var\(--green-tint\); color: var\(--success\); \}/.test(css));
+  ok("the publish rule contributes layout only, never the pill's look", /\.publish-release__outcome \{ flex: 0 0 auto; margin-left: auto; \}/.test(css));
+
+  // --- last published per picker row ---
+  // uio-F04 moved this onto the row's shared meta line, beside the fact badges.
+  ok("each picker row carries its last-published line", /meta\.appendChild\(h\("span", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
+  ok("never-published reads as a plain fact, not a warning", /if \(!last\) return "Never published";/.test(e));
+  ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));
+})();
+
+// uio-P-C07 (PUB-05): a queue row said nothing about where its package goes or what it is called
+// until "Done · <name>" appeared after the run. Every row now states its destination and, before
+// the run, the exact filename it will write — taken from the exporter's own naming function so the
+// promise and the written file cannot disagree.
+section("uio-P-C07: destination chip + resolved filename on every queue row");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css"), ex = src("src/export.js");
+  var m = e.match(/\/\* @publish-dest-start \*\/([\s\S]*?)\/\* @publish-dest-end \*\//);
+  if (!m) { ok("locate @publish-dest fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { publishRowDestSummary: publishRowDestSummary, commonPrefix: commonPrefix, publishRowFilename: publishRowFilename, publishShowsFilename: publishShowsFilename };")();
+
+  // --- the collapsed chip speaks for every output of the row (T3 made a row several outputs) ---
+  var dl = { kind: "download", label: "Downloads", chip: "Downloads", handleKey: null, hint: "No folder set." };
+  var fld = { kind: "root", label: "Drops", chip: "Drops/Acme/course/", handleKey: "publish:root:prodA", hint: "Inherits." };
+  var sib = { kind: "root", label: "Drops", chip: "Drops/Acme/course-coastal/", handleKey: "publish:root:prodA", hint: "Inherits." };
+  var other = { kind: "row", label: "Elsewhere", chip: "Elsewhere/", handleKey: "publish:row:D1::", hint: "Own folder." };
+  ok("a single output states its own destination", g.publishRowDestSummary([fld]).label === "Drops/Acme/course/" && g.publishRowDestSummary([fld]).mixed === false);
+  ok("outputs that agree state the one destination they share", g.publishRowDestSummary([fld, fld]).label === "Drops/Acme/course/" && g.publishRowDestSummary([fld, fld]).mixed === false);
+  ok("the download fallback shows its plain label, not a path", g.publishRowDestSummary([dl]).label === "Downloads" && g.publishRowDestSummary([dl]).kind === "download");
+  // outputs under one inherited root nest into their own subfolders. Naming the flagship's folder
+  // would be true of one and false of the rest, so the chip states only the part they all share --
+  // cut at a folder boundary, so it never states half a folder name.
+  ok("outputs sharing a picked folder state the shared part, ending in an ellipsis", (function () {
+    var s = g.publishRowDestSummary([fld, sib]); return s.label === "Drops/Acme/…" && s.mixed === false && s.kind === "root";
+  })());
+  ok("the shared part is cut at a folder boundary, never mid-name", g.publishRowDestSummary([fld, sib]).label.indexOf("course") === -1);
+  ok("and it says the outputs subdivide below it", /own subfolder/i.test(g.publishRowDestSummary([fld, sib]).why));
+  // the honesty rule: naming one folder for a row whose outputs went to two PICKED folders would be
+  // a false statement, so the chip declines to name any and hands over to its own popover.
+  ok("outputs from different picked folders say Mixed rather than naming one and implying the rest", (function () {
+    var s = g.publishRowDestSummary([fld, other]); return s.label === "Mixed" && s.mixed === true && s.kind === "mixed";
+  })());
+  ok("Mixed carries a reason that routes the author onward", /different folders/i.test(g.publishRowDestSummary([fld, other]).why));
+  ok("a queued download beside a folder is Mixed too, not silently one of them", g.publishRowDestSummary([dl, fld]).mixed === true);
+  ok("no outputs degrades to null, not a throw", g.publishRowDestSummary(null) === null && g.publishRowDestSummary([]) === null && g.publishRowDestSummary([null]) === null);
+
+  // --- the filename comes from the exporter, never rebuilt here ---
+  var seen = null, namer = function (o) { seen = o; return "ACME_V003_coastal_SCORM.zip"; };
+  ok("the row asks the exporter to name the package", g.publishRowFilename(namer, { code: "ACME", version: "V003" }) === "ACME_V003_coastal_SCORM.zip" && seen.code === "ACME");
+  ok("no exporter means the row states nothing rather than inventing a name", g.publishRowFilename(null, { code: "ACME" }) === "" && g.publishRowFilename(undefined, {}) === "");
+  ok("a namer that throws is swallowed into silence, not a broken pane", g.publishRowFilename(function () { throw new Error("boom"); }, {}) === "");
+  ok("no options means no name", g.publishRowFilename(namer, null) === "");
+
+  // --- the promise is only shown while it is still a promise ---
+  ok("the filename shows before the run (pending and running)", g.publishShowsFilename({ status: "pending" }) === true && g.publishShowsFilename({ status: "running" }) === true);
+  ok("and not after it, where the status carries the real outcome", g.publishShowsFilename({ status: "done" }) === false && g.publishShowsFilename({ status: "error" }) === false && g.publishShowsFilename(null) === false);
+
+  // --- wiring: one naming function, one options object ---
+  // The whole point of the ticket. If the preview called its own string-builder, the row could
+  // promise one name and the run write another; both go through SCORMExport.packageName here.
+  ok("the row previews with the exporter's own packageName", /publishRowFilename\(window\.SCORMExport && window\.SCORMExport\.packageName, publishOptionsForRow\(r, outs\[0\]\)\)/.test(e));
+  ok("the run builds with the SAME options the preview was named from", /var opts = publishOptionsForRow\(row, variant\);[\s\S]{0,120}SX\.buildPackage\(opts\)/.test(e));
+  ok("those options name the ROW's document, not whichever one is open", /var d = registry\[row\.docId\], code = d && d\.meta && d\.meta\.code;\s*\n\s*if \(code\) out\.code = code;/.test(e));
+  ok("packageName honours that code and still falls back to the open document", /var parts = \[fileSafe\(\(opts && opts\.code\) \|\| docCode\(\)\)\];/.test(ex));
+  ok("packageName is exported, so nothing has to reimplement it", /packageName: packageName/.test(ex));
+
+  // --- chrome: the pane's existing chip, now a real control because it has something to open ---
+  ok("the destination reuses publish-chip rather than a second chrome", /h\("button", "publish-chip publish-chip--dest", summary\.label\)/.test(e));
+  ok("it opens the destination popover rather than sitting inert", /dchip\.addEventListener\("click", function \(\) \{ openPublishDestPopover\(dchip, r\.id\); \}\)/.test(e));
+  ok("it still says what it means, and that it can be changed", /dchip\.title = "Destination · " \+ summary\.why \+ " Click to set a folder\.";/.test(e));
+  ok("a running row's destination is not clickable mid-write", /if \(r\.status !== "running"\) dchip\.addEventListener/.test(e));
+  ok("the filename takes the slack and the status pins right, like the history rows", /\.publish-queuerow__file \{ flex: 1 1 auto; min-width: 0;[^}]*text-overflow: ellipsis; \}/.test(css) && /\.publish-queuerow__status \{[^}]*margin-left: auto;/.test(css));
+})();
+
+// uio-P-C08 (PUB-15, Conservative): variants as outputs, surfaced on the Publish rows. The static
+// outputs badge becomes the variant roll-up chip -- same F04 fact, now openable to a popover
+// listing every output. The roll-up is a pure derivation over f04OutputsFact; it never expands
+// variants itself, so the chip and the queue's publish run read the same expansion.
+section("uio-P-C08: variant roll-up chip + variant popover on Publish");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  var fm = e.match(/\/\* @f04-start \*\/([\s\S]*?)\/\* @f04-end \*\//);
+  var vm = e.match(/\/\* @publish-varpop-start \*\/([\s\S]*?)\/\* @publish-varpop-end \*\//);
+  if (!fm || !vm) { ok("locate @f04 + @publish-varpop fences", false); return; }
+  var f04 = new Function(fm[1] + "\nreturn { outputsFact: f04OutputsFact };")();
+  var g = new Function(vm[1] + "\nreturn { rollup: publishVariantRollup };")();
+
+  // --- count derivation: straight from the F04 fact, never a second expansion ---
+  var fact = f04.outputsFact(["Compact", "Onshore"]);
+  var roll = g.rollup(fact);
+  ok("a doc with 2 variants rolls up to 3 outputs", roll && roll.count === 3);
+  ok("the chip label is the F04 phrasing verbatim, not a reworded copy", roll.label === fact.label && roll.title === fact.title);
+  ok("the popover rows are the fact's names, flagship first", roll.rows.length === 3 && roll.rows[0].name === "Flagship" && roll.rows[0].flagship === true && roll.rows[1].name === "Compact" && roll.rows[1].flagship === false && roll.rows[2].name === "Onshore");
+
+  // --- the zero-variant case: no chip at all ---
+  ok("a doc without variants rolls up to null (no chip)", g.rollup(f04.outputsFact([])) === null && g.rollup(f04.outputsFact(null)) === null);
+  ok("blank variant entries do not conjure outputs", g.rollup(f04.outputsFact(["", null])) === null);
+  ok("junk degrades to null, not a throw", g.rollup(null) === null && g.rollup({}) === null);
+  ok("one real variant is enough to earn the chip", g.rollup(f04.outputsFact(["Compact"])).count === 2);
+
+  // --- wiring: one chip builder, both Publish rows, the one popover machinery ---
+  ok("both Publish rows build the chip through the one builder", /publishVariantChip\(facts, "publish-pickrow__outputs"\)/.test(e) && /publishVariantChip\(qf, "publish-queuerow__outputs"\)/.test(e));
+  ok("the retired static outputs badge is gone from both rows (the Source strip's roll-up badge stays)", !/f04Badge\(facts\.outputs, "publish-pickrow__outputs"\)/.test(e) && !/f04Badge\(qf\.outputs/.test(e));
+  ok("the chip is the pane's publish-chip family, a real button", /var chip = h\("button", "publish-chip" \+ \(cls \? " " \+ cls : ""\), roll\.label\)/.test(e));
+  ok("the popover opens through openChromePop, the canonical anchored popover", /function publishVariantChip\(facts, cls\)[\s\S]{0,900}openChromePop\(chip,/.test(e));
+  ok("the storage dot opens through the SAME machinery, so there is one popover, not two", /function openStoragePopover\(anchor\) \{\s*\n\s*openChromePop\(anchor,/.test(e) && !/\.storage-pop \{/.test(css));
+  ok("the popover surface carries the DS elevation token", /\.chrome-pop \{[^}]*box-shadow: var\(--shadow-popover/.test(css));
+  // uio-F05: the popover no longer owns an Escape handler — it registers on the ONE layer stack,
+  // which closes the topmost layer only. Same behaviour, one implementation for all six surfaces.
+  ok("Esc closes the popover as the topmost layer", /pushLayer\("chrome-pop", closeChromePop\)/.test(e)
+    && /popLayer\("chrome-pop"\)/.test(e) && !/function _chromePopEsc/.test(e));
+})();
+
+// ---- uio-F05: the overlay layer stack (the spine's Esc contract) -----------------
+// Before this there were 25+ independent Escape handlers, ordered only by capture-phase and
+// stopPropagation. One keypress could close two surfaces, or the wrong one. The stack below is
+// the single owner: Escape closes the TOPMOST layer, last-in-first-out, and focus returns to
+// whatever opened it. Exercised against the REAL fenced source, with a stub document.
+section("uio-F05 overlay layer stack (Esc-LIFO)");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @f05-start \*\/([\s\S]*?)\/\* @f05-end \*\//);
+  if (!m) { ok("locate @f05 fence", false); return; }
+  // a document stub: records listener add/remove and carries a focusable activeElement
+  function makeDoc() {
+    return {
+      listeners: 0, activeElement: null, _nodes: [],
+      addEventListener: function () { this.listeners++; },
+      removeEventListener: function () { this.listeners--; },
+      contains: function (n) { return this._nodes.indexOf(n) !== -1; }
+    };
+  }
+  function boot(docStub) {
+    return new Function("document", m[1] +
+      "\nreturn { push: pushLayer, pop: popLayer, top: topLayer, esc: overlayEsc," +
+      " names: function () { return overlayLayers.map(function (l) { return l.name; }); } };")(docStub);
+  }
+  var d = makeDoc(), g = boot(d);
+  var closed = [];
+  function ev() { return { key: "Escape", _p: 0, _s: 0, preventDefault: function () { this._p++; }, stopPropagation: function () { this._s++; } }; }
+
+  ok("an empty stack has no top and listens for nothing", g.top() === null && d.listeners === 0);
+
+  g.push("settings", function () { closed.push("settings"); });
+  ok("the first push starts listening for Escape exactly once", d.listeners === 1);
+  g.push("modal", function () { closed.push("modal"); });
+  ok("a second push does NOT add a second listener (one owner, always)", d.listeners === 1);
+  ok("the topmost layer is the last pushed", g.top().name === "modal");
+
+  // the core contract: one Escape closes ONE layer, the topmost
+  var e1 = ev(); g.esc(e1);
+  ok("Escape closes the topmost layer only", closed.length === 1 && closed[0] === "modal");
+  ok("and it swallows the keypress so no other handler double-acts", e1._p === 1 && e1._s === 1);
+  // the real close callback pops; simulate what closeSettingsModal/modal.close do
+  g.pop("modal");
+  ok("the sheet underneath is still standing after the confirm above it closed", g.names().join() === "settings");
+
+  var e2 = ev(); g.esc(e2); g.pop("settings");
+  ok("the next Escape then closes the sheet", closed.join() === "modal,settings");
+  ok("the last pop stops listening again, leaving no global handler behind", d.listeners === 0);
+  ok("Escape on an empty stack is inert (no throw, nothing swallowed)", (function () {
+    var e3 = ev(); g.esc(e3); return e3._p === 0 && e3._s === 0;
+  })());
+
+  // a non-Escape key is never the stack's business
+  var d2 = makeDoc(), g2 = boot(d2);
+  g2.push("menu", function () { closed.push("menu"); });
+  var enter = { key: "Enter", _p: 0, _s: 0, preventDefault: function () { this._p++; }, stopPropagation: function () { this._s++; } };
+  g2.esc(enter);
+  ok("Enter passes straight through — the modal's own submit still works", enter._p === 0 && g2.top().name === "menu");
+
+  // popping by name removes the TOPMOST of that name, so a surface may legitimately stack twice
+  var d3 = makeDoc(), g3 = boot(d3);
+  g3.push("chrome-pop", function () {}); g3.push("modal", function () {}); g3.push("chrome-pop", function () {});
+  g3.pop("chrome-pop");
+  ok("popping by name takes the topmost of that name, not the oldest", g3.names().join() === "chrome-pop,modal");
+  ok("popping a name that is not on the stack is a no-op, not a corruption", g3.pop("nope") === null && g3.names().length === 2);
+
+  // focus return: the element that opened the layer gets focus back on pop
+  var d4 = makeDoc(), g4 = boot(d4);
+  var trigger = { focused: 0, focus: function () { this.focused++; } };
+  d4._nodes.push(trigger); d4.activeElement = trigger;
+  g4.push("settings", function () {});
+  d4.activeElement = null;            // focus moved into the sheet
+  g4.pop("settings");
+  ok("focus returns to whatever opened the layer", trigger.focused === 1);
+  // a trigger removed from the DOM while the layer was open must not be focused
+  var d5 = makeDoc(), g5 = boot(d5);
+  var gone = { focused: 0, focus: function () { this.focused++; } };
+  d5.activeElement = gone;            // never added to _nodes -> document.contains() is false
+  g5.push("settings", function () {});
+  g5.pop("settings");
+  ok("a trigger that left the DOM meanwhile is not focused", gone.focused === 0);
+
+  // --- the surfaces that were migrated onto the stack -------------------------------
+  ok("the settings sheet, the popover, the menu and the modal all register on the stack",
+    /pushLayer\("settings", closeSettingsModal\)/.test(e) && /pushLayer\("chrome-pop", closeChromePop\)/.test(e)
+    && /pushLayer\("ctx-menu", closeCtxMenu\)/.test(e) && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(e));
+  ok("no migrated surface keeps a private Escape handler", !/function _chromePopEsc/.test(e) && !/function settingsEsc/.test(e));
+  ok("the stack is exposed for the browser check", /window\.__overlayLayers = \{/.test(e));
+})();
+
+// ---- uio-O-W2 (OVL-13): menus never render an empty section ----------------------
+// "Variants (none yet)" was a greyed heading followed by a "+ New variant…" row in a fourth
+// create-affordance style, spending a third of the menu on a feature the block does not use.
+section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/(function pruneEmptyMenuSections\(items\)[\s\S]*?\n  \})/);
+  if (!m) { ok("locate pruneEmptyMenuSections", false); return; }
+  var prune = new Function(m[1] + "; return pruneEmptyMenuSections;")();
+  function labels(list) { return prune(list).map(function (x) { return x.head ? "#" + x.head : (x.sep ? "-" : x.label); }).join("|"); }
+
+  ok("a heading with nothing under it is dropped", labels([{ head: "Variants" }]) === "");
+  ok("a heading with an entry survives", labels([{ head: "Variants" }, { label: "Hide in A" }]) === "#Variants|Hide in A");
+  ok("an empty section between two full ones goes, and the rest keep their order",
+    labels([{ label: "Copy" }, { head: "Variants" }, { head: "Versions" }, { label: "Hide in v1" }]) === "Copy|#Versions|Hide in v1");
+  ok("a separator is furniture, not an entry, so a heading with only a rule still goes",
+    labels([{ head: "Variants" }, { sep: true }, { head: "Versions" }, { label: "Hide in v1" }]) === "#Versions|Hide in v1");
+  // A separator does NOT end a section — in a flat menu list the entries after a heading belong
+  // to it until the next heading. So "empty" means genuinely nothing actionable before the next
+  // heading or the end, and the rules that framed the dropped heading go with it.
+  ok("the rules that framed a dropped section go with it, leaving no double or trailing rule",
+    labels([{ label: "Copy" }, { sep: true }, { head: "Variants" }, { sep: true }]) === "Copy");
+  ok("no leading rule", labels([{ sep: true }, { label: "Copy" }]) === "Copy");
+  ok("no trailing rule", labels([{ label: "Copy" }, { sep: true }]) === "Copy");
+  ok("no rule directly under a heading", labels([{ head: "Variants" }, { sep: true }, { label: "Hide in A" }]) === "#Variants|Hide in A");
+  ok("an untouched menu comes back untouched", labels([{ label: "Copy" }, { sep: true }, { label: "Delete" }]) === "Copy|-|Delete");
+  ok("it survives an empty list", prune([]).length === 0 && prune(null).length === 0);
+
+  // Wiring.
+  ok("every menu is pruned on the way to the DOM", /var m = buildCtxMenuEl\(pruneEmptyMenuSections\(items\)\);/.test(e));
+  ok("a submenu renders a nested panel with a chevron, pruned the same way",
+    /if \(it\.submenu && it\.submenu\.length\) \{[\s\S]{0,400}buildCtxMenuEl\(pruneEmptyMenuSections\(it\.submenu\), true\)/.test(e));
+  ok("a submenu flips left when it would run off the window, measured not guessed",
+    /var r = sub\.getBoundingClientRect\(\);\s*\n\s*if \(r\.right > window\.innerWidth - 8\) sub\.classList\.add\("is-flipped"\);/.test(e));
+  ok("the variant family is ONE row with a submenu, and New variant sits at its foot",
+    /items\.push\(\{ label: "Variants", submenu: variantSub \}\);/.test(e)
+    && /variantSub\.push\(\{ label: "New variant…"/.test(e));
+  ok("with no variants the whole family is one ordinary row, not a heading saying it is empty",
+    /\} else \{\s*\n\s*items\.push\(\{ label: "Add variant…", onClick: function \(\) \{ newVariantPrompt\(\); \} \}\);/.test(e)
+    && !/head: vs\.length \? "Variants"/.test(e));
+  ok("software versions and variant images collapse the same way",
+    /items\.push\(\{ label: "Software versions", submenu:/.test(e) && /items\.push\(\{ label: "Variant images", submenu: imgSub \}\);/.test(e));
+  ok("the '+' create prefix is gone everywhere — menu verbs are plain", !/\+ New variant/.test(e));
+  ok("the DS carries the submenu entry and the never-empty rule",
+    /submenu\?: MenuEntry\[\];/.test(src("design-system/components/overlays/ContextMenu.d.ts"))
+    && /NEVER renders an empty section/.test(src("design-system/components/overlays/ContextMenu.d.ts")));
+})();
+
+// ---- uio-O-W2 (OVL-08): the switch and the disclosure stop fighting ---------------
+// Being OFF used to force `is-collapsed` whatever the author had twirled open, turning it ON
+// auto-opened the section, and an off section never built its body at all -- so it showed
+// nothing of the configuration it still held.
+section("uio-O-W2 section switch vs disclosure (OVL-08)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css");
+  // Retargeted by OVL-07: these behaviours now live on the ONE section (`.insp-section`),
+  // not on the second twirl chrome they were first built in — the claims are unchanged.
+  ok("the chevron alone decides collapsed, so the switch no longer folds the section",
+    /var collapsed = keyed[\s\S]{0,400}var enabled = opts\.toggle \? !!opts\.toggle\.get\(\) : true;/.test(e)
+    && /"insp-section"[\s\S]{0,200}\(collapsed \? " is-collapsed" : ""\)[\s\S]{0,80}\(enabled \? "" : " is-inactive"\)/.test(e));
+  ok("turning a section ON no longer opens it", !/if \(v\) openSections\[key\] = true;/.test(e)
+    && /opts\.toggle\.set\(v\);\s+\/\/ the switch NEVER moves the disclosure/.test(e));
+  ok("an OFF section still builds its rows, so they stay reachable",
+    /_sectionDepth\+\+;\s*\n\s*try \{ buildFn\(body\); \} catch \(e\) \{\}/.test(e)
+    && !/if \(open\) \{ var body/.test(e));
+  ok("off dims but never disables — no pointer-events trap on an inactive section",
+    /\.insp-section\.is-inactive > \.insp-section__body \{ opacity: 0\.6; \}/.test(ecss)
+    && !/\.insp-section\.is-inactive[^{]*\{[^}]*pointer-events: none/.test(ecss));
+  ok("the summary shows only while collapsed", /\.insp-section:not\(\.is-collapsed\) > \.insp-section__head \.insp-section__summary \{ display: none; \}/.test(ecss));
+  ok("the summary truncates rather than wrapping the header", /\.insp-section__summary \{[\s\S]{0,220}text-overflow: ellipsis;/.test(ecss));
+  ok("the DS carries the switch/summary contract and the independence rule",
+    /enabled\?: boolean;/.test(src("design-system/components/panels/PanelSection.d.ts"))
+    && /summary\?: React\.ReactNode;/.test(src("design-system/components/panels/PanelSection.d.ts"))
+    && /The switch and the chevron are independent/.test(src("design-system/readme.md")));
+
+  // The summary itself is pure, so it runs here as real source.
+  var m = e.match(/(function headerFooterSummary\(cfg, isHeader\)[\s\S]*?\n  \})/);
+  if (!m) { ok("locate headerFooterSummary", false); return; }
+  var summary = new Function(m[1] + "; return headerFooterSummary;")();
+  var withSwitch = e.match(/(function sectionSummary\(opts, enabled\)[\s\S]*?\n  \})/);
+  var sectionSummary = withSwitch ? new Function(withSwitch[1] + "; return sectionSummary;")() : null;
+
+  ok("an untouched section says nothing rather than reciting defaults", summary({}, true) === "");
+  ok("a header names what is actually set", summary({ align: "center", border: true, logo: "asset:1" }, true) === "centred, bottom rule, logo");
+  ok("the same rule reads correctly for a footer", summary({ align: "left", border: true, hideText: true }, false) === "left, top rule, text hidden");
+  ok("header-only facts never leak into a footer summary", summary({ logo: "asset:1", pinned: true }, false) === "");
+  ok("it survives a missing config rather than throwing", summary(null, true) === "");
+  ok("with a switch the line ALWAYS leads with On/Off, so folded never reads as unknown",
+    sectionSummary({ toggle: {}, summary: function () { return "centred"; } }, false) === "Off · centred"
+    && sectionSummary({ toggle: {} }, true) === "On");
+  ok("without a switch there is no On/Off prefix", sectionSummary({ summary: function () { return "centred"; } }, true) === "centred");
+  ok("a summary that throws costs the header nothing", sectionSummary({ summary: function () { throw new Error("x"); } }, true) === "");
+})();
+
+// ---- uio-O-W2 (OVL-07): one notation, two levels ----------------------------------
+// Header & Footer carried three header styles at once -- a triangle disclosure, a second
+// nested twirl, and a plain bold heading with no affordance -- and the same glyph meant
+// "section" in one panel and "sub-section" in another. Every group of rows is now the ONE
+// section, and sections nest one deep: a group that wants a third level is promoted.
+section("uio-O-W2 one section notation, two levels (OVL-07)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css"), ex = src("src/export.js");
+
+  // --- one notation: the rivals are gone, and the survivors are adapters, not chromes ---
+  ok("the plain bold heading is gone from the source", !/function sub\(title\)/.test(e) && !/[^_.]sub\("/.test(e));
+  ok("its class is gone from the stylesheet too, so it cannot come back by hand",
+    ecss.indexOf(".insp-sub") === -1 && ecss.indexOf(".subdisc") === -1 && ecss.indexOf(".disc__head") === -1);
+  ok("panelSection is an adapter over the one section", /function panelSection\(host, title, opts\)[\s\S]{0,400}sectionGroup\(null, title/.test(e));
+  ok("subDisclosure is an adapter that only adds a switch + summary",
+    /function subDisclosure\(key, title, buildBody, opts\)[\s\S]{0,400}return sectionGroup\(null, title, buildBody, \{[\s\S]{0,220}toggle: opts\.toggle/.test(e));
+  ok("disclosure is an adapter that only names its open-state key",
+    /function disclosure\(key, title, buildBody\) \{\s*\n\s*return sectionGroup\(null, title, buildBody, \{ key: key, defaultOpen: false \}\);/.test(e));
+  ok("the export dialog groups its rows the same way, not with its own header",
+    /function section\(title\) \{\s*\n\s*var sec = UI\.PanelSection\(\{ title: title \}\);/.test(ex) && ex.indexOf('"insp-sub"') === -1);
+  ok("one caret glyph, so 'this opens' looks the same everywhere",
+    /\.caret \{/.test(ecss) && ecss.indexOf(".disc__caret") === -1 && /details\[open\] \.caret/.test(ecss));
+
+  // --- two levels: the rule is computed, and the too-deep case is reported not dropped ---
+  var m = e.match(/\/\* @ovl07-start \*\/([\s\S]*?)\/\* @ovl07-end \*\//);
+  if (!m) { ok("locate the @ovl07 depth fence", false); return; }
+  var depthOf = new Function(m[1] + "; return sectionDepthOf;")();
+  ok("a section at the panel root is level 1", depthOf(0, 0).level === 1 && depthOf(0, 0).tooDeep === false);
+  ok("a section built inside another section's buildFn is level 2", depthOf(1, 0).level === 2 && depthOf(1, 0).tooDeep === false);
+  ok("appending into a body that is already nested is level 2 as well", depthOf(0, 1).level === 2 && depthOf(0, 1).tooDeep === false);
+  ok("the two signals overlap by one and are not double-counted", depthOf(1, 1).level === 2 && depthOf(1, 1).tooDeep === false);
+  ok("a third level is flagged, never a third style",
+    depthOf(2, 0).tooDeep === true && depthOf(0, 2).tooDeep === true && depthOf(1, 2).tooDeep === true);
+  ok("a flagged section is still drawn at level 2, so no rows are lost", depthOf(3, 2).level === 2);
+  ok("the offenders are published, so a probe can name them", /window\.__sectionDepth3 = \[\]/.test(e));
+  ok("level 2 is the same header, quieter and indented", /\.insp-section--l2 > \.insp-section__body \{[^}]*padding: 2px 0 6px 14px/.test(ecss)
+    && /\.insp-section--l2 > \.insp-section__head \.insp-section__title \{[^}]*font-size: var\(--text-xs\)/.test(ecss));
+
+  // --- promotion: the panes that used to go three deep now go two ---
+  ok("Header and Footer are sheet sections, not nests inside one",
+    /key: "header", title: "Header"/.test(e) && /key: "footer", title: "Footer"/.test(e)
+    && !/subDisclosure\("hf\.header"/.test(e));
+  ok("the nav's five groups are described once and drawn in both surfaces",
+    /function courseNavNests\(child\)/.test(e)
+    && /function courseNavControls\(child, host\) \{\s*\n\s*courseNavNests\(child\)\.forEach/.test(e)
+    && /function navSettingsSections\(\)[\s\S]{0,700}courseNavNests\(n\)\.map/.test(e));
+  ok("standing alone in the sheet a group says what it belongs to",
+    /sheetTitle: "Nav buttons"/.test(e) && /sheetTitle: "Nav sections"/.test(e));
+  ok("with no nav bar there is still one section that says so and links onward",
+    /key: "nav", title: "Learner nav"[\s\S]{0,300}value: "Not added"/.test(e));
+
+  // --- the mechanics a nested section needs ---
+  ok("a nested section stays in its parent's body, out of the panel's ordering buffer",
+    /var prevBuf = _sectionBuf; _sectionBuf = null;[\s\S]{0,200}_sectionBuf = prevBuf;/.test(e));
+  ok("a parent's roll-up counts what its nested sections resolved",
+    /if \(_scopeTally\) \[\]\.push\.apply\(_scopeTally, childTally\);/.test(e));
+  ok("the body is attached before it is built, so a nested section can see the chain",
+    /sec\.appendChild\(head\); sec\.appendChild\(body\);[\s\S]{0,420}try \{ buildFn\(body\); \}/.test(e));
+  ok("the DS states the rule the code is built to",
+    /One notation, two levels, never three/.test(src("design-system/readme.md"))
+    && /level\?: 1 \| 2;/.test(src("design-system/components/panels/PanelSection.d.ts")));
+})();
+
+// ---- uio-O-W1 (OVL-10): a scrolling body states where there is more ---------------
+// Content used to be sliced flat by the footer edge with nothing to distinguish "the end" from
+// "keep going". The classes go on a positioned WRAPPER, because a pseudo-element inside an
+// overflow box scrolls away with the content.
+section("uio-O-W1 scroll-edge affordance (OVL-10)");
+(function () {
+  var e = src("src/editor.js"), ecss = src("editor.css"), html = src("index.html");
+  ok("the frame is the positioned host, not the scroller itself",
+    /\.scroll-frame \{ position: relative;/.test(ecss)
+    && /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,220}opacity: 0;/.test(ecss));
+  ok("each edge is a hairline plus a short fade, shown only when that edge has more behind it",
+    /\.scroll-frame::before \{[\s\S]{0,160}border-top: 1px solid var\(--border-subtle\);/.test(ecss)
+    && /\.scroll-frame::after \{[\s\S]{0,160}border-bottom: 1px solid var\(--border-subtle\);/.test(ecss)
+    && /\.scroll-frame\.has-edge-top::before, \.scroll-frame\.has-edge-bottom::after \{ opacity: 1; \}/.test(ecss));
+  ok("the edge never eats a click", /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,200}pointer-events: none;/.test(ecss));
+  ok("both edges are measured from the scroll position, so neither shows at rest",
+    /frame\.classList\.toggle\("has-edge-top", scroller\.scrollTop > 1\);/.test(e)
+    && /frame\.classList\.toggle\("has-edge-bottom", slack - scroller\.scrollTop > 1\);/.test(e));
+  ok("wiring is idempotent, so a re-render re-measures without stacking listeners",
+    /if \(!scroller\.__scrollEdges\) \{\s*\n\s*scroller\.__scrollEdges = true;/.test(e));
+  // Folding a section open changes the CONTENT height without moving the scroller's own box,
+  // so a ResizeObserver alone never fires -- which is the one case the affordance exists for.
+  ok("folding a section open re-measures, coalesced to one layout read per frame",
+    /new MutationObserver\(function \(\) \{[\s\S]{0,320}requestAnimationFrame\(run\)[\s\S]{0,200}attributeFilter: \["class", "style", "hidden"\]/.test(e));
+  ok("it refuses to run without its frame rather than drawing edges on the scroller",
+    /if \(!frame \|\| !frame\.classList \|\| !frame\.classList\.contains\("scroll-frame"\)\) return null;/.test(e));
+  ok("the settings sheet body sits in a frame", /var frame = h\("div", "scroll-frame"\); frame\.appendChild\(content\);/.test(e));
+  ok("the inspector's scroller sits in a frame too", /<div class="scroll-frame" id="inspector-scroll-frame">/.test(html));
+  ok("both re-measure after their own re-render",
+    /wireScrollEdges\(settingsModal\.content\)/.test(e)
+    && /wireScrollEdges\(document\.querySelector\("\.panel--right \.panel-scroll"\)\)/.test(e));
+})();
+
+// ---- uio-F06: one index, one palette (Cmd-K) -------------------------------------
+// The ranking + the guide parser are pure, so they run here as REAL fenced source. The point of
+// the index is that a setting is findable by what you WANT ("confetti") rather than by Verso's
+// filing system ("Motion") -- so the alias path is tested as hard as the label path.
+section("uio-F06 command index (Cmd-K)");
+(function () {
+  var e = src("src/editor.js");
+  var m = e.match(/\/\* @f06-start \*\/([\s\S]*?)\/\* @f06-end \*\//);
+  if (!m) { ok("locate @f06 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { entries: commandEntries, score: scoreCommand, rank: rankCommands," +
+    " guide: parseGuideHeadings, aliases: SETTINGS_ALIASES, kinds: COMMAND_KINDS };")();
+
+  var SOURCES = {
+    settings: [
+      { tab: "project", key: "motion", title: "Motion" },
+      { tab: "project", key: "footer", title: "Footer" },
+      { tab: "project", key: "theme", title: "Theme" },
+      { tab: "system", key: "canvas", title: "Canvas" }
+    ],
+    actions: [{ id: "demo", label: "Preview in Demo mode", sub: "Output", keywords: ["play"] }],
+    guide: [{ id: "9-theming-design", title: "Theming & design", level: 2 }],
+    pages: [{ name: "Getting started", pi: 0 }],
+    blocks: [{ label: "Heading", sub: "Getting started", pi: 0, bi: 2 }]
+  };
+  var entries = g.entries(SOURCES);
+
+  ok("the index is ONE flat list over all five sources", entries.length === 8);
+  ok("a settings entry names the scope it lives in, not just its title",
+    entries[0].sub === "Project settings" && entries[3].sub === "System settings");
+  ok("a settings entry carries its intent words", entries[0].keywords.indexOf("confetti") !== -1);
+
+  // The audit's own examples: names that are not guessable from intent.
+  function firstLabel(q) { var r = g.rank(entries, q, 5); return r.length ? r[0].label : null; }
+  ok("'confetti' finds Motion", firstLabel("confetti") === "Motion");
+  ok("'disclaimer' finds Footer", firstLabel("disclaimer") === "Footer");
+  ok("'spellcheck' finds the Canvas section on the System scope", firstLabel("spellcheck") === "Canvas");
+
+  ok("an exact label still beats an alias for the same word", firstLabel("theme") === "Theme");
+  ok("the guide is in the same index as the settings", firstLabel("theming") === "Theming & design");
+  ok("a page is findable by name", firstLabel("getting") === "Getting started");
+  ok("an action is findable by a word that is not in its label", firstLabel("play") === "Preview in Demo mode");
+
+  // Ranking rules.
+  ok("a label PREFIX outranks a mid-label match",
+    g.score({ kind: "setting", label: "Motion", sub: "", keywords: [] }, "mo") >
+    g.score({ kind: "setting", label: "Reduced motion", sub: "", keywords: [] }, "mo"));
+  ok("every token must match, so one stray word drops the entry",
+    g.score({ kind: "setting", label: "Motion", sub: "Project settings", keywords: ["confetti"] }, "confetti nonsense") === -1);
+  ok("a two-word query still matches when both words are present",
+    g.score({ kind: "setting", label: "Custom fonts", sub: "Project settings", keywords: ["upload font"] }, "custom font") > 0);
+  ok("no match at all returns -1, so it is dropped rather than ranked last",
+    g.score({ kind: "page", label: "Getting started", sub: "Page", keywords: [] }, "zzz") === -1);
+  ok("an empty query returns everything in kind order, so the palette opens useful",
+    g.rank(entries, "", 0).length === entries.length && g.rank(entries, "")[0].kind === "action");
+  ok("kind is a TIE-BREAK only and never beats a better text match",
+    g.rank(entries, "motion")[0].kind === "setting");
+  ok("the limit is a shortlist, not a truncation of the ranking",
+    g.rank(entries, "", 2).length === 2 && g.rank(entries, "", 2)[0].kind === "action");
+
+  // The guide parser must agree with mdToHtml's slugs or a guide result scrolls nowhere.
+  var md = [
+    "# Verso", "", "## 1. Quick start", "text", "", "### Open a course", "more",
+    "", "```", "## not a heading, this is a code sample", "```", "", "## 1. Quick start", "dup"
+  ].join("\n");
+  var heads = g.guide(md);
+  ok("only h2/h3 are indexed (the h1 title is the document, not a section)", heads.length === 3);
+  ok("a heading inside a fenced code block is not indexed", heads.map(function (x) { return x.title; }).indexOf("not a heading, this is a code sample") === -1);
+  ok("the leading section number is filing, not meaning, so the result reads clean", heads[0].title === "Quick start");
+  ok("the slug KEEPS the number, because that is what mdToHtml emits", heads[0].id === "1-quick-start");
+  ok("a repeated heading gets the same -2 suffix mdToHtml would give it", heads[2].id === "1-quick-start-2");
+  ok("the level is carried so the palette could group by depth later", heads[1].level === 3);
+})();
+
+// ---- uio-F06: the palette + the keyboard contract --------------------------------
+section("uio-F06 palette wiring + keyboard contract");
+(function () {
+  var e = src("src/editor.js");
+  ok("Cmd-K opens the one palette", /meta && \(e\.key === "k" \|\| e\.key === "K"\)[\s\S]{0,120}openQuickJump\(\)/.test(e));
+  ok("Cmd-, opens Settings and Alt+Cmd-, opens the selection's settings",
+    /meta && e\.key === ","[\s\S]{0,600}if \(e\.altKey\) openSelectionSettings\(\); else openSettingsModal\(\);/.test(e));
+  ok("the selection's settings ARE the inspector, not a second surface",
+    /function openSelectionSettings\(\)[\s\S]{0,500}closeSettingsModal\(\)[\s\S]{0,400}getElementById\("inspector"\)/.test(e));
+  ok("and it lands on the inspector's first control, not its tab strip",
+    /var body = document\.getElementById\("inspector"\);[\s\S]{0,200}body\.querySelector\('input:not\(\[type="hidden"\]\), select, button, \[tabindex="0"\]'\)/.test(e));
+  ok("the palette draws from the one index, not its own page list",
+    /var entries = commandEntries\(commandSources\(__guideIndexCache\)\);/.test(e)
+    && /filtered = rankCommands\(entries, "", PALETTE_LIMIT\)/.test(e));
+  ok("the palette joins the layer stack instead of owning Escape",
+    /pushLayer\("palette", close\)/.test(e) && /popLayer\("palette"\)/.test(e)
+    && !/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); close\(\); \}\s*\n\s*else if \(e\.key === "ArrowDown"\)/.test(e));
+  ok("a result routes by kind, and a settings result opens its named section",
+    /function runCommandEntry\(entry\)[\s\S]{0,200}openSettingsSection\(entry\.ref\.tab, entry\.ref\.key\)/.test(e));
+  ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(e));
+  ok("the guide index is fetched once and cached, and degrades to no guide results",
+    /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(e));
+  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(e));
+  ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(e));
+  // DS first, per the gate: the canonical set had no palette, so it was added there before it
+  // was built here — and the spine settles that it is navigation, not a seventh presentation.
+  var ds = src("design-system/components/overlays/CommandPalette.d.ts");
+  ok("the palette has a DS contract", /export function CommandPalette/.test(ds) && /kind: "setting" \| "action" \| "guide" \| "page" \| "block"/.test(ds));
+  ok("the DS states it is navigation, not a seventh presentation", /NOT a seventh presentation/.test(ds));
+  ok("the spine names the palette and its index", /not a seventh presentation/.test(src("design-system/readme.md"))
+    && /components\/overlays\/CommandPalette/.test(src("design-system/readme.md")));
+})();
+
+// ---- uio-F05: the escalation route out of the narrow surfaces --------------------
+section("uio-F05 escalation links (popover/menu -> sheet)");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("there is ONE escalation control, not one per surface", /function escalateLink\(spec\)/.test(e)
+    && (e.match(/function escalateLink/g) || []).length === 1);
+  ok("the popover takes it as an option and appends it after its own rows", /if \(opts && opts\.escalate\) pop\.appendChild\(escalateLink\(opts\.escalate\)\);/.test(e));
+  ok("the menu takes it too, after a separator, so verbs and the route never blur together", /if \(opts && opts\.escalate\) \{[\s\S]{0,300}items = items\.concat\(\[\{ sep: true \}/.test(e));
+  ok("it routes to a NAMED section of the sheet, never just 'open Settings'", /openSettingsSection\(spec\.tab \|\| "project", spec\.section \|\| null\)/.test(e));
+  ok("the storage popover uses it for real (a route, not a dead end)", /escalate: \{ label: "Backup settings", tab: "project", section: "backup" \}/.test(e));
+  ok("it reads as a quiet link, never a commit button", /\.chrome-pop__escalate \{[\s\S]{0,240}color: var\(--accent\)/.test(css)
+    && /\.chrome-pop__escalate \{[\s\S]{0,240}background: transparent/.test(css));
+})();
+
+// ---- uio-F03: scope + inheritance model (the five-rung ladder) -------------------
+// The UI spine's ladder System -> Product -> Course -> Page -> Block as ONE primitive with
+// one visual language. The resolver is pure and PROPERTY-AGNOSTIC by contract: it takes the
+// property as an argument, never inspects it, and never assumes the value is a style value.
+// The last block below proves that by resolving a NON-setting axis (a neutral three-level
+// classification with a "most restrictive wins" chooser) through the very same resolver —
+// which is how uio-F07's export-control classification becomes an ADDITION, not a second
+// inheritance path.
+section("uio-F03 scope + inheritance model");
+(function () {
+  var e = src("src/editor.js");
+  var css = src("editor.css");
+  var tokens = src("design-system/tokens/spacing.css");
+  var ds = src("design-system/readme.md");
+  var dts = src("design-system/components/panels/PanelSection.d.ts");
+  var m = e.match(/\/\* @f03-start \*\/([\s\S]*?)\/\* @f03-end \*\//);
+  if (!m) { ok("locate @f03 fence", false); return; }
+  var g = new Function(m[1] +
+    "\nreturn { SCOPE_LADDER: SCOPE_LADDER, NOT_SET: NOT_SET, scopeRung: scopeRung, scopeChain: scopeChain," +
+    " resolveScoped: resolveScoped, resetPlan: resetPlan, resetTooltip: resetTooltip," +
+    " inheritedTooltip: inheritedTooltip, overrideCount: overrideCount, rollupLabel: rollupLabel };")();
+  var NOT_SET = g.NOT_SET;
+
+  ok("the ladder is the spine's five rungs, in order", g.SCOPE_LADDER.join(">") === "system>product>course>page>block");
+
+  // --- a fixture ladder: every rung is a plain bag, so one property can be set anywhere ---
+  function ladder(system, product, course, page, block) {
+    return g.scopeChain([
+      g.scopeRung("system", system || {}), g.scopeRung("product", product || {}),
+      g.scopeRung("course", course || {}), g.scopeRung("page", page || {}),
+      g.scopeRung("block", block || {})
+    ]);
+  }
+  // Resolution at each rung: the deepest rung that sets it wins, and names itself.
+  ok("system rung resolves when nothing below sets it", (function () {
+    var r = g.resolveScoped(ladder({ gap: 8 }), "gap");
+    return r.value === 8 && r.scope === "system" && r.inherited === true && r.overridden === false;
+  })());
+  ok("product beats system", g.resolveScoped(ladder({ gap: 8 }, { gap: 12 }), "gap").scope === "product");
+  ok("course beats product", g.resolveScoped(ladder({ gap: 8 }, { gap: 12 }, { gap: 16 }), "gap").scope === "course");
+  ok("page beats course", g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, { gap: 20 }), "gap").scope === "page");
+  ok("block beats page (and is its OWN value, so the row is overridden)", (function () {
+    var r = g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, { gap: 20 }, { gap: 24 }), "gap");
+    return r.value === 24 && r.scope === "block" && r.overridden === true && r.inherited === false;
+  })());
+  // The chain may be given in any order; it is sorted onto the ladder.
+  ok("rungs given out of order still resolve down the ladder", (function () {
+    var chain = g.scopeChain([g.scopeRung("block", {}), g.scopeRung("system", { gap: 8 }), g.scopeRung("course", { gap: 16 })]);
+    return g.resolveScoped(chain, "gap").scope === "course";
+  })());
+
+  // --- a value overridden at a MIDDLE rung, read from a deeper rung ---
+  var mid = ladder({ gap: 8 }, null, { gap: 16 }, {}, {});
+  var midRes = g.resolveScoped(mid, "gap", { at: "block" });
+  ok("a middle-rung override is INHERITED (not overridden) when read from the block", midRes.inherited === true && midRes.overridden === false);
+  ok("the inherited value names the scope it came from", midRes.value === 16 && midRes.scopeLabel === "Course");
+  ok("inherited copy states what will actually apply, never 'unset'", g.inheritedTooltip(midRes) === "Inherited from Course: 16");
+  ok("a page row cannot see a block's override (rungs below `at` are out of play)",
+    g.resolveScoped(ladder({ gap: 8 }, null, { gap: 16 }, {}, { gap: 99 }), "gap", { at: "page" }).value === 16);
+  // Falsy values are REAL values, not absence — the classic inheritance bug.
+  ok("false / 0 / \"\" are real values, only NOT_SET means unset", (function () {
+    var r = g.resolveScoped(ladder({ on: true }, null, { on: false }), "on", { at: "course" });
+    return r.value === false && r.overridden === true;
+  })());
+  ok("a rung that reads NOT_SET contributes nothing", (function () {
+    var chain = g.scopeChain([
+      { scope: "system", label: "System", read: function () { return 8; } },
+      { scope: "course", label: "Course", read: function () { return NOT_SET; } }
+    ]);
+    return g.resolveScoped(chain, "gap", { at: "course" }).scope === "system";
+  })());
+
+  // --- Reset restores the named PARENT value ---
+  var own = ladder({ gap: 8 }, null, { gap: 16 }, {}, { gap: 24 });
+  var ownRes = g.resolveScoped(own, "gap", { at: "block" });
+  var plan = g.resetPlan(own, "gap", "block");
+  ok("Reset targets the row's own rung and names what it restores", plan.clearAt === "block" && plan.restores.scope === "course" && plan.restores.value === 16);
+  ok("the Reset tooltip states the value AND the scope", g.resetTooltip(ownRes) === "Reset to the Course value: 16");
+  ok("clearing the own value really does return the named parent value", (function () {
+    var block = { gap: 24 };
+    var chain = ladder({ gap: 8 }, null, { gap: 16 }, {}, block);
+    delete block.gap;                                  // what the row's onReset does
+    var after = g.resolveScoped(chain, "gap", { at: "block" });
+    return after.value === 16 && after.scope === "course" && after.overridden === false;
+  })());
+  ok("an inherited row has nothing to reset", g.resetPlan(mid, "gap", "block") === null);
+  ok("with no rung above, Reset says it clears instead of naming a scope",
+    /^Reset — nothing is set above Block/.test(g.resetTooltip(g.resolveScoped(ladder(null, null, null, null, { gap: 24 }), "gap"))));
+
+  // --- the section roll-up count ---
+  ok("the roll-up counts only rows overridden at their own rung", g.overrideCount([ownRes, midRes, ownRes]) === 2);
+  ok("the roll-up reads '3 overridden'", g.rollupLabel(3) === "3 overridden");
+  ok("no overrides means no roll-up text at all", g.rollupLabel(0) === "" && g.overrideCount([]) === 0);
+
+  // --- PROOF: a NON-setting property rides the same resolver (the uio-F07 contract) ---
+  // A neutral, invented three-level classification. Nothing about it is a style or a theme
+  // value, its rungs store it under DIFFERENT keys, and it wants "most restrictive wins"
+  // rather than "deepest rung wins" — all of which the shared primitive absorbs.
+  var LEVELS = ["open", "limited", "closed"];
+  function mostRestrictive(a, b) { return LEVELS.indexOf(b) > LEVELS.indexOf(a) ? b : a; }
+  var product = { releaseLevel: "limited" };          // note: a different key per rung
+  var blockBag = { audienceLevel: "closed" };
+  var classChain = g.scopeChain([
+    { scope: "system", label: "System", read: function () { return "open"; } },
+    { scope: "product", label: "Product", read: function () { return product.releaseLevel; } },
+    { scope: "block", label: "Block", read: function (prop) { return Object.prototype.hasOwnProperty.call(blockBag, prop) ? blockBag[prop] : NOT_SET; } }
+  ]);
+  var cr = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+  ok("a non-setting axis resolves through the SAME resolver", cr.value === "closed" && cr.scope === "block" && cr.overridden === true);
+  ok("its Reset names the Product value it would restore", g.resetTooltip(cr) === "Reset to the Product value: limited");
+  ok("a block resolves the inherited classification when it sets none", (function () {
+    delete blockBag.audienceLevel;
+    var r = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+    return r.value === "limited" && r.scopeLabel === "Product" && r.inherited === true;
+  })());
+  ok("choose() lets a LESS restrictive block value lose to its parent (F07's rule)", (function () {
+    blockBag.audienceLevel = "open";                   // tries to loosen
+    var r = g.resolveScoped(classChain, "audienceLevel", { at: "block", choose: mostRestrictive });
+    delete blockBag.audienceLevel;
+    return r.value === "limited" && r.scope === "product";
+  })());
+  ok("the resolver never inspects the property key (no settings list in the pure core)",
+    !/gap|border|gateInteractions|theme|blockStyles/.test(m[1]));
+
+  // --- the wiring: the tail fills uio-F01's slot, no second row anatomy ---
+  ok("settingsRow fills its tail slot from `inherit` (no second row builder)", /var tailNode = opts\.tail \|\| \(opts\.inherit \? inheritanceTail\(opts\.inherit\) : null\)/.test(e));
+  ok("the tail renders inherited scope OR dot + Reset, nothing else", /function inheritanceTail\([\s\S]{0,900}?insp-row__override-dot[\s\S]{0,400}?insp-row__reset[\s\S]{0,400}?insp-row__scope/.test(e));
+  ok("switchRow can carry the tail without a divergent row", /function switchRow\(labelText, get, set, target, noHistory, rowOpts\)/.test(e));
+  ok("the section header counts its own overrides", /rollup\.textContent = rollupLabel\(overrides\)/.test(e));
+  ok("real rows carry the tail at three different rungs", (function () {
+    var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
+    var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
+    var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(e);
+    return atBlock && atPage && atCourse;
+  })());
+  ok("the retired inherit-as-an-option picker is gone (never show 'unset')", !/\["Inherit course default", "inherit"\]/.test(e));
+  // Reset is a live edit, not a commit control — the save contract stays intact.
+  ok("no Save/Apply/Cancel/Done arrived with the inheritance affordances", !/insp-row__(save|apply|cancel|done)/.test(e) && !/"insp-row__reset", "(Save|Apply|Cancel|Done)"/.test(e));
+
+  // --- the DS carries the tokens + the contract this is built to ---
+  ok("DS defines the one override-dot token", /--override-dot:\s*4px/.test(tokens));
+  ok("both the row dot and the section dot ride that one token",
+    /\.insp-row__override-dot \{[^}]*var\(--override-dot/.test(css) && /\.insp-section__dot \{[^}]*var\(--override-dot/.test(css));
+  ok("inherited scope reads in tertiary ink", /\.insp-row__scope \{[^}]*color: var\(--text-tertiary\)/.test(css));
+  ok("the section roll-up is styled and goes accent when non-empty", /\.insp-section__rollup \{/.test(css) && /\.insp-section\.has-overrides \.insp-section__rollup \{[^}]*var\(--accent\)/.test(css));
+  ok("the spine states the resolver is property-agnostic and forbids a parallel path", /property being\s*\n?resolved as an argument/.test(ds) && /parallel inheritance path is a hard fail/.test(ds));
+  ok("PanelSection declares the roll-up count", /overrideCount\?:\s*number/.test(dts));
+})();
+
+// uio-S-C01 (SRC-01/06/07): the mark list summarises marks instead of enumerating instances —
+// one row per mark carrying a count + its own heading path, one labelled filter carrying live
+// counts, and a fixed type palette that never collides with the accent (= selection/focus).
+section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var e = src("src/editor.js"), css = src("editor.css"), sm = src("src/source-marks.js"), tok = src("design-system/tokens/colors.css");
+
+  // --- pure: markPath states where a mark sits, as a heading path ---
+  var m = SD.create([
+    { type: "heading", level: 1, key: "h1", text: "Operation" },
+    { type: "paragraph", key: "pa", text: "Intro prose." },
+    { type: "heading", level: 2, key: "h2", text: "Detection overview" },
+    { type: "paragraph", key: "pb", text: "Detection range depends on emitter power." },
+    { type: "heading", level: 1, key: "h3", text: "Hardware" },
+    { type: "paragraph", key: "pc", text: "Pairing an RF sensor." }
+  ]);
+  var deep = SD.addMark(m, { type: "comment", anchor: { nodeKey: "pb", start: 0, len: 9 } });
+  var shallow = SD.addMark(m, { type: "link", anchor: { nodeKey: "pa", start: 0, len: 5 } });
+  var later = SD.addMark(m, { type: "alternate", anchor: { nodeKey: "pc", start: 0, len: 7 } });
+  ok("markPath walks up to BOTH ancestor headings", SD.markPath(m, deep) === "Operation · Detection overview");
+  ok("markPath under a chapter with no section names just the chapter", SD.markPath(m, shallow) === "Operation");
+  ok("markPath does not leak a PREVIOUS chapter's section", SD.markPath(m, later) === "Hardware");
+  ok("markPath is empty (not a crash) for an unanchored mark", SD.markPath(m, { anchor: { nodeKey: "gone" } }) === "" && SD.markPath(m, null) === "");
+
+  // --- pure: markCounts feeds the filter segments, so they can't disagree with the list ---
+  var c = SD.markCounts(m);
+  ok("markCounts totals every mark and each type", c.all === 3 && c.comment === 1 && c.link === 1 && c.alternate === 1);
+  ok("markCounts on an empty model is all zeroes", SD.markCounts(SD.create([])).all === 0);
+
+  // --- the filter is LABELLED and carries the live count (SRC-06: no unlabelled glyph tabs) ---
+  ok("filter options are labelled, not icons", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"[\s\S]{0,320}\{ key: "comment", label: "Notes"/.test(e) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
+  ok("each segment appends its live count from markCounts", /var counts = SD\.markCounts\(model\);[\s\S]{0,520}label: f\.label \+ " " \+ n/.test(e));
+
+  // --- SRC-01: one row per mark with a count; instances are NOT enumerated ---
+  ok("a linked row states its doc count instead of one row per instance", /out\.meta = n \? \("in " \+ n \+ " doc" \+ \(n === 1 \? "" : "s"\)\) : "not placed yet"/.test(e));
+  ok("a fully-resolved comment thread greys its dot", /if \(!open && thread\.length && !m\.broken\) \{ out\.dot = "grey"; out\.dotTitle = "Resolved"; \}/.test(e));
+  ok("every row carries its heading path", /var path = SD\.markPath\(model, m\);[\s\S]{0,120}source-drawer__row-where/.test(e) && /\.source-drawer__row-where \{/.test(css));
+  ok("clicking a linked row opens the card holding its destination list", /if \(m\.type === "link" && topic\) syncSourceWherePanel\(topic, m\.id\)/.test(e));
+  ok("whole-topic component placements roll up to ONE footnote, not a fake mark row", /h\("button", "source-marks__rollup", "Also placed whole, as a component, in " \+ ni/.test(e) && !/source-marks__rollup[\s\S]{0,80}sd-mark-/.test(e));
+  ok("the count + path ride the 11px chrome baseline, not the 10px badge size", /\.source-drawer__row-count \{[^}]*font-size: var\(--text-xs\)/.test(css) && /\.source-drawer__row-where \{[^}]*font-size: var\(--text-xs\)/.test(css));
+
+  // --- SRC-07: a fixed palette, defined in the DS, with no hue doing two jobs ---
+  ok("the mark palette lives in the DS tokens", /--mark-link:\s*var\(--accent\);[\s\S]{0,420}--mark-focus-wash:/.test(tok));
+  ok("alternate is the components purple, note is warning yellow", /--mark-alt:\s*var\(--component\);/.test(tok) && /--mark-note:\s*var\(--yellow-500\);/.test(tok));
+  ok("highlights read the palette tokens (no hardcoded mark hues)", /::highlight\(sd-link\) \{ background-color: var\(--mark-link-wash\)/.test(css) && /::highlight\(sd-alt\) \{ background-color: var\(--mark-alt-wash\)/.test(css) && /::highlight\(sd-comment\) \{ background-color: var\(--mark-note-wash\)/.test(css));
+  ok("the focus wash is hueless so it can't read as a fourth mark type", /::highlight\(sd-active\) \{ background-color: var\(--mark-focus-wash\); \}/.test(css));
+  ok("row type ink comes from the same palette", /\.sd-mark-link \{ color: var\(--mark-link\); \}/.test(css) && /\.sd-mark-alt \{ color: var\(--mark-alt\); \}/.test(css) && /\.sd-mark-comment \{ color: var\(--mark-note\); \}/.test(css));
+  ok("active/stale LAYER over the type tint instead of replacing it", /reg\[m\.type === "link" \? "link" : m\.type === "comment" \? "comment" : "alt"\]\.add\(r\);\s*\n\s*if \(m\.stale\) reg\.stale\.add\(r\);\s*\n\s*if \(m\.id === activeId\) reg\.active\.add\(r\);/.test(sm));
+})();
+
+// uio-P-C02 (PUB-03): the Publish button is the accent primary only when it has rows to run;
+// otherwise it's a quiet disabled secondary that states the reason on hover.
+section("uio-P-C02: Publish button — accent only when runnable, reason when disabled");
+(function () {
+  var e = src("src/editor.js");
+  ok("Publish is accent primary only when runnable, else secondary", /var canRun = !!pending && !__publishRunning;[\s\S]{0,200}variant: canRun \? "primary" : "secondary"/.test(e));
+  ok("the disabled Publish button carries the reason on hover", /if \(!canRun\) \{[\s\S]{0,160}pub\.title = __publishRunning \? "Publishing…" : "Nothing queued to publish/.test(e));
 })();
 
 // #207 edit-in-active-version ("dynamic flagship"): an active non-base version is the EDITABLE
@@ -8701,7 +11771,7 @@ section("ui-kit #10 DS control set");
   ok("runtime re-clamps open labels on resize", /addEventListener\("resize", function \(\) \{ qsAll\(bar, "\.course-tour__label\.is-open"\)\.forEach\(clampTourLabel\)/.test(run));
   // editor wiring: the Guided tour nest (enable toggle + page picker + per-marker copy)
   var ed = src("src/editor.js");
-  ok("editor adds the Guided tour sub-disclosure", /subDisclosure\("nav\.tour", "Guided tour"/.test(ed));
+  ok("editor adds the Guided tour section", /key: "nav\.tour", title: "Guided tour"/.test(ed));
   ok("editor tour toggle seeds child.tour on enable", /child\.tour\.on = true;[\s\S]{0,160}child\.tour\.page = /.test(ed));
   ok("editor tour nest has a page picker + per-marker copy", /function navTourNest\(child, host\)/.test(ed) && /Show on page/.test(ed) && /headerFooterTextRow\("Title", it, "title"/.test(ed));
 })();
@@ -8853,28 +11923,148 @@ section("#116 copy-editor shell");
   ok("exit while already closed is a no-op (no restore)", next({ open: false }, "exit").restoreCanvas === false);
   ok("null current defaults to closed", next(null, "toggle").open === true);
   // wiring: rail glyph opens, Close/Esc exits, boot wires it, hidden overlay markup exists
-  ok("wiring: rail glyph opens the view", /getElementById\("copy-editor-btn"\)[\s\S]{0,80}addEventListener\("click", enterCopyEditor\)/.test(t));
+  ok("side-rail-cleanup: the copy-editor rail button wiring is retired (Build/Read enters Read view)", t.indexOf('getElementById("copy-editor-btn")') === -1);
   ok("wiring: Close button exits", /getElementById\("copyedit-exit"\)[\s\S]{0,80}addEventListener\("click", exitCopyEditor\)/.test(t));
   ok("wiring: Escape exits when open", /if \(!copyEditorIsOpen\(\)\) return;[\s\S]{0,120}exitCopyEditor\(\)/.test(t));
   ok("wiring: exit re-focuses the active page (canvas restore)", /function exitCopyEditor\(\)[\s\S]{0,700}focusFrame\(p\); setActivePage\(p\); setSelection\("page", p\)/.test(t));
   ok("wiring: wireCopyEditor called at boot", t.indexOf("wireCopyEditor();") !== -1);
   var html = src("index.html");
   ok("markup: copy-editor overlay is hidden by default", /<div id="copy-editor" class="copyedit" hidden>/.test(html));
-  ok("markup: rail glyph present", /id="copy-editor-btn"[\s\S]{0,60}data-lucide="file-text"/.test(html));
+  ok("side-rail-cleanup: the copy-editor rail button is retired from markup", html.indexOf('id="copy-editor-btn"') === -1);
   ok("markup: empty doc container for slices 2-4", /<div class="copyedit__doc" id="copyedit-doc"><\/div>/.test(html));
   // pure-render invariant: the copy editor is Verso UI only — render.js / course.css untouched
   ok("invariant: no copy-editor leak into render.js", src("src/render.js").indexOf("copyedit") === -1 && src("src/render.js").indexOf("copy-editor") === -1);
   ok("invariant: no copy-editor leak into course.css", src("src/course.css").indexOf("copyedit") === -1);
 })();
 
+// chrome invariant (product-rail-editor-fb-chrome-invariant-defullscreen): the file picker
+// (.vbrowser) and the Read/copy view (.copyedit) must NOT go full-screen -- they are contained
+// below the global top bar (.toolbar, 44px) and right of the left rail (--rail-w), so the product
+// picker + stage rail stay visible + interactive. Demo/Preview stays inset:0 (sanctioned exception).
+section("chrome invariant: file picker + Read view are contained, not full-screen");
+(function () {
+  var css = src("editor.css");
+  function block(sel){ var m = css.match(new RegExp("\\" + sel + " \\{[^}]*\\}")); return m ? m[0] : ""; }
+  var copyedit = block(".copyedit"), vbrowser = block(".vbrowser");
+  // uio-E-C01: the overlays sit below the single 40px bar -> top resolves to --toolbar-height.
+  ok(".copyedit is contained (top --toolbar-height + left --rail-w), not inset:0", /position: fixed; top: var\(--toolbar-height, 40px\); left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(copyedit) && copyedit.indexOf("inset: 0") === -1);
+  ok(".vbrowser is contained (top --toolbar-height + left --rail-w), not inset:0", /position: fixed; top: var\(--toolbar-height, 40px\); left: var\(--rail-w, 44px\); right: 0; bottom: 0/.test(vbrowser) && vbrowser.indexOf("inset: 0") === -1);
+  // Demo/Preview is the sanctioned full-screen exception -- must stay inset:0.
+  ok(".demo (Preview) stays full-screen (inset:0)", /\.demo \{[^}]*position: fixed; inset: 0/.test(css));
+})();
+
 // ---- #175 copy-editor inline rich-format toolbar (B/I/U + inline weight on variant text) ----
+// ---- #170/#158: ONE shared, config-driven formatting toggle-bar --------------
+section("#170/#158 shared formatting toggle-bar");
+(function () {
+  var e = src("src/editor.js");
+  var body = slice(e, "function buildFormatToggleBar(io)", "window.__buildFormatToggleBar = buildFormatToggleBar;");
+  ok("buildFormatToggleBar found", body.indexOf("var bar = h(\"div\", \"prop-toggle-row\");") !== -1);
+  ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(e));
+  ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(e));
+  ok("inline-exec toggle calls io.getNode()/document.execCommand/io.onChange (behaviour unchanged)", /var node = io\.getNode\(\); if \(!node\) return;\s*\n\s*node\.focus\(\);\s*\n\s*document\.execCommand\(t\.cmd, false, null\);\s*\n\s*io\.onChange\(\);/.test(body));
+  ok("Link uses the SAME createLink\\/unlink + target=_blank mechanic as before", /document\.execCommand\("createLink", false, url\)[\s\S]{0,250}setAttribute\("target", "_blank"\)/.test(body));
+  ok("bar.refresh() resyncs is-on state against the CURRENT selection (for a bar that persists across re-focus)", /bar\.refresh = function \(\) \{/.test(body));
+  ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(e));
+
+  // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
+  var insStart = e.indexOf("function renderFieldInspector(node)");
+  var insBody = e.slice(insStart, insStart + 7400); // uio-F04 added the source-provenance line above these
+  ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
+  ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
+  ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
+  var cfStart = e.indexOf("function buildCopyFormatBar()");
+  var cfBody = e.slice(cfStart, cfStart + 1500);
+  ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
+  ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
+  // exactly one config-driven toggle list in the whole file (no second duplicate copy).
+  ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (e.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1);
+  // floating-format-bar-to-edit-canvas: an above-selection floating B/I/U bar on the Edit canvas,
+  // reusing FORMAT_TOGGLES' inline-exec set (one config, two surfaces) + the field's own input->commit.
+  var fb = slice(e, "/* @canvas-fmtbar-start */", "/* @canvas-fmtbar-end */");
+  ok("floating bar reuses the inline-exec FORMAT_TOGGLES (shared config, glyph icons)", /FORMAT_TOGGLES\.filter\(function \(t\) \{ return t\.kind === "inline-exec"; \}\)/.test(fb) && /FMTBAR_GLYPH = \{ bold: "bold", italic: "italic", underline: "underline" \}/.test(fb));
+  ok("clicking runs execCommand (no separate write path -- fires the field's own input->writeModel)", /document\.execCommand\(t\.cmd, false, null\); syncCanvasFmtBarActive\(bar\)/.test(fb) && fb.indexOf("writeModel") === -1);
+  ok("the bar binds ONLY to a live editable [data-edit] canvas field (never the Source [data-node] selbar)", /function canvasEditableFieldOf\(node\)[\s\S]{0,200}closest\("\[data-edit\]\.is-editable"\)[\s\S]{0,120}getAttribute\("contenteditable"\) === "true"/.test(fb));
+  ok("a collapsed / non-field selection hides the bar (no bar over a caret or outside a field)", /if \(!sel \|\| !sel\.rangeCount \|\| sel\.isCollapsed\) \{ hideCanvasFmtBar\(\); return; \}[\s\S]{0,160}if \(!canvasEditableFieldOf\(r\.commonAncestorContainer\)\) \{ hideCanvasFmtBar\(\); return; \}/.test(fb));
+  ok("the selection listener + the 'underline' glyph are wired", /document\.addEventListener\("selectionchange", onCanvasSelectionChange\)/.test(e) && /"underline":/.test(src("src/icons.js")) && /\.canvas-fmtbar__btn/.test(src("editor.css")));
+})();
+
+// ---- #170/#33: text<->list block-type conversion (pure) -----------------------
+section("#170/#33 text<->list block-type conversion");
+(function () {
+  var e = src("src/editor.js");
+  var a = e.indexOf("/* @list-convert-start */"), b = e.indexOf("/* @list-convert-end */");
+  if (a === -1 || b === -1) { ok("locate @list-convert fence", false); return; }
+  var g = new Function(e.slice(a, b) +
+    "\nreturn { htmlToListItems: htmlToListItems, listItemsToHtml: listItemsToHtml, convertTextListBlockType: convertTextListBlockType };")();
+
+  // htmlToListItems: block-level breaks become <li> boundaries; inline formatting survives.
+  ok("a single line becomes one <li>", g.htmlToListItems("Hello <b>world</b>") === "<li>Hello <b>world</b></li>");
+  ok("<br> splits into multiple <li>s, inline formatting kept per item", g.htmlToListItems("One<br><b>Two</b><br>Three") === "<li>One</li><li><b>Two</b></li><li>Three</li>");
+  ok("<p>/<div> block tags split into items too (block-level = item boundary)", g.htmlToListItems("<p>Alpha</p><p>Beta</p>") === "<li>Alpha</li><li>Beta</li>");
+  ok("blank lines are dropped, not turned into empty items", g.htmlToListItems("One<br><br>Two") === "<li>One</li><li>Two</li>");
+  ok("empty/whitespace-only input -> one empty <li> (never crashes, never null)", g.htmlToListItems("") === "<li></li>" && g.htmlToListItems("   ") === "<li></li>");
+  ok("inline tags (b/i/u/a/span) are NEVER treated as breaks", g.htmlToListItems('<span style="font-weight:600">Bold run</span> and <a href="https://x">a link</a>') === '<li><span style="font-weight:600">Bold run</span> and <a href="https://x">a link</a></li>');
+
+  // listItemsToHtml: the inverse -- items join with <br>, inline content intact.
+  ok("multiple <li>s join with <br>, formatting kept", g.listItemsToHtml("<li>One</li><li><b>Two</b></li><li>Three</li>") === "One<br><b>Two</b><br>Three");
+  ok("a single <li> round-trips to its bare inner content", g.listItemsToHtml("<li>Hello <b>world</b></li>") === "Hello <b>world</b>");
+  ok("non-<li>-shaped input is returned untouched (defensive)", g.listItemsToHtml("just text") === "just text");
+  // round-trip: html -> list items -> html recovers the original flowing content.
+  ok("htmlToListItems + listItemsToHtml round-trips a multi-line field", g.listItemsToHtml(g.htmlToListItems("One<br>Two<br>Three")) === "One<br>Two<br>Three");
+
+  // convertTextListBlockType: whole block-type swap, remembers prior type, round-trips.
+  var para = { type: "paragraph", text: "Hello <b>world</b>" };
+  g.convertTextListBlockType(para);
+  ok("paragraph -> list converts type + splits text into <li>s", para.type === "list" && para.text === "<li>Hello <b>world</b></li>");
+  ok("prior type is remembered on the block", para.__priorTextType === "paragraph");
+  g.convertTextListBlockType(para);
+  ok("list -> text restores the REMEMBERED prior type (not always paragraph)", para.type === "paragraph");
+  ok("__priorTextType is cleared after restoring (no stale memory)", para.__priorTextType === undefined);
+  ok("round-trip is lossless on content", para.text === "Hello <b>world</b>");
+
+  var heading = { type: "heading", text: "Title text" };
+  g.convertTextListBlockType(heading);
+  g.convertTextListBlockType(heading);
+  ok("heading<->list round-trips back to heading (not a hardcoded paragraph default)", heading.type === "heading");
+
+  var noMemory = { type: "list", text: "<li>Item</li>" };
+  g.convertTextListBlockType(noMemory);
+  ok("list -> text with NO remembered prior type defaults to paragraph", noMemory.type === "paragraph");
+
+  ok("convertTextListBlockType is null-safe", g.convertTextListBlockType(null) === null);
+
+  // purity: does not mutate anything beyond the block object passed in (no globals touched).
+  var before = JSON.stringify({ a: 1 });
+  var untouched = { a: 1 };
+  var block2 = { type: "paragraph", text: "x" };
+  g.convertTextListBlockType(block2);
+  ok("converting one block never touches an unrelated object", JSON.stringify(untouched) === before);
+})();
+
+// ---- SPEC 7: Build/Read view toggle in the editor header (wiring) ----
+section("editor-rework Build/Read toggle");
+(function () {
+  var e = src("src/editor.js");
+  ok("a Build/Read SegmentedControl mounts into the editor header host", /function mountViewToggle\(\)[\s\S]{0,400}getElementById\("editor-view-toggle"\)[\s\S]{0,400}SegmentedControl\(/.test(e));
+  ok("the toggle offers Build + Read segments as GLYPHS (edit-header-ia-v2)", /options: \[\{ value: "build", icon: "square-pen", title: "Build" \}, \{ value: "read", icon: "file-text", title: "Read" \}\]/.test(e));
+  ok("Read enters the copy view, Build exits it", /if \(v === "read"\) \{ if \(!copyEditorIsOpen\(\)\) enterCopyEditor\(\); \}\s*else if \(copyEditorIsOpen\(\)\) exitCopyEditor\(\);/.test(e));
+  ok("the control re-syncs when the copy view opens/closes by any path", /syncViewToggle\(\); \/\/ reflect Read in the header/.test(e) && /syncViewToggle\(\); \/\/ reflect Build in the header/.test(e));
+  ok("the toggle is mounted at boot", /mountViewToggle\(\); \/\/ SPEC 7/.test(e));
+  ok("the header carries the view-toggle host", /id="editor-view-toggle"/.test(src("index.html")));
+})();
+
 section("#175 copy-editor format toolbar");
 (function () {
   var e = src("src/editor.js");
   var bar = slice(e, "function buildCopyFormatBar()", "return bar;\n  }");
   ok("toolbar built once + injected into the copy-editor bar", /getElementById\("copyedit-format"\)[\s\S]*?insertBefore\(bar, host\)/.test(bar));
-  ok("toolbar wires canonical B/I/U prop-toggles via execCommand", /\["B", "bold"\], \["I", "italic"\], \["U", "underline"\][\s\S]*?document\.execCommand\(o\[1\]/.test(bar));
-  ok("B/I/U commits through commitCopyRow (-> frWrite override layer)", /document\.execCommand\(o\[1\][\s\S]*?commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\)/.test(bar));
+  // #170/#158: B/I/U/Link now come from the ONE shared canonical toggle-bar builder
+  // (buildFormatToggleBar), not a bespoke row -- wired here via io.getNode/io.onChange.
+  ok("toolbar uses the shared canonical toggle-bar builder, not a bespoke B/I/U row", /var biu = buildFormatToggleBar\(\{[\s\S]{0,1200}\}\);/.test(bar));
+  ok("getNode resolves the active copy row's field", /getNode: function \(\) \{ return _activeCopyRow && _activeCopyRow\.tx; \}/.test(bar));
+  ok("onChange commits through commitCopyRow (-> frWrite override layer)", /onChange: function \(\) \{ if \(!_activeCopyRow\) return; commitCopyRow\(_activeCopyRow\.t, _activeCopyRow\.tx, _activeCopyRow\.variant\); \}/.test(bar));
+  ok("refreshCopyFormatState delegates to the shared bar's own .refresh()", /function refreshCopyFormatState\(\) \{ if \(_copyFormatBar\) _copyFormatBar\.refresh\(\); \}/.test(e));
   ok("toolbar uses the shared dsSelect weight picker (no bespoke control)", /dsSelect\(\[\["Weight", ""\], \["Regular", "400"\][\s\S]*?applyCopyWeight/.test(bar));
   ok("weight captures the live row range on mousedown (select steals focus)", /mousedown[\s\S]*?savedRange = \(r && _activeCopyRow/.test(bar));
   // applyCopyWeight: an inline font-weight span (survives sanitizeFieldHtml) committed through commitCopyRow
@@ -9524,23 +12714,12 @@ section("left-panel Components reorg");
   ok("renderComponentsList() removed from editor.js", e.indexOf("renderComponentsList") === -1);
   ok("componentsList DOM var removed", e.indexOf('getElementById("components-list")') === -1);
 
-  // new twirl markup: a third .lpane peer to Structure/Blocks, with two split handles
-  ok("index.html has the new Components .lpane peer to Structure/Blocks",
-     /lpane lpane--components" id="lpane-components"/.test(html) && /lpane__title">Components</.test(html));
-  ok("two lpane-split handles bracket the three panes", /id="lpane-split-0"/.test(html) && /id="lpane-split-1"/.test(html));
-  ok("Components twirl hosts the new insert list", /id="components-palette-list"/.test(html));
-
-  // wireLeftPanes() generalized to N panes (not hard-coded to exactly two)
-  var wlpStart = e.indexOf("var LPANE_ORDER = [");
-  ok("wireLeftPanes has an LPANE_ORDER config (structure/blocks/components)", wlpStart > -1);
-  var wlpBody = e.slice(wlpStart, e.indexOf("function wireLeftPanes(") + 2600);
-  ok("LPANE_ORDER lists all three panes", /"lpane-structure"/.test(wlpBody) && /"lpane-blocks"/.test(wlpBody) && /"lpane-components"/.test(wlpBody));
-  ok("split visibility is computed per adjacent pair, not a single bothOpen bool", /function syncSplits\(\)/.test(wlpBody) && /splits\.forEach\(function \(split, i\)/.test(wlpBody));
-  ok("a split's drag only redistributes its OWN two adjacent panes (independent ratios)", /var storeKey = "authoring\.lpane\.split\." \+ i/.test(wlpBody));
-  ok("wireLeftPanes bails out gracefully with fewer than 2 panes present", /panes\.length < 2/.test(wlpBody));
-
-  // setLeftPanelView must know about the new pane + both split ids, or it stays hidden
-  ok("setLeftPanelView un-hides the new pane + both splits", /"lpane-structure", "lpane-split-0", "lpane-blocks", "lpane-split-1", "lpane-components"/.test(e));
+  // SPEC 7: Components folds INTO the Blocks section of the 3-way switcher (data-lsec="blocks"),
+  // as a sub-pane beneath the Insert palette (its own insert list host kept).
+  ok("Components .lpane is tagged into the Blocks section", /lpane lpane--components" id="lpane-components" data-lsec="blocks"/.test(html));
+  ok("Components pane reads as a sub-section (Reusable components)", /lpane__head--sub"><span class="lpane__title">Reusable components</.test(html));
+  ok("Components sub-pane hosts the insert list", /id="components-palette-list"/.test(html));
+  ok("the old draggable split handles are gone", html.indexOf('id="lpane-split-0"') === -1 && html.indexOf('id="lpane-split-1"') === -1);
 
   // renderComponentsPalette(): three groups, in the documented order
   var rcpStart = e.indexOf("function renderComponentsPalette()");
@@ -9558,7 +12737,7 @@ section("left-panel Components reorg");
 
   // mount() keeps the new pane in sync on every render, same as the Blocks palette
   ok("mount() re-renders the Components pane alongside the Blocks palette", /renderAssets\(\); \/\/ keep the Blocks palette current[\s\S]{0,20}renderComponentsPalette\(\);/.test(e));
-  ok("wireLeftPanes() renders both panels on boot", /renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
+  ok("wireLeftSwitcher() renders both panels on boot", /function wireLeftSwitcher\(\)[\s\S]{0,120}renderAssets\(\);\s*\n\s*renderComponentsPalette\(\);/.test(e));
 
   // context-menu additions (Tier 1 per the /verso-frontend ruling): single-block
   // "Save as component…" (canvas + outliner) and page "Save page to library…"
@@ -9567,6 +12746,1807 @@ section("left-panel Components reorg");
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
+})();
+
+// ---- SPEC 7: source insert (linked block) + two-way jump ----
+section("editor-rework source insert + two-way jump");
+(function () {
+  var e = src("src/editor.js");
+  ok("source-link 03 retires the #137 whole-topic insert (insertSourceLinkedBlock is gone)", !/function insertSourceLinkedBlock\(/.test(e));
+  ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(cx, cy\)/.test(e));
+  ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
+  ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
+  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
+})();
+
+// ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
+section("editor-rework left-panel 3-way switcher");
+(function () {
+  var e = src("src/editor.js");
+  var html = src("index.html");
+  ok("the panel has a switcher host + a Source pane", /id="lpane-switch"/.test(html) && /lpane lpane--source" id="lpane-source" data-lsec="source"/.test(html));
+  ok("every content pane is tagged with a section (data-lsec)", /id="lpane-structure" data-lsec="structure"/.test(html) && /id="lpane-blocks" data-lsec="blocks"/.test(html) && /id="lpane-source" data-lsec="source"/.test(html));
+  ok("the switcher offers Structure / Blocks / Source", /options: \[\{ value: "structure", label: "Structure" \}, \{ value: "blocks", label: "Blocks" \}, \{ value: "source", label: "Source" \}\]/.test(e));
+  ok("applyLeftSection shows only the active section's panes", /el\.hidden = el\.getAttribute\("data-lsec"\) !== sec;/.test(e));
+  ok("the active section persists across reloads", /LEFT_SECTION_KEY = "authoring\.lpane\.active"/.test(e) && /localStorage\.getItem\(LEFT_SECTION_KEY\)/.test(e));
+  ok("switching to Source renders the read-only source-doc viewer (source-link 02)", /if \(sec === "source"\) renderEditSourcePanel\(\);/.test(e));
+  ok("setStage re-applies the switcher's active section in Edit (no raw lpane un-hide list)", /applyLeftSection\(_activeLeftSection\);/.test(e) && e.indexOf('"lpane-split-0", "lpane-blocks", "lpane-split-1"') === -1);
+})();
+
+// ---- SPEC 8 source-link 02: Edit Source tab = read-only live source-doc viewer ----
+section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(doc && doc\.meta && doc\.meta\.productId\)/.test(e));
+  ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(e));
+  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a Product[\s\S]{0,600}This Product has no source document yet/.test(e));
+  ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(e));
+  ok("the panel is read-only: its function never sets contentEditable / applySourceLockState", (function () {
+    var start = e.indexOf("function renderEditSourcePanel()");
+    if (start === -1) return false;
+    var body = e.slice(start, e.indexOf("\n  function ", start + 20));
+    return body.indexOf("renderSourceDocNode") !== -1 && body.indexOf("contentEditable") === -1 && body.indexOf("applySourceLockState") === -1;
+  })());
+  ok("find reuses SourceDoc.findMatches + a next/prev cycle that scrolls to the hit", /matches = q \? SD\.findMatches\(model, q\) : \[\];/.test(e) && /function cycleFind\(dir\)[\s\S]{0,200}scrollToHit\(findIdx\)/.test(e));
+  ok("Enter / Shift+Enter cycle matches like the Source stage", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
+  ok("a TOC is built from SourceDoc.outline (chapters + headings), click-to-jump + scroll-spy", /var outline = SD\.outline\(model\)/.test(e) && /outline\.forEach\(function \(ch\) \{ tocRow\(ch\); \(ch\.children \|\| \[\]\)\.forEach\(tocRow\); \}\);/.test(e) && /docCol\.addEventListener\("scroll"[\s\S]{0,600}is-current/.test(e));
+  ok("the viewer reuses the shared .vbrowser__search field + .source-doc__toc-item rows (consistency-over-novelty), not bespoke controls", /h\("label", "vbrowser__search"\)/.test(e) && /h\("input", "vbrowser__search-input"\)/.test(e) && /"source-doc__toc-item source-doc__toc-item--l"/.test(e) && /\.edit-source__doc/.test(css));
+})();
+
+// ---- SPEC 8 source-link 03: select a range -> place a live-linked text block (arm-then-click) ----
+section("SPEC 8: source-link 03 — select + place a linked block");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  // A selection in the read-only panel builds a SourceDoc range descriptor: single-node -> one
+  // anchor; cross-node -> anchor(first, start..end) + endAnchor(last, 0..end), matching addMark.
+  ok("panelSelectionDescriptor builds a single-node OR cross-node range from the DOM selection", /function panelSelectionDescriptor\(docCol, model\)/.test(e) && /if \(sKey === eKey\) \{[\s\S]{0,140}return \{ anchor: \{ nodeKey: sKey, start: sOff, len: eOff - sOff \} \};/.test(e) && /endAnchor: \{ nodeKey: eKey, start: 0, len: eOff \}/.test(e));
+  ok("char offsets are measured against the block's text (Range.toString().length) — the SourceDoc offset model", /function panelCharOffset\(blockEl, container, offset\)[\s\S]{0,200}return r\.toString\(\)\.length;/.test(e));
+  ok("a text selection raises the floating Place bar (mouseup on the reading column)", /docCol\.addEventListener\("mouseup"[\s\S]{0,120}maybeShowPlaceBar\(docCol, model\)/.test(e) && /function maybeShowPlaceBar\(docCol, model\)/.test(e));
+  ok("Place arms the range descriptor (mark creation deferred to the drop, so format-split can mint per-run marks)", /function armSourceLinkPlacement\(desc\)[\s\S]{0,300}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \}/.test(e));
+  // #161: the marks are minted + PERSISTED to master.doc BEFORE any insertBlock, so the first canvas
+  // render's resolver finds them (persist-after-insert rendered the block blank + collapsed).
+  ok("gap placement mints per-run link marks, persists them, THEN inserts blocks (persist before insert, #161)", /function placeSourceLinkBlocks\(a\)[\s\S]{0,900}SD\.addMark\(model, \{ type: "link", anchor: run\.anchor, endAnchor: run\.endAnchor \}\)\.id;[\s\S]{0,120}master\.doc = SD\.toJSON\(model\); saveLibrary\(\);[\s\S]{0,220}insertBlock\(\{ type: SOURCE_LINK_BLOCK_TYPE\[run\.format\][\s\S]{0,160}markId: markIds\[i\]/.test(e));
+  ok("the armed drop is coordinate-aware: onto a text block -> inline span (06), else gap placement", /function placeArmedSourceLink\(cx, cy\)[\s\S]{0,600}if \(blockEl && isSourceLinkTextBlock\(blockEl\.__block\)\) return dropInlineSourceLink\(a, blockEl\.__block\);/.test(e));
+  ok("arming is a capture-phase canvas click (places before select) + Escape cancels", /if \(!__armedSourceLink\) return;[\s\S]{0,200}placeArmedSourceLink\(e\.clientX, e\.clientY\); \}\s*\}, true\);/.test(e) && /if \(e\.key === "Escape" && __armedSourceLink\)[\s\S]{0,80}cancelArmedSourceLink\(\)/.test(e));
+  ok("a placed linked block shows a clickable link indicator (decorateSourceLinks) opening the source-link menu (jump + alternates)", /function decorateSourceLinks\(scope\)[\s\S]{0,500}source-link-badge[\s\S]{0,300}openSourceLinkMenu\(\{ kind: "block", block: b \}, b\.sourceLink\.masterId, b\.sourceLink\.markId/.test(e));
+  ok("clicking the indicator opens the Source tab + scrolls the panel to the exact passage (two-way jump)", /function jumpSourcePanelToMark\(masterId, markId\)[\s\S]{0,200}applyLeftSection\("source"\)/.test(e) && /__pendingSourceJumpMark && __pendingSourceJumpMark\.masterId === __editSourceMasterId/.test(e));
+  ok("passages already linked into the OPEN doc are highlighted in the panel (distinct from find)", /function paintPanelLinkedPassages\(docCol, model\)[\s\S]{0,700}is-source-linked-passage/.test(e) && /\.is-source-linked-passage/.test(css));
+  ok("the indicator + place bar + arming cursor carry their own editor chrome CSS", /\.source-link-badge/.test(css) && /\.source-placebar/.test(css) && /is-arming-source-link #canvas-viewport/.test(css));
+  ok("decorateSourceLinks runs in the render passes (per-page frame + full reapplyStructural)", /decorateSourceLinks\(frame\);/.test(e) && /decorateSourceLinks\(\); \/\/ source-link 03/.test(e));
+})();
+
+// ---- SPEC 8 source-link 04: custom pointer-drag placement gesture ----
+section("SPEC 8: source-link 04 — pointer-drag placement");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("the Place bar carries a grab handle that starts a CUSTOM pointer-drag (pointerdown, not native DnD)", /var grip = h\("button", "source-placebar__grip"\)[\s\S]{0,260}grip\.addEventListener\("pointerdown", function \(ev\) \{ ev\.preventDefault\(\); startSourceLinkDrag\(desc, ev\); \}\)/.test(e));
+  ok("the drag is driven by custom pointer events (pointermove/pointerup on window), not native HTML5 DnD", /window\.addEventListener\("pointermove", move\); window\.addEventListener\("pointerup", up\);/.test(e) && /grip\.addEventListener\("pointerdown"/.test(e));
+  ok("the drag shows a ghost following the cursor + lights up the frame under it (drop target)", /function startSourceLinkDrag\(desc, ev\)[\s\S]{0,600}source-link-ghost[\s\S]{0,1400}frameElementUnder\(e\.clientX, e\.clientY\); if \(fr\) fr\.classList\.add\("is-drop-target"\)/.test(e));
+  ok("releasing over the canvas resolves through the SAME placement as arm-then-click (placeArmedSourceLink)", /function up\(e\)[\s\S]{0,500}__armedSourceLink = \{ masterId: __editSourceMasterId, descriptor: desc \};[\s\S]{0,80}placeArmedSourceLink\(e\.clientX, e\.clientY\);/.test(e));
+  ok("the drop targets the page under the cursor (pageIndexFromPoint -> setActivePage)", /function pageIndexFromPoint\(cx, cy\)[\s\S]{0,300}data-page-id[\s\S]{0,200}findIndex/.test(e) && /var pi = pageIndexFromPoint\(cx, cy\); if \(pi >= 0\) setActivePage\(pi\);/.test(e));
+  ok("a drop outside the canvas places nothing", /if \(!frameElementUnder\(e\.clientX, e\.clientY\)\) \{ sourceToast\("Dropped outside the canvas[\s\S]{0,40}return; \}/.test(e));
+  ok("the ghost, grab handle + drop-target highlight carry their own chrome CSS", /\.source-link-ghost/.test(css) && /\.source-placebar__grip/.test(css) && /\.frame\.is-drop-target/.test(css));
+})();
+
+// ---- SPEC 8 source-link 06: drop onto a text block -> locked linked inline span ----
+section("SPEC 8: source-link 06 — inline span append");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("a drop onto an editable text block (not itself a linked block) routes to the inline path", /function isSourceLinkTextBlock\(b\)[\s\S]{0,120}SOURCE_LINK_TEXT_TYPES\[b\.type\] && !b\.sourceLink/.test(e));
+  ok("dropInlineSourceLink flattens the range to ONE link mark and appends a <span data-source-link> to the block's text", /function dropInlineSourceLink\(a, block\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor, endAnchor: a\.descriptor\.endAnchor \}\)[\s\S]{0,260}block\.text = \(block\.text \? block\.text \+ " " : ""\) \+ span;/.test(e));
+  ok("the appended span carries the mark + master ids (resolved live by 01's inline post-pass)", /var span = '<span data-source-link="' \+ mk\.id \+ '" data-master="' \+ a\.masterId \+ '">' \+ slEscape\(SD\.markText\(model, mk\)\)/.test(e));
+  ok("the block re-renders in place (reapplyBlock) so owned text + the locked span coexist", /function dropInlineSourceLink\(a, block\)[\s\S]{0,700}reapplyBlock\(block\);/.test(e));
+  ok("each inline linked span gets its OWN contextual menu (per-span, not one block badge)", /root\.querySelectorAll\("\.canvas-block span\[data-source-link\]"\)[\s\S]{0,300}is-source-linked-span[\s\S]{0,600}openSourceLinkMenu\(\{ kind: "span", block: owner\.__block, spanEl: sp/.test(e));
+  ok("the inline span indicator carries its own chrome CSS (distinct from the block badge)", /\.is-source-linked-span/.test(css));
+})();
+
+// ---- SPEC 8 source-link 07: drag a source figure -> a new linked image block ----
+section("SPEC 8: source-link 07 — linked image drop");
+(function () {
+  var e = src("src/editor.js"), r = src("src/render.js"), css = src("editor.css");
+  ok("render's image block resolves src/alt LIVE from the source figure (01 object branch), purely (shallow copy)", /image: function \(block\) \{[\s\S]{0,400}block\.sourceLink && block\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,300}rlink\.type === "object"[\s\S]{0,260}c\.src = rlink\.src \|\| block\.src[\s\S]{0,120}block = c;/.test(r));
+  ok("placement routes an OBJECT anchor (no start/len) to a linked IMAGE block, never inline/format-split", /var isObject = !!\(a\.descriptor && a\.descriptor\.anchor && a\.descriptor\.anchor\.len == null\);/.test(e) && /var result = isObject \? placeSourceLinkImage\(a\) : placeSourceLinkBlocks\(a\);/.test(e));
+  // #161 part 1: a source-link drop lands at the between-block gap under the cursor (drop-line), not the
+  // selection-based insertLoc; the gap target is set only for the placement and cleared right after.
+  ok("a source-link drop targets the between-block gap under the cursor (#161 part 1)", /var gap = sourceLinkDropGap\(cx, cy\);\s*\n\s*if \(gap\) __sourceLinkDropAt = \{ pageIndex: gap\.pageIndex, index: gap\.index \};/.test(e) && /__sourceLinkDropAt = null; \/\/ one placement only/.test(e));
+  ok("insertBlock honours an explicit __sourceLinkDropAt gap + auto-advances for a format-split's blocks", /if \(__sourceLinkDropAt && doc\.pages\[__sourceLinkDropAt\.pageIndex\]\)[\s\S]{0,260}__sourceLinkDropAt\.index = L\.index \+ 1;/.test(e));
+  ok("sourceLinkDropGap targets TOP-LEVEL page blocks only (a link drops between page blocks, not inside a column)", /function sourceLinkDropGap\(cx, cy\)[\s\S]{0,400}page\.blocks\.indexOf\(el\.__block\) !== -1;/.test(e));
+  ok("the drag shows a between-block drop-line for a gap, an inline-target ring over a text block (#161 part 1)", /function showSourceLinkDropLine\(cx, cy\)/.test(e) && /is-sl-inline-target/.test(e) && /\.source-link-dropline/.test(src("editor.css")) && /\.canvas-block\.is-sl-inline-target/.test(src("editor.css")));
+  ok("placeSourceLinkImage adds an OBJECT link mark (anchor {nodeKey}, no len) + inserts an image block with sourceLink", /function placeSourceLinkImage\(a\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor \}\)[\s\S]{0,160}insertBlock\(\{ type: "image", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: mk\.id \} \}\)/.test(e));
+  ok("a source figure in the panel is draggable as one unit (pointerdown -> object-anchor drag)", /docCol\.querySelectorAll\("figure\.source-doc__figure\[data-object\]"\)[\s\S]{0,260}startSourceLinkDrag\(\{ anchor: \{ nodeKey: figEl\.getAttribute\("data-node"\) \} \}, ev\)/.test(e));
+  ok("the draggable figure carries its own grab-affordance CSS", /\.edit-source__figure/.test(css));
+})();
+
+// ---- SPEC 8 source-link 08: alternates — create + pick from the canvas ----
+section("SPEC 8: source-link 08 — alternates from the canvas");
+(function () {
+  var e = src("src/editor.js");
+  ok("the source-link menu offers jump, base, existing alternates, and create-an-alternate", /function openSourceLinkMenu\(target, masterId, markId, x, y\)[\s\S]{0,400}label: "Jump to source"[\s\S]{0,300}label: "Base wording", active: !cur[\s\S]{0,600}sourceLinkAlternates\(model, link\)\.forEach[\s\S]{0,400}label: "Create an alternate…"/.test(e));
+  ok("create-an-alternate adds a type:alternate mark to the MASTER (anchored like the link) + persists it", /function createSourceAlternate\(target, masterId, markId\)[\s\S]{0,900}SD\.addMark\(model, \{ type: "alternate", anchor: link\.anchor, endAnchor: link\.endAnchor, alt: wording[\s\S]{0,200}saveLibrary\(\);[\s\S]{0,120}setSourceLinkTargetAlt\(target, alt\.id\)/.test(e));
+  ok("a canvas alternate points only THIS block/span (altId), never other documents", /function setSourceLinkTargetAlt\(target, altId\)[\s\S]{0,120}if \(altId\) target\.block\.sourceLink\.altId = altId; else delete target\.block\.sourceLink\.altId;[\s\S]{0,300}sp\.setAttribute\("data-alt", altId\)/.test(e));
+  ok("picking base vs an alternate reads/writes the target's altId (block field or span data-alt)", /function sourceLinkTargetAlt\(target\)[\s\S]{0,120}target\.block\.sourceLink && target\.block\.sourceLink\.altId[\s\S]{0,120}target\.spanEl\.getAttribute\("data-alt"\)/.test(e));
+  ok("sourceLinkAlternates matches alternates anchored identically to the link (single or multi-block)", /function sourceLinkAlternates\(model, link\)[\s\S]{0,300}m\.type !== "alternate" \|\| SD\.isObjectMark\(m\) !== SD\.isObjectMark\(link\)[\s\S]{0,400}m\.endAnchor\.nodeKey === end\.nodeKey/.test(e));
+  ok("an object (figure) link defers alternates in v1 (whole-block; figure-swap is a follow-up)", /if \(SD\.isObjectMark\(link\)\) \{ sourceToast\("Object \(figure\) alternates are coming soon\."\); return; \}/.test(e));
+})();
+
+// ---- SPEC 8 source-link 09: base-edit warning + fork ----
+section("SPEC 8: source-link 09 — base-edit warning + fork");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  // Pure sourceEditImpact: a link mark whose wording changed since the snapshot is "edited"; its
+  // base-showing locations are affected, alternate-pinned ones are not.
+  var m = SD.create([{ type: "paragraph", key: "p", text: "Charge to 80 percent for storage." }]);
+  var link = SD.addMark(m, { type: "link", anchor: { nodeKey: "p", start: 0, len: 26 } });
+  var old = {}; old[link.id] = SD.markText(m, link); // snapshot BEFORE the edit
+  SD.replaceRange(m, { nodeKey: "p", start: 10, len: 2 }, "50"); // 80 -> 50 (inside the link)
+  var locs = [
+    { markId: link.id, altId: null, docCode: "A", blockId: "b1" },
+    { markId: link.id, altId: null, docCode: "B", blockId: "b2" },
+    { markId: link.id, altId: "alt_x", docCode: "C", blockId: "b3" } // pinned to an alternate
+  ];
+  var impact = SD.sourceEditImpact(m, old, locs);
+  ok("sourceEditImpact: an edited link mark's base-showing locations are affected", impact.affected.length === 2 && impact.affected.every(function (l) { return !l.altId; }));
+  ok("sourceEditImpact: an alternate-pinned location is NOT affected by a base edit", impact.pinned.length === 1 && impact.pinned[0].altId === "alt_x");
+  ok("sourceEditImpact: the edited mark is reported", impact.editedMarks.length === 1 && impact.editedMarks[0] === link.id);
+  ok("sourceEditImpact: a base edit OUTSIDE any link changes nothing", (function () {
+    var m2 = SD.create([{ type: "paragraph", key: "p", text: "hello world here" }]);
+    var lk = SD.addMark(m2, { type: "link", anchor: { nodeKey: "p", start: 0, len: 5 } }); // "hello"
+    var o = {}; o[lk.id] = SD.markText(m2, lk);
+    SD.replaceRange(m2, { nodeKey: "p", start: 12, len: 4 }, "there"); // edit "here", outside the link
+    var im = SD.sourceEditImpact(m2, o, [{ markId: lk.id, altId: null, docCode: "A", blockId: "b" }]);
+    return im.affected.length === 0 && im.editedMarks.length === 0;
+  })());
+
+  var e = src("src/editor.js");
+  ok("the warning fires at LOCK (unlock snapshots, lock computes impact + shows the modal)", /snapshotSourceLinkBase\(\); \/\/ 09[\s\S]{0,400}var impact = sourceBaseEditImpact\(\);\s*if \(impact\.affected\.length && window\.VersoUI[\s\S]{0,80}showSourceBaseEditModal\(topic, impact, opts\); return; \}/.test(e));
+  ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]{0,500}onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(e) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(e));
+  ok("fork freezes each edited mark's OLD wording as an alternate + pins every affected location", /function forkAffectedToAlternate\(impact\)[\s\S]{0,600}alt: oldText, tag: "Frozen"[\s\S]{0,120}applyAltToLocation\(reg, loc, alt\.id\)[\s\S]{0,200}saveRegistry\(reg\)/.test(e));
+  ok("cancel reverts the model to the pre-edit snapshot", /function revertSourceEditSession\(topic\)[\s\S]{0,200}SD\.fromJSON\(__sourcePreEditModelJson\)/.test(e));
+})();
+
+// ---- SPEC 8 source-link 10: source-stage where-used + alternate push ----
+section("SPEC 8: source-link 10 — where-used + push");
+(function () {
+  var e = src("src/editor.js"), css = src("editor.css");
+  ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(e));
+  ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1900}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
+  ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(e));
+  ok("the push dialog picks an alternate + a subset of locations (Checkbox per location)", /function openSourceAltPushDialog\(link, alts, used\)[\s\S]{0,1700}window\.VersoUI\.Checkbox\(\{ label: loc\.docTitle[\s\S]{0,120}chosen\[i\] = v/.test(e));
+  ok("push sets altId on each chosen location across documents + persists (saveRegistry); base stays base until pushed", /function pushSourceAlternate\(markId, altId, locations\)[\s\S]{0,200}applyAltToLocation\(reg, loc, altId\)[\s\S]{0,60}saveRegistry\(reg\)/.test(e));
+  ok("the where-used rows + push affordance carry their own chrome CSS", /\.source-wherepanel__row/.test(css) && /\.source-wherepanel__push/.test(css));
+})();
+
+
+// ---- Source rewrite (Epic 2b): continuous node model + owned undo -------
+// Foundation of the Source-stage rewrite (spec 2b). The whole rewrite rests on two
+// mechanisms the throwaway prototype proved only as an interaction: (a) marks anchored to
+// MODEL offsets that ride edits, and (b) an owned undo that restores a deleted span AND
+// re-anchors its mark (native contentEditable undo does NOT). source-doc.js is a pure,
+// DOM-free core, so we require it directly and exercise the mechanisms headlessly. This IS
+// the spike gate for the node-model-undo ticket.
+section("Source rewrite: node model + owned undo (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var P = SD._pure;
+
+  // --- text diff: single contiguous replaced region ---
+  ok("diffText: pure insertion inside", (function () { var d = P.diffText("abcdef", "abcXYZdef"); return d.start === 3 && d.removed === 0 && d.inserted === 3; })());
+  ok("diffText: pure deletion", (function () { var d = P.diffText("abcdef", "abf"); return d.start === 2 && d.removed === 3 && d.inserted === 0; })());
+  ok("diffText: replacement", (function () { var d = P.diffText("hello world", "hello there"); return d.removed > 0 && d.inserted > 0; })());
+  ok("diffText: identical -> no-op", (function () { var d = P.diffText("same", "same"); return d.removed === 0 && d.inserted === 0; })());
+
+  // --- blocksFromText: ordered + unordered + mixed lists (source-ordered-lists regression) ---
+  var ol = P.blocksFromText("1. one\n2. two\n3. three");
+  ok("blocksFromText: '1. 2. 3.' -> ONE ordered list of 3 items (not a joined paragraph)", ol.length === 1 && ol[0].type === "list" && ol[0].ordered === true && ol[0].items.length === 3 && ol[0].items[0] === "one" && ol[0].items[2] === "three");
+  var ul = P.blocksFromText("- a\n- b");
+  ok("blocksFromText: unordered still parses as ordered:false", ul.length === 1 && ul[0].type === "list" && ul[0].ordered === false && ul[0].items.length === 2);
+  var mixed = P.blocksFromText("- a\n- b\n1. one\n2. two");
+  ok("blocksFromText: switching marker style flushes into SEPARATE list nodes", mixed.length === 2 && mixed[0].ordered === false && mixed[0].items.length === 2 && mixed[1].ordered === true && mixed[1].items.length === 2);
+  var mixed2 = P.blocksFromText("1. one\n2. two\n- a");
+  ok("blocksFromText: ordered -> unordered also flushes", mixed2.length === 2 && mixed2[0].ordered === true && mixed2[1].ordered === false);
+  var startAt = P.blocksFromText("3. three\n4. four");
+  ok("blocksFromText: a list starting at N carries start=N (renders <ol start>)", startAt[0].ordered === true && startAt[0].start === 3);
+  ok("blocksFromText: a list starting at 1 omits start (default)", ol[0].start === undefined);
+  var para = P.blocksFromText("Just a sentence.");
+  ok("blocksFromText: plain text still a paragraph", para.length === 1 && para[0].type === "paragraph");
+
+  // --- #162: <br> folded in table cells; standalone thematic breaks dropped ---
+  var tbr = P.blocksFromText("| Name | Notes |\n| --- | --- |\n| Alpha | line one<br>line two |\n| Beta | x<br/>y |");
+  var trow = tbr.find(function (n) { return n.type === "table"; });
+  ok("blocksFromText: table cell <br>/<br/> folds to a space, no literal tag (#162)", !!trow && trow.rows[1][1] === "line one line two" && trow.rows[2][1] === "x y" && !JSON.stringify(trow.rows).match(/<br/i));
+  var hr = P.blocksFromText("Intro.\n\n---\n\nMiddle.\n\n***\n\nEnd.\n\n___\n\nLast.");
+  ok("blocksFromText: standalone --- / *** / ___ rules are dropped, never a literal paragraph (#162)", hr.every(function (n) { return !/^(-{3,}|\*{3,}|_{3,})$/.test((n.text || "").replace(/\s/g, "")); }) && hr.filter(function (n) { return n.type === "paragraph"; }).length === 4);
+  var hrSpaced = P.blocksFromText("Above.\n\n- - -\n\nBelow.");
+  ok("blocksFromText: a spaced '- - -' rule is also dropped", hrSpaced.length === 2 && hrSpaced.every(function (n) { return n.type === "paragraph"; }));
+  var dashList = P.blocksFromText("- real item\n- another");
+  ok("blocksFromText: a real '- ' list is NOT mistaken for a thematic break", dashList.length === 1 && dashList[0].type === "list" && dashList[0].items.length === 2);
+
+  // --- source-selbar-block-formats: SD.setNodeType (block reassignment) + nodesInAnchor ---
+  var sn = SD.create([{ type: "paragraph", text: "Reassign me" }, { type: "paragraph", text: "second" }]); SD.ensureKeys(sn);
+  var sk0 = sn.nodes[0].key, sk1 = sn.nodes[1].key;
+  ok("setNodeType: paragraph -> heading level 1 keeps key + text, sets level", (function () { var n = P.setNodeType(sn, sk0, { type: "heading", level: 1 }); return n && n.key === sk0 && n.type === "heading" && n.level === 1 && n.text === "Reassign me"; })());
+  ok("setNodeType: heading -> Caution callout sets tag, clears level, keeps text", (function () { var n = P.setNodeType(sn, sk0, { type: "callout", tag: "Caution" }); return n && n.type === "callout" && n.tag === "Caution" && n.level === undefined && n.text === "Reassign me"; })());
+  ok("setNodeType: callout -> body paragraph clears level + tag", (function () { var n = P.setNodeType(sn, sk0, { type: "paragraph" }); return n && n.type === "paragraph" && n.level === undefined && n.tag === undefined; })());
+  ok("setNodeType: a no-op (already that exact type) returns null (no undo churn)", P.setNodeType(sn, sk0, { type: "paragraph" }) === null);
+  ok("setNodeType: a structural node (image/list/table/row) never reassigns", (function () { var m = SD.create([{ type: "image", src: "x" }, { type: "list", items: ["a"] }]); SD.ensureKeys(m); return P.setNodeType(m, m.nodes[0].key, { type: "heading" }) === null && P.setNodeType(m, m.nodes[1].key, { type: "paragraph" }) === null; })());
+  ok("setNodeType: an unknown target type is rejected", P.setNodeType(sn, sk0, { type: "image" }) === null && P.setNodeType(sn, sk0, { type: "list" }) === null);
+  ok("setNodeType: the change is a single OWNED-undo step (marks/undo ride the kept key)", (function () { var m = SD.create([{ type: "paragraph", text: "x" }]); SD.ensureKeys(m); P.setNodeType(m, m.nodes[0].key, { type: "heading", level: 2 }); return SD.canUndo(m) === true; })());
+  ok("nodesInAnchor: a single-node anchor -> one key; a multi-block anchor -> every covered key in order", (function () { var one = P.nodesInAnchor(sn, { nodeKey: sk0 }); var many = P.nodesInAnchor(sn, { nodeKey: sk0, endAnchor: { nodeKey: sk1 } }); return one.length === 1 && one[0] === sk0 && many.length === 2 && many[0] === sk0 && many[1] === sk1; })());
+
+  // --- source-find-replace: SD.replaceAll (case-insensitive, across text nodes, marks ride, one undo) ---
+  ok("replaceAll: case-insensitive across heading/paragraph/list, returns the count", (function () { var m = SD.create([{ type: "heading", level: 1, text: "The Foo heading" }, { type: "paragraph", text: "foo FOO food" }, { type: "list", items: ["a foo item", "b"] }]); SD.ensureKeys(m); var c = SD.replaceAll(m, "foo", "BAR"); return c === 5 && m.nodes[0].text === "The BAR heading" && m.nodes[1].text === "BAR BAR BARd" && m.nodes[2].items[0] === "a BAR item"; })());
+  ok("replaceAll: an empty needle is a no-op (returns 0, no undo churn)", (function () { var m = SD.create([{ type: "paragraph", text: "x" }]); SD.ensureKeys(m); return SD.replaceAll(m, "", "y") === 0 && SD.canUndo(m) === false; })());
+  ok("replaceAll: the whole pass is ONE owned-undo step (undo restores the pre-replace text)", (function () { var m = SD.create([{ type: "paragraph", text: "aa aa aa" }, { type: "paragraph", text: "aa" }]); SD.ensureKeys(m); SD.replaceAll(m, "aa", "Z"); var afterCount = m.nodes[0].text; SD.undo(m); return afterCount === "Z Z Z" && m.nodes[0].text === "aa aa aa" && m.nodes[1].text === "aa"; })());
+  ok("replaceAll: a range-mark on a replaced node rides the edit (offsets shift, not orphaned)", (function () { var m = SD.create([{ type: "paragraph", text: "hello world" }]); SD.ensureKeys(m); var mk = SD.addMark(m, { type: "comment", anchor: { nodeKey: m.nodes[0].key, start: 6, len: 5 } }); SD.replaceAll(m, "hello", "hi"); SD.refreshMark(m, mk); return m.nodes[0].text === "hi world" && SD.anchorText(m, mk.anchor) === "world"; })());
+
+  // --- inlineRuns: rich inline projection that PRESERVES plain-text offsets (source-rich-render) ---
+  // The one invariant that keeps range-marks + applyTextEdit correct under rich rendering: the
+  // concatenation of every run's text must reproduce the input byte-for-byte (markers included).
+  function joins(s) { return P.inlineRuns(s).map(function (r) { return r.text; }).join(""); }
+  ok("inlineRuns: plain text -> one text run, join === input", (function () { var r = P.inlineRuns("plain words"); return r.length === 1 && r[0].kind === "text" && joins("plain words") === "plain words"; })());
+  ok("inlineRuns: bold offset invariant (join === input, markers kept)", joins("a **bold** z") === "a **bold** z");
+  ok("inlineRuns: inline code offset invariant", joins("run `code` now") === "run `code` now");
+  ok("inlineRuns: multiple + adjacent emphasis all preserve length", (function () { var s = "**one** mid `two` **three**"; return joins(s) === s && s.length === joins(s).length; })());
+  ok("inlineRuns: the ** / ` delimiters are flagged marker:true, the inner text is not", (function () {
+    var r = P.inlineRuns("x **b** y");
+    var markers = r.filter(function (t) { return t.marker; });
+    var inner = r.filter(function (t) { return t.kind === "bold" && !t.marker; });
+    return markers.length === 2 && markers[0].text === "**" && markers[1].text === "**" && inner.length === 1 && inner[0].text === "b";
+  })());
+  ok("inlineRuns: an unclosed marker passes through as literal text (graceful, offsets intact)", (function () { var s = "a **half open"; var r = P.inlineRuns(s); return joins(s) === s && r.every(function (t) { return t.kind === "text"; }); })());
+  ok("inlineRuns: empty string -> a single empty text run (never crashes projection)", (function () { var r = P.inlineRuns(""); return r.length === 1 && r[0].text === "" && r[0].kind === "text"; })());
+  ok("inlineRuns grammar matches MarkdownLite.INLINE_RE (bold + code, no italic/nesting)", (function () {
+    // single-asterisk italic is NOT a model convention, so it must survive as literal text
+    var s = "this *is not* italic"; return joins(s) === s && P.inlineRuns(s).every(function (t) { return t.kind === "text"; });
+  })());
+
+  // --- boundary riding: type inside grows, type at edge holds (start-incl / end-excl) ---
+  ok("shiftAnchor: insertion strictly inside grows the span", (function () {
+    var e = P.diffText("the quick fox", "the quick brown fox"); // insert "brown " at 10
+    var a = P.shiftAnchor({ nodeKey: "n", start: 4, len: 5 }, e); // "quick"
+    return a.start === 4 && a.len === 5; // "quick" unchanged (edit after it)
+  })());
+  ok("shiftAnchor: insertion inside the span extends its length", (function () {
+    var e = P.diffText("quick", "quiiick"); // insert "ii" inside
+    var a = P.shiftAnchor({ nodeKey: "n", start: 0, len: 5 }, e);
+    return a.start === 0 && a.len === 7;
+  })());
+  ok("shiftAnchor: insertion exactly at the end boundary does NOT grow (end-exclusive)", (function () {
+    var e = P.diffText("quick", "quickly"); // append "ly" at 5 (== end of a [0,5) span)
+    var a = P.shiftAnchor({ nodeKey: "n", start: 0, len: 5 }, e);
+    return a.start === 0 && a.len === 5;
+  })());
+  ok("shiftAnchor: text before the span shifts start, keeps length", (function () {
+    var e = P.diffText("fox", "the fox"); // prepend "the " -> everything shifts +4
+    var a = P.shiftAnchor({ nodeKey: "n", start: 0, len: 3 }, e);
+    return a.start === 4 && a.len === 3;
+  })());
+  ok("shiftAnchor: deletion straddling the span clips it", (function () {
+    var e = P.diffText("abcdefgh", "afgh"); // delete "bcde" (4..? ) region [1,5)
+    var a = P.shiftAnchor({ nodeKey: "n", start: 2, len: 4 }, e); // "cdef" straddles the delete
+    return a.len < 4; // clipped
+  })());
+
+  // --- node model round-trip + stable heading keys ---
+  var model = SD.create([
+    { type: "heading", level: 2, text: "Overview" },
+    { type: "paragraph", text: "The unit regulates water across sixteen zones." },
+    { type: "list", ordered: false, items: ["Green nominal", "Amber degraded"] }
+  ]);
+  ok("create assigns a stable key to every node", model.nodes.every(function (n) { return !!n.key; }));
+  ok("heading nodes are queryable for the TOC with their keys", (function () {
+    var h = SD.headings(model); return h.length === 1 && h[0].text === "Overview" && !!h[0].key;
+  })());
+  ok("node model round-trips through toJSON/fromJSON (no undo state leaks)", (function () {
+    var j = SD.toJSON(model); var s = JSON.stringify(j);
+    var back = SD.fromJSON(JSON.parse(s));
+    return JSON.stringify(SD.toJSON(back)) === s && j.undo === undefined && j.redo === undefined;
+  })());
+  ok("nodeText: list joins items; paragraph is its text", (function () {
+    return P.nodeText(model.nodes[2]) === "Green nominal\nAmber degraded" && P.nodeText(model.nodes[1]).indexOf("regulates") > -1;
+  })());
+
+  // --- THE SPIKE: owned undo restores a deleted span AND re-anchors its mark ---
+  var m2 = SD.create([{ type: "paragraph", text: "The controller arbitrates contention by line-pressure headroom." }]);
+  var pKey = m2.nodes[0].key;
+  var idx = P.nodeText(m2.nodes[0]).indexOf("arbitrates contention by line-pressure headroom");
+  var mark = SD.addMark(m2, { type: "link", anchor: { nodeKey: pKey, start: idx, len: "arbitrates contention by line-pressure headroom".length }, locations: [{ doc: "Quick-Start", section: "Wiring", loc: "Step 4" }] });
+  ok("a link mark anchors to the exact model text", SD.anchorText(m2, mark.anchor) === "arbitrates contention by line-pressure headroom");
+  // destructive edit: delete the marked phrase entirely (simulating a contentEditable delete)
+  var before = P.nodeText(m2.nodes[0]);
+  var deleted = before.replace("arbitrates contention by line-pressure headroom", "does that");
+  SD.applyTextEdit(m2, pKey, deleted);
+  SD.refreshMark(m2, SD.markById(m2, mark.id));
+  ok("after deleting the anchored text the mark is flagged broken", SD.markById(m2, mark.id).broken === true);
+  // Ctrl+Z: owned undo restores the span AND re-anchors the mark (the native-undo failure)
+  SD.undo(m2);
+  var restored = SD.markById(m2, mark.id);
+  ok("undo restores the deleted phrase into the node text", P.nodeText(SD.nodeByKey(m2, pKey)).indexOf("arbitrates contention by line-pressure headroom") > -1);
+  ok("undo re-anchors the mark: it is no longer broken and points at its original text", (function () {
+    SD.refreshMark(m2, restored); return restored.broken === false && SD.anchorText(m2, restored.anchor) === "arbitrates contention by line-pressure headroom";
+  })());
+  ok("undo also preserves the mark's downstream payload (locations survive the round-trip)", restored.locations && restored.locations[0].doc === "Quick-Start");
+  ok("redo re-applies the destructive edit and re-breaks the mark", (function () {
+    SD.redo(m2); SD.refreshMark(m2, SD.markById(m2, mark.id)); return SD.markById(m2, mark.id).broken === true;
+  })());
+
+  // --- editing a span's own text keeps it anchored (rides the edit, stays in sync) ---
+  var m3 = SD.create([{ type: "paragraph", text: "Flush the manifold quarterly." }]);
+  var k3 = m3.nodes[0].key;
+  var mk3 = SD.addMark(m3, { type: "alternate", anchor: { nodeKey: k3, start: 0, len: 5 }, alt: "Rinse it out." }); // "Flush"
+  SD.applyTextEdit(m3, k3, "Now: Flush the manifold quarterly."); // prepend "Now: " (distinct first char -> clean before-edit)
+  ok("editing before an alternate span keeps the anchor over the same word", SD.anchorText(m3, SD.markById(m3, mk3.id).anchor) === "Flush");
+
+  // --- staleness: base edit inside an alternate's span flags it needs-review ---
+  var m4 = SD.create([{ type: "paragraph", text: "Hold the set-point within a two-percent tolerance band." }]);
+  var k4 = m4.nodes[0].key;
+  var phrase = "two-percent tolerance band";
+  var mk4 = SD.addMark(m4, { type: "alternate", anchor: { nodeKey: k4, start: P.nodeText(m4.nodes[0]).indexOf(phrase), len: phrase.length }, alt: "within 2%" });
+  ok("a fresh alternate is not stale", SD.markById(m4, mk4.id).stale === false);
+  SD.applyTextEdit(m4, k4, P.nodeText(m4.nodes[0]).replace("two-percent", "three-percent"));
+  SD.refreshMark(m4, SD.markById(m4, mk4.id));
+  ok("editing the base span after an alternate was written flags it stale (needs re-sync)", SD.markById(m4, mk4.id).stale === true);
+
+  // --- fromSections migration seam: section-object model -> node tree ---
+  var seeded = SD.fromSections({ sections: [
+    { id: "sec-a", heading: "Zone configuration", facets: { technical: "Each zone carries a schedule.\n\n- Green nominal\n- Amber degraded" } }
+  ] });
+  ok("fromSections builds a heading node with a section-derived stable key", (function () {
+    var h = SD.headings(seeded); return h.length === 1 && h[0].text === "Zone configuration" && seeded.nodes[0].key === "n-sec-a";
+  })());
+  ok("fromSections splits the base text into paragraph + list nodes", (function () {
+    var types = seeded.nodes.map(function (n) { return n.type; });
+    return types.indexOf("paragraph") > -1 && types.indexOf("list") > -1;
+  })());
+
+  // --- range-mark engine: status, ⟳ update-with-appended-copy, relationships, history ---
+  var mm = SD.create([{ type: "paragraph", text: "Flush the manifold quarterly and log the service." }]);
+  var mk = mm.nodes[0].key;
+  var ph = "Flush the manifold quarterly";
+  var link = SD.addMark(mm, { type: "link", anchor: { nodeKey: mk, start: 0, len: ph.length }, locations: [{ doc: "QS", section: "Care", loc: "Step 1" }] });
+  var alt = SD.addMark(mm, { type: "alternate", anchor: { nodeKey: mk, start: mm.nodes[0].text.indexOf("log the service"), len: "log the service".length }, alt: "record it" });
+
+  ok("markStatus: a fresh mark is green/in-sync", SD.markStatus(link).dot === "green");
+  ok("markMeta: each type carries a distinct visual class + label", (function () {
+    return SD._pure.markMeta({ type: "link" }).cls === "sd-mark-link" && SD._pure.markMeta({ type: "comment" }).cls === "sd-mark-comment" && SD._pure.markMeta({ type: "alternate" }).cls === "sd-mark-alt";
+  })());
+  ok("markExtendedBy: a selection that fully contains + extends a mark is offered ⟳ update", (function () {
+    var ext = SD.markExtendedBy(mm, { nodeKey: mk, start: 0, len: ph.length + 6 }); // extends past the link
+    return ext && ext.id === link.id;
+  })());
+  ok("markExtendedBy: a selection equal to (not longer than) the mark is NOT an update target", SD.markExtendedBy(mm, { nodeKey: mk, start: 0, len: ph.length }) === null);
+  ok("⟳ updateMark captures the appended text into the existing mark + resets its baseText", (function () {
+    SD.updateMark(mm, link.id, { nodeKey: mk, start: 0, len: ph.length + 5 }); // + " and"
+    var m = SD.markById(mm, link.id);
+    return m.anchor.len === ph.length + 5 && m.baseText === SD.anchorText(mm, m.anchor) && m.locations[0].doc === "QS";
+  })());
+  ok("marksOverlapping: hit-tests marks covering a point/range in a node", (function () {
+    var hits = SD.marksOverlapping(mm, mk, 2, 0); // inside "Flush..."
+    return hits.length === 1 && hits[0].id === link.id;
+  })());
+  ok("broken detection logs a discrete History event on the edit that breaks a mark", (function () {
+    var m5 = SD.create([{ type: "paragraph", text: "The unit arbitrates contention by headroom." }]);
+    var kk = m5.nodes[0].key, pph = "arbitrates contention by headroom";
+    var lk = SD.addMark(m5, { type: "link", anchor: { nodeKey: kk, start: m5.nodes[0].text.indexOf(pph), len: pph.length } });
+    SD.applyTextEdit(m5, kk, "The unit .");  // delete the whole anchored phrase -> mark breaks
+    var brokeEvents = (m5.history || []).filter(function (h) { return h.type === "mark-broken" && h.markId === lk.id; });
+    return brokeEvents.length === 1;
+  })());
+  // product-rail-source-selbar-multi-paragraph: the contextual selbar's visibility is a pure
+  // decision (anchor + updateTarget + unlocked). A multi-paragraph selection has no update target
+  // (⟳ is single-block only) yet MUST still offer alternate + comment -- the bug was the bar
+  // vanishing on a cross-paragraph selection. Guard the decision so it can't regress.
+  ok("selbarDecision: no anchor -> bar hidden entirely", (function () {
+    var d = SD.selbarDecision(null, null, true);
+    return d.showBar === false && d.showAlt === false && d.showComment === false && d.showUpdate === false;
+  })());
+  ok("selbarDecision: single-block selection with no extended mark -> create (alt + comment), no update", (function () {
+    var d = SD.selbarDecision({ nodeKey: "a", start: 0, len: 4 }, null, false);
+    return d.showBar === true && d.showAlt === true && d.showComment === true && d.showUpdate === false;
+  })());
+  ok("selbarDecision: MULTI-paragraph anchor still offers alternate + comment (the fixed bug)", (function () {
+    var d = SD.selbarDecision({ nodeKey: "a", start: 2, len: 6, endAnchor: { nodeKey: "b", start: 0, len: 5 }, multi: true }, null, true);
+    return d.showBar === true && d.showAlt === true && d.showComment === true && d.showUpdate === false;
+  })());
+  ok("selbarDecision: extending an existing single-block mark flips create -> ⟳ update", (function () {
+    var d = SD.selbarDecision({ nodeKey: "a", start: 0, len: 10 }, { id: "mk1" }, true);
+    return d.showBar === true && d.showUpdate === true && d.showAlt === false && d.showComment === false;
+  })());
+  ok("selbarDecision: rich-text buttons shown only when unlocked", (function () {
+    var locked = SD.selbarDecision({ nodeKey: "a", start: 0, len: 4 }, null, false);
+    var open = SD.selbarDecision({ nodeKey: "a", start: 0, len: 4 }, null, true);
+    return locked.showRT === false && open.showRT === true;
+  })());
+})();
+
+// ---- SPEC 8 source-link 01: linked-content model + render resolver (pure core) ----
+// The link mark lives on the source master's SourceDoc; the document block/span carries a
+// {masterId, markId, altId?} ref, never a copy. resolveSourceLinkContent (render.js) reads the
+// master's LIVE text so edits propagate and export bakes. We test the model side headlessly
+// (source-doc is require-able) + the render wiring by source-string (render.js needs a DOM, so its
+// runtime resolution + export bake are Puppeteer-verified in the browser-verify step).
+section("SPEC 8: source-link 01 — link mark model + resolver wiring");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function master() {
+    return SD.create([
+      { type: "heading", key: "h", level: 2, text: "Battery care" },
+      { type: "paragraph", key: "p", text: "Charge to 80% for storage." },
+      { type: "image", key: "img", src: "cell.png", alt: "A cell", caption: "Fig 1" }
+    ]);
+  }
+  // A link mark over a single-node range resolves to that node's live text (what the block bakes).
+  ok("a text link mark's covered text is the passage base (markText)", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "p", start: 0, len: 26 } });
+    return lk.type === "link" && SD.markText(m, lk) === "Charge to 80% for storage.";
+  })());
+  // A cross-node link (heading -> paragraph) stores anchor + endAnchor and covers both nodes.
+  ok("a cross-node link mark stores endAnchor and joins covered nodes with a newline", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "h", start: 0, len: 12 }, endAnchor: { nodeKey: "p", start: 0, len: 26 } });
+    return SD.isMultiBlock(lk) && lk.endAnchor.nodeKey === "p" && SD.markText(m, lk) === "Battery care\nCharge to 80% for storage.";
+  })());
+  // The link mark survives a JSON round-trip (the master persists as topic.doc) and is re-findable.
+  ok("a link mark round-trips through toJSON/fromJSON and markById re-finds it with live text", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "p", start: 0, len: 26 } });
+    var restored = SD.fromJSON(SD.toJSON(m));
+    var again = SD.markById(restored, lk.id);
+    return !!again && again.type === "link" && SD.markText(restored, again) === "Charge to 80% for storage.";
+  })());
+  // Object link: an image node has no text span -> resolver returns a figure descriptor.
+  ok("an object (image) link mark carries no text span and its node yields src/alt/caption", (function () {
+    var m = master();
+    var lk = SD.addMark(m, { type: "link", anchor: { nodeKey: "img" } }); // no start/len -> object mark
+    if (!SD.isObjectMark(lk)) return false;
+    var n = SD.nodeByKey(m, lk.anchor.nodeKey);
+    return n.src === "cell.png" && n.alt === "A cell" && n.caption === "Fig 1";
+  })());
+  // An alternate fork is its own mark carrying the fork wording in `.alt`, re-findable by id (altId).
+  ok("an alternate mark on the master carries fork wording in .alt, found by id (the resolver's altId)", (function () {
+    var m = master();
+    var alt = SD.addMark(m, { type: "alternate", anchor: { nodeKey: "p", start: 0, len: 26 }, alt: "Store at half charge." });
+    var found = SD.markById(m, alt.id);
+    return found && found.type === "alternate" && found.alt === "Store at half charge.";
+  })());
+
+  // --- source-link 05: planLinkedBlocks format-split planner (pure) ---
+  function splitDoc() {
+    return SD.create([
+      { type: "heading", key: "c", level: 1, text: "Care and cleaning" }, // h1
+      { type: "heading", key: "s", level: 2, text: "Cleaning" },          // h2
+      { type: "paragraph", key: "p1", text: "Wipe the sensor." },         // body
+      { type: "paragraph", key: "p2", text: "Let it dry fully." }         // body
+    ]);
+  }
+  ok("planLinkedBlocks: a single-format range -> ONE block spec (its own sub-range)", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "p1", start: 0, len: 16 } });
+    return plan.length === 1 && plan[0].format === "body" && plan[0].anchor.nodeKey === "p1" && !plan[0].endAnchor;
+  })());
+  ok("planLinkedBlocks: a heading+paragraph range -> TWO blocks (h2, body) in document order", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "s", start: 0, len: 8 }, endAnchor: { nodeKey: "p1", start: 0, len: 16 } });
+    return plan.length === 2 && plan[0].format === "h2" && plan[0].anchor.nodeKey === "s" && plan[1].format === "body" && plan[1].anchor.nodeKey === "p1";
+  })());
+  ok("planLinkedBlocks: two consecutive SAME-format nodes stay in ONE block (joined by a line break at render)", (function () {
+    var d = splitDoc();
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "p1", start: 0, len: 16 }, endAnchor: { nodeKey: "p2", start: 0, len: 17 } });
+    return plan.length === 1 && plan[0].format === "body" && plan[0].anchor.nodeKey === "p1" && plan[0].endAnchor && plan[0].endAnchor.nodeKey === "p2";
+  })());
+  ok("planLinkedBlocks: a chapter (level-1) heading maps to the h1 format, a level-2 to h2", (function () {
+    var d = splitDoc();
+    var p1 = SD.planLinkedBlocks(d, { anchor: { nodeKey: "c", start: 0, len: 5 } });
+    var p2 = SD.planLinkedBlocks(d, { anchor: { nodeKey: "s", start: 0, len: 5 } });
+    return p1[0].format === "h1" && p2[0].format === "h2";
+  })());
+  ok("planLinkedBlocks: heading -> paragraph -> heading is THREE runs (format change starts a new block)", (function () {
+    var d = SD.create([
+      { type: "heading", key: "h1", level: 2, text: "A" },
+      { type: "paragraph", key: "p", text: "body text here" },
+      { type: "heading", key: "h2", level: 2, text: "B" }
+    ]);
+    var plan = SD.planLinkedBlocks(d, { anchor: { nodeKey: "h1", start: 0, len: 1 }, endAnchor: { nodeKey: "h2", start: 0, len: 1 } });
+    return plan.length === 3 && plan[0].format === "h2" && plan[1].format === "body" && plan[2].format === "h2";
+  })());
+  ok("placement maps planner formats to destination block types (h1->heading, h2->subheading, body->paragraph)", /SOURCE_LINK_BLOCK_TYPE = \{ h1: "heading", h2: "subheading", body: "paragraph" \}/.test(src("src/editor.js")));
+
+  // --- render.js resolver wiring (source-string: render.js is DOM-coupled, not require-able) ---
+  var r = src("src/render.js");
+  ok("resolveSourceLinkContent is defined and exposed on window (twin of resolveFacetTemplate)", /function resolveSourceLinkContent\(masterId, markId, altId, hooks\)/.test(r) && /window\.resolveSourceLinkContent = resolveSourceLinkContent;/.test(r));
+  ok("the resolver reads the master from doc.components / LibraryStore.components only (pure, no editor UI state)", /function sourceLinkMaster\(masterId\)[\s\S]{0,400}window\.LibraryStore && window\.LibraryStore\.components[\s\S]{0,200}def\.doc \? def : null/.test(r));
+  ok("the resolver returns live base text via SD.markText, an alternate's .alt by altId, or an object descriptor", /SD\.markText\(model, mark\)/.test(r) && /alt\.type === "alternate" && alt\.alt != null/.test(r) && /type: "object", src: n\.src/.test(r));
+  ok("a linked TEXT BLOCK's field value is produced by the resolver before innerHTML (bakes like a span)", /obj\.sourceLink && obj\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,260}value = window\.sourceLinkTextToHtml\(sl\.text\)/.test(r));
+  ok("linked INLINE SPANS resolve in the SAME post-pass as data-style-ref (resolveSourceLinks after resolveInlineStyles)", /resolveInlineStyles\(node\);\s*[\s\S]{0,220}resolveSourceLinks\(node\);/.test(r) && /span\[data-source-link\]/.test(r));
+  ok("the resolver is a clean no-op fallback when the master or mark is absent (never throws/blanks)", /if \(!SD \|\| !markId\) return null;[\s\S]{0,120}if \(!def\) return null;[\s\S]{0,200}if \(!mark\) return null;/.test(r));
+  ok("resolved plain text is HTML-escaped and newlines become <br> for the rich field", /function sourceLinkTextToHtml\(text\)[\s\S]{0,220}replace\(\/&\/g, "&amp;"\)[\s\S]{0,200}replace\(\/\\n\/g, "<br>"\)/.test(r));
+})();
+
+// ---- source-enter-splits-paragraph: Enter in the continuous doc splits a block (was disabled) ----
+// splitNode is the inverse of replaceRange's merge: the head keeps [0,offset), a new paragraph after
+// holds [offset,end), and marks re-anchor (before stays / after moves / straddle -> two-block).
+section("Source rewrite: splitNode (Enter makes a new paragraph)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var m = SD.create([{ type: "paragraph", text: "Hello world" }]);
+  var k = m.nodes[0].key;
+  var r = SD.splitNode(m, k, 5); // "Hello" | " world"
+  ok("splitNode: one paragraph -> two nodes at the caret", m.nodes.length === 2 && SD.nodeText(m.nodes[0]) === "Hello" && SD.nodeText(m.nodes[1]) === " world");
+  ok("splitNode: the second node is a paragraph with a fresh key", m.nodes[1].type === "paragraph" && m.nodes[1].key === r.newKey && r.newKey !== k);
+  ok("splitNode: caret lands at the start of the new node", r.caret && r.caret.nodeKey === r.newKey && r.caret.offset === 0);
+
+  // marks re-anchor around the split (offset 10 of "alpha beta gamma" -> "alpha beta" | " gamma")
+  var m2 = SD.create([{ type: "paragraph", text: "alpha beta gamma" }]);
+  var k2 = m2.nodes[0].key;
+  var before = SD.addMark(m2, { type: "comment", anchor: { nodeKey: k2, start: 0, len: 5 } });   // "alpha"
+  var after = SD.addMark(m2, { type: "comment", anchor: { nodeKey: k2, start: 11, len: 5 } });    // "gamma"
+  var straddle = SD.addMark(m2, { type: "comment", anchor: { nodeKey: k2, start: 3, len: 9 } });  // crosses the split
+  var r2 = SD.splitNode(m2, k2, 10);
+  ok("splitNode: a mark entirely before the split stays put", before.anchor.nodeKey === k2 && before.anchor.start === 0 && before.anchor.len === 5);
+  ok("splitNode: a mark entirely after moves to the new node, offset-shifted", after.anchor.nodeKey === r2.newKey && after.anchor.start === 1);
+  ok("splitNode: a mark straddling the split becomes a two-block mark", SD.isMultiBlock(straddle) && straddle.anchor.nodeKey === k2 && straddle.endAnchor.nodeKey === r2.newKey && straddle.endAnchor.len === 2);
+
+  // non-text block: Enter drops a fresh empty paragraph after it (no text split)
+  var m3 = SD.create([{ type: "list", ordered: false, items: ["a", "b"] }]);
+  var r3 = SD.splitNode(m3, m3.nodes[0].key, 0);
+  ok("splitNode on a non-text block inserts an empty paragraph after it", m3.nodes.length === 2 && m3.nodes[0].type === "list" && m3.nodes[1].type === "paragraph" && SD.nodeText(m3.nodes[1]) === "" && r3.caret.nodeKey === r3.newKey);
+
+  // owned undo: one split, one undo step, fully restored
+  var m4 = SD.create([{ type: "paragraph", text: "one two" }]);
+  SD.splitNode(m4, m4.nodes[0].key, 3);
+  ok("splitNode pushes owned undo", SD.canUndo(m4) === true);
+  SD.undo(m4);
+  ok("undo restores the single node", m4.nodes.length === 1 && SD.nodeText(m4.nodes[0]) === "one two");
+
+  // wiring: the continuous-doc beforeinput routes Enter through splitNode (no longer a dead preventDefault)
+  var e = src("src/editor.js");
+  ok("editor: Enter (insertParagraph/insertLineBreak) calls SD.splitNode via afterSourceStructuralEdit", /it === "insertParagraph" \|\| it === "insertLineBreak"/.test(e) && /afterSourceStructuralEdit\(topic, model, SD\.splitNode\(model, blk\.getAttribute\("data-node"\), off\)\)/.test(e));
+})();
+
+// ---- product-rail-source-rw-multi-block-marks: a mark spans one word to the whole document (D1) ----
+// SourceMarks.selectionAnchor() returned null for a selection spanning >1 block, so comment / link /
+// alternate never offered on a cross-paragraph selection. The model now lets a mark carry an
+// endAnchor: it covers its FIRST node start..end, its LAST node 0..endOffset, and every node between
+// whole (derived from document order). Only the two endpoints ride edits; interiors are always fully
+// covered. Painting (a single Range across blocks) is DOM-verified in the browser; this proves the
+// pure model -- span decomposition, edit-shift, broken/stale -- headlessly.
+section("Source rewrite: multi-block marks (one word to whole document, D1)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var P = SD._pure;
+  function doc() {
+    return SD.create([
+      { type: "paragraph", text: "The quick brown fox" }, // 0: len 19
+      { type: "paragraph", text: "jumps over" },           // 1: len 10 (interior, whole)
+      { type: "paragraph", text: "the lazy dog" }           // 2: len 12
+    ]);
+  }
+  var m = doc();
+  var k0 = m.nodes[0].key, k1 = m.nodes[1].key, k2 = m.nodes[2].key;
+  // select from "quick..." (offset 4 of node 0) through "the lazy" (offset 8 of node 2)
+  var mk = SD.addMark(m, { type: "comment", anchor: { nodeKey: k0, start: 4, len: 15 }, endAnchor: { nodeKey: k2, start: 0, len: 8 } });
+
+  ok("addMark stores an endAnchor -> the mark is multi-block", SD.isMultiBlock(mk) === true);
+  ok("a same-node mark is NOT multi-block (no regression)", SD.isMultiBlock(SD.addMark(doc(), { type: "comment", anchor: { nodeKey: k0, start: 0, len: 3 } })) === false);
+  ok("markSpans decomposes: first node start..end, interior whole, last node 0..endOffset", (function () {
+    var sp = SD.markSpans(m, mk);
+    return sp.length === 3
+      && sp[0].nodeKey === k0 && sp[0].start === 4 && sp[0].len === 15 // "quick brown fox"
+      && sp[1].nodeKey === k1 && sp[1].start === 0 && sp[1].len === 10 && sp[1].whole === true
+      && sp[2].nodeKey === k2 && sp[2].start === 0 && sp[2].len === 8; // "the lazy"
+  })());
+  ok("markText joins every covered slice (the base a stale-check compares against)", SD.markText(m, mk) === "quick brown fox\njumps over\nthe lazy");
+  ok("baseText is the combined covered text at creation", mk.baseText === "quick brown fox\njumps over\nthe lazy");
+  ok("all three mark types accept a multi-block selection", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var link = SD.addMark(d, { type: "link", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 3 } });
+    var alt = SD.addMark(d, { type: "alternate", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 3 }, alt: "x" });
+    return SD.isMultiBlock(link) && SD.isMultiBlock(alt);
+  })());
+
+  // hit-testing: a click in the first, an interior, OR the last covered node finds the mark
+  ok("marksOverlapping finds a multi-block mark from its first node", SD.marksOverlapping(m, k0, 6, 0).some(function (x) { return x.id === mk.id; }));
+  ok("marksOverlapping finds it from an interior (whole-covered) node", SD.marksOverlapping(m, k1, 3, 0).some(function (x) { return x.id === mk.id; }));
+  ok("marksOverlapping finds it from its last node", SD.marksOverlapping(m, k2, 2, 0).some(function (x) { return x.id === mk.id; }));
+  ok("marksOverlapping does NOT match the uncovered tail of the last node", SD.marksOverlapping(m, k2, 10, 0).some(function (x) { return x.id === mk.id; }) === false);
+
+  // survives a base edit on every covered node
+  ok("editing an INTERIOR node keeps the mark covering it and does not break it", (function () {
+    var d = doc(), a = d.nodes[0].key, mid = d.nodes[1].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 4, len: 15 }, endAnchor: { nodeKey: c, start: 0, len: 8 } });
+    SD.applyTextEdit(d, mid, "jumps right over"); // grow the interior paragraph
+    var mm2 = SD.markById(d, x.id);
+    var sp = SD.markSpans(d, mm2);
+    return mm2.broken === false && sp[1].nodeKey === mid && sp[1].len === "jumps right over".length; // interior re-covered whole
+  })());
+  ok("editing the FIRST node shifts the start endpoint, mark stays intact", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 4, len: 15 }, endAnchor: { nodeKey: c, start: 0, len: 8 } });
+    SD.applyTextEdit(d, a, "AB The quick brown fox"); // prepend "AB " -> start rides right
+    var mm2 = SD.markById(d, x.id), sp = SD.markSpans(d, mm2);
+    return mm2.broken === false && sp[0].start === 7 && SD.nodeText(SD.nodeByKey(d, a)).substr(sp[0].start, sp[0].len) === "quick brown fox";
+  })());
+  ok("editing the LAST node shifts the end endpoint (left gravity holds the boundary)", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 4, len: 15 }, endAnchor: { nodeKey: c, start: 0, len: 8 } });
+    SD.applyTextEdit(d, c, "XY the lazy dog"); // prepend to the last node -> end offset rides right
+    var mm2 = SD.markById(d, x.id), sp = SD.markSpans(d, mm2);
+    return mm2.broken === false && SD.nodeText(SD.nodeByKey(d, c)).substr(0, sp[2].len) === "XY the lazy";
+  })());
+  ok("a multi-block alternate goes stale when a covered node's text changes", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "alternate", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 12 }, alt: "short" });
+    if (SD.markById(d, x.id).stale !== false) return false; // fresh multi-block alternate is in sync
+    SD.applyTextEdit(d, d.nodes[1].key, "leaps over"); // change the interior -> combined text drifts
+    SD.refreshMark(d, SD.markById(d, x.id));
+    return SD.markById(d, x.id).stale === true;
+  })());
+  ok("deleting a multi-block mark's endpoint node breaks it", (function () {
+    var d = doc(), a = d.nodes[0].key, c = d.nodes[2].key;
+    var x = SD.addMark(d, { type: "comment", anchor: { nodeKey: a, start: 0, len: 19 }, endAnchor: { nodeKey: c, start: 0, len: 12 } });
+    d.nodes.splice(2, 1); // remove the last covered node (structural)
+    SD.refreshMark(d, SD.markById(d, x.id));
+    return SD.markById(d, x.id).broken === true;
+  })());
+  ok("markExtendedBy ignores a multi-block selection (⟳ update is single-block only)", SD.markExtendedBy(m, { nodeKey: k0, start: 4, len: 15, endAnchor: { nodeKey: k2, start: 0, len: 8 } }) === null);
+  ok("endAnchor round-trips through toJSON/fromJSON", (function () {
+    var back = SD.fromJSON(JSON.parse(JSON.stringify(SD.toJSON(m))));
+    var bm = SD.markById(back, mk.id);
+    return SD.isMultiBlock(bm) && bm.endAnchor.nodeKey === k2 && bm.endAnchor.len === 8;
+  })());
+})();
+
+// ---- product-rail-source-selbar-multi-paragraph: editing ACROSS paragraphs (replaceRange) ----
+// With one contentEditable host a drag spans blocks, so Backspace/Delete/typing over a multi-paragraph
+// selection must merge + remove blocks through the model. replaceRange is the pure core: single-block
+// reuses applyTextEdit; multi-block keeps the first node's head, merges the last node's tail onto it,
+// removes interiors, and re-anchors surviving marks (deleted text breaks its marks, as a delete should).
+section("Source rewrite: edit across paragraphs (replaceRange)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function doc() {
+    return SD.create([
+      { type: "paragraph", key: "a", text: "Alpha bravo charlie." },   // 0..20
+      { type: "paragraph", key: "b", text: "Delta echo foxtrot." },    // interior
+      { type: "paragraph", key: "c", text: "Golf hotel india." }       // 0..17
+    ]);
+  }
+  ok("single-block delete removes just the covered chars", (function () {
+    var m = doc();
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 5 }, ""); // delete "bravo"
+    return SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha  charlie." && r.caret.offset === 6 && m.nodes.length === 3;
+  })());
+  ok("single-block replace swaps the covered chars for new text", (function () {
+    var m = doc();
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 5 }, "delta"); // bravo -> delta
+    return SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha delta charlie." && r.caret.offset === 11;
+  })());
+  ok("multi-paragraph delete merges first head + last tail and removes interior blocks", (function () {
+    var m = doc();
+    // select from a[6] ("bravo...") through c[5] ("Golf "|"hotel...") and delete
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    return m.nodes.length === 1 &&                      // interior "b" and last "c" both removed, tail merged onto "a"
+      SD.nodeByKey(m, "b") === null && SD.nodeByKey(m, "c") === null &&
+      SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha hotel india." &&
+      r.mergedKey === "a" && r.caret.offset === 6;
+  })());
+  ok("multi-paragraph replace inserts text at the seam", (function () {
+    var m = doc();
+    var r = SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "X");
+    return SD.nodeText(SD.nodeByKey(m, "a")) === "Alpha Xhotel india." && r.caret.offset === 7 && m.nodes.length === 1;
+  })());
+  ok("a mark wholly inside a removed interior paragraph breaks", (function () {
+    var m = doc();
+    var mk = SD.addMark(m, { type: "comment", anchor: { nodeKey: "b", start: 0, len: 5 } }); // "Delta" in interior
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    return SD.markById(m, mk.id).broken === true;
+  })());
+  ok("a mark in the surviving head is untouched by a downstream multi-paragraph delete", (function () {
+    var m = doc();
+    var mk = SD.addMark(m, { type: "link", anchor: { nodeKey: "a", start: 0, len: 5 } }); // "Alpha" in the kept head
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    var after = SD.markById(m, mk.id);
+    return after.broken !== true && after.anchor.nodeKey === "a" && after.anchor.start === 0 && after.anchor.len === 5;
+  })());
+  ok("a mark in the surviving last-node tail re-anchors onto the merged node", (function () {
+    var m = doc();
+    var mk = SD.addMark(m, { type: "link", anchor: { nodeKey: "c", start: 5, len: 5 } }); // "hotel" (offset 5..10 in c)
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    var after = SD.markById(m, mk.id);
+    // merged = "Alpha " + "hotel india." ; "hotel" now sits at offset 6
+    return after.broken !== true && after.anchor.nodeKey === "a" && SD.anchorText(m, after.anchor) === "hotel";
+  })());
+  ok("undo restores the paragraphs a multi-paragraph delete merged", (function () {
+    var m = doc();
+    SD.replaceRange(m, { nodeKey: "a", start: 6, len: 14, endAnchor: { nodeKey: "c", start: 0, len: 5 } }, "");
+    SD.undo(m);
+    return m.nodes.length === 3 && SD.nodeText(SD.nodeByKey(m, "b")) === "Delta echo foxtrot." && SD.nodeText(SD.nodeByKey(m, "c")) === "Golf hotel india.";
+  })());
+})();
+
+// ---- product-rail-source-rw-markdown-export: serialise the continuous doc back out to .md ----
+// The inverse of the import on-ramp: SourceDoc.toMarkdown(model) is a pure node-tree -> Markdown
+// string. Inline conventions (bold/`code`) already live in the node text, so they pass through;
+// each block type maps to standard Markdown. Download wiring is DOM (browser-verified separately).
+section("Source rewrite: export a topic to Markdown (product-rail-source-rw-markdown-export)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([
+    { type: "heading", level: 1, chapter: true, text: "Cooling system" },
+    { type: "paragraph", text: "The **pump** cycles coolant through the `manifold`." },
+    { type: "heading", level: 2, text: "Checks" },
+    { type: "list", ordered: false, items: ["Pressure nominal", "No leaks"] },
+    { type: "list", ordered: true, items: ["Open valve", "Prime pump"] },
+    { type: "table", rows: [["Zone", "State"], ["A", "Green"], ["B", "Amber"]] },
+    { type: "image", src: "diagram.png", alt: "Flow diagram", caption: "Coolant flow" },
+    { type: "callout", tag: "Warning", text: "Do not run dry." }
+  ]);
+  var md = SD.toMarkdown(model);
+  ok("chapter heading (level 1) serialises to a single #", /(^|\n)# Cooling system(\n|$)/.test(md));
+  ok("a level-2 heading serialises to ##", /\n## Checks\n/.test(md));
+  ok("paragraph inline bold/code pass through verbatim", md.indexOf("The **pump** cycles coolant through the `manifold`.") > -1);
+  ok("an unordered list serialises with - bullets", md.indexOf("- Pressure nominal\n- No leaks") > -1);
+  ok("an ordered list serialises with 1. 2. numbering", md.indexOf("1. Open valve\n2. Prime pump") > -1);
+  ok("a table serialises header + --- separator + rows (GFM)", md.indexOf("| Zone | State |\n| --- | --- |\n| A | Green |\n| B | Amber |") > -1);
+  ok("an image serialises to ![alt](src) with its caption", md.indexOf("![Flow diagram](diagram.png)") > -1 && md.indexOf("*Coolant flow*") > -1);
+  ok("a callout serialises to a > blockquote with a bold tag", md.indexOf("> **Warning** Do not run dry.") > -1);
+  ok("blocks are separated by a blank line and the file ends with one newline", /\n\n/.test(md) && /\n$/.test(md) && !/\n\n\n/.test(md));
+  ok("a table cell containing a pipe is escaped", SD.toMarkdown(SD.create([{ type: "table", rows: [["a|b", "c"]] }])).indexOf("a\\|b") > -1);
+  ok("an empty document serialises to just a trailing newline", SD.toMarkdown(SD.create([])) === "\n");
+})();
+
+// ---- product-rail-source-rw-insert-image-table: toolbar insert of image/table nodes ----
+// Object-marks made image/table markable; this is the CREATE half. SourceDoc.insertNodeAfter drops a
+// new node after the selected block (handoff C2), fresh-keyed, existing marks/keys/variants untouched.
+// Toolbar wiring (file picker, re-render) is DOM (browser-verified); the placement core is pure.
+section("Source rewrite: insert image/table node after a block (product-rail-source-rw-insert-image-table)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var m = SD.create([
+    { type: "heading", level: 2, text: "A" },
+    { type: "paragraph", text: "first" },
+    { type: "paragraph", text: "second" }
+  ]);
+  var kFirst = m.nodes[1].key;
+  var img = SD.insertNodeAfter(m, kFirst, { type: "image", src: "data:image/png;base64,X", alt: "diagram" });
+  ok("insertNodeAfter places the node immediately after the target block", m.nodes[2] === SD.nodeByKey(m, img.key) && m.nodes[2].type === "image");
+  ok("the inserted node gets a fresh unique key", !!img.key && m.nodes.filter(function (n) { return n.key === img.key; }).length === 1);
+  ok("insert does not disturb the other nodes' keys/order", m.nodes[1].key === kFirst && SD.nodeText(m.nodes[3]) === "second");
+  ok("insertNodeAfter with a null/unknown key appends at the end", (function () {
+    var d = SD.create([{ type: "paragraph", text: "only" }]);
+    var t = SD.insertNodeAfter(d, null, { type: "table", rows: [["h"], [""]] });
+    return d.nodes[d.nodes.length - 1].key === t.key && t.type === "table";
+  })());
+  ok("an inserted image/table is a markable object node", SD.isMarkableObjectNode(SD.nodeByKey(m, img.key)) === true);
+  ok("a mark anchored before the insert still resolves (keys untouched)", (function () {
+    var d = SD.create([{ type: "paragraph", text: "keep this marked" }]);
+    var k = d.nodes[0].key;
+    var mk = SD.addMark(d, { type: "comment", anchor: { nodeKey: k, start: 0, len: 4 } });
+    SD.insertNodeAfter(d, k, { type: "image", src: "x", alt: "y" });
+    return SD.anchorText(d, SD.markById(d, mk.id).anchor) === "keep";
+  })());
+  ok("insertNodeAfter is undoable (pushes one undo)", (function () {
+    var d = SD.create([{ type: "paragraph", text: "p" }]);
+    SD.insertNodeAfter(d, d.nodes[0].key, { type: "table", rows: [[""]] });
+    var n = d.nodes.length; SD.undo(d);
+    return n === 2 && d.nodes.length === 1;
+  })());
+  ok("an unknown node type falls back to paragraph (never a stray type)", SD.insertNodeAfter(SD.create([]), null, { type: "wat", text: "z" }).type === "paragraph");
+})();
+
+// ---- Source rewrite (Epic 2b): mark painting engine loads (DOM-verified in browser) ----
+// source-marks.js is the DOM painting layer (CSS Custom Highlight over live Ranges). Its offset
+// walking + selection reading need a real DOM/TreeWalker, so its behaviour is proven by the
+// Puppeteer harness (prototypes/source-doc-spike-harness.html and the marks harness), not here;
+// this section only asserts the module loads clean and exposes its contract.
+section("Source rewrite: mark painting engine contract (Epic 2b)");
+(function () {
+  var SM = require(path.join(ROOT, "src/source-marks.js"));
+  ok("SourceMarks exposes create() + hasHighlight()", typeof SM.create === "function" && typeof SM.hasHighlight === "function");
+  ok("hasHighlight() is false headlessly (no CSS.highlights in node) -> paint is a safe no-op", SM.hasHighlight() === false);
+  var eng = SM.create({ root: null, model: { marks: [] } });
+  ok("an engine instance exposes the paint/selection/hit-test contract", typeof eng.paint === "function" && typeof eng.selectionAnchor === "function" && typeof eng.markAtPoint === "function");
+  var threw = false; try { eng.paint(); } catch (e) { threw = true; }
+  ok("paint() is a no-op (does not throw) when the Highlight API is unavailable", threw === false);
+})();
+
+// ---- Source rewrite (Epic 2b): two-layer lock + canvas-idiom toolbars (lock-toolbars) ----
+// The node-model article mounts additively: a topic renders the continuous-document view once it
+// carries a `doc`; legacy section topics are untouched (no regression -- the shipped Source tests
+// above still pass). These assertions guard the wiring that the browser-verify exercises live.
+section("Source rewrite: lock-toolbars wiring (Epic 2b)");
+(function () {
+  var e = src("src/editor.js");
+  // section-cells retired: EVERY topic renders the continuous node-model article; a legacy section
+  // topic auto-converts on open (lossless), then falls through to the same render.
+  ok("renderSourceArticle auto-converts a legacy section topic to the continuous model on open", /if \(!topicHasDoc\(topic\) && window\.SourceDoc\) \{[\s\S]{0,260}topic\.doc = window\.SourceDoc\.toJSON\(_m\);/.test(e));
+  ok("renderSourceArticle then renders the node-model article unconditionally (no section-cells fallback)", /host\.appendChild\(headEl\);\s*\n\s*renderSourceNodeArticle\(topic, host\);/.test(e) && e.indexOf("__sourceEditingCell = { sectionId:") === -1);
+  ok("topicHasDoc gates on the presence of a node tree", /function topicHasDoc\(topic\) \{ return !!\(topic && topic\.doc && topic\.doc\.nodes/.test(e));
+  ok("convertTopicToDoc builds topic.doc from the shipped sections via SourceDoc.fromSections", /window\.SourceDoc\.fromSections\(topic, resolveTopicBaseText\)/.test(e) && /topic\.doc = window\.SourceDoc\.toJSON\(model\)/.test(e));
+  ok("the live model is cached per topic so its owned undo stack survives re-renders", /function ensureSourceDocModel\(topic\)[\s\S]{0,200}__sourceDocModelTopicId === topic\.id/.test(e));
+  ok("switching topics rebinds the doc model and re-locks (base protected by default)", /__sourceDocModel = null; __sourceDocModelTopicId = null;[\s\S]{0,80}__sourceUnlocked = false;/.test(e));
+
+  // two-layer lock
+  ok("locked base prose refuses edits with an unlock reminder (annotation stays live)", /if \(!__sourceUnlocked && \(e\.key\.length === 1 \|\| e\.key === "Backspace"[\s\S]{0,160}sourceToast\("The source is locked/.test(e));
+  ok("Ctrl\\+Z is the OWNED undo (native undo would not restore marks); Shift redo", /if \(e\.shiftKey\) SD\.redo\(model\); else SD\.undo\(model\);/.test(e));
+  // Single editing host: the article (not each block) carries contentEditable, so a selection can span
+  // paragraphs (per-block hosts confined it to one block). Objects stay non-editable.
+  ok("the lock toggles the WHOLE article as one editable host (blocks inherit; objects stay non-editable)", /function applySourceLockState[\s\S]*?art\.contentEditable = __sourceUnlocked \? "true" : "false";/.test(e) && /\[data-object="1"\][\s\S]{0,120}el\.contentEditable = "false";/.test(e));
+  ok("a cross-paragraph edit is routed through SourceDoc.replaceRange, not left to the browser", /addEventListener\("beforeinput"/.test(e) && /SD\.replaceRange\(model, anchor, ins\)/.test(e));
+  ok("a Backspace/Delete at a block boundary merges paragraphs through replaceRange", /back && caretOff === 0 && idx > 0[\s\S]{0,240}SD\.replaceRange\(model, \{ nodeKey: prev\.key/.test(e));
+
+  // doc-level bar (bottom-centre): lock + marks only
+  ok("doc-bar has a lock toggle (glyph swaps lock/lock-open) via the DS IconButton", /icon: __sourceUnlocked \? "lock-open" : "lock"/.test(e));
+  ok("doc-bar has a marks show/hide toggle (eye/eye-off)", /icon: __sourceShowMarks \? "eye" : "eye-off"/.test(e));
+
+  // contextual selection bar: rich-text unlocked-only; alternate + comment always; NO create-link
+  ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(e));
+  ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
+  // source-selbar-block-formats: H1 / H2 / Body / Caution block-format actions (unlock-gated __rt),
+  // grouped after the inline three; the four glyphs are vendored; the handler reassigns node type.
+  ok("selbar has H1/H2/Body/Caution block-format segs, all unlock-gated (__rt)", /seg\("fmt-h1", "heading-1", "Heading 1", "source-selbar__rt"\)[\s\S]{0,200}seg\("fmt-h2", "heading-2"[\s\S]{0,200}seg\("fmt-body", "pilcrow"[\s\S]{0,200}seg\("fmt-caution", "triangle-alert", "Caution box", "source-selbar__rt"\)/.test(e));
+  ok("the four block-format glyphs are vendored in icons.js", /"heading-1":/.test(src("src/icons.js")) && /"heading-2":/.test(src("src/icons.js")) && /"pilcrow":/.test(src("src/icons.js")) && /"triangle-alert":/.test(src("src/icons.js")));
+  ok("block-format is gated behind the unlock (a base edit), applied across the selection, rides SD.setNodeType", /if \(cmd === "fmt-h1" \|\| cmd === "fmt-h2" \|\| cmd === "fmt-body" \|\| cmd === "fmt-caution"\) \{[\s\S]{0,200}if \(!__sourceUnlocked\)[\s\S]{0,700}SD\.nodesInAnchor\(__sourceDocModel, __sourceSelAnchor\)[\s\S]{0,160}SD\.setNodeType\(__sourceDocModel, k, spec\)/.test(e));
+  ok("the reassignment persists + rebuilds the article (element type changed)", /keys\.forEach\(function \(k\) \{ if \(SD\.setNodeType\(__sourceDocModel, k, spec\)\) changed\+\+; \}\);[\s\S]{0,120}persistSourceDocModel\(topic, __sourceDocModel\);\s*\n\s*renderSourceArticle\(\);/.test(e));
+  ok("the source reading render is heading-level aware so H1/H2 read distinctly (h1/h2/h3 + h1 CSS)", /node\.level === 1 \? "h1" : node\.level === 3 \? "h3" : "h2"/.test(e) && /h1\.source-doc__h \{ font-size:/.test(src("editor.css")));
+  // B1: create-link IS on the bar now, but object-only (source-selbar__obj) -- a text selection
+  // still never sees it (it's default-hidden and only un-hidden in selectSourceObject).
+  ok("create-link is present as an OBJECT-only action (source-selbar__obj)", /seg\("link", "link", "Add a link", "source-selbar__obj"\)/.test(e));
+  ok("the object-only controls are hidden by default (shown only on object select)", /\.source-selbar__img, \.source-selbar__obj"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
+  ok("the object selbar creates a link object-mark anchored by nodeKey", /cmd === "link"[\s\S]{0,320}addMark\(__sourceDocModel, \{ type: "link", anchor: \{ nodeKey: __sourceObjectSelKey \} \}\)/.test(e));
+  // the selection bar is centred over the selection: positioned in #source-stage-article-relative
+  // coords (subtract the container's viewport left + add its scroll), NOT raw page x -- else the
+  // left rail's width pushed it off to the right. Both selection paths route through the helper.
+  ok("the selection bar centres over the selection via container-relative coords, not page x", /function positionSourceSelBar\(bar, r\)[\s\S]{0,200}r\.left \+ r\.width \/ 2 - hr\.left \+ host\.scrollLeft/.test(e) && !/bar\.style\.left = \(window\.scrollX \+ r\.left \+ r\.width/.test(e));
+  ok("both the text-selection and object-selection paths use positionSourceSelBar", (e.match(/positionSourceSelBar\(bar,/g) || []).length >= 2);
+  ok("a selection extending past a mark flips create -> the ⟳ update action", /__sourceUpdateTarget = window\.SourceDoc\.markExtendedBy\(__sourceDocModel, anchor\)/.test(e));
+  ok("annotation uses an inline composer, not a raw prompt()", /function openSourceComposer\(mode, onSave, opts\)/.test(e) && !/window\.prompt\(cmd/.test(e));
+
+  // index.html load order
+  var idx = src("index.html");
+  ok("index.html loads source-doc.js + source-marks.js before editor.js", (function () {
+    var a = idx.indexOf("src/source-doc.js"), b = idx.indexOf("src/source-marks.js"), c = idx.indexOf("src/editor.js");
+    return a > -1 && b > -1 && a < c && b < c;
+  })());
+})();
+
+// ---- Source rewrite (Epic 2b): TOC + full-text search + marks drawer (toc-search-drawer) ----
+// Fuzzy full-text search + the drawer's mark filtering are PURE (proven here); the TOC rail,
+// scroll-spy, and drawer DOM are wired in editor.js (browser-verified) and asserted structurally.
+section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  // full-text search reaches beyond the title into the doc's node text
+  var docTopic = { name: "Contention", doc: { nodes: [
+    { type: "heading", level: 2, text: "Flush arbitration" },
+    { type: "paragraph", text: "The unit arbitrates contention by headroom." }
+  ] } };
+  ok("searchText concatenates the topic name + all node text", (function () {
+    var t = SD.searchText(docTopic);
+    return t.indexOf("Contention") !== -1 && t.indexOf("Flush arbitration") !== -1 && t.indexOf("headroom") !== -1;
+  })());
+  ok("searchText falls back to section headings + facet strings for a legacy topic", (function () {
+    var legacy = { name: "Intro", sections: [{ heading: "Overview", facets: { technical: "coldflow venting" } }] };
+    var t = SD.searchText(legacy);
+    return t.indexOf("Overview") !== -1 && t.indexOf("coldflow venting") !== -1;
+  })());
+  ok("fuzzyMatch: an empty query matches everything", SD.fuzzyMatch("anything", "") === true && SD.fuzzyMatch("", "") === true);
+  ok("fuzzyMatch: a plain substring inside the body matches (title-only would miss)", SD.fuzzyMatch(SD.searchText(docTopic), "headroom") === true);
+  ok("fuzzyMatch: a subsequence matches (typing 'flsh' finds 'flush')", SD.fuzzyMatch("Flush arbitration", "flsh") === true);
+  ok("fuzzyMatch: chars out of order do NOT match", SD.fuzzyMatch("abc", "cab") === false);
+  ok("fuzzyMatch: is case-insensitive", SD.fuzzyMatch("Headroom", "HEAD") === true);
+
+  // Marks-section filtering: the type filter is a plain predicate over model.marks
+  function drawerFilter(marks, f) { return marks.filter(function (m) { return f === "all" || m.type === f; }); }
+  var marks = [{ type: "link" }, { type: "alternate" }, { type: "comment" }, { type: "alternate" }];
+  ok("marks filter 'all' returns every mark", drawerFilter(marks, "all").length === 4);
+  ok("marks filter by type narrows to that mark type only", drawerFilter(marks, "alternate").length === 2 && drawerFilter(marks, "link").length === 1);
+
+  // editor.js wiring (browser-verified live; asserted structurally here)
+  var e = src("src/editor.js");
+  ok("topicMatchesQuery uses SourceDoc fuzzy full-text (not a title substring)", /window\.SourceDoc\.fuzzyMatch\(window\.SourceDoc\.searchText\(topic\), query\)/.test(e));
+  ok("the article mounts a TOC rail from heading nodes with scroll-spy", /function buildSourceToc\(model, host\)[\s\S]{0,400}window\.SourceDoc\.headings\(model\)/.test(e) && /function updateSourceScrollSpy\(\)/.test(e));
+  ok("scroll-spy is re-bound remove-then-add so it survives re-renders", /host\.removeEventListener\("scroll", onSourceArticleScroll\);[\s\S]{0,120}host\.addEventListener\("scroll", onSourceArticleScroll\)/.test(e) && /function onSourceArticleScroll\(\)[\s\S]{0,60}updateSourceScrollSpy\(\)/.test(e));
+  // Source v2 (consolidated-panel): the drawer is folded into the one right panel; the doc-bar
+  // toggle now shows/hides that panel, and the Marks filter lives in its Marks section.
+  ok("the doc-bar carries ONE consolidated-panel toggle (columns-2 glyph), not a second overlay", /icon: "columns-2", label: __sourceInfoOpen \? "Hide the details panel"/.test(e) && !/label: "All marks"/.test(e));
+  ok("the Marks section offers All / Alternates / Linked / Comments filters", /SOURCE_MARK_FILTERS = \[[\s\S]{0,220}"alternate"[\s\S]{0,120}"link"[\s\S]{0,120}"comment"/.test(e));
+  ok("a doc-topic swap clears the active mark (no orphan overlay left behind)", /if \(!\(topic && topicHasDoc\(topic\)\)\) \{ __sourceActiveMarkId = null;/.test(e));
+})();
+
+// Source v2 (spec 2c section 3): the two overlapping right surfaces (always-on info aside + an
+// overlay all-marks drawer that stacked over it -- the "double-up") become ONE consolidated panel:
+// Marks / History / Source / Comments, opened by ONE doc-bar control. The overlay drawer is gone.
+section("Source v2: one consolidated right panel (spec 2c section 3)");
+(function () {
+  var e = src("src/editor.js");
+  ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /var hasDoc = topicHasDoc\(topic\);\s*\n\s*if \(hasDoc\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(e));
+  ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(e));
+  ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(e));
+  ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));
+  ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface", /function applySourceInfoVisibility\(\)[\s\S]{0,140}el\.style\.display = __sourceInfoOpen \? "" : "none";/.test(e));
+  ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,900}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(e));
+  ok("the active mark's row is highlighted (is-active) in the Marks list", /"source-drawer__row" \+ \(m\.id === __sourceActiveMarkId \? " is-active" : ""\)/.test(e));
+  ok("panel visibility + Marks controls are exposed on __sourceRw for verification", /setInfoOpen: function[\s\S]{0,400}infoOpen: function[\s\S]{0,400}revealMark: function/.test(e));
+  // source import hardening: text nodes are projected through fillSourceInline with the node's
+  // structured format runs (node.formats), NOT raw el.textContent, so bold/italic/code render as
+  // formatting while the model text stays plain and the mark offsets stay put.
+  ok("renderSourceDocNode projects heading/paragraph/callout through fillSourceInline(el, text, formats)", /el = h\("p", "source-doc__p"\); fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\)/.test(e) && /fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\); el\.setAttribute\("data-editable", "1"\); }/.test(e));
+  ok("fillSourceInline wraps runs in transparent strong/em/code without changing el.textContent (offset-safe)", /function fillSourceInline\(el, text, runs\)[\s\S]{0,800}if \(!runs \|\| !runs\.length\) \{ el\.textContent = text; return; }[\s\S]{0,800}span\.textContent = text\.slice\(r\.start, r\.start \+ r\.len\)/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): demand-driven alternates + staleness (alternates-staleness) ----
+// The fixed 3-facet toggle dies: a span carries 0..N tagged alternates, each flagging stale when
+// the base drifts. Staleness + resolution are PURE (proven here); the pinned contextual panel is
+// wired in editor.js (browser-verified) and asserted structurally.
+section("Source rewrite: demand-driven alternates + staleness (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "paragraph", text: "The unit arbitrates contention by headroom." }]);
+  var k = model.nodes[0].key, phrase = "arbitrates contention by headroom";
+  var anchor = { nodeKey: k, start: model.nodes[0].text.indexOf(phrase), len: phrase.length };
+  var alt = SD.addMark(model, { type: "alternate", anchor: anchor, alt: "decides who wins when there's a clash", tag: "plain-language" });
+
+  ok("an alternate carries a tag (what it is appropriate for)", alt.tag === "plain-language");
+  ok("a fresh alternate is in sync (green), not stale", alt.stale === false && SD.markStatus(alt).dot === "green");
+
+  ok("editing the base span flips the alternate to stale (yellow) -- nothing auto-rewrites", (function () {
+    SD.applyTextEdit(model, k, "The unit arbitrates contention purely by headroom.");
+    var m = SD.markById(model, alt.id);
+    return m.stale === true && SD.markStatus(m).dot === "yellow" && m.alt === "decides who wins when there's a clash";
+  })());
+  ok("going stale logs a discrete mark-stale History entry (provenance, spec 3.2)", (function () {
+    var ev = (model.history || []).filter(function (h) { return h.type === "mark-stale" && h.markId === alt.id; });
+    return ev.length === 1;
+  })());
+  ok("Mark reviewed (updateMark) re-syncs baseText and clears stale", (function () {
+    var m = SD.markById(model, alt.id);
+    SD.updateMark(model, m.id, m.anchor);
+    return SD.markById(model, alt.id).stale === false;
+  })());
+
+  // pure resolution
+  var m2 = SD.create([{ type: "paragraph", text: "Vent the manifold." }]);
+  var kk = m2.nodes[0].key, a2 = { nodeKey: kk, start: 0, len: 4 }; // "Vent"
+  var altA = SD.addMark(m2, { type: "alternate", anchor: a2, alt: "Release", tag: "quick-start" });
+  var altB = SD.addMark(m2, { type: "alternate", anchor: a2, alt: "Open", tag: "" });
+  ok("alternatesFor returns every alternate on exactly the span", SD.alternatesFor(m2, kk, 0, 4).length === 2);
+  ok("pickAlternate: an exact tag match wins", SD.pickAlternate([altA, altB], "quick-start") === altA);
+  ok("pickAlternate: no tag match falls back to the untagged catch-all", SD.pickAlternate([altA, altB], "nope") === altB);
+  ok("pickAlternate: empty list resolves to null (use the base)", SD.pickAlternate([], "quick-start") === null);
+
+  // editor.js wiring (browser-verified live; asserted structurally here)
+  var e = src("src/editor.js");
+  ok("selecting a span-with-alternate opens the pinned contextual panel", /syncSourceAltPanel\(topic, m && m\.type === "alternate" \? m\.id : null\)/.test(e) && /function renderSourceAltPanel\(topic\)/.test(e));
+  ok("the alt panel shows base vs alternate + a status dot", /var baseLine = SD\.isObjectMark\(m\) \?[\s\S]{0,90}SD\.anchorText\(model, m\.anchor\) \|\| "\(empty\)"/.test(e) && /source-altpanel__base", baseLine/.test(e) && /source-drawer__dot source-drawer__dot--" \+ status\.dot/.test(e));
+  ok("a stale alternate offers a Mark reviewed re-sync (updateMark)", /"Mark reviewed"[\s\S]{0,220}SD\.updateMark\(model, m\.id, m\.anchor\)/.test(e));
+  ok("the alt composer captures an optional tag; the panel light-dismisses on Escape", /source-composer__tag/.test(e) && /function onSourceAltPanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceAltPanel/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): comments = shared canvas engine + range-mark adapter ----
+// One comment engine shared with the canvas (makeComment/makeReply, the comment-reply thread UI);
+// the Source adapter anchors a comment to a range mark ({markId}). Presentation = margin pins in
+// the gutter tracking the span. Wiring is browser-verified; here we assert the adapter + reuse.
+section("Source rewrite: comments = shared canvas engine + range-mark adapter (Epic 2b)");
+(function () {
+  var e = src("src/editor.js");
+  ok("a Source comment is a range mark PLUS a shared makeComment thread keyed by the mark id", /var cmark = SD\.addMark\(__sourceDocModel, \{ type: "comment", anchor: anchor \}\);[\s\S]{0,220}makeComment\(\{ markId: cmark\.id \}, val\)/.test(e));
+  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(e) && /c\.replies\.push\(makeReply\(v\)\)/.test(e));
+  ok("comment threads anchor by mark id (sectionId anchor dies with sections)", /function sourceCommentsForMark\(topic, markId\)[\s\S]{0,120}c\.anchor\.markId === markId/.test(e));
+  ok("margin pins render in the gutter for each comment mark, pinned to the span", /function renderSourceCommentPins\(topic\)/.test(e) && /if \(m\.type !== "comment"\) return;/.test(e) && /pinCardToSpan\(pin, m\.id\)/.test(e));
+  ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(e) && /toggleSourceCommentThread\(topic, m\.id\)/.test(e));
+  ok("add / resolve activity is logged to History (spec 3.3)", /type: "comment-added", markId: cmark\.id/.test(e) && /type: c && c\.done \? "comment-resolved" : "comment-reopened"/.test(e));
+  ok("the thread card + pins re-sync after a re-render (survive undo/edit)", /renderSourceCommentPins\(topic\); \/\/ re-pin the comment margin pins/.test(e) && /if \(__sourceOpenCommentMarkId\) renderSourceCommentThread\(topic\)/.test(e));
+  ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceWherePanel\(\); closeSourceCommentThread\(\);/.test(e));
+  ok("the comment thread light-dismisses on Escape + outside click (canvas popover parity)", /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(e) && /function onSourceCommentThreadOutside\(ev\)/.test(e) && /if \(card\.contains\(ev\.target\)\) return;/.test(e));
+  ok("comments stay addable while the base is locked (annotation ungated -- no unlock guard on the comment path)", !/cmd === "comment"[\s\S]{0,80}__sourceUnlocked/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): History timeline (hybrid granularity) ------
+// Prose edits collapse into ONE commit entry (summarizeEdits over the per-keystroke diff
+// stream); structural events (alternate added, span broke/stale/restored, comment opened/
+// resolved) each get a discrete entry. The pure cores are proven here; the merged rendering
+// (topic.history import events + model.history doc events) is wired in editor.js.
+section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  // --- pure collapse: a keystroke stream folds into a single commit summary ---
+  var stream = [{ inserted: 3, removed: 0 }, { inserted: 0, removed: 0 }, { inserted: 1, removed: 2 }, { inserted: 5, removed: 0 }];
+  var sum = SD.summarizeEdits(stream);
+  ok("summarizeEdits totals inserted/removed across the stream", sum.charsAdded === 9 && sum.charsRemoved === 2);
+  ok("summarizeEdits ignores no-op keystrokes (arrow keys etc.)", sum.editCount === 3);
+  ok("summarizeEdits on an empty stream is zero (no commit worth logging)", (function () { var s = SD.summarizeEdits([]); return s.editCount === 0 && s.charsAdded === 0; })());
+
+  // --- pure view mapping: each event type renders a label (+ optional detail) ---
+  var commitView = SD.historyEntryView({ type: "commit", charsAdded: 12, charsRemoved: 3, editCount: 4, note: "clarity" });
+  ok("historyEntryView: a commit collapses to one 'Edited source' entry with a char summary", commitView.kind === "commit" && commitView.label === "Edited source" && /\+12/.test(commitView.detail) && /3 chars/.test(commitView.detail));
+  ok("historyEntryView: a commit carries its optional why-note in the detail", /clarity/.test(commitView.detail));
+  ok("historyEntryView: a note-less commit still summarises without a dangling quote", (function () { var v = SD.historyEntryView({ type: "commit", charsAdded: 5, charsRemoved: 0, editCount: 1 }); return v.detail.indexOf("“") === -1; })());
+  ok("historyEntryView: structural events map to discrete labels", SD.historyEntryView({ type: "mark-broken", markType: "link" }).label === "Link broke" && SD.historyEntryView({ type: "mark-stale", markType: "alternate" }).label === "Alternate went stale" && SD.historyEntryView({ type: "alternate-created" }).label === "Alternate added" && SD.historyEntryView({ type: "comment-resolved" }).label === "Comment resolved");
+  // uio-S-C04 (SRC-11): raw edit-op types read as plain author words, not model vocabulary.
+  ok("historyEntryView: raw edit ops read as author words (no 'node-split'/'range-replaced')", SD.historyEntryView({ type: "range-replaced" }).label === "Edited text" && SD.historyEntryView({ type: "node-split" }).label === "Paragraph split" && SD.historyEntryView({ type: "node-reformat" }).label === "Reformatted" && SD.historyEntryView({ type: "whatever-unknown" }).label === "Edited source");
+
+  // --- logHistory stamps a time so both provenance streams interleave ---
+  var m = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
+  SD.logHistory(m, { type: "commit", charsAdded: 4, charsRemoved: 0, editCount: 1 });
+  ok("logHistory stamps `at` so doc events sort against timestamped import events", typeof m.history[0].at === "number");
+
+  // --- restore is provenance too: break the span, then edit it back in sync ---
+  var mm = SD.create([{ type: "paragraph", text: "The unit arbitrates contention by headroom." }]);
+  var k = mm.nodes[0].key, phrase = "arbitrates contention by headroom";
+  var a = { nodeKey: k, start: mm.nodes[0].text.indexOf(phrase), len: phrase.length };
+  SD.addMark(mm, { type: "alternate", anchor: a, alt: "decides ties", tag: "" });
+  SD.applyTextEdit(mm, k, "The unit weighs contention by headroom."); // drift -> stale
+  ok("editing the base drifts the alternate stale (a discrete entry)", mm.history.some(function (h) { return h.type === "mark-stale"; }));
+  SD.applyTextEdit(mm, k, "The unit arbitrates contention by headroom."); // back to base -> restored
+  ok("editing the text back in sync logs a discrete mark-restored entry", mm.history.some(function (h) { return h.type === "mark-restored"; }));
+
+  // --- editor.js wiring (browser-verified live; asserted structurally here) ---
+  var e = src("src/editor.js");
+  ok("prose edits buffer per unlock->lock cycle (recordSourceEdit on the input path)", /recordSourceEdit\(res && res\.edit\)/.test(e) && /function beginSourceEditSession\(\) \{ __sourceEditSession = \{ edits: \[\] \}; \}/.test(e));
+  ok("locking flushes the buffer into ONE commit entry via summarizeEdits", /function flushSourceEditSession\(topic, opts\)[\s\S]{0,400}SD\.summarizeEdits\(s\.edits\)/.test(e) && /type: "commit", charsAdded:/.test(e));
+  ok("the commit why-note is optional + skippable (Skip / Escape still commits)", /function sourceCommitNoteModal\(onCommit\)[\s\S]{0,700}onClose: function \(\) \{ if \(done\) return; done = true; onCommit\(""\); \}/.test(e));
+  ok("the lock toggle routes through one begin/flush entry point (setSourceUnlocked)", /function setSourceUnlocked\(v, opts\)/.test(e) && /onClick: function \(\) \{ setSourceUnlocked\(!__sourceUnlocked\); \}/.test(e));
+  ok("creating an alternate logs a discrete alternate-created entry", /type: "alternate-created", markId: mk\.id/.test(e));
+  ok("the timeline MERGES import events (topic.history) with doc events (model.history)", /var imports = \(topic\.history \|\| \[\]\)\.map/.test(e) && /historyEntryView\(e\)/.test(e) && /var rows = imports\.concat\(docRows\)/.test(e));
+  ok("the merged rows sort newest-first across both streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
+  ok("the synthetic 'Last edited' node only fills in when there are no doc commits", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
+
+  // Regression #108: a LOCKED block is contentEditable=false, so a click can't focus it and a real
+  // keystroke never reaches the article keydown guard -> no lock reminder showed. A document-level
+  // guard catches the attempt (locked doc mounted + a printable key + not in a real field).
+  ok("#108: a document-level guard shows the lock reminder when typing into locked prose", /function onSourceLockedTypeGuard\(e\)[\s\S]{0,500}The source is locked/.test(e) && /document\.addEventListener\("keydown", onSourceLockedTypeGuard\)/.test(e));
+  ok("#108: the guard ignores real fields + shortcuts, only printable keys count", /if \(!e\.key \|\| e\.key\.length !== 1\) return;/.test(e) && /t\.isContentEditable \|\| \/\^\(INPUT\|TEXTAREA\|SELECT\)\$\/\.test/.test(e));
+  // Regression #109: structural History events (comment/alternate add + resolve/reopen) must
+  // re-render the info-panel timeline; only the commit path did before, so they never surfaced.
+  ok("#109: refreshSourceHistory re-renders the info-panel History for the active topic", /function refreshSourceHistory\(topic\)[\s\S]{0,320}renderSourceInfoPanel\(t\)/.test(e));
+  ok("#109: creating an alternate refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new alternate/.test(e));
+  ok("#109: adding a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new comment in the History timeline/.test(e));
+  ok("#109: resolving/reopening a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface comment resolve\/reopen/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): object (image/table) marks -----------------
+// An image or table is a first-class markable OBJECT: its mark is a node-id reference (anchor
+// with no start/len), stable by construction -- nothing to survive when surrounding prose is
+// edited. The model half is pure (proven here); the selection + create UX is wired in editor.js.
+// ---- A1: source image resize width core (product-rail-source-image-resize-handles) --------
+section("Source image A1: width clamp + snap (pure core)");
+(function () {
+  var t = src("src/editor.js");
+  var m = t.match(/\/\* @pure-imgwidth-start \*\/([\s\S]*?)\/\* @pure-imgwidth-end \*\//);
+  if (!m) { ok("locate @pure-imgwidth fence", false); return; }
+  var g = new Function(m[1] + "\nreturn { clampSourceImgWidth: clampSourceImgWidth, snapSourceImgWidth: snapSourceImgWidth, sourceImgAlign: sourceImgAlign };")();
+  // clamp: blank/NaN -> 100 (full width); below 20 floors; above 100 caps.
+  ok("clamp NaN -> 100", g.clampSourceImgWidth("") === 100 && g.clampSourceImgWidth(undefined) === 100);
+  ok("clamp floors at 20", g.clampSourceImgWidth(5) === 20 && g.clampSourceImgWidth(20) === 20);
+  ok("clamp caps at 100", g.clampSourceImgWidth(140) === 100 && g.clampSourceImgWidth(100) === 100);
+  ok("clamp passes a mid value", g.clampSourceImgWidth(63) === 63);
+  ok("clamp parses a percent string", g.clampSourceImgWidth("47%") === 47);
+  // snap: within ~4% of a stop magnetises; otherwise rounds and stays free.
+  ok("snap catches near-50", g.snapSourceImgWidth(52) === 50 && g.snapSourceImgWidth(48) === 50);
+  ok("snap catches near-25/75/100", g.snapSourceImgWidth(27) === 25 && g.snapSourceImgWidth(73) === 75 && g.snapSourceImgWidth(97) === 100);
+  ok("snap leaves an in-between value (rounded)", g.snapSourceImgWidth(60) === 60 && g.snapSourceImgWidth(41.4) === 41);
+  ok("snap boundary is ~4%", g.snapSourceImgWidth(45) === 45 && g.snapSourceImgWidth(46) === 50);
+  // A2 align: centre is the default (no style); left/right apply; anything else falls to centre.
+  ok("align centre default -> ''", g.sourceImgAlign({}) === "" && g.sourceImgAlign({ align: "center" }) === "" && g.sourceImgAlign(null) === "");
+  ok("align left/right apply", g.sourceImgAlign({ align: "left" }) === "left" && g.sourceImgAlign({ align: "right" }) === "right");
+  ok("align junk -> centre", g.sourceImgAlign({ align: "middle" }) === "");
+})();
+
+// ---- A3: side-by-side image row container (product-rail-source-image-side-by-side-row) -------
+section("Source image A3: row container nesting + mark-key stability");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function freshModel() {
+    return SD.create([
+      { type: "paragraph", text: "Intro." },
+      { type: "image", src: "a.png", caption: "A" },
+      { type: "image", src: "b.png", caption: "B" },
+      { type: "image", src: "c.png", caption: "C" },
+      { type: "paragraph", text: "Outro." }
+    ]);
+  }
+  var model = freshModel();
+  var aKey = model.nodes[1].key, bKey = model.nodes[2].key, cKey = model.nodes[3].key;
+  // an object mark on image A must survive nesting (anchored by key, key must not change)
+  var mk = SD.addMark(model, { type: "alternate", anchor: { nodeKey: aKey }, alt: "alt A" });
+
+  // combine A + next (B) into a row
+  ok("combineIntoRow wraps A + B into a row", SD.combineIntoRow(model, aKey) === true);
+  ok("row replaced the two top-level images", model.nodes.length === 4 && model.nodes[1].type === "row" && model.nodes[1].children.length === 2);
+  ok("row children kept their keys (marks stay attached)", model.nodes[1].children[0].key === aKey && model.nodes[1].children[1].key === bKey);
+  ok("nodeByKey descends into the row to find a child", SD.nodeByKey(model, aKey) && SD.nodeByKey(model, aKey).src === "a.png");
+  ok("the alternate on A is still resolvable + not broken after nesting", SD.objectAlternatesFor(model, aKey).length === 1 && !SD.refreshMark(model, mk).broken);
+  ok("rowOf locates the child's row", SD.rowOf(model, bKey) && SD.rowOf(model, bKey).childIndex === 1);
+
+  // grow the row to 3: the row's LAST child (B) pulls in the following image C
+  ok("combineIntoRow grows the row via its last child (max 3)", SD.combineIntoRow(model, bKey) === true);
+  var theRow = model.nodes.find(function (n) { return n.type === "row"; });
+  ok("row now holds 3 images", theRow.children.length === 3 && theRow.children[2].key === cKey);
+  // a full (3-child) row is never grown past 3
+  var m5 = SD.create([{ type: "image", src: "v.png" }, { type: "image", src: "w.png" }, { type: "image", src: "x.png" }, { type: "image", src: "y.png" }]);
+  SD.combineIntoRow(m5, m5.nodes[1].key);          // w + x -> row(2); nodes: [v, row(w,x), y]
+  var r5 = m5.nodes[1];
+  SD.combineIntoRow(m5, r5.children[1].key);        // row's last child pulls in y -> row(3); nodes: [v, row(3)]
+  ok("an image joins a row that has room (grows to 3)", m5.nodes[1].type === "row" && m5.nodes[1].children.length === 3);
+  ok("a full 3-image row refuses a 4th (image before it)", SD.combineIntoRow(m5, m5.nodes[0].key) === false && m5.nodes[1].children.length === 3);
+
+  // round-trips through toJSON/fromJSON with children intact
+  var round = SD.fromJSON(SD.toJSON(model));
+  var rr = round.nodes.find(function (n) { return n.type === "row"; });
+  ok("row round-trips through toJSON/fromJSON with children", rr && rr.children.length === 3 && rr.children[0].key === aKey);
+  ok("nodeByKey descends after a round-trip", SD.nodeByKey(round, bKey) && SD.nodeByKey(round, bKey).src === "b.png");
+
+  // un-nest: remove B; the row keeps A + C, B drops back to top level
+  var freed = SD.removeFromRow(round, bKey);
+  ok("removeFromRow frees the child back to top level", freed === bKey && round.nodes.some(function (n) { return n.key === bKey && n.type === "image"; }));
+  var rr2 = round.nodes.find(function (n) { return n.type === "row"; });
+  ok("row keeps its other children after un-nest", rr2 && rr2.children.length === 2);
+
+  // dissolve: a row falling to one child becomes a plain image again
+  var m3 = SD.create([{ type: "image", src: "x.png" }, { type: "image", src: "y.png" }]);
+  var xKey = m3.nodes[0].key;
+  SD.combineIntoRow(m3, xKey);
+  SD.removeFromRow(m3, xKey);
+  ok("a row of one dissolves back into a plain image", !m3.nodes.some(function (n) { return n.type === "row"; }) && m3.nodes.length === 2);
+
+  // combine no-ops when there's nothing to place beside (last image, or non-image neighbour)
+  var m4 = SD.create([{ type: "image", src: "solo.png" }, { type: "paragraph", text: "text" }]);
+  ok("combineIntoRow no-ops with a non-image neighbour", SD.combineIntoRow(m4, m4.nodes[0].key) === false);
+})();
+
+// ---- B2: per-variant image swap (product-rail-source-image-variant-swap) ---------------------
+section("Source image B2: per-variant image resolve + set");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "image", src: "base.png", alt: "Base", caption: "Cap" }]);
+  var key = model.nodes[0].key, V = "Compact";
+
+  // Flagship + an unset variant both resolve to the base image (inherited fall-through).
+  var f = SD.imageForVariant(model.nodes[0], SD.FLAGSHIP);
+  ok("Flagship resolves the base src/alt/caption", f.present && f.src === "base.png" && f.alt === "Base" && f.caption === "Cap" && f.source === "flagship");
+  var inh = SD.imageForVariant(model.nodes[0], V);
+  ok("a variant with no override inherits the base image", inh.present && inh.src === "base.png" && inh.source === "inherited");
+
+  // set a variant override -> that variant swaps src; Flagship is untouched.
+  SD.setVariantImage(model, key, V, "compact.png", { alt: "Compact art" });
+  var ov = SD.imageForVariant(model.nodes[0], V);
+  ok("a variant override swaps just that variant's src", ov.present && ov.src === "compact.png" && ov.alt === "Compact art" && ov.source === "override");
+  ok("the override inherits the base caption when not given", ov.caption === "Cap");
+  ok("Flagship still resolves the base image after a variant override", SD.imageForVariant(model.nodes[0], SD.FLAGSHIP).src === "base.png");
+
+  // presence/absence reuse the generic remove/restore.
+  SD.removeNodeFromVariant(model, key, V);
+  ok("a variant can hide the image (absent)", SD.imageForVariant(model.nodes[0], V).present === false);
+  SD.restoreNodeToVariant(model, key, V);
+  ok("restore drops the override too -> back to inherited base", SD.imageForVariant(model.nodes[0], V).src === "base.png" && SD.imageForVariant(model.nodes[0], V).source === "inherited");
+
+  // setVariantImage on Flagship replaces the base for everyone that inherits.
+  SD.setVariantImage(model, key, SD.FLAGSHIP, "newbase.png");
+  ok("setting Flagship replaces the base image", model.nodes[0].src === "newbase.png" && SD.imageForVariant(model.nodes[0], V).src === "newbase.png");
+
+  // round-trips through toJSON/fromJSON with the override intact.
+  SD.setVariantImage(model, key, V, "c2.png");
+  var round = SD.fromJSON(SD.toJSON(model));
+  ok("a per-variant image override round-trips", SD.imageForVariant(round.nodes[0], V).src === "c2.png" && SD.imageForVariant(round.nodes[0], SD.FLAGSHIP).src === "newbase.png");
+
+  // setVariantImage refuses a non-image node (guards the type).
+  var m2 = SD.create([{ type: "paragraph", text: "hi" }]);
+  ok("setVariantImage no-ops on a non-image node", SD.setVariantImage(m2, m2.nodes[0].key, V, "x.png") === null);
+})();
+
+// ---- Markdown import hardening: tables, HTML comments, inline formatting ----------------------
+section("Source import: robust markdown -> rich nodes (tables, comments, inline)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var P = SD._pure;
+
+  // inline parser: lifts **bold** / *italic* / `code` out to formats[] over PLAIN text (so marks
+  // stay aligned). Underscore emphasis only at a word boundary (snake_case stays literal).
+  var b = P.parseInline("A **bold** and *italic* and `code` bit.");
+  ok("inline: plain text has the markers stripped", b.text === "A bold and italic and code bit.");
+  ok("inline: bold run located over plain text", b.formats.some(function (f) { return f.style === "bold" && b.text.substr(f.start, f.len) === "bold"; }));
+  ok("inline: italic + code runs located", b.formats.some(function (f) { return f.style === "italic" && b.text.substr(f.start, f.len) === "italic"; }) && b.formats.some(function (f) { return f.style === "code" && b.text.substr(f.start, f.len) === "code"; }));
+  ok("inline: snake_case is NOT italicised", P.parseInline("call some_function_name now").text === "call some_function_name now" && P.parseInline("call some_function_name now").formats.length === 0);
+  ok("inline: __bold__ and escaped \\* both handled", P.parseInline("__x__ and \\*lit\\*").text === "x and *lit*" && P.parseInline("__x__").formats[0].style === "bold");
+
+  // a bullet followed by bold markup formats correctly (the reported bug: bold after a dot point)
+  var listNodes = SD.create(SD._pure.blocksFromText("- first **strong** item\n- second one")).nodes;
+  ok("bullet with **bold** -> list node with itemFormats (markers stripped)", listNodes.length === 1 && listNodes[0].type === "list" && listNodes[0].items[0] === "first strong item" && listNodes[0].itemFormats[0][0].style === "bold");
+
+  // a markdown pipe table becomes a real table node (not paragraphs of pipe text)
+  var md = "Intro line.\n\n| Name | Role |\n| --- | --- |\n| Ana | Lead |\n| Bo | Dev |\n\nOutro.";
+  var tnodes = SD.create(SD._pure.blocksFromText(md)).nodes;
+  var tbl = tnodes.filter(function (n) { return n.type === "table"; })[0];
+  ok("pipe table parses to a table node with header + body rows", !!tbl && tbl.rows.length === 3 && tbl.rows[0][0] === "Name" && tbl.rows[2][1] === "Dev");
+  ok("the pipe/dash lines do NOT leak in as paragraph text", !tnodes.some(function (n) { return n.type === "paragraph" && /\|/.test(n.text) && /---/.test(n.text); }));
+  ok("text around the table still parses as paragraphs", tnodes[0].type === "paragraph" && tnodes[0].text === "Intro line." && tnodes[tnodes.length - 1].text === "Outro.");
+
+  // table cells carry inline formatting too
+  var mdf = "| Col |\n| --- |\n| a **bold** cell |";
+  var tf = SD.create(SD._pure.blocksFromText(mdf)).nodes[0];
+  ok("table cell inline formatting is lifted to cellFormats", tf.rows[1][0] === "a bold cell" && tf.cellFormats[1][0][0].style === "bold");
+
+  // HTML comments (PDF page markers) are stripped on import
+  var mdc = "Before.\n\n<!-- Page 43 -->\n\nAfter.\n\nInline <!-- x --> kept clean.";
+  var cnodes = SD.create(SD._pure.blocksFromText(mdc)).nodes;
+  ok("whole-line HTML comment is dropped (no <!-- --> paragraph)", !cnodes.some(function (n) { return /<!--/.test(SD.nodeText(n)); }));
+  ok("inline HTML comment is stripped from a line", cnodes.some(function (n) { return n.type === "paragraph" && /Inline\s+kept clean\./.test(n.text); }));
+
+  // export round-trips inline formatting + tables back to markdown
+  var model = SD.create(SD._pure.blocksFromText("A **bold** word.\n\n| H |\n| --- |\n| v |"));
+  var out = SD.toMarkdown(model);
+  ok("toMarkdown re-emits **bold**", /A \*\*bold\*\* word\./.test(out));
+  ok("toMarkdown re-emits a pipe table", /\| H \|/.test(out) && /\| --- \|/.test(out) && /\| v \|/.test(out));
+  // and re-importing that markdown yields the same rich structure (idempotent shape)
+  var reNodes = SD.create(SD._pure.blocksFromText(out)).nodes;
+  ok("re-import round-trips: bold paragraph + table survive", reNodes[0].text === "A bold word." && reNodes[0].formats[0].style === "bold" && reNodes.some(function (n) { return n.type === "table" && n.rows[1][0] === "v"; }));
+
+  // editing a formatted node drops its now-stale format runs (safe fallback, base text usually locked)
+  var em = SD.create([{ type: "paragraph", text: "x", key: "n1" }]);
+  em.nodes[0].formats = [{ start: 0, len: 1, style: "bold" }];
+  SD.applyTextEdit(em, "n1", "xy");
+  ok("applyTextEdit drops stale formats on a real text change", !em.nodes[0].formats);
+})();
+
+// ---- Source/Editor feedback batch: UI regression guards ---------------------------------------
+section("Source/Editor feedback batch (UI wiring guards)");
+(function () {
+  var e = src("src/editor.js");
+  // Issue 1 SUPERSEDED by uio-S-C01 (SRC-06): the glyph tabs were unlabelled AND duplicated the
+  // filter below them. There is now ONE filter, labelled, carrying live counts — see the
+  // "uio-S-C01" section for its guards. What survives here is the no-going-back assertion.
+  ok("mark-filter tabs are words + counts, never bare glyphs", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"/.test(e) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
+  // Issue 2: the collapse-all button is placed on the shared toolbar row, not its own strip.
+  ok("collapse-all is appended to the shared source toolbar row", /querySelector\("#source-stage-nav-actions \.source-stage__toolbar"\)[\s\S]{0,120}toolbarRow\.appendChild\(collapseBtn\)/.test(e));
+  // Issue 3: an empty source text block gets a <br> so an Enter-split new line is visible.
+  ok("empty source block renders a <br> so it is not zero-height", /if \(!text\) \{ el\.appendChild\(document\.createElement\("br"\)\); return; \}/.test(e));
+  // Issue 4: an auto-picked Product is NOT persisted before the saved scope is restored.
+  ok("auto-pick does not clobber the saved Product before restore", /if \(__productRestored\) setActiveProduct\(keys\[i\]\); else __activeProduct = keys\[i\]/.test(e));
+  // Editor: entering Edit reframes the canvas once it is actually visible.
+  ok("entering Edit frames the canvas the first time it is visible", /stage === "edit" && !__framedWhileVisible[\s\S]{0,500}view\.ready = false; fitAll\(\); __framedWhileVisible = true/.test(e));
+  // Editor: a source-linked image counts as having an image (full inspector shows).
+  ok("a source-linked image gets the full image inspector", /var hasImage = !!\(block\.src \|\| block\.srcLight \|\| block\.srcDark \|\| \(block\.sourceLink && block\.sourceLink\.markId\)\)/.test(e));
+})();
+
+section("Source rewrite: object (image/table) marks (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([
+    { type: "paragraph", text: "Before the diagram." },
+    { type: "image", src: "d.png", caption: "The arbitration path" },
+    { type: "table", rows: [["A", "B"], ["1", "2"]] },
+    { type: "paragraph", text: "After the diagram." }
+  ]);
+  var imgKey = model.nodes[1].key, tblKey = model.nodes[2].key, p0 = model.nodes[0].key;
+
+  ok("isMarkableObjectNode: image + table are objects; a paragraph is not", SD.isMarkableObjectNode(model.nodes[1]) && SD.isMarkableObjectNode(model.nodes[2]) && !SD.isMarkableObjectNode(model.nodes[0]));
+
+  // create: an object mark anchors by node id only (no start/len -> isObjectMark true)
+  var alt = SD.addMark(model, { type: "alternate", anchor: { nodeKey: imgKey }, alt: "A simplified caption", tag: "plain-language" });
+  ok("an object alternate is a node-id mark (isObjectMark, no start/len)", SD.isObjectMark(alt) && alt.anchor.nodeKey === imgKey && alt.anchor.start == null);
+  ok("objectAlternatesFor finds the object's alternates by node id", SD.objectAlternatesFor(model, imgKey).length === 1 && SD.objectAlternatesFor(model, tblKey).length === 0);
+  ok("objectNodeLabel summarises the node for the panel base line", /^Image — The arbitration path/.test(SD.objectNodeLabel(model.nodes[1])) && /^Table \(2 rows\)/.test(SD.objectNodeLabel(model.nodes[2])));
+
+  // stable across surrounding edits: editing the paragraphs never shifts a node-id anchor
+  SD.applyTextEdit(model, p0, "Before the diagram, note this."); // grow the prose before it
+  SD.refreshMark(model, alt);
+  ok("the object mark is stable across surrounding prose edits (node id, nothing to shift)", alt.anchor.nodeKey === imgKey && alt.broken === false);
+
+  // resolve = the node's fate: deleting the node breaks the mark (refreshMark), otherwise in-sync
+  ok("an object mark stays in sync while its node exists", SD.markStatus(SD.markById(model, alt.id)).dot === "green");
+  var idx = model.nodes.map(function (n) { return n.key; }).indexOf(imgKey);
+  model.nodes.splice(idx, 1); // the object is deleted
+  SD.refreshMark(model, alt);
+  ok("deleting the object node breaks its mark (red)", alt.broken === true && SD.markStatus(alt).dot === "red");
+
+  // a comment on an object is the same node-id anchor
+  var cmark = SD.addMark(model, { type: "comment", anchor: { nodeKey: tblKey } });
+  ok("an object comment is also a node-id mark", SD.isObjectMark(cmark) && cmark.type === "comment" && cmark.anchor.nodeKey === tblKey);
+
+  // ---- marks engine: object marks tint their node element (no Range) ----
+  var sm = src("src/source-marks.js");
+  ok("paint() tints object-marked nodes via a class, not a Range highlight", /if \(sd\.isObjectMark\(m\)\) \{ decorateObject\(m\); return; \}/.test(sm) && /function decorateObject\(m\)/.test(sm));
+  ok("object decoration clears + re-applies each paint and on hide (clearObjectDecor exported)", /clearObjectDecor: clearObjectDecor/.test(sm) && /clearObjectDecor\(\);/.test(sm));
+  ok("rectFor already returns the node element rect for an object mark (panel/pin pinning)", /if \(sd\.isObjectMark\(m\)\) \{ var el = nodeEl\(m\.anchor\.nodeKey\); return el && el\.getBoundingClientRect\(\); \}/.test(sm));
+
+  // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
+  var e = src("src/editor.js");
+  ok("image/table nodes are tagged as objects (data-object) for whole-node selection", /if \(SD\.isMarkableObjectNode && SD\.isMarkableObjectNode\(node\)\) \{ el\.classList\.add\("source-doc__obj"\); el\.setAttribute\("data-object", "1"\); \}/.test(e));
+  ok("clicking an object selects the whole node (not a text span)", /var objEl = e\.target && e\.target\.closest \? e\.target\.closest\('\[data-object="1"\]'\) : null;/.test(e) && /selectSourceObject\(topic, objEl\.getAttribute\("data-node"\)\)/.test(e));
+  ok("an object selection sets an object anchor { nodeKey } (no start/len) + shows alternate/comment only", /__sourceSelAnchor = \{ nodeKey: nodeKey \}; \/\/ object anchor/.test(e) && /bar\.querySelectorAll\("\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
+  ok("a real text selection supersedes the object selection (the two models don't fight)", /if \(__sourceObjectSelKey\) clearSourceObjectSel\(\); \/\/ a real text selection supersedes the object/.test(e));
+  ok("selecting an object with an existing alternate opens its contextual panel", /var alts = SD\.objectAlternatesFor\(__sourceDocModel, nodeKey\);[\s\S]{0,120}syncSourceAltPanel\(topic, alts\.length \? alts\[0\]\.id : null\)/.test(e));
+  ok("the object composer pins to the node rect (no text range to sit under)", /if \(anchor\.len == null\) \{ var oe = document\.querySelector\('\[data-node="' \+ anchor\.nodeKey \+ '"\]'\); if \(oe\) objRect = oe\.getBoundingClientRect\(\); \}/.test(e) && /if \(\(!r \|\| !r\.width\) && opts\.rect\) r = opts\.rect;/.test(e));
+  ok("the alt panel shows the object's node label as its base line", /SD\.isObjectMark\(m\) \? SD\.objectNodeLabel\(SD\.nodeByKey\(model, m\.anchor\.nodeKey\)\)/.test(e));
+  ok("hidden marks also clear object decoration (the eye toggle hides all mark visuals)", /if \(__sourceMarksEngine\.clearObjectDecor\) __sourceMarksEngine\.clearObjectDecor\(\);/.test(e));
+})();
+
+// ---- Source rewrite (Epic 2b): where-used panel (read-only "Linked in N") -
+// Source is ONE-WAY: it DISPLAYS where a span is linked, never creates links (the creating side
+// is an Edit-stage ticket). Selecting a link mark opens a read-only card with a breadcrumb pill
+// per destination. The where-used list build is pure (0/1/N destinations); the panel is wired
+// in editor.js and browser-verified.
+section("Source rewrite: where-used panel (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
+  var k = model.nodes[0].key, a = { nodeKey: k, start: 0, len: 4 }; // "Vent"
+
+  // 0 destinations: a link mark with no locations -> empty list (the empty-state path)
+  var link0 = SD.addMark(model, { type: "link", anchor: a, locations: [] });
+  ok("whereUsedForMark on a link with no destinations is empty (empty-state)", SD.whereUsedForMark(link0).length === 0);
+  ok("whereUsedForMark on a non-link mark is empty (only links have where-used)", SD.whereUsedForMark(SD.addMark(model, { type: "alternate", anchor: a, alt: "x" })).length === 0);
+
+  // 1 destination: a full breadcrumb (Document > Section > Location)
+  var link1 = SD.addMark(model, { type: "link", anchor: a, locations: [{ docCode: "C1", docTitle: "Orchard-9 Course", sectionTitle: "Setup", locationLabel: "Page 2", blockId: "b_1" }] });
+  var w1 = SD.whereUsedForMark(link1);
+  ok("whereUsedForMark builds a Document > Section > Location breadcrumb", w1.length === 1 && w1[0].doc === "Orchard-9 Course" && w1[0].section === "Setup" && w1[0].location === "Page 2" && w1[0].docCode === "C1");
+
+  // N destinations + tolerance of missing fields (a partial location still renders a crumb)
+  var linkN = SD.addMark(model, { type: "link", anchor: a, locations: [
+    { docCode: "C1", docTitle: "Course One", sectionTitle: "Intro" },
+    { docCode: "C2" }, // only a code -> doc falls back to the code, no section/location
+    {} // wholly empty -> "Document", nulls
+  ] });
+  var wN = SD.whereUsedForMark(linkN);
+  ok("whereUsedForMark returns one row per destination (N)", wN.length === 3);
+  ok("a partial destination still resolves a doc label; missing fields are null", wN[1].doc === "C2" && wN[1].section === null && wN[2].doc === "Document");
+
+  // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
+  var e = src("src/editor.js");
+  ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(e) && /function renderSourceWherePanel\(topic\)/.test(e));
+  ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10; neutral at 0 — uio-S-C03)", /source-altpanel__title", used\.length \? \("Linked in " \+ used\.length\)/.test(e) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(e));
+  ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
+  ok("a link with no live uses shows the invitation zero state (uio-S-C03)", /if \(!used\.length\) \{[\s\S]{0,320}Not used in a course yet — place this passage from the Edit stage/.test(e));
+  ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(e) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(e));
+  ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(e) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(e));
+  ok("it is READ-ONLY: no addMark/link creation inside the where-used panel", !/function renderSourceWherePanel\(topic\)[\s\S]{0,1400}SD\.addMark/.test(e));
+  ok("a 'link' glyph exists in the icon set for the panel", /"link":/.test(src("src/icons.js")));
+})();
+
+// ---- Source rewrite (Epic 2b): variant per-node divergence (MODEL layer) --
+// Variants are a top-level structural layer orthogonal to marks (spec 4). A node diverges against
+// the Flagship base in three ways: SHARED (inherit), DIVERGED WORDING (an override), and
+// PRESENCE/ABSENCE (removed from a variant, or added-only). This is the PURE model layer only --
+// the conditional-column UI is a follow-on ticket (gated on the Source IA reshape). Persistence is
+// automatic (deep clone), so no schema change; the round-trip is asserted here.
+section("Source rewrite: variant per-node divergence, model layer (Epic 2b)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  var model = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
+  var k = model.nodes[0].key;
+
+  // SHARED: no override -> every variant inherits the Flagship base
+  ok("nodeForVariant: a shared node inherits the base for every variant", (function () {
+    var f = SD.nodeForVariant(model.nodes[0], SD.FLAGSHIP), y = SD.nodeForVariant(model.nodes[0], "Model-Y");
+    return f.present && f.source === "flagship" && y.present && y.source === "inherited" && y.text === f.text;
+  })());
+  ok("variantView: all shown variants identical -> a single shared column", (function () {
+    var v = SD.variantView(model.nodes[0], [SD.FLAGSHIP, "Model-Y", "Model-Z"]);
+    return v.mode === "shared" && /Vent the manifold/.test(v.text);
+  })());
+
+  // DIVERGED WORDING: an override splits the columns
+  SD.setVariantText(model, k, "Model-Y", "Bleed the manifold before pulling the cap.");
+  ok("setVariantText diverges one variant's wording (override), Flagship untouched", (function () {
+    var y = SD.nodeForVariant(model.nodes[0], "Model-Y"), f = SD.nodeForVariant(model.nodes[0], SD.FLAGSHIP);
+    return y.source === "override" && y.diverged === true && /Bleed the manifold/.test(y.text) && /Vent the manifold/.test(f.text);
+  })());
+  ok("variantView: a diverged node splits into per-variant columns", (function () {
+    var v = SD.variantView(model.nodes[0], [SD.FLAGSHIP, "Model-Y", "Model-Z"]);
+    return v.mode === "split" && v.cols.length === 3 && v.cols[1].variant === "Model-Y" && v.cols[1].diverged && v.cols[2].source === "inherited";
+  })());
+
+  // PRESENCE/ABSENCE: remove from a variant, then restore
+  SD.removeNodeFromVariant(model, k, "Model-Z");
+  ok("removeNodeFromVariant marks the node absent for that variant (present/absence)", (function () {
+    var z = SD.nodeForVariant(model.nodes[0], "Model-Z");
+    return z.present === false && z.source === "absent";
+  })());
+  ok("variantView carries the absent state as a column (for the 'not in Model-Z' UI)", (function () {
+    var v = SD.variantView(model.nodes[0], [SD.FLAGSHIP, "Model-Z"]);
+    return v.mode === "split" && v.cols[1].present === false;
+  })());
+  SD.restoreNodeToVariant(model, k, "Model-Z");
+  ok("restoreNodeToVariant clears the override/absent -> inherits the base again", SD.nodeForVariant(model.nodes[0], "Model-Z").source === "inherited" && SD.nodeForVariant(model.nodes[0], "Model-Z").present === true);
+
+  // ADDED-ONLY: a node not in Flagship, present only for a variant (baseAbsent)
+  var m2 = SD.create([{ type: "paragraph", text: "Base line." }]);
+  var k2 = m2.nodes[0].key;
+  SD.setVariantText(m2, k2, "Model-Z", "Only Model-Z says this.");
+  SD.removeNodeFromVariant(m2, k2, SD.FLAGSHIP); // now baseAbsent -> added-only for Model-Z
+  ok("an added-only node is absent from Flagship but present for its variant", (function () {
+    var f = SD.nodeForVariant(m2.nodes[0], SD.FLAGSHIP), z = SD.nodeForVariant(m2.nodes[0], "Model-Z"), y = SD.nodeForVariant(m2.nodes[0], "Model-Y");
+    return f.present === false && z.present === true && /Only Model-Z/.test(z.text) && y.present === false; // a non-overriding variant is also absent
+  })());
+
+  ok("variantsInDoc lists the referenced variant keys, Flagship excluded", (function () {
+    var vs = SD.variantsInDoc(model);
+    return vs.indexOf("Model-Y") !== -1 && vs.indexOf(SD.FLAGSHIP) === -1;
+  })());
+  ok("renameVariant carries a variant's per-node overrides to the new name (Product-level rename)", (function () {
+    var mr = SD.create([{ type: "paragraph", text: "Base." }]);
+    SD.setVariantText(mr, mr.nodes[0].key, "Model-Y", "Y wording");
+    SD.renameVariant(mr, "Model-Y", "Model-Y2");
+    var v = mr.nodes[0].variants;
+    return v && !v["Model-Y"] && v["Model-Y2"] && v["Model-Y2"].text === "Y wording";
+  })());
+
+  // undo covers a variant mutation (owned undo, same as text edits)
+  ok("a variant mutation is undoable (pushUndo)", (function () {
+    var m3 = SD.create([{ type: "paragraph", text: "X." }]);
+    var kk = m3.nodes[0].key;
+    SD.setVariantText(m3, kk, "Model-Y", "Y override");
+    SD.undo(m3);
+    return !(m3.nodes[0].variants && m3.nodes[0].variants["Model-Y"]);
+  })());
+
+  // persistence: variants + baseAbsent survive the toJSON/fromJSON round-trip (deep clone, no schema change)
+  ok("variants + baseAbsent round-trip through toJSON/fromJSON", (function () {
+    var re = SD.fromJSON(SD.toJSON(m2));
+    var n = re.nodes[0];
+    return n.baseAbsent === true && n.variants && n.variants["Model-Z"] && /Only Model-Z/.test(n.variants["Model-Z"].text);
+  })());
+
+  // Flagship base + Flagship removed
+  ok("removing the node from Flagship sets baseAbsent (added-only pivot)", (function () {
+    var m4 = SD.create([{ type: "paragraph", text: "Z." }]);
+    SD.removeNodeFromVariant(m4, m4.nodes[0].key, SD.FLAGSHIP);
+    return m4.nodes[0].baseAbsent === true && SD.nodeForVariant(m4.nodes[0], SD.FLAGSHIP).present === false;
+  })());
+})();
+
+// Source v2 (spec 2d): cross-variant manual combine/import. variantImportPlan reconciles a
+// variant's manual against the Flagship base per node (SHARED / DIVERGED / ABSENT / ADDED-ONLY),
+// and applyVariantImportPlan writes ONLY per-variant overrides -- the base + other variants are
+// never touched. Pure cores, headlessly testable like importPlan.
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+  function baseDoc() {
+    return SD.create([
+      { type: "heading", level: 1, chapter: true, text: "Intro" },
+      { type: "paragraph", text: "Shared opening line." },
+      { type: "paragraph", text: "Flagship wording here." },
+      { type: "paragraph", text: "Only the flagship has this." }
+    ]);
+  }
+  function chap(name, texts) { return [{ name: name, nodes: texts.map(function (t) { return { type: "paragraph", text: t }; }) }]; }
+
+  // DIVERGE + ABSENT: variant reworded line 2 and dropped line 3
+  ok("variantImportPlan: a reworded line diverges, a dropped line goes absent, a match is shared", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    var s = plan.summary;
+    return s.shared === 1 && s.diverged === 1 && s.absent === 1 && s.added === 0;
+  })());
+  ok("applyVariantImportPlan writes ONLY Model-Y overrides; the Flagship base is untouched", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    SD.applyVariantImportPlan(m, plan);
+    var body = m.nodes.slice(1); // after the chapter heading
+    var l1 = SD.nodeForVariant(body[0], "Model-Y"); // shared
+    var l2f = SD.nodeForVariant(body[1], SD.FLAGSHIP), l2y = SD.nodeForVariant(body[1], "Model-Y"); // diverged
+    var l3y = SD.nodeForVariant(body[2], "Model-Y"); // absent
+    return l1.source === "inherited" && l1.present &&
+      /Flagship wording here\./.test(l2f.text) && l2y.diverged && /Variant wording here\./.test(l2y.text) &&
+      l3y.present === false && l3y.source === "absent";
+  })());
+
+  // ADDED-ONLY node: variant manual has an extra paragraph after a shared one
+  ok("variantImportPlan: a variant-only paragraph is added-only (base-absent, present for the variant)", (function () {
+    var m = SD.create([{ type: "heading", level: 1, chapter: true, text: "Ops" }, { type: "paragraph", text: "Common step." }]);
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Ops", ["Common step.", "Extra Model-Y step."]));
+    SD.applyVariantImportPlan(m, plan);
+    var added = m.nodes[m.nodes.length - 1];
+    return plan.summary.added === 1 && added.baseAbsent === true &&
+      SD.nodeForVariant(added, SD.FLAGSHIP).present === false &&
+      SD.nodeForVariant(added, "Model-Y").present === true && /Extra Model-Y step\./.test(SD.nodeForVariant(added, "Model-Y").text);
+  })());
+
+  // ADDED-ONLY chapter: a chapter only the variant's manual has
+  ok("variantImportPlan: an unmatched chapter becomes an added-only chapter (heading + nodes, base-absent)", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Variant-only chapter", ["A line only Model-Y has."]));
+    SD.applyVariantImportPlan(m, plan);
+    var head = m.nodes[m.nodes.length - 2];
+    return plan.summary.chaptersAdded === 1 && head.type === "heading" && head.chapter === true && head.baseAbsent === true &&
+      SD.nodeForVariant(head, SD.FLAGSHIP).present === false && SD.nodeForVariant(head, "Model-Y").present === true;
+  })());
+
+  // Identical manual -> all shared, zero ops
+  ok("variantImportPlan: an identical manual produces no overrides (all shared)", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Flagship wording here.", "Only the flagship has this."]));
+    return plan.ops.length === 0 && plan.summary.shared === 3;
+  })());
+
+  // Key preservation: the base node carrying the divergence keeps its key (marks ride along)
+  ok("applyVariantImportPlan preserves base node keys (marks + other variants ride along)", (function () {
+    var m = baseDoc();
+    var keyBefore = m.nodes[2].key;
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    SD.applyVariantImportPlan(m, plan);
+    return m.nodes[2].key === keyBefore;
+  })());
+
+  // One undo reverses the whole combine
+  ok("applyVariantImportPlan pushes ONE undo -- the whole combine reverses", (function () {
+    var m = baseDoc();
+    var plan = SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Variant wording here."]));
+    SD.applyVariantImportPlan(m, plan);
+    SD.undo(m);
+    var body = m.nodes.slice(1);
+    return !(body[1].variants && body[1].variants["Model-Y"]) && !(body[2].variants && body[2].variants["Model-Y"]);
+  })());
+
+  // Re-import an updated manual updates the same override in place (no duplicate node)
+  ok("re-importing an updated variant manual updates the override in place, no duplicate", (function () {
+    var m = baseDoc();
+    SD.applyVariantImportPlan(m, SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "First variant text."])));
+    var lenAfterFirst = m.nodes.length;
+    SD.applyVariantImportPlan(m, SD.variantImportPlan(m, "Model-Y", chap("Intro", ["Shared opening line.", "Second variant text."])));
+    return m.nodes.length === lenAfterFirst && /Second variant text\./.test(SD.nodeForVariant(m.nodes[2], "Model-Y").text);
+  })());
+
+  // Flagship is not a variant target -- use importPlan for the base
+  ok("variantImportPlan returns null for Flagship (the base uses importPlan)", SD.variantImportPlan(baseDoc(), SD.FLAGSHIP, chap("Intro", ["x"])) === null);
+})();
+
+// Source v2 (spec 2c section 1): a Product's many topic docs become ONE continuous document.
+// concatChapters is the load-bearing pure core -- it must (a) emit a level-1 chapter heading
+// per topic, (b) survive the id-collision crux (each topic's model mints n-1/m-1... on its own
+// _seq counter, so keys collide across topics), and (c) carry marks + per-node variants +
+// provenance across the merge with every key-riding reference rewritten. This is the migration
+// gate: if these fail, marks/variants would silently break on migration.
+section("Source v2: concatChapters unify topics -> one document (spec 2c)");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  // Two topics that INDEPENDENTLY mint colliding keys (both start n-1/m-1...).
+  var t1 = SD.create([
+    { type: "heading", level: 2, text: "Overview" },
+    { type: "paragraph", text: "The unit regulates water across sixteen zones." }
+  ]);
+  var t1k = t1.nodes[1].key;
+  var m1 = SD.addMark(t1, { type: "link", anchor: { nodeKey: t1k, start: 4, len: 4 }, locations: [{ doc: "Quick-Start" }] });
+
+  var t2 = SD.create([
+    { type: "heading", level: 2, text: "Wiring" },
+    { type: "paragraph", text: "Bleed the manifold before pulling the cap." }
+  ]);
+  var t2k = t2.nodes[1].key;
+  SD.setVariantText(t2, t2k, "Model-Y", "Bleed the manifold before pulling the cap.");
+  var m2 = SD.addMark(t2, { type: "comment", anchor: { nodeKey: t2k, start: 0, len: 5 }, comments: [{ text: "typo?" }] });
+
+  // sanity: the two topics really do collide on keys/ids before merge
+  ok("precondition: the two topic docs collide on node keys (the crux)", t1.nodes[0].key === t2.nodes[0].key);
+
+  var uni = SD.concatChapters([{ name: "Alpha", model: t1 }, { name: "Beta", model: t2 }]);
+
+  ok("concatChapters emits one level-1 chapter heading per topic, chapter:true stamped", (function () {
+    var chs = SD.chapters(uni);
+    return chs.length === 2 && chs[0].text === "Alpha" && chs[1].text === "Beta"
+      && uni.nodes[0].level === 1 && uni.nodes[0].chapter === true;
+  })());
+  ok("concatChapters keeps every original content node (2 chapter heads + 4 topic nodes = 6)", uni.nodes.length === 6);
+  ok("concatChapters gives every node a UNIQUE key (collision resolved)", (function () {
+    var seen = {}; return uni.nodes.every(function (n) { if (seen[n.key]) return false; seen[n.key] = 1; return true; });
+  })());
+  ok("concatChapters gives every mark a UNIQUE id", (function () {
+    var seen = {}; return (uni.marks || []).every(function (m) { if (seen[m.id]) return false; seen[m.id] = 1; return true; });
+  })());
+  ok("a text mark's anchor is rewritten to its node's (possibly re-keyed) key and still covers its text", (function () {
+    return (uni.marks || []).length === 2 && (uni.marks || []).every(function (m) {
+      return SD.nodeByKey(uni, m.anchor.nodeKey) && (m.type === "link" ? SD.anchorText(uni, m.anchor).length === 4 : true);
+    });
+  })());
+  ok("per-node variants ride the merge (Beta's Model-Y override survives)", (function () {
+    var beta = SD.nodeByKey(uni, SD.chapters(uni)[1].key); // chapter head; find its diverged para
+    // the diverged node is the one carrying a Model-Y override
+    var diverged = uni.nodes.filter(function (n) { return n.variants && n.variants["Model-Y"]; });
+    return diverged.length === 1 && /Bleed the manifold/.test(diverged[0].variants["Model-Y"].text) && !!beta;
+  })());
+  ok("the unified doc round-trips through toJSON/fromJSON (marks + variants persist)", (function () {
+    var back = SD.fromJSON(SD.toJSON(uni));
+    return JSON.stringify(SD.toJSON(back)) === JSON.stringify(SD.toJSON(uni)) && (back.marks || []).length === 2;
+  })());
+  ok("minted keys never collide with a preserved key (no post-hoc counter catch-up)", (function () {
+    // force a case where chapter-1 keeps keys the running counter would later reach
+    var a = SD.create([{ type: "paragraph", text: "one" }, { type: "paragraph", text: "two" }, { type: "paragraph", text: "three" }]);
+    var b = SD.create([{ type: "paragraph", text: "four" }, { type: "paragraph", text: "five" }]);
+    var u = SD.concatChapters([{ name: "A", model: a }, { name: "B", model: b }]);
+    var seen = {}; return u.nodes.every(function (n) { if (seen[n.key]) return false; seen[n.key] = 1; return true; });
+  })());
+  ok("concatChapters is non-destructive: source topic docs are untouched", t1.nodes.length === 2 && t1.nodes[1].key === t1k);
+  ok("an empty chapter list yields an empty document; a missing model yields just its heading", (function () {
+    return SD.concatChapters([]).nodes.length === 0 && SD.concatChapters([{ name: "Solo" }]).nodes.length === 1;
+  })());
+
+  // --- unified TOC outline + chapter reorder (unified-toc ticket, spec 2c section 2) ---
+  var doc = SD.concatChapters([
+    { name: "Alpha", model: SD.create([{ type: "heading", level: 2, text: "A-sec1" }, { type: "paragraph", text: "a body" }, { type: "heading", level: 3, text: "A-sub" }]) },
+    { name: "Beta", model: SD.create([{ type: "heading", level: 2, text: "B-sec1" }, { type: "paragraph", text: "b body" }]) },
+    { name: "Gamma", model: SD.create([{ type: "paragraph", text: "g body only" }]) }
+  ]);
+  ok("outline nests child headings (level 2/3) under their chapter (level 1)", (function () {
+    var o = SD.outline(doc);
+    return o.length === 3 && o[0].text === "Alpha" && o[0].level === 1
+      && o[0].children.length === 2 && o[0].children[0].text === "A-sec1" && o[0].children[1].level === 3
+      && o[1].children.length === 1 && o[2].children.length === 0;
+  })());
+  ok("chapterBlocks reports each chapter's contiguous node span", (function () {
+    var b = SD.chapterBlocks(doc);
+    return b.length === 3 && b[0].text === "Alpha" && b[0].end - b[0].start === 4 && b[2].text === "Gamma";
+  })());
+  ok("moveChapter reorders a whole chapter block before another chapter", (function () {
+    var d2 = SD.fromJSON(SD.toJSON(doc));
+    var gammaKey = SD.chapters(d2)[2].key, alphaKey = SD.chapters(d2)[0].key;
+    var moved = SD.moveChapter(d2, gammaKey, alphaKey); // Gamma -> before Alpha
+    var order = SD.chapters(d2).map(function (c) { return c.text; });
+    return moved === true && order.join(",") === "Gamma,Alpha,Beta";
+  })());
+  ok("moveChapter to null appends the chapter to the end", (function () {
+    var d3 = SD.fromJSON(SD.toJSON(doc));
+    var alphaKey = SD.chapters(d3)[0].key;
+    SD.moveChapter(d3, alphaKey, null); // Alpha -> end
+    return SD.chapters(d3).map(function (c) { return c.text; }).join(",") === "Beta,Gamma,Alpha";
+  })());
+  ok("moveChapter carries the chapter's nodes with it (Alpha keeps its 2 child headings)", (function () {
+    var d4 = SD.fromJSON(SD.toJSON(doc));
+    SD.moveChapter(d4, SD.chapters(d4)[0].key, null);
+    var o = SD.outline(d4);
+    return o[o.length - 1].text === "Alpha" && o[o.length - 1].children.length === 2;
+  })());
+  ok("moveChapter is a no-op (returns false) for an unknown or self target", (function () {
+    var d5 = SD.fromJSON(SD.toJSON(doc));
+    var a = SD.chapters(d5)[0].key;
+    return SD.moveChapter(d5, a, a) === false && SD.moveChapter(d5, "nope", null) === false;
+  })());
+  ok("moveChapter pushes undo (the reorder is reversible)", (function () {
+    var d6 = SD.fromJSON(SD.toJSON(doc));
+    SD.moveChapter(d6, SD.chapters(d6)[2].key, SD.chapters(d6)[0].key);
+    SD.undo(d6);
+    return SD.chapters(d6).map(function (c) { return c.text; }).join(",") === "Alpha,Beta,Gamma";
+  })());
+
+  // --- find-to-word + match cycling (find-word-cycling ticket, spec 2c section 2) ---
+  var fdoc = SD.create([
+    { type: "heading", level: 1, text: "Manifold", chapter: true },
+    { type: "paragraph", text: "Flush the manifold. Flush it twice." },
+    { type: "heading", level: 2, text: "Bleeding" },
+    { type: "paragraph", text: "Bleed the line, then flush again." }
+  ]);
+  ok("findMatches returns every case-insensitive occurrence across the whole document, in order", (function () {
+    var ms = SD.findMatches(fdoc, "flush");
+    return ms.length === 3 && ms[0].nodeKey === fdoc.nodes[1].key && ms[0].len === 5
+      && ms[2].nodeKey === fdoc.nodes[3].key && ms[1].index === 1;
+  })());
+  ok("findMatches counts repeated hits within one node (two 'Flush' in the first paragraph)", (function () {
+    return SD.findMatches(fdoc, "flush").filter(function (m) { return m.nodeKey === fdoc.nodes[1].key; }).length === 2;
+  })());
+  ok("findMatches on an empty needle is no matches; a miss is zero", (function () {
+    return SD.findMatches(fdoc, "").length === 0 && SD.findMatches(fdoc, "zzz").length === 0;
+  })());
+  ok("each hit is a highlightable span -- its slice equals the needle (case-folded)", (function () {
+    var ms = SD.findMatches(fdoc, "manifold");
+    return ms.length === 2 && SD.nodeText(SD.nodeByKey(fdoc, ms[0].nodeKey)).substr(ms[0].start, ms[0].len).toLowerCase() === "manifold";
+  })());
+  ok("headingKeyForNode reports the section a hit sits under (body hit -> its preceding heading)", (function () {
+    var bleedPara = fdoc.nodes[3].key, flushPara = fdoc.nodes[1].key;
+    return SD.headingKeyForNode(fdoc, bleedPara) === fdoc.nodes[2].key // 'Bleeding'
+      && SD.headingKeyForNode(fdoc, flushPara) === fdoc.nodes[0].key;  // 'Manifold' chapter
+  })());
+
+  // --- additive Markdown import + reconcile preview (md-import-additive, spec 2c section 4) ---
+  var base = SD.concatChapters([
+    { name: "Intro", model: SD.create([{ type: "paragraph", text: "Welcome." }]) },
+    { name: "Setup", model: SD.create([{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step two." }]) }
+  ]);
+  // a mark on Setup's first paragraph -- it must survive an update that keeps that node
+  var setupPara = base.nodes[3].key; // Intro-head, Intro-para, Setup-head, Setup-para1...
+  SD.addMark(base, { type: "comment", anchor: { nodeKey: setupPara, start: 0, len: 4 }, comments: [{ text: "note" }] });
+
+  ok("importPlan ADDs a chapter whose name isn't in the document", (function () {
+    var plan = SD.importPlan(base, [{ name: "Wiring", nodes: [{ type: "paragraph", text: "Connect." }] }]);
+    return plan.ops.length === 1 && plan.ops[0].type === "add" && plan.summary.chaptersAdded === 1 && plan.summary.nodesAdded === 1;
+  })());
+  ok("importPlan UPDATEs a chapter that already exists (matched by name), reporting add/remove/keep", (function () {
+    // Setup: keep "Step one.", drop "Step two.", add "Step three."
+    var plan = SD.importPlan(base, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step three." }] }]);
+    var op = plan.ops[0];
+    return op.type === "update" && op.kept === 1 && op.added === 1 && op.removed === 1 && plan.summary.chaptersUpdated === 1;
+  })());
+  ok("importPlan is a preview only -- it does NOT mutate the document", (function () {
+    var before = base.nodes.length;
+    SD.importPlan(base, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Changed." }] }]);
+    return base.nodes.length === before;
+  })());
+  ok("applyImportPlan appends an added chapter with fresh unique keys", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var plan = SD.importPlan(d, [{ name: "Wiring", nodes: [{ type: "paragraph", text: "Connect." }] }]);
+    SD.applyImportPlan(d, plan);
+    var chs = SD.chapters(d).map(function (c) { return c.text; });
+    var seen = {}, unique = d.nodes.every(function (n) { if (seen[n.key]) return false; seen[n.key] = 1; return true; });
+    return chs.join(",") === "Intro,Setup,Wiring" && unique;
+  })());
+  ok("applyImportPlan UPDATE keeps unchanged nodes' keys so their marks survive", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var keepKey = SD.chapterBlocks(d).filter(function (b) { return b.text === "Setup"; })[0];
+    var setupFirst = d.nodes[keepKey.start + 1].key; // "Step one." node
+    var plan = SD.importPlan(d, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step three." }] }]);
+    SD.applyImportPlan(d, plan);
+    // the kept node still exists under its original key, and its comment mark still anchors to it
+    var mark = d.marks[0];
+    return !!SD.nodeByKey(d, setupFirst) && mark.anchor.nodeKey === setupFirst && SD.anchorText(d, mark.anchor) === "Step";
+  })());
+  ok("applyImportPlan UPDATE drops removed nodes and inserts added ones in order", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var plan = SD.importPlan(d, [{ name: "Setup", nodes: [{ type: "paragraph", text: "Step one." }, { type: "paragraph", text: "Step three." }] }]);
+    SD.applyImportPlan(d, plan);
+    var blk = SD.chapterBlocks(d).filter(function (b) { return b.text === "Setup"; })[0];
+    var body = d.nodes.slice(blk.start + 1, blk.end).map(function (n) { return SD.nodeText(n); });
+    return body.join("|") === "Step one.|Step three.";
+  })());
+  ok("applyImportPlan pushes undo (the whole import is reversible)", (function () {
+    var d = SD.fromJSON(SD.toJSON(base));
+    var before = d.nodes.length;
+    SD.applyImportPlan(d, SD.importPlan(d, [{ name: "Wiring", nodes: [{ type: "paragraph", text: "x" }] }]));
+    SD.undo(d);
+    return d.nodes.length === before;
+  })());
+
+  // editor wiring: the migration is guarded + reversible + stored as a reserved master.
+  var e = src("src/editor.js");
+  ok("the unified doc lives in a reserved 'source master' component keyed off product.groundTruthId", /function sourceMasterFor\(productId\)[\s\S]{0,200}p\.groundTruthId[\s\S]{0,120}m\.sourceMaster/.test(e));
+  ok("migrateProductToUnifiedDoc is GUARDED (idempotent unless force) -> returns the existing master", /var existing = sourceMasterFor\(productId\);[\s\S]{0,80}if \(existing && !opts\.force\) return existing;/.test(e));
+  ok("migration concatenates the Product's topics via SourceDoc.concatChapters", /SD\.concatChapters\(chapters\)/.test(e));
+  ok("migration is REVERSIBLE: old topics are kept, only stamped archivedInto (never deleted)", /topics\.forEach\(function \(t\) \{ t\.archivedInto = master\.id; \}\);/.test(e) && /function revertProductUnifiedDoc/.test(e));
+  ok("the reserved master + archived topics are hidden from the interim Source nav (no double-up)", /\.filter\(function \(t\) \{ return !t\.sourceMaster && !t\.archivedInto; \}\)/.test(e));
+  ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(e) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(e));
+
+  // md-import-additive wiring (spec 2c section 4)
+  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(e));
+  ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(e));
+  ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(e));
+  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(topic, n, shown\)/.test(e));
+  ok("spec 2d: the variant bar always offers Manage variants (declare the first variant on a Product with none)", /function buildSourceVariantBar\(topic\)[\s\S]{0,400}label: "Manage variants", onClick: function \(\) \{ openVariantEditor\(topic\)/.test(e));
+  ok("spec 2d: the variant editor declares via setProductVariants; a rename migrates overrides via SourceDoc.renameVariant", (function () { var m = e.slice(e.indexOf("function openVariantEditor(topic)"), e.indexOf("function openVariantEditor(topic)") + 1900); return /setProductVariants\(pid, list\)/.test(m) && /SD\.renameVariant\(model, v, nn\)/.test(m); })());
+  ok("spec 2d: clicking Done commits a name still typed in the add field (no silent discard)", /onPrimary: function \(\) \{ if \(addInput && addInput\.value\.trim\(\)\) doAdd\(\); shell\.modal\.close\(\); \}/.test(e));
+  // Found by browser-verify: dsModalShell binds Enter to the primary button, so an add-field
+  // Enter that only preventDefault()s adds the variant AND closes the dialog -- you could never
+  // declare two variants in one visit. Enter here means "add"; Done means "finish".
+  ok("spec 2d: Enter in the add field adds without also firing the modal's Done", /addInput\.addEventListener\("keydown", function \(e\) \{ if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); doAdd\(\); \} \}\);/.test(e));
+  ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
+  ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
+  ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));
+
+  // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
+  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(e));
+  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = sourceMasterFor\(activeSourceProductId\(\)\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(e));
+  ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(e) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(e));
+  ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(e));
+  ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(e));
+  ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(e) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(e));
+  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(e));
+  ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(e));
+  ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(e) && /it\.classList\.toggle\("is-selected", on\)/.test(e));
+  ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(e));
+
+  // find-word-cycling wiring (spec 2c section 2)
+  ok("the TOC recomputes live find hits + filters headings that own a hit (one mechanism)", /__sourceFindMatches = q \? SD\.findMatches\(model, q\) : \[\];[\s\S]{0,220}var hk = SD\.headingKeyForNode\(model, m\.nodeKey\); if \(hk\) kept\[hk\] = 1;/.test(e));
+  ok("a find hit is painted into a dedicated sd-find CSS Custom Highlight via the marks engine's rangeFor", /CSS\.highlights\.get\("sd-find"\)[\s\S]{0,200}eng\.rangeFor\(\{ nodeKey: hit\.nodeKey, start: hit\.start, len: hit\.len \}\)/.test(e));
+  ok("cycling steps the cursor with wrap, scrolls to + paints the hit, refreshes the nav", /function cycleSourceFind\(dir\)[\s\S]{0,220}__sourceFindIndex \+ dir \+ __sourceFindMatches\.length\) % __sourceFindMatches\.length;[\s\S]{0,80}scrollToSourceFindHit/.test(e));
+  ok("the match navigator shows N/total + prev/next only while a query is active", /function renderSourceFindNav\(\)[\s\S]{0,180}if \(!q\) \{ nav\.style\.display = "none"; return; \}[\s\S]{0,400}"Previous match"[\s\S]{0,160}"Next match"/.test(e));
+  ok("Enter cycles next, Shift\\+Enter previous, in the find field", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleSourceFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
+  // source-find-replace: a replacement field + Replace (current) / Replace all under the find field
+  // (unified doc only); replacing is a base edit, so it's unlock-gated; both ride owned undo.
+  ok("the search mounts a Replace field + Replace / Replace all (unified doc only)", /var repRow = h\("div", "source-replace"\);[\s\S]{0,1100}replaceCurrentSourceMatch\(\)[\s\S]{0,200}replaceAllSourceMatches\(\)/.test(e) && /"replace"/.test(src("src/icons.js")));
+  ok("replace-current is unlock-gated + replaces the current match via replaceRange (owned undo)", /function replaceCurrentSourceMatch\(\)[\s\S]{0,200}if \(!__sourceUnlocked\) \{ sourceToast[\s\S]{0,200}__sourceFindMatches\[__sourceFindIndex\][\s\S]{0,160}SD\.replaceRange\(__sourceDocModel, \{ nodeKey: m\.nodeKey, start: m\.start, len: m\.len \}, __sourceReplaceQuery\)/.test(e));
+  ok("replace-all is unlock-gated + calls SD.replaceAll, then re-renders + toasts the count", /function replaceAllSourceMatches\(\)[\s\S]{0,300}if \(!__sourceUnlocked\)[\s\S]{0,300}SD\.replaceAll\(__sourceDocModel, q, __sourceReplaceQuery\)[\s\S]{0,300}Replaced " \+ n/.test(e));
 })();
 
 // ---- Repository hygiene gate (HARD FAIL) ---------------------------------

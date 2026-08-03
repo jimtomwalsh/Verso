@@ -20,12 +20,12 @@ Build and export your first course in a few minutes.
 1. **Open Verso.** Launch the desktop app, or open `index.html` in a browser (serve the folder
    over `http://` so export and fonts work — see §2).
 2. **Add a page.** In the **Structure** panel on the left, click **+** to add a page.
-3. **Add a block.** Open the **Blocks** palette (below Structure) and click **Heading**, then
+3. **Add a block.** Switch the left panel to **Blocks** and click **Heading**, then
    **Paragraph**. Click the text on the canvas and type.
 4. **Preview it.** Click **▶ Demo** (or press ⌘P) to see the page exactly as a learner will.
    Press **Esc** to return.
-5. **Export it.** Open **Import & Export → Export SCORM**. Upload the `.zip` to Moodle as a
-   SCORM activity.
+5. **Export it.** On the **Publish** stage, add the document to the queue and press **Publish**.
+   Upload the `.zip` to Moodle as a SCORM activity.
 
 > **Reassurance.** You can't lose work by exploring — every edit autosaves, and ⌘Z undoes.
 > There's no "save" button for normal editing.
@@ -48,6 +48,21 @@ Verso is a plain web app — nothing to install.
 Your work **saves automatically to this browser** (IndexedDB) as you go; the **All changes
 saved** status in the top bar confirms it.
 
+**Create a document.** The **＋** beside the tabs opens **New document**: pick a **Product**
+(defaults to the one you're scoped to), a **preset** — the starting matrix cell (eLearning,
+Presentation, 1-pager, Quick-start guide, Responsive doc), each shown as *geometry · interactive
+or static* — then a **title** and **code**. The document is born in that Product and that cell;
+you can change the cell later. The same dialog also opens a saved course, imports a document, or
+loads a sample.
+
+**Change the document type later.** The **cell chip** in the editor header (e.g. *Reflow ·
+Interactive*) opens a small menu to change the document's matrix cell after creation. Toggling
+**Interactive / Static** applies at once; switching the **geometry** (Reflow / Fixed frame /
+Paged) warns first, because content reflows into the new geometry and may not survive 1:1 — you
+can switch back. In a **Static** document the interactive block types (Quiz, Image hotspots,
+Web/HTML Embed, Accordion, Card Reveal, and the rest) are hidden from the Blocks library; any
+interactive blocks you already placed are kept, and turning interactivity back on restores them.
+
 > **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
 > before clearing browser data or switching machines (§15).
 
@@ -56,23 +71,135 @@ saved** status in the top bar confirms it.
 ## 3. The workspace
 
 Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (centre), and the
-**Inspector** (right), under a top toolbar.
+**Inspector** (right). A single **top bar** runs across the very top of every stage.
 
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
-- **Toolbar (top).** Light/dark toggle, save status, **Undo/Redo**, **Fit all**, **Comment
-  mode**, **Demo**, and the **Import & Export** menu (CSV import, SCORM export, JSON backup).
-  Open courses appear as tabs on the left.
-- **Left (three stacked, collapsible panes).** **Structure** — the outliner of chapters and
-  pages as a tree. **Blocks** — the insert palette for built-in block types (Text, Media,
-  Layout, Interactive…). **Components** — the browse/insert surface for reusable components:
-  **My Components** (course-local), **Blocks** and **Pages** (the shared cross-course library,
-  §9). Drag the thin divider between any two panes to resize them; click a pane's header to
-  collapse it.
+- **Top bar.** One bar carries everything, left to right. **Identity** (always shown): the **Verso**
+  mark, the **product picker** (sets the active product across Source, Edit and Publish — and
+  **scopes the open tabs** to that product; "All products" shows every open tab; your choice is
+  **remembered across refresh**), a **＋** to **create a new product** from scratch, and the
+  **storage-health dot** beside it. Creating a product (either the **＋** here or **New Product** in
+  the document browser) makes it the active product and drops you on its **document browser** —
+  empty, since nothing is tagged to it yet; any course you create from there is tagged to the new
+  product automatically.
+  The rest of the bar appears **only in the Edit stage** and covers the document you're editing, in
+  three zones split by faint dividers. **Tabs:** the **file-picker** (▤, browse all courses — a
+  browser **grouped by document type**, colour-coded, each card showing its product,
+  interactive/static and whether it's open; it respects the product scope and opens automatically
+  when no course is open) and the **open-course tabs**. Each tab carries a **doc-type glyph** (course,
+  presentation, or paged/print document) so a Product's course, one-pager and deck stay
+  distinguishable at a glance, plus a **per-product colour dot** (hover it to see which Product).
+  **Document:** a **Document-settings** button (a sliders glyph, deliberately not the same cog as
+  the app-wide one on the left rail; opens this document's settings —
+  **Document type** (geometry + interactivity, set once), **Header**, **Footer**, the learner-nav
+  sections, Theme and the rest; app-wide settings live under the left-rail cog), the **Build /
+  Read** toggle (glyphs), and the
+  **Variant** and **Version** selectors as **named dropdowns**, each captioned with its axis and
+  showing the current value ("Flagship", the version name) at a glance. The moment either leaves
+  base, a chip appears in the bar — **Read-only** when you're previewing (a variant preview locks
+  the canvas) or **Editing <version>** when a software version is the editable flagship — with a
+  one-click **Return to base**. **Output:** the **▶ Demo** preview and a labelled **Send to publish**
+  button that carries the **pending queue count** (how many documents are waiting to publish).
+  **Light / dark** lives in the Demo button's **▾** menu, under the size presets. When
+  many courses are open the tabs scroll within their own strip so the Document and Output clusters
+  never move. In Source and Publish the bar shows the Identity zone only.
+- **Stage rail (far left).** A slim icon rail names the three stages — **Source**, **Edit**,
+  **Publish** — as a stepper; click one to switch. Below them sit the **User guide** and
+  **Settings** glyphs.
+- **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
+  panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
+  palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
+  components** beneath it: **My Components** (course-local), **Blocks** and **Pages** (the shared
+  cross-course library, §9). **Source** — a **read-only, live view of the open document's product
+  source**: the same source document you'd see in the Source stage, in a narrow reading column,
+  with a **search box** (type to find, Enter / Shift+Enter to cycle matches) and a **table of
+  contents** that jumps to a chapter and tracks where you're reading. It keys off the document you
+  have open (its product), not the product picker, so it always matches the course in front of you.
+  It's read-only — all source editing stays in the Source stage. The panel remembers which section
+  you last used.
+  **Placing linked copy.** Select any passage in this panel (a phrase, or a heading through a
+  paragraph in one sweep) and a small bar appears at the selection with a **drag handle** and a
+  **Place** button. Two ways to place it: **drag** the handle onto the canvas — a ghost follows your
+  cursor, the target page lights up, and a **drop-line** shows the exact gap between blocks where it
+  will land — then release; or click **Place** then click a spot in the canvas (**Esc** cancels).
+  Either way the passage drops in at that spot as **live-linked** text in your
+  document's own styles. If your selection spans **different formats** — a heading and a paragraph —
+  it splits into one block per format (a heading block, then a body block), each independently
+  styleable with the normal text-block controls; two passages of the same format stay in one block.
+  Drop a passage **onto an existing text block** instead of into a gap and it merges in as a locked
+  **inline span** at that block, so one block can mix your own words with linked source copy — each
+  linked span carries its own indicator. Drag a source **figure** (a diagram) as a whole and it
+  drops as a linked **image** block. Linked copy is **locked** — you can't edit it directly, so it
+  can't drift from the source — and it updates automatically whenever the source wording changes. A
+  linked block (or span) shows a **link badge**; click it for a menu that jumps back to the exact
+  source passage, or lets you say it differently here. Select a linked block and the inspector opens
+  with a **From source** line naming the source document it came from, how many documents use that
+  passage, and a **Source changed** flag if the source has moved since this document was last
+  published. **Alternates** are the sanctioned way to
+  diverge without breaking the link: pick **Create an alternate…** to fork a named wording that
+  applies to *this block only* (and registers on the source, so you can reuse or push it later), or
+  pick an existing alternate — or **Base wording** to reset. Passages you've already linked into the
+  open document are **highlighted** in the panel, so you can see what you've used.
 - **Canvas (centre).** An infinite, zoomable board of your pages. Scroll to pan, ⌘+scroll (or
-  pinch) to zoom. Every page is a live, editable render of what the learner will see.
-- **Inspector (right).** Context-sensitive: with nothing selected it shows **document**
-  settings; select a block and it shows that block's settings.
+  pinch) to zoom. Every page is a live, editable render of what the learner will see. The board
+  follows the document's **geometry** (set by its preset, §2): **reflow** flows content down a
+  fluid page (eLearning / web); **fixed frame** shows each page as one fixed screen and clips
+  anything past it with an amber *overflows* warning (decks); **paged** shows page-break guide
+  lines, so content reads across pages (print / guides). The same blocks render in every geometry.
+- **The four cross-stage facts.** Four things follow a document wherever you are, always worded and
+  coloured the same way. **Alignment** — what share of the document is linked to approved source,
+  banded green at 85% or more, amber from 60 to 84, plain below that; **Not indexed** means there is
+  nothing to measure yet (no prose, or no approved source document), not a score of zero.
+  **Drift** — how many linked source documents have changed since this one was last published; a
+  document that has never published shows nothing, because there is nothing for it to have drifted
+  from. **Linked in N** — how many documents use a source passage. **Outputs** — how many packages
+  a document actually produces (its flagship plus each variant). A fact with nothing to say shows
+  nothing at all, so a quiet row means "no news", never "unknown".
+- **Inspector (right).** Context-sensitive: with nothing selected it shows the **Document**
+  context — the document type (its geometry · interactivity) with that geometry's tools (paged →
+  margins / running header-footer / page breaks / page numbers; frame → frame size / transitions /
+  animation; reflow → breakpoint preview) — then the canvas backdrop. Select a block and it shows
+  that block's settings instead. With a block selected, the **⋯** beside the breadcrumb (**Page 1 ›
+  Heading**) opens that block's actions — the same list you get by right-clicking it on the canvas.
+  Higher up, the panel's own **⋯** (in the **Design / Interact** tab strip) holds **Reorder inspector
+  sections…**, which turns on a drag mode to rearrange the section order across every block's
+  inspector — a preference saved for you, not the course; a banner names the scope while it's on.
+- **Settings.** Settings opens as a panel down the right-hand side, in the place the inspector
+  normally sits. It does not cover the course: the canvas simply narrows, and you can keep clicking,
+  scrolling and editing while Settings is open — useful when you want to watch a change land. The
+  settings are one scrolling list of sections, each folded shut; open the ones you need and Verso
+  remembers which you left open. There is no Save or Done button. Every change applies to the
+  course as you make it and is saved for you; **⌘Z** undoes the last one. **Close** or **Esc**
+  puts the panel away and brings the inspector back. Clicking the canvas does not close it, so a
+  stray click can't lose your place. Where a setting is really owned by another panel, its row
+  shows the live value and a link straight to that panel rather than telling you to go and find it.
+  When a panel has more than fits, a **hairline and a soft fade** appear at the edge you can keep
+  scrolling towards, and go once you reach the end, so a cut-off line is never mistaken for the
+  last one. Settings and the inspector both do this.
+  A section that has an **on/off switch** keeps that switch and its fold-out arrow separate: the
+  arrow opens and closes it, the switch decides whether it applies, and neither moves the other.
+  Folded, it shows a one-line summary of what it will do ("On · centred, bottom rule"). Switched
+  **off**, its rows dim but stay there and stay usable, so you can set a header up the way you
+  want it and then turn it on, rather than turning it on to find out what it does.
+  **Drag its left edge** to make it wider or narrower, exactly like the side panels. Settings keeps
+  its own width, so widening it does not change how wide the inspector is when it comes back.
+  **⌘\\** (hide the side panels) closes Settings, since there would be nowhere left to show it.
+- **Esc closes one thing at a time.** If you open a menu or a small pop-up on top of Settings,
+  **Esc** closes just that, and Settings stays where it was. Press it again to close Settings.
+  Small pop-ups that only hold a setting or two carry a link through to the full Settings panel,
+  so you are never left guessing where the rest of them live.
+- **⌘K finds anything.** One box over everything Verso can take you to: a **setting**, an
+  **action** ("Send to publish", "Add a page", "Go to Publish"), a **page or block** in the open
+  document, and a **section of this guide**. Every result says which category it comes from, so
+  you know where you are about to land. Settings are indexed by what you actually want, not only
+  by what Verso calls them: type *confetti* and you get Motion, *disclaimer* and you get Header &
+  Footer. Choosing a setting opens it in the Settings panel with its section already unfolded;
+  choosing a guide section opens the guide at that heading. Arrow keys move, Enter runs, Esc
+  closes. Because ⌘K covers the guide, the guide no longer has its own search box; its contents
+  list on the left is still there.
+- **⌘,** opens Settings where you left it. **⌥⌘,** gives you the settings for whatever you have
+  selected, which is the inspector: it puts the Settings panel away and hands the space back.
 
 ---
 
@@ -89,7 +216,43 @@ Four ideas cover most of how Verso works.
 - **Some blocks are containers.** A **Card**, **Columns**, **Card Reveal**, or **Accordion**
   holds child blocks inside it.
 - **The Inspector mirrors your selection.** Select nothing for document-wide settings (theme,
-  fonts, header/footer); select a block for that block's settings.
+  fonts, header/footer); select a block for that block's settings. Editing a text block shows its
+  Type controls and its layout, spacing and appearance settings together in one scrolling panel.
+
+### Sections
+
+Every group of settings — in the inspector, in the settings sheet, in a dialog — is a **section**:
+a title with a chevron, sometimes a switch, and rows underneath. Click the title to fold it; folded,
+it states what it will do in one line ("On · centred, bottom rule"), so a closed section never reads
+as unknown. The chevron and the switch are independent: turning a section off dims its rows but
+keeps them there and usable, so you can set something up before you switch it on.
+
+Sections nest **one** level deep at most, and a nested one looks the same, just quieter and
+indented. There is no third level and no other kind of heading, so anything with a chevron opens
+and anything without one is an ordinary row.
+
+The **Header** and **Footer** settings are two sections of their own (they used to be nested inside
+one "Header & Footer"), and with a nav bar in place each learner-nav group — **Nav buttons**,
+**Progress pill**, **Progression**, **Nav sections**, **Guided tour** — is its own section too. ⌘K
+still finds any of them by what you want rather than by their names: "disclaimer" finds Footer,
+"logo" finds Header, "pill" finds Progress pill.
+
+### Inherited and overridden settings
+
+Many settings are set once high up and followed everywhere below. Verso reads them down five
+levels: **System → Product → Course → Page → Block.** The nearest level that sets a value wins.
+
+A setting never shows as blank or "unset". It always shows the value that will actually apply,
+plus a small note at the end of the row telling you where that value came from:
+
+- **A grey scope name — "Course", "System".** The value is inherited. Change it at that level and
+  every page or block following it changes with it.
+- **A blue dot and a Reset link.** This one is set here, so it no longer follows its parent. Hover
+  **Reset** to see exactly what it would go back to and from which level. Clicking Reset applies
+  straight away — there is nothing to save, and ⌘Z undoes it like any other edit.
+- **A count in the section header — "3 overridden".** That section has three values set here
+  rather than inherited. It is the quick way to spot a block or page that has drifted from the
+  course.
 
 ---
 
@@ -103,11 +266,13 @@ Pages are the unit a learner reads; chapters group them and drive navigation.
 - **Reorder or move.** Drag pages and chapters in the outliner. Play-order follows the outline,
   so the exported course always navigates in outline order.
 - **Split or merge.** Split a page at a block, or **merge with the next page** in the same
-  chapter, from the page's frame-label menu or the outliner.
+  chapter, from the page's frame-label menu or the outliner. When you split, the parts are named
+  **`Base · 1 of 2`, `Base · 2 of 2`** (renumbered if you split again) — no piling-up suffixes.
 - **Collapse the tree.** The glyph beside **Pages** folds the outline to chapter level and back.
 
-> **Note.** Pages auto-title themselves as `chapter.page firstLineOfCopy` (e.g.
-> `2.3 Exclusion zones`) and renumber as you add, split, or delete. Rename any page to override.
+> **Note.** Pages auto-title themselves from the first line of copy, with the derived
+> `chapter.page` number shown in its **own column** beside the name (so names stay clean and
+> aligned). Numbers renumber as you add, split, or delete. Rename any page to override the title.
 
 ---
 
@@ -118,9 +283,9 @@ the full catalogue.
 
 ![Click a page in the outliner; the highlight marks the page you're editing.](docs/assets/annotated-navigate.webp "The highlight marks the active page."){poster=docs/assets/annotated-navigate-still.webp}
 
-**Insert a block.** Open the **Blocks** palette and click or drag a block onto a page — or into
-a container (**Card**, **Columns**, **Card Reveal**). For a reusable component you've already
-saved (§9), use the **Components** pane instead.
+**Insert a block.** Switch the left panel to **Blocks** and click or drag a block onto a page — or
+into a container (**Card**, **Columns**, **Card Reveal**). For a reusable component you've already
+saved (§9), use the **Reusable components** beneath the palette in the same Blocks section.
 
 **Select and drill in.** One click selects the outermost container under the cursor; each
 further click drills one level in (container → block → text). **Double-click** jumps straight
@@ -128,6 +293,12 @@ into text editing. **Esc** steps back out one level.
 
 **Move, duplicate, delete.** Drag to move; **⌘D** duplicates; **Delete** removes the selection;
 arrow keys nudge. Group blocks with **⌘G** (ungroup **⌘⇧G**).
+
+**A block's full list of actions — two ways in.** Right-click the block on the canvas, or click the
+**⋯** beside the breadcrumb at the top of the Inspector. Both open the same list: Duplicate, Copy,
+Copy style, Move up / down, Save as component, Clear content, Delete, plus the variant and software
+version show/hide toggles. The list ends with **Block settings**, which takes you back into the
+Inspector on that block.
 
 > **Tip.** An unfilled image or interaction placeholder glows neon-pink on the canvas so you
 > never miss a slot. It's an authoring cue only — it never shows in preview or the export.
@@ -140,10 +311,15 @@ Every block you can insert, grouped by type. Software tours have their own secti
 
 ### Text
 
-- **Heading / Subheading / Paragraph / Quote** — rich text. Select text to **Bold**, *Italic*,
-  or underline, add an inline **Link**, or turn it into a **List** — all from the one formatting
-  bar in the Text panel. Apply a saved text style (§9) for consistent type. When a field is a
-  list, its marker settings (bullet style, custom glyph, colour, size) appear just below.
+- **Heading / Subheading / Paragraph / Quote** — rich text. Select some text and a small **floating
+  format bar** appears just above it (Bold / Italic / Underline) — the same idiom as the Source stage —
+  so you can format right on the canvas without going to the panel. The **Text panel** and the Copy
+  editor carry the same formatting controls (plus **Link**), and **List** in the panel bar converts the
+  WHOLE block to a bulleted list and back
+  (no text selection needed) — your wording carries over line by line, and converting back
+  restores the original block type (heading stays a heading, paragraph stays a paragraph). Apply
+  a saved text style (§9) for consistent type. When a field is a list, its marker settings
+  (bullet style, custom glyph, colour, size) appear just below.
 - **Bulleted list** — marker style, colour, custom glyphs, and nesting.
 - **Note / callout** — a highlighted aside.
 
@@ -162,6 +338,8 @@ Every block you can insert, grouped by type. Software tours have their own secti
 
 - **Card (container)** — a styled box holding child blocks (fill, border, radius, padding).
 - **Columns** — a multi-column row; drop blocks into each column. Collapses to a stack on mobile.
+  Drag the gap between two columns to resize them; hover a gap for a **swap** glyph that
+  exchanges those two columns' content in place.
 - **Table** — a native table: header row, borders, zebra striping, cell padding, and per-column
   alignment. Edit cells directly on the canvas.
 - **Divider / Spacer** — a rule, and vertical space.
@@ -308,7 +486,10 @@ board where every screen is a node laid out in 2D.
   on the scrub bar). A source is **author-time only: it is never included in the exported course**, so
   a long screen-recording never bloats your package. It stays saved with the course so you can come
   back and keep working from it; the **trash** button on the node removes it (screens you've already
-  made from it are kept).
+  made from it are kept). To clear every source at once (e.g. once you've finished harvesting and
+  want to slim the save file), open the Properties panel with nothing selected and use **Purge all
+  sources** near the bottom — it removes all source recordings in one step; screens you've already
+  harvested stay.
 - **Crop the source (uniform size).** The **crop** button on a source's player shows a crop frame over
   the video — drag it to move, the corners to resize. Every screen you then harvest from that source
   comes out at that **same size**, so a set of screens lines up perfectly. Re-cropping only affects
@@ -358,8 +539,9 @@ one carousel.
 
 Select nothing, and the Inspector shows document-wide design controls.
 
-- **Light / dark.** The top-bar **☾** toggles the palette you preview. Learners get a toggle
-  too; the palette crossfades between modes (tunable under **Motion**; respects reduce-motion).
+- **Light / dark.** Open the **▾** menu on the **▶ Demo** button (under the size presets) and pick
+  **Light** or **Dark** to switch the palette you preview. Learners get a toggle too; the palette
+  crossfades between modes (tunable under **Motion**; respects reduce-motion).
 - **Theme.** Edit the colour tokens for each mode — background, ink, accent, success, and so on.
 - **Saved Text Styles.** Create named styles (font, size, weight, spacing, case, alignment,
   colour). Apply a style to any text; edit it once and every use updates. Renaming is safe —
@@ -418,16 +600,23 @@ A course can carry **product variants** (e.g. two hardware models) that share mo
 differ in specifics. You author one **flagship**; each variant is a thin layer of overrides on
 top, so unchanged copy stays shared and you maintain one source.
 
-- **Switch flagship or variant** from the top bar. **Flagship** is the editable master; picking
+- **Switch flagship or variant** from the editor header. **Flagship** is the editable master; picking
   a variant shows a read-only preview. Edit a variant's wording where variant edits are allowed,
   and the change lands only on that variant's override.
 - A block with no override for the current variant simply **inherits** the flagship copy.
+- **Hide a block in one variant** from its right-click menu: **Variants ›** opens a short list with
+  a *Hide in <name>* switch per variant, and **New variant…** at its foot. Software versions and
+  per-variant images fold the same way. Before you have any variants there is no Variants list at
+  all — just a single **Add variant…** entry, so the menu never shows you a heading with nothing
+  under it.
 
-**Compare side by side.** Open the **Copy editor** (the file-text glyph in the left rail) for a
-full-screen, plain-text view of all course copy. With variants, a **Single | Side by side**
+**Compare side by side.** Switch the editor header's **Build / Read** toggle to **Read** for a
+plain-text view of all course copy; **Build** returns you to the canvas. With variants, a **Single | Side by side**
 toggle appears: **Side by side** adds one column per variant. A held variant cell is read-only
 behind a lock — click the lock to edit it; a block with no variant yet shows a **+** to create
-its copy from the flagship.
+its copy from the flagship. Click into any row to select some text and use the **B / I / U /
+Link** toolbar plus the **Weight** dropdown — the same formatting controls the canvas Inspector's
+Style row uses.
 
 **Shared Library masters inherit variants and software versions too.** If you gave a block
 per-variant or per-software-version wording *before* saving it to the Shared Library (§9), every
@@ -440,8 +629,8 @@ whatever you were previewing at the moment you detached, not the master's flagsh
 
 ## 11. Importing from a spreadsheet (CSV)
 
-For bulk content, use **Import & Export → Import CSV**. Verso reads a flat schema
-(`Page, Location, Path, Field, Type, Value`) and builds pages, blocks, and native quizzes.
+For bulk content, use the **Source** stage's **Import** button → **CSV**. Verso reads a
+flat schema (`Page, Location, Path, Field, Type, Value`) and builds pages, blocks, and native quizzes.
 
 - See `SCHEMA-TEMPLATE-GUIDE.md` and `course_schema_template.csv` in the app folder for the
   exact columns and an example.
@@ -509,9 +698,10 @@ or dismiss it.
 
 ## 15. Publishing to SCORM
 
-**Import & Export → Export SCORM** builds a SCORM 1.2 `.zip`. All fonts, images, and HTML
-interactions are embedded, so the package is self-contained and runs offline. Upload the `.zip`
-to Moodle as a SCORM activity.
+On the **Publish** stage, queue the document and press **Publish** to build a SCORM 1.2 `.zip`.
+All fonts, images, and HTML interactions are embedded, so the package is self-contained and runs
+offline. Upload the `.zip` to Moodle as a SCORM activity. (The older one-off **Export SCORM** dialog,
+with its full option list, is still there under the **⋯** button beside **Format**.)
 
 **For air-gapped Moodle,** run the **`/publish`** prep on the exported package before uploading —
 it embeds the Exo 2 fonts and forces an always-visible scrollbar (`scripts/scorm-publish.sh`).
@@ -536,7 +726,9 @@ restores it.
 | Copy / Paste / Paste without formatting | ⌘C / ⌘V / ⌘⇧V |
 | Group / Ungroup | ⌘G / ⌘⇧G |
 | Preview (Demo) | ⌘P |
-| Quick-jump to a page | ⌘K |
+| Find anything (settings, actions, pages, guide) | ⌘K |
+| Open Settings | ⌘, |
+| Settings for what's selected (the inspector) | ⌥⌘, |
 | Hide / show side panels | ⌘\ |
 | Comment mode | C |
 | Edit text (on a selected field) | Double-click, or Enter |
@@ -558,6 +750,410 @@ restores it.
   reduced motion.
 - **Air-gap rule.** Anything a learner sees is embedded, never fetched at runtime. You can be
   online while authoring; the shipped course sends nothing out.
+
+---
+
+## 18. Product Rail: Source stage (early)
+
+Product Rail groups your courses under **Products** (e.g. a hardware line), with a left rail
+switching between **Source** (reference wiki), **Edit** (the course canvas you already know), and
+**Publish**. This section covers Source — an early feature, still growing.
+
+**One document per Product (Source v2).** A Product's source is now **one continuous document**,
+not a list of separate topics. The first time you open the Source rail for a Product, the topics
+you imported are joined into a single document — each becomes a top-level **chapter**, its headings
+nested underneath. Nothing is thrown away; the original topics are kept, so this is reversible.
+
+- **The left rail is the document's table of contents.** Chapters sit at the top level with a twirl
+  to fold their headings in or out; click any entry to jump to it; the entry you're reading
+  highlights as you scroll. The button above the outline collapses every chapter at once (and
+  expands them again). Drag a chapter to move that whole chapter (and everything under it) within
+  the document — the dragged row dims and a line shows exactly where it will land.
+- **What depends on this document.** Under the document title sits a quiet strip of facts about the
+  Product you're reading, so you can see the downstream cost of a change before you make it: how
+  much of the Product's documents is **aligned** to this approved source, how many documents this
+  topic is **linked in**, how many published documents are now **behind** it, and how many
+  **outputs** (packages) the Product ships. These are the same numbers, in the same words, that the
+  Publish stage shows per document — see §3 for what each one means. With a single document in the
+  Product, the alignment figure here and the one on its Publish row are the same number.
+- **Find in the document.** The search field above the outline finds your text anywhere in the
+  document — headings and body copy — as you type. The **match count ("3 / 12") and the up/down
+  jump arrows sit in the field itself**; press Enter (or the arrows) to jump between hits, each
+  scrolled to and highlighted. The outline narrows to the sections that contain a match, so it
+  doubles as a filter, and it scrolls to and highlights the entry that owns the hit you're on so
+  you never lose your place.
+- **Replace.** A **replace glyph** in the search field reveals a **replace** row on demand, with
+  **Replace** (the current match) and **Replace all** — so it's out of the way until you need it.
+  Since replacing edits the base prose, it's available only when the source is **unlocked**; locked,
+  the row is disabled and states the reason. Replace is case-insensitive (it matches the find) and
+  undoable as a single step; range marks (comments, alternates) ride the edit.
+- **The one action left in the rail is Import.** Because there's one document, the old
+  per-topic tools — new topic, select, delete, move, reorder topics — are gone. The **Import** button
+  is where everything comes into Verso: **Markdown** (below), plus **CSV** (§11) and **Schema**, which
+  used to sit on the Publish stage. Markdown import is now
+  **additive**: pick a Markdown file (it can be a segment — just one chapter), and Verso shows a
+  **preview** first — which chapters it will **add** and which existing chapters it will **update**
+  (with how many blocks change), matched by chapter name. Nothing changes until you click **Apply
+  import**; an update keeps the parts you haven't changed (so any alternates or comments on them stay
+  put) and only adds or removes what actually differs. There's no silent whole-document overwrite.
+- **What import turns into rich content.** Headings, bullet and numbered lists, and **tables** (pipe
+  tables) come in as real tables — not lines of text with dividers. Inline **bold**, *italic* and
+  `code` markup is formatted rather than shown as raw asterisks/backticks, including inside list items
+  and table cells. HTML page markers like `<!-- Page 43 -->` (common in PDF-to-Markdown conversions)
+  are stripped on the way in.
+- **Declaring a Product's variants.** Above the document, **Manage variants** opens a small editor to
+  add, rename, or remove the variants this Product's source carries (Flagship is always the base). It's
+  shown even when a Product has none yet, so you can declare the first one. Renaming a variant carries
+  its divergences with it; removing one just hides its column (re-add the name to bring it back). If you
+  attach a course that already has variants (Save/Recents → Promote to Product), those variant names are
+  copied onto the Product automatically.
+- **Bringing in a variant's manual.** If your Product has variants declared, importing asks first
+  whether the file updates the **Flagship** (the base) or a **variant**. Choosing a variant runs a
+  **combine**: it reconciles that manual against the Flagship per paragraph and previews exactly what
+  will **diverge**, go **absent**, or be **added** for that variant before anything is written — the
+  Flagship base is never rewritten. (Choosing Flagship runs the normal additive import.)
+- **Comparing variants as columns.** Above the document, a chip row switches variants on. With none
+  on, the document reads and edits as normal (Flagship). Turn a variant on and every paragraph that
+  differs **splits into side-by-side columns** — one per shown variant — while paragraphs they all
+  share stay a single column; a paragraph a variant omits shows "Not in this variant". The column
+  view is for comparison and is **read-only for text** — turn the variants off to edit again.
+- **A variant can have its own image.** Images are the exception to the read-only column view.
+  When variants are shown, each image column has a **swap** button — pick a file and that variant
+  gets its own picture, while the others keep the base (Flagship) image. A named variant can also be
+  **hidden** (eye-off) so the image doesn't appear in it, or given an image where the base has none.
+  Unlock the source first. Previewing or exporting a variant then uses that variant's image, falling
+  back to the base whenever a variant has no image of its own.
+- **Starting a new Product's source from scratch.** An empty Product's Source stage offers two ways
+  in: **New topic** (start writing) or **Import from Markdown…**. Either one seeds the Product's first
+  chapter and builds its continuous document straight away — you land in the one-document view
+  (chapters in the outline), not an intermediate per-topic list.
+
+The rest of this section describes the earlier per-topic shape, which Source v2 is replacing;
+authoring a chapter's text, importing, annotations, history and comments all work as described.
+
+**Attaching a course to a Product.** In the file picker (the **Home** button), open a course card's
+**⋯** menu and choose **Promote to Product…**. Pick an existing Product or create a new one, choose a
+Format (eLearning, Presentations, or Print docs), and promote. This only tags the course — its content
+is never touched. The top-bar Product dropdown then lets you switch between every course, and the
+Source wiki, for that Product.
+
+**Exporting the source to Markdown.** On the **Source** stage, the **Product actions** menu (the ⋯
+button in the **footer strip at the bottom of the topic rail**) has **Export to Markdown** — it downloads the Product's whole continuous
+document as a portable `.md` file (named after the Product). Headings, paragraphs, bold/`inline code`,
+bullet and numbered lists, tables, images, and callouts all come across, so it round-trips with the
+Markdown import. Nothing is changed in the app; it's a save-a-copy.
+
+**Unlinking and deleting.** To detach a course from its Product, open its card's **⋯** menu in the file
+picker and choose **Remove from Product** (the course and its content stay; only the tag is removed). On the **Source**
+stage, the **Product actions** menu (the ⋯ button in the **footer at the bottom of the topic rail**, kept clear of the New-topic / Import navigation) lets you **Unlink all courses** from
+a Product, **Delete source document** (clears the whole continuous document but keeps the Product), or
+**Delete Product** (removes the Product entirely, including its source and the tag on any linked
+course). The deletes ask for confirmation and can't be undone.
+
+**Populating the Source wiki.** Switch to the **Source** rail tab, pick a Product from the top bar,
+then use the icon toolbar above the topic list (hover any icon for its name):
+
+- **New topic** — creates a blank topic you write directly, the same click-to-edit way as a
+  course's text blocks: click a heading or body to edit it, click away to save. Editing a body
+  is real formatted text, not raw Markdown — bold/code/bullets show as themselves while you
+  type, never as `**`/`` ` ``/`- ` marks. A small toolbar (Bold, inline code, bullet list)
+  appears next to whichever block you're actively editing; the section widens while you're in
+  it so you can see the whole thing.
+- **Import from Markdown…** — creates topics straight from a Markdown file (e.g. a manual you've
+  converted to `.md`). Numbered headings (`# 1`, `## 1.1`, `### 1.1.1`) split into topics and
+  sections by their number — the number itself decides the split even if the file's own `#`/`##`
+  levels are inconsistent (common in converted manuals); the number is never shown in the wiki
+  itself, only used to organise it. A `1` becomes a topic, its `1.1` headings become that topic's
+  sections, and anything numbered deeper folds into the section text as a bold line. Bold, inline
+  code, bullet lists, numbered lists, and Markdown tables in the file all carry over. If the Product has no
+  declared variants, this opens your file picker directly; if it does, a small dialog lets you
+  add one optional file per variant, whose matching sections become that variant's own text (via
+  the same "Diverge for `<variant>`" mechanism described in §10) — a section that only exists in a
+  variant's file is added with blank Flagship text so nothing is lost. Only import produces the
+  wiki's "Technical" version of each section; the "Digestible" and "Dot-point" versions (switchable
+  above the article) are yours to write afterward. You can optionally note each file's version and
+  publish date when asked — shown later in the topic's info panel under "Source".
+
+**Re-importing an updated manual.** Run "Import from Markdown…" again with the same filename for
+the same Product, and it updates the existing topics instead of duplicating them: a section whose
+text changed only in the file is updated automatically; a section you haven't touched since the
+last import is left alone if the file didn't change it either. If a section changed **both** in
+the file and in what you've since written in the wiki, nothing is overwritten — a small "Source
+updated" flag appears next to its heading. Click it to see exactly what changed (added lines in
+green, removed in red), then choose **Use updated text** or **Keep mine**. Whenever a Product has
+1+ topics with a pending flag, a **Needs review** chip appears above the topic list — click it to
+filter down to just those topics.
+
+If you rename the manual file and import it under its new name, and its topics substantially
+match ones already imported from a different filename for this Product, you're asked whether it's
+the same manual (updates the existing topics under the new filename) or a genuinely separate one
+(imports as new topics instead) — nothing is guessed silently.
+
+**Reordering.** Under Source v2 (above), reorder by dragging a **chapter** in the document outline —
+the old per-topic reorder, multi-select, delete, and move-to-Product tools are gone with the topic
+list, since a Product is now one document.
+
+**Reordering and removing sections.** Hover a section to reveal its controls: drag the grip handle
+to reorder it within the topic, or click the trash icon to delete it (you'll be asked to confirm).
+Controls stay out of the way until you're actually looking at that section.
+
+**A topic's history.** The info panel's History section shows every import and re-import that
+touched a topic as a timeline, newest first — file, version, publish date, and what changed each
+time (new sections, sections updated from source, sections flagged for review). A topic you wrote
+by hand shows a single "Created" entry. In continuous-document mode (below) the same timeline also
+records your edits and annotations (see "History records what changed and why").
+
+**Comments.** The same comment/discussion feature as the canvas editor, for this wiki. Click the
+comment icon next to any section to open its thread — write a note, reply, mark it Resolved, or
+delete it. A count appears on the icon while a section has unresolved comments. In continuous-document
+mode the right-hand panel's **Marks** section has a **Comments** filter tab that lists every comment on
+the topic — that is their single home (there is no separate comments accordion beneath it).
+
+**Continuous-document mode (beta).** A newer way to author a topic: instead of separate sections
+with Technical/Digestible/Dot-point versions, the whole topic reads and edits as **one continuous
+document** — like the manual it came from. Open a topic and click **Switch to continuous document
+(beta)** at the bottom of the article; your existing section text is carried over (nothing is lost).
+
+In this mode:
+
+- **The source is locked by default.** The signed-off prose is protected — a bar docked at the
+  bottom-centre shows a padlock; click it to **unlock** and edit the base text, click again to
+  lock. Trying to type while locked shows a brief reminder instead of changing anything.
+- **You can always annotate, even when locked.** Select any text and a small toolbar appears above
+  it. **Add an alternate** (another way to say the same thing, for a particular course or
+  audience) or **Comment** — both are available whether or not the source is unlocked. The
+  rich-text buttons (bold, italic, bullets) only appear once you've unlocked, since they change the
+  base prose. Alongside them are four **block-format** buttons — **Heading 1**, **Heading 2**, **Body**
+  and **Caution box** — that reassign the selected paragraph's type (across several paragraphs if your
+  selection spans them), for the structure operating manuals rely on. There is no "link" button here:
+  linking a course to a piece of source happens in the Edit stage, not Source.
+- **Select as little or as much as you like — one word to the whole document.** A selection that
+  spans several paragraphs (or titles) is fine, locked or unlocked: the toolbar still appears, so an
+  alternate or a comment can cover a whole passage, not just a single paragraph. A multi-paragraph
+  mark highlights across every paragraph it covers and rides your edits the same way — edit the middle
+  of it and it stays put.
+- **Editing across paragraphs.** Once unlocked, a selection that spans paragraphs edits as one: type
+  over it, or press Delete/Backspace, and the covered text goes — the paragraph you started in and the
+  one you ended in join into a single paragraph, and any paragraphs wholly inside the selection are
+  removed. A Backspace at the very start of a paragraph (or Delete at the very end) merges it with its
+  neighbour. Undo (Ctrl/Cmd+Z) puts the paragraphs back.
+- **Insert an image or a table.** Once unlocked, the bottom bar shows an **image** and a **table**
+  button. Each drops the new block **after the block you're in** (or at the end of the document if you
+  haven't clicked into one). An image opens your file picker and is stored in the document itself; a
+  table starts as a small 2×2 you can build out. Both are whole **objects** — click to select, and the
+  same alternate / comment actions apply. (The buttons are hidden while the source is locked.)
+- **Alternates: one base, many renditions.** The base prose is the single source of truth. When a
+  particular course needs to say a span differently, add an **alternate** — the same meaning, no new
+  information — and optionally tag it with what it's *appropriate for* (e.g. "quick-start" or
+  "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
+  an alternate opens a **panel pinned in the right margin** that tracks the span as you scroll,
+  showing the **base vs the alternate**, a status dot, and Edit / Delete.
+- **Images and tables are markable too.** An image or a table is a whole **object** — click it (a
+  ring shows it's selected) and the same **Add an alternate** / **Comment** / **Add a link** actions
+  appear, so you can attach, say, a simplified caption to a diagram, a note to a table, or a link on
+  an image (its **Linked in** panel then tracks where it's used). An object's mark is tied
+  to the object itself, so it stays put no matter how you edit the prose around it; a marked object
+  carries the same status tint as a marked span, and its alternate/comment opens the same margin
+  panel (its "base" line names the object, e.g. "Image — <caption>").
+- **Resize an image.** Select an image (with the source unlocked) and grab handles appear on its
+  left and right edges. Drag either handle to resize it live; it grows and shrinks about its centre,
+  with a light snap at 25 / 50 / 75 / 100% of the column width. Release to set the size — it persists
+  and travels with the document. Leave it at full width to fill the column.
+- **Align an image.** When an image is selected, its floating toolbar also has align **left /
+  centre / right** (centre is the default). Choosing one positions a resized image within the column;
+  a full-width image looks the same whichever you pick. The choice persists with the document.
+- **Place images side by side.** The image toolbar's **columns** button puts the selected image
+  beside the next one, in a row (up to three across). Each image in the row keeps its own size and
+  its own comments / alternates / links. Select an image already in a row and the same button
+  **takes it back out**. Text stays full width above and below the row.
+- **Staleness keeps alternates honest.** If you later change the base text, any alternate written
+  against the old wording is flagged **stale** (an amber dot, a note in the panel, and an entry in
+  History) — nothing is silently rewritten. Reword the alternate to match, then click **Mark
+  reviewed** to clear the flag. Deleting a span's text flags its marks **broken** (a red dot);
+  Ctrl/Cmd+Z brings the text and the mark back.
+- **See where a span is used, and push a wording out.** When documents link a piece of this source,
+  selecting the linked span opens a **"Linked in N"** panel in the right margin (it never covers the
+  text you're reading; if the passage isn't used anywhere yet the panel invites you to place it) —
+  one row per place it's used, each tagged **base** or **alternate**, and clicking a row opens that document in Edit
+  with the exact block selected. If the passage has alternates, **Push an alternate…** sends a
+  forked wording to those documents — all of them, or a chosen subset — so you can roll out a better
+  wording deliberately. A placement keeps showing **base** until an alternate is chosen for it or
+  pushed to it; pushes are never automatic. A span that isn't linked anywhere says so.
+- **Editing linked source warns first.** If you unlock and change wording that other documents link,
+  locking shows a **"linked in N places"** check before it propagates: **Update all** (the linked
+  copies re-resolve to your new wording), **Keep as-is (fork)** (freeze their current wording as an
+  alternate, then your source moves on), or **Cancel** (undo the edit). A placement already pinned to
+  an alternate is never touched by a base edit.
+- **Comments live in the margin.** Selecting text and choosing **Comment** drops a small **blue
+  comment glyph just to the right of the text** next to that span; the pin tracks the span as you
+  scroll. It matches the canvas comment glyph — subtle, no box. Click a pin to open
+  the thread in place — the same comment threads, replies, and Resolved control as the canvas
+  editor, so a comment behaves the same everywhere. Add more comments or replies, tick **Resolved**
+  when it's handled, and both events show up in History. Comments can be added while the source is
+  locked. Click away or press **Esc** to close a thread.
+- **Marks ride your edits.** An alternate or comment is anchored to the exact span you selected;
+  as you edit around it the anchor moves with the text, and if you delete the anchored text the
+  mark is flagged as broken. **Ctrl/Cmd+Z** is a document-aware undo — it restores deleted text
+  *and* reconnects its mark, which the browser's own undo cannot do.
+- **History records what changed and why.** The info panel's **History** timeline now shows your
+  editing, not just imports. A run of prose edits between unlocking and locking collapses into one
+  **"Edited source"** entry (with a `+added / −removed` character summary), so the log reads as
+  meaningful changes rather than keystroke noise. When you **lock**, a small dialog offers an
+  optional note — *why* you made the change — which you can type or **Skip**. Structural events
+  each get their own entry: an alternate added, a mark going stale, broken, or restored, a comment
+  opened or resolved. Import events (from the section view) and these doc events share one timeline,
+  newest first, **grouped by day** (the date is shown once per day). History sits in a **collapsed
+  footer section** — expand it when you want the provenance, so it doesn't compete with the marks
+  above.
+- **The document reads as formatted text.** Bold and `inline code` show as themselves in the
+  continuous view — not as literal `**` or `` ` `` marks — so the source reads like a finished
+  document, and range marks (comments, alternates, linked spans) stay anchored to exactly the same
+  words underneath.
+- **Show/hide marks** with the eye button in the bottom bar. Marked spans are tinted by type
+  (linked blue / alternate purple / comment yellow), so annotation never clutters plain reading. Jumping to a mark —
+  clicking a row in the panel, or an alternate — turns marks back on for you if they were hidden,
+  so the highlight you jumped to is always visible.
+- **Jump around with the outline.** A **table of contents** down the left side lists the document's
+  headings; click one to jump to it, and the heading you're currently reading stays highlighted as
+  you scroll. (The outline hides itself on a narrow window so the reading column keeps its width.)
+- **Find a topic by anything in it.** The topic search at the top of the left nav now matches the
+  full text of every topic — a heading or a phrase inside the document, not just the title.
+- **One details panel on the right.** Everything about the document lives in a single right panel.
+  At the top is **Marks** — every alternate, link and comment with a status dot (green in sync /
+  amber stale / red broken / grey once a comment thread is resolved). Four **labelled filters**
+  narrow the list — **All**, **Alt**, **Linked** and **Notes** — and each one carries a live count,
+  so the filter row doubles as the document's mark summary. Click a row to jump to that mark.
+  Comments appear here under **Notes**, in one place (the old duplicate comments list below the
+  panel is gone). Below Marks sit **History** (the provenance timeline) and, for legacy per-topic
+  sources, a **Source** section. The bottom-bar panel button shows or hides the whole panel;
+  selecting a mark opens it to that mark.
+- **One row per mark, and each row says where it is.** A linked passage used by four documents is a
+  single row saying "in 4 docs", not four rows repeating the same passage. Under the passage each
+  row states its place in the document ("Operation · Detection overview"), so you can tell two
+  rows apart even when their text is truncated. Click a linked row to open its card and see the
+  individual destinations. If the whole topic is also placed as a component, that is one line at
+  the end of the list rather than a row per placement.
+- **Every mark type has a fixed colour.** Linked is blue (the accent), an alternate is purple —
+  the same purple Verso uses for components everywhere else — and a comment is yellow. The mark
+  you last clicked gets a colourless brightening on top of its own colour, so highlighting it
+  never hides what kind of mark it is. The type is always spelled out in the list too; the colour
+  is a reminder, never the only clue.
+
+This is an early view — the variant columns arrive in a later update; the section editor above
+remains the full-featured path.
+
+---
+
+## 19. Product Rail: Publish stage (early)
+
+The **Publish** rail tab is a **persistent publish queue** — like a render queue. You line up the
+documents you want to package, then run them all with one button; the queue is saved, so it survives
+a refresh and a stage-switch.
+
+- **Left — pick documents.** A list of your documents, scoped to the Product chosen in the top bar
+  (all documents when no Product is selected). Click **+** on a row to add it to the queue, or use
+  **Add current document** at the top to queue the document you have open. A solo export is just a
+  queue of one.
+- **Send straight from the editor.** You don't have to switch stages first: the **send** glyph in the
+  editor header (also in the Publish head's **⋯** menu as **Send to publish queue**) drops the
+  document you're editing into the queue with its remembered preset — no configuration — and confirms
+  with a small toast showing how many are now pending. Sending a document that's already queued re-arms
+  its row rather than adding a second. Queue a few in a row, then switch to Publish and run them.
+- **Right — the queue.** One row per document, each showing its status — **Pending**, **Publishing…**,
+  **Done** (with the package's file name), or **Failed**. Remove a row with **×**. Adding a document
+  that's already queued re-arms it rather than duplicating it.
+- **Where it goes, and what it will be called.** Every queue row states its destination on a chip,
+  and next to it the exact file name that row will write, before you press Publish — for example
+  `SAFE-101_V001_SCORM.zip`. Change the row's preset and the name changes with it, so you can see
+  what you're about to get. The name comes from the exporter itself, so what the row promises is what
+  lands. Once a row has run, its status carries the real result and the prediction steps aside.
+- **Set one folder for the whole Product.** In the Publish head, **Set publish folder** picks one
+  folder for the Product you have selected. Every queued row then inherits it and nests itself into
+  `Product / document-variant`, so a whole-family publish costs one folder pick rather than one per
+  row. Until you set it, rows say **Downloads** and packages go to your browser's downloads folder —
+  nothing is written anywhere you didn't choose. The folder is remembered between visits.
+- **Overriding one output.** Click a row's destination chip to open its **Publish destination**
+  popover. It lists one path row per output the document produces — Flagship plus each variant — each
+  showing where it lands and the exact file it will write. **Choose folder** on any of them overrides
+  the inherited Product folder for that one output; **Reset** puts it back, and says what it is
+  putting it back to. A row whose outputs all sit under the Product folder shows the part they share,
+  ending in `…`; if you have sent them to genuinely different folders it reads **Mixed** and defers to
+  this popover rather than naming one and implying the rest.
+- **Versions never overwrite by accident.** Each output keeps its own version number — a variant
+  steps independently of its flagship — and every run writes the next one up (`V001`, `V002`, …), so
+  the package you shipped last week is still there. When you deliberately want to re-cut the same
+  version, turn on **Replace current version** in that row's destination popover; it is off by
+  default, and it is the only way a package gets written over.
+- **The facts on each row.** Under every document's name, in both the left list and the queue, sits a
+  line of small badges — the same four facts described in §3, in the same words they use everywhere
+  else in the app:
+  - **N changed** (amber) — that many linked source documents have moved since this one was last
+    published. Informational only: it never blocks or warns, and it clears the moment you publish
+    the document again. A document that has **never published** shows no drift badge, because there
+    is nothing for it to have drifted from — the line beside it already says "Never published".
+  - **N% aligned** — the share of the document's words linked to approved source rather than novel
+    copy written here. Green at 85% or more, amber from 60 to 84, plain below. **Not indexed** means
+    there is nothing to measure yet.
+  - **N outputs** — how many packages this document actually produces (its flagship plus each
+    variant). Shown only when there is more than one.
+  The same alignment figure is available while editing (the storage-dot popover in the editor header
+  shows a **Source alignment** readout) and in the Source stage top bar, all read from one place, so
+  they can never disagree.
+- **Presets.** Each queue row shows an **output preset** chip — click it to switch the row's preset,
+  save the current settings as a new named preset, or rename/delete one of your own. Three come built
+  in: **Master** (full quality), **Review copy** (adds the reviewer file, learner theme off), and
+  **Lightweight** (optimises media hard for a smaller package). Presets are shared across the app, and
+  each document remembers the preset it last used, so re-queuing it is one click.
+- **Format.** Beside the Publish button, a **Format** control states the format the queue will emit —
+  today that is **SCORM 1.2**. Open it to see the whole list once: the formats Verso can't emit yet
+  (SCORM 2004, xAPI / Tin Can, standalone web) are greyed and marked **Soon**. Format is part of a
+  row's output preset, so this control states it rather than setting it; if you queue documents whose
+  presets ask for different formats, it reads **Mixed**. The **⋯** button beside it holds the
+  occasional export jobs that aren't the queue: the one-off **Export SCORM** dialog, **Export .verso**,
+  **Export JSON**, **Export Schema**, **Publish to Viewer** and **Reset Workspace**.
+  **Importing has moved to the Source stage** — the Publish stage only sends work out.
+- **Publish.** One **Publish** button runs every pending row in turn. A row is packaged once per
+  output — its flagship and each variant — so the **N outputs** badge and the packages that appear are
+  the same number. Each is built with that row's preset, written to that output's folder (or
+  downloaded when none is set), and its version recorded only once it has landed, so a failed write
+  never burns a version number. Done rows stay in the queue, greyed, with their result — the queue
+  isn't cleared, so you can see what shipped.
+- **Release history.** Each Publish run records **one** timestamped release entry, and history takes
+  whatever room the queue isn't using — it answers "what did we ship?", so it sits open in the pane
+  rather than folded away. Each release states how many documents went out, the preset (or a count
+  when a run mixed several), where they were delivered, and the outcome: **Published**, or **N failed**
+  when part of the run didn't make it. Expand a release to see every document in it with its format,
+  variant, version and preset; a document that failed is marked in the list. It's a read-only audit
+  trail — it never re-exports anything. To publish a whole product family as one release, queue its
+  documents and run them together.
+- **Finding the right document.** The Documents list states its scope and how many documents it's
+  showing, and carries a **search** field. The **sort** control beside the heading offers the three
+  orderings that matter: **Title**, **Drift** (most changed source first) and **Last published**,
+  which leads with anything never published and then works forward from the oldest — the two
+  documents most likely to need your attention, at the top. When something does need attention —
+  approved source has moved under it, or it has never gone out — a **Needs attention** filter
+  appears with its count. It only appears when there's something in it.
+- **Last published, per document.** Every row in the Documents list states when that document last
+  actually went out and as what version ("Last published 12 Jun · v1.4"), or **Never published**.
+  That's usually the fastest way to tell whether a re-publish is needed at all. The line is read
+  from the release record, so it can never disagree with the history beside it — and a run that
+  failed doesn't count as published.
+
+- **Queueing several at once.** Every row in the Documents list has a **tick box**. Tick the documents
+  you want and press **Queue selected (N)** at the bottom of the list — they all go into the queue in
+  one action, each with its own remembered preset, and you get one confirmation instead of one per
+  document. **Select all** ticks everything currently shown. The button stays greyed out until you
+  tick something, and says so if you hover it. The ticks clear once the batch is queued.
+  The per-row **+** still works exactly as before for adding a single document.
+- **Searching never loses your ticks.** Search, the **Needs attention** filter and the sort control
+  change what the list shows, never what you've ticked — so you can tick five documents, search for
+  a sixth, and still have all five. When the current search or filter is hiding part of your
+  selection, the bottom of the list says so ("3 selected · 2 hidden by search") and offers **Clear**
+  to drop the whole selection, hidden documents included. **Queue selected (3)** queues all three,
+  including the two you can't see: that's what you ticked, and the line above the button says it
+  will. Ticks are for the session only; they aren't saved with the document.
+
+This is an early view — a chosen save folder and staleness dots arrive in later updates.
 
 ---
 

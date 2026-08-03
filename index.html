@@ -13,71 +13,132 @@
 </head>
 <body>
   <!-- ==================== top toolbar ==================== -->
-  <header class="toolbar">
-    <div class="toolbar__group toolbar__group--left" style="flex: 1 1 auto; align-self: stretch; align-items: flex-end; padding-top: 6px;">
+  <!-- uio-E-C01 (EDIT-07): ONE merged 40px top bar. The overhaul supersedes SPEC 7 decision 8
+       (which split app chrome from a second doc-header bar) -- the two stacked bars are merged
+       into this single .toolbar. Left group = identity (brand + product + storage dot). The
+       three Edit-stage doc zones (tabs / document controls / output) live here too and show
+       only in Edit (.toolbar--edit, toggled by setStage); Source/Publish show identity only. -->
+  <header class="toolbar" id="toolbar">
+    <div class="toolbar__group toolbar__group--left">
       <span class="toolbar__brand" aria-hidden="true">Verso<span class="toolbar__brand-dot">.</span></span>
-      <button class="tool toolbar__home" id="home-btn" data-lucide="layout-grid" title="Home — all courses"></button>
+      <!-- Product Rail: persistent product context for all three rail stages (Source/Edit/
+           Publish). Populated from window.ProductsStore + "All products" by mountProductPicker()
+           (a VersoUI.Select instance — see the editor script). -->
+      <div class="product-picker" id="product-picker-host" title="Active product — filters Source, Edit and Publish"></div>
+      <!-- #92b storage-health dot, now beside the product name (uio-E-C01): green healthy /
+           amber getting full / red near-quota or a save failure. Click opens a popover
+           (backend, quota %, course weight). Collab-presence avatars insert themselves before it. -->
+      <button class="storage-dot storage-dot--ok" id="storage-dot" title="Storage healthy — click for details" aria-label="Storage health"></button>
+    </div>
+
+    <!-- Zone 1 -- tabs / file management (Edit only) -->
+    <div class="editor-window__zone editor-window__zone--tabs">
+      <button class="tool editor-window__filepicker" id="home-btn" data-lucide="layout-grid" title="Browse all courses"></button>
       <div class="toolbar-tabs" id="toolbar-tabs"></div>
+    </div>
+    <span class="editor-window__sep editor-window__sep--doc" aria-hidden="true"></span>
+    <!-- Zone 2 -- document settings + live switches (the "matrix" is the face-up controls) -->
+    <div class="editor-window__zone editor-window__zone--doc">
+      <!-- opens the type-aware Document settings modal; wired by mountDocSettingsBtn(). -->
+      <button class="tool editor-window__docsettings" id="doc-settings-btn" data-lucide="sliders-horizontal" title="Document settings"></button>
+      <!-- Build/Read view toggle (SPEC 7 decision 14). A VersoUI.SegmentedControl mounts here. -->
+      <div class="editor-window__view" id="editor-view-toggle"></div>
+      <!-- doc-scoping axes: variant (outer) then software-version (inner) as face-up dropdowns. -->
+      <div class="editor-window__axes" id="editor-doc-axes"></div>
+    </div>
+    <span class="editor-window__sep editor-window__sep--doc" aria-hidden="true"></span>
+    <!-- Zone 3 -- output (Edit only) -->
+    <div class="editor-window__zone editor-window__zone--output">
+      <!-- Preview (Demo) is the single accent-blue PRIMARY; the chevron opens size + light/dark. -->
+      <div class="preview-cluster">
+        <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
+        <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview size and palette"></button>
+      </div>
+      <!-- uio-E-C08 (EDIT-15): a LABELLED secondary button (was an unlabelled paper-plane next to
+           the accent Play), carrying the pending queue count so "publish" reads clearly. -->
+      <button class="editor-window__publish" id="send-to-publish-btn" title="Send to publish queue"><span class="editor-window__publish-icon" data-lucide="send"></span><span class="editor-window__publish-label">Send to publish</span><span class="editor-window__publish-count" id="send-to-publish-count" hidden></span></button>
     </div>
 
     <div class="toolbar__group toolbar__group--right">
-      <!-- #92c: the desktop/tablet/mobile breakpoint switch moved behind the Preview
-           chevron (see #preview-bp-btn below) to declutter the top bar. -->
-      <!-- Icon-only tools: glyphs are hydrated from the Lucide Icon accessor
-           (src/icons.js) at boot via Editor.mountTopBar(); markup stays svg-free
-           so the DS conformance gate holds. data-lucide names the glyph. -->
-      <!-- NNN: light/dark AUTHORING palette toggle (quick switch/test) -->
-      <!-- #89: recents (save-menu), Help and Export relocated to the left rail. -->
-      <button class="tool" id="mode-toggle" data-lucide="moon" title="Toggle light / dark palette"></button>
-      <span class="toolbar__divider"></span>
       <!-- #92: hidden by default; only the data-loss FAIL state renders text here. -->
       <div class="save-state save-state--saved" id="save-state" role="status" aria-live="polite" hidden></div>
-      <!-- #92b storage-health dot: green healthy / amber getting full / red near-quota or
-           a save failure. Click opens a popover (backend, quota %, course weight). Replaces
-           the "Saved" text + the standalone course-weight readout. -->
-      <button class="storage-dot storage-dot--ok" id="storage-dot" title="Storage healthy — click for details" aria-label="Storage health"></button>
-      <!-- #86: find, zoom, grid and comment relocated to the floating canvas overlay bar.
-           #92: undo/redo removed (Cmd/Ctrl+Z / Shift+Z); the null-guarded wiring no-ops. -->
-      <span class="toolbar__divider"></span>
-      <!-- DS action-priority: Preview (Demo) is the single accent-blue PRIMARY;
-           built into a vds-btn primary by Editor.mountTopBar(). #92c: the chevron
-           opens the device-breakpoint menu (desktop/tablet/mobile) that used to be
-           the standalone bp-switch group. -->
-      <div class="preview-cluster">
-        <button class="tool tool--play" id="demo-enter" data-lucide="play" title="Demo — fullscreen preview"></button>
-        <button class="tool preview-cluster__chevron" id="preview-bp-btn" data-lucide="chevron-down" title="Preview device size"></button>
-      </div>
     </div>
   </header>
 
   <!-- ==================== workspace ==================== -->
-  <main class="workspace">
+  <main class="workspace" id="workspace">
     <!-- #89 left icon rail: top nav-tab glyphs swap the
          adjacent left panel; bottom pinned glyphs are global actions relocated off the
-         top bar (Export / Help / Settings / recents). Glyphs hydrated in mountTopBar. -->
+         top bar (Export / Help / Settings / recents). Glyphs hydrated in mountTopBar.
+         Product Rail (2026-07-27 DaVinci pivot): three fixed, ungated, free-form
+         segments -- Source, Edit, Publish -- replacing the old single Document tab.
+         Edit shows exactly today's document-editing workspace (Structure/Blocks/
+         Components + canvas + inspector), unchanged. Source/Publish are placeholder
+         regions until Epics 2/3/6 build their real content; this rail only owns the
+         segment switch (setStage(), in the editor script). -->
     <nav class="left-rail" id="left-rail" aria-label="Editor rail">
       <div class="left-rail__group left-rail__nav">
-        <button class="rail-btn rail-tab is-active" id="rail-tab-document" data-rail-tab="document" data-lucide="panel-left" title="Document" aria-label="Document"></button>
-        <!-- #116 Copy Editor v1 (1/4): opens the full-screen copy-editing view (an
-             alternate canvas over the layout canvas; you are in one view at a time). -->
-        <button class="rail-btn" id="copy-editor-btn" data-lucide="file-text" title="Copy editor" aria-label="Copy editor"></button>
+        <!-- uio-E-C08 (EDIT-15): the three stages are NAMED (icon over a 9px caption), so the rail
+             reads as a Source -> Edit -> Publish stepper instead of three unlabelled glyphs. The
+             glyph moves to an inner span so its caption sibling survives icon hydration. -->
+        <button class="rail-btn rail-tab" id="rail-tab-source" data-rail-tab="source" title="Source" aria-label="Source"><span class="rail-tab__icon" data-lucide="book-open"></span><span class="rail-tab__label">Source</span></button>
+        <button class="rail-btn rail-tab is-active" id="rail-tab-edit" data-rail-tab="edit" title="Edit" aria-label="Edit"><span class="rail-tab__icon" data-lucide="pen"></span><span class="rail-tab__label">Edit</span></button>
+        <button class="rail-btn rail-tab" id="rail-tab-publish" data-rail-tab="publish" title="Publish" aria-label="Publish"><span class="rail-tab__icon" data-lucide="upload"></span><span class="rail-tab__label">Publish</span></button>
+        <!-- side-rail-cleanup: the Copy-editor rail button is retired -- Read view is now per-doc
+             via the Build/Read toggle in the editor header. -->
       </div>
       <div class="left-rail__group left-rail__actions">
-        <!-- Data / export pipeline mounts Export (glyph) + ⋯ overflow here. -->
-        <div class="left-rail__pipeline" id="pipeline-actions"></div>
+        <!-- side-rail-cleanup slice 2: the Import/Export pipeline (Export glyph + ⋯ overflow) is
+             relocated off the rail. uio-P-C05 then split it by direction: the exports sit in the
+             Publish head (beside the Format control), the imports in the Source rail's Import menu. -->
         <button class="rail-btn" id="help-btn" data-lucide="help-circle" title="User guide"></button>
         <button class="rail-btn" id="rail-settings-btn" data-lucide="settings" title="Settings"></button>
-        <button class="rail-btn" id="save-menu-btn" data-lucide="history" title="Recent courses & file actions"></button>
+        <!-- side-rail-cleanup slice 2: the Recent-courses/file-actions popover is retired -- recents +
+             file actions (Promote/Remove/store path) now live in the file picker (Home). -->
       </div>
     </nav>
 
-    <!-- left: layers / pages / components -->
+    <!-- Product Rail Source stage: left nav (search + topic list grouped by Product,
+         source-stage-nav-article) + a flowing, directly-editable article for the
+         selected topic (source-topic-content-authoring: click a heading/body to edit
+         it in place, no edit-mode toggle) with a page-level Technical/Digestible/
+         Dot-point facet switch, a Flagship + per-declared-variant pill row that adds
+         a column only to sections that actually diverge for a toggled variant
+         (source-stage-variant-columns), and a right info panel (Linked in / History,
+         source-stage-info-panel). Populated by renderSourceStage()/renderSourceArticle()
+         in the editor script, which rebuilds head + pills + sections together on every
+         render (topic switch, facet toggle, variant toggle, section edit) -- one
+         container, one source of render truth. -->
+    <div class="source-stage" id="stage-source" hidden>
+      <nav class="source-stage__nav" aria-label="Source topics">
+        <div class="source-stage__search" id="source-stage-search"></div>
+        <div class="source-stage__nav-actions" id="source-stage-nav-actions"></div>
+        <div class="source-stage__topics" id="source-topic-list"></div>
+        <!-- uio-S-C05 (SRC-13): product-SCOPE actions (export / unlink / delete) live in a footer
+             strip, pinned to the bottom, away from the New-topic / Import navigation above — so a
+             destructive menu is never one unlabelled click from ordinary navigation. -->
+        <div class="source-stage__nav-footer" id="source-stage-nav-footer"></div>
+      </nav>
+      <div class="source-stage__article" id="source-stage-article"></div>
+      <aside class="source-stage__info" id="source-stage-info" aria-label="Topic info"></aside>
+    </div>
+
+    <!-- Product Rail Publish stage (Epic 6, T1): left = product-scoped document picker, right = the
+         persistent publish queue + one Publish button. mountPublishStage (editor.js) fills both. -->
+    <div class="publish-stage" id="stage-publish" hidden>
+      <div class="publish-stage__pick" id="publish-pick" aria-label="Documents to publish"></div>
+      <div class="publish-stage__queue" id="publish-queue" aria-label="Publish queue"></div>
+    </div>
+
+    <!-- left: SPEC 7 (decision 11) — a single 3-way switcher: Structure . Blocks . Source
+         (Source gets equal billing now that source insertion is a primary use). Each .lpane
+         carries data-lsec; the switcher (mounted into #lpane-switch, wired in wireLeftSwitcher)
+         shows the panes for the active section and hides the rest, persisting the last-active.
+         Components folds INTO Blocks (James's call): the Blocks section shows the Insert palette
+         with the Reusable-components pane beneath it. -->
     <aside class="panel panel--left">
-      <!-- SS: Structure + Blocks + Components are STACKED (all visible), each
-           collapsible, with a draggable split between each adjacent pair
-           (wired in wireLeftPanes, generalized to N panes). -->
-      <div class="lpane lpane--structure" id="lpane-structure">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Structure</span></div>
+      <div class="lpane-switch" id="lpane-switch"></div>
+      <div class="lpane lpane--structure" id="lpane-structure" data-lsec="structure">
         <div class="lpane__body" id="tab-structure">
           <div class="panel-section">
             <div class="panel-section__title panel-section__title--sticky" style="display: flex; align-items: center; justify-content: space-between;">
@@ -92,9 +153,7 @@
           </div>
         </div>
       </div>
-      <div class="lpane-split" id="lpane-split-0"></div>
-      <div class="lpane lpane--blocks" id="lpane-blocks">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Blocks</span></div>
+      <div class="lpane lpane--blocks" id="lpane-blocks" data-lsec="blocks">
         <div class="lpane__body" id="tab-assets">
           <div class="panel-section">
             <div class="panel-section__title panel-section__title--row">
@@ -106,16 +165,18 @@
           </div>
         </div>
       </div>
-      <div class="lpane-split" id="lpane-split-1"></div>
-      <div class="lpane lpane--components" id="lpane-components">
-        <div class="lpane__head"><span class="lpane__caret"></span><span class="lpane__title">Components</span></div>
+      <!-- Components folded into the Blocks section (data-lsec="blocks"): a sub-pane beneath the palette. -->
+      <div class="lpane lpane--components" id="lpane-components" data-lsec="blocks">
+        <div class="lpane__head lpane__head--sub"><span class="lpane__title">Reusable components</span></div>
         <div class="lpane__body" id="tab-components">
           <div class="panel-section">
-            <div class="panel-section__title">Reusable components</div>
             <div id="components-palette-list"></div>
             <div class="insp-hint">Click to insert. My Components are course-local copies; Blocks and Pages are live-linked to the shared library.</div>
           </div>
         </div>
+      </div>
+      <div class="lpane lpane--source" id="lpane-source" data-lsec="source" hidden>
+        <div class="lpane__body" id="tab-source"></div>
       </div>
       <div class="panel-resizer" id="resizer-left"></div>
     </aside>
@@ -147,17 +208,24 @@
         <button class="ptab" data-ptab="interact" title="Interact — author click actions and locks">Interact</button>
         <!-- #92c: the Settings cog moved to the left rail (rail-settings-btn); removed here
              to end the duplication. -->
+        <!-- uio-E-C05 (EDIT-09): panel overflow menu. Holds the demoted "Reorder inspector
+             sections…" entry; shown only where the inspector has reorderable sections. -->
+        <button class="tool panel-tabs__overflow" id="panel-overflow-btn" data-lucide="more-horizontal" title="Panel options" hidden></button>
       </div>
       <div class="panel-resizer" id="resizer-right"></div>
+      <!-- uio-O-W1 (OVL-10): the frame is the positioned host for the scroll-edge hairline+fade;
+           the scroller inside it is unchanged. -->
+      <div class="scroll-frame" id="inspector-scroll-frame">
       <div class="panel-scroll">
         <div class="panel-section" id="inspector"></div>
         <details class="panel-section" id="model-details">
           <summary class="panel-section__title" style="cursor: pointer; outline: none; list-style: none; display: flex; align-items: center; gap: 6px; user-select: none;">
-            <span class="disc__caret"></span>
+            <span class="caret"></span>
             Document model · live
           </summary>
           <pre id="model-json" style="margin-top: 8px;"></pre>
         </details>
+      </div>
       </div>
     </aside>
   </main>
@@ -223,6 +291,19 @@
   <script src="src/icons.js"></script>
   <!-- DS canonical control set (issue #10) — chrome only; must precede editor.js so switchEl can drop in onto VersoUI.Switch -->
   <script src="src/ui-kit.js"></script>
+  <!-- Product Rail: markdown-lite content render primitive (bold/inline-code/bullets). DOM-free, no editor coupling -- load order is not load-bearing, kept near ui-kit.js since both are shared chrome render helpers. -->
+  <script src="src/markdown-lite.js"></script>
+  <!-- Source rewrite (Epic 2b): continuous-document node model + owned undo (DOM-free), and the range-mark painting engine (CSS Custom Highlight over live Ranges). Must load before editor.js, which mounts them in the Source stage. -->
+  <script src="src/source-doc.js"></script>
+  <script src="src/source-marks.js"></script>
+  <script src="src/publish-queue.js"></script>
+  <script src="src/publish-presets.js"></script>
+  <script src="src/publish-paths.js"></script>
+  <script src="src/release-history.js"></script>
+  <!-- Product Rail: Markdown-manual importer (heading-depth-aware topic/section + variant-override parsing). DOM-free, no editor coupling -- load order is not load-bearing. -->
+  <script src="src/markdown-import.js"></script>
+  <!-- Product Rail: dependency-free line-level diff (the "Source updated" reconcile-conflict review). DOM-free, no editor coupling -- load order is not load-bearing. -->
+  <script src="src/line-diff.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->

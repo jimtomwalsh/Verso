@@ -45,6 +45,7 @@
   --red-600:   #d63a18;
   --red-tint:  rgba(242, 72, 34, 0.16);
   --yellow-500:#ffcd29;  /* warning */
+  --yellow-tint: rgba(255, 205, 41, 0.16);
   --purple-500:#9747ff;  /* components / instances  */
   --teal-500:  #0e9384;  /* software-version axis (distinct from the variant/instances purple) */
 
@@ -103,8 +104,26 @@
   --success:         var(--green-500);
   --danger:          var(--red-500);
   --danger-hover:    var(--red-600);
+  --danger-quiet:    var(--red-tint);
   --warning:         var(--yellow-500);
   --component:       var(--purple-500);
+
+  /* ---- Source mark palette (uio-S-C01 / SRC-07) -----------
+     A FIXED palette, so a mark's meaning is never guessed from its hue and no mark colour
+     collides with the accent that also means selection and focus. Ink is always reinforced by
+     the mark's type label in the list -- colour never carries the meaning on its own.
+     link = accent (it points somewhere) · alternate = the components purple (a variant of the
+     base) · note = warning yellow (a human asking for attention) · resolved = disabled grey.
+     The focus wash is deliberately hueless: it layers OVER a mark's type tint so the mark you
+     clicked stands out without losing the colour that says what it is. */
+  --mark-link:       var(--accent);
+  --mark-link-wash:  rgba(13, 153, 255, 0.14);
+  --mark-alt:        var(--component);
+  --mark-alt-wash:   rgba(151, 71, 255, 0.16);
+  --mark-note:       var(--yellow-500);
+  --mark-note-wash:  rgba(255, 205, 41, 0.16);
+  --mark-resolved:   var(--text-disabled);
+  --mark-focus-wash: rgba(255, 255, 255, 0.16);
 }
 
 /* ============================================================
@@ -141,4 +160,10 @@
   --accent-hover:   #007be5;
   --accent-pressed: #005bb5;
   --accent-quiet:   rgba(13, 153, 255, 0.12);
+  --danger-quiet:   rgba(242, 72, 34, 0.12);
+
+  /* Mark palette on a light surface: the warning yellow is unreadable as INK here, so notes take
+     a dark amber; the hueless focus wash flips to black-alpha. Washes keep their hue. */
+  --mark-note:       #8a6300;
+  --mark-focus-wash: rgba(0, 0, 0, 0.12);
 }

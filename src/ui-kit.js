@@ -83,15 +83,32 @@
       var s = (size === "sm" || size === "lg") ? size : "md";
       return "vds-iconbtn vds-iconbtn--" + s + (active ? " is-active" : "") + (danger ? " is-danger" : "");
     },
-    badgeClass: function (tone, size) {
-      var t = (tone === "accent" || tone === "success" || tone === "danger" || tone === "component") ? tone : "neutral";
+    badgeClass: function (tone, size, quiet) {
+      var t = (tone === "accent" || tone === "success" || tone === "danger" || tone === "warning" || tone === "component") ? tone : "neutral";
       var s = size === "sm" ? "sm" : "md";
-      return "vds-badge vds-badge--" + t + " vds-badge--" + s;
+      // quiet = tinted background + the tone as ink, for a badge that repeats down a list where a
+      // column of solid fills would shout louder than the rows (DS Badge contract).
+      return "vds-badge vds-badge--" + t + " vds-badge--" + s + (quiet ? " vds-badge--quiet" : "");
+    },
+    // Meter (uio-P-C01 / PUB-01): class per band tone; a null pct is the not-indexed state.
+    meterClass: function (tone, notIndexed) {
+      var t = (tone === "success" || tone === "warning") ? tone : "neutral";
+      return "vds-meter vds-meter--" + t + (notIndexed ? " vds-meter--notindexed" : "");
+    },
+    // Meter fill width: clamp to 0-100, and null stays null (no fill at all, not a 0% fill).
+    meterPct: function (pct) {
+      if (pct == null || isNaN(pct)) return null;
+      return Math.max(0, Math.min(100, pct));
     },
     // Tri-state checkbox aria-checked value.
     checkAria: function (checked, mixed) { return mixed ? "mixed" : (checked ? "true" : "false"); },
     // TreeItem indent (px) by depth — 8px base + 12px per level.
-    treeIndent: function (depth) { return 8 + Math.max(0, (depth | 0)) * 12; }
+    treeIndent: function (depth) { return 8 + Math.max(0, (depth | 0)) * 12; },
+    // ToggleChip: an independently-toggleable pill (several can be active at once,
+    // unlike SegmentedControl's one-of-N). `disabled` reads as a permanent baseline.
+    toggleChipClass: function (active, disabled) {
+      return "vds-chip" + (active ? " is-on" : "") + (disabled ? " is-disabled" : "");
+    }
   };
 
   // ==========================================================================
@@ -221,6 +238,30 @@
       btns.push(b); row.appendChild(b);
     });
     return row;
+  }
+  // ChoiceCards — a single-select grid of labelled cards (title + optional description),
+  // for picking one of several presets/modes where a SegmentedControl is too dense (5+
+  // options, each wanting a description). SPEC 7 uses it for the create-flow preset grid;
+  // reusable by the cell switcher and doc-type picker. props: { options:[{value,title,desc}],
+  // value, onChange, columns }. Self-updates its is-on state on click.
+  function ChoiceCards(props) {
+    props = props || {};
+    var grid = h("div", "vds-choicecards");
+    if (props.columns) grid.style.gridTemplateColumns = "repeat(" + props.columns + ", 1fr)";
+    var cards = [];
+    (props.options || []).forEach(function (o) {
+      var card = h("button", "vds-choicecard" + (o.value === props.value ? " is-on" : ""));
+      card.type = "button"; card.setAttribute("data-value", o.value);
+      card.appendChild(h("span", "vds-choicecard__title", o.title == null ? String(o.value) : String(o.title)));
+      if (o.desc != null) card.appendChild(h("span", "vds-choicecard__desc", String(o.desc)));
+      card.addEventListener("click", function () {
+        cards.forEach(function (c) { c.classList.remove("is-on"); });
+        card.classList.add("is-on");
+        if (typeof props.onChange === "function") props.onChange(o.value);
+      });
+      cards.push(card); grid.appendChild(card);
+    });
+    return grid;
   }
   // Switch — EXACT drop-in for editor.js `switchEl` (same uiswitch DOM). Self-
   // updates its is-on/aria state; callers that re-render simply discard it.
@@ -384,6 +425,11 @@
   function DocumentTab(props) {
     props = props || {};
     var tab = h("div", "vds-doctab" + (props.active ? " is-active" : ""));
+    // tab-doctype-glyph: a leading glyph naming the document type (course / presentation /
+    // paged), so a Product's course + one-pager + deck stay distinguishable by shape.
+    if (props.icon) { var g = h("span", "vds-doctab__glyph"); g.innerHTML = iconSvg(props.icon); if (props.typeLabel) { g.title = props.typeLabel; g.setAttribute("aria-label", props.typeLabel); } tab.appendChild(g); }
+    // SPEC 7: an optional per-Product colour dot so a mixed set of tabs stays legible.
+    if (props.dot) { var dot = h("span", "vds-doctab__dot"); dot.style.background = props.dot; if (props.dotTitle) dot.title = props.dotTitle; tab.appendChild(dot); }
     var name = h("button", "vds-doctab__label", props.label); name.type = "button";
     if (typeof props.onSelect === "function") name.addEventListener("click", props.onSelect);
     tab.appendChild(name);
@@ -449,9 +495,66 @@
   }
   function Badge(props) {
     props = props || {};
-    var b = h("span", _pure.badgeClass(props.tone, props.size));
+    var b = h("span", _pure.badgeClass(props.tone, props.size, props.quiet));
     appendChildren(b, props.children);
     return b;
+  }
+  // Meter — labelled, banded percentage (structure/Meter contract; uio-P-C01 / PUB-01).
+  // Label names the fact, the fill carries the band tone, and the value repeats the number in the
+  // tone as ink (the quiet Badge's move, so the meter reads as kin to the badges beside it).
+  // A null pct is the honest not-indexed state: dashed empty track + words, never a 0% score.
+  // The band is never colour alone -- the aria-label speaks the value and the band's name.
+  function Meter(props) {
+    props = props || {};
+    var pct = _pure.meterPct(props.pct);
+    var notIndexed = pct == null;
+    var el = h("div", _pure.meterClass(props.tone, notIndexed));
+    var value = props.value != null ? props.value : (notIndexed ? "Not indexed" : pct + "%");
+    el.setAttribute("role", "meter");
+    el.setAttribute("aria-valuemin", "0");
+    el.setAttribute("aria-valuemax", "100");
+    if (!notIndexed) el.setAttribute("aria-valuenow", String(pct));
+    el.setAttribute("aria-label",
+      (props.label ? props.label + ": " : "") + value + (props.bandLabel && props.bandLabel !== value ? " (" + props.bandLabel + ")" : ""));
+    if (props.label) el.appendChild(h("span", "vds-meter__label", props.label));
+    var track = h("div", "vds-meter__track");
+    if (!notIndexed) {
+      var fill = h("div", "vds-meter__fill");
+      fill.style.width = pct + "%";
+      track.appendChild(fill);
+    }
+    el.appendChild(track);
+    el.appendChild(h("span", "vds-meter__value", value));
+    return el;
+  }
+  // ToggleChip — a row of these is a MULTI-select toggle (several active at once);
+  // for a single-select "pick exactly one" row, use SegmentedControl instead.
+  function ToggleChip(props) {
+    props = props || {};
+    var b = h("button", _pure.toggleChipClass(props.active, props.disabled), props.label != null ? String(props.label) : "");
+    b.type = "button";
+    if (props.disabled) b.disabled = true;
+    if (props.title) b.title = props.title;
+    b.addEventListener("click", function () { if (!props.disabled && typeof props.onClick === "function") props.onClick(); });
+    return b;
+  }
+  // Timeline -- a vertical node-based activity/history trail (dot + connecting line +
+  // content per entry), newest-first by convention (the caller orders entries). Promoted
+  // from Product Rail's per-topic import/edit history (design-system/components/structure/Timeline).
+  function Timeline(props) {
+    props = props || {};
+    var wrap = h("div", "vds-timeline");
+    (props.entries || []).forEach(function (entry) {
+      var node = h("div", "vds-timeline__node");
+      node.appendChild(h("div", "vds-timeline__dot"));
+      var content = h("div", "vds-timeline__content");
+      if (entry.date) content.appendChild(h("div", "vds-timeline__date", entry.date));
+      if (entry.label) content.appendChild(h("div", "vds-timeline__label", entry.label));
+      if (entry.detail) content.appendChild(h("div", "vds-timeline__detail", entry.detail));
+      node.appendChild(content);
+      wrap.appendChild(node);
+    });
+    return wrap;
   }
 
   // ==========================================================================
@@ -526,11 +629,11 @@
     Icon: Icon,
     Button: Button, IconButton: IconButton,
     IconField: IconField, TextField: TextField, FieldRow: FieldRow, TwoUp: TwoUp,
-    SegmentedControl: SegmentedControl, Switch: Switch, SwitchRow: SwitchRow,
+    SegmentedControl: SegmentedControl, ChoiceCards: ChoiceCards, Switch: Switch, SwitchRow: SwitchRow,
     Select: Select, Checkbox: Checkbox, ColorField: ColorField,
     Panel: Panel, PanelSection: PanelSection, Breadcrumb: Breadcrumb,
     Tabs: Tabs, DocumentTab: DocumentTab,
-    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge,
+    TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, Meter: Meter, ToggleChip: ToggleChip, Timeline: Timeline,
     Modal: Modal, ContextMenu: ContextMenu, Tooltip: Tooltip,
     _pure: _pure
   };

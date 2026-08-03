@@ -11,6 +11,7 @@ export function Badge({ children, tone = "neutral", size = "sm", style }) {
     accent: { bg: "var(--accent-quiet)", fg: "var(--accent)" },
     success: { bg: "var(--green-tint)", fg: "var(--success)" },
     danger: { bg: "var(--red-tint)", fg: "var(--danger)" },
+    warning: { bg: "var(--yellow-tint)", fg: "var(--warning)" },
     component: { bg: "rgba(151,71,255,0.16)", fg: "var(--component)" },
   };
   const t = tones[tone] || tones.neutral;
