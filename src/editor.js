@@ -3301,22 +3301,11 @@
   function setDragTargetZone(v) { VE.get("setDragTargetZone")(v); }
 
 
-  // Legacy icon-button keys -> Lucide (kebab) names, resolved through the offline
-  // Icon accessor (src/icons.js). Hand-drawn ICONS art retired; callers keep their
-  // stable keys so wiring is untouched (re-skin, never re-wire).
-  var ICON_ALIAS = {
-    duplicate: "copy", trash: "trash-2", grip: "grip-vertical", plus: "plus",
-    minus: "minus", chevron: "chevron-right", image: "image", refresh: "refresh-cw",
-    upload: "upload", unlink: "unlink", eye: "eye", eyeOff: "eye-off",
-    arrowUp: "arrow-up", arrowDown: "arrow-down", lock: "lock", unlock: "lock-open",
-    slice: "scissors", merge: "fold-vertical"
-  };
-  function iconBtn(icon, title, danger) {
-    var b = h("button", "icon-btn" + (danger ? " icon-btn--danger" : ""));
-    b.title = title;
-    b.innerHTML = Icon(ICON_ALIAS[icon] || icon);
-    return b;
-  }
+  // arch-P3b-07: the icon button and its legacy-key alias table are canonical CONTROLS, and moved
+  // to editor/inspector/primitives.js with the rest of the set. They were in the drag-and-drop
+  // banner because that is where the first caller happened to be.
+  var iconBtn = VE.bind("iconBtn");
+  var ICON_ALIAS;   // data, not an entry point -- read from its owner after install (__kit ships it)
 
   // ---- active theme (#124: home is doc.theme) -------------------------------
   // arch-P3b-07f: the theme -- the per-course tokens, the two modes, the preset library and the
@@ -8110,25 +8099,11 @@
   // ...continues in theme.js (arch-P3b-07).
 
 
-  // a plain text field selected
-  // #157/rawSelect review: canonical dropdown — VersoUI.Select fed the editor's [label, value]
-  // option pairs. Returns the <select> element so callers can still style width/flex or attach
-  // extra listeners (e.g. the selection-aware weight picker's mousedown range capture).
-  function dsSelect(pairs, current, onChange, opts) {
-    opts = opts || {};
-    return window.VersoUI.Select({
-      options: (pairs || []).map(function (o) { return { value: o[1], label: o[0] }; }),
-      value: current == null ? "" : String(current),
-      placeholder: opts.placeholder || null,
-      onChange: onChange
-    });
-  }
-  function selectRow(label, options, current, onchange) {
-    inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", label));
-    var sel = dsSelect(options, current, function (v) { pushHistory(); onchange(v); });
-    inspector.appendChild(sel);
-    return sel;
-  }
+  // arch-P3b-07: the canonical dropdown and its labelled row moved to
+  // editor/inspector/primitives.js, where every other canonical control lives. They were in the
+  // theme banner, between the Theme panel and the font picker that each happened to use one.
+  var dsSelect = VE.bind("dsSelect");
+  var selectRow = VE.bind("selectRow");
   // ...continues in fonts.js (arch-P3b-07).
 
 
@@ -14910,6 +14885,7 @@
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has
   // installed. Constants -- nothing reassigns them afterwards.
+  ICON_ALIAS = VE.get("ICON_ALIAS");
   CONTAINER_IO_KEYS = VE.get("CONTAINER_IO_KEYS");
   HEADER_STYLE_KEYS = VE.get("HEADER_STYLE_KEYS");
   FOOTER_STYLE_KEYS = VE.get("FOOTER_STYLE_KEYS");

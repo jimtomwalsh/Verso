@@ -9454,7 +9454,7 @@ section("UI kit seam");
   ok("repeatedList grip drag reorders via opts.move", /dragstart[\s\S]{0,1000}drop[\s\S]{0,300}opts\.move\(from, i\)/.test(ep));
   ok("repeatedList trash removes via opts.remove", /iconBtn\("trash"[\s\S]{0,200}opts\.remove\(i\)/.test(ep));
   ok("repeatedList field edit is live, no repaint (keeps focus)", /field\.addEventListener\("change", function \(\) \{ if \(!opts\.noHistory\) pushHistory\(\); opts\.setValue\(item, field\.value\);/.test(ep));
-  ok("grip glyph is canonical (Lucide grip-vertical via ICON_ALIAS, not inline one-off)", /grip: "grip-vertical"/.test(e) && /"grip-vertical":/.test(src("src/icons.js")));
+  ok("grip glyph is canonical (Lucide grip-vertical via ICON_ALIAS, not inline one-off)", /grip: "grip-vertical"/.test(ep) && /"grip-vertical":/.test(src("src/icons.js")));
   ok("__kit exposes repeatedList", /window\.__kit[\s\S]{0,900}\brepeatedList\s*:/.test(e));
   ok("kit-gallery demos repeatedList", /K\.repeatedList\(/.test(gal));
 
