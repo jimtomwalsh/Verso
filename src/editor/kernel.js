@@ -46,6 +46,8 @@
   // caller's getter as-is. Both are read the same way, so a consumer never knows or cares which
   // kind it got -- and a binding can be upgraded from constant to live without touching consumers.
   var provided = Object.create(null);
+  // Which names were registered LIVE, so a later constant provide() cannot freeze one (rule 5).
+  var live = Object.create(null);
   // name -> function. What the moved regions publish back.
   var exposed = Object.create(null);
   // Every name any region has ever asked for, and every name any call site has bound. Kept so the
@@ -64,6 +66,12 @@
       Object.keys(name).forEach(function (k) { provide(k, name[k]); });
       return VersoEditor;
     }
+    // RULE 5, and it cost a batch to learn: a LIVE binding may never be downgraded to a constant.
+    // `provide("selection", selection)` looks harmless beside forty other entries, and it replaces
+    // the getter with a snapshot taken at boot -- so every region reading it sees an empty
+    // selection forever, silently, while editor.js's own copy updates on every click. No test that
+    // reads source text can see that, and no boot fails on it.
+    if (live[name]) fail("`" + name + "` is provided LIVE -- providing it as a constant would freeze it at this value");
     provided[name] = { get: function () { return value; } };
     return VersoEditor;
   }
@@ -76,6 +84,7 @@
     }
     if (typeof getter !== "function") fail("provideLive(" + name + ") needs a getter function");
     provided[name] = { get: getter };
+    live[name] = true;
     return VersoEditor;
   }
   function has(name) { return !!provided[name]; }
@@ -149,6 +158,7 @@
   // Tests only. A vm context is fresh per load, so the app never needs this.
   function reset() {
     provided = Object.create(null);
+    live = Object.create(null);
     exposed = Object.create(null);
     needed = Object.create(null);
     bound = Object.create(null);

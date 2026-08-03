@@ -10475,6 +10475,52 @@
   }, true);
 
   // ==========================================================================
+  // ---- canvas input: pan, rubber-band marquee, and the two header buttons ----
+  // This routes a mousedown on the canvas background to the right gesture. The comment layer adds
+  // its own capture-phase listener ABOVE this one, so a pin drop beats a marquee; everything else
+  // is decided here (arch-P3b-07).
+  canvas.addEventListener("mousedown", function (e) {
+    var onBg = e.target === canvas || e.target === world || (e.target.classList && e.target.classList.contains("connectors"));
+    // pan: middle mouse, or Space-held left-drag
+    if (e.button === 1 || (spaceHeld && e.button === 0)) {
+      panning = true; last = { x: e.clientX, y: e.clientY };
+      canvas.classList.add("is-panning"); e.preventDefault(); return;
+    }
+    // plain left-drag on empty canvas: rubber-band select
+    if (onBg && e.button === 0 && !e.shiftKey && !e.metaKey) {
+      startMarquee(e); e.preventDefault();
+    }
+  });
+  window.addEventListener("mousemove", function (e) {
+    if (marquee) { updateMarquee(e); return; }
+    if (!panning) return;
+    var dx = e.clientX - last.x, dy = e.clientY - last.y;
+    last = { x: e.clientX, y: e.clientY };
+    panDrag(dx, dy);
+  });
+  window.addEventListener("mouseup", function (e) { if (marquee) endMarquee(e); });
+  window.addEventListener("mouseup", function () { if (panning) { panning = false; canvas.classList.remove("is-panning"); } });
+  document.getElementById("zoom-fit").addEventListener("click", fitCycle);
+
+  var addPageBtn = document.getElementById("add-page-btn");
+  if (addPageBtn) addPageBtn.addEventListener("click", addPageAfterCurrent);
+
+  // Outliner "add chapter" — mirrors the canvas "+ Chapter" column affordance so a new
+  // chapter is reachable from the Pages header bar without scrolling the canvas. Prompts
+  // for a name (defaulting to the next number), then mounts.
+  var addChapterBtn = document.getElementById("add-chapter-btn");
+  if (addChapterBtn) {
+    addChapterBtn.innerHTML = Icon("folder-plus") || "+";
+    addChapterBtn.addEventListener("click", function () {
+      promptModal("New chapter", "Name", "Chapter " + ((doc.chapters || []).length + 1), function (nm) {
+        if (nm == null) return;
+        pushHistory(); createChapter((nm || "").trim() || undefined); mount();
+      });
+    });
+  }
+
+
+
   // arch-P3b-07: review comments -- pins, their three-tier anchors, the comment list, identity,
   // replies, the sidecar transport and the presence chrome -- moved to editor/comments.js.
   var setCommentMode = VE.bind("setCommentMode");
@@ -11241,6 +11287,8 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    // arch-P3b-07: the comment panel clears the shared field map like any other panel does.
+    resetPanelFields: function () { panelFields = {}; },
     pageNumberOf: pageNumberOf, pageTitlePart: pageTitlePart,
     cap: cap,
     refreshGridOverlay: refreshGridOverlay,
@@ -11290,7 +11338,6 @@
     commentIsOrphaned: commentIsOrphaned,
     demoIsOpen: demoIsOpen,
     demoStageEl: demoStageEl,
-    panning: panning,
     repeatedList: repeatedList,
     reconnectBackupFolder: reconnectBackupFolder,
     bindProjectFolder: bindProjectFolder,
@@ -11520,7 +11567,7 @@
     decorateSourceLinks: decorateSourceLinks, snapshotSourceLinkBase: snapshotSourceLinkBase,
     sourceBaseEditImpact: sourceBaseEditImpact, showSourceBaseEditModal: showSourceBaseEditModal,
     finalizeSourceLock: finalizeSourceLock, modalText: modalText,
-    saveRegistry: saveRegistry, selection: selection, line: line, dsSelect: dsSelect,
+    saveRegistry: saveRegistry, line: line, dsSelect: dsSelect,
     variantNames: variantNames, confirmModal: confirmModal, showContextMenu: showContextMenu
   });
   // arch-P3b-06: what the hotspots editor reads. Mostly panel primitives and the block-layer verbs

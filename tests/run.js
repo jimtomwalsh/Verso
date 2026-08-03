@@ -321,6 +321,25 @@ section("P3b namespace");
     try { K.provideLive("bad", {}); return false; } catch (e) { return /needs a getter/.test(e.message); }
   })());
 
+  // Rule 5, and it is the most expensive bug this phase shipped. `provide("selection", selection)`
+  // sat in a forty-entry literal and replaced the live getter with a snapshot taken at boot, so
+  // every moved region read an empty selection forever while editor.js's own copy updated on every
+  // click. Nothing failed: no boot error, no unmet name, no test that reads source text can see it.
+  // A live binding may not be downgraded to a constant.
+  K.reset();
+  K.provideLive("selection", function () { return { type: "block" }; });
+  ok("a live binding cannot be re-provided as a constant", (function () {
+    try { K.provide("selection", { type: "none" }); return false; }
+    catch (e) { return /provided LIVE/.test(e.message); }
+  })());
+  ok("the live getter survives the attempt", K.get("selection").type === "block");
+  ok("re-providing it LIVE is still allowed (the host may rewire)", (function () {
+    K.provideLive("selection", function () { return { type: "page" }; });
+    return K.get("selection").type === "page";
+  })());
+  K.reset();
+  K.provide("h", function () { return "node"; });
+
   // Rule 2: a name nobody supplies is recorded the moment it is asked for, so a boot alone
   // reveals it -- no one has to open the panel that would have rendered empty.
   K.need("neverProvided");
@@ -4908,7 +4927,7 @@ section("comment list (panel)");
     return VI.pick({ commentMode: true, selectionType: "block" }).render === "renderCommentList" &&
       VI.pick({ commentMode: true, interactMode: true, multiSelCount: 5 }).render === "renderCommentList";
   })());
-  ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(interactMode\) setInteractMode\(false\)/.test(t));
+  ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(E\.interactMode\) setInteractMode\(false\)/.test(t));
   ok("list filters Open vs Resolved", /function renderCommentList[\s\S]*?commentFilter === "resolved" \? c\.done : !c\.done/.test(t));
   ok("row = colour-dot + snippet + done checkbox", /comment-row__dot[\s\S]*?comment-row__snip[\s\S]*?comment-row__done/.test(t));
   ok("resolve from the list syncs the pin", /c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); renderCommentList\(\)/.test(t));

@@ -34,7 +34,9 @@
       "commentFromEnv", "applyView", "cycleGrid", "updateGridBtn", "toggleStyleAudit", "updateStyleAuditBtn",
       "startMarquee", "updateMarquee", "panDrag", "endMarquee", "fitCycle", "addPageAfterCurrent",
       "promptModal", "createChapter", "collapseTreeToChapters", "inspector", "last", "world",
-      "spaceHeld", "marquee", "interactMode", "panelFields", "activeDocId", "doc"
+      "spaceHeld", "marquee", "interactMode", "panelFields", "activeDocId", "doc",
+      "resetPanelFields",
+      "setInspector"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -113,7 +115,7 @@
     // (`rect`), and whether world/general anchors apply (canvas-only). `activeSurf()`
     // picks the demo while it's open + in comment mode, else the canvas.
     function canvasSurf() {
-      return { name: "canvas", root: world, layerParent: canvas,
+      return { name: "canvas", root: E.world, layerParent: canvas,
         getLayer: function () { if (!commentPinLayer) commentPinLayer = h("div", "comment-pin-layer"); return commentPinLayer; },
         rect: function () { return canvas.getBoundingClientRect(); }, allowWorld: true,
         worldToPx: function (a) { return { px: view.x + a.worldX * view.zoom, py: view.y + a.worldY * view.zoom }; },
@@ -137,7 +139,7 @@
       try { localStorage.setItem(COMMENT_MODE_KEY, on ? "1" : "0"); } catch (e) {}
       canvas.classList.toggle("is-comment-mode", commentMode);
       if (commentBtn) commentBtn.classList.toggle("is-active", commentMode);
-      if (commentMode) { if (interactMode) setInteractMode(false); closeCommentPopover(); clearSelection(); clearAllMulti(); refreshCanvasSelection(); }
+      if (commentMode) { if (E.interactMode) setInteractMode(false); closeCommentPopover(); clearSelection(); clearAllMulti(); refreshCanvasSelection(); }
       else closeCommentPopover();
       renderInspector();   // slice 3 swaps the panel to the comment list while in-mode
       renderCommentPins();
@@ -145,13 +147,13 @@
     // §12 slice 3: the right panel becomes the comment LIST while in comment mode.
     var commentFilter = "open"; // "open" | "resolved"
     function renderCommentList() {
-      inspector.innerHTML = ""; panelFields = {}; // self-clearing: the filter/resolve/row
+      E.inspector.innerHTML = ""; E.resetPanelFields(); // self-clearing: the filter/resolve/row
       // handlers call this directly (not via renderInspector), so it must not double-append.
       var UI = window.VersoUI; // DS canonical control set (re-skin, issue #17)
       // uio-O-W2 (OVL-07): the identity + sidecar controls are a section, not a bold line with no
       // affordance. The filter and the list below are the panel's own rows.
-      var _cmtRoot = inspector;
-      inspector = panelSection(_cmtRoot, "Comments");
+      var _cmtRoot = E.inspector;
+      E.setInspector(panelSection(_cmtRoot, "Comments"));
       // §12 slice 5: who am I (author identity) + sidecar transport
       var idn = commentIdentity();
       var idRow = h("div", "comment-identity");
@@ -161,18 +163,18 @@
       nameField.input.title = "Your name (stamped on comments you drop)";
       nameField.input.addEventListener("change", function () { setCommentAuthor(nameField.input.value); renderCommentList(); });
       idRow.appendChild(idDot); idRow.appendChild(nameField);
-      inspector.appendChild(idRow);
+      E.inspector.appendChild(idRow);
       // sidecar transport — Export / Import (two secondary buttons, 2-up)
-      inspector.appendChild(UI.TwoUp({ children: [
+      E.inspector.appendChild(UI.TwoUp({ children: [
         UI.Button({ variant: "secondary", full: true, label: "Export…", title: "Save comments as a sidecar JSON", onClick: function () { exportComments(); } }),
         UI.Button({ variant: "secondary", full: true, label: "Import…", title: "Merge a reviewer's comments file", onClick: function () { importComments(); } })
       ] }));
-      inspector = _cmtRoot;
+      E.setInspector(_cmtRoot);
       var list = (E.doc.comments || []);
       var openN = list.filter(function (c) { return !c.done; }).length;
       var resN = list.length - openN;
       // Open / Resolved filter — primary = active (2-up)
-      inspector.appendChild(UI.TwoUp({ children: [
+      E.inspector.appendChild(UI.TwoUp({ children: [
         UI.Button({ variant: commentFilter === "open" ? "primary" : "secondary", full: true, label: "Open (" + openN + ")", onClick: function () { commentFilter = "open"; renderCommentList(); } }),
         UI.Button({ variant: commentFilter === "resolved" ? "primary" : "secondary", full: true, label: "Resolved (" + resN + ")", onClick: function () { commentFilter = "resolved"; renderCommentList(); } })
       ] }));
@@ -182,7 +184,7 @@
       var orphaned = shown.filter(function (c) { return commentIsOrphaned(c, E.doc); });
       var anchored = shown.filter(function (c) { return !commentIsOrphaned(c, E.doc); });
       if (!shown.length) {
-        inspector.appendChild(h("div", "insp-hint", commentFilter === "resolved" ? "No resolved comments yet." : "No open comments. Click anywhere on the canvas to drop one."));
+        E.inspector.appendChild(h("div", "insp-hint", commentFilter === "resolved" ? "No resolved comments yet." : "No open comments. Click anywhere on the canvas to drop one."));
         return;
       }
       // one row builder, reused for the anchored list + the orphaned tray (ticket 26).
@@ -213,13 +215,13 @@
       }
       var listWrap = h("div", "comment-list");
       anchored.forEach(function (c) { listWrap.appendChild(commentRow(c, false)); });
-      inspector.appendChild(listWrap);
+      E.inspector.appendChild(listWrap);
       if (orphaned.length) {
-        inspector.appendChild(h("div", "comment-group__head", "Orphaned — need a home (" + orphaned.length + ")"));
-        inspector.appendChild(h("div", "insp-hint", "These notes lost the block they pointed at. Kept, never dropped — re-anchor by re-adding the block, or dismiss."));
+        E.inspector.appendChild(h("div", "comment-group__head", "Orphaned — need a home (" + orphaned.length + ")"));
+        E.inspector.appendChild(h("div", "insp-hint", "These notes lost the block they pointed at. Kept, never dropped — re-anchor by re-adding the block, or dismiss."));
         var orphanWrap = h("div", "comment-list is-orphan-tray");
         orphaned.forEach(function (c) { orphanWrap.appendChild(commentRow(c, true)); });
-        inspector.appendChild(orphanWrap);
+        E.inspector.appendChild(orphanWrap);
       }
     }
     // Re-render the panel list after a comment change (only while in comment mode —
@@ -678,7 +680,7 @@
           document.addEventListener("click", closeHeldMenu);
           document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeHeldMenu(); });
           beatTimer = setInterval(beat, HEARTBEAT_MS); // ticket 11 AC4: heartbeat drives presence TTL
-          session = window.VersoSync.connect(activeDocId);
+          session = window.VersoSync.connect(E.activeDocId);
         } catch (e) {}
       }
       // Re-draw the collab overlays after a mount() (canvas.innerHTML was cleared). Cheap + gated.
@@ -1010,7 +1012,7 @@
     // Drop a pin: capture-phase so it beats the drill / marquee / pan handlers.
     canvas.addEventListener("mousedown", function (e) {
       if (!commentMode) return;
-      if (e.button !== 0 || spaceHeld) return;                 // middle / space still pan
+      if (e.button !== 0 || E.spaceHeld) return;                 // middle / space still pan
       if (e.target.closest(".comment-pin, .comment-popover")) return; // handled by their own listeners
       e.preventDefault(); e.stopPropagation();
       // Positive exit: while a note is open, the first click OUTSIDE it just closes it
@@ -1059,47 +1061,6 @@
     if (_demoDeviceEl) _demoDeviceEl.addEventListener("click", function (e) { if (demoCommentMode) { e.preventDefault(); e.stopPropagation(); } }, true);
     // Content scrolls inside the device -> re-project pins to follow it.
     if (_demoStageEl) _demoStageEl.addEventListener("scroll", function () { if (demoIsOpen()) renderCommentPins(); }, true);
-
-    canvas.addEventListener("mousedown", function (e) {
-      var onBg = e.target === canvas || e.target === world || (e.target.classList && e.target.classList.contains("connectors"));
-      // pan: middle mouse, or Space-held left-drag
-      if (e.button === 1 || (spaceHeld && e.button === 0)) {
-        panning = true; last = { x: e.clientX, y: e.clientY };
-        canvas.classList.add("is-panning"); e.preventDefault(); return;
-      }
-      // plain left-drag on empty canvas: rubber-band select
-      if (onBg && e.button === 0 && !e.shiftKey && !e.metaKey) {
-        startMarquee(e); e.preventDefault();
-      }
-    });
-    window.addEventListener("mousemove", function (e) {
-      if (marquee) { updateMarquee(e); return; }
-      if (!panning) return;
-      var dx = e.clientX - last.x, dy = e.clientY - last.y;
-      last = { x: e.clientX, y: e.clientY };
-      panDrag(dx, dy);
-    });
-    window.addEventListener("mouseup", function (e) { if (marquee) endMarquee(e); });
-    window.addEventListener("mouseup", function () { if (panning) { panning = false; canvas.classList.remove("is-panning"); } });
-    document.getElementById("zoom-fit").addEventListener("click", fitCycle);
-
-    var addPageBtn = document.getElementById("add-page-btn");
-    if (addPageBtn) addPageBtn.addEventListener("click", addPageAfterCurrent);
-
-    // Outliner "add chapter" — mirrors the canvas "+ Chapter" column affordance so a new
-    // chapter is reachable from the Pages header bar without scrolling the canvas. Prompts
-    // for a name (defaulting to the next number), then mounts.
-    var addChapterBtn = document.getElementById("add-chapter-btn");
-    if (addChapterBtn) {
-      addChapterBtn.innerHTML = Icon("folder-plus") || "+";
-      addChapterBtn.addEventListener("click", function () {
-        promptModal("New chapter", "Name", "Chapter " + ((E.doc.chapters || []).length + 1), function (nm) {
-          if (nm == null) return;
-          pushHistory(); createChapter((nm || "").trim() || undefined); mount();
-        });
-      });
-    }
-
 
     // The preview reads both of these as it opens and as pins are drawn; they are reassigned as the
     // author works, so they cross as live getters rather than values.
