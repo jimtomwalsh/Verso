@@ -348,6 +348,61 @@
     };
   }
 
+  // ---- Product Rail: tag vocabulary + the reserved owning-Product tag ------------
+  // arch-P3b-07tags. A master's tags are [{value, reserved}]. At most one entry is reserved:
+  // the owning-Product tag, stamped ONCE at promotion time from the active document's Product
+  // context -- birthplace, not ownership, so a master promoted from an untagged document simply
+  // gets no reserved tag and there is nothing to attribute. Every other entry is a freeform
+  // technology tag, global across Products rather than scoped per Product.
+  //
+  // These are the FACTS half of this file: plain values in, the same object back, no store and
+  // no DOM. Callers own persistence -- saveLibrary() after mutating the master passed in.
+  //
+  // FOUR OF THESE FIVE HAVE NO CALLER. `stampOwnerProductTag` runs at promotion (library.js);
+  // the add, the remove and the vocabulary match are the model for a tag-editing UI that was
+  // specified, tested and never built. They are kept, and said out loud here, so whoever builds
+  // that UI finds a model rather than writing a second one.
+  // A master's tags: [{value, reserved}]. At most one entry is reserved:true -- the
+  // "owning Product" tag, stamped ONCE at promotion time from the active doc's Product
+  // context (birthplace, not ownership -- a master promoted from an untagged doc simply
+  // gets no reserved tag, nothing to attribute). Every other entry is a freeform
+  // technology tag, global across Products (never scoped per Product). Pure; callers own
+  // persistence (saveLibrary()) after mutating the master object passed in.
+  /* @tag-vocab-start */
+  function ownerProductTagValue(productId) { return productId ? ("product:" + productId) : null; }
+  function stampOwnerProductTag(master, productId) {
+    if (!master) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (!productId) return master; // no Product context at promotion time -- nothing to attribute
+    if (master.tags.some(function (t) { return t && t.reserved; })) return master; // stamped once, never re-stamped
+    master.tags.push({ value: ownerProductTagValue(productId), reserved: true });
+    return master;
+  }
+  function addTechnologyTag(master, value) {
+    if (!master) return master;
+    var v = String(value || "").trim(); if (!v) return master;
+    if (!Array.isArray(master.tags)) master.tags = [];
+    if (master.tags.some(function (t) { return t && t.value === v; })) return master; // no dupes
+    master.tags.push({ value: v, reserved: false });
+    return master;
+  }
+  // Ordinary tag-editing can never remove the reserved tag -- matches on a non-reserved value only.
+  function removeMasterTag(master, value) {
+    if (!master || !Array.isArray(master.tags)) return master;
+    master.tags = master.tags.filter(function (t) { return !(t && t.value === value && !t.reserved); });
+    return master;
+  }
+  // Autocomplete-first matching against the global technology-tag vocabulary. "propose
+  // new" is the caller's fallback when exact is false -- never the default typing path.
+  function matchTagVocabulary(vocab, query) {
+    var q = String(query || "").trim().toLowerCase();
+    if (!q) return { matches: [], exact: false };
+    var matches = (vocab || []).filter(function (t) { return t && t.toLowerCase().indexOf(q) !== -1; });
+    var exact = (vocab || []).some(function (t) { return t && t.toLowerCase() === q; });
+    return { matches: matches, exact: exact };
+  }
+  /* @tag-vocab-end */
+
   var VersoProductRail = {
     BANDS: BANDS,
     BAND_TONE: BAND_TONE,
@@ -359,6 +414,9 @@
     outputsFact: outputsFact,
     alignmentMeterModel: alignmentMeterModel,
     visibleTabIds: visibleTabIds,
+    ownerProductTagValue: ownerProductTagValue, stampOwnerProductTag: stampOwnerProductTag,
+    addTechnologyTag: addTechnologyTag, removeMasterTag: removeMasterTag,
+    matchTagVocabulary: matchTagVocabulary,
     create: createProductRail
   };
 

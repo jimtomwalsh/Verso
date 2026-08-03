@@ -404,12 +404,27 @@
       document.body.appendChild(modal);
     }
 
+    // arch-P3b-07tags: the global technology-tag vocabulary. It is the one tag helper that is
+    // NOT pure -- it reads every master in the shared library -- so it came here rather than to
+    // product-rail.js with the other five. It has no caller: the tag-editing UI it was written
+    // for was specified and never built.
+    function collectTagVocabulary() {
+      var seen = {}, out = [];
+      var comps = libComponents();
+      Object.keys(comps).forEach(function (k) {
+        ((comps[k] && comps[k].tags) || []).forEach(function (t) {
+          if (t && !t.reserved && t.value && !seen[t.value]) { seen[t.value] = true; out.push(t.value); }
+        });
+      });
+      return out;
+    }
+
     kernel.expose({
       seedDemoLibrary: seedDemoLibrary, loadLibrary: loadLibrary, saveLibrary: saveLibrary,
       libComponents: libComponents, libraryWhereUsed: libraryWhereUsed, libraryWhereUsedDetail: libraryWhereUsedDetail,
       exportLibraryJson: exportLibraryJson, importLibraryJson: importLibraryJson, buildLibraryBody: buildLibraryBody,
       buildComponentsBody: buildComponentsBody, saveBlockAsComponent: saveBlockAsComponent, ungroupContainer: ungroupContainer,
-      showDefineComponentDialog: showDefineComponentDialog
+      showDefineComponentDialog: showDefineComponentDialog, collectTagVocabulary: collectTagVocabulary
     });
   }
 
