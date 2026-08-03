@@ -3564,344 +3564,34 @@
 
 
   // ---- drag & drop (reorder in the outliner, insert from Assets) -----------
-  // dragPayload: { kind:"move", page, index } | { kind:"insert", makeIndex }
-  var dragPayload = null;
-  var dragTargetZone = "before";
-  function clearDropMarks() {
-    Array.prototype.forEach.call(document.querySelectorAll(".drop-before,.drop-into,.drop-left,.drop-right,.drop-after"), function (e) {
-      e.classList.remove("drop-before", "drop-into", "drop-left", "drop-right", "drop-after");
-    });
-    hideDropPreview();
-  }
+  // arch-P3b-07t: the drag OVERLAY -- the insertion line, the hit zones, the column edge bands,
+  // resizers and swap handles -- moved to editor/dnd-ui.js. It completes the split arch-P3-08
+  // started: editor/dnd.js already DECIDES where a drop lands; that file SHOWS it. The drag state
+  // (dragPayload / dragTargetZone) went with it and is read back through the namespace, because
+  // the code that maintains it left and the outliner and Assets tab that read it did not.
+  //
+  // iconBtn and its legacy-key alias table stayed: they are a canonical CONTROL, not drag
+  // behaviour, and belong with the rest of the set in inspector/primitives.js. Noted as a
+  // follow-up rather than smuggled through that ticket.
+  var clearDropMarks = VE.bind("clearDropMarks");
+  var makeDropTarget = VE.bind("makeDropTarget");
+  var handleDrop = VE.bind("handleDrop");
+  var attachEmptyColumnDrops = VE.bind("attachEmptyColumnDrops");
+  var wireItemBodyDrops = VE.bind("wireItemBodyDrops");
+  var attachColumnsEdgeBands = VE.bind("attachColumnsEdgeBands");
+  var attachColumnResizers = VE.bind("attachColumnResizers");
+  var attachColumnSwaps = VE.bind("attachColumnSwaps");
+  var showDropPreview = VE.bind("showDropPreview");
+  var hideDropPreview = VE.bind("hideDropPreview");
+  // The drag STATE reads and writes this file still makes. They are the drag SOURCES -- a canvas
+  // block, an outliner row, an Assets tile -- and each moves out in a later slice; until then they
+  // go through the owner rather than a local variable. Reads are functions, not a bound value,
+  // because a payload is set and cleared many times per drag and a captured value would be stale.
+  function dragPayloadNow() { return VE.get("dragPayload"); }
+  function dragTargetZoneNow() { return VE.get("dragTargetZone"); }
+  function setDragPayload(v) { VE.get("setDragPayload")(v); }
+  function setDragTargetZone(v) { VE.get("setDragTargetZone")(v); }
 
-  // Live snap-zone drop preview (OS-window-snap feel). A single, reusable,
-  // pointer-events:none overlay painted over the hovered block per dragover -- it
-  // NEVER intercepts drops, so the real hit-testing (block 4-zone dragover +
-  // stopPropagation, the columns edge bands) stays fully intact; only the painting
-  // moved off the per-block .drop-* border classes. Two layers: a filled quadrant
-  // tint so the four hotspots read as segments, and a solid accent bar showing
-  // exactly where the block will land. Positioned in viewport space (fixed) from
-  // getBoundingClientRect, so canvas pan/zoom transforms don't matter.
-  function getDropOverlay() {
-    var ov = document.getElementById("drop-overlay");
-    if (ov) return ov;
-    ov = h("div", "drop-overlay");
-    ov.id = "drop-overlay";
-    ov.__tint = h("div", "drop-overlay__tint");
-    ov.__bar = h("div", "drop-overlay__bar");
-    ov.appendChild(ov.__tint);
-    ov.appendChild(ov.__bar);
-    document.body.appendChild(ov);
-    return ov;
-  }
-  function setDropBox(node, l, t, w, hgt) {
-    node.style.left = l + "px"; node.style.top = t + "px";
-    node.style.width = Math.max(0, w) + "px"; node.style.height = Math.max(0, hgt) + "px";
-  }
-  function showDropPreview(rect, zone) {
-    var ov = getDropOverlay();
-    ov.style.display = "block";
-    var edge = 0.28; // column hotspot band width (the decision band is 0.22/0.78)
-    if (zone === "before") {
-      setDropBox(ov.__tint, rect.left, rect.top, rect.width, rect.height / 2);
-      setDropBox(ov.__bar, rect.left, rect.top - 1.5, rect.width, 3);
-    } else if (zone === "after") {
-      setDropBox(ov.__tint, rect.left, rect.top + rect.height / 2, rect.width, rect.height / 2);
-      setDropBox(ov.__bar, rect.left, rect.top + rect.height - 1.5, rect.width, 3);
-    } else if (zone === "left") {
-      setDropBox(ov.__tint, rect.left, rect.top, rect.width * edge, rect.height);
-      setDropBox(ov.__bar, rect.left - 1.5, rect.top, 3, rect.height);
-    } else if (zone === "right") {
-      setDropBox(ov.__tint, rect.left + rect.width * (1 - edge), rect.top, rect.width * edge, rect.height);
-      setDropBox(ov.__bar, rect.left + rect.width - 1.5, rect.top, 3, rect.height);
-    }
-  }
-  function hideDropPreview() {
-    var ov = document.getElementById("drop-overlay");
-    if (ov) ov.style.display = "none";
-  }
-  function makeDropTarget(el, getTarget, cls) {
-    cls = cls || "drop-before";
-    el.addEventListener("dragover", function (e) {
-      if (!dragPayload) return;
-      e.preventDefault(); e.stopPropagation();
-      e.dataTransfer.dropEffect = dragPayload.kind === "insert" ? "copy" : "move";
-      
-      if (el.classList.contains("canvas-block")) {
-        var rect = el.getBoundingClientRect();
-        var pctX = (e.clientX - rect.left) / rect.width;
-        var pctY = (e.clientY - rect.top) / rect.height;
-        // Decide the hotspot; paint via the live overlay (not per-block borders).
-        if (pctX < 0.22) dragTargetZone = "left";
-        else if (pctX > 0.78) dragTargetZone = "right";
-        else if (pctY < 0.5) dragTargetZone = "before";
-        else dragTargetZone = "after";
-        showDropPreview(rect, dragTargetZone);
-      } else {
-        dragTargetZone = "before";
-        el.classList.add(cls);
-        hideDropPreview();
-      }
-    });
-    el.addEventListener("dragleave", function () {
-      el.classList.remove(cls, "drop-before", "drop-after", "drop-left", "drop-right");
-    });
-    el.addEventListener("drop", function (e) {
-      if (!dragPayload) return;
-      e.preventDefault(); e.stopPropagation();
-      el.classList.remove(cls, "drop-before", "drop-after", "drop-left", "drop-right");
-      hideDropPreview();
-      handleDrop(typeof getTarget === "function" ? getTarget() : getTarget);
-    });
-  }
-  // TTT: append a block INTO a container — a group/frame's children, or the first
-  // column of a columns block (creating the column if empty). Pure model op.
-  function appendIntoContainer(cont, blk) { return DND.appendIntoContainer(cont, blk); }
-  // #94: append a block into a SPECIFIC column of a columns block (the targeted
-  // empty-column drop slot). Creates the column array if absent. Pure model op.
-  function appendIntoColumn(cont, ci, blk) { return DND.appendIntoColumn(cont, ci, blk); }
-  // #94: wire each EMPTY column of a Columns block as its own drop target, so content
-  // dropped onto it lands in THAT column (a fresh palette Columns block starts with two
-  // empty columns). Non-empty columns keep their existing per-block drop zones; only
-  // columns still showing the empty-column placeholder get this slot target.
-  function attachEmptyColumnDrops(columnsNode, block) {
-    var cols = Array.prototype.filter.call(columnsNode.children, function (c) {
-      return c.classList && c.classList.contains("layout-column");
-    });
-    cols.forEach(function (colEl, ci) {
-      if (!colEl.querySelector(".layout-column__empty")) return; // only empty columns need a slot target
-      makeDropTarget(colEl, (function (b, i) { return function () { return { intoColumn: { block: b, index: i } }; }; })(block, ci), "drop-into");
-    });
-  }
-  // #134: wire each card/accordion BODY (incl. EMPTY ones) as a drop target that appends
-  // into the exact items[i].children / items[i].front array. render() emits the item index
-  // on every card/panel (data-cr-index / data-cd-index / data-acc-index), so an empty body --
-  // which renders only a placeholder div and was NOT a drop target before -- now accepts any
-  // block, uniformly across every card and both flip sides. Editor drop wiring only; the array
-  // is resolved (and created) lazily at drop time, so render() + the doc are untouched until a
-  // block actually lands. makeDropTarget stopPropagation lets a child block's before/after
-  // zone win when the pointer is over it; the body target only fires on the empty background.
-  function wireItemBodyDrops(root) {
-    function ownerOf(el) { var cb = el.closest && el.closest(".canvas-block"); return cb && cb.__block; }
-    function wire(bodyEl, block, idx, key) {
-      if (!bodyEl || !block || !Array.isArray(block.items) || isNaN(idx)) return;
-      makeDropTarget(bodyEl, (function (blk, i, k) {
-        return function () {
-          var it = blk.items && blk.items[i]; if (!it) return null;
-          var arr = (it[k] = it[k] || []);
-          return { intoBlocks: { arrayRef: arr, ownerBlock: blk } };
-        };
-      })(block, idx, key), "drop-into");
-    }
-    Array.prototype.forEach.call(root.querySelectorAll(".card-reveal__card"), function (card) {
-      var block = ownerOf(card), idx = parseInt(card.getAttribute("data-cr-index"), 10);
-      wire(card.querySelector(".card-reveal__content"), block, idx, "children"); // reveal body / flip back (Side 2)
-      wire(card.querySelector(".card-reveal__front"), block, idx, "front");       // flip front (Side 1)
-    });
-    Array.prototype.forEach.call(root.querySelectorAll(".card-deck__card"), function (card) {
-      wire(card.querySelector(".card-deck__content"), ownerOf(card), parseInt(card.getAttribute("data-cd-index"), 10), "children");
-    });
-    Array.prototype.forEach.call(root.querySelectorAll(".acc__panel[data-acc-index]"), function (panel) {
-      wire(panel, ownerOf(panel), parseInt(panel.getAttribute("data-acc-index"), 10), "children"); // accordion/sequence parity
-    });
-  }
-  // The drop's model surgery is src/editor/dnd.js (arch-P3-08). This owns what a module cannot:
-  // the drag payload, the undo push, the active page and the repaint.
-  function handleDrop(target) {
-    var res = DND.resolveDrop({
-      doc: doc, payload: dragPayload, target: target, zone: dragTargetZone, currentPage: currentPage,
-      make: function (i) { return LIBRARY[i].make(); },
-      beginEdit: pushHistory,
-      findPageOfBlock: findPageOfBlock,
-      walkBlocks: walkPageBlocks,
-      clone: clone,
-      cleanupColumns: cleanupColumns
-    });
-    dragPayload = null;
-    if (!res.ok) { if (res.reason === "cycle") clearDropMarks(); return; }
-    currentPage = res.currentPage;
-    // A drop touches at most the source and destination pages; -1 falls back to a full mount.
-    reapplyStructural(res.affected.length ? res.affected : -1);
-  }
-
-  // AA: a `columns` row is skipped as a canvas drop target (its inner column
-  // blocks own the 4-zone drops and stopPropagation the dragover), so dropping a
-  // full-width block before/after the columns row at PAGE level was unreachable.
-  // Give the columns node its own full-width top/bottom edge bands that insert a
-  // full-width block before/after the columns block in page.blocks. The bands sit
-  // above the column content and only capture pointer events while a block is
-  // being dragged (body.is-dragging-block), so they never touch normal editing.
-  function attachColumnsEdgeBands(columnsNode, block, pi) {
-    columnsNode.style.position = "relative";
-    ["top", "bottom"].forEach(function (edge) {
-      var band = h("div", "columns-edge-band columns-edge-band--" + edge);
-      band.addEventListener("dragover", function (e) {
-        if (!dragPayload) return;
-        e.preventDefault(); e.stopPropagation();
-        e.dataTransfer.dropEffect = dragPayload.kind === "insert" ? "copy" : "move";
-        clearDropMarks();
-        band.classList.add("is-band-active");
-        dragTargetZone = edge === "top" ? "before" : "after";
-        // Live preview: a full-width insertion bar at the columns row's top/bottom
-        // edge (page-level before/after), matching the block-level snap feel.
-        showDropPreview(columnsNode.getBoundingClientRect(), dragTargetZone);
-      });
-      band.addEventListener("dragleave", function () { band.classList.remove("is-band-active"); });
-      band.addEventListener("drop", function (e) {
-        if (!dragPayload) return;
-        e.preventDefault(); e.stopPropagation();
-        band.classList.remove("is-band-active");
-        hideDropPreview();
-        // page-level before/after the columns block (not into a column)
-        currentPage = pi;
-        dragTargetZone = edge === "top" ? "before" : "after";
-        handleDrop({ targetBlock: block });
-      });
-      columnsNode.appendChild(band);
-    });
-  }
-
-  // Per-gap column-resize handles (editor chrome only — never rendered/exported).
-  // A hover-revealed vertical line + grab strip in each inter-column gap; dragging
-  // it redistributes flex ratios between the TWO adjacent columns only (a splitter),
-  // leaving the other columns' widths untouched. The result is written to
-  // block.colWidths (plain doc data -> ships in SCORM); render.js reads it back.
-  // The invariant holds: nothing here leaks into render() — we mutate the doc, and
-  // during a live drag we mirror the SAME flex values onto the mounted column nodes
-  // for smooth feedback (setDoc/re-mount would reproduce them from colWidths).
-  var COL_MIN_PX = 48; // a column may not be dragged narrower than this
-  function attachColumnResizers(columnsNode, block) {
-    var cols = Array.prototype.slice.call(columnsNode.children).filter(function (c) {
-      return c.classList && c.classList.contains("layout-column");
-    });
-    if (cols.length < 2) return; // nothing to resize between
-    columnsNode.style.position = "relative";
-    var gap = block.gap == null ? 24 : block.gap;
-    var handles = [];
-
-    function positionHandles() {
-      handles.forEach(function (hnd, i) {
-        // Centre of the gap between column i and i+1, relative to the row
-        // (columnsNode is the offsetParent since it is position:relative).
-        var left = cols[i].offsetLeft + cols[i].offsetWidth + gap / 2;
-        hnd.style.left = left + "px";
-      });
-    }
-
-    cols.slice(0, -1).forEach(function (_, i) {
-      var hnd = h("div", "col-resize-handle");
-      hnd.setAttribute("role", "separator");
-      hnd.setAttribute("aria-orientation", "vertical");
-      hnd.title = "Drag to resize columns";
-      hnd.appendChild(h("div", "col-resize-handle__line"));
-      handles.push(hnd);
-      columnsNode.appendChild(hnd);
-
-      var drag = null;
-      hnd.addEventListener("pointerdown", function (e) {
-        if (e.button !== 0) return;
-        e.preventDefault(); e.stopPropagation();
-        // Materialise the CURRENT rendered widths as explicit ratios so ONLY the
-        // dragged pair changes (untouched columns keep their exact pixel width).
-        var widths = cols.map(function (c) { return c.offsetWidth; });
-        pushHistory();
-        block.colWidths = widths.slice();
-        drag = { startX: e.clientX, wi: widths[i], wj: widths[i + 1], total: widths[i] + widths[i + 1] };
-        hnd.setPointerCapture(e.pointerId);
-        hnd.classList.add("is-resizing");
-        document.body.classList.add("is-col-resizing");
-      });
-      hnd.addEventListener("pointermove", function (e) {
-        if (!drag) return;
-        var dx = e.clientX - drag.startX;
-        var ni = Math.max(COL_MIN_PX, Math.min(drag.total - COL_MIN_PX, drag.wi + dx));
-        var nj = drag.total - ni;
-        block.colWidths[i] = ni;
-        block.colWidths[i + 1] = nj;
-        cols[i].style.flex = String(ni);
-        cols[i + 1].style.flex = String(nj);
-        positionHandles();
-      });
-      function endDrag(e) {
-        if (!drag) return;
-        drag = null;
-        try { hnd.releasePointerCapture(e.pointerId); } catch (_) {}
-        hnd.classList.remove("is-resizing");
-        document.body.classList.remove("is-col-resizing");
-        positionHandles();
-        renderModelView();
-        scheduleSave();
-      }
-      hnd.addEventListener("pointerup", endDrag);
-      hnd.addEventListener("pointercancel", endDrag);
-    });
-
-    positionHandles();
-    // Keep handles glued if the row reflows (window resize / inspector-driven relayout).
-    if (window.ResizeObserver) {
-      var ro = new ResizeObserver(function () { positionHandles(); });
-      ro.observe(columnsNode);
-    }
-  }
-
-  // Pure swap of two adjacent columns' block arrays (+ colWidths, if custom and still
-  // matching the column count). i/i+1 must both be valid indices; the caller (the click
-  // handler below) guarantees that by construction (one button per adjacent pair).
-  /* @swap-columns-start */
-  function swapColumns(block, i) {
-    if (!block || !Array.isArray(block.columns)) return block;
-    var a = block.columns[i], b = block.columns[i + 1];
-    block.columns[i] = b; block.columns[i + 1] = a;
-    if (Array.isArray(block.colWidths) && block.colWidths.length === block.columns.length) {
-      var wa = block.colWidths[i], wb = block.colWidths[i + 1];
-      block.colWidths[i] = wb; block.colWidths[i + 1] = wa;
-    }
-    return block;
-  }
-  /* @swap-columns-end */
-  // Per-gap column-SWAP glyph (editor chrome only — never rendered/exported). A small
-  // hover-revealed icon button in each inter-column gap, mirroring attachColumnResizers'
-  // wiring exactly, that exchanges the two adjacent columns via swapColumns and
-  // re-renders. Unlike a resize (a live drag on flex ratios), a swap is a genuine
-  // structural change — content actually moves — so it goes through the normal
-  // pushHistory + reapplyStructural + reselectBlockNode path, not a live DOM mirror.
-  function attachColumnSwaps(columnsNode, block) {
-    var cols = Array.prototype.slice.call(columnsNode.children).filter(function (c) {
-      return c.classList && c.classList.contains("layout-column");
-    });
-    if (cols.length < 2) return; // nothing to swap between
-    var gap = block.gap == null ? 24 : block.gap;
-    var btns = [];
-
-    function positionSwaps() {
-      btns.forEach(function (btn, i) {
-        var left = cols[i].offsetLeft + cols[i].offsetWidth + gap / 2;
-        btn.style.left = left + "px";
-        btn.style.top = (columnsNode.offsetHeight / 2) + "px";
-      });
-    }
-
-    cols.slice(0, -1).forEach(function (_, i) {
-      var btn = iconBtn("arrow-left-right", "Swap these two columns");
-      btn.classList.add("col-swap-btn");
-      btn.addEventListener("pointerdown", function (e) { e.preventDefault(); e.stopPropagation(); });
-      btn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        pushHistory();
-        swapColumns(block, i);
-        reapplyStructural(findPageOfBlock(block));
-        reselectBlockNode(block, "block");
-      });
-      btns.push(btn);
-      columnsNode.appendChild(btn);
-    });
-
-    positionSwaps();
-    if (window.ResizeObserver) {
-      var ro2 = new ResizeObserver(function () { positionSwaps(); });
-      ro2.observe(columnsNode);
-    }
-  }
 
   // Legacy icon-button keys -> Lucide (kebab) names, resolved through the offline
   // Icon accessor (src/icons.js). Hand-drawn ICONS art retired; callers keep their
@@ -11033,7 +10723,7 @@
   // (FileReader -> assetRef -> block.src) so it stores in the asset store + ships in
   // export identically. A dashed drop-highlight marks the target while hovering.
   function externalImageDrag(e) {
-    if (dragPayload) return false; // an internal block move -> leave it to makeDropTarget
+    if (dragPayloadNow()) return false; // an internal block move -> leave it to makeDropTarget
     var dt = e.dataTransfer; if (!dt) return false;
     // dragover doesn't expose file contents, only that Files are present
     return Array.prototype.indexOf.call(dt.types || [], "Files") !== -1;
@@ -11047,7 +10737,7 @@
     });
     node.addEventListener("dragleave", function (e) { if (e.target === node) node.classList.remove("is-file-drop"); });
     node.addEventListener("drop", function (e) {
-      if (dragPayload) return; // internal move -> normal drop logic owns it
+      if (dragPayloadNow()) return; // internal move -> normal drop logic owns it
       var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (!f || !/^image\//.test(f.type)) { node.classList.remove("is-file-drop"); return; }
       e.preventDefault(); e.stopPropagation();
@@ -11430,7 +11120,7 @@
       // Shared move-drag payload — identical to the old gripper's, so every drop /
       // reorder path (makeDropTarget / handleDrop) is untouched. Alt = duplicate.
       function startBlockDrag(e) {
-        dragPayload = { kind: "move", page: pi, block: block, duplicate: e.altKey };
+        setDragPayload({ kind: "move", page: pi, block: block, duplicate: e.altKey });
         e.dataTransfer.effectAllowed = e.altKey ? "copy" : "move";
         try { e.dataTransfer.setData("text/plain", ""); } catch (_) {}
         node.classList.add("is-dragging");
@@ -11439,7 +11129,7 @@
       function endBlockDrag() {
         node.classList.remove("is-dragging");
         clearDropMarks();
-        dragPayload = null;
+        setDragPayload(null);
         document.body.classList.remove("is-dragging-block");
       }
 
@@ -12827,7 +12517,7 @@
         // resolves and removes the source by reference; index-only payloads
         // were silently no-op'ing (and dirtying undo) after the payload shapes
         // diverged from the canvas handle.
-        dragPayload = { kind: "move", page: pi, block: block, index: bi };
+        setDragPayload({ kind: "move", page: pi, block: block, index: bi });
         e.dataTransfer.effectAllowed = "move";
         try { e.dataTransfer.setData("text/plain", ""); } catch (_) {}
         br.classList.add("is-dragging");
@@ -12836,7 +12526,7 @@
       br.addEventListener("dragend", function () {
         br.classList.remove("is-dragging");
         clearDropMarks();
-        dragPayload = null;
+        setDragPayload(null);
         document.body.classList.remove("is-dragging-block");
       });
     } else {
@@ -13277,13 +12967,13 @@
     if (opts.dragData) {
       el.setAttribute("draggable", "true");
       el.addEventListener("dragstart", function (e) {
-        dragPayload = opts.dragData();
+        setDragPayload(opts.dragData());
         e.dataTransfer.effectAllowed = "copy";
         try { e.dataTransfer.setData("text/plain", ""); } catch (_) {}
         document.body.classList.add("is-dragging-block");
       });
       el.addEventListener("dragend", function () {
-        clearDropMarks(); dragPayload = null; document.body.classList.remove("is-dragging-block");
+        clearDropMarks(); setDragPayload(null); document.body.classList.remove("is-dragging-block");
       });
     } else {
       el.removeAttribute("draggable");
@@ -17501,26 +17191,26 @@
     dnd: {
       // Drop a moved block onto another block's top/bottom/left/right hotspot.
       dropOnBlock: function (srcPi, srcBlock, targPi, targetBlock, zone, dup) {
-        dragPayload = { kind: "move", page: srcPi, block: srcBlock, duplicate: !!dup };
-        dragTargetZone = zone;
+        setDragPayload({ kind: "move", page: srcPi, block: srcBlock, duplicate: !!dup });
+        setDragTargetZone(zone);
         currentPage = targPi;
         handleDrop({ targetBlock: targetBlock });
       },
       // Insert a new library block onto another block's hotspot.
       insertOnBlock: function (makeIndex, targPi, targetBlock, zone) {
-        dragPayload = { kind: "insert", makeIndex: makeIndex };
-        dragTargetZone = zone;
+        setDragPayload({ kind: "insert", makeIndex: makeIndex });
+        setDragTargetZone(zone);
         currentPage = targPi;
         handleDrop({ targetBlock: targetBlock });
       },
       // Outliner-style reorder: move a block to a page/index slot.
       reorderByIndex: function (srcPi, srcBlock, targPi, targIndex) {
-        dragPayload = { kind: "move", page: srcPi, block: srcBlock, index: -1 };
+        setDragPayload({ kind: "move", page: srcPi, block: srcBlock, index: -1 });
         handleDrop({ page: targPi, index: targIndex });
       },
       // Append (drop onto empty frame area).
       appendToPage: function (srcPi, srcBlock, targPi) {
-        dragPayload = { kind: "move", page: srcPi, block: srcBlock };
+        setDragPayload({ kind: "move", page: srcPi, block: srcBlock });
         handleDrop({ pageIndex: targPi, append: true });
       },
       deleteBlock: function (block) { deleteBlockByRef(block); }
@@ -18826,6 +18516,9 @@
   });
   window.VersoEditor.provide({
     getBlockStyles: getBlockStyles, alignSeg: alignSeg, ensureBlockToolbar: ensureBlockToolbar,
+    // arch-P3b-07t: what the drag overlay reads. `LIBRARY` is the insertable-type table an
+    // Assets-tab drag carries an index into.
+    LIBRARY: LIBRARY, clone: clone, walkBlocks: walkBlocks, cleanupColumns: cleanupColumns,
     // Region-to-region: colour is exposed by editor/color.js, and a need() resolves against
     // provide(), so the bound forwarder is what crosses. It dispatches at call time, which is why
     // it does not matter that colour installs first.
@@ -18894,6 +18587,7 @@
   CV.install(VE);
   window.VersoColor.install(VE);             // installs early: the panels below place its rows
   window.VersoInspectorPrimitives.install(VE);   // and every settings row resolves to one of these
+  window.VersoDndUi.install(VE);             // owns the drag state the outliner and Assets tab read
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has

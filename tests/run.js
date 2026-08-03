@@ -3736,6 +3736,8 @@ section("hotspot inspector: markers consolidated with the list (#45)");
 // drop content into each column. Additive: the implicit side-by-side wrap is untouched.
 section("columns palette block (#94)");
 (function () {
+  // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
+  var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js"), rn = src("src/render.js");
   ok("Columns palette entry makes an EXPLICIT empty 2-column block", /label: "Columns", make: function \(\) \{ return \{ type: "columns", explicit: true, columns: \[\[\], \[\]\] \}/.test(e));
   // an explicit palette Columns block must NOT be collapsed/unwrapped by cleanupColumns
@@ -3765,7 +3767,7 @@ section("columns palette block (#94)");
     var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { intoColumn: { block: col, index: 1 } }, null);
     return res.ok && col.columns[1].length === 1 && col.columns[0].length === 0;
   })());
-  ok("empty columns wired as drop targets", /function attachEmptyColumnDrops[\s\S]*?intoColumn: \{ block: b, index: i \}/.test(e) && /attachEmptyColumnDrops\(node, block\)/.test(e));
+  ok("empty columns wired as drop targets", /function attachEmptyColumnDrops[\s\S]*?intoColumn: \{ block: b, index: i \}/.test(edui) && /attachEmptyColumnDrops\(node, block\)/.test(e));
   ok("cycle guard also covers an intoColumn move", (function () {
     // dropping a columns block into one of its OWN columns would nest it inside itself
     var col = { type: "columns", explicit: true, columns: [[], []] };
@@ -7664,6 +7666,8 @@ section("columns colWidths render");
 // ---- columns colWidths self-heal + resize-handle chrome ----------------------
 section("columns colWidths guards");
 (function () {
+  // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
+  var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js");
   // arch-P3-08: stale per-column widths misalign the row, so both paths that change the column
   // count drop them. Run, not matched.
@@ -7680,7 +7684,7 @@ section("columns colWidths guards");
     var res = dropIn(doc, { kind: "insert", makeIndex: 0 }, { targetBlock: a }, "left");
     return res.ok && row.columns.length === 3 && row.colWidths === undefined;
   })());
-  ok("resize drag redistributes only the adjacent pair (total held)", /var nj = drag\.total - ni/.test(e) && /COL_MIN_PX/.test(e));
+  ok("resize drag redistributes only the adjacent pair (total held)", /var nj = drag\.total - ni/.test(edui) && /COL_MIN_PX/.test(edui));
   ok("resize handle attached in the columns decorate branch", /attachColumnResizers\(node, block\)/.test(e));
   var css = src("editor.css");
   ok("col-resize handle uses col-resize cursor", /\.col-resize-handle\s*\{[^}]*cursor:\s*col-resize/.test(css));
@@ -7691,10 +7695,14 @@ section("columns colWidths guards");
 // ---- swap-columns affordance (hover glyph, swaps adjacent columns) ------------
 section("swap-columns affordance");
 (function () {
+  // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
+  var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js");
 
   // 1. PURE: swapColumns, extracted headlessly.
-  var m = e.match(/\/\* @swap-columns-start \*\/([\s\S]*?)\/\* @swap-columns-end \*\//);
+  // arch-P3b-07t: a fenced slice must follow its code, and the fence is one indent deeper inside
+  // install() now, so the terminating brace widened with it.
+  var m = edui.match(/\/\* @swap-columns-start \*\/([\s\S]*?)\/\* @swap-columns-end \*\//);
   if (!m) { ok("locate @swap-columns fence", false); return; }
   var g = new Function(m[1] + "\nreturn { swapColumns: swapColumns };")();
 
@@ -7722,9 +7730,9 @@ section("swap-columns affordance");
   // 2. WIRING: the swap glyph is attached in the columns decorate branch, alongside the
   // existing resize handles, and mutates via swapColumns (never a bespoke inline swap).
   ok("swap glyph attached in the columns decorate branch", /attachColumnSwaps\(node, block\)/.test(e));
-  ok("swap button uses the canonical iconBtn + Icon(\"arrow-left-right\")", /iconBtn\("arrow-left-right", "Swap these two columns"\)/.test(e));
-  ok("swap click pushes history, mutates via swapColumns, then reapplies + reselects", /pushHistory\(\);\s*\n\s*swapColumns\(block, i\);\s*\n\s*reapplyStructural\(findPageOfBlock\(block\)\);\s*\n\s*reselectBlockNode\(block, "block"\);/.test(e));
-  ok("swap button keeps the field/gap pointer semantics (mousedown/pointerdown preventDefault + stopPropagation)", /btn\.addEventListener\("pointerdown", function \(e\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}\);/.test(e));
+  ok("swap button uses the canonical iconBtn + Icon(\"arrow-left-right\")", /iconBtn\("arrow-left-right", "Swap these two columns"\)/.test(edui));
+  ok("swap click pushes history, mutates via swapColumns, then reapplies + reselects", /pushHistory\(\);\s*\n\s*swapColumns\(block, i\);\s*\n\s*reapplyStructural\(findPageOfBlock\(block\)\);\s*\n\s*reselectBlockNode\(block, "block"\);/.test(edui));
+  ok("swap button keeps the field/gap pointer semantics (mousedown/pointerdown preventDefault + stopPropagation)", /btn\.addEventListener\("pointerdown", function \(e\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); \}\);/.test(edui));
 
   // 3. icons.js: a real vendored Lucide glyph, not a placeholder/ad-hoc SVG.
   var icons = src("src/icons.js");
@@ -7775,10 +7783,12 @@ section("image file drop");
 (function () {
   var e = src("src/editor.js");
   ok("image blocks get attachImageFileDrop in the decoration loop", /block\.type === "image"\) attachImageFileDrop\(node, block\)/.test(e));
-  ok("only EXTERNAL file drags (no dragPayload) + Files present", /function externalImageDrag[\s\S]{0,220}if \(dragPayload\) return false;[\s\S]{0,220}indexOf\.call\(dt\.types \|\| \[\], "Files"\)/.test(e));
+  // arch-P3b-07t: the drag state moved to editor/dnd-ui.js, so this file reads it through its
+  // owner. The guard is the same claim -- an internal block move is not an external file drop.
+  ok("only EXTERNAL file drags (no dragPayload) + Files present", /function externalImageDrag[\s\S]{0,220}if \(dragPayloadNow\(\)\) return false;[\s\S]{0,220}indexOf\.call\(dt\.types \|\| \[\], "Files"\)/.test(e));
   ok("drop accepts image/* files only", /!f \|\| !\/\^image\\\/\/\.test\(f\.type\)/.test(e));
   ok("drop reuses the assetRef upload path", /block\.src = assetRef\(r\.result, f\); reapplyStructural\(findPageOfBlock\(block\)\); reselectBlockNode\(block, "block"\)/.test(e));
-  ok("drop guarded against internal moves (dragPayload)", /node\.addEventListener\("drop", function \(e\) \{\s*if \(dragPayload\) return;/.test(e));
+  ok("drop guarded against internal moves (dragPayload)", /node\.addEventListener\("drop", function \(e\) \{\s*if \(dragPayloadNow\(\)\) return;/.test(e));
   ok("file-drop highlight styled", /\.canvas-block\.is-file-drop\s*\{[^}]*dashed var\(--(?:ui-)?accent\)/.test(src("editor.css")));
 })();
 
@@ -9124,6 +9134,8 @@ section("FR find/replace");
 // ---- PERF: block edits rebuild one page, not the whole world -------------
 section("PERF one-page re-render");
 (function () {
+  // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
+  var edui = src("src/editor/dnd-ui.js");
   var e = src("src/editor.js");
   ok("reapplyStructural = reapplyPage + cheap chrome (no all-pages rebuild)",
     /function reapplyStructural\(pi\) \{[\s\S]{0,220}if \(!ok \|\| isPreview\(\)\) \{ mount\(\); return; \}[\s\S]{0,120}reapplyPage\(i\);[\s\S]{0,600}renderStructure\(\);[\s\S]{0,60}renderModelView\(\);[\s\S]{0,60}renderCommentPins\(\);/.test(e));
@@ -9140,7 +9152,7 @@ section("PERF one-page re-render");
     var moving = { type: "image" }, landing = { type: "heading" };
     var doc = { pages: [{ blocks: [moving] }, { blocks: [landing] }] };
     var res = dropIn(doc, { kind: "move", page: 0, block: moving }, { targetBlock: landing }, "after");
-    var wired = /reapplyStructural\(res\.affected\.length \? res\.affected : -1\);/.test(e);
+    var wired = /reapplyStructural\(res\.affected\.length \? res\.affected : -1\);/.test(edui);
     return wired && res.ok && res.affected.slice().sort().join(",") === "0,1";
   })());
   ok("an Alt-drag duplicate reports only the page it landed on", (function () {
@@ -13733,7 +13745,9 @@ section("#134 cards as drop containers");
     var res = dropIn(doc, { kind: "move", page: 0, block: card }, { intoBlocks: { arrayRef: body, ownerBlock: card } }, null);
     return res.ok === false && res.reason === "cycle" && body.length === 0 && res.historyPushes === 0;
   })());
-  ok("canvas wires each card/side body (incl. front) as a drop target", /function wireItemBodyDrops\(root\)[\s\S]{0,900}card-reveal__front[\s\S]{0,120}"front"/.test(e));
+  // arch-P3b-07t: wireItemBodyDrops moved to editor/dnd-ui.js. The scan window widens by the four
+  // characters per line the extra indent costs.
+  ok("canvas wires each card/side body (incl. front) as a drop target", /function wireItemBodyDrops\(root\)[\s\S]{0,1000}card-reveal__front[\s\S]{0,140}"front"/.test(src("src/editor/dnd-ui.js")));
   ok("canvas wiring is called from enableEditing", /wireItemBodyDrops\(root\); \/\/ #134/.test(e));
   ok("outliner cap rows drop into the item array", /if \(g\.arrayOwner\) \{[\s\S]{0,240}intoBlocks: \{ arrayRef: arr, ownerBlock: blk \}/.test(e));
   ok("outliner block-row drop for items containers routes to the first item", /if \(isItems\) \{[\s\S]{0,260}it0\.children = it0\.children \|\| \[\]/.test(e));
@@ -16618,6 +16632,8 @@ section("arch-P3-07 canvas view");
 // a drag handler. The two that cost data are first.
 section("arch-P3-08 drop resolution");
 (function () {
+  // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
+  var edui = src("src/editor/dnd-ui.js");
   var DND = require(path.join(ROOT, "src/editor/dnd.js")).use(require(path.join(ROOT, "src/editor/hotspots.js")));
   var e = src("src/editor.js");
 
@@ -16690,8 +16706,8 @@ section("arch-P3-08 drop resolution");
 
   // ---- the wiring ----
   ok("editor.js keeps the payload, the history push and the repaint, and nothing else",
-    /DND\.resolveDrop\(\{/.test(e) && /beginEdit: pushHistory/.test(e) &&
-    /dragPayload = null;\s*\n\s*if \(!res\.ok\) \{ if \(res\.reason === "cycle"\) clearDropMarks\(\); return; \}/.test(e));
+    /DND\.resolveDrop\(\{/.test(edui) && /beginEdit: pushHistory/.test(edui) &&
+    /dragPayload = null;\s*\n\s*if \(!res\.ok\) \{ if \(res\.reason === "cycle"\) clearDropMarks\(\); return; \}/.test(edui));
   ok("editor.js holds no block-tree surgery of its own",
     !/function findBlockParent\(blocks, targetBlock\) \{\s*\n\s*for /.test(e) &&
     !/function cleanupColumns\(blocks\) \{\s*\n\s*for /.test(e));
