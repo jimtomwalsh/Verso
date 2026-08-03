@@ -472,6 +472,46 @@ section("P3b namespace (load order)");
     ok(f.rel + " wires its sibling explicitly (use())", /function use\s*\(/.test(f.text));
   });
   ok("every module under src/editor was checked", files.length >= 12);
+
+  // arch-P3b-07w. An ALIAS resolves at INSTALL time. A live binding is safe either way -- E hands
+  // back a getter and the read happens on use -- but a CONSTANT published by another module is
+  // whatever that module has provided by the moment the alias is taken. Alias one before its owner
+  // installs and you get `undefined`, permanently, with no unmet need and no failing boot.
+  // TEXT_CONTENT_TYPES moved to structure-ops.js and copy-editor.js aliases it; the install call
+  // landed after copy-editor's and the table read empty until this gate was written.
+  var order = (src("src/editor.js").match(/window\.(Verso\w+)\.install\(VE\)/g) || [])
+    .map(function (m) { return /window\.(Verso\w+)\./.exec(m)[1]; });
+  var globalOf = {}, constOwner = {};
+  files.forEach(function (f) {
+    var g = /window\.(Verso\w+)\s*=\s*\{\s*install/.exec(f.text);
+    if (g) globalOf[f.rel] = g[1];
+  });
+  files.forEach(function (f) {
+    // kernel.provide({...}) publishes DATA. kernel.provideLive is a getter and is not at risk.
+    var blocks = f.text.match(/kernel\.provide\(\{[\s\S]*?\n\s*\}\)/g) || [];
+    blocks.forEach(function (b) {
+      (b.match(/^\s*(\w+):/gm) || []).forEach(function (k) {
+        constOwner[k.trim().replace(":", "")] = f.rel;
+      });
+    });
+  });
+  var aliasChecked = 0;
+  files.forEach(function (f) {
+    var alias = /\/\/ The stable half[\s\S]*?\n(\s*var [\s\S]*?;)\n/.exec(f.text);
+    if (!alias) return;
+    (alias[1].match(/(\w+) = E\.\1\b/g) || []).forEach(function (pair) {
+      var name = pair.split(" ")[0], owner = constOwner[name];
+      if (!owner || owner === f.rel) return;
+      // Safe by construction when editor.js ALSO binds the name: bind() returns a stable
+      // forwarder that dispatches on call, so the alias points at something that works from the
+      // moment it is taken. The exposed case is a name editor.js only reads back with VE.get.
+      if (src("src/editor.js").indexOf('VE.bind("' + name + '")') > -1) return;
+      aliasChecked++;
+      var oi = order.indexOf(globalOf[owner]), ai = order.indexOf(globalOf[f.rel]);
+      ok(f.rel + " aliases `" + name + "` after its owner installs", oi > -1 && ai > -1 && oi < ai);
+    });
+  });
+  ok("the constant-alias order gate found aliases to check", aliasChecked >= 1);
 })();
 
 // The check no boot performs. A moved region's functions are declared inside its install(), so a
@@ -4082,6 +4122,8 @@ section("exit preview focuses the demo's page (#100)");
 // #90: native Table block — 4-file contract wiring (render / course.css / editor).
 section("table block (#90)");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
@@ -4096,8 +4138,8 @@ section("table block (#90)");
   ok("table header + zebra use theme tokens (no ad-hoc colour)", /th\.table-block__cell \{[\s\S]*?background: var\(--color-surface\)/.test(css) && /\[data-zebra\][\s\S]*?background: var\(--color-surface-alt\)/.test(css));
   // editor.js: palette entry, block-selection type, inspector dispatch, BLOCK_LUCIDE glyph
   ok("Table is in the block palette (Layout group)", /label: "Table", make: function \(\) \{ return \{ type: "table"/.test(ASSETS));
-  ok("table selects as a block (not an inline field)", /=== "table"\) return "block"/.test(e));
-  ok("table dispatches to renderTableInspector via two-level", /block\.type === "table"\) \{ renderBlockTwoLevel\(node, "Table", CONTENT_DECL, renderTableInspector\)/.test(e));
+  ok("table selects as a block (not an inline field)", /=== "table"\) return "block"/.test(SOPS));
+  ok("table dispatches to renderTableInspector via two-level", /block\.type === "table"\) \{ renderBlockTwoLevel\(node, "Table", CONTENT_DECL, renderTableInspector\)/.test(IB));
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
   ok("table has a Lucide glyph", /table: "table"/.test(OUT) && /"table":/.test(ic));
   // F&R parity: cells wired into the enumerator
@@ -4666,6 +4708,7 @@ section("#126 theme presets (copy-on-apply)");
 // ---- #127: blockStyles per type + capture-from-block + render/export cascade --
 section("#127 blockStyles (per-type default appearance cascade)");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // resolveBlockBox (render.js) is the PURE cascade core: theme.blockStyles[type] is the
   // baseline, block.box overrides key-by-key. Exercise the REAL function against a stub.
@@ -4698,7 +4741,7 @@ section("#127 blockStyles (per-type default appearance cascade)");
   // Editor: capture-from-block writes doc.theme.blockStyles[type] via getBlockStyles, and
   // the theme panel edits captured defaults.
   ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?doc\.theme\.blockStyles = \{\};[\s\S]*?return doc\.theme\.blockStyles;/.test(e));
-  ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(e) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(e));
+  ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(BA) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(BA));
   ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(THEME) && /function blockStylesEditor\(intro, listHost\)/.test(THEME));
 })();
 
@@ -5183,8 +5226,13 @@ section("page-dup");
   ok("remintIds re-mints a nested child cid", cdup.children[0].cid !== "c_child" && /^c_9/.test(cdup.children[0].cid));
   ok("remintIds re-mints an item-child cid", cdup.items[0].children[0].cid !== "c_item" && /^c_9/.test(cdup.items[0].children[0].cid));
   // extract duplicatePage, injecting its closure deps
-  var dStart = etxt.indexOf("function duplicatePage(pi)");
-  var dbody = etxt.slice(dStart, etxt.indexOf("\n  }", dStart) + 4);
+  // arch-P3b-07w: the op moved to editor/structure-ops.js, where it reads the live document and
+  // writes the page index through E. Two consequences for an eval'd body: inject an E stand-in
+  // instead of `doc`, and widen the closing marker, because inside install() it closes one indent
+  // deeper.
+  var SOPS = src("src/editor/structure-ops.js");
+  var dStart = SOPS.indexOf("function duplicatePage(pi)");
+  var dbody = SOPS.slice(dStart, SOPS.indexOf("\n    }", dStart) + 6);
   var doc = {
     pages: [
       { id: "src1", name: "Intro", chapterId: "c1", padX: 40, blocks: [
@@ -5206,9 +5254,9 @@ section("page-dup");
   new Function("window", etxt.slice(etxt.indexOf("// >>> P2 auto page-naming helpers"), etxt.indexOf("// <<< P2 auto page-naming helpers"))).call(null, hWin);
   var firstCopyOf = hWin.__firstCopyOf;
   var duplicatePage = new Function(
-    "doc", "clone", "remintIds", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "firstCopyOf",
-    "var currentPage=0;\n" + dbody + "\nreturn duplicatePage;"
-  )(doc, clone, remintIds, eachCourseNav, noop, noop, noop, noop, noop, firstCopyOf);
+    "E", "clone", "remintIds", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "firstCopyOf",
+    dbody + "\nreturn duplicatePage;"
+  )({ doc: doc, setCurrentPage: noop }, clone, remintIds, eachCourseNav, noop, noop, noop, noop, noop, firstCopyOf);
 
   duplicatePage(0);
   ok("page inserted right after source", doc.pages.length === 3 && doc.pages[2].id === "p2");
@@ -5247,9 +5295,11 @@ section("page-dup");
 // ---- page-merge: mergePageWithNext (concat blocks, same-chapter guard, nav sync)
 section("page-merge");
 (function () {
-  var etxt = src("src/editor.js");
+  // arch-P3b-07w: in editor/structure-ops.js now — E stands in for the live document and page
+  // index, and the body closes one indent deeper inside install().
+  var etxt = src("src/editor/structure-ops.js");
   var s = etxt.indexOf("function mergePageWithNext(pi)");
-  var body = etxt.slice(s, etxt.indexOf("\n  }", s) + 4);
+  var body = etxt.slice(s, etxt.indexOf("\n    }", s) + 6);
   var doc = {
     pages: [
       { id: "a", chapterId: "c1", blocks: [{ type: "heading", id: "b_1" }] },
@@ -5263,8 +5313,8 @@ section("page-merge");
     [hf.header, hf.footer].forEach(function (r) { if (r && r.children) r.children.forEach(function (bl) { if (bl.type === "courseNav") fn(bl); }); });
   };
   var alerts = [], noop = function () {};
-  var merge = new Function("doc", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "window",
-    "var currentPage=1;\n" + body + "\nreturn mergePageWithNext;")(doc, eachCourseNav, noop, noop, noop, noop, noop, { alert: function (m) { alerts.push(m); } });
+  var merge = new Function("E", "eachCourseNav", "pushHistory", "mount", "setActivePage", "focusFrame", "setSelection", "window",
+    body + "\nreturn mergePageWithNext;")({ doc: doc, currentPage: 1, setCurrentPage: noop }, eachCourseNav, noop, noop, noop, noop, noop, { alert: function (m) { alerts.push(m); } });
   merge(0); // a + b (same chapter)
   ok("merge: pages reduced to 2", doc.pages.length === 2);
   ok("merge: blocks concatenated in order", doc.pages[0].blocks.map(function (x) { return x.id; }).join(",") === "b_1,b_2,b_3");
@@ -5556,6 +5606,8 @@ section("shared-library palette insert");
 // ---- #20: library-instance mirror (live-linked, promote ANY composed block) -----
 section("#20 library-instance mirror");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
   var rtxt = src("src/render.js");
@@ -5574,8 +5626,8 @@ section("#20 library-instance mirror");
   // componentGrid's existing precedent for a def-resolving block type.
   ok("TWO_LEVEL_TYPES includes libraryInstance (contentless like componentGrid)",
     require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("libraryInstance"));
-  ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(etxt));
-  ok("inspector dispatch reuses renderContentlessBlock", /if \(block\.type === "libraryInstance"\) \{ renderContentlessBlock\(node, "Library instance", renderLibraryInstanceBody\); return; \}/.test(etxt));
+  ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(SOPS));
+  ok("inspector dispatch reuses renderContentlessBlock", /if \(block\.type === "libraryInstance"\) \{ renderContentlessBlock\(node, "Library instance", renderLibraryInstanceBody\); return; \}/.test(IB));
   ok("block-icon map has a libraryInstance glyph", /libraryInstance: "component"/.test(OUT));
   ok("tree label resolves the master's name via resolveComponentDef", /if \(b\.type === "libraryInstance"\) \{ var libDef = resolveComponentDef\(b\.ref\)/.test(OUT));
 
@@ -5915,6 +5967,7 @@ section("product-rail facet pointer schema");
 // ---- #22: section + page library masters ------------------------------------
 section("#22 section + page library masters");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var rtxt = src("src/render.js");
   var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
@@ -5946,20 +5999,20 @@ section("#22 section + page library masters");
 
   // 3. editor.js: capture / insert / detach / where-used, all mirroring the block-level
   // (#19/#20/#21/#24) conventions at page scope.
-  var spStart = etxt.indexOf("function savePageAsLibraryMaster(pi)");
-  var spBody = etxt.slice(spStart, spStart + 900);
+  var spStart = SOPS.indexOf("function savePageAsLibraryMaster(pi)");
+  var spBody = SOPS.slice(spStart, spStart + 900);
   ok("savePageAsLibraryMaster found", spStart !== -1);
   ok("page capture mints every block's id ONCE (remintIds per block, #19's contract)", /var blocks = \(page\.blocks \|\| \[\]\)\.map\(function \(b\) \{ return remintIds\(clone\(b\)\); \}\)/.test(spBody));
   ok("saves kind:\"page\" directly to the shared library (no doc.components staging step)", /kind: "page", template: \{ blocks: blocks \}/.test(spBody));
 
-  var ipStart = etxt.indexOf("function insertPageFromLibrary(key)");
+  var ipStart = SOPS.indexOf("function insertPageFromLibrary(key)");
   ok("insertPageFromLibrary found", ipStart !== -1);
-  var ipBody = etxt.slice(ipStart, ipStart + 700);
+  var ipBody = SOPS.slice(ipStart, ipStart + 700);
   ok("mints a fresh page id (never reused from the master)", /id: "page-" \+ Date\.now\(\) \+ "-" \+ Math\.random\(\)/.test(ipBody));
   ok("syncs courseNav section membership like duplicatePage does", /eachCourseNav\(function \(nav\)/.test(ipBody));
 
-  var dpStart = etxt.indexOf("function detachPageLibraryInstance(pi)");
-  var dpBody = etxt.slice(dpStart, dpStart + 900);
+  var dpStart = SOPS.indexOf("function detachPageLibraryInstance(pi)");
+  var dpBody = SOPS.slice(dpStart, dpStart + 900);
   ok("detachPageLibraryInstance found", dpStart !== -1);
   var dpAxisIdx = dpBody.indexOf("resolveLibraryAxisContent(withOverrides");
   var dpOvIdx = dpBody.indexOf("applyInstanceOverrides(withOverrides");
@@ -6039,13 +6092,19 @@ section("multi-selection batch style");
 // ---- DDD: undo coverage — structural mutators push history, redo invalidates
 section("DDD undo-coverage");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var t = src("src/editor.js");
   // arch-P3b-07h: insertBlock moved to src/editor/assets.js with the palette that calls it, and a
   // function body there closes one indent deeper, inside install().
   var ASSETS = src("src/editor/assets.js");
   function bodyOf(name) {
     var s = t.indexOf("function " + name + "("), src2 = t, end = "\n  }";
-    if (s < 0) { s = ASSETS.indexOf("function " + name + "("); src2 = ASSETS; end = "\n    }"; }
+    // arch-P3b-07w: duplicateBlock and moveBlock left with the structure ops, and a body inside
+    // install() closes one indent deeper in either module.
+    [ASSETS, SOPS].forEach(function (mod) {
+      if (s >= 0) return;
+      s = mod.indexOf("function " + name + "("); src2 = mod; end = "\n    }";
+    });
     return s < 0 ? "" : src2.slice(s, src2.indexOf(end, s) + end.length);
   }
   ok("duplicateBlock pushes history", /pushHistory\(\)/.test(bodyOf("duplicateBlock")));
@@ -6326,6 +6385,8 @@ section("chapter menu dismiss");
 // ---- #168 Nav settings single-source: Settings 'Learner nav' targets the canonical footer nav ----
 section("#168 learner-nav single source");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
   // The Settings 'Learner nav' tab must resolve the CANONICAL footer nav (footerCourseNav),
@@ -6334,12 +6395,12 @@ section("#168 learner-nav single source");
   ok("Settings 'Learner nav' sections use footerCourseNav (not first-found)", /function navSettingsSections\(\) \{\s*\n\s*var n = footerCourseNav\(\);/.test(SS));
   ok("old first-found pattern is gone from the nav tab", !/title: "Learner nav"[\s\S]{0,120}eachCourseNav\(function \(x\) \{ if \(!n\) n = x; \}\)/.test(e));
   // footerCourseNav resolves ONLY the footer region's courseNav (the single creatable instance).
-  var fn = slice(e, "function footerCourseNav()", "\n  }");
-  ok("footerCourseNav reads doc.headerFooter.footer", /doc\.headerFooter && doc\.headerFooter\.footer/.test(fn));
+  var fn = slice(SOPS, "function footerCourseNav()", "\n    }");
+  ok("footerCourseNav reads doc.headerFooter.footer", /E\.doc\.headerFooter && E\.doc\.headerFooter\.footer/.test(fn));
   ok("footerCourseNav walks the footer children for a courseNav", /walkPageBlocks\(f\.children, function \(b\) \{ if \(b\.type === "courseNav" && !found\) found = b; \}\)/.test(fn));
   // The canvas side panel still edits the SELECTED nav (direct manipulation) — when the footer
   // nav is selected that is the SAME object footerCourseNav returns, so the two surfaces mirror.
-  ok("side-panel nav inspector edits the selected node", /function renderCourseNavInspector\(node\) \{[\s\S]{0,160}courseNavControls\(block, inspector\)/.test(e));
+  ok("side-panel nav inspector edits the selected node", /function renderCourseNavInspector\(node\) \{[\s\S]{0,200}courseNavControls\(block, E\.inspector\)/.test(IB));
 })();
 
 // ---- #169 Pin-to-gutters: runtime fixed-pin ships; the authoring canvas previews it ----
@@ -6630,6 +6691,7 @@ section("quiz per-field styles");
 // ---- SVG colour switching: a detected colour can be switched to a fixed custom colour ----
 section("svg colour switching");
 (function () {
+  var ep = src("src/editor/inspector/primitives.js");   // arch-P3b-07y
   var r = src("src/render.js");
   var e = src("src/editor.js");
   // isColorLiteral distinguishes a literal colour from a theme-token key
@@ -6641,8 +6703,8 @@ section("svg colour switching");
   ok("toCssColor maps token->var and literal->as-is", /function toCssColor\(tok\) \{ return isColorLiteral\(tok\) \? tok\.trim\(\) : "var\(--color-" \+ kebabToken\(tok\) \+ "\)"; \}/.test(r));
   ok("recolorNode uses toCssColor for both attr + inline forms", /setStyleProp\(style, attr, toCssColor\(tok\)\)/.test(r) && /prop \+ ":" \+ toCssColor\(tok\)/.test(r));
   // editor: a per-colour "Switch to colour" picker writes a fixed hex into colorMap
-  ok("inspector exposes a Switch-to-colour picker", /colourControl\("Switch to colour", isHexMap \? explicit : null/.test(e));
-  ok("custom hex round-trips: reflected as a Custom-colour select option", /if \(isHexMap\) selOpts\.unshift\(\["Custom colour", "__custom"\]\)/.test(e) && /if \(v === "__custom"\) return;/.test(e));
+  ok("inspector exposes a Switch-to-colour picker", /colourControl\("Switch to colour", isHexMap \? explicit : null/.test(ep));
+  ok("custom hex round-trips: reflected as a Custom-colour select option", /if \(isHexMap\) selOpts\.unshift\(\["Custom colour", "__custom"\]\)/.test(ep) && /if \(v === "__custom"\) return;/.test(ep));
 })();
 
 // ---- Inline hyperlinks in text (external URL, new tab, theme-aware) ---------------
@@ -6749,6 +6811,8 @@ section("vimeo hash");
 // ---- HTML-interaction palette linking (Phase 2): map an interaction's own vars to theme ----
 section("embed palette linking");
 (function () {
+  var ep = src("src/editor/inspector/primitives.js");   // arch-P3b-07y
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -6773,24 +6837,24 @@ section("embed palette linking");
   // exported runtime forwards + applies the map too
   ok("exported runtime forwards data-embed-colormap", /getAttribute\('data-embed-colormap'\)/.test(x) && /if\(mp\)\{ for\(var mk in mp\)/.test(x));
   // inspector exposes the per-var palette control
-  ok("embed inspector has an Interaction colours palette (detects inline OR bundled src)", /disclosure\("embedPalette", "Interaction colours"/.test(e) && /detectEmbedColorVars\(embedHtmlForInspect\(block\)\)/.test(ASSETS));
+  ok("embed inspector has an Interaction colours palette (detects inline OR bundled src)", /disclosure\("embedPalette", "Interaction colours"/.test(IB) && /detectEmbedColorVars\(embedHtmlForInspect\(block\)\)/.test(ASSETS));
   ok("bundled-file interactions decode their HTML for detection", /function embedHtmlForInspect\(block\)[\s\S]*?atob\(m\[2\]\)/.test(ASSETS));
   // palette writes must persist NOW (scheduleSave), not only on the 4s autosave tick —
   // else a colour mapping made just before a hard refresh is lost (WKWebView skips
   // beforeunload on Cmd+R). One choke for embed / SVG-image / glossary palettes.
-  ok("paletteColorRow persists the map on every write (scheduleSave)", /function apply\(\) \{ o\.refresh\(\); scheduleSave\(\); \}/.test(e));
+  ok("paletteColorRow persists the map on every write (scheduleSave)", /function apply\(\) \{ o\.refresh\(\); scheduleSave\(\); \}/.test(ep));
   // #85: opening the inspector + every palette re-render decoded + regex-parsed the
   // full interaction markup with no caching (a 2-3s freeze). Detection is now cached
   // per block, keyed on its html/src, and the palette reads through the cache.
   ok("#85 embed colour-var detection is cached per block (keyed on html/src)",
     /function embedColorVarsCached\(block\)[\s\S]*?_embedVarCache\.get\(block\)[\s\S]*?_embedVarCache\.set\(block, \{ sig: sig, vars: vars \}\)/.test(ASSETS));
   ok("#85 the palette reads detection through the cache (no per-render decode)",
-    /var embedVars = embedColorVarsCached\(block\);/.test(e));
+    /var embedVars = embedColorVarsCached\(block\);/.test(IB));
   // #85: a colour-map change must recolour the iframe LIVE (push the theme), NOT
   // tear it down + reload it (the per-click 2-3s freeze). embedRefresh rewrites the
   // baked data-embed-colormap covering every var (Keep -> authored literal, so a
   // revert applies live too) and re-pushes the theme, with NO reRenderBlockNode.
-  var erBody = e.slice(e.indexOf("var embedRefresh = function"), e.indexOf("embedVars.forEach(function (v)"));
+  var erBody = IB.slice(IB.indexOf("var embedRefresh = function"), IB.indexOf("embedVars.forEach(function (v)"));
   ok("#85 colour-map change recolours live via pushEmbedTheme (no iframe reload)",
     erBody.indexOf("reRenderBlockNode") === -1 && /pushEmbedTheme\(canvas/.test(erBody) && /data-embed-colormap/.test(erBody));
   ok("#85 live recolour covers Keep/absent vars with their authored literal (reverts apply live)",
@@ -6800,6 +6864,7 @@ section("embed palette linking");
 // ---- §6: Card Reveal cover = real frosted glass (translucent) + author control ----
 section("card-reveal flip / off modes");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
   // render: revealStyle -> data-reveal-style, face suppressed for off
   ok("render stamps data-reveal-style (reveal|flip|off)", /var revealStyle = block\.revealStyle === "flip" \? "flip" : block\.revealStyle === "off" \? "off" : "reveal";\s*root\.setAttribute\("data-reveal-style", revealStyle\)/.test(r));
@@ -6834,11 +6899,12 @@ section("card-reveal flip / off modes");
   // revealed indefinitely, bound on the card (fires through the cleared cover). (Fix 2026-07-08.)
   ok("frost card click LATCHES open (add is-revealed, not toggle)", /\} else \{[\s\S]*?card\.addEventListener\("click", function \(e\) \{[\s\S]*?classList\.add\("is-revealed"\)/.test(rt) && !/cover\.addEventListener\("click"/.test(rt));
   // editor: the mode segment
-  ok("editor has a Reveal style segment (Reveal|Flip|Off)", /segmentedLive\("Reveal style", \[\["Reveal", "reveal"\], \["Flip", "flip"\], \["Off", "off"\]\]/.test(e));
+  ok("editor has a Reveal style segment (Reveal|Flip|Off)", /segmentedLive\("Reveal style", \[\["Reveal", "reveal"\], \["Flip", "flip"\], \["Off", "off"\]\]/.test(IB));
 })();
 
 section("card-reveal cover glass");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var css = src("src/course.css");
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -6851,8 +6917,8 @@ section("card-reveal cover glass");
   ok("render sets --cr-cover-opacity from block.coverOpacity", /--cr-cover-opacity", block\.coverOpacity \+ "%"/.test(r));
   ok("render sets --cr-cover-blur from block.coverBlur", /--cr-cover-blur", block\.coverBlur \+ "px"/.test(r));
   // inspector exposes the controls (only when the cover is on)
-  ok("inspector has a Cover colour control (colorFieldFlat)", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e));
-  ok("inspector has Cover opacity + blur iconFields", /title: "Cover opacity"[\s\S]*?block\.coverOpacity[\s\S]*?title: "Cover blur"[\s\S]*?block\.coverBlur/.test(e));
+  ok("inspector has a Cover colour control (colorFieldFlat)", /colorFieldFlat\("Cover colour", block\.coverColor/.test(IB));
+  ok("inspector has Cover opacity + blur iconFields", /title: "Cover opacity"[\s\S]*?block\.coverOpacity[\s\S]*?title: "Cover blur"[\s\S]*?block\.coverBlur/.test(IB));
 })();
 
 // ---- §6: Accordion/Tabs beautified to the Card-Reveal visual standard ------
@@ -6876,6 +6942,7 @@ section("accordion card-reveal standard");
 // Shared across card-reveal + accordion/tabs. Pure block data -> data-pattern + --tex-color.
 section("surface pattern controls");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var css = src("src/course.css");
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -6893,10 +6960,10 @@ section("surface pattern controls");
   ok("cardReveal render pipes --tex-color", /block\.patternColor\) root\.style\.setProperty\("--tex-color", block\.patternColor\)/.test(r));
   ok("accordion render stamps data-pattern + --tex-color", (r.match(/root\.setAttribute\("data-pattern"/g) || []).length >= 2 && (r.match(/setProperty\("--tex-color", block\.patternColor\)/g) || []).length >= 2);
   // inspector: shared control on both block types (segmented Grid/Dots/None + colour)
-  ok("patternControls helper exists", /function patternControls\(block, refresh, target\)/.test(e));
-  ok("patternControls offers Grid/Dots/None", /segmentedLive\("Pattern", \[\["Grid", "grid"\], \["Dots", "dots"\], \["None", "none"\]\]/.test(e));
-  ok("patternControls has a colour control (colorFieldFlat)", /colorFieldFlat\("Pattern colour", block\.patternColor/.test(e));
-  ok("both inspectors call patternControls", (e.match(/patternControls\(block, refresh\)/g) || []).length >= 2);
+  ok("patternControls helper exists", /function patternControls\(block, refresh, target\)/.test(IB));
+  ok("patternControls offers Grid/Dots/None", /segmentedLive\("Pattern", \[\["Grid", "grid"\], \["Dots", "dots"\], \["None", "none"\]\]/.test(IB));
+  ok("patternControls has a colour control (colorFieldFlat)", /colorFieldFlat\("Pattern colour", block\.patternColor/.test(IB));
+  ok("both inspectors call patternControls", (IB.match(/patternControls\(block, refresh\)/g) || []).length >= 2);
 })();
 
 // ---- accordion/cardReveal children are first-class in the block tree --------
@@ -6940,6 +7007,7 @@ section("nested items[].children traversal");
 // these guards lock the tracer render + registration + token-driven styling.
 section("sequence block tracer");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -6957,7 +7025,7 @@ section("sequence block tracer");
   // shared surface-texture shape (data-pattern + --tex-color), like accordion / card-reveal
   ok("sequence stamps data-pattern + --tex-color", /root\.setAttribute\("data-pattern", block\.pattern === "dots" \|\| block\.pattern === "none" \? block\.pattern : "grid"\)/.test(r) && /block\.patternColor\) root\.style\.setProperty\("--tex-color", block\.patternColor\)/.test(r.slice(r.indexOf("sequence: function"))));
   // registration: container-classifier treats it as a "block", palette entry exists in Layout
-  ok("sequence is a container 'block' in the selection classifier", /block\.type === "cardReveal" \|\| block\.type === "sequence"/.test(e));
+  ok("sequence is a container 'block' in the selection classifier", /block\.type === "cardReveal" \|\| block\.type === "sequence"/.test(SOPS));
   ok("sequence has a Layout palette entry seeding 3 steps", /label: "Sequence[\s\S]*?type: "sequence", spine: "numbered", orient: "vertical", reveal: "scroll", items: \[1, 2, 3\]/.test(ASSETS));
   // token-driven styling only (design-gate: no bespoke per-element colour): connector = hairline,
   // node surface = per-mode card fill, marker text = accent
@@ -6973,6 +7041,8 @@ section("sequence block tracer");
 // sequence -> nested delete/drag/drop/traversal inherited. Numbers DERIVED at render.
 section("card deck block");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -6993,11 +7063,11 @@ section("card deck block");
   // per-mode fill switches light/dark (author override via cardBox.fillDark/fillLight)
   ok("cardDeck fill switches per-mode", /--cd-fill-dark/.test(cd) && /--cd-fill-light/.test(cd));
   // registration: container-classifier treats it as a "block"; TWO_LEVEL; Layout palette
-  ok("cardDeck is a container 'block' in the selection classifier", /block\.type === "cardDeck" \|\| block\.type === "courseNav"/.test(e));
+  ok("cardDeck is a container 'block' in the selection classifier", /block\.type === "cardDeck" \|\| block\.type === "courseNav"/.test(SOPS));
   ok("cardDeck is a two-level type", require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("cardDeck"));
   ok("cardDeck has a Layout palette entry", /label: "Card Deck \(carousel\)"[\s\S]*?type: "cardDeck", items:/.test(ASSETS));
-  ok("block inspector dispatches cardDeck -> two-level shell (renderCardDeckInspector)", /block\.type === "cardDeck"\) \{ renderBlockTwoLevel\(node, "Card deck", CONTENT_DECL, renderCardDeckInspector\); return; \}/.test(e));
-  ok("renderCardDeckInspector exists + reuses repeatedList + patternControls", /function renderCardDeckInspector\(node\)/.test(e) && /repeatedList\(inspector, "Cards"/.test(e) && /patternControls\(block, refresh\)/.test(e.slice(e.indexOf("function renderCardDeckInspector"))));
+  ok("block inspector dispatches cardDeck -> two-level shell (renderCardDeckInspector)", /block\.type === "cardDeck"\) \{ renderBlockTwoLevel\(node, "Card deck", CONTENT_DECL, renderCardDeckInspector\); return; \}/.test(IB));
+  ok("renderCardDeckInspector exists + reuses repeatedList + patternControls", /function renderCardDeckInspector\(node\)/.test(IB) && /repeatedList\(E\.inspector, "Cards"/.test(IB) && /patternControls\(block, refresh\)/.test(IB.slice(IB.indexOf("function renderCardDeckInspector"))));
   // runtime paging engine wired into create(), armed so the editor still shows all cards
   ok("runtime defines bindCardDeck + create() calls it", /function bindCardDeck\(root\)/.test(rt) && /bindCardDeck\(root\); \/\/ Card Deck paging/.test(rt));
   ok("cardDeck paging is runtime-gated (is-armed), clamped (no wrap)", /deck\.classList\.add\("is-armed"\)/.test(rt) && /active > 0/.test(rt) && /active < cards\.length - 1/.test(rt));
@@ -7038,18 +7108,19 @@ section("card deck block");
 // "+ block" escape-hatch. Horizontal renders fit/wrap (NOT a sideways filmstrip).
 section("sequence inspector + toggles");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var e = src("src/editor.js");
   var css = src("src/course.css");
   // dedicated inspector, dispatched like accordion / cardReveal
-  ok("renderSequenceInspector exists", /function renderSequenceInspector\(node\)/.test(e));
-  ok("block inspector dispatches sequence -> two-level shell (Content = renderSequenceInspector)", /block\.type === "sequence"\) \{ renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\); return; \}/.test(e));
-  var insp = e.slice(e.indexOf("function renderSequenceInspector"), e.indexOf("// TTTT: Card Reveal inspector"));
+  ok("renderSequenceInspector exists", /function renderSequenceInspector\(node\)/.test(IB));
+  ok("block inspector dispatches sequence -> two-level shell (Content = renderSequenceInspector)", /block\.type === "sequence"\) \{ renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\); return; \}/.test(IB));
+  var insp = IB.slice(IB.indexOf("function renderSequenceInspector"), IB.indexOf("// TTTT: Card Reveal inspector"));
   // Spine segmented toggle (Numbered / Dated / Plain) writes block.spine
   ok("spine toggle offers Numbered/Dated/Plain", /segmentedLive\("Marker", \[\["Numbered", "numbered"\], \["Dated", "dated"\], \["Plain", "plain"\]\]/.test(insp) && /block\.spine = v;/.test(insp));
   // Orientation segmented toggle (Vertical / Horizontal) writes block.orient
   ok("orientation toggle offers Vertical/Horizontal", /segmentedLive\("Orientation", \[\["Vertical", "vertical"\], \["Horizontal", "horizontal"\]\]/.test(insp) && /block\.orient = v;/.test(insp));
   // Steps section: add (propHeader), per-step title field, reorder (swap), delete, +block
-  ok("Steps use the repeatedList primitive with an Add step header", /repeatedList\(inspector, "Steps", \{[\s\S]*?addLabel: "Add step"/.test(insp));
+  ok("Steps use the repeatedList primitive with an Add step header", /repeatedList\(E\.inspector, "Steps", \{[\s\S]*?addLabel: "Add step"/.test(insp));
   ok("per-step title = repeatedList value/setValue on item.title", /value: function \(it\) \{ return it\.title; \}[\s\S]*?setValue: function \(it, v\) \{ it\.title = v;/.test(insp));
   ok("Dated spine shows a free-text date field (rowExtras)", /if \(spine === "dated"\) \{[\s\S]*?rep-row__extra-field[\s\S]*?item\.date = dateIn\.value/.test(insp));
   ok("reorder = repeatedList move (splice from -> to)", /move: function \(from, to\) \{ var m = block\.items\.splice\(from, 1\)\[0\]; block\.items\.splice\(to, 0, m\);/.test(insp));
@@ -7059,7 +7130,7 @@ section("sequence inspector + toggles");
   ok("sequence inspector reuses patternControls", /patternControls\(block, refresh\)/.test(insp));
   // #37: sequence adopts the canonical taxonomy (Behaviour/Appearance/Content sectionGroups),
   // no longer a flat panel — the last item-list straggler now matches accordion/cardReveal.
-  ok("#37: sequence wraps its body in beginSections()/endSections()", /beginSections\(\);/.test(insp) && /endSections\(inspector\);/.test(insp));
+  ok("#37: sequence wraps its body in beginSections()/endSections()", /beginSections\(\);/.test(insp) && /endSections\(E\.inspector\);/.test(insp));
   ok("#37: sequence has Behaviour + Appearance + Content sectionGroups", /sectionGroup\("Behaviour", "Behaviour"/.test(insp) && /sectionGroup\("Appearance", "Appearance"/.test(insp) && /sectionGroup\("Content", "Steps"/.test(insp));
   ok("#37: sequence dropped the flat sub(\"Spine\") header (Behaviour title carries it)", !/sub\("Spine"\)/.test(insp));
   // Horizontal orientation CSS: fit/wrap row, overflow-x reachability only, horizontal connector
@@ -7073,6 +7144,7 @@ section("sequence inspector + toggles");
 // into the runtime create() so it ships in the exported SCORM. Reduced-motion -> static.
 section("sequence reveal engine");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var rt = src("src/runtime.js");
   var r = src("src/render.js");
   var css = src("src/course.css");
@@ -7104,7 +7176,7 @@ section("sequence reveal engine");
   ok("click hides future steps via the runtime class", /\.seq\[data-seq-reveal="click"\] \.seq__step\.is-future \{ display: none; \}/.test(css));
   ok("reduced-motion forces armed steps to show statically", /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.seq\.is-armed \.seq__step \{ opacity: 1; transform: none/.test(css));
   // inspector: Reveal segmented toggle writes block.reveal
-  ok("inspector has a Reveal toggle (Scroll/Click/Static)", /segmentedLive\("Reveal", \[\["Scroll", "scroll"\], \["Click", "click"\], \["Static", "static"\]\]/.test(e) && /block\.reveal = v;/.test(e));
+  ok("inspector has a Reveal toggle (Scroll/Click/Static)", /segmentedLive\("Reveal", \[\["Scroll", "scroll"\], \["Click", "click"\], \["Static", "static"\]\]/.test(IB) && /block\.reveal = v;/.test(IB));
 })();
 
 // ---- Sequence block — slice 4: appearance (token-driven + surface texture) ------------
@@ -7113,6 +7185,7 @@ section("sequence reveal engine");
 // (data-pattern) so the patternControls toggle (added in slice 2) actually renders.
 section("sequence appearance + texture");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var css = src("src/course.css");
   var r = src("src/render.js");
   var e = src("src/editor.js");
@@ -7126,7 +7199,7 @@ section("sequence appearance + texture");
   // render stamps data-pattern (grid default) + pipes --tex-color, like the sibling blocks
   ok("sequence render stamps data-pattern + --tex-color", /root\.setAttribute\("data-pattern", block\.pattern === "dots" \|\| block\.pattern === "none" \? block\.pattern : "grid"\)/.test(r.slice(r.indexOf("sequence: function"))));
   // universal appearance panel reaches the block via renderBlockActionsSection (not suppressed)
-  ok("sequence inspector runs the universal renderBlockActionsSection (appearance not suppressed)", /function renderSequenceInspector[\s\S]*?renderBlockActionsSection\(block\);\n  \}/.test(e));
+  ok("sequence inspector runs the universal renderBlockActionsSection (appearance not suppressed)", /function renderSequenceInspector[\s\S]*?renderBlockActionsSection\(block\);\n    \}/.test(IB));
 })();
 
 // ---- Sequence block — slice 5: per-step icons ----------------------------------------
@@ -7134,6 +7207,7 @@ section("sequence appearance + texture");
 // data-URLs; raster falls back to <img>); Dated keeps its date beside the icon; absent -> number.
 section("sequence per-step icons");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var r = src("src/render.js");
   var e = src("src/editor.js");
   var css = src("src/course.css");
@@ -7145,7 +7219,7 @@ section("sequence per-step icons");
   // Dated + icon: the date moves beside the icon as a caption (icon took the marker slot)
   ok("dated + icon keeps the date beside the icon", /if \(item\.icon && spine === "dated" && hasDate\) body\.appendChild\(el\("div", "seq__date", String\(item\.date\)\)\)/.test(seqFn));
   // editor: per-step icon slot uploads via assetRef and a Remove control clears it
-  var insp = e.slice(e.indexOf("function renderSequenceInspector"), e.indexOf("// TTTT: Card Reveal inspector"));
+  var insp = IB.slice(IB.indexOf("function renderSequenceInspector"), IB.indexOf("// TTTT: Card Reveal inspector"));
   ok("inspector step row has an icon upload (assetRef, rowExtras)", /iconBtn\("image"[\s\S]*?item\.icon = assetRef\(rd\.result, f\)/.test(insp));
   ok("inspector shows a Remove icon control when set (rowExtras)", /if \(item\.icon\) \{ var rm = iconBtn\("minus"[\s\S]*?delete item\.icon/.test(insp));
   // CSS: icon fills the node; plain-dot shrink excludes icon markers so the icon keeps full size
@@ -7160,6 +7234,7 @@ section("sequence per-step icons");
 // sub-block, column, item and question (the skeleton), and recurse the canonical subtree shape.
 section("clear content #174");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
@@ -7168,10 +7243,12 @@ section("clear content #174");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   var e = src("src/editor.js");
-  var s = e.indexOf("var TEXT_CONTENT_TYPES = {");
-  var end = e.indexOf("window.__clearBlockContent");
-  ok("#174 clearBlockContent + TEXT_CONTENT_TYPES present in editor.js", s >= 0 && end > s);
-  var clearBlockContent = new Function(e.slice(s, end) + "\nreturn clearBlockContent;")();
+  // arch-P3b-07w: the pure subtree clear and its type table moved to editor/structure-ops.js.
+  var SOPS = src("src/editor/structure-ops.js");
+  var s = SOPS.indexOf("var TEXT_CONTENT_TYPES = {");
+  var end = SOPS.indexOf("window.__clearBlockContent");
+  ok("#174 clearBlockContent + TEXT_CONTENT_TYPES present in structure-ops.js", s >= 0 && end > s);
+  var clearBlockContent = new Function(SOPS.slice(s, end) + "\nreturn clearBlockContent;")();
 
   // text-style blocks -> empty .text
   var tb = { type: "paragraph", text: "hello" }; clearBlockContent(tb);
@@ -7209,12 +7286,12 @@ section("clear content #174");
   // wiring guards: exposed on both surfaces + gated
   ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? E\.multiSel\.slice\(\) : block\); \}/.test(OUT));
   ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(ecm));
-  ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
+  ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(BA));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
   ok("#174 container-chrome acts[] includes the eraser via handlers.clearContent", /handlers\.clearContent === "function"\) acts\.push\(\["eraser", "Clear content \(keep structure\)", handlers\.clearContent, false\]\)/.test(ep));
   ok("#174 blockChromeHandlers exposes clearContent -> clearBlockContentAction([block])", /clearContent: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(eh));
-  ok("#174 clear action is confirm-gated + pushes history (destructive, undoable)", /confirmModal\("Clear content",[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}list\.forEach\(clearBlockContent\)/.test(e));
+  ok("#174 clear action is confirm-gated + pushes history (destructive, undoable)", /confirmModal\("Clear content",[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}list\.forEach\(clearBlockContent\)/.test(SOPS));
   ok("#174 eraser glyph vendored in icons.js", /"eraser":/.test(src("src/icons.js")));
 })();
 
@@ -7245,6 +7322,9 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
@@ -7343,15 +7423,15 @@ section("richer bullet lists");
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
   ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(SS) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(SS));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
-  ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
-  ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
+  ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(IB) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, E\.inspector\)/.test(IB));
+  ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(SOPS));
   ok("clicking the nav-bar background selects it (not its buttons/toggle)", /var navBar = e\.target\.closest\("\.course-nav\.canvas-block"\)[\s\S]*?!e\.target\.closest\("\[data-edit\], \.course-nav__btn, \.mode-toggle, button, a"\)[\s\S]*?setSelection\("block", navBar\)/.test(DRILL));
   // PERF: incremental single-page render — James 2026-07-08
   ok("reapplyPage rebuilds ONE frame's content (renderPage + fold), not the world", /function reapplyPage\(i\)[\s\S]*?frameDescs\[i\][\s\S]*?window\.renderPage\(page[\s\S]*?enableEditing\(frame\)/.test(e));
   ok("reapplyPage falls back to full rebuild for variants\/language\/missing frame", /function reapplyPage\(i\) \{[\s\S]*?if \(!fd \|\| isPreview\(\)\) \{ reapplyWorld\(\); return; \}/.test(e));
   ok("reapplyBlock resolves the block's page then rebuilds just it", /function reapplyBlock\(block\) \{[\s\S]*?findPageOfBlock\(block\)[\s\S]*?reapplyPage\(pi\)/.test(e));
-  ok("block Spacing edits use the incremental page rebuild", /var onSpace  = opts\.onSpace  \|\| function \(\) \{ reapplyBlock\(block\)/.test(e));
-  ok("block Align\/Vertical edits use the incremental page rebuild", (e.match(/reapplyBlock\(block\); reselectBlockNode\(block, getSelectionTypeForBlock\(block\)\);/g) || []).length >= 2);
+  ok("block Spacing edits use the incremental page rebuild", /var onSpace  = opts\.onSpace  \|\| function \(\) \{ reapplyBlock\(block\)/.test(BA));
+  ok("block Align\/Vertical edits use the incremental page rebuild", (BA.match(/reapplyBlock\(block\); reselectBlockNode\(block, getSelectionTypeForBlock\(block\)\);/g) || []).length >= 2);
   ok("header\/footer padding pokes live on .course-header\/.course-footer", /function pokeHeaderFooterLive\(cfg, key\)[\s\S]*?cfg === hf\.header\) \? "\.course-header"[\s\S]*?cfg === hf\.footer\) \? "\.course-footer"/.test(e));
   ok("headerFooterNum tries the live poke before a full rebuild", /if \(!pokeHeaderFooterLive\(cfg, key\)\) reapplyHeaderFooter\(\)/.test(ehf));
   // nav progress pill: author Width + Height (BACKLOG §pill P2, James 2026-07-08)
@@ -7371,6 +7451,7 @@ section("richer bullet lists");
 // ---- bullet-list discoverability: toggle on any text box + spacing promoted ----
 section("list discoverability + spacing");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var e = src("src/editor.js");
   ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
@@ -7379,7 +7460,7 @@ section("list discoverability + spacing");
   // heads only the marker-settings section, shown when the field root is a list.
   ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(e));
   ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);/.test(e));
-  ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(e) && /block\.__priorTextType/.test(e));
+  ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(SOPS) && /block\.__priorTextType/.test(SOPS));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
 })();
 
@@ -8625,11 +8706,12 @@ section("block valign render mapping");
 // ---- block valign: editor control + vertical glyphs --------------------------
 section("block valign controls");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var e = src("src/editor.js");
-  ok("Vertical segmented control writes block.valign", /segmentedIconLive\("Vertical",[\s\S]{0,400}block\.valign = v/.test(e));
-  ok("valign 'top' deletes the key (equal/default)", /if \(v === "top"\) delete block\.valign/.test(e));
+  ok("Vertical segmented control writes block.valign", /segmentedIconLive\("Vertical",[\s\S]{0,400}block\.valign = v/.test(BA));
+  ok("valign 'top' deletes the key (equal/default)", /if \(v === "top"\) delete block\.valign/.test(BA));
   ok("vertical glyphs defined (Top/Middle/Bottom)", /"align-start-horizontal":/.test(src("src/icons.js")) && /"align-center-horizontal":/.test(src("src/icons.js")) && /"align-end-horizontal":/.test(src("src/icons.js")));
-  ok("Vertical row references the vertical glyphs", /Icon\("align-start-horizontal"\), "top"[\s\S]{0,80}Icon\("align-center-horizontal"\), "center"[\s\S]{0,80}Icon\("align-end-horizontal"\), "bottom"/.test(e));
+  ok("Vertical row references the vertical glyphs", /Icon\("align-start-horizontal"\), "top"[\s\S]{0,80}Icon\("align-center-horizontal"\), "center"[\s\S]{0,80}Icon\("align-end-horizontal"\), "bottom"/.test(BA));
 })();
 
 // ---- CSVBind: M8 single-source content binding (flagship reuse feature) -----
@@ -9062,6 +9144,7 @@ section("onboarding tour retired");
 // ---- confetti on quiz pass (author opt-in) -------------------------------
 section("quiz confetti");
 (function () {
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var r = src("src/render.js"), qr = src("src/quiz-runtime.js"), e = src("src/editor.js");
   ok("render stamps data-confetti from settings", /root\.setAttribute\("data-confetti", s\.confetti \? "1" : "0"\)/.test(r));
   ok("quiz-runtime reads the confetti flag", /confetti: quiz\.getAttribute\("data-confetti"\) === "1"/.test(qr));
@@ -9070,7 +9153,7 @@ section("quiz confetti");
   ok("burstConfetti exposed on the API", /burstConfetti: burstConfetti/.test(qr));
   // orange-only palette: no green (#6bbe46) / yellow-gold (#ffcc4d), oranges kept
   ok("confetti palette is orange-only (no green/yellow-gold)", /var colors = \["#f5a623", "#ff7a00", "#e2653b", "#ff9f0a"\];/.test(qr) && qr.indexOf("#6bbe46") === -1 && qr.indexOf("#ffcc4d") === -1);
-  ok("editor exposes a Celebrate-on-pass toggle", /switchRow\("Celebrate on pass \(confetti\)", function \(\) \{ return !!s\.confetti; \}/.test(e));
+  ok("editor exposes a Celebrate-on-pass toggle", /switchRow\("Celebrate on pass \(confetti\)", function \(\) \{ return !!s\.confetti; \}/.test(IB));
 })();
 
 // ---- outliner collapse-all-to-chapters -----------------------------------
@@ -9098,6 +9181,8 @@ section("neon-pink empty placeholders");
 // ---- Panel System v2: panelLayout engine (Phase 1) -----------------------
 section("panel system v2 — layout engine");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
@@ -9203,12 +9288,12 @@ section("panel system v2 — layout engine");
   ok("colorField opens a 3-tab popover (Token/Custom/Per-mode; Per-mode hidden when noPerMode)", /var TABS = opts\.noPerMode \? \[\["Token", "token"\], \["Custom", "custom"\]\] : \[\["Token", "token"\], \["Custom", "custom"\], \["Per-mode", "per"\]\]/.test(ecol));
   ok("colorFieldFlat: CSS-string adapter for element colour sites (token→var, hex→hex)", /function colorFieldFlat\(labelText, cssVal, onPick, target, fopts\)[\s\S]*?if \(v\.token\) return onPick\("var\(--color-" \+ v\.token \+ "\)"\);[\s\S]*?if \(v\.hex\) return onPick\(v\.hex\)/.test(ecol));
   // Phase 3 Batch 1: frame/box appearance migrated to colorFieldFlat
-  ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(e) && /colorFieldFlat\("Text", box\.textColor/.test(e) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(e));
+  ok("frame/box Fill+Text+Stroke use colorFieldFlat", /colorFieldFlat\("Fill", box\.fill/.test(BA) && /colorFieldFlat\("Text", box\.textColor/.test(BA) && /colorFieldFlat\("Stroke colour", box\.borderColor/.test(BA));
   // Phase 3 Batches 2-8: 25 element colour sites migrated (block inspectors + nav + header/footer)
-  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(e) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
+  ok("card-reveal + hotspot + nav colour sites use colorFieldFlat", /colorFieldFlat\("Cover colour", block\.coverColor/.test(IB) && /colorOpt\("Fill"/.test(eh) && /colorFieldFlat\("Pill fill"/.test(ehf));
   ok("theme-TOKEN editors stay RAW colourControl (define what tokens resolve to; no self-reference)", /colourControl\(t\[1\], themeEdit\(\)\.color\[key\]/.test(THEME));
   ok("Phase 4: button-style colours migrated to colorFieldFlat (noHistory — theme edits off the doc undo stack)", /colorFieldFlat\("Fill", btn\.bg[\s\S]*?\{ noHistory: true \}\)/.test(THEME) && /colorFieldFlat\("Hover text", btn\.hoverFg/.test(THEME));
-  ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(e) && /colourControl\("Fill \(dark/.test(e));
+  ok("SVG colorMap + per-mode card fills stay raw colourControl", /colourControl\("Switch to colour"/.test(ep) && /colourControl\("Fill \(dark/.test(IB));
   // side-rail-cleanup slice 2: the Import/Export pipeline is relocated off the rail onto the Publish
   // stage, into #publish-io. uio-P-C05 then split it by direction: the Publish pane keeps the Format
   // control plus an overflow of the outbound actions, and Source took the imports.
@@ -9230,18 +9315,18 @@ section("panel system v2 — layout engine");
   ok("field inspector wraps a Type section (List folded in) via the panelLayout engine", /beginSections\(\);\s*sectionGroup\("Type", "Type", function \(secBody\)[\s\S]*?typeCluster\(inspector, s, apply[\s\S]*?endSections\(inspector\)/.test(e));
   // #155: the universal Level-1 container sections adopt the sectionGroup taxonomy. renderBlockActionsSection
   // wraps them in beginSections()/endSections(inspector); each is sectionGroup(type,...) not disclosure().
-  ok("#155: Appearance is a sectionGroup (was disclosure block-appearance)", /sectionGroup\("Appearance", "Appearance", function \(body\)/.test(e) && !/disclosure\("block-appearance"/.test(e));
-  ok("#155: Layout + Spacing are sectionGroups (was disclosure block-layout/spacing)", /sectionGroup\("Layout", "Layout", function \(body\)/.test(e) && /sectionGroup\("Spacing", "Spacing", function \(body\)/.test(e) && !/disclosure\("block-layout"/.test(e) && !/disclosure\("spacing"/.test(e));
-  ok("#155/#165: renderBlockActionsSection buffers container sections, self-managing the buffer only when the caller has none", /function renderBlockActionsSection\(block, opts\)[\s\S]*?var ownBuffer = !sectionsBufferOpen\(\);\s*if \(ownBuffer\) beginSections\(\);\s*sectionGroup\("Layout"[\s\S]*?if \(opts\.appearance !== false\) renderAppearanceSection\(block\);\s*[\s\S]*?if \(ownBuffer\) endSections\(inspector\);/.test(e));
+  ok("#155: Appearance is a sectionGroup (was disclosure block-appearance)", /sectionGroup\("Appearance", "Appearance", function \(body\)/.test(BA) && !/disclosure\("block-appearance"/.test(e));
+  ok("#155: Layout + Spacing are sectionGroups (was disclosure block-layout/spacing)", /sectionGroup\("Layout", "Layout", function \(body\)/.test(BA) && /sectionGroup\("Spacing", "Spacing", function \(body\)/.test(BA) && !/disclosure\("block-layout"/.test(e) && !/disclosure\("spacing"/.test(e));
+  ok("#155/#165: renderBlockActionsSection buffers container sections, self-managing the buffer only when the caller has none", /function renderBlockActionsSection\(block, opts\)[\s\S]*?var ownBuffer = !sectionsBufferOpen\(\);\s*if \(ownBuffer\) beginSections\(\);\s*sectionGroup\("Layout"[\s\S]*?if \(opts\.appearance !== false\) renderAppearanceSection\(block\);\s*[\s\S]*?if \(ownBuffer\) endSections\(E\.inspector\);/.test(BA));
   // #160: the three high-traffic Level-2 content inspectors emit their sections as canonical
   // sectionGroups (Content/Appearance/Behaviour/Layout/Light-Dark), each wrapped in begin/endSections.
-  ok("#160 quiz content: Behaviour + Appearance(Colours) + Content(Questions) sectionGroups, no raw sub headers", /function renderQuizInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Behaviour"[\s\S]*?sectionGroup\("Appearance", "Colours"[\s\S]*?sectionGroup\("Content", "Questions"[\s\S]*?endSections\(inspector\);/.test(e) && !/sub\("Intro page"\)/.test(e) && !/sub\("Questions"\)/.test(e));
+  ok("#160 quiz content: Behaviour + Appearance(Colours) + Content(Questions) sectionGroups, no raw sub headers", /function renderQuizInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Behaviour"[\s\S]*?sectionGroup\("Appearance", "Colours"[\s\S]*?sectionGroup\("Content", "Questions"[\s\S]*?endSections\(E\.inspector\);/.test(IB) && !/sub\("Intro page"\)/.test(IB) && !/sub\("Questions"\)/.test(IB));
   ok("#160 image content: Content/Layout/Appearance/Behaviour/Light-Dark sectionGroups", /function renderImageContent\(block\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Image"[\s\S]*?sectionGroup\("Layout", "Layout"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Behaviour", "Behaviour"[\s\S]*?sectionGroup\("Light\/Dark", "Light & dark"[\s\S]*?endSections\(inspector\);/.test(e));
   ok("#160 hotspot content: Content(Base/Screen image)/Behaviour(Interaction)/Appearance(Overlay card+Markers)/Content(Screens+Hotspots) sectionGroups", /function renderHotspotInspector\(block\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", isEntryScreen \? "Base image" : "Screen image"[\s\S]*?sectionGroup\("Behaviour", "Interaction"[\s\S]*?sectionGroup\("Appearance", "Overlay card"[\s\S]*?sectionGroup\("Appearance", "Markers"[\s\S]*?sectionGroup\("Content", "Screens"[\s\S]*?sectionGroup\("Content", "Hotspots"[\s\S]*?endSections\(E\.inspector\);/.test(eh)); // #216: + Screens
   // #161: the remaining Level-2 + single-level inspectors adopt the canonical sectionGroup taxonomy.
-  ok("#161 accordion: Behaviour(Display)/Appearance/Content(Sections) sectionGroups", /function renderAccordionInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Display"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Content", "Sections"[\s\S]*?endSections\(inspector\);/.test(e));
-  ok("#161 cardReveal: Behaviour(Reveal)/Layout(Grid)/Appearance/Content(Cards) sectionGroups", /function renderCardRevealInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Reveal"[\s\S]*?sectionGroup\("Layout", "Grid"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Content", "Cards"[\s\S]*?endSections\(inspector\);/.test(e));
-  ok("#161 embed: Content(HTML code)/Layout/Light-Dark/Appearance sectionGroups; loadSource targets secBody", /function renderEmbedInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "HTML code"[\s\S]*?secBody\.appendChild\(codeIn\)[\s\S]*?sectionGroup\("Layout", "Layout"[\s\S]*?sectionGroup\("Light\/Dark", "On light & dark"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?endSections\(inspector\);/.test(e));
+  ok("#161 accordion: Behaviour(Display)/Appearance/Content(Sections) sectionGroups", /function renderAccordionInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Display"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Content", "Sections"[\s\S]*?endSections\(E\.inspector\);/.test(IB));
+  ok("#161 cardReveal: Behaviour(Reveal)/Layout(Grid)/Appearance/Content(Cards) sectionGroups", /function renderCardRevealInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Behaviour", "Reveal"[\s\S]*?sectionGroup\("Layout", "Grid"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?sectionGroup\("Content", "Cards"[\s\S]*?endSections\(E\.inspector\);/.test(IB));
+  ok("#161 embed: Content(HTML code)/Layout/Light-Dark/Appearance sectionGroups; loadSource targets secBody", /function renderEmbedInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "HTML code"[\s\S]*?secBody\.appendChild\(codeIn\)[\s\S]*?sectionGroup\("Layout", "Layout"[\s\S]*?sectionGroup\("Light\/Dark", "On light & dark"[\s\S]*?sectionGroup\("Appearance", "Appearance"[\s\S]*?endSections\(E\.inspector\);/.test(IB));
   // #165: the shared footer is buffered INTO the nav inspector's open cycle, then flushed once —
   // one PanelLayout-sorted stream (Behaviour after Layout/Spacing), not two independent sorts.
   ok("#161/#165 navButton: Content(Label)/Appearance(Style)/Behaviour(On click) then renderBlockActionsSection buffered, endSections once", /function renderNavButtonInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Label"[\s\S]*?sectionGroup\("Appearance", "Style"[\s\S]*?sectionGroup\("Behaviour", "On click"[\s\S]*?renderBlockActionsSection\(block\);\s*endSections\(E\.inspector\);/.test(ACT));
@@ -9468,6 +9553,7 @@ section("FR find/replace");
 // ---- PERF: block edits rebuild one page, not the whole world -------------
 section("PERF one-page re-render");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   // arch-P3b-07t: the drag overlay moved to src/editor/dnd-ui.js.
@@ -9500,7 +9586,7 @@ section("PERF one-page re-render");
   // #171: deletePage re-anchors the viewport by page IDENTITY (keepId -> pageIndexById),
   // so deleting a page BEFORE the active one no longer jumps the view to a random page.
   ok("deletePage #171 re-anchors by page identity, not raw index", /var keepId = pi === currentPage[\s\S]{0,200}doc\.pages\.splice\(pi, 1\);\s*var ni = keepId \? pageIndexById\(keepId\) : -1;\s*currentPage = ni >= 0 \? ni : Math\.min\(currentPage, doc\.pages\.length - 1\);/.test(e));
-  ok("duplicateBlock + moveBlock rebuild one page", /reapplyStructural\(pi\); \/\/ PERF: one page/.test(e));
+  ok("duplicateBlock + moveBlock rebuild one page", /reapplyStructural\(pi\); \/\/ PERF: one page/.test(SOPS));
   ok("insertBlock rebuilds only the block's page", /L\.array\.splice\(L\.index, 0, block\);\s*reapplyStructural\(findPageOfBlock\(block\)\);/.test(ASSETS));
   ok("pasteClipboard rebuilds only the paste page", /reapplyStructural\(findPageOfBlock\(news\[0\]\)\); return true;/.test(CLIP));
   ok("image max-width edit uses reapplyBlock (not mount)", /block\.maxWidth = n; reapplyBlock\(block\); reselectBlockNode/.test(e));
@@ -9510,6 +9596,8 @@ section("PERF one-page re-render");
 // ---- UI kit gallery seam ----------------------
 section("UI kit seam");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
+  var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the block glyph map moved with the tree
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -9629,7 +9717,7 @@ section("UI kit seam");
   // left-rail/top-bar reorg dropped them: ensureBlockToolbar mounts a contextual segment
   // inside #canvas-overlay, and the container-chrome Actions build the split button there.
   ok("block actions mount into the canvas overlay bar segment",
-     /function ensureBlockToolbar\(\) \{[\s\S]{0,320}canvas-overlay-bar__inner[\s\S]{0,240}"canvas-overlay-bar__actions"/.test(e));
+     /function ensureBlockToolbar\(\) \{[\s\S]{0,320}canvas-overlay-bar__inner[\s\S]{0,240}"canvas-overlay-bar__actions"/.test(BA));
   ok("split page action is built into the canvas bar (not a panel section)",
      /if \(typeof handlers\.split === "function"\) acts\.push\(\["slice", "Split page here", handlers\.split/.test(ep) &&
      /acts\.forEach\(function \(a\) \{[\s\S]{0,180}bar\.appendChild\(btn\)/.test(ep));
@@ -9655,7 +9743,7 @@ section("UI kit seam");
 
   // Tickets 5-6 — two-level inspector: a generic shell, proven on hotspots + sequence.
   ok("generic two-level shell defined (renderBlockTwoLevel)", /function renderBlockTwoLevel\(node, label, decl, renderContent, io, handlers\) \{/.test(e));
-  ok("hotspot + sequence dispatched to the two-level shell (#160: hotspot depth-pure)", /renderBlockTwoLevel\(node, "Image hotspots", CONTENT_PURE_DECL/.test(e) && /renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\)/.test(e));
+  ok("hotspot + sequence dispatched to the two-level shell (#160: hotspot depth-pure)", /renderBlockTwoLevel\(node, "Image hotspots", CONTENT_PURE_DECL/.test(IB) && /renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\)/.test(IB));
   ok("shell: crumbs, container chrome (actions-only at content level for a pureContent block), then specific content when entered (#160 depth-pure)",
     // uio-F04 (EDIT-06): a source-linked block's provenance line is appended between the crumb and the
     // container chrome, so the window here allows for it.
@@ -9675,9 +9763,9 @@ section("UI kit seam");
   // Ticket 6 (2/2) — sequence steps on repeatedList + the rowExtras extension.
   ok("repeatedList supports optional compact rowExtras (icons between field + trash)", /if \(opts\.rowExtras\) \{[\s\S]{0,220}row\.appendChild\(n\)/.test(ep) && /row\.appendChild\(grip\); row\.appendChild\(field\);/.test(ep));
   ok("image glyph is canonical Lucide (icons.js, for the step marker upload)", /"image":/.test(src("src/icons.js")) && /image: "image"/.test(OUT));
-  ok("sequence Content has no duplicate footer (spacing+actions at Block level)", /no renderBlockActionsSection here/.test(e));
+  ok("sequence Content has no duplicate footer (spacing+actions at Block level)", /no renderBlockActionsSection here/.test(IB));
   // Ticket 8 (1/n) — frame/group two-level via renderContainerChrome.
-  ok("frame/group dispatched to the two-level shell", /if \(block\.type === "frame" \|\| block\.type === "group"\) \{ renderFrameOrGroupTwoLevel\(node\); return; \}/.test(e));
+  ok("frame/group dispatched to the two-level shell", /if \(block\.type === "frame" \|\| block\.type === "group"\) \{ renderFrameOrGroupTwoLevel\(node\); return; \}/.test(IB));
   ok("renderContainerChrome supports stroke:\"switch\" (on/off, no dead colour/width)", /if \(decl\.stroke === "switch"\) \{\s*switchRow\("Stroke"/.test(ep));
   ok("frame Block level = container decl (padding/gap/radius/fill/stroke-switch)", /renderBlockTwoLevel\(node, "Card", \{ padding: true, gap: true, radius: true, fill: true, stroke: "switch" \}/.test(e));
   ok("group Block level = CONTENT_DECL (invisible, spacing+actions)", /renderBlockTwoLevel\(node, "Group", CONTENT_DECL, renderFrameContent\)/.test(e));
@@ -9685,40 +9773,40 @@ section("UI kit seam");
   ok("frame Content = children (Inside) + actions (renderFrameContent)", /function renderFrameContent\(node\) \{[\s\S]{0,400}panelSection\(_frameRoot, "Inside"\)[\s\S]{0,2200}Convert to group/.test(e));
   // Ticket 7 (1/n) — image two-level (image params = content). #88: the box STROKE is
   // exposed (IMAGE_DECL) with an io mapping it to block.box so a border can be removed.
-  ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(e));
+  ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(IB));
   ok("#88 IMAGE_DECL exposes the box stroke (fill/radius stay off)", /var IMAGE_DECL = \{ fill: false, stroke: true, radius: false \};/.test(e));
   ok("#88 imageChromeIo maps hasStroke/colour/width to block.box + clears legacy border", /function imageChromeIo\(block\)[\s\S]{0,400}return !!\(block\.box && block\.box\.border\)[\s\S]{0,900}block\.box\.border = true;[\s\S]{0,200}delete block\.box\.border; delete block\.box\.borderColor; delete block\.box\.borderWidth;[\s\S]{0,120}delete block\.border;/.test(eh));
   ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,1100}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
   // Ticket 7 (2/n) — text blocks (heading/paragraph/note) two-level.
-  ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(e));
+  ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(IB));
   ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,250}panelSection\(inspector, "Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
   // Ticket 7 (3/n) — content-less blocks (spacer, divider).
   ok("renderContentlessBlock delegates to the all-in-one shell (body = specific)", /function renderContentlessBlock\(node, label, renderBody\) \{[\s\S]{0,200}renderBlockTwoLevel\(node, label, BOX_ONLY_DECL, function \(n\) \{ if \(renderBody\) renderBody\(n\); \}\)/.test(e));
-  ok("spacer + divider dispatched as content-less", /if \(block\.type === "spacer"\) \{ renderContentlessBlock\(node, "Spacer", renderSpacerBody\); return; \}/.test(e) && /if \(block\.type === "divider"\) \{ renderContentlessBlock\(node, "Divider"/.test(e));
+  ok("spacer + divider dispatched as content-less", /if \(block\.type === "spacer"\) \{ renderContentlessBlock\(node, "Spacer", renderSpacerBody\); return; \}/.test(IB) && /if \(block\.type === "divider"\) \{ renderContentlessBlock\(node, "Divider"/.test(IB));
   // Ticket 8 (2/n) — columns (container; children canvas-edited -> single-level).
-  ok("columns dispatched as single-level (renderColumnsBody)", /if \(block\.type === "columns"\) \{ renderContentlessBlock\(node, "Columns", renderColumnsBody\); return; \}/.test(e));
+  ok("columns dispatched as single-level (renderColumnsBody)", /if \(block\.type === "columns"\) \{ renderContentlessBlock\(node, "Columns", renderColumnsBody\); return; \}/.test(IB));
   ok("renderColumnsBody = column gap / row gap layout", /function renderColumnsBody\(node\)/.test(e) && /title: "Column gap \(horizontal\)"/.test(e) && /title: "Row gap \(vertical/.test(e));
   // Ticket 8 (3/n) — specialized inspectors (accordion, quiz) wrapped in two-level.
-  ok("accordion wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "accordion"\) \{ renderBlockTwoLevel\(node, "Accordion", CONTENT_PURE_DECL, renderAccordionInspector\); return; \}/.test(e));
-  ok("quiz wrapped in the two-level shell (#160 depth-pure)", /if \(block\.type === "quiz"\) \{ renderBlockTwoLevel\(node, "Quiz", CONTENT_PURE_DECL, renderQuizInspector\); return; \}/.test(e));
-  ok("specialized inspectors omit their own head + footer (shell provides them)", (e.match(/head omitted \(two-level breadcrumb/g) || []).length >= 1 && (e.match(/footer omitted \(spacing \+ actions at Block level\)/g) || []).length >= 2);
+  ok("accordion wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "accordion"\) \{ renderBlockTwoLevel\(node, "Accordion", CONTENT_PURE_DECL, renderAccordionInspector\); return; \}/.test(IB));
+  ok("quiz wrapped in the two-level shell (#160 depth-pure)", /if \(block\.type === "quiz"\) \{ renderBlockTwoLevel\(node, "Quiz", CONTENT_PURE_DECL, renderQuizInspector\); return; \}/.test(IB));
+  ok("specialized inspectors omit their own head + footer (shell provides them)", (IB.match(/head omitted \(two-level breadcrumb/g) || []).length >= 1 && (IB.match(/footer omitted \(spacing \+ actions at Block level\)/g) || []).length >= 2);
   // Ticket 8 (4/n) — componentGrid single-level.
-  ok("componentGrid dispatched single-level (renderComponentGridBody)", /if \(block\.type === "componentGrid"\) \{ renderContentlessBlock\(node, "Component grid", renderComponentGridBody\); return; \}/.test(e));
+  ok("componentGrid dispatched single-level (renderComponentGridBody)", /if \(block\.type === "componentGrid"\) \{ renderContentlessBlock\(node, "Component grid", renderComponentGridBody\); return; \}/.test(IB));
   ok("renderComponentGridBody = grid layout (template/instances)", /function renderComponentGridBody\(node\)/.test(e) && /panelSection\(inspector, "Grid Layout"\)/.test(e) && /Component Template/.test(e));
   // Ticket 8 (5/n) — checkbox single-level.
-  ok("checkbox dispatched single-level (renderCheckboxBody)", /if \(block\.type === "checkbox"\) \{ renderContentlessBlock\(node, "Checkbox", renderCheckboxBody\); return; \}/.test(e));
+  ok("checkbox dispatched single-level (renderCheckboxBody)", /if \(block\.type === "checkbox"\) \{ renderContentlessBlock\(node, "Checkbox", renderCheckboxBody\); return; \}/.test(IB));
   ok("renderCheckboxBody = acknowledgement + require-to-continue gate", /function renderCheckboxBody\(node\)/.test(e) && /panelSection\(inspector, "Acknowledgement"\)/.test(e) && /Require to continue/.test(e));
   // Ticket 8 (6/n) — cardReveal wrapped in two-level.
-  ok("cardReveal wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "cardReveal"\) \{ renderBlockTwoLevel\(node, "Card reveal", CONTENT_PURE_DECL, renderCardRevealInspector\); return; \}/.test(e));
+  ok("cardReveal wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "cardReveal"\) \{ renderBlockTwoLevel\(node, "Card reveal", CONTENT_PURE_DECL, renderCardRevealInspector\); return; \}/.test(IB));
   // Ticket 8 (7/n) — embed (htmlEmbed/webEmbed) wrapped in two-level.
   ok("embed wrapped in the two-level shell (type-aware label; #161 depth-pure)", /renderEmbedPanel: function \(\) \{\s*renderBlockTwoLevel\(selection\.node, selection\.node\.__block\.type === "htmlEmbed" \? "HTML Interaction" : "Web Embed",\s*CONTENT_PURE_DECL, renderEmbedInspector\);/.test(e));
   // PERF: a large interaction's source (MBs of inlined base64) is NOT eagerly injected into
   // the inspector <textarea> — a multi-MB editable node made the whole panel chug. It is
   // deferred behind a "Load HTML to edit" button above a threshold; small ones stay inline.
-  ok("embed source deferred above a size threshold", /var HTML_INLINE_MAX = \d+;[\s\S]*?var deferSource = rawHtml\.length > HTML_INLINE_MAX;/.test(e));
-  ok("large source is NOT put in the textarea until requested", /if \(!deferSource\) codeIn\.value = rawHtml;/.test(e) && /function loadSource\(\)/.test(e));
-  ok("deferred source shows a Load button instead of the giant field", /if \(deferSource\) \{[\s\S]*?"Load HTML to edit"[\s\S]*?\} else \{\s*inspector\.appendChild\(codeIn\);/.test(e));
-  ok("paste reveals the deferred field first", /if \(!codeIn\.parentNode\) loadSource\(\); \/\/ reveal the deferred/.test(e));
+  ok("embed source deferred above a size threshold", /var HTML_INLINE_MAX = \d+;[\s\S]*?var deferSource = rawHtml\.length > HTML_INLINE_MAX;/.test(IB));
+  ok("large source is NOT put in the textarea until requested", /if \(!deferSource\) codeIn\.value = rawHtml;/.test(IB) && /function loadSource\(\)/.test(IB));
+  ok("deferred source shows a Load button instead of the giant field", /if \(deferSource\) \{[\s\S]*?"Load HTML to edit"[\s\S]*?\} else \{\s*E\.inspector\.appendChild\(codeIn\);/.test(IB));
+  ok("paste reveals the deferred field first", /if \(!codeIn\.parentNode\) loadSource\(\); \/\/ reveal the deferred/.test(IB));
 })();
 
 // ---- Icon accessor (issue #9 — Lucide adopted offline) -------------------
@@ -12857,6 +12945,7 @@ section("uio-F05 escalation links (popover/menu -> sheet)");
 // inheritance path.
 section("uio-F03 scope + inheritance model");
 (function () {
+  var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
@@ -12998,7 +13087,7 @@ section("uio-F03 scope + inheritance model");
     return rollupOf(dirty).textContent === "2 overridden" && dirty.classList.contains("has-overrides");
   })());
   ok("real rows carry the tail at three different rungs", (function () {
-    var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(e);
+    var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(BA);
     var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
     var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(ehf);
     return atBlock && atPage && atCourse;
@@ -13452,7 +13541,9 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   // editor inspector wiring + split-page inheritance
   var ed = src("src/editor.js");
   ok("inspector writes per-breakpoint padX keys", /pagePadX\("padX"/.test(ed) && /pagePadX\("padXTablet"/.test(ed) && /pagePadX\("padXMobile"/.test(ed));
-  ok("split-page carries padXTablet/padXMobile", /newPage\.padXTablet = P\.padXTablet/.test(ed) && /newPage\.padXMobile = P\.padXMobile/.test(ed));
+  // arch-P3b-07w: splitPageAtBlock moved to editor/structure-ops.js.
+  var SOPS = src("src/editor/structure-ops.js");
+  ok("split-page carries padXTablet/padXMobile", /newPage\.padXTablet = P\.padXTablet/.test(SOPS) && /newPage\.padXMobile = P\.padXMobile/.test(SOPS));
 })();
 
 // ---- #62 canvas gap affordance (add / merge between stacked pages) --------
@@ -13751,10 +13842,11 @@ section("#170/#158 shared formatting toggle-bar");
 // ---- #170/#33: text<->list block-type conversion (pure) -----------------------
 section("#170/#33 text<->list block-type conversion");
 (function () {
+  var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var e = src("src/editor.js");
-  var a = e.indexOf("/* @list-convert-start */"), b = e.indexOf("/* @list-convert-end */");
+  var a = SOPS.indexOf("/* @list-convert-start */"), b = SOPS.indexOf("/* @list-convert-end */");
   if (a === -1 || b === -1) { ok("locate @list-convert fence", false); return; }
-  var g = new Function(e.slice(a, b) +
+  var g = new Function(SOPS.slice(a, b) +
     "\nreturn { htmlToListItems: htmlToListItems, listItemsToHtml: listItemsToHtml, convertTextListBlockType: convertTextListBlockType };")();
 
   // htmlToListItems: block-level breaks become <li> boundaries; inline formatting survives.

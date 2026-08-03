@@ -34,17 +34,18 @@
   function install(kernel) {
     var E = kernel.need(
       "h", "pushHistory", "panelSection", "sectionGroup", "getBlockStyles", "alignSeg",
-      "ensureBlockToolbar", "colourControl", "inspector", "doc", "blockToolbarSep"
+      "ensureBlockToolbar", "colourControl", "inspector", "doc", "blockToolbarSep",
+      "scheduleSave"
     );
     // The stable half: function declarations editor.js never reassigns, aliased once so the moved
     // bodies read exactly as they did. `inspector`, `doc` and `blockToolbarSep` are deliberately
-    // NOT here -- editor.js swaps `inspector` for a section body while a panel builds, replaces
-    // `doc` wholesale on a document swap, and mints `blockToolbarSep` when it builds the overlay
-    // bar. All three are read through E at the moment they are used.
+    // NOT here -- editor.js swaps `inspector` for a section body while a panel builds and replaces
+    // `doc` wholesale on a document swap, and `blockToolbarSep` is minted by block-actions.js when
+    // it first builds the overlay bar (arch-P3b-07o). All three are read through E at use.
     var h = E.h, pushHistory = E.pushHistory, panelSection = E.panelSection,
         sectionGroup = E.sectionGroup, getBlockStyles = E.getBlockStyles,
         alignSeg = E.alignSeg, ensureBlockToolbar = E.ensureBlockToolbar,
-        colourControl = E.colourControl;
+        colourControl = E.colourControl, scheduleSave = E.scheduleSave;
 
     // ---- the three controls that were living elsewhere (arch-P3b-07) --------------------
     // A canonical control belongs with the canonical control set, whatever banner its first
@@ -859,6 +860,58 @@
         }
       }
     }
+    // ---- Shared palette colour-row (SVG image palette + HTML-interaction palette) ------
+    // ONE row = swatch + label + [BG | Text | Keep] toggles + a ⋯ twirl holding the full
+    // token dropdown + a "Switch to colour" custom picker. Used identically by both the
+    // image SVG palette and the interaction palette so they look + behave the same.
+    // BG -> the page-bg token, Text -> ink, Keep -> the authored colour.
+    var PALETTE_ROLE_TOKEN = { bg: "bg", text: "ink", keep: "keep" };
+    function paletteColorRow(host, o) {
+      var map = o.map, key = o.key, tokens = o.tokens || [];
+      var explicit = map.hasOwnProperty(key) ? map[key] : null;
+      var isCustom = !!explicit && explicit !== "surface" && explicit !== "ink" && explicit !== "keep" && explicit !== "bg";
+      var isHexMap = !!explicit && /^(#|rgb)/i.test(String(explicit));
+      var role = o.roleOf ? o.roleOf(key) : "keep";
+      // Persist the map write NOW (debounced), not only on the 4s autosave tick. Every
+      // mutation below routes through apply(), and WKWebView does NOT fire beforeunload
+      // on Cmd+R, so without this a colour mapping made just before a hard refresh is
+      // lost (reverts) — the same gap the text-edit path closed with scheduleSave. This
+      // is the single choke for all three palette consumers (embed / SVG image / glossary).
+      function apply() { o.refresh(); scheduleSave(); }
+      // Line 1: swatch + label, with a ⋯ advanced-token toggle at the far right.
+      var head = h("div", "insp-row");
+      var lbl = h("span", "insp-row__label"); lbl.style.flex = "1 1 auto";
+      var sw = h("span", "insp-swatch");
+      sw.style.cssText = "display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:6px;vertical-align:middle;border:1px solid var(--color-hair);background:" + o.swatchColor;
+      lbl.appendChild(sw); lbl.appendChild(document.createTextNode(o.label)); lbl.title = o.label;
+      head.appendChild(lbl);
+      var advRow = h("div", "insp-row"); advRow.style.marginTop = "5px"; advRow.style.display = isCustom ? "" : "none";
+      advRow.appendChild(h("span", "insp-row__label", "Token"));
+      var selOpts = [["Auto", "auto"], ["Keep as-is", "keep"]].concat(tokens.map(function (t) { return [t, t]; }));
+      if (isHexMap) selOpts.unshift(["Custom colour", "__custom"]);
+      var selCurrent = explicit == null ? "auto" : (isHexMap ? "__custom" : explicit);
+      var sel = dsSelect(selOpts, selCurrent, function (v) { if (v === "__custom") return; pushHistory(); if (v === "auto") delete map[key]; else map[key] = v; apply(); });
+      advRow.appendChild(sel);
+      colourControl("Switch to colour", isHexMap ? explicit : null, function (v) { pushHistory(); if (v == null) delete map[key]; else map[key] = v; apply(); }, advRow);
+      var advBtn = h("button", null, "⋯");
+      advBtn.type = "button"; advBtn.title = "Advanced — map this colour to a specific theme token";
+      advBtn.style.cssText = "flex:0 0 auto;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:13px;line-height:1;color:var(--text-secondary);border:1px solid var(--border-subtle);background:" + (isCustom ? "var(--surface-raised)" : "transparent") + ";";
+      advBtn.addEventListener("click", function () { advRow.style.display = advRow.style.display === "none" ? "" : "none"; });
+      head.appendChild(advBtn);
+      host.appendChild(head);
+      // Line 2: full-width role toggles — their own row so labels never truncate.
+      var roleRow = h("div", "prop-toggle-row"); roleRow.style.marginTop = "5px";
+      [["BG", "bg"], ["Text", "text"], ["Keep", "keep"]].forEach(function (ro) {
+        var b = h("button", "prop-toggle" + (!isCustom && role === ro[1] ? " is-on" : ""), ro[0]);
+        b.type = "button";
+        b.title = ro[1] === "bg" ? "Background — follows the theme (light in light mode, dark in dark mode)" : ro[1] === "text" ? "Text — follows the theme (contrasts the background per mode)" : "Keep this colour exactly as authored (brand/accent)";
+        b.addEventListener("click", function () { pushHistory(); map[key] = PALETTE_ROLE_TOKEN[ro[1]]; apply(); });
+        roleRow.appendChild(b);
+      });
+      host.appendChild(roleRow);
+      host.appendChild(advRow);
+    }
+
     // What editor.js and the other regions still call. The scope tally crosses in both directions
     // because a panel build borrows the buffer and hands it back -- it is the one piece of state
     // this file owns rather than derives.
@@ -879,7 +932,8 @@
       segmentedLive: segmentedLive, iconField: iconField, twoUp: twoUp, propHeader: propHeader,
       breadcrumb: breadcrumb, optionalRow: optionalRow, repeatedList: repeatedList,
       renderContainerChrome: renderContainerChrome,
-      iconBtn: iconBtn, dsSelect: dsSelect, selectRow: selectRow
+      iconBtn: iconBtn, dsSelect: dsSelect, selectRow: selectRow,
+      paletteColorRow: paletteColorRow
     });
     // Constants the panels read as data rather than call.
     kernel.provide({
