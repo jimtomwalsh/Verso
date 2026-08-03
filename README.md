@@ -83,6 +83,7 @@ No install. No bundler. Classic `<script>` tags exposing globals.
 
 ```bash
 node tests/run.js      # headless regression suite, pure Node → N/N
+npm test               # the same thing (no install step — there is nothing to install)
 ```
 
 Run before every change; CI gates on it. Wiring that unit tests can't see is browser-verified
@@ -103,7 +104,24 @@ Build content once, reuse it across documents, and publish it in different forma
 - **Export** produces a self-contained SCORM 1.2 zip; fonts and assets are inlined
   so the course renders offline / air-gapped.
 
-## Project layout
+## Repository boundary
+
+Every top-level entry has exactly one declared role. `scripts/check-hygiene.js` enforces this
+table: a new top-level file or folder fails the gate until it is classified here, and anything
+under the gitignored role fails if it is ever staged.
+
+| Role | Entries | Meaning |
+| --- | --- | --- |
+| **Ships** | `index.html` `editor.css` `src/` `export/` `assets/` `fonts/` `serve.command` `course_schema_template.csv` | The product. Present in every install; the app runs from these alone. |
+| **Optional** | `server/` `desktop/` | Real surfaces for one posture each (server-of-one, macOS shell). The app runs without them. |
+| **Dev-only** | `tools/` `scripts/` `tests/` `design-system/` `docs/` `viewer/` `kit.html` `kit-gallery.js` `.github/` | Authoring-time and CI material. Never loaded by the running app, never in a SCORM export. |
+| **Meta** | `README.md` `CONTRIBUTING.md` `LICENSE` `NOTICE` `SECURITY.md` `THIRD-PARTY-NOTICES.md` `SCHEMA-TEMPLATE-GUIDE.md` `roadmap.html` `package.json` `.gitignore` | Repository documentation and the manifest. |
+| **Gitignored** | `workbench/` | Prototypes, spikes, design specs, audits — working material that must not sit next to shipping code. Local only. |
+
+`package.json` declares **zero dependencies** and exists to say so: `npm test` runs the headless
+suite, and there is no `npm install` step, no `node_modules`, no bundler.
+
+## Shipping code at a glance
 
 ```
 index.html          editor shell (toolbar, panels, canvas)
@@ -118,12 +136,9 @@ src/
   model.js / schema.js / persist.js / theme.js / csv.js / components.js …
   store-http.js     HTTP storage adapter — inert unless a server URL is injected
   sync-client.js    live-collaboration client — inert unless a server URL is injected
-tests/run.js        headless regression suite (no deps)
-viewer/             standalone review Viewer (publish → comment → merge back)
-desktop/            optional macOS app shell (WKWebView)
-design-system/      the Verso UI design system — rules, tokens, components, gate mapping
-server/             optional server-of-one backend (server mode, in development)
-docs/               user guide + architecture decision records (docs/adr/)
+export/             SCORM runtime shim + embedded course fonts
+assets/             bundled sample assets
+fonts/              vendored editor fonts (air-gap capable)
 ```
 
 ## Contributing

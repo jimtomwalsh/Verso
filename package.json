@@ -1,0 +1,20 @@
+{
+  "name": "verso",
+  "version": "0.1.0",
+  "description": "Self-hosted, offline, browser-based authoring tool for technical documentation and learning materials. Vanilla JS, no build step, zero runtime dependencies.",
+  "license": "Apache-2.0",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jimtomwalsh/Verso.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node tests/run.js",
+    "hygiene": "node scripts/check-hygiene.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

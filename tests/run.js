@@ -13538,7 +13538,7 @@ section("Source rewrite: insert image/table node after a block (product-rail-sou
 // ---- Source rewrite (Epic 2b): mark painting engine loads (DOM-verified in browser) ----
 // source-marks.js is the DOM painting layer (CSS Custom Highlight over live Ranges). Its offset
 // walking + selection reading need a real DOM/TreeWalker, so its behaviour is proven by the
-// Puppeteer harness (prototypes/source-doc-spike-harness.html and the marks harness), not here;
+// Puppeteer harness (workbench/prototypes/source-doc-spike-harness.html + the marks harness), not here;
 // this section only asserts the module loads clean and exposes its contract.
 section("Source rewrite: mark painting engine contract (Epic 2b)");
 (function () {
