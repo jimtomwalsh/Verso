@@ -127,6 +127,8 @@
   <script src="src/editor/board/harvest.js"></script>
   <!-- arch-P3b-04 tour builder: window.VersoTourBoard — the board overlay itself (node cards, pin/port drags, loop frames, the source-video scrubber and the re-hosted hotspot inspector). Must precede editor.js, which installs it after providing its host surface. -->
   <!-- arch-P3b-06 hotspots editor: window.VersoHotspotsEditor — the canvas marker overlay, the layer actions and renderHotspotInspector. OWNS the hotspot selection (hotspotEditId / hotspotEditScreenId) the tour builder reads, so it must precede editor.js like the rest. -->
+  <!-- arch-P3b-05 Source stage: window.VersoSourceStage — the unified per-Product source document, its outline rail, the editable article, facets, variant columns, range marks, find-to-word and additive Markdown import. Must precede editor.js. -->
+  <script src="src/editor/source-stage.js"></script>
   <script src="src/editor/hotspots-editor.js"></script>
   <script src="src/editor/board/builder.js"></script>
   <script src="src/editor.js"></script>
