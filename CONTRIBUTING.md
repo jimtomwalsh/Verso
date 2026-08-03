@@ -41,7 +41,10 @@ pattern is missing, add it there first, then build to it.
 - `editor.css` = editor UI only (never bleeds into course output). `src/course.css` =
   tokens-only, ships in SCORM.
 - **No emojis** in code or files.
-- Keep the app **dependency-free** — do not add third-party runtime packages.
+- **No runtime dependencies, ever.** Dev-only tools are permitted, but the app must always
+  run and ship without them: `index.html` opens from `file://` with nothing installed, and a
+  SCORM export carries no third-party code. `package.json` declares zero dependencies and
+  exists to state that — the hygiene gate fails any `dependencies` or `devDependencies` entry.
 - **`server/` is the one scoped exception** (optional server-of-one backend, server mode,
   in development): Node built-ins only (`node:sqlite`, `node:crypto`, `node:http`) plus a
   consciously accepted bundled Node runtime — still no third-party npm packages, no
@@ -80,9 +83,17 @@ node tools/docs-capture.js --stale src/editor.js editor.css   # which figure sce
 
 This repo enforces a hygiene gate that hard-fails (in CI and, if installed, at commit time)
 if a change introduces: customer/proprietary content, personal filesystem paths, secrets,
-external CDN `<script>` loads in shipping HTML, new third-party runtime dependencies, or
-committed course-content files. The gate is `scripts/check-hygiene.js`; it also runs as a
-section of `node tests/run.js`, which CI requires to pass.
+external CDN `<script>` loads in shipping HTML, third-party dependencies, or committed
+course-content files. The gate is `scripts/check-hygiene.js`; it also runs as a section of
+`node tests/run.js`, which CI requires to pass.
+
+It also enforces the **repository boundary** — the role table in
+[README.md](README.md#repository-boundary). Every top-level entry carries one declared role
+(Ships / Optional / Dev-only / Meta / Gitignored). A new top-level file or folder fails the
+gate until you classify it in both the README table and the `ROLES` map in the gate, and
+nothing under `workbench/` may be staged. Put prototypes, spikes, specs and audits in
+`workbench/` — it is gitignored on purpose, so working material stops sitting next to
+shipping code.
 
 Enable the local pre-commit hook once per clone:
 
