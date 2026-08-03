@@ -4711,7 +4711,7 @@ section("#126 theme presets (copy-on-apply)");
   // name (else the chosen theme rendered twice), and the per-course selection must reset on a
   // course switch (copy-on-apply keeps no live link, so it must not bleed across courses).
   ok("picker placeholder is neutral (no duplicate option)", /placeholder: names\.length \? "Saved themes…" : "No saved themes yet"/.test(THEME));
-  ok("switchDoc resets themePresetSel (no cross-course bleed)", /function switchDoc\(id\)[\s\S]*?clearThemePresetChoice\(\);/.test(t) && /function clearThemePresetChoice\(\) \{ themePresetSel = null; \}/.test(THEME));
+  ok("activating a doc resets themePresetSel (no cross-course bleed)", /function activateDoc\(id\)[\s\S]{0,400}clearThemePresetChoice\(\);/.test(t) && /function clearThemePresetChoice\(\) \{ themePresetSel = null; \}/.test(THEME) && /activateDoc\(id\)/.test(src("src/editor/tabs.js")));
   ok("every active-doc change resets themePresetSel (arch-P3-02: one owner, activateDoc)", /function activateDoc\(id\)[\s\S]{0,700}clearThemePresetChoice\(\);/.test(t) && !/clearThemePresetChoice();/.test(t.slice(t.indexOf("function closeTab("), t.indexOf("function switchDoc("))));
 })();
 
@@ -4750,7 +4750,7 @@ section("#127 blockStyles (per-type default appearance cascade)");
 
   // Editor: capture-from-block writes doc.theme.blockStyles[type] via getBlockStyles, and
   // the theme panel edits captured defaults.
-  ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?doc\.theme\.blockStyles = \{\};[\s\S]*?return doc\.theme\.blockStyles;/.test(e));
+  ok("editor: getBlockStyles ensures doc.theme.blockStyles exists", /function getBlockStyles\(\)[\s\S]*?E\.doc\.theme\.blockStyles = \{\};[\s\S]*?return E\.doc\.theme\.blockStyles;/.test(src("src/editor/theme.js")));
   ok("editor: Capture look saves the EFFECTIVE box to the type default", /getBlockStyles\(\)\[type\] = clone\(eff\);/.test(BA) && /var eff = window\.resolveBlockBox\(bs && bs\[type\], block\.box\);/.test(BA));
   ok("editor: theme panel has a Block styles editor", /panelSection\(c, "Block styles"\)/.test(THEME) && /function blockStylesEditor\(intro, listHost\)/.test(THEME));
 })();
@@ -6315,7 +6315,8 @@ section("footer nav corner-pin: framed preview matches export");
 // ---- named text styles: rename repoints styleRef + blocks collisions -------
 section("named-styles rename");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07styles: the rename lives in editor/theme.js now, beside the panel that offers it.
+  var t = src("src/editor/theme.js");
   var body = t.slice(t.indexOf("function renameTextStyle(oldName, newName)"), t.indexOf("window.__renameTextStyle"));
   ok("blocks a rename that collides with an existing style", /if \(styles\[newName\]\)[\s\S]*?return false/.test(body));
   ok("no-op on empty/same name", /if \(!newName \|\| newName === oldName\) return false/.test(body));
@@ -7879,7 +7880,7 @@ section("#145 text-role auto-styling");
   // role map, exposed API, audit toggle + decorator, render() untouched.
   ok("insertBlock auto-stamps a dropped block's role style", /stampRoleStyle\(block\); \/\/ #145/.test(ASSETS));
   ok("schema import auto-applies roles after setDoc", /window\.Editor\.applyTextRolesByType\(\);/.test(src("src/schema.js")));
-  ok("renameTextStyle repoints the role map", /doc\.textRoles\[t\] === oldName\) doc\.textRoles\[t\] = newName/.test(e));
+  ok("renameTextStyle repoints the role map", /E\.doc\.textRoles\[t\] === oldName\) E\.doc\.textRoles\[t\] = newName/.test(src("src/editor/theme.js")));
   ok("Editor exposes applyTextRolesByType", /applyTextRolesByType: function \(\)/.test(e));
   ok("audit decorator wired into mount + per-page", (e.match(/decorateStyleAudit\(/g) || []).length >= 3);
   ok("audit marks unstyled canvas blocks red (editor-only class)", /node\.classList\.add\("is-unstyled-audit"\)/.test(e) && /\.canvas-block\.is-unstyled-audit/.test(src("editor.css")));
@@ -8150,6 +8151,7 @@ section("inspector Enter-to-blur");
 // ---- project auto-backup (P0 data-safety) -------------
 section("project auto-backup");
 (function () {
+  var TABS = src("src/editor/tabs.js");   // arch-P3b-07tabs
   var DOCS = src("src/editor/documents.js");   // arch-P3b-07doc
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07d: the durable-copy writer moved to src/editor/backup.js.
@@ -8162,7 +8164,7 @@ section("project auto-backup");
   ok("native write goes through the bridge (web side)", /nativeBackupCall\("write", \{ folder: E\.doc\.backup\.folderPath, files: b\.files \}\)/.test(ebk) && /nativeBackupCall\("pickFolder"\)/.test(ebk));
   ok("Swift shell registers + handles the versoBackup bridge", (function () { var s = src("desktop/AuthoringTool.swift"); return /userContentController\.add\(self, name: "versoBackup"\)/.test(s) && /message\.name == "versoBackup" \{ handleBackup/.test(s) && /func handleBackup/.test(s) && /NSOpenPanel\(\)[\s\S]{0,300}canChooseDirectories = true/.test(s) && /__versoBackupReply/.test(s); })());
   ok("auto-backup hooked into the save choke point", /if \(res\.ok\) \{ setSaveState\("saved"\);[\s\S]{0,60}scheduleBackup\(\)/.test(e));
-  ok("folder reconnects on boot + doc switch", /window\.addEventListener\("load", function \(\) \{ initReviewAutoIngest\(\); connectBackupFolder\(\)/.test(e) && /connectBackupFolder\(\); \/\/ re-point auto-backup/.test(e));
+  ok("folder reconnects on boot + doc switch", /window\.addEventListener\("load", function \(\) \{ initReviewAutoIngest\(\); connectBackupFolder\(\)/.test(e) && /connectBackupFolder\(\); \/\/ re-point auto-backup/.test(TABS));
   ok("handle persisted per-doc in IndexedDB (verso-backup)", /indexedDB\.open\("verso-backup", 1\)/.test(ebk) && /saveBackupHandle\(E\.activeDocId, h\)/.test(ebk));
   ok("LOUD banner covers both states (reconnect if bound, choose folder if not)", /function showBackupBanner/.test(ebk) && /Backup OFF — this course is NOT being saved/.test(ebk) && /No backup folder — this course is NOT being saved anywhere/.test(ebk) && /\? "Reconnect folder" : "Choose folder"/.test(ebk));
   // arch-P3b-07d: the new-doc flow stayed here; only the banner it raises moved.
@@ -11623,7 +11625,7 @@ section("line diff (LineDiff)");
   ok("currentDoc nests variant then version (product resolves first)",
     /function currentDoc\(\) \{\s*var d = doc;\s*if \(activeVariant\) d = window\.resolveVariant\(d, activeVariant\);\s*if \(activeVersion\) \{/.test(e));
   ok("isPreview() stays the conservative read-only gate (both axes)", /function isPreview\(\) \{ return !!activeVariant \|\| !!activeVersion; \}/.test(e));
-  ok("setDoc drops a stale activeVersion the new doc lacks", /if \(activeVersion && \(doc\.versions \|\| \[\]\)\.indexOf\(activeVersion\) === -1\) activeVersion = null;/.test(e));
+  ok("setDoc drops a stale activeVersion the new doc lacks", /if \(E\.activeVersion && \(E\.doc\.versions \|\| \[\]\)\.indexOf\(E\.activeVersion\) === -1\) E\.setActiveVersion\(null\);/.test(src("src/editor/tabs.js")));
   // SWITCHER: face-up named dropdown (edit-header-ia-v2), menu, newest = default, Base entry,
   // order after the variant control.
   ok("version switch is a face-up axis button, named axis + words (no leading glyph)", /versionWrapEl = h\("button", "tool editor-window__axis-btn version-glyph"\)[\s\S]{0,400}axis-btn__axis">Version<[\s\S]{0,120}axis-btn__label[\s\S]{0,120}axis-btn__caret/.test(VARIANTS) && !/versionWrapEl\.innerHTML =[\s\S]{0,200}axis-btn__icon/.test(e));
@@ -11634,7 +11636,7 @@ section("line diff (LineDiff)");
   ok("+ New version prompt writes doc.versions (append = moving default)", /function newVersionPrompt\(then\)[\s\S]*?doc\.versions\.push\(name\)/.test(VARIANTS));
   // FIX 4a: order encodes nesting — version glyph inserted AFTER the variant glyph.
   ok("version glyph inserts after the variant glyph (outer->inner order)", /host\.insertBefore\(versionWrapEl, variantWrapEl\.nextSibling\)/.test(VARIANTS));
-  ok("renderVersionSwitch wired into init + setDoc", (e.match(/renderVersionSwitch\(\)/g) || []).length >= 2);
+  ok("renderVersionSwitch wired into init + setDoc", ((e + src("src/editor/tabs.js")).match(/renderVersionSwitch\(\)/g) || []).length >= 2);
   // PREVIEW: read-only badge + right-click nav back to Base.
   ok("previewVersion sets activeVersion + re-mounts (flushing in-flight edits)", /function previewVersion\(v\) \{ flushSave\(\); E\.setActiveVersion\(v\); syncVersionSwitch\(\); mount\(\); \}/.test(VARIANTS));
   ok("version badge distinguishes editing vs read-only (#207)", /label = editable \? \("Editing version · " \+ E\.activeVersion\) : \("Previewing version · " \+ E\.activeVersion \+ " · read-only"\)/.test(VARIANTS));
@@ -13411,13 +13413,13 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 
   // switchDoc must drop the outgoing doc's selection/page cursor (else a stale page
   // index crashes renderPageInspector on the new doc — hit via cross-file page paste).
-  ok("switchDoc resets selection + page cursor before mount", /function switchDoc[\s\S]*clearSelection\(\); clearMultiPages\(\); multiSel = \[\]; currentPage = 0;[\s\S]*mount\(\);/.test(ed));
+  ok("a doc switch resets selection + page cursor before mount", /function activateDoc\(id\)[\s\S]{0,400}clearSelection\(\); clearMultiPages\(\); multiSel = \[\]; currentPage = 0;/.test(ed) && /function switchDoc[\s\S]{0,600}activateDoc\(id\)[\s\S]{0,900}mount\(\);/.test(src("src/editor/tabs.js")));
   ok("renderPageInspector guards a stale/out-of-range page index", /function renderPageInspector\(pi\) \{\s*var page = doc\.pages\[pi\];\s*if \(!page\) return;/.test(ed));
 
   // Variant UX: switchDoc must refresh the top-bar variant pill + drop a stale variant;
   // the variant-text field placeholder shows the flagship copy with tags stripped.
-  ok("switchDoc rebuilds the top-bar variant pill for the new doc", /function switchDoc[\s\S]*mount\(\);\s*renderTabs\(\);\s*renderVariantSwitch\(\);/.test(ed));
-  ok("switchDoc drops a variant the new doc doesn't have", /if \(activeVariant && \(doc\.variants \|\| \[\]\)\.indexOf\(activeVariant\) === -1\) activeVariant = null;/.test(ed));
+  ok("switchDoc rebuilds the top-bar variant pill for the new doc", /function switchDoc[\s\S]*mount\(\);\s*renderTabs\(\);\s*renderVariantSwitch\(\);/.test(src("src/editor/tabs.js")));
+  ok("switchDoc drops a variant the new doc doesn't have", /if \(E\.activeVariant && \(E\.doc\.variants \|\| \[\]\)\.indexOf\(E\.activeVariant\) === -1\) E\.setActiveVariant\(null\);/.test(src("src/editor/tabs.js")));
   ok("variant-text placeholder strips flagship HTML tags", /input\.placeholder = stripToText\(baseFieldValue\(t\.host, f\)\);/.test(VARIANTS));
   ok("variant text-bearing field is an auto-growing textarea", /var multiline = !f\.isSlot \|\| \/obj\|desc\|body\|summary\|para\|text\/i\.test\(f\.key\);[\s\S]*multiline \? h\("textarea", "prop-input prop-input--grow"\)/.test(VARIANTS));
   ok("autoGrowVariant measures with a hidden mirror (never mutates the live field)", /function autoGrowVariant\(ta\)[\s\S]*autoGrowVariant\._mirror[\s\S]*m\.textContent = \(ta\.value \|\| ta\.placeholder \|\| ""\)/.test(VARIANTS) && !/ta\.value = ta\.placeholder/.test(VARIANTS));
@@ -16937,8 +16939,10 @@ section("arch-P3-02 editor history");
     (e.match(/registry\[activeDocId\] = /g) || []).length === 1);
   // arch-P3b-07k: course DELETE moved to editor/home.js with the browser that offers it, so one of
   // the four call sites went with it. Same claim, counted across both files.
+  // arch-P3b-07tabs: two of the four call sites are the tab strip's (switch and close-active).
   var activateCalls = (e.match(/activateDoc\(/g) || []).length +
-                      (src("src/editor/home.js").match(/activateDoc\(/g) || []).length;
+                      (src("src/editor/home.js").match(/activateDoc\(/g) || []).length +
+                      (src("src/editor/tabs.js").match(/activateDoc\(/g) || []).length;
   ok("every tab switch, tab close and course delete goes through activateDoc",
     activateCalls === 4 && /function activateDoc\(id\)[\s\S]{0,700}History\.reset\(\);/.test(e));
   ok("editor.js holds no undo/redo state of its own",
