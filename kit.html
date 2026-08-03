@@ -103,6 +103,8 @@
        so the kit gallery needs them as much as index.html does. (arch-P1 added the render context
        to index.html only, which left this page throwing on load until arch-P3-01 noticed.) -->
   <script src="src/render-context.js"></script>
+  <!-- arch-P3b-01 editor namespace: window.VersoEditor — the provide/need/expose/bind table a moved region and editor.js reach each other through. Pure wiring. Must precede editor.js, which provides its host surface as it loads. -->
+  <script src="src/editor/kernel.js"></script>
   <script src="src/editor/storage.js"></script>
   <!-- arch-P3-02 history seam: window.VersoHistory — undo/redo stacks + the document-swap rule. DOM-free. Must precede editor.js, which creates its History at load. -->
   <script src="src/editor/history.js"></script>
