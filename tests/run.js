@@ -3889,6 +3889,8 @@ section("table block (#90)");
 // ---- #111 course-completion / exit splash --------------------------------
 section("#111 completion screen");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var rn = src("src/render.js"), ex = src("src/export.js"), ed = src("src/editor.js"), cs = src("src/course.css");
   // render.js — pure render, default-on, defaults published for the editor
   ok("render exposes VERSO_ENDSCREEN_DEFAULTS", /window\.VERSO_ENDSCREEN_DEFAULTS = ENDSCREEN_DEFAULTS/.test(rn));
@@ -9799,8 +9801,10 @@ section("Product Rail: 3-stage rail + product dropdown");
 // ---- product-rail-source-stage-nav-article: Source stage left-nav + flowing article ----
 section("Product Rail: Source stage nav + article");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
-  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
+  var m = src("src/editor/source-stage.js").match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { isValidFacet: isValidFacet, topicMatchesQuery: topicMatchesQuery, filterTopics: filterTopics," +
@@ -9885,8 +9889,8 @@ section("Product Rail: Source stage nav + article");
   // search input and the shared product-context change (Epic 1's dropdown).
   ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(e));
   ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(e));
-  ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(e));
-  ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("div", "vbrowser__search source-stage__search-field"\)/.test(e));
+  ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(es));
+  ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("div", "vbrowser__search source-stage__search-field"\)/.test(es));
   // (facet SegmentedControl + per-section MarkdownLite column rendering retired with the section-cells path)
 
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
@@ -10341,8 +10345,10 @@ section("Product Rail: source-alignment metric");
 // ---- product-rail-source-stage-variant-columns: Flagship + conditional variant columns ----
 section("Product Rail: Source stage variant columns");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
-  var m = e.match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
+  var m = src("src/editor/source-stage.js").match(/\/\* @source-stage-start \*\/([\s\S]*?)\/\* @source-stage-end \*\//);
   if (!m) { ok("locate @source-stage fence", false); return; }
   var g = new Function(m[1] +
     "\nreturn { declaredVariantsForProduct: declaredVariantsForProduct, sectionOverrideVariants: sectionOverrideVariants," +
@@ -10379,8 +10385,8 @@ section("Product Rail: Source stage variant columns");
   // index.html / wiring.
   var idx = src("index.html");
   ok("no separate variant-pills mount point -- the article rebuilds head+pills+sections together", idx.indexOf('id="source-stage-variant-pills"') === -1);
-  ok("switching topics resets the toggled-variant selection", /__sourceActiveVariants = \[\]; \/\/ a different topic may have a different variant set/.test(e));
-  ok("a Product with no declared variants renders no pill row at all", /if \(!declared\.length\) return null;/.test(e));
+  ok("switching topics resets the toggled-variant selection", /__sourceActiveVariants = \[\]; \/\/ a different topic may have a different variant set/.test(es));
+  ok("a Product with no declared variants renders no pill row at all", /if \(!declared\.length\) return null;/.test(es));
   ok("setProductVariants writes onto the Product, never invents one", /function setProductVariants\(productId, variants\) \{\s*var p = productId && window\.ProductsStore\[productId\]; if \(!p\) return null;/.test(e));
   ok("__productRail exposes setProductVariants (fixture/future-authoring write path)", /window\.__productRail = \{ createProduct: createProduct, tagDocProductStage: tagDocProductStage, docMatchesProductStage: docMatchesProductStage, setProductVariants: setProductVariants,/.test(e));
   ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
@@ -10399,6 +10405,8 @@ section("Product Rail: Source stage variant columns");
 // console-free path this whole ticket exists for ----
 section("Product Rail: New Topic / Import from Markdown UI");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
 
   // Mount point + wiring: rendered once per renderSourceStage(), alongside the search field.
@@ -10407,22 +10415,22 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // /verso-frontend audit 2026-07-27: consolidated into ONE state-reactive toolbar row
   // (renderSourceToolbar, icon-only IconButton), built inside renderSourceTopicList
   // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
-  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,900}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(e));
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,900}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(e) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(e));
-  ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(e) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(e));
+  ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(es) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(es));
   // uio-P-C05: the Import button now opens the whole inbound menu (Markdown + the registered
   // import pipelines that used to sit on the Publish pane); Markdown is still its first entry.
-  ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(e) &&
-    /icon: "download", label: "Import…"/.test(e) && /label: "Markdown…", onClick: importMarkdownModal/.test(e));
+  ok("the idle toolbar uses the canonical IconButton (icon-only, tooltip via label), not full-width labeled buttons", /row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic", onClick: newTopicModal \}\)\);/.test(es) &&
+    /icon: "download", label: "Import…"/.test(es) && /label: "Markdown…", onClick: importMarkdownModal/.test(es));
   ok("button copy is sentence case, not Title Case (DS content rule)", e.indexOf('label: "New Topic"') === -1);
 
   // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
   // LibraryStore write, not a course edit).
-  ok("newTopicModal is blocked when no Product is active", /function newTopicModal\(\) \{\s*var productId = getActiveProduct\(\);\s*if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
-  ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(e));
-  var ntmStart = e.indexOf("function newTopicModal()");
-  var ntmBody = e.slice(ntmStart, ntmStart + 900);
+  ok("newTopicModal is blocked when no Product is active", /function newTopicModal\(\) \{\s*var productId = getActiveProduct\(\);\s*if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(es));
+  ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(es));
+  var ntmStart = es.indexOf("function newTopicModal()");
+  var ntmBody = es.slice(ntmStart, ntmStart + 900);
   ok("newTopicModal never calls pushHistory() (LibraryStore write, not a doc edit)", ntmBody.indexOf("pushHistory()") === -1);
   // new-product first-run: "start writing" mints the unified master immediately (via renderSourceStage
   // -> ensureUnifiedDocForActiveProduct), matching the import path, instead of leaving a loose topic.
@@ -10430,33 +10438,33 @@ section("Product Rail: New Topic / Import from Markdown UI");
 
   // Import from Markdown: same active-Product gate, blocked without a chosen file, and
   // the variant file list is the Product's OWN declared variants (no free-form entry).
-  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,900}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(e));
-  ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(e));
-  ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(e));
-  ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(e));
+  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,1100}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(es));
+  ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(es));
+  ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(es));
+  ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(es));
 
   // /verso-frontend Tier 2 fix: a Product with NO declared variants only ever needs ONE
   // file, so it matches the established one-click precedent exactly (glossary's importCsv
   // -- click, native picker opens immediately, no intermediate modal). The modal only
   // exists for the multi-file case a single click structurally can't do.
-  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);\s*checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{\s*finishMarkdownImport\(baseParse, \[\], productId, meta\);\s*\}\);\s*\}\);\s*\}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(e));
+  ok("no declared variants -> skips the modal entirely, opens the native file picker directly", /if \(!declaredVariants\.length\) \{\s*var inp = h\("input"\); inp\.type = "file"; inp\.accept = "\.md,\.markdown,\.txt";\s*inp\.addEventListener\("change", function \(\) \{\s*var f = inp\.files && inp\.files\[0\]; if \(!f\) return;\s*promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);\s*checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{\s*finishMarkdownImport\(baseParse, \[\], productId, meta\);\s*\}\);\s*\}\);\s*\}\);\s*\}\);\s*inp\.click\(\);\s*return;\s*\}/.test(es));
   var dsModalShellIdxInImport = e.indexOf("var shell = dsModalShell({", e.indexOf("function importMarkdownModal()"));
   ok("the multi-file modal path is reached only AFTER the no-variant early return", dsModalShellIdxInImport > e.indexOf('inp.click();\n      return;'));
 
   // /verso-frontend Tier 2 fix: the result summary goes through the canonical
   // confirmModal, never a raw window.alert (Tier 1 checklist item 1 explicitly bans
   // raw alert/confirm for anything beyond a single-sentence hard failure).
-  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId, meta\) \{[\s\S]{0,1800}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(e));
-  ok("a fresh-Product import lands in the unified stage (renderSourceStage) so topics->unified migration fires, not the retired topic view", /var result = importParsedTopics\(baseParse\.topics, productId,[\s\S]{0,900}renderSourceStage\(\);/.test(e));
-  ok("finishMarkdownImport is the single tail shared by both the one-click and modal import paths", (e.match(/finishMarkdownImport\(/g) || []).length === 3); // definition + the 2 call sites
+  ok("import result summary uses the canonical confirmModal, not a raw window.alert", /function finishMarkdownImport\(baseParse, variantParses, productId, meta\) \{[\s\S]{0,1800}confirmModal\("Import from Markdown", summary, function \(\) \{\}\);/.test(es));
+  ok("a fresh-Product import lands in the unified stage (renderSourceStage) so topics->unified migration fires, not the retired topic view", /var result = importParsedTopics\(baseParse\.topics, productId,[\s\S]{0,900}renderSourceStage\(\);/.test(es));
+  ok("finishMarkdownImport is the single tail shared by both the one-click and modal import paths", (es.match(/finishMarkdownImport\(/g) || []).length === 3); // definition + the 2 call sites
 
   // importParsedTopics: pure shape conversion (parse-result section -> real
   // {id,heading,facets,overrides} section), exposed for headless/browser-verify use.
   ok("__productRail exposes importParsedTopics / importMarkdownModal (headless/browser-verify hooks)",
-    /window\.__productRail\.importParsedTopics = importParsedTopics;/.test(e) && /window\.__productRail\.importMarkdownModal = importMarkdownModal;/.test(e));
-  ok("importParsedTopics writes ONLY the technical facet from imported text", /facets: \{ technical: s\.text \}/.test(e));
-  ok("a variant override becomes section.overrides[v].facets.technical, mirroring the shipped divergeSectionVariant shape", /sec\.overrides\[v\] = \{ facets: \{ technical: s\.overrides\[v\] \}, lastImportedText: s\.overrides\[v\] \};/.test(e));
-  ok("each NEW imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections, \{ key: t\.key, source: sourceStamp, variantSources: meta\.variantMeta, historyEntry: historyEntry \}\);/.test(e));
+    /window\.__productRail\.importParsedTopics = importParsedTopics;/.test(es) && /window\.__productRail\.importMarkdownModal = importMarkdownModal;/.test(es));
+  ok("importParsedTopics writes ONLY the technical facet from imported text", /facets: \{ technical: s\.text \}/.test(es));
+  ok("a variant override becomes section.overrides[v].facets.technical, mirroring the shipped divergeSectionVariant shape", /sec\.overrides\[v\] = \{ facets: \{ technical: s\.overrides\[v\] \}, lastImportedText: s\.overrides\[v\] \};/.test(es));
+  ok("each NEW imported topic goes through the real createTopic write path, not a raw LibraryStore poke", /createTopic\(t\.name, productId, sections, \{ key: t\.key, source: sourceStamp, variantSources: meta\.variantMeta, historyEntry: historyEntry \}\);/.test(es));
 
   // Chrome-only invariant + no proprietary content ever hard-coded as a fixture.
   var renderJs2 = src("src/render.js");
@@ -10468,6 +10476,8 @@ section("Product Rail: New Topic / Import from Markdown UI");
 // conflict flag, provenance display ----
 section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
 
   // Source v2 cleanup (spec 2c section 7.6): the per-topic bulk-select / delete / move-to-Product
@@ -10478,52 +10488,52 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
       && !/function deleteSelectedTopics/.test(e) && !/function moveSelectedTopicsModal/.test(e)
       && !/function topicNeedsReview/.test(e) && !/function structMoveTopic/.test(e) && !/function exitSelectMode/.test(e);
   })());
-  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(e) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(e));
+  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(es) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(es));
 
   // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
   // confirms with the author first, and covers both "no ambiguity" fast-paths.
-  ok("an already-bound filename (or a Product with no prior imports at all) skips the check entirely -- no ambiguity to ask about", /function checkRenamedSource\(productId, meta, parsedTopics, onDone\) \{[\s\S]{0,600}if \(alreadyBound \|\| !allForProduct\.length\) \{ onDone\(meta\); return; \}/.test(e));
-  ok("no rename candidate found -> proceeds silently as a genuinely new source", /var candidate = window\.MarkdownImport\.detectRenamedSource\(filesToKeys, parsedTopics\.map\(function \(t\) \{ return t\.key; \}\)\);\s*if \(!candidate\) \{ onDone\(meta\); return; \}/.test(e));
-  ok("a real candidate always asks first (dsModalShell, explicit Yes/No choice), never silently re-stamps", /title: "Same manual, new filename\?",[\s\S]{0,300}primaryLabel: "Yes, same manual",[\s\S]{0,200}label: "No, keep separate",/.test(e));
-  ok("accepting the rename re-stamps EVERY topic under the old filename (not just the matched ones) to the new name, then proceeds", /allForProduct\.forEach\(function \(t\) \{ if \(t\.source\.file === candidate\.file\) t\.source\.file = meta\.file; \}\);\s*saveLibrary\(\);\s*shell\.modal\.close\(\);\s*onDone\(meta\);/.test(e));
-  ok("declining keeps the two sources separate -- onDone still fires so the import completes as a genuinely new lineage", /onClick: function \(\) \{ shell\.modal\.close\(\); onDone\(meta\); \}/.test(e));
-  ok("both import paths run the rename check BEFORE finishMarkdownImport, never bypass it", (e.match(/checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{/g) || []).length === 2);
+  ok("an already-bound filename (or a Product with no prior imports at all) skips the check entirely -- no ambiguity to ask about", /function checkRenamedSource\(productId, meta, parsedTopics, onDone\) \{[\s\S]{0,600}if \(alreadyBound \|\| !allForProduct\.length\) \{ onDone\(meta\); return; \}/.test(es));
+  ok("no rename candidate found -> proceeds silently as a genuinely new source", /var candidate = window\.MarkdownImport\.detectRenamedSource\(filesToKeys, parsedTopics\.map\(function \(t\) \{ return t\.key; \}\)\);\s*if \(!candidate\) \{ onDone\(meta\); return; \}/.test(es));
+  ok("a real candidate always asks first (dsModalShell, explicit Yes/No choice), never silently re-stamps", /title: "Same manual, new filename\?",[\s\S]{0,300}primaryLabel: "Yes, same manual",[\s\S]{0,200}label: "No, keep separate",/.test(es));
+  ok("accepting the rename re-stamps EVERY topic under the old filename (not just the matched ones) to the new name, then proceeds", /allForProduct\.forEach\(function \(t\) \{ if \(t\.source\.file === candidate\.file\) t\.source\.file = meta\.file; \}\);\s*saveLibrary\(\);\s*shell\.modal\.close\(\);\s*onDone\(meta\);/.test(es));
+  ok("declining keeps the two sources separate -- onDone still fires so the import completes as a genuinely new lineage", /onClick: function \(\) \{ shell\.modal\.close\(\); onDone\(meta\); \}/.test(es));
+  ok("both import paths run the rename check BEFORE finishMarkdownImport, never bypass it", (es.match(/checkRenamedSource\(productId, metaList\[0\], baseParse\.topics, function \(meta\) \{/g) || []).length === 2);
 
   // Re-import reconcile: createTopic carries optional key/source/variantSources so a
   // LATER import of the same (Product, file) can find and update instead of duplicating.
-  ok("createTopic accepts optional key/source/variantSources, a blank New Topic passes none of them", /function createTopic\(name, productId, sections, extra\) \{/.test(e) &&
-    /if \(extra && extra\.key != null\) topic\.key = extra\.key;/.test(e) && /if \(extra && extra\.source\) topic\.source = extra\.source;/.test(e));
-  ok("existing topics are matched for reconcile ONLY within the same Product + source file (never cross-Product, never a differently-named file)", /return t\.kind === "topic" && t\.productId === productId && t\.source && t\.source\.file === meta\.file;/.test(e));
-  ok("a fresh topic with no existing (Product,file,key) match still creates normally (first import, or a genuinely new topic in an updated manual)", /var existingTopic = existingForSource\.filter\(function \(et\) \{ return et\.key === t\.key; \}\)\[0\];\s*if \(!existingTopic\) \{/.test(e));
-  ok("applySectionReconcile: a 'create' verdict appends a brand-new section with lastImportedText already stamped", /function applySectionReconcile\(topic, existingSec, freshSection, decision\) \{\s*if \(decision\.action === "create"\) \{\s*var sec = \{ id: "sec-" \+ Math\.random\(\)\.toString\(36\)\.slice\(2, 8\), key: freshSection\.key, heading: freshSection\.heading, facets: \{ technical: freshSection\.text \}, lastImportedText: freshSection\.text \};/.test(e));
-  ok("applySectionReconcile: 'update'/'track' adopt the fresh text and clear any stale flag; 'flag' leaves the author's text untouched", /if \(decision\.action === "update" \|\| decision\.action === "track"\) \{\s*existingSec\.facets\.technical = freshSection\.text;\s*existingSec\.lastImportedText = freshSection\.text;\s*delete existingSec\.sourceUpdate;\s*\} else if \(decision\.action === "flag"\) \{\s*existingSec\.sourceUpdate = \{ text: freshSection\.text \};/.test(e));
-  ok("variant overrides go through the SAME reconcile safety as the Flagship text, not a raw overwrite", /function applyVariantReconcile\(sec, variant, freshText, decision\) \{/.test(e) && /sec\.overrides\[variant\]\.sourceUpdate = \{ text: freshText \};/.test(e));
-  ok("importParsedTopics reports created/updated/flagged counts separately, not one lumped total", /return \{ topicCount: topicCount, sectionCount: sectionCount, updatedCount: updatedCount, flaggedCount: flaggedCount \};/.test(e));
+  ok("createTopic accepts optional key/source/variantSources, a blank New Topic passes none of them", /function createTopic\(name, productId, sections, extra\) \{/.test(es) &&
+    /if \(extra && extra\.key != null\) topic\.key = extra\.key;/.test(es) && /if \(extra && extra\.source\) topic\.source = extra\.source;/.test(es));
+  ok("existing topics are matched for reconcile ONLY within the same Product + source file (never cross-Product, never a differently-named file)", /return t\.kind === "topic" && t\.productId === productId && t\.source && t\.source\.file === meta\.file;/.test(es));
+  ok("a fresh topic with no existing (Product,file,key) match still creates normally (first import, or a genuinely new topic in an updated manual)", /var existingTopic = existingForSource\.filter\(function \(et\) \{ return et\.key === t\.key; \}\)\[0\];\s*if \(!existingTopic\) \{/.test(es));
+  ok("applySectionReconcile: a 'create' verdict appends a brand-new section with lastImportedText already stamped", /function applySectionReconcile\(topic, existingSec, freshSection, decision\) \{\s*if \(decision\.action === "create"\) \{\s*var sec = \{ id: "sec-" \+ Math\.random\(\)\.toString\(36\)\.slice\(2, 8\), key: freshSection\.key, heading: freshSection\.heading, facets: \{ technical: freshSection\.text \}, lastImportedText: freshSection\.text \};/.test(es));
+  ok("applySectionReconcile: 'update'/'track' adopt the fresh text and clear any stale flag; 'flag' leaves the author's text untouched", /if \(decision\.action === "update" \|\| decision\.action === "track"\) \{\s*existingSec\.facets\.technical = freshSection\.text;\s*existingSec\.lastImportedText = freshSection\.text;\s*delete existingSec\.sourceUpdate;\s*\} else if \(decision\.action === "flag"\) \{\s*existingSec\.sourceUpdate = \{ text: freshSection\.text \};/.test(es));
+  ok("variant overrides go through the SAME reconcile safety as the Flagship text, not a raw overwrite", /function applyVariantReconcile\(sec, variant, freshText, decision\) \{/.test(es) && /sec\.overrides\[variant\]\.sourceUpdate = \{ text: freshText \};/.test(es));
+  ok("importParsedTopics reports created/updated/flagged counts separately, not one lumped total", /return \{ topicCount: topicCount, sectionCount: sectionCount, updatedCount: updatedCount, flaggedCount: flaggedCount \};/.test(es));
 
   // Provenance capture: version + publish date are optional, asked once per file
   // regardless of the one-click or multi-file path (neither a native picker nor the
   // file-input modal has anywhere to type free text).
-  ok("promptImportProvenance is a lightweight modal (dsModalShell + modalText rows), not a bespoke dialog", /function promptImportProvenance\(fileEntries, onDone\) \{[\s\S]{0,300}dsModalShell\(\{/.test(e));
-  ok("the one-click (no-variant) path collects provenance for its single file before parsing/writing anything", /promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);/.test(e));
-  ok("the multi-file modal path collects provenance for EVERY file (Flagship + each variant), not just the primary", /var entries = \[\{ key: "flagship", label: "Manual \(Flagship\)", file: primaryFile\.name \}\]\s*\.concat\(variantNames\.map\(function \(v\) \{ return \{ key: v, label: v, file: variantFiles\[v\]\.name \}; \}\)\);/.test(e));
+  ok("promptImportProvenance is a lightweight modal (dsModalShell + modalText rows), not a bespoke dialog", /function promptImportProvenance\(fileEntries, onDone\) \{[\s\S]{0,300}dsModalShell\(\{/.test(es));
+  ok("the one-click (no-variant) path collects provenance for its single file before parsing/writing anything", /promptImportProvenance\(\[\{ key: "flagship", label: "Manual", file: f\.name \}\], function \(metaList\) \{\s*readFileAsText\(f\)\.then\(function \(text\) \{\s*var baseParse = window\.MarkdownImport\.parse\(text\);/.test(es));
+  ok("the multi-file modal path collects provenance for EVERY file (Flagship + each variant), not just the primary", /var entries = \[\{ key: "flagship", label: "Manual \(Flagship\)", file: primaryFile\.name \}\]\s*\.concat\(variantNames\.map\(function \(v\) \{ return \{ key: v, label: v, file: variantFiles\[v\]\.name \}; \}\)\);/.test(es));
 
   // (the per-section 'Source updated' conflict pill retired with the section-cells path; the Badge
   // warning tone it introduced stays in the DS and is still asserted below)
   ok("Badge's canonical tone set was extended with 'warning' (design-system/components/structure/Badge), not hacked via an inline style override", /tone === "danger" \|\| tone === "warning" \|\| tone === "component"/.test(src("src/ui-kit.js")) &&
     /\.vds-badge--warning \{ background: var\(--warning, #e0a83e\); color: #1a1a1a; \}/.test(src("editor.css")));
-  ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(e));
+  ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(es));
   // product-rail-review-diff: a real line-level diff (LineDiff), not two flat side-by-side blocks.
-  ok("the review compares via the real LineDiff.diff, not a flat two-block dump", /var ops = window\.LineDiff \? window\.LineDiff\.diff\(sec\.facets\.technical \|\| "", sec\.sourceUpdate\.text \|\| ""\) : \[\];/.test(e));
-  ok("each diff op renders on its own line with a type-specific class (removed/added/same), + and − prefixes", /var prefix = op\.type === "removed" \? "− " : op\.type === "added" \? "\+ " : "  ";/.test(e) &&
-    /h\("div", "source-stage__diff-line source-stage__diff-line--" \+ op\.type, prefix \+ op\.text\)/.test(e));
-  ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(e));
+  ok("the review compares via the real LineDiff.diff, not a flat two-block dump", /var ops = window\.LineDiff \? window\.LineDiff\.diff\(sec\.facets\.technical \|\| "", sec\.sourceUpdate\.text \|\| ""\) : \[\];/.test(es));
+  ok("each diff op renders on its own line with a type-specific class (removed/added/same), + and − prefixes", /var prefix = op\.type === "removed" \? "− " : op\.type === "added" \? "\+ " : "  ";/.test(es) &&
+    /h\("div", "source-stage__diff-line source-stage__diff-line--" \+ op\.type, prefix \+ op\.text\)/.test(es));
+  ok("choosing 'Use updated text' commits it as the new lastImportedText baseline (so it won't re-flag next time unless it changes again)", /sec\.facets\.technical = sec\.sourceUpdate\.text;\s*sec\.lastImportedText = sec\.sourceUpdate\.text;\s*delete sec\.sourceUpdate;/.test(es));
 
   // Provenance MOVED under the document header (source-provenance-bug); the sidebar keeps only Linked in.
-  ok("provenance renders under the document header, not the sidebar", /headEl\.appendChild\(renderSourceProvenanceLine\(topic\)\);/.test(e) && /function renderSourceProvenanceLine\(topic\)[\s\S]{0,220}"Imported from " \+ \(src\.file/.test(e));
-  ok("the sidebar Source section no longer carries the provenance line (single source of truth)", /panelSection\(host, "Source", \{ collapsible: true \}\);[\s\S]{0,200}libraryWhereUsedDetail/.test(e) && e.indexOf('"Authored in Verso (no imported source)."') === -1);
+  ok("provenance renders under the document header, not the sidebar", /headEl\.appendChild\(renderSourceProvenanceLine\(topic\)\);/.test(es) && /function renderSourceProvenanceLine\(topic\)[\s\S]{0,220}"Imported from " \+ \(src\.file/.test(es));
+  ok("the sidebar Source section no longer carries the provenance line (single source of truth)", /panelSection\(host, "Source", \{ collapsible: true \}\);[\s\S]{0,200}libraryWhereUsedDetail/.test(es) && e.indexOf('"Authored in Verso (no imported source)."') === -1);
   // bug fix: a unified master reports its real imported source (not "authored in Verso").
-  ok("resolveTopicSource inherits an imported stamp from an archived constituent of a master", /function resolveTopicSource\(topic\)[\s\S]{0,280}topic\.sourceMaster[\s\S]{0,200}t\.archivedInto === topic\.id && t\.source\) return t\.source/.test(e));
-  ok("migrateProductToUnifiedDoc copies the constituents' imported source onto the master", /if \(!master\.source\) \{\s*var imported = topics\.filter\(function \(t\) \{ return t && t\.source; \}\)\[0\];[\s\S]{0,120}master\.source = imported\.source;/.test(e));
+  ok("resolveTopicSource inherits an imported stamp from an archived constituent of a master", /function resolveTopicSource\(topic\)[\s\S]{0,280}topic\.sourceMaster[\s\S]{0,200}t\.archivedInto === topic\.id && t\.source\) return t\.source/.test(es));
+  ok("migrateProductToUnifiedDoc copies the constituents' imported source onto the master", /if \(!master\.source\) \{\s*var imported = topics\.filter\(function \(t\) \{ return t && t\.source; \}\)\[0\];[\s\S]{0,120}master\.source = imported\.source;/.test(es));
 
   // Chrome-only invariant.
   var renderJs3 = src("src/render.js");
@@ -10533,6 +10543,8 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
 // ---- product-rail-source-stage-info-panel: right info panel (Linked in + History) ----
 section("Product Rail: Source stage info panel");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
 
   // index.html: a real right pane, not a placeholder, mounted alongside the nav/article.
@@ -10541,29 +10553,29 @@ section("Product Rail: Source stage info panel");
 
   // Wiring: renderSourceArticle() drives the info panel from the SAME topic-selection
   // state as the article -- one source of truth, no separate re-fetch/resync path.
-  ok("no topic selected -> info panel explicitly cleared (not left stale from the last topic)", /renderSourceInfoPanel\(null\);\s*\n\s*return;/.test(e));
-  ok("a selected topic drives the info panel from the SAME render pass as the article", /renderSourceInfoPanel\(topic\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\n\s*\/\/ Product Rail \(source-stage-info-panel\)/.test(e));
+  ok("no topic selected -> info panel explicitly cleared (not left stale from the last topic)", /renderSourceInfoPanel\(null\);\s*\n\s*return;/.test(es));
+  ok("a selected topic drives the info panel from the SAME render pass as the article", /renderSourceInfoPanel\(topic\);\s*\n\s*return;\s*\n\s*\}\s*\n\s*\n\s*\/\/ Product Rail \(source-stage-info-panel\)/.test(es));
 
   // renderSourceInfoPanel: reuses the canonical panelSection() helper (not a one-off
   // block) for both "Linked in" and "History" -- the same section chrome every other
   // side panel in the app uses.
-  ok("'Linked in (N)' is a sub-head folded into the Source section (both are document-origin facts)", /source-info__subhead", "Linked in \(" \+ used\.length \+ "\)"/.test(e));
-  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\)/.test(e));
+  ok("'Linked in (N)' is a sub-head folded into the Source section (both are document-origin facts)", /source-info__subhead", "Linked in \(" \+ used\.length \+ "\)"/.test(es));
+  ok("History section uses the canonical panelSection() helper", /panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\)/.test(es));
   // #163: the standalone Comments accordion is retired. Comments live ONLY in the Marks section's
   // Comments filter tab, so the info panel never double-renders them. The legacy !hasDoc branch ends
   // at its Linked-in loop (no renderSourceCommentsPanel call), and the function itself is gone.
   ok("the standalone renderSourceCommentsPanel accordion is retired (#163)", !/function renderSourceCommentsPanel\(/.test(e) && !/renderSourceCommentsPanel\(host, topic\)/.test(e));
-  ok("the Marks section carries a Comments filter tab -- comments' single home", /SOURCE_MARK_FILTERS = \[[\s\S]{0,320}\{ key: "comment", label: "Notes", title: "Comments"/.test(e));
-  ok("the legacy !hasDoc branch renders only the Linked-in list, then closes (no comments accordion)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);\s*\n\s*\}\);\s*\n\s*\}\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(e));
-  ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(e));
-  ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(e));
-  ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(e) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(e));
+  ok("the Marks section carries a Comments filter tab -- comments' single home", /SOURCE_MARK_FILTERS = \[[\s\S]{0,320}\{ key: "comment", label: "Notes", title: "Comments"/.test(es));
+  ok("the legacy !hasDoc branch renders only the Linked-in list, then closes (no comments accordion)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\); \}\);\s*\n\s*sourceBody\.appendChild\(row\);\s*\n\s*\}\);\s*\n\s*\}\s*\n\s*\}\s*\n\s*applySourceInfoVisibility\(\);/.test(es));
+  ok("Linked in reads the detailed where-used list (title + jump target), not just counts", /libraryWhereUsedDetail\(topic\.id, getRegistry\(\)\)/.test(es));
+  ok("empty where-used renders the named empty state, not a blank section", /Not currently linked in any document\./.test(es));
+  ok("clicking a Linked-in row jumps to the EXACT linked block (opens doc, Edit, selects block)", /jumpToLinkedBlock\(u\.docCode, u\.blockId\);/.test(es) && /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}reselectBlockNode\(b, "block"\)/.test(e));
   // md-topic-import: History is now a node-based vertical timeline (renderHistoryTimeline),
   // not a flat Created/Updated pair -- traces every import (and any edit since) back to
   // how the topic entered the platform, newest first.
-  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic\) \{[\s\S]{0,220}var body = panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\);/.test(e));
+  ok("History renders via the dedicated renderHistoryTimeline helper, reusing panelSection", /function renderHistoryTimeline\(host, topic\) \{[\s\S]{0,220}var body = panelSection\(host, "History", \{ collapsible: true, defaultOpen: false \}\);/.test(es));
   // uio-S-C04 (SRC-11): the timeline states each day's date ONCE (grouped), not on every row.
-  ok("History groups by day — the date is stated once per day run", /var lastDate = null;[\s\S]{0,260}var showDate = d !== lastDate; lastDate = d;[\s\S]{0,120}date: showDate \? d : null/.test(e));
+  ok("History groups by day — the date is stated once per day run", /var lastDate = null;[\s\S]{0,260}var showDate = d !== lastDate; lastDate = d;[\s\S]{0,120}date: showDate \? d : null/.test(es));
   // Timeline promoted to a real DSLMS component (design-system/components/structure/
   // Timeline) rather than left as ad-hoc dot/line DOM in editor.js -- /verso-frontend
   // ruled this converge-now given it's built entirely from already-anchored tokens
@@ -10576,29 +10588,29 @@ section("Product Rail: Source stage info panel");
   ok("Timeline's DSLMS contract (.d.ts) exists with the entries prop", /interface TimelineProps/.test(dsTimelineDts) && /entries: TimelineEntry\[\];/.test(dsTimelineDts));
   ok("readme.md's canonical control list includes Timeline under structure/", /\*\*structure\/\*\* · `TreeItem` · `BlockPaletteItem` · `BlockTile` \+ `BlockGrid` · `Badge` · `Meter` · `Timeline`/.test(src("design-system/readme.md")));
   ok("editor.css styles the canonical .vds-timeline* classes, not the old source-stage__timeline ad-hoc names", /\.vds-timeline \{/.test(src("editor.css")) && src("editor.css").indexOf(".source-stage__timeline") === -1);
-  ok("timeline rows sort newest-first across both provenance streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
-  ok("a hand-created topic with neither stream still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rows\.length\) rows = \[\{ ts: topic\.createdAt \|\| 0, importedAt: topic\.createdAt, label: "Created", detail: null \}\];/.test(e));
-  ok("a legacy edit newer than the last import leads with a synthetic 'Last edited' node (only when there are no doc commits)", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
-  ok("timeline entries render through the canonical VersoUI.Timeline, not hand-built dot/line DOM", /body\.appendChild\(window\.VersoUI\.Timeline\(\{ entries: entries \}\)\);/.test(e));
+  ok("timeline rows sort newest-first across both provenance streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(es));
+  ok("a hand-created topic with neither stream still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rows\.length\) rows = \[\{ ts: topic\.createdAt \|\| 0, importedAt: topic\.createdAt, label: "Created", detail: null \}\];/.test(es));
+  ok("a legacy edit newer than the last import leads with a synthetic 'Last edited' node (only when there are no doc commits)", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(es));
+  ok("timeline entries render through the canonical VersoUI.Timeline, not hand-built dot/line DOM", /body\.appendChild\(window\.VersoUI\.Timeline\(\{ entries: entries \}\)\);/.test(es));
 
   // Data side: each import call (first-time create AND every later reconcile) appends
   // one history entry, never overwrites the log -- the whole point is a full trace.
-  ok("a brand-new topic's first history entry is stamped at creation via createTopic's extra.historyEntry", /if \(extra && extra\.historyEntry\) topic\.history = \[extra\.historyEntry\];/.test(e));
-  ok("a reconciled (already-existing) topic APPENDS to its history, never replaces it", /existingTopic\.history = existingTopic\.history \|\| \[\];\s*existingTopic\.history\.push\(\{/.test(e));
+  ok("a brand-new topic's first history entry is stamped at creation via createTopic's extra.historyEntry", /if \(extra && extra\.historyEntry\) topic\.history = \[extra\.historyEntry\];/.test(es));
+  ok("a reconciled (already-existing) topic APPENDS to its history, never replaces it", /existingTopic\.history = existingTopic\.history \|\| \[\];\s*existingTopic\.history\.push\(\{/.test(es));
   // REGRESSION (caught by browser-verify): updatedAt must be stamped with the SAME
   // sourceStamp.importedAt as the history entry it belongs to, never a separate
   // Date.now() -- a fresh call would read a few ms later than the entry's own
   // timestamp, making renderHistoryTimeline's "is there activity since the last
   // import" check wrongly true on EVERY reconcile and show a phantom "Last edited"
   // node even when nothing was hand-edited.
-  ok("reconcile's updatedAt reuses sourceStamp.importedAt, not a fresh Date.now() (avoids a phantom 'Last edited' node)", /existingTopic\.updatedAt = sourceStamp \? sourceStamp\.importedAt : Date\.now\(\);/.test(e));
-  ok("each reconcile's history entry counts THIS run's created/updated/flagged sections, separate from the whole-import summary totals", /var runCreated = 0, runUpdated = 0, runFlagged = 0;/.test(e) &&
-    /sectionsCreated: runCreated, sectionsUpdated: runUpdated, sectionsFlagged: runFlagged/.test(e));
-  ok("a variant-override flag also counts toward the topic's OWN run tally, not just the global summary", /if \(vDecision\.action === "flag"\) \{ flaggedCount\+\+; runFlagged\+\+; \}/.test(e));
+  ok("reconcile's updatedAt reuses sourceStamp.importedAt, not a fresh Date.now() (avoids a phantom 'Last edited' node)", /existingTopic\.updatedAt = sourceStamp \? sourceStamp\.importedAt : Date\.now\(\);/.test(es));
+  ok("each reconcile's history entry counts THIS run's created/updated/flagged sections, separate from the whole-import summary totals", /var runCreated = 0, runUpdated = 0, runFlagged = 0;/.test(es) &&
+    /sectionsCreated: runCreated, sectionsUpdated: runUpdated, sectionsFlagged: runFlagged/.test(es));
+  ok("a variant-override flag also counts toward the topic's OWN run tally, not just the global summary", /if \(vDecision\.action === "flag"\) \{ flaggedCount\+\+; runFlagged\+\+; \}/.test(es));
 
   // createTopic now stamps updatedAt alongside createdAt (both start equal -- "just
   // created" IS "just updated" until a future editing ticket bumps it independently).
-  ok("createTopic stamps updatedAt alongside createdAt", /createdAt: now, updatedAt: now \};/.test(e));
+  ok("createTopic stamps updatedAt alongside createdAt", /createdAt: now, updatedAt: now \};/.test(es));
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
@@ -11214,36 +11226,42 @@ section("uio-E-C08: named stage rail + labelled Send-to-publish w/ count");
 // toolbar into a footer strip pinned to the bottom of the Source rail; New topic + Import stay on top.
 section("uio-S-C05: Source product actions moved to a rail footer strip");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
   ok("the Source nav has a footer strip element", /id="source-stage-nav-footer"/.test(html) && /\.source-stage__nav-footer \{[^}]*border-top: 1px solid/.test(css));
-  ok("Product actions render into the footer (not the top toolbar row)", /source-stage-nav-footer"\);[\s\S]{0,320}label: "Product actions"[\s\S]{0,400}footer\.appendChild/.test(e));
-  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,400}label: "Import…"[\s\S]{0,300}host\.appendChild\(row\)/.test(e));
+  ok("Product actions render into the footer (not the top toolbar row)", /source-stage-nav-footer"\);[\s\S]{0,320}label: "Product actions"[\s\S]{0,400}footer\.appendChild/.test(es));
+  ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,400}label: "Import…"[\s\S]{0,300}host\.appendChild\(row\)/.test(es));
 })();
 
 // uio-S-C03 (SRC-03): mark cards never overlap the prose — while any card is open the article
 // reserves a right-margin lane (padding-right) so the measure shifts clear of the card zone.
 section("uio-S-C03: source mark cards clamp to a reserved right lane");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var css = src("editor.css");
   ok("the article reserves a right lane when a where/alt/comment card is open (:has)", /\.source-stage__article:has\(\[data-source-wherepanel\]\)[\s\S]{0,220}data-source-commentthread\]\) \{ padding-right: 312px; \}/.test(css));
   ok("the lane is desktop-scoped (min-width) so narrow screens aren't over-squeezed", /@media \(min-width: 1181px\) \{[\s\S]{0,260}padding-right: 312px/.test(css));
   // SRC-02: the where-used zero state reads as an invitation, and the title isn't the contradictory "Linked in 0".
   var e = src("src/editor.js");
-  ok("where-used zero state is an invitation (not 'not linked')", /Not used in a course yet — place this passage from the Edit stage/.test(e));
-  ok("where-used title avoids 'Linked in 0' (neutral when count is 0)", /used\.length \? \("Linked in " \+ used\.length\) : "Where used"/.test(e));
+  ok("where-used zero state is an invitation (not 'not linked')", /Not used in a course yet — place this passage from the Edit stage/.test(es));
+  ok("where-used title avoids 'Linked in 0' (neutral when count is 0)", /used\.length \? \("Linked in " \+ used\.length\) : "Where used"/.test(es));
 })();
 
 // uio-S-C02 (SRC-05): one search field carrying the in-field match navigator + a replace glyph that
 // reveals the replace row on demand (disabled with a reason when the source is locked).
 section("uio-S-C02: one Source search field + in-field match nav + reveal-on-demand replace");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js"), css = src("editor.css");
   // in-field adornment holds the match nav + a replace-toggle glyph
-  ok("the match nav + replace glyph sit IN the field (source-search__adorn)", /var adorn = h\("div", "source-search__adorn"\);[\s\S]{0,200}findNav\.id = "source-find-nav";[\s\S]{0,300}icon: "replace"[\s\S]{0,600}search\.appendChild\(adorn\)/.test(e) && /\.source-search__adorn \{/.test(css));
+  ok("the match nav + replace glyph sit IN the field (source-search__adorn)", /var adorn = h\("div", "source-search__adorn"\);[\s\S]{0,200}findNav\.id = "source-find-nav";[\s\S]{0,300}icon: "replace"[\s\S]{0,600}search\.appendChild\(adorn\)/.test(es) && /\.source-search__adorn \{/.test(css));
   // replace row is revealed on demand (gated on __sourceReplaceOpen), not always shown
-  ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(e) && /if \(unified && __sourceReplaceOpen\) \{/.test(e));
+  ok("replace row shows only when toggled open", /var __sourceReplaceOpen = false;/.test(es) && /if \(unified && __sourceReplaceOpen\) \{/.test(es));
   // when locked, the row disables the inputs/buttons + states the reason
-  ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(e) && /source-replace__lockhint/.test(e));
+  ok("replace is disabled with a reason when the source is locked", /var locked = !__sourceUnlocked;[\s\S]{0,1000}if \(locked\) \{ \[repOne, repAll\]\.forEach[\s\S]{0,160}Unlock the source/.test(es) && /source-replace__lockhint/.test(es));
 })();
 
 // uio-P-C05 (PUB-13): "Import & export" put an INBOUND pipeline on the publish screen, beside the
@@ -11252,6 +11270,8 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
 // lists the unavailable formats once with a "soon" state.
 section("uio-P-C05: format control on Publish, import on Source");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js"), x = src("src/export.js"), css = src("editor.css"), ds = src("design-system/components/overlays/ContextMenu.d.ts");
   var m = e.match(/\/\* @publish-format-start \*\/([\s\S]*?)\/\* @publish-format-end \*\//);
   if (!m) { ok("locate @publish-format fence", false); return; }
@@ -11302,9 +11322,9 @@ section("uio-P-C05: format control on Publish, import on Source");
   ok("the head lays the Format control out beside its overflow", /\.publish-io \{ display: inline-flex; align-items: center; gap: 4px; \}/.test(css));
 
   // --- import now lives on Source, routed to the SAME handlers (no second importer) ---
-  ok("the Source rail's one Import button opens the inbound menu", /label: "Import…", onClick: function \(ev\)[\s\S]{0,220}openSourceImportMenu\(r\.left, r\.bottom \+ 4\)/.test(e));
-  ok("the menu leads with Markdown, then every registered import", /function openSourceImportMenu\(x, y\) \{[\s\S]{0,120}label: "Markdown…", onClick: importMarkdownModal[\s\S]{0,220}pipelineByDirection\(pipelineButtons, "import"\)/.test(e));
-  ok("it reuses each registered handler rather than rebuilding an importer", /items\.push\(\{ label: importMenuLabel\(b\.label\), onClick: b\.onClick \}\)/.test(e));
+  ok("the Source rail's one Import button opens the inbound menu", /label: "Import…", onClick: function \(ev\)[\s\S]{0,220}openSourceImportMenu\(r\.left, r\.bottom \+ 4\)/.test(es));
+  ok("the menu leads with Markdown, then every registered import", /function openSourceImportMenu\(x, y\) \{[\s\S]{0,120}label: "Markdown…", onClick: importMarkdownModal[\s\S]{0,220}pipelineByDirection\(pipelineButtons, "import"\)/.test(es));
+  ok("it reuses each registered handler rather than rebuilding an importer", /items\.push\(\{ label: importMenuLabel\(b\.label\), onClick: b\.onClick \}\)/.test(es));
   ok("an import registered after boot still reaches the Source menu", /if \(__activeStage === "source"\) renderSourceToolbar\(\);/.test(e));
 
   // --- the menu primitive grew the states this needs, per the DS contract ---
@@ -11320,6 +11340,8 @@ section("uio-P-C05: format control on Publish, import on Source");
 // never-published states, and the roll-up that makes the Source top bar and a Publish row agree.
 section("uio-F04: cross-stage data surfacing");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
   // arch-P3-05: these are the module's pure facts now.
   var PR5 = require(path.join(ROOT, "src/editor/product-rail.js"));
@@ -11426,8 +11448,8 @@ section("uio-F04: cross-stage data surfacing");
     return align === 1 && drift === 1;
   })());
   ok("where-used comes from sourceLinkWhereUsed, not a stored list", /f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, null\)\)/.test(e));
-  ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(e));
-  ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(e) && /\.source-stage__facts/.test(src("editor.css")));
+  ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(es));
+  ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(es) && /\.source-stage__facts/.test(src("editor.css")));
   ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,400}f04AlignmentMeter\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
   ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(src("editor.css")));
   ok("every fact is drawn as the canonical DS Badge, quiet, never a bespoke chip", /function f04Badge\(fact, cls\)[\s\S]{0,320}U\.Badge\(\{ tone: fact\.tone \|\| "neutral", quiet: true, size: "sm"/.test(e));
@@ -12540,6 +12562,8 @@ section("uio-F03 scope + inheritance model");
 // counts, and a fixed type palette that never collides with the accent (= selection/focus).
 section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
   var e = src("src/editor.js"), css = src("editor.css"), sm = src("src/source-marks.js"), tok = src("design-system/tokens/colors.css");
 
@@ -12566,15 +12590,15 @@ section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette"
   ok("markCounts on an empty model is all zeroes", SD.markCounts(SD.create([])).all === 0);
 
   // --- the filter is LABELLED and carries the live count (SRC-06: no unlabelled glyph tabs) ---
-  ok("filter options are labelled, not icons", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"[\s\S]{0,320}\{ key: "comment", label: "Notes"/.test(e) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
-  ok("each segment appends its live count from markCounts", /var counts = SD\.markCounts\(model\);[\s\S]{0,520}label: f\.label \+ " " \+ n/.test(e));
+  ok("filter options are labelled, not icons", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"[\s\S]{0,320}\{ key: "comment", label: "Notes"/.test(es) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
+  ok("each segment appends its live count from markCounts", /var counts = SD\.markCounts\(model\);[\s\S]{0,520}label: f\.label \+ " " \+ n/.test(es));
 
   // --- SRC-01: one row per mark with a count; instances are NOT enumerated ---
-  ok("a linked row states its doc count instead of one row per instance", /out\.meta = n \? \("in " \+ n \+ " doc" \+ \(n === 1 \? "" : "s"\)\) : "not placed yet"/.test(e));
-  ok("a fully-resolved comment thread greys its dot", /if \(!open && thread\.length && !m\.broken\) \{ out\.dot = "grey"; out\.dotTitle = "Resolved"; \}/.test(e));
-  ok("every row carries its heading path", /var path = SD\.markPath\(model, m\);[\s\S]{0,120}source-drawer__row-where/.test(e) && /\.source-drawer__row-where \{/.test(css));
-  ok("clicking a linked row opens the card holding its destination list", /if \(m\.type === "link" && topic\) syncSourceWherePanel\(topic, m\.id\)/.test(e));
-  ok("whole-topic component placements roll up to ONE footnote, not a fake mark row", /h\("button", "source-marks__rollup", "Also placed whole, as a component, in " \+ ni/.test(e) && !/source-marks__rollup[\s\S]{0,80}sd-mark-/.test(e));
+  ok("a linked row states its doc count instead of one row per instance", /out\.meta = n \? \("in " \+ n \+ " doc" \+ \(n === 1 \? "" : "s"\)\) : "not placed yet"/.test(es));
+  ok("a fully-resolved comment thread greys its dot", /if \(!open && thread\.length && !m\.broken\) \{ out\.dot = "grey"; out\.dotTitle = "Resolved"; \}/.test(es));
+  ok("every row carries its heading path", /var path = SD\.markPath\(model, m\);[\s\S]{0,120}source-drawer__row-where/.test(es) && /\.source-drawer__row-where \{/.test(css));
+  ok("clicking a linked row opens the card holding its destination list", /if \(m\.type === "link" && topic\) syncSourceWherePanel\(topic, m\.id\)/.test(es));
+  ok("whole-topic component placements roll up to ONE footnote, not a fake mark row", /h\("button", "source-marks__rollup", "Also placed whole, as a component, in " \+ ni/.test(es) && !/source-marks__rollup[\s\S]{0,80}sd-mark-/.test(e));
   ok("the count + path ride the 11px chrome baseline, not the 10px badge size", /\.source-drawer__row-count \{[^}]*font-size: var\(--text-xs\)/.test(css) && /\.source-drawer__row-where \{[^}]*font-size: var\(--text-xs\)/.test(css));
 
   // --- SRC-07: a fixed palette, defined in the DS, with no hue doing two jobs ---
@@ -14142,6 +14166,8 @@ section("SPEC 8: source-link 08 — alternates from the canvas");
 // ---- SPEC 8 source-link 09: base-edit warning + fork ----
 section("SPEC 8: source-link 09 — base-edit warning + fork");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
   // Pure sourceEditImpact: a link mark whose wording changed since the snapshot is "edited"; its
   // base-showing locations are affected, alternate-pinned ones are not.
@@ -14168,7 +14194,7 @@ section("SPEC 8: source-link 09 — base-edit warning + fork");
   })());
 
   var e = src("src/editor.js");
-  ok("the warning fires at LOCK (unlock snapshots, lock computes impact + shows the modal)", /snapshotSourceLinkBase\(\); \/\/ 09[\s\S]{0,400}var impact = sourceBaseEditImpact\(\);\s*if \(impact\.affected\.length && window\.VersoUI[\s\S]{0,80}showSourceBaseEditModal\(topic, impact, opts\); return; \}/.test(e));
+  ok("the warning fires at LOCK (unlock snapshots, lock computes impact + shows the modal)", /snapshotSourceLinkBase\(\); \/\/ 09[\s\S]{0,400}var impact = sourceBaseEditImpact\(\);\s*if \(impact\.affected\.length && window\.VersoUI[\s\S]{0,80}showSourceBaseEditModal\(topic, impact, opts\); return; \}/.test(es));
   ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]{0,500}onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(e) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(e));
   ok("fork freezes each edited mark's OLD wording as an alternate + pins every affected location", /function forkAffectedToAlternate\(impact\)[\s\S]{0,600}alt: oldText, tag: "Frozen"[\s\S]{0,120}applyAltToLocation\(reg, loc, alt\.id\)[\s\S]{0,200}saveRegistry\(reg\)/.test(e));
   ok("cancel reverts the model to the pre-edit snapshot", /function revertSourceEditSession\(topic\)[\s\S]{0,200}SD\.fromJSON\(__sourcePreEditModelJson\)/.test(e));
@@ -14177,12 +14203,14 @@ section("SPEC 8: source-link 09 — base-edit warning + fork");
 // ---- SPEC 8 source-link 10: source-stage where-used + alternate push ----
 section("SPEC 8: source-link 10 — where-used + push");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js"), css = src("editor.css");
   ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(e));
-  ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1900}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
-  ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(e));
-  ok("the push dialog picks an alternate + a subset of locations (Checkbox per location)", /function openSourceAltPushDialog\(link, alts, used\)[\s\S]{0,1700}window\.VersoUI\.Checkbox\(\{ label: loc\.docTitle[\s\S]{0,120}chosen\[i\] = v/.test(e));
-  ok("push sets altId on each chosen location across documents + persists (saveRegistry); base stays base until pushed", /function pushSourceAlternate\(markId, altId, locations\)[\s\S]{0,200}applyAltToLocation\(reg, loc, altId\)[\s\S]{0,60}saveRegistry\(reg\)/.test(e));
+  ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1900}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(es));
+  ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(es));
+  ok("the push dialog picks an alternate + a subset of locations (Checkbox per location)", /function openSourceAltPushDialog\(link, alts, used\)[\s\S]{0,1700}window\.VersoUI\.Checkbox\(\{ label: loc\.docTitle[\s\S]{0,120}chosen\[i\] = v/.test(es));
+  ok("push sets altId on each chosen location across documents + persists (saveRegistry); base stays base until pushed", /function pushSourceAlternate\(markId, altId, locations\)[\s\S]{0,200}applyAltToLocation\(reg, loc, altId\)[\s\S]{0,60}saveRegistry\(reg\)/.test(es));
   ok("the where-used rows + push affordance carry their own chrome CSS", /\.source-wherepanel__row/.test(css) && /\.source-wherepanel__push/.test(css));
 })();
 
@@ -14538,6 +14566,8 @@ section("SPEC 8: source-link 01 — link mark model + resolver wiring");
 // holds [offset,end), and marks re-anchor (before stays / after moves / straddle -> two-block).
 section("Source rewrite: splitNode (Enter makes a new paragraph)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
   var m = SD.create([{ type: "paragraph", text: "Hello world" }]);
   var k = m.nodes[0].key;
@@ -14571,7 +14601,7 @@ section("Source rewrite: splitNode (Enter makes a new paragraph)");
 
   // wiring: the continuous-doc beforeinput routes Enter through splitNode (no longer a dead preventDefault)
   var e = src("src/editor.js");
-  ok("editor: Enter (insertParagraph/insertLineBreak) calls SD.splitNode via afterSourceStructuralEdit", /it === "insertParagraph" \|\| it === "insertLineBreak"/.test(e) && /afterSourceStructuralEdit\(topic, model, SD\.splitNode\(model, blk\.getAttribute\("data-node"\), off\)\)/.test(e));
+  ok("editor: Enter (insertParagraph/insertLineBreak) calls SD.splitNode via afterSourceStructuralEdit", /it === "insertParagraph" \|\| it === "insertLineBreak"/.test(es) && /afterSourceStructuralEdit\(topic, model, SD\.splitNode\(model, blk\.getAttribute\("data-node"\), off\)\)/.test(es));
 })();
 
 // ---- product-rail-source-rw-multi-block-marks: a mark spans one word to the whole document (D1) ----
@@ -14827,51 +14857,53 @@ section("Source rewrite: mark painting engine contract (Epic 2b)");
 // above still pass). These assertions guard the wiring that the browser-verify exercises live.
 section("Source rewrite: lock-toolbars wiring (Epic 2b)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
   // section-cells retired: EVERY topic renders the continuous node-model article; a legacy section
   // topic auto-converts on open (lossless), then falls through to the same render.
-  ok("renderSourceArticle auto-converts a legacy section topic to the continuous model on open", /if \(!topicHasDoc\(topic\) && window\.SourceDoc\) \{[\s\S]{0,260}topic\.doc = window\.SourceDoc\.toJSON\(_m\);/.test(e));
-  ok("renderSourceArticle then renders the node-model article unconditionally (no section-cells fallback)", /host\.appendChild\(headEl\);\s*\n\s*renderSourceNodeArticle\(topic, host\);/.test(e) && e.indexOf("__sourceEditingCell = { sectionId:") === -1);
-  ok("topicHasDoc gates on the presence of a node tree", /function topicHasDoc\(topic\) \{ return !!\(topic && topic\.doc && topic\.doc\.nodes/.test(e));
-  ok("convertTopicToDoc builds topic.doc from the shipped sections via SourceDoc.fromSections", /window\.SourceDoc\.fromSections\(topic, resolveTopicBaseText\)/.test(e) && /topic\.doc = window\.SourceDoc\.toJSON\(model\)/.test(e));
-  ok("the live model is cached per topic so its owned undo stack survives re-renders", /function ensureSourceDocModel\(topic\)[\s\S]{0,200}__sourceDocModelTopicId === topic\.id/.test(e));
-  ok("switching topics rebinds the doc model and re-locks (base protected by default)", /__sourceDocModel = null; __sourceDocModelTopicId = null;[\s\S]{0,80}__sourceUnlocked = false;/.test(e));
+  ok("renderSourceArticle auto-converts a legacy section topic to the continuous model on open", /if \(!topicHasDoc\(topic\) && window\.SourceDoc\) \{[\s\S]{0,260}topic\.doc = window\.SourceDoc\.toJSON\(_m\);/.test(es));
+  ok("renderSourceArticle then renders the node-model article unconditionally (no section-cells fallback)", /host\.appendChild\(headEl\);\s*\n\s*renderSourceNodeArticle\(topic, host\);/.test(es) && e.indexOf("__sourceEditingCell = { sectionId:") === -1);
+  ok("topicHasDoc gates on the presence of a node tree", /function topicHasDoc\(topic\) \{ return !!\(topic && topic\.doc && topic\.doc\.nodes/.test(es));
+  ok("convertTopicToDoc builds topic.doc from the shipped sections via SourceDoc.fromSections", /window\.SourceDoc\.fromSections\(topic, resolveTopicBaseText\)/.test(es) && /topic\.doc = window\.SourceDoc\.toJSON\(model\)/.test(es));
+  ok("the live model is cached per topic so its owned undo stack survives re-renders", /function ensureSourceDocModel\(topic\)[\s\S]{0,200}__sourceDocModelTopicId === topic\.id/.test(es));
+  ok("switching topics rebinds the doc model and re-locks (base protected by default)", /__sourceDocModel = null; __sourceDocModelTopicId = null;[\s\S]{0,80}__sourceUnlocked = false;/.test(es));
 
   // two-layer lock
-  ok("locked base prose refuses edits with an unlock reminder (annotation stays live)", /if \(!__sourceUnlocked && \(e\.key\.length === 1 \|\| e\.key === "Backspace"[\s\S]{0,160}sourceToast\("The source is locked/.test(e));
-  ok("Ctrl\\+Z is the OWNED undo (native undo would not restore marks); Shift redo", /if \(e\.shiftKey\) SD\.redo\(model\); else SD\.undo\(model\);/.test(e));
+  ok("locked base prose refuses edits with an unlock reminder (annotation stays live)", /if \(!__sourceUnlocked && \(e\.key\.length === 1 \|\| e\.key === "Backspace"[\s\S]{0,160}sourceToast\("The source is locked/.test(es));
+  ok("Ctrl\\+Z is the OWNED undo (native undo would not restore marks); Shift redo", /if \(e\.shiftKey\) SD\.redo\(model\); else SD\.undo\(model\);/.test(es));
   // Single editing host: the article (not each block) carries contentEditable, so a selection can span
   // paragraphs (per-block hosts confined it to one block). Objects stay non-editable.
-  ok("the lock toggles the WHOLE article as one editable host (blocks inherit; objects stay non-editable)", /function applySourceLockState[\s\S]*?art\.contentEditable = __sourceUnlocked \? "true" : "false";/.test(e) && /\[data-object="1"\][\s\S]{0,120}el\.contentEditable = "false";/.test(e));
-  ok("a cross-paragraph edit is routed through SourceDoc.replaceRange, not left to the browser", /addEventListener\("beforeinput"/.test(e) && /SD\.replaceRange\(model, anchor, ins\)/.test(e));
-  ok("a Backspace/Delete at a block boundary merges paragraphs through replaceRange", /back && caretOff === 0 && idx > 0[\s\S]{0,240}SD\.replaceRange\(model, \{ nodeKey: prev\.key/.test(e));
+  ok("the lock toggles the WHOLE article as one editable host (blocks inherit; objects stay non-editable)", /function applySourceLockState[\s\S]*?art\.contentEditable = __sourceUnlocked \? "true" : "false";/.test(es) && /\[data-object="1"\][\s\S]{0,120}el\.contentEditable = "false";/.test(es));
+  ok("a cross-paragraph edit is routed through SourceDoc.replaceRange, not left to the browser", /addEventListener\("beforeinput"/.test(es) && /SD\.replaceRange\(model, anchor, ins\)/.test(es));
+  ok("a Backspace/Delete at a block boundary merges paragraphs through replaceRange", /back && caretOff === 0 && idx > 0[\s\S]{0,240}SD\.replaceRange\(model, \{ nodeKey: prev\.key/.test(es));
 
   // doc-level bar (bottom-centre): lock + marks only
-  ok("doc-bar has a lock toggle (glyph swaps lock/lock-open) via the DS IconButton", /icon: __sourceUnlocked \? "lock-open" : "lock"/.test(e));
-  ok("doc-bar has a marks show/hide toggle (eye/eye-off)", /icon: __sourceShowMarks \? "eye" : "eye-off"/.test(e));
+  ok("doc-bar has a lock toggle (glyph swaps lock/lock-open) via the DS IconButton", /icon: __sourceUnlocked \? "lock-open" : "lock"/.test(es));
+  ok("doc-bar has a marks show/hide toggle (eye/eye-off)", /icon: __sourceShowMarks \? "eye" : "eye-off"/.test(es));
 
   // contextual selection bar: rich-text unlocked-only; alternate + comment always; NO create-link
-  ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(e));
-  ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(e));
+  ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(es));
+  ok("selection bar carries alternate + comment (annotation is ungated)", /seg\("alternate"[\s\S]{0,80}seg\("comment"/.test(es));
   // source-selbar-block-formats: H1 / H2 / Body / Caution block-format actions (unlock-gated __rt),
   // grouped after the inline three; the four glyphs are vendored; the handler reassigns node type.
-  ok("selbar has H1/H2/Body/Caution block-format segs, all unlock-gated (__rt)", /seg\("fmt-h1", "heading-1", "Heading 1", "source-selbar__rt"\)[\s\S]{0,200}seg\("fmt-h2", "heading-2"[\s\S]{0,200}seg\("fmt-body", "pilcrow"[\s\S]{0,200}seg\("fmt-caution", "triangle-alert", "Caution box", "source-selbar__rt"\)/.test(e));
+  ok("selbar has H1/H2/Body/Caution block-format segs, all unlock-gated (__rt)", /seg\("fmt-h1", "heading-1", "Heading 1", "source-selbar__rt"\)[\s\S]{0,200}seg\("fmt-h2", "heading-2"[\s\S]{0,200}seg\("fmt-body", "pilcrow"[\s\S]{0,200}seg\("fmt-caution", "triangle-alert", "Caution box", "source-selbar__rt"\)/.test(es));
   ok("the four block-format glyphs are vendored in icons.js", /"heading-1":/.test(src("src/icons.js")) && /"heading-2":/.test(src("src/icons.js")) && /"pilcrow":/.test(src("src/icons.js")) && /"triangle-alert":/.test(src("src/icons.js")));
-  ok("block-format is gated behind the unlock (a base edit), applied across the selection, rides SD.setNodeType", /if \(cmd === "fmt-h1" \|\| cmd === "fmt-h2" \|\| cmd === "fmt-body" \|\| cmd === "fmt-caution"\) \{[\s\S]{0,200}if \(!__sourceUnlocked\)[\s\S]{0,700}SD\.nodesInAnchor\(__sourceDocModel, __sourceSelAnchor\)[\s\S]{0,160}SD\.setNodeType\(__sourceDocModel, k, spec\)/.test(e));
-  ok("the reassignment persists + rebuilds the article (element type changed)", /keys\.forEach\(function \(k\) \{ if \(SD\.setNodeType\(__sourceDocModel, k, spec\)\) changed\+\+; \}\);[\s\S]{0,120}persistSourceDocModel\(topic, __sourceDocModel\);\s*\n\s*renderSourceArticle\(\);/.test(e));
-  ok("the source reading render is heading-level aware so H1/H2 read distinctly (h1/h2/h3 + h1 CSS)", /node\.level === 1 \? "h1" : node\.level === 3 \? "h3" : "h2"/.test(e) && /h1\.source-doc__h \{ font-size:/.test(src("editor.css")));
+  ok("block-format is gated behind the unlock (a base edit), applied across the selection, rides SD.setNodeType", /if \(cmd === "fmt-h1" \|\| cmd === "fmt-h2" \|\| cmd === "fmt-body" \|\| cmd === "fmt-caution"\) \{[\s\S]{0,200}if \(!__sourceUnlocked\)[\s\S]{0,700}SD\.nodesInAnchor\(__sourceDocModel, __sourceSelAnchor\)[\s\S]{0,160}SD\.setNodeType\(__sourceDocModel, k, spec\)/.test(es));
+  ok("the reassignment persists + rebuilds the article (element type changed)", /keys\.forEach\(function \(k\) \{ if \(SD\.setNodeType\(__sourceDocModel, k, spec\)\) changed\+\+; \}\);[\s\S]{0,120}persistSourceDocModel\(topic, __sourceDocModel\);\s*\n\s*renderSourceArticle\(\);/.test(es));
+  ok("the source reading render is heading-level aware so H1/H2 read distinctly (h1/h2/h3 + h1 CSS)", /node\.level === 1 \? "h1" : node\.level === 3 \? "h3" : "h2"/.test(es) && /h1\.source-doc__h \{ font-size:/.test(src("editor.css")));
   // B1: create-link IS on the bar now, but object-only (source-selbar__obj) -- a text selection
   // still never sees it (it's default-hidden and only un-hidden in selectSourceObject).
-  ok("create-link is present as an OBJECT-only action (source-selbar__obj)", /seg\("link", "link", "Add a link", "source-selbar__obj"\)/.test(e));
-  ok("the object-only controls are hidden by default (shown only on object select)", /\.source-selbar__img, \.source-selbar__obj"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
-  ok("the object selbar creates a link object-mark anchored by nodeKey", /cmd === "link"[\s\S]{0,320}addMark\(__sourceDocModel, \{ type: "link", anchor: \{ nodeKey: __sourceObjectSelKey \} \}\)/.test(e));
+  ok("create-link is present as an OBJECT-only action (source-selbar__obj)", /seg\("link", "link", "Add a link", "source-selbar__obj"\)/.test(es));
+  ok("the object-only controls are hidden by default (shown only on object select)", /\.source-selbar__img, \.source-selbar__obj"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(es));
+  ok("the object selbar creates a link object-mark anchored by nodeKey", /cmd === "link"[\s\S]{0,320}addMark\(__sourceDocModel, \{ type: "link", anchor: \{ nodeKey: __sourceObjectSelKey \} \}\)/.test(es));
   // the selection bar is centred over the selection: positioned in #source-stage-article-relative
   // coords (subtract the container's viewport left + add its scroll), NOT raw page x -- else the
   // left rail's width pushed it off to the right. Both selection paths route through the helper.
-  ok("the selection bar centres over the selection via container-relative coords, not page x", /function positionSourceSelBar\(bar, r\)[\s\S]{0,200}r\.left \+ r\.width \/ 2 - hr\.left \+ host\.scrollLeft/.test(e) && !/bar\.style\.left = \(window\.scrollX \+ r\.left \+ r\.width/.test(e));
-  ok("both the text-selection and object-selection paths use positionSourceSelBar", (e.match(/positionSourceSelBar\(bar,/g) || []).length >= 2);
-  ok("a selection extending past a mark flips create -> the ⟳ update action", /__sourceUpdateTarget = window\.SourceDoc\.markExtendedBy\(__sourceDocModel, anchor\)/.test(e));
-  ok("annotation uses an inline composer, not a raw prompt()", /function openSourceComposer\(mode, onSave, opts\)/.test(e) && !/window\.prompt\(cmd/.test(e));
+  ok("the selection bar centres over the selection via container-relative coords, not page x", /function positionSourceSelBar\(bar, r\)[\s\S]{0,320}r\.left \+ r\.width \/ 2 - hr\.left \+ host\.scrollLeft/.test(es) && !/bar\.style\.left = \(window\.scrollX \+ r\.left \+ r\.width/.test(es));
+  ok("both the text-selection and object-selection paths use positionSourceSelBar", (es.match(/positionSourceSelBar\(bar,/g) || []).length >= 2);
+  ok("a selection extending past a mark flips create -> the ⟳ update action", /__sourceUpdateTarget = window\.SourceDoc\.markExtendedBy\(__sourceDocModel, anchor\)/.test(es));
+  ok("annotation uses an inline composer, not a raw prompt()", /function openSourceComposer\(mode, onSave, opts\)/.test(es) && !/window\.prompt\(cmd/.test(e));
 
   // index.html load order
   var idx = src("index.html");
@@ -14886,6 +14918,8 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
 // scroll-spy, and drawer DOM are wired in editor.js (browser-verified) and asserted structurally.
 section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
 
   // full-text search reaches beyond the title into the doc's node text
@@ -14916,14 +14950,14 @@ section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
 
   // editor.js wiring (browser-verified live; asserted structurally here)
   var e = src("src/editor.js");
-  ok("topicMatchesQuery uses SourceDoc fuzzy full-text (not a title substring)", /window\.SourceDoc\.fuzzyMatch\(window\.SourceDoc\.searchText\(topic\), query\)/.test(e));
-  ok("the article mounts a TOC rail from heading nodes with scroll-spy", /function buildSourceToc\(model, host\)[\s\S]{0,400}window\.SourceDoc\.headings\(model\)/.test(e) && /function updateSourceScrollSpy\(\)/.test(e));
-  ok("scroll-spy is re-bound remove-then-add so it survives re-renders", /host\.removeEventListener\("scroll", onSourceArticleScroll\);[\s\S]{0,120}host\.addEventListener\("scroll", onSourceArticleScroll\)/.test(e) && /function onSourceArticleScroll\(\)[\s\S]{0,60}updateSourceScrollSpy\(\)/.test(e));
+  ok("topicMatchesQuery uses SourceDoc fuzzy full-text (not a title substring)", /window\.SourceDoc\.fuzzyMatch\(window\.SourceDoc\.searchText\(topic\), query\)/.test(es));
+  ok("the article mounts a TOC rail from heading nodes with scroll-spy", /function buildSourceToc\(model, host\)[\s\S]{0,400}window\.SourceDoc\.headings\(model\)/.test(es) && /function updateSourceScrollSpy\(\)/.test(es));
+  ok("scroll-spy is re-bound remove-then-add so it survives re-renders", /host\.removeEventListener\("scroll", onSourceArticleScroll\);[\s\S]{0,120}host\.addEventListener\("scroll", onSourceArticleScroll\)/.test(es) && /function onSourceArticleScroll\(\)[\s\S]{0,60}updateSourceScrollSpy\(\)/.test(es));
   // Source v2 (consolidated-panel): the drawer is folded into the one right panel; the doc-bar
   // toggle now shows/hides that panel, and the Marks filter lives in its Marks section.
-  ok("the doc-bar carries ONE consolidated-panel toggle (columns-2 glyph), not a second overlay", /icon: "columns-2", label: __sourceInfoOpen \? "Hide the details panel"/.test(e) && !/label: "All marks"/.test(e));
-  ok("the Marks section offers All / Alternates / Linked / Comments filters", /SOURCE_MARK_FILTERS = \[[\s\S]{0,220}"alternate"[\s\S]{0,120}"link"[\s\S]{0,120}"comment"/.test(e));
-  ok("a doc-topic swap clears the active mark (no orphan overlay left behind)", /if \(!\(topic && topicHasDoc\(topic\)\)\) \{ __sourceActiveMarkId = null;/.test(e));
+  ok("the doc-bar carries ONE consolidated-panel toggle (columns-2 glyph), not a second overlay", /icon: "columns-2", label: __sourceInfoOpen \? "Hide the details panel"/.test(es) && !/label: "All marks"/.test(e));
+  ok("the Marks section offers All / Alternates / Linked / Comments filters", /SOURCE_MARK_FILTERS = \[[\s\S]{0,220}"alternate"[\s\S]{0,120}"link"[\s\S]{0,120}"comment"/.test(es));
+  ok("a doc-topic swap clears the active mark (no orphan overlay left behind)", /if \(!\(topic && topicHasDoc\(topic\)\)\) \{ __sourceActiveMarkId = null;/.test(es));
 })();
 
 // Source v2 (spec 2c section 3): the two overlapping right surfaces (always-on info aside + an
@@ -14931,20 +14965,22 @@ section("Source rewrite: TOC + full-text search + marks drawer (Epic 2b)");
 // Marks / History / Source / Comments, opened by ONE doc-bar control. The overlay drawer is gone.
 section("Source v2: one consolidated right panel (spec 2c section 3)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
-  ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /var hasDoc = topicHasDoc\(topic\);\s*\n\s*if \(hasDoc\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(e));
-  ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(e));
-  ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(e));
+  ok("the info panel leads with the Marks section (the navigator), folded in from the drawer", /var hasDoc = topicHasDoc\(topic\);\s*\n\s*if \(hasDoc\) renderSourceMarksSection\(host, ensureSourceDocModel\(topic\)\);/.test(es));
+  ok("renderSourceMarksSection is title-less (primary section, no 'Marks' header) with the SegmentedControl filter + mark rows", /function renderSourceMarksSection\(host, model\)[\s\S]{0,400}source-marks__primary[\s\S]{0,1200}U\.SegmentedControl\(\{[\s\S]{0,1200}source-drawer__row/.test(es));
+  ok("Source + where-used are one section (provenance then 'Linked in N'), not a separate top block", /panelSection\(host, "Source"[\s\S]{0,900}source-info__subhead", "Linked in \("/.test(es));
   ok("the overlay drawer is retired: no fixed .source-drawer aside is built or appended to body", !/h\("aside", "source-drawer"\)/.test(e) && !/function renderSourceDrawer\(/.test(e));
-  ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface", /function applySourceInfoVisibility\(\)[\s\S]{0,140}el\.style\.display = __sourceInfoOpen \? "" : "none";/.test(e));
-  ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,900}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(e));
-  ok("the active mark's row is highlighted (is-active) in the Marks list", /"source-drawer__row" \+ \(m\.id === __sourceActiveMarkId \? " is-active" : ""\)/.test(e));
-  ok("panel visibility + Marks controls are exposed on __sourceRw for verification", /setInfoOpen: function[\s\S]{0,400}infoOpen: function[\s\S]{0,400}revealMark: function/.test(e));
+  ok("ONE control toggles the whole panel (applySourceInfoVisibility), not a second surface", /function applySourceInfoVisibility\(\)[\s\S]{0,140}el\.style\.display = __sourceInfoOpen \? "" : "none";/.test(es));
+  ok("clicking a mark reveals it in the panel: opens it, highlights its row, scrolls to it", /function revealSourceMark\(m\)[\s\S]{0,900}if \(!__sourceInfoOpen\) \{ __sourceInfoOpen = true;[\s\S]{0,500}scrollIntoView/.test(es));
+  ok("the active mark's row is highlighted (is-active) in the Marks list", /"source-drawer__row" \+ \(m\.id === __sourceActiveMarkId \? " is-active" : ""\)/.test(es));
+  ok("panel visibility + Marks controls are exposed on __sourceRw for verification", /setInfoOpen: function[\s\S]{0,400}infoOpen: function[\s\S]{0,400}revealMark: function/.test(es));
   // source import hardening: text nodes are projected through fillSourceInline with the node's
   // structured format runs (node.formats), NOT raw el.textContent, so bold/italic/code render as
   // formatting while the model text stays plain and the mark offsets stay put.
-  ok("renderSourceDocNode projects heading/paragraph/callout through fillSourceInline(el, text, formats)", /el = h\("p", "source-doc__p"\); fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\)/.test(e) && /fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\); el\.setAttribute\("data-editable", "1"\); }/.test(e));
-  ok("fillSourceInline wraps runs in transparent strong/em/code without changing el.textContent (offset-safe)", /function fillSourceInline\(el, text, runs\)[\s\S]{0,800}if \(!runs \|\| !runs\.length\) \{ el\.textContent = text; return; }[\s\S]{0,800}span\.textContent = text\.slice\(r\.start, r\.start \+ r\.len\)/.test(e));
+  ok("renderSourceDocNode projects heading/paragraph/callout through fillSourceInline(el, text, formats)", /el = h\("p", "source-doc__p"\); fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\)/.test(es) && /fillSourceInline\(el, SD\.nodeText\(node\), node\.formats\); el\.setAttribute\("data-editable", "1"\); }/.test(es));
+  ok("fillSourceInline wraps runs in transparent strong/em/code without changing el.textContent (offset-safe)", /function fillSourceInline\(el, text, runs\)[\s\S]{0,800}if \(!runs \|\| !runs\.length\) \{ el\.textContent = text; return; }[\s\S]{0,800}span\.textContent = text\.slice\(r\.start, r\.start \+ r\.len\)/.test(es));
 })();
 
 // ---- Source rewrite (Epic 2b): demand-driven alternates + staleness (alternates-staleness) ----
@@ -14953,6 +14989,8 @@ section("Source v2: one consolidated right panel (spec 2c section 3)");
 // wired in editor.js (browser-verified) and asserted structurally.
 section("Source rewrite: demand-driven alternates + staleness (Epic 2b)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
   var model = SD.create([{ type: "paragraph", text: "The unit arbitrates contention by headroom." }]);
   var k = model.nodes[0].key, phrase = "arbitrates contention by headroom";
@@ -14989,10 +15027,10 @@ section("Source rewrite: demand-driven alternates + staleness (Epic 2b)");
 
   // editor.js wiring (browser-verified live; asserted structurally here)
   var e = src("src/editor.js");
-  ok("selecting a span-with-alternate opens the pinned contextual panel", /syncSourceAltPanel\(topic, m && m\.type === "alternate" \? m\.id : null\)/.test(e) && /function renderSourceAltPanel\(topic\)/.test(e));
-  ok("the alt panel shows base vs alternate + a status dot", /var baseLine = SD\.isObjectMark\(m\) \?[\s\S]{0,90}SD\.anchorText\(model, m\.anchor\) \|\| "\(empty\)"/.test(e) && /source-altpanel__base", baseLine/.test(e) && /source-drawer__dot source-drawer__dot--" \+ status\.dot/.test(e));
-  ok("a stale alternate offers a Mark reviewed re-sync (updateMark)", /"Mark reviewed"[\s\S]{0,220}SD\.updateMark\(model, m\.id, m\.anchor\)/.test(e));
-  ok("the alt composer captures an optional tag; the panel light-dismisses on Escape", /source-composer__tag/.test(e) && /function onSourceAltPanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceAltPanel/.test(e));
+  ok("selecting a span-with-alternate opens the pinned contextual panel", /syncSourceAltPanel\(topic, m && m\.type === "alternate" \? m\.id : null\)/.test(es) && /function renderSourceAltPanel\(topic\)/.test(es));
+  ok("the alt panel shows base vs alternate + a status dot", /var baseLine = SD\.isObjectMark\(m\) \?[\s\S]{0,90}SD\.anchorText\(model, m\.anchor\) \|\| "\(empty\)"/.test(es) && /source-altpanel__base", baseLine/.test(es) && /source-drawer__dot source-drawer__dot--" \+ status\.dot/.test(es));
+  ok("a stale alternate offers a Mark reviewed re-sync (updateMark)", /"Mark reviewed"[\s\S]{0,220}SD\.updateMark\(model, m\.id, m\.anchor\)/.test(es));
+  ok("the alt composer captures an optional tag; the panel light-dismisses on Escape", /source-composer__tag/.test(es) && /function onSourceAltPanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceAltPanel/.test(es));
 })();
 
 // ---- Source rewrite (Epic 2b): comments = shared canvas engine + range-mark adapter ----
@@ -15001,16 +15039,18 @@ section("Source rewrite: demand-driven alternates + staleness (Epic 2b)");
 // the gutter tracking the span. Wiring is browser-verified; here we assert the adapter + reuse.
 section("Source rewrite: comments = shared canvas engine + range-mark adapter (Epic 2b)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
-  ok("a Source comment is a range mark PLUS a shared makeComment thread keyed by the mark id", /var cmark = SD\.addMark\(__sourceDocModel, \{ type: "comment", anchor: anchor \}\);[\s\S]{0,220}makeComment\(\{ markId: cmark\.id \}, val\)/.test(e));
-  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(e) && /c\.replies\.push\(makeReply\(v\)\)/.test(e));
-  ok("comment threads anchor by mark id (sectionId anchor dies with sections)", /function sourceCommentsForMark\(topic, markId\)[\s\S]{0,120}c\.anchor\.markId === markId/.test(e));
-  ok("margin pins render in the gutter for each comment mark, pinned to the span", /function renderSourceCommentPins\(topic\)/.test(e) && /if \(m\.type !== "comment"\) return;/.test(e) && /pinCardToSpan\(pin, m\.id\)/.test(e));
-  ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(e) && /toggleSourceCommentThread\(topic, m\.id\)/.test(e));
-  ok("add / resolve activity is logged to History (spec 3.3)", /type: "comment-added", markId: cmark\.id/.test(e) && /type: c && c\.done \? "comment-resolved" : "comment-reopened"/.test(e));
-  ok("the thread card + pins re-sync after a re-render (survive undo/edit)", /renderSourceCommentPins\(topic\); \/\/ re-pin the comment margin pins/.test(e) && /if \(__sourceOpenCommentMarkId\) renderSourceCommentThread\(topic\)/.test(e));
-  ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceWherePanel\(\); closeSourceCommentThread\(\);/.test(e));
-  ok("the comment thread light-dismisses on Escape + outside click (canvas popover parity)", /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(e) && /function onSourceCommentThreadOutside\(ev\)/.test(e) && /if \(card\.contains\(ev\.target\)\) return;/.test(e));
+  ok("a Source comment is a range mark PLUS a shared makeComment thread keyed by the mark id", /var cmark = SD\.addMark\(__sourceDocModel, \{ type: "comment", anchor: anchor \}\);[\s\S]{0,220}makeComment\(\{ markId: cmark\.id \}, val\)/.test(es));
+  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(es) && /c\.replies\.push\(makeReply\(v\)\)/.test(e));
+  ok("comment threads anchor by mark id (sectionId anchor dies with sections)", /function sourceCommentsForMark\(topic, markId\)[\s\S]{0,120}c\.anchor\.markId === markId/.test(es));
+  ok("margin pins render in the gutter for each comment mark, pinned to the span", /function renderSourceCommentPins\(topic\)/.test(es) && /if \(m\.type !== "comment"\) return;/.test(es) && /pinCardToSpan\(pin, m\.id\)/.test(es));
+  ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(es) && /toggleSourceCommentThread\(topic, m\.id\)/.test(es));
+  ok("add / resolve activity is logged to History (spec 3.3)", /type: "comment-added", markId: cmark\.id/.test(es) && /type: c && c\.done \? "comment-resolved" : "comment-reopened"/.test(es));
+  ok("the thread card + pins re-sync after a re-render (survive undo/edit)", /renderSourceCommentPins\(topic\); \/\/ re-pin the comment margin pins/.test(es) && /if \(__sourceOpenCommentMarkId\) renderSourceCommentThread\(topic\)/.test(es));
+  ok("a doc-topic swap drops the comment thread (belongs to the continuous-document view)", /closeSourceAltPanel\(\); closeSourceWherePanel\(\); closeSourceCommentThread\(\);/.test(es));
+  ok("the comment thread light-dismisses on Escape + outside click (canvas popover parity)", /function onSourceCommentThreadKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceCommentThread/.test(es) && /function onSourceCommentThreadOutside\(ev\)/.test(es) && /if \(card\.contains\(ev\.target\)\) return;/.test(es));
   ok("comments stay addable while the base is locked (annotation ungated -- no unlock guard on the comment path)", !/cmd === "comment"[\s\S]{0,80}__sourceUnlocked/.test(e));
 })();
 
@@ -15021,6 +15061,8 @@ section("Source rewrite: comments = shared canvas engine + range-mark adapter (E
 // (topic.history import events + model.history doc events) is wired in editor.js.
 section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
 
   // --- pure collapse: a keystroke stream folds into a single commit summary ---
@@ -15056,26 +15098,26 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
 
   // --- editor.js wiring (browser-verified live; asserted structurally here) ---
   var e = src("src/editor.js");
-  ok("prose edits buffer per unlock->lock cycle (recordSourceEdit on the input path)", /recordSourceEdit\(res && res\.edit\)/.test(e) && /function beginSourceEditSession\(\) \{ __sourceEditSession = \{ edits: \[\] \}; \}/.test(e));
-  ok("locking flushes the buffer into ONE commit entry via summarizeEdits", /function flushSourceEditSession\(topic, opts\)[\s\S]{0,400}SD\.summarizeEdits\(s\.edits\)/.test(e) && /type: "commit", charsAdded:/.test(e));
-  ok("the commit why-note is optional + skippable (Skip / Escape still commits)", /function sourceCommitNoteModal\(onCommit\)[\s\S]{0,700}onClose: function \(\) \{ if \(done\) return; done = true; onCommit\(""\); \}/.test(e));
-  ok("the lock toggle routes through one begin/flush entry point (setSourceUnlocked)", /function setSourceUnlocked\(v, opts\)/.test(e) && /onClick: function \(\) \{ setSourceUnlocked\(!__sourceUnlocked\); \}/.test(e));
-  ok("creating an alternate logs a discrete alternate-created entry", /type: "alternate-created", markId: mk\.id/.test(e));
-  ok("the timeline MERGES import events (topic.history) with doc events (model.history)", /var imports = \(topic\.history \|\| \[\]\)\.map/.test(e) && /historyEntryView\(e\)/.test(e) && /var rows = imports\.concat\(docRows\)/.test(e));
-  ok("the merged rows sort newest-first across both streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(e));
-  ok("the synthetic 'Last edited' node only fills in when there are no doc commits", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(e));
+  ok("prose edits buffer per unlock->lock cycle (recordSourceEdit on the input path)", /recordSourceEdit\(res && res\.edit\)/.test(es) && /function beginSourceEditSession\(\) \{ __sourceEditSession = \{ edits: \[\] \}; \}/.test(es));
+  ok("locking flushes the buffer into ONE commit entry via summarizeEdits", /function flushSourceEditSession\(topic, opts\)[\s\S]{0,400}SD\.summarizeEdits\(s\.edits\)/.test(es) && /type: "commit", charsAdded:/.test(es));
+  ok("the commit why-note is optional + skippable (Skip / Escape still commits)", /function sourceCommitNoteModal\(onCommit\)[\s\S]{0,700}onClose: function \(\) \{ if \(done\) return; done = true; onCommit\(""\); \}/.test(es));
+  ok("the lock toggle routes through one begin/flush entry point (setSourceUnlocked)", /function setSourceUnlocked\(v, opts\)/.test(es) && /onClick: function \(\) \{ setSourceUnlocked\(!__sourceUnlocked\); \}/.test(es));
+  ok("creating an alternate logs a discrete alternate-created entry", /type: "alternate-created", markId: mk\.id/.test(es));
+  ok("the timeline MERGES import events (topic.history) with doc events (model.history)", /var imports = \(topic\.history \|\| \[\]\)\.map/.test(es) && /historyEntryView\(e\)/.test(es) && /var rows = imports\.concat\(docRows\)/.test(es));
+  ok("the merged rows sort newest-first across both streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(es));
+  ok("the synthetic 'Last edited' node only fills in when there are no doc commits", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(es));
 
   // Regression #108: a LOCKED block is contentEditable=false, so a click can't focus it and a real
   // keystroke never reaches the article keydown guard -> no lock reminder showed. A document-level
   // guard catches the attempt (locked doc mounted + a printable key + not in a real field).
-  ok("#108: a document-level guard shows the lock reminder when typing into locked prose", /function onSourceLockedTypeGuard\(e\)[\s\S]{0,500}The source is locked/.test(e) && /document\.addEventListener\("keydown", onSourceLockedTypeGuard\)/.test(e));
-  ok("#108: the guard ignores real fields + shortcuts, only printable keys count", /if \(!e\.key \|\| e\.key\.length !== 1\) return;/.test(e) && /t\.isContentEditable \|\| \/\^\(INPUT\|TEXTAREA\|SELECT\)\$\/\.test/.test(e));
+  ok("#108: a document-level guard shows the lock reminder when typing into locked prose", /function onSourceLockedTypeGuard\(e\)[\s\S]{0,500}The source is locked/.test(es) && /document\.addEventListener\("keydown", onSourceLockedTypeGuard\)/.test(es));
+  ok("#108: the guard ignores real fields + shortcuts, only printable keys count", /if \(!e\.key \|\| e\.key\.length !== 1\) return;/.test(es) && /t\.isContentEditable \|\| \/\^\(INPUT\|TEXTAREA\|SELECT\)\$\/\.test/.test(es));
   // Regression #109: structural History events (comment/alternate add + resolve/reopen) must
   // re-render the info-panel timeline; only the commit path did before, so they never surfaced.
-  ok("#109: refreshSourceHistory re-renders the info-panel History for the active topic", /function refreshSourceHistory\(topic\)[\s\S]{0,320}renderSourceInfoPanel\(t\)/.test(e));
-  ok("#109: creating an alternate refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new alternate/.test(e));
-  ok("#109: adding a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new comment in the History timeline/.test(e));
-  ok("#109: resolving/reopening a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface comment resolve\/reopen/.test(e));
+  ok("#109: refreshSourceHistory re-renders the info-panel History for the active topic", /function refreshSourceHistory\(topic\)[\s\S]{0,320}renderSourceInfoPanel\(t\)/.test(es));
+  ok("#109: creating an alternate refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new alternate/.test(es));
+  ok("#109: adding a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface the new comment in the History timeline/.test(es));
+  ok("#109: resolving/reopening a comment refreshes the History timeline", /refreshSourceHistory\(topic\); \/\/ surface comment resolve\/reopen/.test(es));
 })();
 
 // ---- Source rewrite (Epic 2b): object (image/table) marks -----------------
@@ -15086,7 +15128,7 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
 section("Source image A1: width clamp + snap (pure core)");
 (function () {
   var t = src("src/editor.js");
-  var m = t.match(/\/\* @pure-imgwidth-start \*\/([\s\S]*?)\/\* @pure-imgwidth-end \*\//);
+  var m = src("src/editor/source-stage.js").match(/\/\* @pure-imgwidth-start \*\/([\s\S]*?)\/\* @pure-imgwidth-end \*\//);
   if (!m) { ok("locate @pure-imgwidth fence", false); return; }
   var g = new Function(m[1] + "\nreturn { clampSourceImgWidth: clampSourceImgWidth, snapSourceImgWidth: snapSourceImgWidth, sourceImgAlign: sourceImgAlign };")();
   // clamp: blank/NaN -> 100 (full width); below 20 floors; above 100 caps.
@@ -15265,20 +15307,22 @@ section("Source import: robust markdown -> rich nodes (tables, comments, inline)
 // ---- Source/Editor feedback batch: UI regression guards ---------------------------------------
 section("Source/Editor feedback batch (UI wiring guards)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
   // Issue 1 SUPERSEDED by uio-S-C01 (SRC-06): the glyph tabs were unlabelled AND duplicated the
   // filter below them. There is now ONE filter, labelled, carrying live counts — see the
   // "uio-S-C01" section for its guards. What survives here is the no-going-back assertion.
-  ok("mark-filter tabs are words + counts, never bare glyphs", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"/.test(e) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
+  ok("mark-filter tabs are words + counts, never bare glyphs", /var SOURCE_MARK_FILTERS = \[\s*\{ key: "all", label: "All"/.test(es) && !/SOURCE_MARK_FILTERS = \[[\s\S]{0,320}icon:/.test(e));
   // Issue 2: the collapse-all button is placed on the shared toolbar row, not its own strip.
-  ok("collapse-all is appended to the shared source toolbar row", /querySelector\("#source-stage-nav-actions \.source-stage__toolbar"\)[\s\S]{0,120}toolbarRow\.appendChild\(collapseBtn\)/.test(e));
+  ok("collapse-all is appended to the shared source toolbar row", /querySelector\("#source-stage-nav-actions \.source-stage__toolbar"\)[\s\S]{0,120}toolbarRow\.appendChild\(collapseBtn\)/.test(es));
   // Issue 3: an empty source text block gets a <br> so an Enter-split new line is visible.
-  ok("empty source block renders a <br> so it is not zero-height", /if \(!text\) \{ el\.appendChild\(document\.createElement\("br"\)\); return; \}/.test(e));
+  ok("empty source block renders a <br> so it is not zero-height", /if \(!text\) \{ el\.appendChild\(document\.createElement\("br"\)\); return; \}/.test(es));
   // Issue 4: an auto-picked Product is NOT persisted before the saved scope is restored.
   // arch-P3-05: adopting a scope in memory is now a named operation, not an assignment to a
   // closure variable -- and the module keeps the "don't persist before restore" rule itself.
   ok("auto-pick does not clobber the saved Product before restore", (function () {
-    var wired = /if \(ProductRail\.hasRestoredActiveProduct\(\)\) setActiveProduct\(keys\[i\]\); else ProductRail\.adoptActiveProduct\(keys\[i\]\)/.test(e);
+    var wired = /if \(ProductRail\.hasRestoredActiveProduct\(\)\) setActiveProduct\(keys\[i\]\); else ProductRail\.adoptActiveProduct\(keys\[i\]\)/.test(es);
     var H = railHarness({ products: { "prod-saved": { id: "prod-saved" }, "prod-auto": { id: "prod-auto" } } });
     H.storage["verso.activeProduct"] = "prod-saved";
     H.rail.adoptActiveProduct("prod-auto");                       // the boot-time auto-pick
@@ -15294,6 +15338,8 @@ section("Source/Editor feedback batch (UI wiring guards)");
 
 section("Source rewrite: object (image/table) marks (Epic 2b)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
   var model = SD.create([
     { type: "paragraph", text: "Before the diagram." },
@@ -15335,14 +15381,14 @@ section("Source rewrite: object (image/table) marks (Epic 2b)");
 
   // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
   var e = src("src/editor.js");
-  ok("image/table nodes are tagged as objects (data-object) for whole-node selection", /if \(SD\.isMarkableObjectNode && SD\.isMarkableObjectNode\(node\)\) \{ el\.classList\.add\("source-doc__obj"\); el\.setAttribute\("data-object", "1"\); \}/.test(e));
-  ok("clicking an object selects the whole node (not a text span)", /var objEl = e\.target && e\.target\.closest \? e\.target\.closest\('\[data-object="1"\]'\) : null;/.test(e) && /selectSourceObject\(topic, objEl\.getAttribute\("data-node"\)\)/.test(e));
-  ok("an object selection sets an object anchor { nodeKey } (no start/len) + shows alternate/comment only", /__sourceSelAnchor = \{ nodeKey: nodeKey \}; \/\/ object anchor/.test(e) && /bar\.querySelectorAll\("\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(e));
-  ok("a real text selection supersedes the object selection (the two models don't fight)", /if \(__sourceObjectSelKey\) clearSourceObjectSel\(\); \/\/ a real text selection supersedes the object/.test(e));
-  ok("selecting an object with an existing alternate opens its contextual panel", /var alts = SD\.objectAlternatesFor\(__sourceDocModel, nodeKey\);[\s\S]{0,120}syncSourceAltPanel\(topic, alts\.length \? alts\[0\]\.id : null\)/.test(e));
-  ok("the object composer pins to the node rect (no text range to sit under)", /if \(anchor\.len == null\) \{ var oe = document\.querySelector\('\[data-node="' \+ anchor\.nodeKey \+ '"\]'\); if \(oe\) objRect = oe\.getBoundingClientRect\(\); \}/.test(e) && /if \(\(!r \|\| !r\.width\) && opts\.rect\) r = opts\.rect;/.test(e));
-  ok("the alt panel shows the object's node label as its base line", /SD\.isObjectMark\(m\) \? SD\.objectNodeLabel\(SD\.nodeByKey\(model, m\.anchor\.nodeKey\)\)/.test(e));
-  ok("hidden marks also clear object decoration (the eye toggle hides all mark visuals)", /if \(__sourceMarksEngine\.clearObjectDecor\) __sourceMarksEngine\.clearObjectDecor\(\);/.test(e));
+  ok("image/table nodes are tagged as objects (data-object) for whole-node selection", /if \(SD\.isMarkableObjectNode && SD\.isMarkableObjectNode\(node\)\) \{ el\.classList\.add\("source-doc__obj"\); el\.setAttribute\("data-object", "1"\); \}/.test(es));
+  ok("clicking an object selects the whole node (not a text span)", /var objEl = e\.target && e\.target\.closest \? e\.target\.closest\('\[data-object="1"\]'\) : null;/.test(es) && /selectSourceObject\(topic, objEl\.getAttribute\("data-node"\)\)/.test(es));
+  ok("an object selection sets an object anchor { nodeKey } (no start/len) + shows alternate/comment only", /__sourceSelAnchor = \{ nodeKey: nodeKey \}; \/\/ object anchor/.test(es) && /bar\.querySelectorAll\("\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = "none"; \}\)/.test(es));
+  ok("a real text selection supersedes the object selection (the two models don't fight)", /if \(__sourceObjectSelKey\) clearSourceObjectSel\(\); \/\/ a real text selection supersedes the object/.test(es));
+  ok("selecting an object with an existing alternate opens its contextual panel", /var alts = SD\.objectAlternatesFor\(__sourceDocModel, nodeKey\);[\s\S]{0,120}syncSourceAltPanel\(topic, alts\.length \? alts\[0\]\.id : null\)/.test(es));
+  ok("the object composer pins to the node rect (no text range to sit under)", /if \(anchor\.len == null\) \{ var oe = document\.querySelector\('\[data-node="' \+ anchor\.nodeKey \+ '"\]'\); if \(oe\) objRect = oe\.getBoundingClientRect\(\); \}/.test(es) && /if \(\(!r \|\| !r\.width\) && opts\.rect\) r = opts\.rect;/.test(es));
+  ok("the alt panel shows the object's node label as its base line", /SD\.isObjectMark\(m\) \? SD\.objectNodeLabel\(SD\.nodeByKey\(model, m\.anchor\.nodeKey\)\)/.test(es));
+  ok("hidden marks also clear object decoration (the eye toggle hides all mark visuals)", /if \(__sourceMarksEngine\.clearObjectDecor\) __sourceMarksEngine\.clearObjectDecor\(\);/.test(es));
 })();
 
 // ---- Source rewrite (Epic 2b): where-used panel (read-only "Linked in N") -
@@ -15352,6 +15398,8 @@ section("Source rewrite: object (image/table) marks (Epic 2b)");
 // in editor.js and browser-verified.
 section("Source rewrite: where-used panel (Epic 2b)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
   var model = SD.create([{ type: "paragraph", text: "Vent the manifold before removing the cap." }]);
   var k = model.nodes[0].key, a = { nodeKey: k, start: 0, len: 4 }; // "Vent"
@@ -15378,12 +15426,12 @@ section("Source rewrite: where-used panel (Epic 2b)");
 
   // ---- editor.js wiring (browser-verified live; asserted structurally here) ----
   var e = src("src/editor.js");
-  ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(e) && /function renderSourceWherePanel\(topic\)/.test(e));
-  ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10; neutral at 0 — uio-S-C03)", /source-altpanel__title", used\.length \? \("Linked in " \+ used\.length\)/.test(e) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(e));
-  ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(e));
-  ok("a link with no live uses shows the invitation zero state (uio-S-C03)", /if \(!used\.length\) \{[\s\S]{0,320}Not used in a course yet — place this passage from the Edit stage/.test(e));
-  ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(e) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(e));
-  ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(e) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(e));
+  ok("selecting a link mark opens the read-only where-used panel (link -> where; alternate -> alt)", /syncSourceWherePanel\(topic, m && m\.type === "link" \? m\.id : null\)/.test(es) && /function renderSourceWherePanel\(topic\)/.test(es));
+  ok("the panel titles 'Linked in N' from the LIVE where-used count (source-link 10; neutral at 0 — uio-S-C03)", /source-altpanel__title", used\.length \? \("Linked in " \+ used\.length\)/.test(es) && /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);/.test(es));
+  ok("each location row jumps to the exact block in Edit (jumpToLinkedBlock)", /source-wherepanel__row[\s\S]{0,300}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(es));
+  ok("a link with no live uses shows the invitation zero state (uio-S-C03)", /if \(!used\.length\) \{[\s\S]{0,320}Not used in a course yet — place this passage from the Edit stage/.test(es));
+  ok("the where-used panel reuses the pinned-card chrome + tracks the span (pinCardToSpan)", /source-altpanel source-wherepanel/.test(es) && /function positionSourceWherePanel\(\) \{ pinCardToSpan\(document\.querySelector\("\[data-source-wherepanel\]"\), __sourceWhereUsedMarkId\)/.test(es));
+  ok("the where-used panel light-dismisses on Escape + re-pins after a re-render", /function onSourceWherePanelKey\(ev\) \{ if \(ev\.key === "Escape"\) closeSourceWherePanel/.test(es) && /if \(__sourceWhereUsedMarkId\) renderSourceWherePanel\(topic\)/.test(es));
   ok("it is READ-ONLY: no addMark/link creation inside the where-used panel", !/function renderSourceWherePanel\(topic\)[\s\S]{0,1400}SD\.addMark/.test(e));
   ok("a 'link' glyph exists in the icon set for the panel", /"link":/.test(src("src/icons.js")));
 })();
@@ -15584,6 +15632,8 @@ section("Source rewrite: variant per-node divergence, model layer (Epic 2b)");
 // gate: if these fail, marks/variants would silently break on migration.
 section("Source v2: concatChapters unify topics -> one document (spec 2c)");
 (function () {
+  // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
+  var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
 
   // Two topics that INDEPENDENTLY mint colliding keys (both start n-1/m-1...).
@@ -15781,52 +15831,52 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
 
   // editor wiring: the migration is guarded + reversible + stored as a reserved master.
   var e = src("src/editor.js");
-  ok("the unified doc lives in a reserved 'source master' component keyed off product.groundTruthId", /function sourceMasterFor\(productId\)[\s\S]{0,200}p\.groundTruthId[\s\S]{0,120}m\.sourceMaster/.test(e));
-  ok("migrateProductToUnifiedDoc is GUARDED (idempotent unless force) -> returns the existing master", /var existing = sourceMasterFor\(productId\);[\s\S]{0,80}if \(existing && !opts\.force\) return existing;/.test(e));
-  ok("migration concatenates the Product's topics via SourceDoc.concatChapters", /SD\.concatChapters\(chapters\)/.test(e));
-  ok("migration is REVERSIBLE: old topics are kept, only stamped archivedInto (never deleted)", /topics\.forEach\(function \(t\) \{ t\.archivedInto = master\.id; \}\);/.test(e) && /function revertProductUnifiedDoc/.test(e));
-  ok("the reserved master + archived topics are hidden from the interim Source nav (no double-up)", /\.filter\(function \(t\) \{ return !t\.sourceMaster && !t\.archivedInto; \}\)/.test(e));
-  ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(e) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(e));
+  ok("the unified doc lives in a reserved 'source master' component keyed off product.groundTruthId", /function sourceMasterFor\(productId\)[\s\S]{0,200}p\.groundTruthId[\s\S]{0,120}m\.sourceMaster/.test(es));
+  ok("migrateProductToUnifiedDoc is GUARDED (idempotent unless force) -> returns the existing master", /var existing = sourceMasterFor\(productId\);[\s\S]{0,80}if \(existing && !opts\.force\) return existing;/.test(es));
+  ok("migration concatenates the Product's topics via SourceDoc.concatChapters", /SD\.concatChapters\(chapters\)/.test(es));
+  ok("migration is REVERSIBLE: old topics are kept, only stamped archivedInto (never deleted)", /topics\.forEach\(function \(t\) \{ t\.archivedInto = master\.id; \}\);/.test(es) && /function revertProductUnifiedDoc/.test(es));
+  ok("the reserved master + archived topics are hidden from the interim Source nav (no double-up)", /\.filter\(function \(t\) \{ return !t\.sourceMaster && !t\.archivedInto; \}\)/.test(es));
+  ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(es) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(es));
 
   // md-import-additive wiring (spec 2c section 4)
-  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(e));
-  ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(e));
-  ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(e));
-  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(topic, n, shown\)/.test(e));
-  ok("spec 2d: the variant bar always offers Manage variants (declare the first variant on a Product with none)", /function buildSourceVariantBar\(topic\)[\s\S]{0,400}label: "Manage variants", onClick: function \(\) \{ openVariantEditor\(topic\)/.test(e));
-  ok("spec 2d: the variant editor declares via setProductVariants; a rename migrates overrides via SourceDoc.renameVariant", (function () { var m = e.slice(e.indexOf("function openVariantEditor(topic)"), e.indexOf("function openVariantEditor(topic)") + 1900); return /setProductVariants\(pid, list\)/.test(m) && /SD\.renameVariant\(model, v, nn\)/.test(m); })());
-  ok("spec 2d: clicking Done commits a name still typed in the add field (no silent discard)", /onPrimary: function \(\) \{ if \(addInput && addInput\.value\.trim\(\)\) doAdd\(\); shell\.modal\.close\(\); \}/.test(e));
+  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(es));
+  ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(es));
+  ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(es));
+  ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(topic, n, shown\)/.test(es));
+  ok("spec 2d: the variant bar always offers Manage variants (declare the first variant on a Product with none)", /function buildSourceVariantBar\(topic\)[\s\S]{0,400}label: "Manage variants", onClick: function \(\) \{ openVariantEditor\(topic\)/.test(es));
+  ok("spec 2d: the variant editor declares via setProductVariants; a rename migrates overrides via SourceDoc.renameVariant", (function () { var m = es.slice(es.indexOf("function openVariantEditor(topic)"), es.indexOf("function openVariantEditor(topic)") + 1900); return /setProductVariants\(pid, list\)/.test(m) && /SD\.renameVariant\(model, v, nn\)/.test(m); })());
+  ok("spec 2d: clicking Done commits a name still typed in the add field (no silent discard)", /onPrimary: function \(\) \{ if \(addInput && addInput\.value\.trim\(\)\) doAdd\(\); shell\.modal\.close\(\); \}/.test(es));
   // Found by browser-verify: dsModalShell binds Enter to the primary button, so an add-field
   // Enter that only preventDefault()s adds the variant AND closes the dialog -- you could never
   // declare two variants in one visit. Enter here means "add"; Done means "finish".
-  ok("spec 2d: Enter in the add field adds without also firing the modal's Done", /addInput\.addEventListener\("keydown", function \(e\) \{ if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); doAdd\(\); \} \}\);/.test(e));
-  ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(e));
-  ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(e));
-  ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(e));
+  ok("spec 2d: Enter in the add field adds without also firing the modal's Done", /addInput\.addEventListener\("keydown", function \(e\) \{ if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); doAdd\(\); \} \}\);/.test(es));
+  ok("the additive import previews the plan BEFORE applying (no silent overwrite)", /var plan = SD\.importPlan\(model, incoming\);[\s\S]{0,500}primaryLabel: "Apply import"[\s\S]{0,300}onPrimary: function \(\) \{\s*SD\.applyImportPlan\(model, plan\);/.test(es));
+  ok("incoming chapters come from the parse's topics via fromSections", /function incomingChaptersFromParse\(parse\)[\s\S]{0,220}SD\.fromSections\(\{ sections: t\.sections \}/.test(es));
+  ok("the import is exposed for browser-verify (parse -> reconcile plan; apply commits)", /window\.__productRail\.importMarkdownText = function \(text, apply\)[\s\S]{0,320}SD\.importPlan\(model, incoming\);/.test(es));
 
   // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
-  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(e));
-  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = sourceMasterFor\(activeSourceProductId\(\)\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(e));
-  ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(e) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(e));
-  ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(e));
-  ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(e));
-  ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(e) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(e));
-  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(e));
-  ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(e));
-  ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(e) && /it\.classList\.toggle\("is-selected", on\)/.test(e));
-  ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(e));
+  ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(es));
+  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = sourceMasterFor\(activeSourceProductId\(\)\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(es));
+  ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(es) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(es));
+  ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(es));
+  ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(es));
+  ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(e) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(es));
+  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(es));
+  ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(es));
+  ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(es) && /it\.classList\.toggle\("is-selected", on\)/.test(es));
+  ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(es));
 
   // find-word-cycling wiring (spec 2c section 2)
-  ok("the TOC recomputes live find hits + filters headings that own a hit (one mechanism)", /__sourceFindMatches = q \? SD\.findMatches\(model, q\) : \[\];[\s\S]{0,220}var hk = SD\.headingKeyForNode\(model, m\.nodeKey\); if \(hk\) kept\[hk\] = 1;/.test(e));
-  ok("a find hit is painted into a dedicated sd-find CSS Custom Highlight via the marks engine's rangeFor", /CSS\.highlights\.get\("sd-find"\)[\s\S]{0,200}eng\.rangeFor\(\{ nodeKey: hit\.nodeKey, start: hit\.start, len: hit\.len \}\)/.test(e));
-  ok("cycling steps the cursor with wrap, scrolls to + paints the hit, refreshes the nav", /function cycleSourceFind\(dir\)[\s\S]{0,220}__sourceFindIndex \+ dir \+ __sourceFindMatches\.length\) % __sourceFindMatches\.length;[\s\S]{0,80}scrollToSourceFindHit/.test(e));
-  ok("the match navigator shows N/total + prev/next only while a query is active", /function renderSourceFindNav\(\)[\s\S]{0,180}if \(!q\) \{ nav\.style\.display = "none"; return; \}[\s\S]{0,400}"Previous match"[\s\S]{0,160}"Next match"/.test(e));
-  ok("Enter cycles next, Shift\\+Enter previous, in the find field", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleSourceFind\(e\.shiftKey \? -1 : 1\); \}/.test(e));
+  ok("the TOC recomputes live find hits + filters headings that own a hit (one mechanism)", /__sourceFindMatches = q \? SD\.findMatches\(model, q\) : \[\];[\s\S]{0,220}var hk = SD\.headingKeyForNode\(model, m\.nodeKey\); if \(hk\) kept\[hk\] = 1;/.test(es));
+  ok("a find hit is painted into a dedicated sd-find CSS Custom Highlight via the marks engine's rangeFor", /CSS\.highlights\.get\("sd-find"\)[\s\S]{0,200}eng\.rangeFor\(\{ nodeKey: hit\.nodeKey, start: hit\.start, len: hit\.len \}\)/.test(es));
+  ok("cycling steps the cursor with wrap, scrolls to + paints the hit, refreshes the nav", /function cycleSourceFind\(dir\)[\s\S]{0,220}__sourceFindIndex \+ dir \+ __sourceFindMatches\.length\) % __sourceFindMatches\.length;[\s\S]{0,80}scrollToSourceFindHit/.test(es));
+  ok("the match navigator shows N/total + prev/next only while a query is active", /function renderSourceFindNav\(\)[\s\S]{0,180}if \(!q\) \{ nav\.style\.display = "none"; return; \}[\s\S]{0,400}"Previous match"[\s\S]{0,160}"Next match"/.test(es));
+  ok("Enter cycles next, Shift\\+Enter previous, in the find field", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); cycleSourceFind\(e\.shiftKey \? -1 : 1\); \}/.test(es));
   // source-find-replace: a replacement field + Replace (current) / Replace all under the find field
   // (unified doc only); replacing is a base edit, so it's unlock-gated; both ride owned undo.
-  ok("the search mounts a Replace field + Replace / Replace all (unified doc only)", /var repRow = h\("div", "source-replace"\);[\s\S]{0,1100}replaceCurrentSourceMatch\(\)[\s\S]{0,200}replaceAllSourceMatches\(\)/.test(e) && /"replace"/.test(src("src/icons.js")));
-  ok("replace-current is unlock-gated + replaces the current match via replaceRange (owned undo)", /function replaceCurrentSourceMatch\(\)[\s\S]{0,200}if \(!__sourceUnlocked\) \{ sourceToast[\s\S]{0,200}__sourceFindMatches\[__sourceFindIndex\][\s\S]{0,160}SD\.replaceRange\(__sourceDocModel, \{ nodeKey: m\.nodeKey, start: m\.start, len: m\.len \}, __sourceReplaceQuery\)/.test(e));
-  ok("replace-all is unlock-gated + calls SD.replaceAll, then re-renders + toasts the count", /function replaceAllSourceMatches\(\)[\s\S]{0,300}if \(!__sourceUnlocked\)[\s\S]{0,300}SD\.replaceAll\(__sourceDocModel, q, __sourceReplaceQuery\)[\s\S]{0,300}Replaced " \+ n/.test(e));
+  ok("the search mounts a Replace field + Replace / Replace all (unified doc only)", /var repRow = h\("div", "source-replace"\);[\s\S]{0,1100}replaceCurrentSourceMatch\(\)[\s\S]{0,200}replaceAllSourceMatches\(\)/.test(es) && /"replace"/.test(src("src/icons.js")));
+  ok("replace-current is unlock-gated + replaces the current match via replaceRange (owned undo)", /function replaceCurrentSourceMatch\(\)[\s\S]{0,200}if \(!__sourceUnlocked\) \{ sourceToast[\s\S]{0,200}__sourceFindMatches\[__sourceFindIndex\][\s\S]{0,160}SD\.replaceRange\(__sourceDocModel, \{ nodeKey: m\.nodeKey, start: m\.start, len: m\.len \}, __sourceReplaceQuery\)/.test(es));
+  ok("replace-all is unlock-gated + calls SD.replaceAll, then re-renders + toasts the count", /function replaceAllSourceMatches\(\)[\s\S]{0,300}if \(!__sourceUnlocked\)[\s\S]{0,300}SD\.replaceAll\(__sourceDocModel, q, __sourceReplaceQuery\)[\s\S]{0,300}Replaced " \+ n/.test(es));
 })();
 
 // ---- arch-P1: render-context (the editor/export divergence seam) ----------
