@@ -1149,48 +1149,24 @@
     return doc.components;
   }
 
-  // ---- SHARED COMPONENT LIBRARY (cross-course single-source) -----------------
-  // A machine-level store (separate from the per-doc registry) of component DEFS that
-  // ANY course references by key. A componentGrid resolves its def doc -> LIBRARY ->
-  // built-in, so a library component is single-source: edit the master and every course
-  // using it updates. render resolves defs to static HTML at export time (editor
-  // context), so the shipped SCORM is self-contained. Storage routes through
-  // libraryAdapter() (#18) -- localStorage on the 'browser' backend, the per-user file
-  // store on 'file' -- the same seam/flag the doc registry uses.
-  // Neutral demo master (ships with the tool, mirrors SAMPLE_DOC's role): a single
-  // reusable component carrying one named facet ("pro"), so the shipped demo course's
-  // Products & Variants chapter (model.js) has a real shared component to point its
-  // libraryInstance placements at on a fresh install. Only used to seed an EMPTY store —
-  // never overwrites real authored components.
-  function seedDemoLibrary(lib) {
-    lib.components["comp-demo-feature"] = {
-      name: "Feature Highlight",
-      productId: "prod-demo",
-      template: {
-        id: "lib-demo-root", type: "frame", padding: 24, radius: 12, border: true,
-        children: [
-          { id: "lib-demo-h", type: "subheading", text: "Standard" },
-          { id: "lib-demo-p", type: "paragraph", text: "The Standard tier covers the core feature set." }
-        ]
-      },
-      facets: {
-        pro: {
-          name: "Pro",
-          template: {
-            id: "lib-demo-root-pro", type: "frame", padding: 24, radius: 12, border: true,
-            children: [
-              { id: "lib-demo-h-pro", type: "subheading", text: "Pro" },
-              { id: "lib-demo-p-pro", type: "paragraph", text: "The Pro tier adds advanced options on top of the Standard feature set." }
-            ]
-          }
-        }
-      }
-    };
-  }
-  function loadLibrary() { return Store.loadLibrary(seedDemoLibrary); }
-  window.LibraryStore = loadLibrary();
-  function saveLibrary() { Store.saveLibrary(window.LibraryStore); }
-  function libComponents() { return (window.LibraryStore && window.LibraryStore.components) || {}; }
+  // arch-P3b-07lib: the shared component library moved to editor/library.js -- the store and its
+  // accessors, the where-used counters that sat 1,800 lines away under a banner about interaction
+  // identity, and the panel that sat 2,700 lines below that. One feature, three places. The doc
+  // walker the counters borrow stayed here: it is substrate four unrelated callers share.
+  var seedDemoLibrary = VE.bind("seedDemoLibrary");
+  var loadLibrary = VE.bind("loadLibrary");
+  var saveLibrary = VE.bind("saveLibrary");
+  var libComponents = VE.bind("libComponents");
+  var libraryWhereUsed = VE.bind("libraryWhereUsed");
+  var libraryWhereUsedDetail = VE.bind("libraryWhereUsedDetail");
+  var exportLibraryJson = VE.bind("exportLibraryJson");
+  var importLibraryJson = VE.bind("importLibraryJson");
+  var buildLibraryBody = VE.bind("buildLibraryBody");
+  var buildComponentsBody = VE.bind("buildComponentsBody");
+  var saveBlockAsComponent = VE.bind("saveBlockAsComponent");
+  var ungroupContainer = VE.bind("ungroupContainer");
+  var showDefineComponentDialog = VE.bind("showDefineComponentDialog");
+
 
   // Product Rail #1 — ProductsStore: { [productId]: {id, name, createdAt, groundTruthId} }.
   // Same load/save shape as the library above, through productsAdapter()'s adapter seam.
@@ -2583,277 +2559,21 @@
   var storeLocationText = VE.bind("storeLocationText");
 
 
-  // ---- Shared "header & footer default for new courses" ---------------------
-  // A machine-level default (localStorage, cross-project) captured from any course's
-  // Header & Footer, applied as the starting header/footer of every NEW course. The
-  // pure core sanitises what carries: the per-course header TITLE is dropped (each
-  // new course uses its own name) and any courseNav SECTIONS are cleared (nav is
-  // chapter-derived at render, so styling carries but not the source course's page
-  // bindings). The logo asset ref is baked to an inline data URI by the caller so the
-  // default is self-contained (survives asset GC + isn't tied to the source course).
-  var HF_DEFAULT_KEY = "authoring.defaultHeaderFooter";
-  /* @hfdefault-start */
-  function sanitizeHeaderFooterDefault(hf) {
-    if (!hf || typeof hf !== "object") return null;
-    var out = JSON.parse(JSON.stringify(hf));
-    if (out.header && typeof out.header === "object") delete out.header.title;
-    if (out.footer && Array.isArray(out.footer.children)) {
-      out.footer.children.forEach(function (ch) { if (ch && ch.type === "courseNav") ch.sections = []; });
-    }
-    return out;
-  }
-  function headerFooterFromDefault(savedDefault, title) {
-    if (!savedDefault || typeof savedDefault !== "object") return null;
-    var out = JSON.parse(JSON.stringify(savedDefault));
-    out.header = out.header || {};
-    out.header.title = title; // always the NEW course's own name, never the source course's
-    return out;
-  }
-  /* @hfdefault-end */
-  window.__hfDefault = { sanitize: sanitizeHeaderFooterDefault, fromDefault: headerFooterFromDefault };
-  function getHeaderFooterDefault() {
-    try { var s = localStorage.getItem(HF_DEFAULT_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; }
-  }
-  // Schema-CSV import rebuilds the whole doc from the CSV, which would overwrite the
-  // house header/footer default with whatever (often blank) HF the CSV carries. Expose
-  // the machine default so importSchema can keep it: returns the default HF for `title`,
-  // or null when no house default has been set (then the CSV's own HF is left alone).
-  window.__hfDefault.forNewDoc = function (title) {
-    var saved = getHeaderFooterDefault();
-    return saved ? headerFooterFromDefault(saved, title) : null;
-  };
-  function saveHeaderFooterDefault() {
-    var clean = sanitizeHeaderFooterDefault(doc.headerFooter);
-    if (!clean) return false;
-    if (clean.header && typeof clean.header.logo === "string") { // bake the logo -> portable data URI
-      var m = /^asset:(.+)$/.exec(clean.header.logo);
-      if (m && window.AssetStore) { var a = window.AssetStore.get(m[1]); if (a && a.dataUrl) clean.header.logo = a.dataUrl; }
-    }
-    try { localStorage.setItem(HF_DEFAULT_KEY, JSON.stringify(clean)); return true; } catch (e) { return false; }
-  }
-  function clearHeaderFooterDefault() { try { localStorage.removeItem(HF_DEFAULT_KEY); } catch (e) {} }
+  // arch-P3b-07doc: everything about bringing a course into existence -- the New dialog, the
+  // blank-course builder, the .json import and its id-collision check, the file readers -- moved
+  // to editor/documents.js. The shared header/footer default went with them: it exists only so a
+  // new course inherits the chrome the author already built, and has no other consumer.
+  var sanitizeHeaderFooterDefault = VE.bind("sanitizeHeaderFooterDefault");
+  var headerFooterFromDefault = VE.bind("headerFooterFromDefault");
+  var getHeaderFooterDefault = VE.bind("getHeaderFooterDefault");
+  var saveHeaderFooterDefault = VE.bind("saveHeaderFooterDefault");
+  var clearHeaderFooterDefault = VE.bind("clearHeaderFooterDefault");
+  var createBlankDoc = VE.bind("createBlankDoc");
+  var importDocToRegistry = VE.bind("importDocToRegistry");
+  var readCourseFile = VE.bind("readCourseFile");
+  var pickCourseFile = VE.bind("pickCourseFile");
+  var showNewDocDialog = VE.bind("showNewDocDialog");
 
-  // SPEC 7: `opts` (optional) = { productId, geo, interactive } from the product-first create
-  // flow. When present, the new doc is stamped with its Product (doc.meta.productId) and its
-  // matrix cell (doc.meta.geo/interactive) at birth. Omitted -> an untagged doc = today's
-  // {reflow, interactive} default, so the old callers are unchanged.
-  function createBlankDoc(title, code, opts) {
-    if (registry[code]) {
-      alert("A course with code '" + code + "' already exists.");
-      return;
-    }
-    var newDoc = {
-      meta: { title: title, code: code },
-      backupRequired: true, // Slice 2: a new course MUST bind a backup folder (nagged until it does)
-      headerFooter: headerFooterFromDefault(getHeaderFooterDefault(), title) || {
-        header: { on: true, title: title, subtitle: "Course Orientation", logo: null },
-        footer: { on: true, text: "WARNING: This document may contain technical data subject to export control laws." }
-      },
-      pages: [
-        {
-          id: "intro",
-          name: "Introduction",
-          blocks: [
-            { type: "heading", text: title },
-            { type: "paragraph", text: "Welcome to the " + title + " course." }
-          ]
-        }
-      ]
-    };
-    opts = opts || {};
-    if (opts.productId) tagDocProductStage(newDoc, opts.productId, null);
-    if (opts.geo) tagDocCell(newDoc, opts.geo, opts.interactive); // preset {geo, interactive}
-    registry[code] = newDoc;
-    saveRegistry(registry);
-    openDocIds.push(code);
-    saveOpenDocIds(openDocIds);
-    switchDoc(code);
-  }
-
-  function importDocToRegistry(importedDoc) {
-    var code = importedDoc.meta.code || ("IMPORTED-" + Math.floor(Math.random() * 1000));
-    importedDoc.meta.code = code;
-    // Commit + load. Wrapped so any failure is VISIBLE: native alert()/confirm()
-    // are swallowed by the Verso WKWebView host (no WKUIDelegate panels), so the
-    // old raw confirm()/alert() here failed silently -> "picked a file, nothing
-    // happened". Route the overwrite prompt through the DOM confirmModal and log
-    // every step so a failed import self-reports in the Web Inspector console.
-    function commit() {
-      try {
-        registry[code] = importedDoc;
-        saveRegistry(registry);
-        if (openDocIds.indexOf(code) === -1) {
-          openDocIds.push(code);
-          saveOpenDocIds(openDocIds);
-        }
-        switchDoc(code);
-        if (window.console && console.log) console.log("[import] loaded course '" + code + "'");
-      } catch (e) {
-        if (window.console && console.error) console.error("[import] commit failed:", e);
-        confirmModal("Import failed", "Could not load the course: " + (e && e.message || e), function () {});
-      }
-    }
-    if (registry[code]) {
-      confirmModal("Overwrite existing course?",
-        "A course with code '" + code + "' already exists. Overwrite it?",
-        commit, { danger: true, okLabel: "Overwrite" });
-      return;
-    }
-    commit();
-  }
-
-  // Read a picked .verso/.json course file and hand the parsed doc to onDoc.
-  // Factored out of showNewDocDialog so the file browser (#74) reuses the exact
-  // same read/parse/error path. Native alert() is swallowed by the WKWebView host,
-  // so every failure routes through the DOM confirmModal.
-  function readCourseFile(file, onDoc) {
-    if (!file) return;
-    var isVerso = /\.verso$/i.test(file.name || "");
-    var reader = new FileReader();
-    reader.onerror = function () {
-      var err = reader.error;
-      if (window.console && console.error) console.error("[import] FileReader error:", err);
-      confirmModal("Import failed",
-        "Could not read the file" + (err && err.name ? " (" + err.name + ")" : "") + ". It may be too large for this app's memory.",
-        function () {});
-    };
-    reader.onload = function () {
-      try {
-        var imported;
-        if (isVerso) {
-          var pkg = window.VersoFormat.readPackage(new Uint8Array(reader.result));
-          if (window.AssetStore) Object.keys(pkg.assets).forEach(function (id) {
-            window.AssetStore.put(pkg.assets[id].dataUrl, { mime: pkg.assets[id].mime });
-          });
-          imported = pkg.doc;
-        } else {
-          imported = JSON.parse(reader.result);
-        }
-        if (!imported || !imported.pages) {
-          confirmModal("Import failed", "That file isn't a valid course document (no pages found).", function () {});
-          return;
-        }
-        if (window.console && console.log) console.log("[import] parsed OK: " + (imported.pages || []).length + " pages from " + file.name);
-        onDoc(imported);
-      } catch (e) {
-        if (window.console && console.error) console.error("[import] parse/import failed:", e);
-        confirmModal("Import failed", (isVerso ? "Invalid .verso: " : "Invalid JSON: ") + (e && e.message || e), function () {});
-      }
-    };
-    if (isVerso) reader.readAsArrayBuffer(file); else reader.readAsText(file);
-  }
-  function pickCourseFile(onDoc) {
-    var input = document.createElement("input");
-    input.type = "file"; input.accept = ".json,application/json,.verso";
-    input.addEventListener("change", function () { readCourseFile(input.files && input.files[0], onDoc); });
-    input.click();
-  }
-
-  function showNewDocDialog() {
-    var existing = document.getElementById("new-doc-modal");
-    if (existing) return;
-
-    // Import / sample sit in the footer beside Cancel + Create blank; the whole
-    // dialog routes through the DS modal shell (VersoUI.Modal) — issue #19. modal
-    // + box are assigned from the shell below.
-    var modal, box, titleIn, codeIn;
-    // SPEC 7 product-first creation: the new doc is born in a Product (defaults to the current
-    // picker scope) and a matrix-cell preset (defaults to eLearning). Resolved to
-    // {geo, interactive} via the doc-type model at create time.
-    var DT = window.__docType;
-    var newDocProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
-    var newDocPreset = "elearning";
-    var btnImport = window.VersoUI.Button({ variant: "secondary", label: "Import…", onClick: function () {
-      pickCourseFile(function (imported) { importDocToRegistry(imported); modal.remove(); });
-    } });
-    var btnSample = window.VersoUI.Button({ variant: "secondary", label: "Load sample copy", onClick: function () {
-      var code = "DEMO-WSE-101-copy-" + Math.floor(Math.random() * 1000);
-      var freshSample = clone(window.SAMPLE_DOC || doc);
-      freshSample.meta.code = code;
-      freshSample.meta.title += " (Copy)";
-      importDocToRegistry(freshSample);
-      modal.remove();
-    } });
-
-    var shell = dsModalShell({
-      id: "new-doc-modal", keys: false,
-      title: "New document",
-      subtitle: "Open a saved course, import a document, or start a blank one.",
-      extras: [btnImport, btnSample],
-      primaryLabel: "Create blank",
-      onPrimary: function () {
-        var title = titleIn.value.trim();
-        var code = codeIn.value.trim();
-        if (!title || !code) { alert("Title and Code are required."); return; }
-        var cell = (DT && DT.presetToCell(newDocPreset)) || { geo: "reflow", interactive: true };
-        createBlankDoc(title, code, { productId: newDocProduct, geo: cell.geo, interactive: cell.interactive });
-        modal.remove();
-        // Slice 2: MANDATORY backup-folder setup — prompt the picker immediately (still
-        // within this click gesture, required for the native/FSA folder pickers). If the
-        // author cancels, the loud "no backup folder" banner nags until they bind.
-        bindProjectFolder();
-      }
-    });
-    modal = shell.modal; box = shell.body;
-
-    var closedIds = Object.keys(registry).filter(function (id) {
-      return openDocIds.indexOf(id) === -1;
-    });
-    if (closedIds.length > 0) {
-      var openBody = modalSection(box, "Open a saved course");
-      var list = h("div", "modal-list");
-      closedIds.forEach(function (id) {
-        var d = registry[id];
-        var item = h("div", "modal-list__item");
-        var left = h("div", "insp-list__text");
-        left.appendChild(h("span", "insp-list__title", d.meta.title || id));
-        left.appendChild(h("span", "insp-list__meta", id));
-        item.appendChild(left);
-        item.addEventListener("click", function () {
-          openDocIds.push(id);
-          saveOpenDocIds(openDocIds);
-          switchDoc(id);
-          modal.remove();
-        });
-        // Delete a saved (closed) course from the registry. Confirm first; permanent
-        // local removal (any exported SCORM / on-disk backup folder is left alone).
-        var del = iconBtn("trash", "Delete this saved course", true);
-        del.addEventListener("click", function (e) {
-          e.stopPropagation(); // don't open the course we're deleting
-          confirmModal("Delete course?", "Permanently remove “" + (d.meta.title || id) + "” (" + id + ") from this machine. This can't be undone. Any exported SCORM or backup folder on disk is not affected.", function () {
-            delete registry[id];
-            saveRegistry(registry);
-            var oi = openDocIds.indexOf(id); if (oi !== -1) { openDocIds.splice(oi, 1); saveOpenDocIds(openDocIds); }
-            modal.remove(); showNewDocDialog(); // re-render the list fresh
-          }, { okLabel: "Delete", danger: true });
-        });
-        item.appendChild(del);
-        list.appendChild(item);
-      });
-      openBody.appendChild(list);
-    }
-
-    box = modalSection(box, "New course");
-    // Product (defaults to the current scope) -> preset (matrix cell) -> name, per SPEC 7.
-    var prodRow = modalField(box, "Product");
-    prodRow.appendChild(window.VersoUI.Select({
-      options: productSelectOptions(window.ProductsStore),
-      value: newDocProduct,
-      onChange: function (v) { newDocProduct = v || ""; }
-    }));
-    if (DT && window.VersoUI.ChoiceCards) {
-      modalField(box, "Start from a preset");
-      box.appendChild(window.VersoUI.ChoiceCards({
-        options: DT.PRESETS.map(function (p) {
-          return { value: p.key, title: p.name, desc: (p.geo.charAt(0).toUpperCase() + p.geo.slice(1)) + " · " + (p.interactive ? "interactive" : "static") };
-        }),
-        value: newDocPreset,
-        onChange: function (v) { newDocPreset = v; }
-      }));
-    }
-    titleIn = modalText(box, "Course title", "", "e.g. My New Course");
-    codeIn = modalText(box, "Course code", "", "e.g. DRO-NEW-101");
-  }
 
   // ---- history / undo-redo -> src/editor/history.js (arch-P3-02) -------------
   // The stacks, the cap, redo invalidation, the one-step-per-typing-burst rule and the repaint
@@ -2964,42 +2684,8 @@
     }
     ((doc && doc.pages) || []).forEach(function (p) { (p.blocks || []).forEach(walk); });
   }
-  // #24: where-used for a shared library master -- courses = how many courses in the
-  // registry reference it at all, instances = total libraryInstance placements across
-  // all of them. Reuses walkBlocks (not a 4th near-duplicate walker) since every
-  // libraryInstance placement is an ordinary block, no different from any other #20
-  // reference for this purpose. PURE (DOM-free): takes the registry object as data, so
-  // tests/run.js can exercise it headlessly against a fixture multi-course registry.
-  /* @where-used-start */
-  function libraryWhereUsed(ref, registryObj) {
-    var courses = 0, instances = 0;
-    Object.keys(registryObj || {}).forEach(function (code) {
-      var count = 0;
-      walkBlocks(registryObj[code], function (b) { if (b.type === "libraryInstance" && b.ref === ref) count++; });
-      // #22: a page master's instances are PAGES (page.libraryRef), not blocks -- walkBlocks
-      // only reaches doc.pages[].blocks, so count those separately on the same pass.
-      ((registryObj[code] && registryObj[code].pages) || []).forEach(function (p) { if (p && p.libraryRef === ref) count++; });
-      if (count > 0) { courses++; instances += count; }
-    });
-    return { courses: courses, instances: instances };
-  }
-  // Product Rail (source-stage-info-panel): the detailed, per-usage sibling of
-  // libraryWhereUsed's counts -- one entry per referencing block, with enough to
-  // both label it (document title) and jump to it (docCode + blockId). Generic over
-  // any LibraryStore ref (topics included -- a topic is just a kind:"topic" master).
-  function libraryWhereUsedDetail(ref, registryObj) {
-    var entries = [];
-    Object.keys(registryObj || {}).forEach(function (code) {
-      var doc = registryObj[code];
-      walkBlocks(doc, function (b) {
-        if (b.type === "libraryInstance" && b.ref === ref) {
-          entries.push({ docCode: code, docTitle: (doc.meta && doc.meta.title) || code, blockId: b.id });
-        }
-      });
-    });
-    return entries;
-  }
-  /* @where-used-end */
+  // ...continues in library.js (arch-P3b-07).
+
   window.__libraryWhereUsed = libraryWhereUsed; // test hook
   // Re-mint on duplicate: a cloned subtree must never reuse ids, or a copy's
   // interactions/gate would collide with the original — and a shared cid would make
@@ -5677,271 +5363,8 @@
   var lockSourceEditing = VE.bind("lockSourceEditing");
   var clearSourceEditSession = VE.bind("clearSourceEditSession");
 
-  // ---- Component Library panel (cross-course shared components) -------------
-  function exportLibraryJson() {
-    var blob = new Blob([JSON.stringify(window.LibraryStore, null, 2)], { type: "application/json" });
-    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "component-library.json";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-  }
-  function importLibraryJson() {
-    var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
-    inp.addEventListener("change", function () {
-      var f = inp.files && inp.files[0]; if (!f) return;
-      var r = new FileReader();
-      r.onload = function () {
-        var p; try { p = JSON.parse(r.result); } catch (e) { window.alert("Couldn't read that file as JSON."); return; }
-        if (!p || !p.components) { window.alert("That file isn't a component library (no components)."); return; }
-        var n = Object.keys(p.components).length;
-        var merge = window.confirm("Import " + n + " component(s).\n\nOK = MERGE (imported win on a name clash).\nCancel = keep yours (skip clashes).");
-        Object.keys(p.components).forEach(function (k) { if (merge || !window.LibraryStore.components[k]) window.LibraryStore.components[k] = p.components[k]; });
-        saveLibrary(); mount(); renderInspector();
-      };
-      r.readAsText(f);
-    });
-    inp.click();
-  }
-  function buildLibraryBody(c) {
-    c.appendChild(h("div", "insp-hint", "A shared library used across ALL your courses. A course REFERENCES a library component; edit the master here and every course using it updates. It bakes into the export, so the shipped SCORM stays self-contained (air-gap safe)."));
-    var lib = libComponents();
-    // #22: PAGE masters get their own list below (different actions -- Insert page, not
-    // Copy to course, since a page isn't a doc.components-shaped thing) -- filter/label
-    // by type per the ticket's acceptance criteria.
-    var keys = Object.keys(lib).filter(function (k) { return lib[k].kind !== "page"; });
-    if (keys.length) {
-      var list = h("div", "insp-list");
-      keys.forEach(function (k) {
-        var comp = lib[k];
-        var item = h("div", "insp-list__item");
-        var left = h("div", "insp-list__text");
-        left.appendChild(h("span", "insp-list__title", comp.name || k));
-        left.appendChild(h("span", "insp-list__meta", (comp.slots || []).map(function (s) { return s.label; }).join(", ") || comp.kind || "component"));
-        // #24: where-used — a live-linked instance (#20) already resolves the CURRENT
-        // master on every render, so this is a read-only blast-radius indicator, not a
-        // staleness warning. Scanning the full registry per row is fine here: the panel
-        // only builds when an author opens Settings > System > Component Library.
-        var usage = libraryWhereUsed(k, getRegistry());
-        left.appendChild(h("span", "insp-list__meta", usage.instances
-          ? "Used in " + usage.courses + " course" + (usage.courses === 1 ? "" : "s") + " / " + usage.instances + " instance" + (usage.instances === 1 ? "" : "s")
-          : "Not placed anywhere yet"));
-        item.appendChild(left);
-        var acts = h("div"); acts.style.cssText = "display:flex;gap:4px;";
-        var copyB = h("button", "prop-btn", "Copy to course"); copyB.style.cssText = "padding:2px 6px;font-size:10px;"; copyB.title = "Detach a local copy into this course (edits won't propagate)";
-        // #19: deliberately plain clone(), NOT remintIds — the master's ids are its
-        // stable identity and must survive a detach untouched (see the contract on remintIds).
-        copyB.addEventListener("click", function () { pushHistory(); getComponents()[k] = clone(comp); saveRegistry(registry); mount(); });
-        // #24: an explicit, deliberate confirmation that every #20 live instance already
-        // reflects the current master (architecture, not a data mutation this button
-        // performs) -- and durably persists the master in case an in-memory edit hasn't
-        // been saved yet. Detached/copied-to-course snapshots are NOT live references
-        // (that's the whole point of detaching, #19/#21) so are intentionally out of
-        // scope here; #21's Relink is the targeted way to re-sync one of those.
-        var pushB = h("button", "prop-btn", "Push update"); pushB.style.cssText = "padding:2px 6px;font-size:10px;";
-        pushB.title = "Confirm every live-linked instance reflects this master's current content, and save it durably.";
-        pushB.addEventListener("click", function () {
-          saveLibrary();
-          var fresh = libraryWhereUsed(k, getRegistry());
-          confirmModal("Push update", fresh.instances
-            ? "Saved. " + fresh.instances + " live-linked instance" + (fresh.instances === 1 ? "" : "s") + " across " + fresh.courses + " course" + (fresh.courses === 1 ? "" : "s") + " already reflect “" + (comp.name || k) + "”'s current content — instances resolve the master live, so there's nothing further to push."
-            : "Saved. “" + (comp.name || k) + "” isn't placed anywhere yet, so there's nothing to push.",
-            function () {}, { okLabel: "OK" });
-        });
-        var delB = h("button", "prop-btn prop-btn--danger", "✕"); delB.style.cssText = "padding:2px 6px;font-size:10px;";
-        delB.addEventListener("click", function () {
-          var impact = libraryWhereUsed(k, getRegistry());
-          var warn = impact.instances ? " Currently used in " + impact.courses + " course" + (impact.courses === 1 ? "" : "s") + " / " + impact.instances + " instance" + (impact.instances === 1 ? "" : "s") + " —" : "";
-          confirmModal("Remove component", "Remove “" + (comp.name || k) + "” from the shared library?" + warn + " courses referencing it fall back to a built-in / show unknown.", function () { delete window.LibraryStore.components[k]; saveLibrary(); mount(); renderInspector(); }, { okLabel: "Remove", danger: true });
-        });
-        acts.appendChild(copyB); acts.appendChild(pushB); acts.appendChild(delB); item.appendChild(acts);
-        list.appendChild(item);
-      });
-      c.appendChild(list);
-    } else {
-      c.appendChild(h("div", "insp-hint", "No shared components yet. Promote a course component below, or import a library."));
-    }
+  // ...continues in library.js (arch-P3b-07).
 
-    // #22: PAGE masters -- listed + labelled separately from block masters. "Insert page"
-    // (not "Copy to course") since placing one adds a whole page to doc.pages, not a
-    // doc.components entry; capture happens from a page's OWN inspector ("Save page to
-    // library", above in renderPageInspector), not from here.
-    var pageKeys = Object.keys(lib).filter(function (k) { return lib[k].kind === "page"; });
-    if (pageKeys.length) {
-      var pageSecBody = panelSection(c, "Pages");
-      var pageList = h("div", "insp-list");
-      pageKeys.forEach(function (k) {
-        var comp = lib[k];
-        var item = h("div", "insp-list__item");
-        var left = h("div", "insp-list__text");
-        left.appendChild(h("span", "insp-list__title", comp.name || k));
-        left.appendChild(h("span", "insp-list__meta", "page"));
-        var usage = libraryWhereUsed(k, getRegistry());
-        left.appendChild(h("span", "insp-list__meta", usage.instances
-          ? "Used in " + usage.courses + " course" + (usage.courses === 1 ? "" : "s") + " / " + usage.instances + " instance" + (usage.instances === 1 ? "" : "s")
-          : "Not placed anywhere yet"));
-        item.appendChild(left);
-        var pacts = h("div"); pacts.style.cssText = "display:flex;gap:4px;";
-        var insertB = h("button", "prop-btn prop-btn--accent", "Insert page"); insertB.style.cssText = "padding:2px 6px;font-size:10px;"; insertB.title = "Insert a live-linked page right after the current one — editing the master updates every placement";
-        insertB.addEventListener("click", function () { insertPageFromLibrary(k); });
-        var pPushB = h("button", "prop-btn", "Push update"); pPushB.style.cssText = "padding:2px 6px;font-size:10px;";
-        pPushB.title = "Confirm every live-linked page reflects this master's current content, and save it durably.";
-        pPushB.addEventListener("click", function () {
-          saveLibrary();
-          var fresh = libraryWhereUsed(k, getRegistry());
-          confirmModal("Push update", fresh.instances
-            ? "Saved. " + fresh.instances + " live-linked page" + (fresh.instances === 1 ? "" : "s") + " across " + fresh.courses + " course" + (fresh.courses === 1 ? "" : "s") + " already reflect “" + (comp.name || k) + "”'s current content — pages resolve the master live, so there's nothing further to push."
-            : "Saved. “" + (comp.name || k) + "” isn't placed anywhere yet, so there's nothing to push.",
-            function () {}, { okLabel: "OK" });
-        });
-        var pDelB = h("button", "prop-btn prop-btn--danger", "✕"); pDelB.style.cssText = "padding:2px 6px;font-size:10px;";
-        pDelB.addEventListener("click", function () {
-          var impact = libraryWhereUsed(k, getRegistry());
-          var warn = impact.instances ? " Currently used in " + impact.courses + " course" + (impact.courses === 1 ? "" : "s") + " / " + impact.instances + " instance" + (impact.instances === 1 ? "" : "s") + " —" : "";
-          confirmModal("Remove page", "Remove “" + (comp.name || k) + "” from the shared library?" + warn + " courses referencing it show an empty page.", function () { delete window.LibraryStore.components[k]; saveLibrary(); mount(); renderInspector(); }, { okLabel: "Remove", danger: true });
-        });
-        pacts.appendChild(insertB); pacts.appendChild(pPushB); pacts.appendChild(pDelB); item.appendChild(pacts);
-        pageList.appendChild(item);
-      });
-      pageSecBody.appendChild(pageList);
-    }
-    // promote a course-local component to the shared library (single-sources it)
-    var docKeys = Object.keys(doc.components || {}).filter(function (k) { return !(window.COMPONENTS || {})[k]; });
-    if (docKeys.length) {
-      var addBody = panelSection(c, "Add to library");
-      var selectedKey = docKeys[0];
-      addBody.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Course component"));
-      var psel = dsSelect(docKeys.map(function (k) { return [doc.components[k].name || k, k]; }), selectedKey, function (v) { selectedKey = v; });
-      addBody.appendChild(psel);
-      var saveB = h("button", "prop-btn prop-btn--accent", "Save to library"); saveB.style.marginTop = "6px";
-      saveB.addEventListener("click", function () {
-        if (!selectedKey || !doc.components[selectedKey]) return;
-        function doSave() {
-          pushHistory();
-          // #19: plain clone(), NOT remintIds — promoting to the shared library keeps the
-          // exact ids this course-local component was captured with (see the contract on
-          // remintIds); they become the master's permanent cross-course identity.
-          var promoted = clone(doc.components[selectedKey]);
-          stampMasterVersion(promoted, Date.now()); // Product Rail: bump on this content edit
-          // Product Rail: stamp the reserved owning-Product tag from THIS course's Product
-          // context, if it has one -- birthplace, not ownership; an untagged course simply
-          // promotes with no reserved tag (nothing to attribute). Stamped once, here, at
-          // the moment of promotion -- never re-stamped on a later overwrite.
-          stampOwnerProductTag(promoted, doc.meta && doc.meta.productId);
-          window.LibraryStore.components[selectedKey] = promoted;
-          delete doc.components[selectedKey]; // single-source: this course now references the library copy
-          saveLibrary(); saveRegistry(registry); mount(); renderInspector();
-        }
-        if (libComponents()[selectedKey]) {
-          // #24 IMPACT PREVIEW: the one place a master's content actually changes today
-          // (there's no in-place master editor yet, #21) — so this overwrite confirm is
-          // where a blast-radius preview belongs.
-          var impact = libraryWhereUsed(selectedKey, getRegistry());
-          var warn = impact.instances ? " " + impact.instances + " live-linked instance" + (impact.instances === 1 ? "" : "s") + " across " + impact.courses + " course" + (impact.courses === 1 ? "" : "s") + " will pick up this content immediately." : " It isn't placed anywhere yet.";
-          confirmModal("Overwrite component", "The library already has “" + selectedKey + "”. Overwrite it?" + warn, doSave, { okLabel: "Overwrite" });
-        } else doSave();
-      });
-      addBody.appendChild(saveB);
-    }
-    var xfer = panelSection(c, "Transfer");
-    xfer.appendChild(h("div", "insp-hint", "Move the library between machines / the on-prem server."));
-    var expB = h("button", "prop-btn", "Export library (.json)");
-    expB.addEventListener("click", exportLibraryJson); xfer.appendChild(expB);
-    var impB = h("button", "prop-btn", "Import library (.json)…"); impB.style.marginTop = "6px";
-    impB.addEventListener("click", importLibraryJson); xfer.appendChild(impB);
-  }
-  function buildComponentsBody(c) {
-    c.appendChild(h("div", "insp-hint", "Define component templates and fields. Grids can render any defined template."));
-    var comps = getComponents();
-    var list = h("div", "insp-list");
-    Object.keys(comps).forEach(function (k) {
-      var comp = comps[k];
-      var item = h("div", "insp-list__item");
-      var left = h("div", "insp-list__text");
-      left.appendChild(h("span", "insp-list__title", comp.name));
-      left.appendChild(h("span", "insp-list__meta", (comp.slots || []).map(function (s) { return s.label; }).join(", ")));
-      item.appendChild(left);
-      list.appendChild(item);
-    });
-    c.appendChild(list);
-
-    var btn = h("button", "prop-btn prop-btn--accent", "+ Define custom component");
-    btn.style.marginTop = "10px";
-    btn.addEventListener("click", showDefineComponentDialog);
-    c.appendChild(btn);
-  }
-
-  // Capture a built block (typically a Frame composed from primitives) as a
-  // reusable component. v1 = a saved preset: inserting drops an independent copy
-  // (detached). Stored on doc.components with kind:"composed" so it shows in
-  // the Blocks panel under "My Components" and survives save/load + export.
-  function saveBlockAsComponent(block) {
-    promptModal("Name this reusable component", "Component name", blockLabel(block), function (v) {
-      var name = (v || "").trim();
-      if (!name) return;
-      var id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-      if (!id) { alert("Please use a name with some letters or numbers."); return; }
-      var comps = getComponents();
-      function save() {
-        pushHistory();
-        comps[id] = { name: name, kind: "composed", template: remintIds(clone(block)) };
-        doc.components = comps;
-        saveRegistry(registry);
-        mount();
-        alert("Saved “" + name + "”. Find it in the Blocks panel → My Components.");
-      }
-      if (comps[id]) confirmModal("Overwrite component", "A component named “" + name + "” already exists. Overwrite it?", save, { okLabel: "Overwrite" });
-      else save();
-    });
-  }
-
-  // Dissolve a group/card back into its children in the page (at its position).
-  function ungroupContainer(block) {
-    var loc = getBlockPageIndexAndIndex(block);
-    if (!loc) return;
-    pushHistory();
-    var args = [loc.blockIndex, 1].concat(block.children || []);
-    Array.prototype.splice.apply(doc.pages[loc.pageIndex].blocks, args);
-    clearSelection();
-    mount();
-  }
-
-  function showDefineComponentDialog() {
-    var existing = document.getElementById("define-comp-modal");
-    if (existing) return;
-    var modal = h("div", "modal-overlay");
-    modal.id = "define-comp-modal";
-    var box = h("div", "modal-box");
-    modalHead(box, "Define custom component", "Create a reusable template with named fields you can drop onto any page.");
-
-    var nameIn = modalText(box, "Component name", "", "e.g. Product Card");
-    var idIn = modalText(box, "Component ID", "", "e.g. product-card");
-    var slotsIn = modalText(box, "Fields / slots", "", "e.g. Title, Details, Action text");
-    nameIn.addEventListener("input", function () {
-      idIn.value = this.value.trim().toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
-    });
-
-    modalActions(box, modal, "Define template", function () {
-      var name = nameIn.value.trim();
-      var id = idIn.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
-      var slotsRaw = slotsIn.value.trim();
-      if (!name || !id || !slotsRaw) { alert("All fields are required."); return; }
-      var slots = slotsRaw.split(",").map(function (s) {
-        var clean = s.trim();
-        var key = clean.toLowerCase().replace(/[^a-z0-9]/g, "");
-        return { key: key, label: clean };
-      }).filter(function (s) { return s.key !== ""; });
-      if (slots.length === 0) { alert("At least one valid field is required."); return; }
-      var comps = getComponents();
-      if (comps[id]) { alert("A component with ID '" + id + "' already exists."); return; }
-      pushHistory();
-      comps[id] = { name: name, slots: slots };
-      doc.components = comps;
-      saveRegistry(registry);
-      modal.remove();
-      mount();
-    });
-    modal.appendChild(box);
-    document.body.appendChild(modal);
-  }
 
   // Nothing selected → a LEAN, contextual doc panel (James 2026-07-08). The stacked wall of
   // document settings moved into the ⚙ settings modal (System / Project tabs); the sidebar now
@@ -8104,6 +7527,11 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    productSelectOptions: productSelectOptions,
+    tagDocCell: tagDocCell,
+    tagDocProductStage: tagDocProductStage,
+    stampOwnerProductTag: stampOwnerProductTag,
+    stampMasterVersion: stampMasterVersion,
     gridMode: gridMode,
     activeBp: activeBp,
     addPageAfter: addPageAfter,
@@ -8539,6 +7967,8 @@
   window.VersoInteract.install(VE);   // Interact mode; before actions.js, which aliases ACTION_TYPES
   window.VersoPages.install(VE);   // chapters, and which one a page belongs to
   window.VersoWorld.install(VE);   // the canvas render loop
+  window.VersoLibrary.install(VE);   // the shared component library; installs early -- it loads the store
+  window.VersoDocuments.install(VE);   // bringing a course into existence
   window.VersoEditing.install(VE);   // what makes the canvas typeable
   window.VersoActions.install(VE);   // what a learner's click does
   window.VersoInspectorBlocks.install(VE);   // which panel a selected block gets
