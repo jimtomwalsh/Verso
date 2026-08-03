@@ -4881,6 +4881,7 @@ section("#159/#163 frontend conformance gate");
 // ---- §12 slice 2: canvas comment mode (drop / anchor / render / resolve) -----
 section("comment mode (canvas)");
 (function () {
+  var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   var t = src("src/editor/comments.js");   // arch-P3b-07: review comments moved here
   ok("setCommentMode toggles the canvas class + persists", /function setCommentMode\(on\)[\s\S]*?setItem\(COMMENT_MODE_KEY[\s\S]*?canvas\.classList\.toggle\("is-comment-mode", commentMode\)/.test(t));
   // 3-tier anchor resolution (block > page > world)
@@ -4912,7 +4913,7 @@ section("comment mode (canvas)");
     return calls === 1;
   })());
   // mode bails: drill + C shortcut
-  ok("drill handler bails in comment mode", /if \(interactMode \|\| commentModeOn\(\)\) return;/.test(src("src/editor.js")));
+  ok("drill handler bails in comment mode", /if \(E\.interactMode \|\| commentModeOn\(\)\) return;/.test(DRILL));
   // arch-P3b-07: the keyboard map moved to src/editor/shortcuts.js.
   ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentModeOn\(\)\)/.test(src("src/editor/shortcuts.js")));
   // export-strip: comment pins/store are editor.js chrome only — render.js knows nothing
@@ -5994,7 +5995,7 @@ section("outliner multi-select any-scope");
   ok("groupMulti resolves by ref + needs one shared parent", /findBlockParent[\s\S]*?parentArray !== pa/.test(grp));
   // selection must persist through PAN (middle-click / space+left) — the deselect handler
   // returns early for pan gestures, but a plain left-click on empty canvas still deselects.
-  ok("pan gestures don't clear the selection", /A PAN gesture[\s\S]*?if \(e\.button === 1 \|\| \(spaceHeld && e\.button === 0\)\) return;/.test(etxt));
+  ok("pan gestures don't clear the selection", /A PAN gesture[\s\S]*?if \(e\.button === 1 \|\| \(E\.spaceHeld && e\.button === 0\)\) return;/.test(src("src/editor/drill.js")));
 })();
 
 // ---- §105 batch-apply a text style / colour / align to a multi-selection ----
@@ -6421,23 +6422,23 @@ section("global motion");
 section("select-first / progressive drill");
 (function () {
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
-  var t = src("src/editor.js");
+  var t = src("src/editor.js"), DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   // rule 6: the flag is reused, flipped -> select-first ON unless an explicit "0".
   ok("select-first is always on (toggle removed, hard-wired true)", /function twoStateText\(\) \{ return true; \}/.test(t) && !/segmentedLive\("Text editing"/.test(t));
   ok("enableEditing still branches on twoStateText()", /if \(twoStateText\(\)\) \{[\s\S]*?dblclick[\s\S]*?enterTextEdit/.test(t));
   ok("click-to-edit mode still sets contenteditable true", /\} else \{[\s\S]*?setAttribute\("contenteditable", "true"\)/.test(t));
   ok("deleteSelection handles a selected (non-editing) text field", /E\.selection\.type === "field"[\s\S]*?getAttribute\("contenteditable"\) !== "true"[\s\S]*?deleteBlockByRef/.test(src("src/editor/clipboard.js")));
   // drill engine
-  ok("buildDrillLevels resolves outermost->innermost levels", /function buildDrillLevels\(target\)[\s\S]*?inner\.reverse\(\)/.test(t));
-  ok("terminal editable field becomes an \"edit\" step (replaces the field-select)", /leaf\.kind === "field" && leaf\.node\.classList\.contains\("is-editable"\)[\s\S]*?levels\[levels\.length - 1\] = \{ kind: "edit"/.test(t));
-  ok("dual-role node yields BOTH block + field drill levels (progressive disclosure)", /if \(n\.matches\("\[data-edit\]"\)\) inner\.push\(\{ kind: "field"[\s\S]*?if \(n\.classList\.contains\("canvas-block"\) && n\.__block\)[\s\S]*?inner\.push\(\{ kind: "block"/.test(t));
-  ok("extra block tier gated to plain text blocks (navButton keeps bespoke inspector)", /!n\.matches\("\[data-edit\]"\) \|\| getSelectionTypeForBlock\(n\.__block\) === "field"\) inner\.push\(\{ kind: "block"/.test(t));
-  ok("edit drill step selects the field AND enters the caret", /l\.kind === "edit"\) \{ selectFieldNode\(l\.node\); enterTextEdit\(l\.node\)/.test(t));
-  ok("block drill tier forces a block selection for a data-edit text node", /getAttribute\("data-edit"\) != null && l\.node\.__block\) \{ blurActiveText\(\); setSelection\("block", l\.node\)/.test(t));
+  ok("buildDrillLevels resolves outermost->innermost levels", /function buildDrillLevels\(target\)[\s\S]*?inner\.reverse\(\)/.test(DRILL));
+  ok("terminal editable field becomes an \"edit\" step (replaces the field-select)", /leaf\.kind === "field" && leaf\.node\.classList\.contains\("is-editable"\)[\s\S]*?levels\[levels\.length - 1\] = \{ kind: "edit"/.test(DRILL));
+  ok("dual-role node yields BOTH block + field drill levels (progressive disclosure)", /if \(n\.matches\("\[data-edit\]"\)\) inner\.push\(\{ kind: "field"[\s\S]*?if \(n\.classList\.contains\("canvas-block"\) && n\.__block\)[\s\S]*?inner\.push\(\{ kind: "block"/.test(DRILL));
+  ok("extra block tier gated to plain text blocks (navButton keeps bespoke inspector)", /!n\.matches\("\[data-edit\]"\) \|\| getSelectionTypeForBlock\(n\.__block\) === "field"\) inner\.push\(\{ kind: "block"/.test(DRILL));
+  ok("edit drill step selects the field AND enters the caret", /l\.kind === "edit"\) \{ selectFieldNode\(l\.node\); enterTextEdit\(l\.node\)/.test(DRILL));
+  ok("block drill tier forces a block selection for a data-edit text node", /getAttribute\("data-edit"\) != null && l\.node\.__block\) \{ blurActiveText\(\); setSelection\("block", l\.node\)/.test(DRILL));
   // uio-E-C02: a top-level text field inspector now shows the block chrome in one scroll (no jump
   // link); the back-to-block link survives only for the non-text / version-edit fallback branch.
   ok("field/type inspector keeps the back-to-block link only for the non-text fallback", /insp-backlink[\s\S]*?reselectBlockNode\(selection\.block, "block"\)/.test(t) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(t));
-  ok("capture handler bails out in click-to-edit mode", /if \(!twoStateText\(\)\) return;\s*\/\/ click-to-edit/.test(t));
+  ok("capture handler bails out in click-to-edit mode", /if \(!twoStateText\(\)\) return;\s*\/\/ click-to-edit/.test(DRILL));
   // LEAF-FIRST (James 2026-07-12): a plain click selects the INNERMOST non-edit level
   // (the element under the cursor), not the outermost container; Escape steps outward.
   // leafSelectIndex is NODE-AWARE: it steps back over the innermost node's own caret
@@ -6457,17 +6458,17 @@ section("select-first / progressive drill");
     return normal === 1 && editOnly === 1 && foreign === 1 &&
       SEL.leafSelectIndex([]) === -1 && SEL.leafSelectIndex(null) === -1;
   })());
-  ok("plain click selects the leaf directly (leaf-first, not the container)", /var leafIndex = leafSelectIndex\(levels\);[\s\S]*?clearAllMulti\(\);\s*\n\s*drill\.levels = levels; drill\.index = leafIndex;/.test(t));
+  ok("plain click selects the leaf directly (leaf-first, not the container)", /var leafIndex = leafSelectIndex\(levels\);[\s\S]*?clearAllMulti\(\);\s*\n\s*E\.drill\.levels = levels; E\.drill\.index = leafIndex;/.test(DRILL));
   // An "edit"-kind leaf (navButton-like) SELECTS without a caret on single click, so it
   // becomes draggable and doesn't jump into text edit; other leaves select normally.
-  ok("an edit-kind leaf single-click selects without the caret (navButton draggable, no auto-edit)", /if \(leaf\.kind === "edit"\) \{ blurActiveText\(\); selectFieldNode\(leaf\.node\); \}\s*\n\s*else applyDrillLevel\(leaf\);/.test(t));
+  ok("an edit-kind leaf single-click selects without the caret (navButton draggable, no auto-edit)", /if \(leaf\.kind === "edit"\) \{ blurActiveText\(\); selectFieldNode\(leaf\.node\); \}\s*\n\s*else applyDrillLevel\(leaf\);/.test(DRILL));
   // press-drag defer is keyed on the NODE (press is on the currently-selected, draggable
   // block) not selection.block -- setSelection leaves selection.block null for some types
   // (navButton), so a block-ref check would drop them out of the drag path.
-  ok("onSelectedLeaf is keyed on the selected+draggable host node, not selection.block", /var leafHost = leaf\.node && leaf\.node\.closest && leaf\.node\.closest\("\.canvas-block"\);[\s\S]*?var onSelectedLeaf = leafBlock && !multiSel\.length && leafHost && leafHost === selHost &&\s*\n\s*leafHost\.getAttribute\("draggable"\) === "true";/.test(t));
+  ok("onSelectedLeaf is keyed on the selected+draggable host node, not selection.block", /var leafHost = leaf\.node && leaf\.node\.closest && leaf\.node\.closest\("\.canvas-block"\);[\s\S]*?var onSelectedLeaf = leafBlock && !E\.multiSel\.length && leafHost && leafHost === selHost &&\s*\n\s*leafHost\.getAttribute\("draggable"\) === "true";/.test(DRILL));
   // ONE multi-select handler owns Shift/Cmd (registered before the leaf click handler, which bails on modifiers).
-  ok("leaf-first click handler bails on Shift/Cmd (the multi-select handler owns them)", /if \(e\.button !== 0 \|\| e\.shiftKey \|\| e\.metaKey \|\| spaceHeld\) return;/.test(t));
-  ok("Shift/Cmd click multi-selects the LEAF element (not canvasTopBlock), seeded from the single selection", /if \(e\.shiftKey \|\| e\.metaKey\) \{[\s\S]*?var node = levels\.length \? levels\[leafSelectIndex\(levels\)\]\.node : null;[\s\S]*?if \(!multiSel\.length && selection && selection\.block && selection\.block !== node\.__block\) multiSel\.push\(selection\.block\);[\s\S]*?toggleMulti\(node\.__block\)/.test(t));
+  ok("leaf-first click handler bails on Shift/Cmd (the multi-select handler owns them)", /if \(e\.button !== 0 \|\| e\.shiftKey \|\| e\.metaKey \|\| E\.spaceHeld\) return;/.test(DRILL));
+  ok("Shift/Cmd click multi-selects the LEAF element (not canvasTopBlock), seeded from the single selection", /if \(e\.shiftKey \|\| e\.metaKey\) \{[\s\S]*?var node = levels\.length \? levels\[leafSelectIndex\(levels\)\]\.node : null;[\s\S]*?if \(!E\.multiSel\.length && E\.selection && E\.selection\.block && E\.selection\.block !== node\.__block\) E\.multiSel\.push\(E\.selection\.block\);[\s\S]*?toggleMulti\(node\.__block\)/.test(DRILL));
   ok("multi-select no longer keys off canvasTopBlock (would collapse siblings to the container)", !/if \(e\.shiftKey \|\| e\.metaKey\) \{\s*\n\s*var node = canvasTopBlock/.test(t));
   ok("a 2+ multi-selection strips the stray single is-selected highlight", /if \(E\.multiSel\.length >= 2\) Array\.prototype\.forEach\.call\(E\.world\.querySelectorAll\("\.is-selected"\)/.test(OUT));
   // arch-P3-07: the chain rules are src/editor/selection.js now, so these run them.
@@ -6497,6 +6498,7 @@ section("select-first / progressive drill");
 // ---- §74 PHASE 2: grab handle removed; selected block IS the drag surface -----
 section("select-first / grab-handle removal (phase 2)");
 (function () {
+  var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var t = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
   // select-first branch: block body is draggable, gated on the draggable attr + not editing
@@ -6509,7 +6511,7 @@ section("select-first / grab-handle removal (phase 2)");
   ok("updateDragAffordance sets draggable on the selected block", /if \(sel\) sel\.setAttribute\("draggable", "true"\)/.test(OUT));
   ok("refreshCanvasSelection updates the drag affordance", /drawContainerOutline\(E\.selection\.block\);\s*updateDragAffordance\(\);/.test(OUT));
   // a press-drag on the selected leaf defers to mouseup so a native MOVE wins over edit
-  ok("press-drag on the selected leaf defers to mouseup (move wins over dbl-click edit)", /if \(onSelectedLeaf\) \{/.test(t) && /window\.addEventListener\("mouseup", onUp, true\)/.test(t) && /if \(!moved && e\.detail >= 2 && editLevel\.kind === "edit"\)/.test(t));
+  ok("press-drag on the selected leaf defers to mouseup (move wins over dbl-click edit)", /if \(onSelectedLeaf\) \{/.test(DRILL) && /window\.addEventListener\("mouseup", onUp, true\)/.test(DRILL) && /if \(!moved && e\.detail >= 2 && editLevel\.kind === "edit"\)/.test(DRILL));
 })();
 
 // ---- leaf-first pure core: which level a plain click selects ----------------
@@ -7225,6 +7227,7 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var DRILL = src("src/editor/drill.js");   // arch-P3b-07m
   var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
@@ -7323,7 +7326,7 @@ section("richer bullet lists");
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
   ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(e) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, inspector\)/.test(e));
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(e));
-  ok("clicking the nav-bar background selects it (not its buttons/toggle)", /var navBar = e\.target\.closest\("\.course-nav\.canvas-block"\)[\s\S]*?!e\.target\.closest\("\[data-edit\], \.course-nav__btn, \.mode-toggle, button, a"\)[\s\S]*?setSelection\("block", navBar\)/.test(e));
+  ok("clicking the nav-bar background selects it (not its buttons/toggle)", /var navBar = e\.target\.closest\("\.course-nav\.canvas-block"\)[\s\S]*?!e\.target\.closest\("\[data-edit\], \.course-nav__btn, \.mode-toggle, button, a"\)[\s\S]*?setSelection\("block", navBar\)/.test(DRILL));
   // PERF: incremental single-page render — James 2026-07-08
   ok("reapplyPage rebuilds ONE frame's content (renderPage + fold), not the world", /function reapplyPage\(i\)[\s\S]*?frameDescs\[i\][\s\S]*?window\.renderPage\(page[\s\S]*?enableEditing\(frame\)/.test(e));
   ok("reapplyPage falls back to full rebuild for variants\/language\/missing frame", /function reapplyPage\(i\) \{[\s\S]*?if \(!fd \|\| isPreview\(\)\) \{ reapplyWorld\(\); return; \}/.test(e));
