@@ -28,10 +28,10 @@
   function install(kernel) {
     var E = kernel.need(
       "h", "canvas", "view", "pushHistory", "scheduleSave", "panning",
-      "demoStageEl", "demoIsOpen", "renderInspector", "commentIsOrphaned", "isTextTarget", "mount",
-      "blockIdByCid", "makeComment", "demoDeviceEl", "setInteractMode", "clearSelection", "clearAllMulti",
-      "refreshCanvasSelection", "panelSection", "commentIsGuest", "iconBtn", "reapplyStructural", "rebindTourBuilderToLiveDoc",
-      "commentFromEnv", "applyView", "cycleGrid", "updateGridBtn", "toggleStyleAudit", "updateStyleAuditBtn",
+      "demoStageEl", "demoIsOpen", "renderInspector", "walkBlocks", "isTextTarget", "mount",
+      "demoDeviceEl", "setInteractMode", "clearSelection", "clearAllMulti",
+      "refreshCanvasSelection", "panelSection", "iconBtn", "reapplyStructural", "rebindTourBuilderToLiveDoc",
+      "applyView", "cycleGrid", "updateGridBtn", "toggleStyleAudit", "updateStyleAuditBtn",
       "startMarquee", "updateMarquee", "panDrag", "endMarquee", "fitCycle", "addPageAfterCurrent",
       "promptModal", "createChapter", "collapseTreeToChapters", "inspector", "last", "world",
       "spaceHeld", "marquee", "interactMode", "panelFields", "activeDocId", "doc",
@@ -49,22 +49,18 @@
         demoStageEl = E.demoStageEl,
         demoIsOpen = E.demoIsOpen,
         renderInspector = E.renderInspector,
-        commentIsOrphaned = E.commentIsOrphaned,
+        walkBlocks = E.walkBlocks,
         isTextTarget = E.isTextTarget,
         mount = E.mount,
-        blockIdByCid = E.blockIdByCid,
-        makeComment = E.makeComment,
         demoDeviceEl = E.demoDeviceEl,
         setInteractMode = E.setInteractMode,
         clearSelection = E.clearSelection,
         clearAllMulti = E.clearAllMulti,
         refreshCanvasSelection = E.refreshCanvasSelection,
         panelSection = E.panelSection,
-        commentIsGuest = E.commentIsGuest,
         iconBtn = E.iconBtn,
         reapplyStructural = E.reapplyStructural,
         rebindTourBuilderToLiveDoc = E.rebindTourBuilderToLiveDoc,
-        commentFromEnv = E.commentFromEnv,
         applyView = E.applyView,
         cycleGrid = E.cycleGrid,
         updateGridBtn = E.updateGridBtn,
@@ -79,6 +75,95 @@
         promptModal = E.promptModal,
         createChapter = E.createChapter,
         collapseTreeToChapters = E.collapseTreeToChapters;
+
+    // arch-P3b-07z: the comment MODEL, moved in from editor.js. It sat under a banner called
+    // "interaction element identity" -- the cid minting is genuinely that -- but the model built
+    // on top of it has never had a consumer outside this file and source-stage.js.
+    // §12 slice 1: a comment object. `anchor` is one of the 3 tiers (block/page/
+    // general — see makeAnchorFromPoint). `author`/`colour`/`replies` are in the
+    // schema now so multi-user colours + threading (slice 5) are ADDITIVE — no
+    // migration. Build 1 is flat + `done`.
+    function makeComment(anchor, body) {
+      var id = (typeof commentIdentity === "function") ? commentIdentity() : { name: null, colour: null };
+      return { id: "cm_" + Math.random().toString(36).slice(2, 8), anchor: anchor, body: body || "",
+        done: false, author: id.name || null, colour: id.colour || null, createdAt: Date.now(), replies: [] };
+    }
+    window.__makeComment = makeComment;
+    // §12 / #196: pin taxonomy. A comment is one of two KINDS:
+    // - "task"    (default): a human-authored instruction — appears in the right-panel queue,
+    // open|done via `.done`.
+    // - "receipt": a nested CHANGE record under its task via `.parentId`, carrying the before/after
+    // text (`.original`/`.changed`) so the author can review + revert. Never appears in
+    // the queue; it belongs to its task.
+    // Additive to the makeComment schema (exactly like author/colour/replies before it) — NO migration:
+    // a legacy comment with no `.kind` reads as a task (see commentIsTask). This is the model + the
+    // pure classifiers the list/pin UIs consume.
+    // Pure classifiers — no Date/Math/identity deps, so they are asserted headlessly. A comment with
+    // no `.kind` is a task (back-compat). Receipts are excluded from the queue and grouped by parent.
+    function commentIsReceipt(c) { return !!(c && c.kind === "receipt"); }
+    function commentIsTask(c) { return !!c && !commentIsReceipt(c); }
+    function taskComments(doc) { return ((doc && doc.comments) || []).filter(commentIsTask); }
+    function receiptsFor(doc, taskId) { return ((doc && doc.comments) || []).filter(function (c) { return commentIsReceipt(c) && c.parentId === taskId; }); }
+    function openTasks(doc) { return taskComments(doc).filter(function (c) { return !c.done; }); }
+    function doneTasks(doc) { return taskComments(doc).filter(function (c) { return !!c.done; }); }
+    // ticket 26 (review-links round-trip): guest-vs-internal + orphaned-anchor classifiers. Both are
+    // pure + additive over the SHIPPED comment object (no new store, no migration) -- a guest comment
+    // is an ordinary doc.comments entry with source:"guest-link"; an orphaned one is a block-anchored
+    // note whose target block (by stable cid) the author has since deleted. Surfaced, never dropped.
+    /* @comment-guest-start */
+    function commentIsGuest(c) { return !!(c && (c.source === "guest-link" || c.guest === true)); }
+    function docCids(doc, acc) {
+      acc = acc || {};
+      walkBlocks(doc, function (b) { if (typeof b.cid === "string") acc[b.cid] = true; });
+      return acc;
+    }
+    function commentIsOrphaned(c, doc) {
+      var a = c && c.anchor;
+      if (!a || !a.blockId) return false; // only block-anchored notes orphan (page/world resolve differently)
+      return !docCids(doc)[a.blockId];
+    }
+    // ticket 26 id-space bridge: the server anchors review comments by the STABLE block id (block.id),
+    // but the client comment mode pins by CID (data-cid). Map a server block.id -> its client cid so a
+    // guest comment resolves onto the live block. Returns the cid, or null (-> surfaces as orphaned,
+    // never mis-anchored). Pure; walks nested containers like docCids.
+    function blockCidById(doc, id) {
+      if (id == null) return null;
+      var found = null;
+      walkBlocks(doc, function (b) { if (found == null && b.id === id && typeof b.cid === "string") found = b.cid; });
+      return found;
+    }
+    // inverse of blockCidById: a client cid -> the server STABLE block id, so an author's reply/resolve
+    // can be fanned back to the server (which anchors by block.id). Null if unmapped. Pure.
+    function blockIdByCid(doc, cid) {
+      if (cid == null) return null;
+      var found = null;
+      walkBlocks(doc, function (b) { if (found == null && b.cid === cid && b.id != null) found = b.id; });
+      return found;
+    }
+    // ticket 26: map a server->client `comment.added` ENVELOPE (blockId + author live on the envelope;
+    // {id, threadId, body, kind} in payload -- see server/sync.js) into a client comment shaped like
+    // makeComment, anchored by cid so the shipped pins/panel render it. Guest notes carry source. Pure
+    // (colourFn injected). -> a client comment, or null if the envelope has no comment id.
+    function commentFromEnv(env, doc, colourFn) {
+      if (!env) return null;
+      var p = env.payload || {};
+      if (!p.id) return null;
+      var cid = blockCidById(doc, env.blockId);
+      return {
+        id: p.id,
+        anchor: { blockId: cid || env.blockId }, // cid resolves the pin; a raw id falls through to orphaned
+        body: p.body || "",
+        author: env.author || null,
+        colour: env.author ? colourFn(env.author) : null,
+        done: false,
+        source: (p.kind === "guest") ? "guest-link" : null,
+        threadId: p.threadId || p.id,
+        createdAt: env.ts || 0,
+        replies: []
+      };
+    }
+    /* @comment-guest-end */
+    window.__commentModel = { isReceipt: commentIsReceipt, isTask: commentIsTask, tasks: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks, isGuest: commentIsGuest, isOrphaned: commentIsOrphaned };
 
     // ==========================================================================
     // §12 slice 2 — Comment mode: drop review pins on the canvas, 3-tier anchored
@@ -1074,6 +1159,12 @@
     });
     kernel.expose({
       setCommentMode: setCommentMode, commentModeOn: commentModeOn, renderCommentList: renderCommentList,
+      // arch-P3b-07z: the comment MODEL, which lives here now. editor.js and source-stage.js
+      // reach it through the kernel exactly as they did when it was a local declaration.
+      makeComment: makeComment, commentIsReceipt: commentIsReceipt, commentIsTask: commentIsTask,
+      taskComments: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks,
+      commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, commentFromEnv: commentFromEnv,
+      docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid,
       refreshCommentPanel: refreshCommentPanel, commentIdentity: commentIdentity, colourForName: colourForName,
       makeReply: makeReply, mergeComments: mergeComments, makeAnchorFromPoint: makeAnchorFromPoint,
       rectUnculled: rectUnculled, activeSurf: activeSurf, renderCommentPins: renderCommentPins,

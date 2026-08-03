@@ -384,6 +384,8 @@
   <script src="src/editor/diagnostics.js"></script>
   <!-- arch-P3b-07m drill: window.VersoDrill — select-first progressive drill-in (each click on the same spot steps one level deeper, Escape steps back out) and the zoom-to-fit that needs the same depth-aware rectangles. Must precede editor.js. -->
   <script src="src/editor/drill.js"></script>
+  <!-- arch-P3b-07s interact: window.VersoInteract — Interact mode: the mode flag and its tabs, click-to-pick, drag-to-link, the connection handle, and the on-click and locked-until inspector sections. Must precede editor.js. -->
+  <script src="src/editor/interact.js"></script>
   <!-- arch-P3b-07n editing: window.VersoEditing — what makes the canvas typeable: contentEditable on copy fields (selected first, editable second), drop targets, column resizers, the embed shield, and the collaboration edit lifecycle. Nothing it adds may leak into render(). Must precede editor.js. -->
   <script src="src/editor/editing.js"></script>
   <!-- arch-P3b-07 actions: window.VersoActions — what a learner's click does: go to a page (by id, never an index, so reordering cannot silently redirect it) or exit the course, plus the "On click" list. Must precede editor.js. -->

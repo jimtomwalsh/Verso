@@ -2975,39 +2975,23 @@
   // export byte-unaffected; the editor stamps `data-cid` on mount for hit-testing.
   function mintCid() { return "c_" + Math.random().toString(36).slice(2, 8); }
   window.__mintCid = mintCid;
-  // §12 slice 1: a comment object. `anchor` is one of the 3 tiers (block/page/
-  // general — see makeAnchorFromPoint). `author`/`colour`/`replies` are in the
-  // schema now so multi-user colours + threading (slice 5) are ADDITIVE — no
-  // migration. Build 1 is flat + `done`.
-  function makeComment(anchor, body) {
-    var id = (typeof commentIdentity === "function") ? commentIdentity() : { name: null, colour: null };
-    return { id: "cm_" + Math.random().toString(36).slice(2, 8), anchor: anchor, body: body || "",
-      done: false, author: id.name || null, colour: id.colour || null, createdAt: Date.now(), replies: [] };
-  }
-  window.__makeComment = makeComment;
-  // §12 / #196: pin taxonomy. A comment is one of two KINDS:
-  // - "task"    (default): a human-authored instruction — appears in the right-panel queue,
-  // open|done via `.done`.
-  // - "receipt": a nested CHANGE record under its task via `.parentId`, carrying the before/after
-  // text (`.original`/`.changed`) so the author can review + revert. Never appears in
-  // the queue; it belongs to its task.
-  // Additive to the makeComment schema (exactly like author/colour/replies before it) — NO migration:
-  // a legacy comment with no `.kind` reads as a task (see commentIsTask). This is the model + the
-  // pure classifiers the list/pin UIs consume.
-  // Pure classifiers — no Date/Math/identity deps, so they are asserted headlessly. A comment with
-  // no `.kind` is a task (back-compat). Receipts are excluded from the queue and grouped by parent.
-  function commentIsReceipt(c) { return !!(c && c.kind === "receipt"); }
-  function commentIsTask(c) { return !!c && !commentIsReceipt(c); }
-  function taskComments(doc) { return ((doc && doc.comments) || []).filter(commentIsTask); }
-  function receiptsFor(doc, taskId) { return ((doc && doc.comments) || []).filter(function (c) { return commentIsReceipt(c) && c.parentId === taskId; }); }
-  function openTasks(doc) { return taskComments(doc).filter(function (c) { return !c.done; }); }
-  function doneTasks(doc) { return taskComments(doc).filter(function (c) { return !!c.done; }); }
-  // ticket 26 (review-links round-trip): guest-vs-internal + orphaned-anchor classifiers. Both are
-  // pure + additive over the SHIPPED comment object (no new store, no migration) -- a guest comment
-  // is an ordinary doc.comments entry with source:"guest-link"; an orphaned one is a block-anchored
-  // note whose target block (by stable cid) the author has since deleted. Surfaced, never dropped.
-  /* @comment-guest-start */
-  function commentIsGuest(c) { return !!(c && (c.source === "guest-link" || c.guest === true)); }
+  // arch-P3b-07z: the comment MODEL -- makeComment, the task/receipt and guest/orphan
+  // classifiers, the cid scans and the server-envelope bridge -- moved to editor/comments.js,
+  // which is the only thing that consumes it. The @comment-guest fence went with it. What is
+  // left here is the doc walker those scans borrow, which is substrate, not comment code.
+  var makeComment = VE.bind("makeComment");
+  var commentIsReceipt = VE.bind("commentIsReceipt");
+  var commentIsTask = VE.bind("commentIsTask");
+  var taskComments = VE.bind("taskComments");
+  var receiptsFor = VE.bind("receiptsFor");
+  var openTasks = VE.bind("openTasks");
+  var doneTasks = VE.bind("doneTasks");
+  var commentIsGuest = VE.bind("commentIsGuest");
+  var commentIsOrphaned = VE.bind("commentIsOrphaned");
+  var commentFromEnv = VE.bind("commentFromEnv");
+  var docCids = VE.bind("docCids");
+  var blockCidById = VE.bind("blockCidById");
+  var blockIdByCid = VE.bind("blockIdByCid");
   // walk every block in the doc (incl. nested containers), calling visit(block). The ONE place that
   // knows the container-child keys, shared by the cid scans below (kills the duplicated walkers).
   function walkBlocks(doc, visit) {
@@ -3018,58 +3002,6 @@
     }
     ((doc && doc.pages) || []).forEach(function (p) { (p.blocks || []).forEach(walk); });
   }
-  function docCids(doc, acc) {
-    acc = acc || {};
-    walkBlocks(doc, function (b) { if (typeof b.cid === "string") acc[b.cid] = true; });
-    return acc;
-  }
-  function commentIsOrphaned(c, doc) {
-    var a = c && c.anchor;
-    if (!a || !a.blockId) return false; // only block-anchored notes orphan (page/world resolve differently)
-    return !docCids(doc)[a.blockId];
-  }
-  // ticket 26 id-space bridge: the server anchors review comments by the STABLE block id (block.id),
-  // but the client comment mode pins by CID (data-cid). Map a server block.id -> its client cid so a
-  // guest comment resolves onto the live block. Returns the cid, or null (-> surfaces as orphaned,
-  // never mis-anchored). Pure; walks nested containers like docCids.
-  function blockCidById(doc, id) {
-    if (id == null) return null;
-    var found = null;
-    walkBlocks(doc, function (b) { if (found == null && b.id === id && typeof b.cid === "string") found = b.cid; });
-    return found;
-  }
-  // inverse of blockCidById: a client cid -> the server STABLE block id, so an author's reply/resolve
-  // can be fanned back to the server (which anchors by block.id). Null if unmapped. Pure.
-  function blockIdByCid(doc, cid) {
-    if (cid == null) return null;
-    var found = null;
-    walkBlocks(doc, function (b) { if (found == null && b.cid === cid && b.id != null) found = b.id; });
-    return found;
-  }
-  // ticket 26: map a server->client `comment.added` ENVELOPE (blockId + author live on the envelope;
-  // {id, threadId, body, kind} in payload -- see server/sync.js) into a client comment shaped like
-  // makeComment, anchored by cid so the shipped pins/panel render it. Guest notes carry source. Pure
-  // (colourFn injected). -> a client comment, or null if the envelope has no comment id.
-  function commentFromEnv(env, doc, colourFn) {
-    if (!env) return null;
-    var p = env.payload || {};
-    if (!p.id) return null;
-    var cid = blockCidById(doc, env.blockId);
-    return {
-      id: p.id,
-      anchor: { blockId: cid || env.blockId }, // cid resolves the pin; a raw id falls through to orphaned
-      body: p.body || "",
-      author: env.author || null,
-      colour: env.author ? colourFn(env.author) : null,
-      done: false,
-      source: (p.kind === "guest") ? "guest-link" : null,
-      threadId: p.threadId || p.id,
-      createdAt: env.ts || 0,
-      replies: []
-    };
-  }
-  /* @comment-guest-end */
-  window.__commentModel = { isReceipt: commentIsReceipt, isTask: commentIsTask, tasks: taskComments, receiptsFor: receiptsFor, openTasks: openTasks, doneTasks: doneTasks, isGuest: commentIsGuest, isOrphaned: commentIsOrphaned };
   // #24: where-used for a shared library master -- courses = how many courses in the
   // registry reference it at all, instances = total libraryInstance placements across
   // all of them. Reuses walkBlocks (not a 4th near-duplicate walker) since every
@@ -3139,44 +3071,34 @@
   }
   window.__remintIds = remintIds;
 
-  // ---- Interact mode ------------------------------
-  // A right-panel tab toggles the editor between Design (property inspectors, no
-  // connectors) and Interact (interaction editor + authored connectors + canvas
-  // tint). One flag drives connector visibility (drawConnectors), the inspector
-  // dispatch (renderInspector), and the canvas indicator.
-  var interactMode = false;
-  var INTERACT_MODE_KEY = "authoring.interactMode"; // HH: persist Design/Interact tab across refresh
-  // Interact connectors are CONTEXTUAL to the selection by default: only links
-  // touching the selected component(s) draw, so a dense layout isn't spaghetti.
-  // "Show all connections" flips to the full overview. Editor-chrome only.
-  var showAllConnectors = false;
-  var SHOW_ALL_CONNECTORS_KEY = "authoring.showAllConnectors";
-  try { showAllConnectors = localStorage.getItem(SHOW_ALL_CONNECTORS_KEY) === "1"; } catch (e) {}
-  function syncRightTabs() {
-    var tabs = document.querySelectorAll("#right-ptabs .ptab");
-    Array.prototype.forEach.call(tabs, function (t) {
-      t.classList.toggle("is-active", t.getAttribute("data-ptab") === (interactMode ? "interact" : "design"));
-    });
-  }
-  function setInteractMode(on) {
-    on = !!on;
-    if (interactMode === on) return;
-    interactMode = on;
-    try { localStorage.setItem(INTERACT_MODE_KEY, on ? "1" : "0"); } catch (e) {} // HH
-    endPick();                                   // never leave a pick session dangling across modes
-    canvas.classList.toggle("is-interact", interactMode);
-    syncRightTabs();
-    mount();                                     // rebuild world (connectors + tint) + repaint panel
-  }
-  function wireRightTabs() {
-    var tabs = document.querySelectorAll("#right-ptabs .ptab");
-    Array.prototype.forEach.call(tabs, function (t) {
-      t.addEventListener("click", function () { setInteractMode(t.getAttribute("data-ptab") === "interact"); });
-    });
-    // #92c: Settings now lives on the left rail (rail-settings-btn, wired in mountLeftRail);
-    // the right-panel cog was removed to end the duplication.
-    syncRightTabs();
-  }
+  // arch-P3b-07s: Interact mode moved to editor/interact.js -- the mode flag and its tabs,
+  // click-to-pick, drag-to-link, the connection handle and the two inspector sections (on-click
+  // and the locked-until gate). The module OWNS the mode, the show-all-connections preference and
+  // the pending pick, and editor.js asks for them through accessors. `drawConnectors` stayed: it
+  // paints the links, but it is canvas geometry and belongs with the view.
+  var syncRightTabs = VE.bind("syncRightTabs");
+  var setInteractMode = VE.bind("setInteractMode");
+  var wireRightTabs = VE.bind("wireRightTabs");
+  var pageBlockCandidates = VE.bind("pageBlockCandidates");
+  var conditionSources = VE.bind("conditionSources");
+  var startPick = VE.bind("startPick");
+  var endPick = VE.bind("endPick");
+  var startLink = VE.bind("startLink");
+  var frameElementUnder = VE.bind("frameElementUnder");
+  var interactReselect = VE.bind("interactReselect");
+  var addGotoInteraction = VE.bind("addGotoInteraction");
+  var decorateInteractHandle = VE.bind("decorateInteractHandle");
+  var interactBlock = VE.bind("interactBlock");
+  var renderInteractInspector = VE.bind("renderInteractInspector");
+  var restoreInteractMode = VE.bind("restoreInteractMode");
+  var interactModeOn = VE.bind("interactModeOn");
+  var showAllConnectorsOn = VE.bind("showAllConnectorsOn");
+  var isPicking = VE.bind("isPicking");
+  var renderGateSection = VE.bind("renderGateSection");
+  var blockById = VE.bind("blockById");
+  // Constants, read back from their owner right after it installs (see the bottom of this file).
+  var ACTION_TYPES, NAV_ACTIONS;
+
 
   // walk a page's block tree (children + columns) so nested interactive blocks
   // are reached — mirrors render.js walkBlocks (which is module-private there).
@@ -3200,48 +3122,10 @@
     }
     return -1;
   }
-  // all blocks on a page (nested included), optionally excluding one — the
-  // candidate list for element-target + gate-source pickers.
-  function pageBlockCandidates(pi, exclude) {
-    var out = [];
-    if (pi < 0 || !doc.pages[pi]) return out;
-    walkPageBlocks(doc.pages[pi].blocks, function (b) { if (b !== exclude) out.push(b); });
-    return out;
-  }
-  // gate condition sources (flattens allOf) -> list of source ids.
-  function conditionSources(cond) {
-    var ids = [];
-    (function walk(c) {
-      if (!c) return;
-      if (c.allOf) { c.allOf.forEach(walk); return; }
-      if (c.anyOf) { c.anyOf.forEach(walk); return; }
-      if (c.source) ids.push(c.source);
-    })(cond);
-    return ids;
-  }
+  // ...continues in interact.js (arch-P3b-07).
 
-  // ---- click-to-pick (element targets + gate sources, SPEC §6) --------------
-  // The panel enters a "pick target" state; the next canvas block click resolves
-  // the target/source. A capture-phase canvas handler intercepts so it never
-  // triggers normal selection/editing.
-  var picking = null; // { onPick, label }
-  function startPick(label, onPick) {
-    picking = { onPick: onPick, label: label };
-    document.body.classList.add("is-picking");
-  }
-  function endPick() {
-    if (!picking) return;
-    picking = null;
-    document.body.classList.remove("is-picking");
-  }
-  // Capture-phase so a pick click is consumed before normal selection/editing.
-  canvas.addEventListener("mousedown", function (e) {
-    if (!picking) return;
-    var n = e.target.closest ? e.target.closest(".canvas-block") : null;
-    e.preventDefault(); e.stopPropagation();
-    var cb = picking.onPick; endPick();
-    if (n && n.__block) cb(n.__block);
-  }, true);
+
+  // ...continues in interact.js (arch-P3b-07).
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function colX(col) { return col * (FRAME_W + GAP_X); }
@@ -3440,7 +3324,7 @@
     renderStructure();
     renderModelView();
     renderCommentPins();
-    if (interactMode) decorateInteractHandle();
+    if (interactModeOn()) decorateInteractHandle();
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
     decorateSourceLinks(); // source-link 03: link indicator on placed source-linked blocks
@@ -4036,7 +3920,7 @@
   };
   function renderInspector() {
     var rule = window.VersoInspector.pick({
-      kitMode: !!window.__KIT_MODE, commentMode: commentModeOn(), interactMode: interactMode,
+      kitMode: !!window.__KIT_MODE, commentMode: commentModeOn(), interactMode: interactModeOn(),
       multiSelCount: multiSel.length, selectionType: selection.type
     });
     if (!rule.render) return; // kit.html owns #inspector as a static gallery
@@ -6947,75 +6831,8 @@
   var setGoto = VE.bind("setGoto");
 
 
-  // ---- drag-to-link: press the inspector's drag control, drag onto a frame ---
-  // A screen-space preview arrow tracks the cursor; the frame under the cursor
-  // highlights; releasing over it sets action.goto to that page.
-  var linking = null;      // { host, reselect, from:{x,y} }
-  var linkOverlay = null, linkPath = null, hlFrame = null;
-  function ensureLinkOverlay() {
-    if (linkOverlay) return;
-    linkOverlay = document.createElementNS(SVGNS, "svg");
-    linkOverlay.setAttribute("class", "link-overlay");
-    var defs = document.createElementNS(SVGNS, "defs");
-    var m = document.createElementNS(SVGNS, "marker");
-    m.setAttribute("id", "link-arrow"); m.setAttribute("viewBox", "0 0 10 10");
-    m.setAttribute("refX", "8"); m.setAttribute("refY", "5");
-    m.setAttribute("markerWidth", "7"); m.setAttribute("markerHeight", "7");
-    m.setAttribute("orient", "auto-start-reverse");
-    var ar = document.createElementNS(SVGNS, "path");
-    ar.setAttribute("d", "M0 0L10 5L0 10z"); ar.setAttribute("fill", "#0d99ff");
-    m.appendChild(ar); defs.appendChild(m);
-    linkPath = document.createElementNS(SVGNS, "path");
-    linkPath.setAttribute("class", "link-overlay__path");
-    linkPath.setAttribute("marker-end", "url(#link-arrow)");
-    linkOverlay.appendChild(defs); linkOverlay.appendChild(linkPath);
-    document.body.appendChild(linkOverlay);
-  }
-  function frameElementUnder(cx, cy) { var e = document.elementFromPoint(cx, cy); return e ? e.closest(".frame") : null; }
-  function frameIndexOf(frameEl) { for (var i = 0; i < frameDescs.length; i++) if (frameDescs[i].frame === frameEl) return i; return -1; }
-  function clearFrameHighlight() { if (hlFrame) { hlFrame.classList.remove("is-link-target"); hlFrame = null; } }
-  function startLink(host, sourceNode, reselect) {
-    ensureLinkOverlay();
-    var r = sourceNode.getBoundingClientRect();
-    linking = { host: host, reselect: reselect, from: { x: r.right, y: r.top + r.height / 2 } };
-    linkOverlay.style.display = "block";
-    document.body.classList.add("is-linking");
-  }
-  // Interact-mode variant of the drag-to-link gesture: drop onto a frame appends
-  // a {click -> goto:targetPage} interaction to the block (mints an id) instead of
-  // writing the legacy host.action.goto.
-  function startInteractLink(block, sourceNode) {
-    ensureLinkOverlay();
-    var r = sourceNode.getBoundingClientRect();
-    linking = { interact: true, block: block, from: { x: r.right, y: r.top + r.height / 2 } };
-    linkOverlay.style.display = "block";
-    document.body.classList.add("is-linking");
-  }
-  window.addEventListener("mousemove", function (e) {
-    if (!linking) return;
-    var f = linking.from, x2 = e.clientX, y2 = e.clientY, cx = (x2 - f.x) / 2;
-    linkPath.setAttribute("d", "M" + f.x + " " + f.y + " C" + (f.x + cx) + " " + f.y + " " + (x2 - cx) + " " + y2 + " " + x2 + " " + y2);
-    var fr = frameElementUnder(x2, y2);
-    if (fr !== hlFrame) { clearFrameHighlight(); if (fr) { fr.classList.add("is-link-target"); hlFrame = fr; } }
-  });
-  window.addEventListener("mouseup", function (e) {
-    if (!linking) return;
-    var lk = linking; linking = null;
-    var fr = frameElementUnder(e.clientX, e.clientY);
-    clearFrameHighlight();
-    linkOverlay.style.display = "none";
-    document.body.classList.remove("is-linking");
-    if (fr) {
-      var idx = frameIndexOf(fr);
-      if (idx >= 0) {
-        if (lk.interact) {
-          pushHistory();
-          addGotoInteraction(lk.block, doc.pages[idx].id);
-          mount(); interactReselect(lk.block);
-        } else { setGoto(lk.host, doc.pages[idx].id); mount(); lk.reselect(); }
-      }
-    }
-  });
+  // ...continues in interact.js (arch-P3b-07).
+
 
   // ---- editing wiring (across all frames) ----------------------------------
   // arch-P3b-07n: what turns render()'s output into something typeable -- contentEditable, the
@@ -7137,171 +6954,10 @@
   // connectors re-derive) then reselects the same element.
   // ==========================================================================
 
-  // reselect a block after a mount(), using its natural selection type.
-  function interactReselect(block) { reselectBlockNode(block, getSelectionTypeForBlock(block)); }
+  // ...continues in interact.js (arch-P3b-07).
 
-  // add a {click -> goto:pageId} interaction (mints an id). Used by the drag-to-
-  // link gesture and the connection handle.
-  function addGotoInteraction(block, pageId) {
-    ensureId(block);
-    block.interactions = block.interactions || [];
-    block.interactions.push({ trigger: { type: "click" }, action: { type: "goto", target: pageId } });
-  }
+  // ...continues in interact.js (arch-P3b-07).
 
-  // connection handle: in Interact mode the selected element sprouts a small
-  // handle you drag onto a target page to author a goto (SPEC §6 drag-to-link).
-  function decorateInteractHandle() {
-    Array.prototype.forEach.call(canvas.querySelectorAll(".interact-handle"), function (n) { n.parentNode.removeChild(n); });
-    var block = interactBlock(); if (!block) return;
-    var node = canvasNodeForBlock(block); if (!node) return;
-    if (!node.style.position) node.style.position = "relative";
-    var handle = h("div", "interact-handle");
-    handle.title = "Drag onto a page to link (go to)";
-    handle.setAttribute("contenteditable", "false");
-    handle.addEventListener("mousedown", function (e) { e.preventDefault(); e.stopPropagation(); startInteractLink(block, node); });
-    node.appendChild(handle);
-  }
-
-  var ACTION_TYPES = [
-    ["Go to page", "goto"], ["Next page", "next"], ["Previous page", "prev"],
-    ["Show element", "show"], ["Hide element", "hide"],
-    ["Enable element", "enable"], ["Toggle element", "toggle"],
-    ["Exit course", "exit"]
-  ];
-  // TARGETLESS actions: they carry no page/element target, so switching to one
-  // clears any stale target and the inspector shows no target picker. (goto has a
-  // page target; show/hide/enable/toggle have an element target; next/prev/exit none.)
-  var NAV_ACTIONS = { next: 1, prev: 1, exit: 1 };
-
-  // resolve the selected element for the interaction editor. Works for any
-  // selection that carries a block (field / block / navButton / embed).
-  function interactBlock() {
-    if (selection && selection.block) return selection.block;
-    if (selection && selection.node && selection.node.__block) return selection.node.__block; // navButton etc.
-    return null;
-  }
-
-  function renderInteractInspector() {
-    var block = interactBlock();
-    var head = h("div", "prop-component prop-component--interact");
-    head.appendChild(h("span", null, block ? blockLabel(block) : "Interact"));
-    if (block && block.id) head.appendChild(h("span", "insp-tag", block.id));
-    inspector.appendChild(head);
-
-    // Connectors are contextual to the selection by default; this flips to the
-    // full overview. Always shown (even with nothing selected) so you can survey
-    // every link when wanted, then clear it to zero back in on one component.
-    switchRow("Show all connections", function () { return showAllConnectors; }, function (v) {
-      showAllConnectors = v;
-      try { localStorage.setItem(SHOW_ALL_CONNECTORS_KEY, v ? "1" : "0"); } catch (e) {}
-      drawConnectors();
-    });
-
-    if (!block) {
-      inspector.appendChild(h("div", "insp-hint", "Interact mode. Select an element on the canvas to see its links (blue arrows = navigation, grey dashed + lock = gates). Turn on “Show all connections” for the full overview."));
-      return;
-    }
-    if (picking) inspector.appendChild(h("div", "insp-hint insp-hint--picking", "Click an element on the canvas to set the " + (picking.label || "target") + "  ·  Esc to cancel"));
-
-    renderOnClickSection(block);
-    renderGateSection(block);
-  }
-
-  // ...continues in actions.js (arch-P3b-07).
-
-
-  // ---- "Locked until ->" reactive gate -------------------------------------
-  var IS_OPTIONS = [["visited", "visited"], ["watched", "watched"], ["checked", "checked"]];
-  function renderGateSection(block) {
-    var _gateRoot = inspector;
-    var on = !!block.gate;
-    // uio-O-W2 (OVL-07): the gate's own on/off is the SECTION's switch, not a "Gate" row one
-    // line under a heading that said the same thing. Off, the section states so and stops --
-    // there is no configuration to keep, because turning it off deletes the gate.
-    _gateRoot.appendChild(sectionGroup(null, "Locked until", function (gateBody) {
-    var _gins = inspector; inspector = gateBody;
-    try {
-    if (!on) {
-      inspector.appendChild(h("div", "insp-hint", "Off. Turn on to keep this element locked (greyed or hidden) until a condition is met."));
-      return;
-    }
-    var g = block.gate;
-
-    segmentedLive("When locked", [["disable", "disable"], ["hide", "hide"]], function (v) { return (g.mode || "disable") === v; }, function (v) {
-      g.mode = v; mount(); interactReselect(block);
-    });
-
-    // conditions (allOf). A single condition is stored bare; two+ become allOf.
-    var conds = gateConditionList(g);
-    conds.forEach(function (c, ci) {
-      var rowHead = h("div", "insp-int-row");
-      rowHead.appendChild(h("span", "insp-int-row__idx", conds.length > 1 ? ("Condition " + (ci + 1)) : "Condition"));
-      if (conds.length > 1) {
-        var del = iconBtn("trash", "Remove this condition", true);
-        del.addEventListener("click", function () { pushHistory(); removeGateCondition(g, ci); mount(); interactReselect(block); });
-        rowHead.appendChild(del);
-      }
-      inspector.appendChild(rowHead);
-      buildTargetPicker(block, c, "Source element", "source");
-      selectRow("Is", IS_OPTIONS, c.is || "visited", function (v) { c.is = v; mount(); interactReselect(block); });
-    });
-    var addCond = h("button", "prop-btn", "+ Add condition (all of)");
-    addCond.addEventListener("click", function () { pushHistory(); addGateCondition(g); mount(); interactReselect(block); });
-    inspector.appendChild(addCond);
-
-    inspector = panelSection(gateBody, "Hint + completion");
-    // hint writes live (no rebuild) so the field keeps focus while typing.
-    var hintRow = h("div", "insp-row"); hintRow.appendChild(h("span", "insp-row__label", "Hint"));
-    var hintIn = h("input", "prop-text"); hintIn.type = "text"; hintIn.spellcheck = false;
-    hintIn.placeholder = "e.g. Watch the video to continue";
-    hintIn.value = g.hint || "";
-    hintIn.addEventListener("input", function () { if (hintIn.value) g.hint = hintIn.value; else delete g.hint; renderModelView(); });
-    hintRow.appendChild(hintIn); inspector.appendChild(hintRow);
-
-    switchRow("Required to complete", function () { return !!g.required; }, function (v) {
-      if (v) g.required = true; else delete g.required;
-      mount(); interactReselect(block);
-    });
-    inspector.appendChild(h("div", "insp-hint", "Required gates must be satisfied (plus every page visited) before the course reports complete."));
-    } finally { inspector = _gins; }
-    }, {
-      key: "gate.lockedUntil",
-      toggle: {
-        get: function () { return !!block.gate; },
-        set: function (v) {
-          if (v) { ensureId(block); block.gate = block.gate || { mode: "disable", when: { source: "", is: "visited" } }; }
-          else { delete block.gate; }
-          mount(); interactReselect(block);
-        }
-      },
-      summary: function () { return block.gate ? ((block.gate.mode || "disable") === "hide" ? "hidden until met" : "greyed until met") : ""; }
-    }));
-  }
-
-  // normalise gate.when into an editable array of {source,is} conditions.
-  function gateConditionList(g) {
-    if (!g.when) { g.when = { source: "", is: "visited" }; return [g.when]; }
-    if (g.when.allOf) return g.when.allOf;
-    return [g.when];
-  }
-  function addGateCondition(g) {
-    var list = gateConditionList(g);
-    var next = { source: "", is: "visited" };
-    if (g.when.allOf) g.when.allOf.push(next);
-    else g.when = { allOf: [g.when, next] };
-  }
-  function removeGateCondition(g, ci) {
-    if (!g.when.allOf) { g.when = { source: "", is: "visited" }; return; }
-    g.when.allOf.splice(ci, 1);
-    if (g.when.allOf.length === 1) g.when = g.when.allOf[0];
-  }
-
-  // find a block anywhere in the doc by its id (for target/source labels).
-  function blockById(id) {
-    var found = null;
-    doc.pages.forEach(function (p) { walkPageBlocks(p.blocks, function (b) { if (b.id === id) found = b; }); });
-    return found;
-  }
 
   // Item U: the little map/grid glyph shown beside each page title (16x16,
   // currentColor, matching the GLYPHS family style).
@@ -7627,7 +7283,7 @@
     if (old) old.parentNode.removeChild(old);
 
     // SPEC §5: connectors show ONLY in Interact mode (Design = clean canvas).
-    if (!interactMode) return;
+    if (!interactModeOn()) return;
 
     // CONTEXTUAL connectors (James 2026-07-09): unless "Show all connections" is on,
     // draw only the component links that TOUCH the current selection (single or
@@ -7729,7 +7385,7 @@
         var ti = lk.ti;
         if (ti === si) return; // self-link has no meaningful path
         // contextual: skip links that don't touch the selection (unless Show all)
-        if (!showAllConnectors && !(selection.node === lk.elm || blockInSelection(lk.block))) return;
+        if (!showAllConnectorsOn() && !(selection.node === lk.elm || blockInSelection(lk.block))) return;
         var isForward = ti > si;
         var srcH = frameDescs[si].h || FRAME_H, tgtH = frameDescs[ti].h || FRAME_H;
         var fan = (n > 1) ? (k - (n - 1) / 2) * 24 : 0;
@@ -7759,7 +7415,7 @@
         var sLoc = blockLoc[srcId]; if (!sLoc) return;
         var srcSel = blockInSelection(sLoc.elm.__block);
         // contextual: draw only if the gated or source block is selected (unless Show all)
-        if (!showAllConnectors && !gatedSel && !srcSel) return;
+        if (!showAllConnectorsOn() && !gatedSel && !srcSel) return;
         var isSel = gatedSel || srcSel;
         var sr = elmWorldRect(sLoc);
         // anchor on the LEFT edges; both control points share one bulge X so the
@@ -7957,7 +7613,7 @@
     
     renderTabs();
     refreshCanvasSelection();
-    if (interactMode) decorateInteractHandle();
+    if (interactModeOn()) decorateInteractHandle();
     decorateVariantVersionBadges(); // #148: on-canvas version-cycle badge on image blocks with variant versions
     decorateStyleAudit(); // #145: mark unstyled text blocks when the audit toggle is on
     renderCommentPins(); // §12: re-project review pins (canvas.innerHTML was cleared)
@@ -8607,7 +8263,7 @@
     // and any harness that needs to drive Interact mode programmatically).
     interact: {
       setMode: function (on) { setInteractMode(on); },
-      isOn: function () { return interactMode; },
+      isOn: function () { return interactModeOn(); },
       selectBlock: function (pi, bi) { selectBlock(pi, bi); },
       enterDemo: function () { enterDemo(); },
       exitDemo: function () { exitDemo(); },
@@ -8944,7 +8600,7 @@
     panning: function () { return panning; },
     last: function () { return last; },
     marquee: function () { return marquee; },
-    interactMode: function () { return interactMode; },
+    // arch-P3b-07s: `interactMode` is provided from editor/interact.js, which owns it.
     panelFields: function () { return panelFields; }
   });
   // arch-P3b-07o: `blockToolbarSep` used to be provided from here, because this file built the
@@ -8965,6 +8621,9 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    buildTargetPicker: buildTargetPicker,
+    renderOnClickSection: renderOnClickSection,
+    setGoto: setGoto,
     renumberSplitFamily: renumberSplitFamily,
     stripSplitSuffix: stripSplitSuffix,
     sectionsBufferOpen: sectionsBufferOpen,
@@ -8996,12 +8655,10 @@
     endPick: endPick,
     startPick: startPick,
     pageBlockCandidates: pageBlockCandidates,
-    ACTION_TYPES: ACTION_TYPES,
     propHeader: propHeader,
     renderBlockActionsSection: renderBlockActionsSection,
     attachFontWarn: attachFontWarn,
     startLink: startLink,
-    NAV_ACTIONS: NAV_ACTIONS,
     interactReselect: interactReselect,
     wireItemBodyDrops: wireItemBodyDrops,
     attachImageFileDrop: attachImageFileDrop,
@@ -9378,6 +9035,7 @@
   window.VersoShortcuts.install(VE);   // one place that says what every key does
   window.VersoDiagnostics.install(VE);   // the frame-cadence readout
   window.VersoDrill.install(VE);   // select-first drill-in and zoom-to-fit
+  window.VersoInteract.install(VE);   // Interact mode; before actions.js, which aliases ACTION_TYPES
   window.VersoEditing.install(VE);   // what makes the canvas typeable
   window.VersoActions.install(VE);   // what a learner's click does
   window.VersoInspectorBlocks.install(VE);   // which panel a selected block gets
@@ -9399,6 +9057,9 @@
   BLOCK_LUCIDE = VE.get("BLOCK_LUCIDE");
 
   TEXT_CONTENT_TYPES = VE.get("TEXT_CONTENT_TYPES");
+
+  ACTION_TYPES = VE.get("ACTION_TYPES");
+  NAV_ACTIONS = VE.get("NAV_ACTIONS");
 
   // ---- UI kit gallery seam ----------------------
   // Expose the canonical control primitives + Icon accessor so kit.html can render
@@ -9450,8 +9111,8 @@
   wireRightTabs();
   // HH: restore the right-panel Design/Interact mode before the boot mount so the
   // canvas + panel render in the saved mode (setInteractMode persists it on change).
-  try { if (localStorage.getItem(INTERACT_MODE_KEY) === "1") { interactMode = true; canvas.classList.add("is-interact"); syncRightTabs(); } } catch (e) {}
-  window.addEventListener("keydown", function (e) { if (e.key === "Escape" && picking) { endPick(); renderInspector(); } });
+  restoreInteractMode();   // arch-P3b-07s: the module owns the flag, the key and the tab sync
+  window.addEventListener("keydown", function (e) { if (e.key === "Escape" && isPicking()) { endPick(); renderInspector(); } });
   document.addEventListener("selectionchange", onCanvasSelectionChange); // floating-format-bar: above-selection B/I/U on the Edit canvas
   window.addEventListener("scroll", hideCanvasFmtBar, true); // keep the fixed bar from lagging the selection on scroll
   wireResizers();

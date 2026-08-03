@@ -1225,10 +1225,14 @@ section("platform-pivot 11 presence chrome");
 section("platform-pivot 26 review round-trip");
 (function () {
   var t = src("src/editor/comments.js");   // arch-P3b-07: the review round-trip moved with them
-  // The guest-identity fence stayed in editor.js, beside the rest of the identity plumbing.
-  var m = src("src/editor.js").match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
+  // arch-P3b-07z: the guest-identity fence moved to comments.js with the model. It no longer
+  // encloses `walkBlocks` -- the doc walker is substrate every module borrows and stayed in
+  // editor.js -- so the eval is handed it, the same way the other extracted bodies are.
+  var m = src("src/editor/comments.js").match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
   if (!m) { ok("locate @comment-guest fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
+  var wb = src("src/editor.js");
+  var wbBody = wb.slice(wb.indexOf("function walkBlocks(doc, visit)"), wb.indexOf("\n  }", wb.indexOf("function walkBlocks(doc, visit)")) + 4);
+  var g = new Function(wbBody + m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
 
   ok("commentIsGuest: source guest-link OR guest flag", g.commentIsGuest({ source: "guest-link" }) === true && g.commentIsGuest({ guest: true }) === true && g.commentIsGuest({ author: "Me" }) === false);
   var doc = { pages: [ { blocks: [ { cid: "c1", type: "para" }, { cid: "c2", type: "group", children: [ { cid: "c3" } ] } ] } ] };
@@ -4432,7 +4436,8 @@ section("AAA doc-migration");
   var kc = migrate({ schemaVersion: 2, chapters: [{ id: "c", name: "X", order: 0 }], pages: [], comments: [{ id: "cm_1", body: "hi" }] });
   ok("existing doc.comments preserved (idempotent)", kc.comments.length === 1 && kc.comments[0].id === "cm_1");
   // factory shape (schema carries author/colour/replies for the additive slice 5)
-  var et = src("src/editor.js");
+  // arch-P3b-07z: the comment MODEL lives in editor/comments.js now.
+  var et = src("src/editor/comments.js");
   ok("makeComment mints the full schema", /function makeComment\(anchor, body\)[\s\S]*?id: "cm_"[\s\S]*?done: false[\s\S]*?author: id\.name[\s\S]*?colour: id\.colour[\s\S]*?replies: \[\]/.test(et));
 
   // ---- #196 pin taxonomy (task vs receipt pins) — additive, no migration ----
@@ -4956,7 +4961,7 @@ section("comment mode (canvas)");
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
   // arch-P3b-07: mount, the drill handler and the keyboard shortcut all stayed here; comment mode
   // is asked for rather than read, because editor/comments.js owns it now.
-  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(src("src/editor.js")));
+  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactModeOn\(\)\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(src("src/editor.js")));
   // arch-P3b-02: applyView moved to src/editor/canvas-view.js, so this drives it instead of
   // matching its text. A pin rebuild on every pan/zoom frame is the whole contract -- pins are
   // absolutely positioned in canvas space, so a view change that skipped this would leave them
@@ -5025,7 +5030,7 @@ section("comment transport (slice 5)");
 (function () {
   var t = src("src/editor/comments.js");   // arch-P3b-07
   ok("author identity is stored + colour is deterministic", /function commentIdentity\(\)[\s\S]*?COMMENT_AUTHOR_KEY/.test(t) && /function colourForName/.test(t));
-  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(src("src/editor.js")));
+  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(src("src/editor/comments.js")));
   ok("sidecar export writes a typed payload, never into the course", /type: "verso-comments"[\s\S]*?comments: E\.doc\.comments/.test(t));
   ok("import merges (never replaces) the store", /function importComments[\s\S]*?mergeComments\(list\)/.test(t));
   ok("replies are threaded via makeReply", /function makeReply[\s\S]*?rp_[\s\S]*?c\.replies\.push\(makeReply/.test(t));
@@ -5786,10 +5791,11 @@ section("#24 where-used + impact preview + push-update");
   var etxt = src("src/editor.js");
 
   // 1. PURE: libraryWhereUsed against a fixture multi-course registry. Extracted as TWO
-  // pieces (walkBlocks, then the @where-used fence) so the concatenation skips the
-  // @comment-guest fence's own window.__commentModel line sitting between them.
+  // pieces, walkBlocks then the @where-used fence, because the walker is shared substrate
+  // and the counters are fenced. arch-P3b-07z took the comment model that used to sit
+  // between them, so walkBlocks now ends at its own closing brace.
   var wbStart = etxt.indexOf("function walkBlocks(doc, visit)");
-  var wbEnd = etxt.indexOf("function docCids(doc, acc)");
+  var wbEnd = etxt.indexOf("\n  }", wbStart) + 4;
   var wuStart = etxt.indexOf("/* @where-used-start */");
   var wuEnd = etxt.indexOf("/* @where-used-end */");
   var pureBody = etxt.slice(wbStart, wbEnd) + etxt.slice(wuStart, wuEnd);
@@ -9357,6 +9363,7 @@ section("panel system v2 — layout engine");
 // last option of the "On click" dropdown. Demo overrides onExit (no real exit).
 section("exit-course action");
 (function () {
+  var INT = src("src/editor/interact.js");   // arch-P3b-07s
   var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var r = src("src/render.js"), rt = src("src/runtime.js"), e = src("src/editor.js");
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
@@ -9378,8 +9385,8 @@ section("exit-course action");
   ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(ACT));
   ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(DEMO) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(DEMO));
   // Interact-mode action picker (the "On click -> Do" list): exit is an option + targetless
-  ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(e));
-  ok("editor: exit is targetless (NAV_ACTIONS -> no target picker)", /var NAV_ACTIONS = \{ next: 1, prev: 1, exit: 1 \};/.test(e));
+  ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(INT));
+  ok("editor: exit is targetless (NAV_ACTIONS -> no target picker)", /var NAV_ACTIONS = \{ next: 1, prev: 1, exit: 1 \};/.test(INT));
 })();
 
 // ---- Interact-mode contextual connectors ---------------------------------
@@ -9388,14 +9395,15 @@ section("exit-course action");
 // every selection change via refreshCanvasSelection (interact-mode only).
 section("interact contextual connectors");
 (function () {
+  var INT = src("src/editor/interact.js");   // arch-P3b-07s
   var e = src("src/editor.js");
-  ok("showAllConnectors state defaults OFF + persisted", /var showAllConnectors = false;/.test(e) && /var SHOW_ALL_CONNECTORS_KEY = "authoring\.showAllConnectors";/.test(e) && /showAllConnectors = localStorage\.getItem\(SHOW_ALL_CONNECTORS_KEY\) === "1"/.test(e));
+  ok("showAllConnectors state defaults OFF + persisted", /var showAllConnectors = false;/.test(INT) && /var SHOW_ALL_CONNECTORS_KEY = "authoring\.showAllConnectors";/.test(INT) && /showAllConnectors = localStorage\.getItem\(SHOW_ALL_CONNECTORS_KEY\) === "1"/.test(INT));
   ok("drawConnectors has a blockInSelection helper (single + multi)", /function blockInSelection\(b\)[\s\S]{0,220}multiSel\.indexOf\(b\) !== -1/.test(e));
-  ok("action-links skip non-selected links unless Show all", /if \(!showAllConnectors && !\(selection\.node === lk\.elm \|\| blockInSelection\(lk\.block\)\)\) return;/.test(e));
-  ok("gate-links skip unless gated/source selected or Show all", /if \(!showAllConnectors && !gatedSel && !srcSel\) return;/.test(e));
+  ok("action-links skip non-selected links unless Show all", /if \(!showAllConnectorsOn\(\) && !\(selection\.node === lk\.elm \|\| blockInSelection\(lk\.block\)\)\) return;/.test(e));
+  ok("gate-links skip unless gated/source selected or Show all", /if \(!showAllConnectorsOn\(\) && !gatedSel && !srcSel\) return;/.test(e));
   // arch-P3b-07i: the one choke point every selection change routes through moved with the tree.
   ok("connectors redraw on selection change (refreshCanvasSelection, interact-only)", /function refreshCanvasSelection\(\)[\s\S]*?if \(E\.interactMode\) drawConnectors\(\);\s*\}/.test(src("src/editor/outliner.js")));
-  ok("Interact inspector exposes a Show all connections toggle", /switchRow\("Show all connections", function \(\) \{ return showAllConnectors; \}/.test(e));
+  ok("Interact inspector exposes a Show all connections toggle", /switchRow\("Show all connections", function \(\) \{ return showAllConnectors; \}/.test(INT));
 })();
 
 // ---- per-hotspot popover-card size ---------------------------------------
@@ -13554,7 +13562,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("gap Add wired to addPageAfter(pi)", /addBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); addPageAfter\(pi\); \}\)/.test(e));
   ok("gap Merge wired to mergePageWithNext(pi)", /mergeBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); mergePageWithNext\(pi\); \}\)/.test(e));
   ok("gap affordances suppressed in variant/language preview", /function buildGapAffordances[\s\S]*?if \(isPreview\(\)\) return;/.test(e));
-  ok("gap affordances build in BOTH modes (before the Interact-only return)", /layoutColumns\(\);[\s\S]*?buildGapAffordances\(\);[\s\S]*?if \(!interactMode\) return;/.test(e));
+  ok("gap affordances build in BOTH modes (before the Interact-only return)", /layoutColumns\(\);[\s\S]*?buildGapAffordances\(\);[\s\S]*?if \(!interactModeOn\(\)\) return;/.test(e));
   ok("addPageAfter inherits the reference page's chapter", /function addPageAfter\(pi\)[\s\S]*?if \(ref && ref\.chapterId != null\) newPage\.chapterId = ref\.chapterId/.test(e));
   ok("addPageAfterCurrent delegates to addPageAfter", /function addPageAfterCurrent\(\) \{ addPageAfter\(currentPage\); \}/.test(e));
   ok("page-gap css: hidden tools revealed on hover", /\.page-gap__tools \{[\s\S]*?opacity: 0;[\s\S]*?\}\s*\.page-gap:hover \.page-gap__tools \{ opacity: 1;/.test(css));
