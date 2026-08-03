@@ -508,11 +508,49 @@
       badge.innerHTML = glyph + "<span>" + label.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</span>";
     }
 
+
+    // ---- per-key visibility, on both axes (arch-P3b-07vis) -----------------------
+    // Whether a node is hidden in a given variant or a given software version. Both axes carry
+    // the SAME shape -- a `hide` list on the node, deleted when it empties so an untouched node
+    // stays clean in the saved document -- and the version half tags the BASE node, because in an
+    // editable version the selected node is a display clone and tagging the clone writes nothing
+    // that survives a re-mount. That is what versionBaseNode is for, and it is why it is exported:
+    // four other surfaces have to unwrap the same way before they touch a node.
+    function isHiddenIn(node, variant) { var vv = node.variantVis; return !!(vv && vv.hide && vv.hide.indexOf(variant) !== -1); }
+    function toggleHiddenIn(node, variant) {
+      pushHistory();
+      var vv = node.variantVis || (node.variantVis = {});
+      vv.hide = vv.hide || [];
+      var i = vv.hide.indexOf(variant);
+      if (i === -1) vv.hide.push(variant); else vv.hide.splice(i, 1);
+      if (!vv.hide.length) delete vv.hide;
+      if (node.variantVis && !node.variantVis.hide && !node.variantVis.only) delete node.variantVis;
+      mount();
+    }
+    // #207: the SAME show/hide-per-key pattern for the software-version axis (node.versionVis).
+    // In an editable version the selected node is a display clone, so tag its BASE node (__vbase).
+    function versionBaseNode(node) { return (node && node.__vbase) || node; }
+    function isHiddenInVersion(node, version) { var vv = versionBaseNode(node).versionVis; return !!(vv && vv.hide && vv.hide.indexOf(version) !== -1); }
+    function toggleHiddenInVersion(node, version) {
+      pushHistory();
+      var b = versionBaseNode(node);
+      var vv = b.versionVis || (b.versionVis = {});
+      vv.hide = vv.hide || [];
+      var i = vv.hide.indexOf(version);
+      if (i === -1) vv.hide.push(version); else vv.hide.splice(i, 1);
+      if (!vv.hide.length) delete vv.hide;
+      if (b.versionVis && !b.versionVis.hide && !b.versionVis.only) delete b.versionVis;
+      mount();
+    }
+
     kernel.expose({
       newVariantPrompt: newVariantPrompt, renderVariantOverrides: renderVariantOverrides, previewVariant: previewVariant,
       renderVariantSwitch: renderVariantSwitch, syncVariantSwitch: syncVariantSwitch, updateVariantBadge: updateVariantBadge,
       openVariantMenu: openVariantMenu, openVariantMenuAtSwitch: openVariantMenuAtSwitch, renderVersionSwitch: renderVersionSwitch,
-      syncVersionSwitch: syncVersionSwitch, updateVersionBadge: updateVersionBadge
+      syncVersionSwitch: syncVersionSwitch, updateVersionBadge: updateVersionBadge,
+      isHiddenIn: isHiddenIn, toggleHiddenIn: toggleHiddenIn,
+      versionBaseNode: versionBaseNode, isHiddenInVersion: isHiddenInVersion,
+      toggleHiddenInVersion: toggleHiddenInVersion
     });
   }
 

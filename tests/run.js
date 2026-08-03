@@ -9523,9 +9523,9 @@ section("hotspot per-card size");
     return !!owner && owner.block === hotspot && owner.hs === marker &&
       HS.ownerOf([{ blocks: [hotspot] }], { type: "orphan" }, walk) === null;
   })());
-  ok("editor: deleting a card child keeps the card open (reselect owner hotspot block)", /var hsOwner = hotspotOwnerOf\(block\);[\s\S]{0,520}if \(hsOwner\) \{ setHotspotEditId\(hsOwner\.hs\.id\); clearSelection\(\); mount\(\); reselectBlockNode\(hsOwner\.block, "block"\); \}/.test(e));
+  ok("editor: deleting a card child keeps the card open (reselect owner hotspot block)", /var hsOwner = hotspotOwnerOf\(block\);[\s\S]{0,520}if \(hsOwner\) \{ setHotspotEditId\(hsOwner\.hs\.id\); clearSelection\(\); mount\(\); reselectBlockNode\(hsOwner\.block, "block"\); \}/.test(src("src/editor/structure-ops.js")));   // arch-P3b-07vis: deleteBlockByRef is a structural verb
   // PERF: a plain (non-hotspot) block delete rebuilds only its page, not the world.
-  ok("editor: plain block delete uses reapplyStructural(pi), not mount", /else \{ clearSelection\(\); reapplyStructural\(pi\); \}/.test(e));
+  ok("editor: plain block delete uses reapplyStructural(pi), not mount", /else \{ clearSelection\(\); reapplyStructural\(pi\); \}/.test(src("src/editor/structure-ops.js")));
 })();
 
 // ---- FR: Find & replace pure core + variant routing ----------------------
@@ -13380,8 +13380,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("enableEditing gate keys off canvasEditable() (version = editable flagship UNLESS collaborating)", (e.match(/if \(canvasEditable\(\)\) enableEditing\(world\);/g) || []).length >= 2);
   ok("writeModel captures into versionOverrides via __vbase when editing a version", /if \(versionEditable\(\) && obj && obj\.__vbase\) setVersionOverrideField\(obj\.__vbase, activeVersion, field, value\);\s*else obj\[field\] = value;/.test(e));
   ok("capture is undoable — the input handler snapshots before writeModel", /History\.pushOnce\(\);[\s\S]{0,200}writeModel\(node,/.test(EDIT));
-  ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(e));
-  ok("version tagging targets the BASE node (__vbase) not the display clone", /function versionBaseNode\(node\) \{ return \(node && node\.__vbase\) \|\| node; \}/.test(e));
+  ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(src("src/editor/variants.js")));   // arch-P3b-07vis: both axes' visibility lives with both axes
+  ok("version tagging targets the BASE node (__vbase) not the display clone", /function versionBaseNode\(node\) \{ return \(node && node\.__vbase\) \|\| node; \}/.test(src("src/editor/variants.js")));
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   ok("block context menu adds a Software version show/hide section", /var versAll = versionNames\(\);[\s\S]{0,700}toggleHiddenInVersion\(host, v\)/.test(src("src/editor/context-menu.js")));
   ok("FIX 2: editing a version disables inert block controls with a reason", /function applyVersionEditGuard\(\)[\s\S]*?is-version-readonly-panel[\s\S]*?version-edit-notice/.test(e));

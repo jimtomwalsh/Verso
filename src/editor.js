@@ -6156,55 +6156,17 @@
   // ...continues in variants.js (arch-P3b-07).
 
 
-  function isHiddenIn(node, variant) { var vv = node.variantVis; return !!(vv && vv.hide && vv.hide.indexOf(variant) !== -1); }
-  function toggleHiddenIn(node, variant) {
-    pushHistory();
-    var vv = node.variantVis || (node.variantVis = {});
-    vv.hide = vv.hide || [];
-    var i = vv.hide.indexOf(variant);
-    if (i === -1) vv.hide.push(variant); else vv.hide.splice(i, 1);
-    if (!vv.hide.length) delete vv.hide;
-    if (node.variantVis && !node.variantVis.hide && !node.variantVis.only) delete node.variantVis;
-    mount();
-  }
-  // #207: the SAME show/hide-per-key pattern for the software-version axis (node.versionVis).
-  // In an editable version the selected node is a display clone, so tag its BASE node (__vbase).
-  function versionBaseNode(node) { return (node && node.__vbase) || node; }
-  function isHiddenInVersion(node, version) { var vv = versionBaseNode(node).versionVis; return !!(vv && vv.hide && vv.hide.indexOf(version) !== -1); }
-  function toggleHiddenInVersion(node, version) {
-    pushHistory();
-    var b = versionBaseNode(node);
-    var vv = b.versionVis || (b.versionVis = {});
-    vv.hide = vv.hide || [];
-    var i = vv.hide.indexOf(version);
-    if (i === -1) vv.hide.push(version); else vv.hide.splice(i, 1);
-    if (!vv.hide.length) delete vv.hide;
-    if (b.versionVis && !b.versionVis.hide && !b.versionVis.only) delete b.versionVis;
-    mount();
-  }
-  function deleteBlockByRef(block) {
-    // Resolve across the whole page tree (top-level, columns children, group
-    // children) -- getBlockPageIndexAndIndex only sees top-level blocks, so a
-    // block inside a columns row was previously undeletable. After removal, run
-    // the collapse pass so a columns row reduced to one column unwraps to a plain
-    // block (no orphan single-column containers).
-    var loc = null;
-    for (var pi = 0; pi < doc.pages.length; pi++) {
-      var res = findBlockParent(doc.pages[pi].blocks, block);
-      if (res) { loc = res; break; }
-    }
-    if (!loc) return;
-    // If the block lives in a hotspot card, keep that card open after the delete
-    // (selection would otherwise clear -> the popover snaps shut to the image).
-    var hsOwner = hotspotOwnerOf(block);
-    pushHistory();
-    loc.parentArray.splice(loc.index, 1);
-    doc.pages.forEach(function (page) { cleanupColumns(page.blocks); });
-    // `pi` from the resolve loop above = the page the block lived on (loop broke there).
-    // Hotspot-card deletes keep the delicate popover-reveal path on a full mount.
-    if (hsOwner) { setHotspotEditId(hsOwner.hs.id); clearSelection(); mount(); reselectBlockNode(hsOwner.block, "block"); }
-    else { clearSelection(); reapplyStructural(pi); } // PERF: one page, not the world
-  }
+  // arch-P3b-07vis: the last of the "variant model mutations" banner, which was two concerns.
+  // Per-key visibility on both axes -- isHiddenIn / toggleHiddenIn and their software-version
+  // twins, plus the versionBaseNode unwrap they share -- went to editor/variants.js, which
+  // already owns both axes. deleteBlockByRef went to editor/structure-ops.js: it is a structural
+  // verb that six surfaces route through, and it was never about variants at all.
+  var isHiddenIn = VE.bind("isHiddenIn");
+  var toggleHiddenIn = VE.bind("toggleHiddenIn");
+  var versionBaseNode = VE.bind("versionBaseNode");
+  var isHiddenInVersion = VE.bind("isHiddenInVersion");
+  var toggleHiddenInVersion = VE.bind("toggleHiddenInVersion");
+  var deleteBlockByRef = VE.bind("deleteBlockByRef");
 
   // ...continues in variants.js (arch-P3b-07).
 
@@ -6335,6 +6297,8 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    setHotspotEditId: setHotspotEditId,
+    hotspotOwnerOf: hotspotOwnerOf,
     dirPermission: dirPermission,
     refreshCommentPanel: refreshCommentPanel,
     mergeComments: mergeComments,
