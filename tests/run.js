@@ -40,6 +40,43 @@ function ok(name, cond) {
 // A non-failing signal (UI kit ticket 4 conformance gate, warn-only phase).
 function warn(msg) { warnings++; console.warn("  WARN [" + sectionName + "] " + msg); }
 function slice(txt, from, to) { var a = txt.indexOf(from), b = txt.indexOf(to, a + 1); return txt.slice(a, b); }
+// JS with its comments, strings and REGEX LITERALS blanked, so a name inside one is not a call
+// site. The regex half is why this walks rather than replaces: editor.js is full of literals that
+// contain a quote (/['"]/), and a walker that only knows about quotes reads that apostrophe as the
+// start of a string and runs to the next one hundreds of lines away, blanking most of the file.
+function codeOnly(s) {
+  var out = "", i = 0, prev = "";   // prev = the last significant code character emitted
+  // A slash starts a regex when what came before it cannot END an expression: after an identifier,
+  // a number, `)` or `]` it is division; after anything else it is a literal.
+  function slashStartsRegex() { return !prev || !/[A-Za-z0-9_$)\]]/.test(prev); }
+  while (i < s.length) {
+    var c = s[i], d = s[i + 1];
+    if (c === "/" && d === "/") { var j = s.indexOf("\n", i); if (j < 0) j = s.length; out += " "; i = j; continue; }
+    if (c === "/" && d === "*") { var k = s.indexOf("*/", i + 2); k = k < 0 ? s.length : k + 2; out += " "; i = k; continue; }
+    if (c === '"' || c === "'" || c === "`") {
+      var q = c, m = i + 1;
+      while (m < s.length) { if (s[m] === "\\") { m += 2; continue; } if (s[m] === q) { m++; break; } m++; }
+      out += ' " " '; i = m; prev = '"'; continue;
+    }
+    if (c === "/" && slashStartsRegex()) {
+      var n = i + 1, cls = false, closed = false;
+      while (n < s.length) {
+        var ch = s[n];
+        if (ch === "\\") { n += 2; continue; }
+        if (ch === "\n") break;                  // unterminated: it was division after all
+        if (cls) { if (ch === "]") cls = false; n++; continue; }
+        if (ch === "[") { cls = true; n++; continue; }   // a `/` inside a class does not close it
+        if (ch === "/") { closed = true; n++; break; }
+        n++;
+      }
+      if (closed) { while (n < s.length && /[gimsuy]/.test(s[n])) n++; out += " RX "; i = n; prev = ")"; continue; }
+    }
+    out += c;
+    if (!/\s/.test(c)) prev = c;
+    i++;
+  }
+  return out;
+}
 // arch-P1: render.js resolves every per-pass hook through one rc() accessor, so a slice of any
 // render.js function that reads a hook needs that accessor in scope alongside it.
 function withRc(renderSrc, body) {
@@ -412,6 +449,75 @@ section("P3b namespace (load order)");
     ok(f.rel + " wires its sibling explicitly (use())", /function use\s*\(/.test(f.text));
   });
   ok("every module under src/editor was checked", files.length >= 12);
+})();
+
+// The check no boot performs. A moved region's functions are declared inside its install(), so a
+// call site editor.js FORGOT to rewire is a plain free identifier: not a bound forwarder, not a
+// need(), nothing the kernel audit can see. It throws only when that path runs, which is how
+// `loadBackupHandle is not defined` survived a green suite and a clean audit until an end-to-end
+// publish run hit it -- along with the tour builder's stale-block rebind, which was guarded by
+// `typeof x === "function"` and had been silently answering "no" ever since the region moved.
+section("P3b namespace (no orphaned call sites)");
+(function () {
+  // What the modules declare, one indent deeper because it sits inside install().
+  var owner = Object.create(null), mods = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, rel + f + "/");
+      else if (/\.js$/.test(f)) mods.push("src/editor/" + rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+  mods.forEach(function (rel) {
+    var t = src(rel);
+    (t.match(/^\s{4}(?:async )?function ([A-Za-z_$][\w$]*)/gm) || []).forEach(function (m) {
+      var n = m.trim().replace(/^async /, "").split(/\s+/)[1];
+      owner[n] = owner[n] || rel;
+    });
+    (t.match(/^\s{4}var ([^;\n]+)/gm) || []).forEach(function (m) {
+      m.replace(/^\s+var /, "").split(",").forEach(function (p) {
+        var n = p.trim().split(/[\s=(\[]/)[0]; if (/^[A-Za-z_$][\w$]*$/.test(n)) owner[n] = owner[n] || rel;
+      });
+    });
+  });
+
+  function orphansIn(text) {
+    var code = codeOnly(text);
+    // Every name editor.js declares ANYWHERE, plus every parameter. A local `block` inside one of
+    // its own functions is not a call into a module that happens to declare `block` too.
+    var mine = Object.create(null);
+    (code.match(/\b(?:function\s+|var\s+|let\s+|const\s+)([A-Za-z_$][\w$]*)/g) || []).forEach(function (m) {
+      mine[m.replace(/^\w+\s+/, "").trim()] = 1;
+    });
+    (code.match(/\bvar\s+([^;\n]+)/g) || []).forEach(function (m) {
+      m.replace(/^var\s+/, "").split(",").forEach(function (p) {
+        var n = p.trim().split(/[\s=(\[]/)[0]; if (/^[A-Za-z_$][\w$]*$/.test(n)) mine[n] = 1;
+      });
+    });
+    (code.match(/function[^(]*\(([^)]*)\)/g) || []).forEach(function (m) {
+      m.replace(/^function[^(]*\(|\)$/g, "").split(",").forEach(function (x) {
+        var n = x.trim(); if (/^[A-Za-z_$][\w$]*$/.test(n)) mine[n] = 1;
+      });
+    });
+    (code.match(/catch\s*\(\s*([A-Za-z_$][\w$]*)/g) || []).forEach(function (m) { mine[m.replace(/^catch\s*\(\s*/, "")] = 1; });
+    // A trailing `:` is an object-literal KEY, not a read: `{ tourMakeMarker: VE.bind(...) }` is
+    // the wiring itself, not a call into the module.
+    var out = [];
+    code.replace(/(\.?)\s*\b([A-Za-z_$][\w$]*)\b(\s*:)?/g, function (m, dot, id, key) {
+      if (!dot && !key && owner[id] && !mine[id] && out.indexOf(id) === -1) out.push(id);
+      return m;
+    });
+    return out;
+  }
+
+  var ed = src("src/editor.js");
+  var orphans = orphansIn(ed);
+  ok("editor.js declares or binds every name it calls" + (orphans.length ? " -- ORPHANED: " + orphans.join(", ") : ""), orphans.length === 0);
+  ok("the scan saw the modules at all", Object.keys(owner).length > 200);
+  // The gate has to be able to FAIL: drop one bind and the name it fed must come back as an
+  // orphan. This is the exact shape of the bug -- the call site stays, the wiring goes.
+  var doctored = ed.replace(/\n  var scheduleBackup = VE\.bind\("scheduleBackup"\);/, "\n");
+  ok("gate trips: removing a bind surfaces its call sites", doctored !== ed && orphansIn(doctored).indexOf("scheduleBackup") > -1);
 })();
 
 // ---- XX: durable-write core ----------------------------------------------
@@ -14221,7 +14327,10 @@ section("editor-rework source insert + two-way jump");
   ok("copy is now placed as a range-linked block (armSourceLinkPlacement -> placeArmedSourceLink)", /function armSourceLinkPlacement\(desc\)/.test(e) && /function placeArmedSourceLink\(cx, cy\)/.test(e));
   ok("direction 1 (Source -> block): the where-used row selects the exact block", /function jumpToLinkedBlock\(docCode, blockId\)[\s\S]{0,300}blockById\(blockId\)[\s\S]{0,200}reselectBlockNode\(b, "block"\)/.test(e));
   ok("direction 2 (block -> Source): a linked block offers Open in Source", /if \(block\.sourceRef && block\.sourceRef\.topicId && window\.VersoUI[\s\S]{0,260}jumpToSourceTopic\(block\.sourceRef\.topicId\)/.test(e));
-  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}__sourceActiveTopicId = topicId;[\s\S]{0,120}setStage\("source"\)/.test(e));
+  // arch-P3b-07: the stage owns that state, so the jump asks it to open the topic (which persists
+  // it for the next refresh) rather than writing the stage's variable from outside.
+  ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}openSourceTopicId\(topicId\);[\s\S]{0,120}setStage\("source"\)/.test(e));
+  ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
 })();
 
 // ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----

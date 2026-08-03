@@ -2930,7 +2930,7 @@
     } else {
       mount();
     }
-    if (typeof rebindTourBuilderToLiveDoc === "function") rebindTourBuilderToLiveDoc(); // keep an open builder bound to the restored doc
+    rebindTourBuilderToLiveDoc(); // keep an open builder bound to the restored doc
   }
   // Making a different course the active one. Tab click, tab close, course delete: all three
   // move the id, the live doc and the registry entry together, drop the outgoing course's undo
@@ -6954,6 +6954,7 @@
   var tourBoardIsOpen = VE.bind("tourBoardIsOpen");
   var syncTourBoard = VE.bind("syncTourBoard");
   var maybeReopenTourBuilder = VE.bind("maybeReopenTourBuilder");
+  var rebindTourBuilderToLiveDoc = VE.bind("rebindTourBuilderToLiveDoc");   // arch-P3b-07
 
   // A section built for an imperative caller: appends it to `host` and hands back the BODY, so
   // the rows that follow append into the section rather than beside it. uio-O-W2 (OVL-07): this
@@ -7238,6 +7239,13 @@
   var backupSlug = VE.bind("backupSlug");
   var backupMode = VE.bind("backupMode");
   var connectBackupFolder = VE.bind("connectBackupFolder");
+  // arch-P3b-07: these five stayed as bare call sites when the region moved, so they threw the
+  // moment their path ran -- the publish destination handles and the two folder buttons.
+  var loadBackupHandle = VE.bind("loadBackupHandle");
+  var saveBackupHandle = VE.bind("saveBackupHandle");
+  var bindProjectFolder = VE.bind("bindProjectFolder");
+  var reconnectBackupFolder = VE.bind("reconnectBackupFolder");
+  var backupHandleSet = VE.bind("backupHandleSet");
 
   function renderPipelineButtons(container) {
     container.innerHTML = "";
@@ -7554,6 +7562,14 @@
   var unifiableTopicsFor = VE.bind("unifiableTopicsFor");
   var updateSourceDocBar = VE.bind("updateSourceDocBar");
   var pushSourceAlternate = VE.bind("pushSourceAlternate");
+  // arch-P3b-07: the base-edit warning and the two-way jump kept reading the stage's state by
+  // name after it moved. They ask through these instead.
+  var sourceDocModel = VE.bind("sourceDocModel");
+  var setSourceDocModel = VE.bind("setSourceDocModel");
+  var sourceActiveTopicId = VE.bind("sourceActiveTopicId");
+  var openSourceTopicId = VE.bind("openSourceTopicId");
+  var lockSourceEditing = VE.bind("lockSourceEditing");
+  var clearSourceEditSession = VE.bind("clearSourceEditSession");
 
   // ---- Component Library panel (cross-course shared components) -------------
   function exportLibraryJson() {
@@ -8328,7 +8344,7 @@
   function buildBackupBody(c) {
     c.appendChild(h("div", "insp-hint", "Auto-save a durable copy of this course to a real folder (e.g. its OneDrive project folder) on every change. Writes a self-contained " + backupSlug() + ".json (fully restorable, images included) + " + backupSlug() + ".schema.csv, plus timestamped snapshots. The live app storage is not a file — this is your hard backup."));
     var bound = !!(doc && doc.backup);
-    var connected = bound && (backupMode() === "native" ? !!doc.backup.folderPath : !!backupHandle);
+    var connected = bound && (backupMode() === "native" ? !!doc.backup.folderPath : backupHandleSet());
     var row = h("div", "insp-row");
     var lbl = h("span", "insp-row__label"); lbl.style.flex = "1 1 auto";
     lbl.textContent = bound
@@ -8569,6 +8585,9 @@
   var makeCourseNav = VE.bind("makeCourseNav");
   var headerFooterConfig = VE.bind("headerFooterConfig");
   var hfSectionOpts = VE.bind("hfSectionOpts");
+  // arch-P3b-07: the nav's controls are drawn from two places here and neither was bound.
+  var courseNavControls = VE.bind("courseNavControls");
+  var courseNavNests = VE.bind("courseNavNests");
 
 
   // ---- theme controls (collapsible Theme section) --------------------------
@@ -12764,7 +12783,7 @@
   // On unlock: snapshot each link mark's current wording (so "fork" can freeze it) + the whole model
   // (so "cancel" can revert the edits). Only when the doc actually carries link marks.
   function snapshotSourceLinkBase() {
-    var SD = window.SourceDoc, model = __sourceDocModel;
+    var SD = window.SourceDoc, model = sourceDocModel();
     __sourceLinkOldText = null; __sourcePreEditModelJson = null;
     if (!SD || !model || !(model.marks || []).some(function (m) { return m.type === "link"; })) return;
     __sourceLinkOldText = {};
@@ -12773,15 +12792,15 @@
   }
   // The blast radius of the just-finished edit session: base-showing locations of edited link marks.
   function sourceBaseEditImpact() {
-    var SD = window.SourceDoc, model = __sourceDocModel;
+    var SD = window.SourceDoc, model = sourceDocModel();
     if (!SD || !model || !__sourceLinkOldText) return { affected: [], pinned: [], editedMarks: [] };
-    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(__sourceActiveTopicId, null));
+    return SD.sourceEditImpact(model, __sourceLinkOldText, sourceLinkWhereUsed(sourceActiveTopicId(), null));
   }
   // "Keep as-is (fork)": freeze each edited link mark's OLD wording as an alternate on the master,
   // and pin every affected (base-showing) location -- in whatever document uses it -- to that
   // alternate. The source base then moves on; those placements keep the old words.
   function forkAffectedToAlternate(impact) {
-    var SD = window.SourceDoc, model = __sourceDocModel, reg = registry, byMark = {};
+    var SD = window.SourceDoc, model = sourceDocModel(), reg = registry, byMark = {};
     impact.affected.forEach(function (loc) { (byMark[loc.markId] = byMark[loc.markId] || []).push(loc); });
     Object.keys(byMark).forEach(function (markId) {
       var link = SD.markById(model, markId); if (!link) return;
@@ -12793,16 +12812,16 @@
   }
   function finalizeSourceLock(topic, opts) {
     flushSourceEditSession(topic, { prompt: opts.prompt });
-    __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    lockSourceEditing(); __sourceLinkOldText = null; __sourcePreEditModelJson = null;
     applySourceLockState(); refreshSourceSelBar(); updateSourceDocBar();
   }
   function revertSourceEditSession(topic) {
     var SD = window.SourceDoc;
     if (SD && __sourcePreEditModelJson && topic) {
-      __sourceDocModel = SD.fromJSON(__sourcePreEditModelJson); __sourceDocModelTopicId = topic.id;
-      persistSourceDocModel(topic, __sourceDocModel);
+      setSourceDocModel(SD.fromJSON(__sourcePreEditModelJson), topic.id);
+      persistSourceDocModel(topic, sourceDocModel());
     }
-    __sourceEditSession = null; __sourceUnlocked = false; __sourceLinkOldText = null; __sourcePreEditModelJson = null;
+    clearSourceEditSession(); lockSourceEditing(); __sourceLinkOldText = null; __sourcePreEditModelJson = null;
     renderSourceArticle();
     sourceToast("Edit cancelled.");
   }
@@ -12853,8 +12872,7 @@
   // Two-way link, direction 2: a linked block's affordance opens the Source stage on its topic.
   function jumpToSourceTopic(topicId) {
     if (!topicId) return;
-    __sourceActiveTopicId = topicId;
-    try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, topicId); } catch (e) {}
+    openSourceTopicId(topicId);
     setStage("source");
   }
   // Two-way link, direction 1: open the doc, land in Edit, and select the exact linked block.
@@ -13923,7 +13941,7 @@
       try { reapplyStructural(loc.pi); } catch (e) { try { mount(); } catch (e2) {} } // re-render just that page (mount() if previewing)
       // a remote block.change swaps the block OBJECT -> if the tour builder is open on that same
       // block, its captured reference just went stale; re-bind it to the live doc (same guard as undo/setDoc).
-      if (typeof rebindTourBuilderToLiveDoc === "function") { try { rebindTourBuilderToLiveDoc(); } catch (e) {} }
+      try { rebindTourBuilderToLiveDoc(); } catch (e) {}
       reproject();
     }
     function flushPending() {
@@ -15420,6 +15438,7 @@
   var showContextMenu = VE.bind("showContextMenu");
   var closeCtxMenu = VE.bind("closeCtxMenu");
   var wireContextMenu = VE.bind("wireContextMenu");
+  var blockMenuItems = VE.bind("blockMenuItems");   // arch-P3b-07: the overflow button's verb list
 
 
   // ---- variant model mutations ----

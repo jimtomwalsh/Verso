@@ -197,7 +197,15 @@
 
     kernel.expose({
       scheduleBackup: scheduleBackup, backupSlug: backupSlug, backupMode: backupMode,
-      connectBackupFolder: connectBackupFolder
+      connectBackupFolder: connectBackupFolder,
+      // The IndexedDB handle store is this file's, and the publish destinations key into the SAME
+      // store -- one place remembers which folders the author has granted. The settings sheet and
+      // the off-banner drive the two folder buttons. All five were still called by name from
+      // editor.js after the region moved, which no boot and no unit test can see: a free identifier
+      // throws only when its path runs (arch-P3b-07, found by an end-to-end publish run).
+      loadBackupHandle: loadBackupHandle, saveBackupHandle: saveBackupHandle,
+      bindProjectFolder: bindProjectFolder, reconnectBackupFolder: reconnectBackupFolder,
+      backupHandleSet: function () { return !!backupHandle; }
     });
   }
 

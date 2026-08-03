@@ -1935,6 +1935,12 @@
       renderTourEdges(); scheduleSave();
     });
     kernel.expose({
+      // arch-P3b-07: undo, setDoc and a collab frame all REPLACE the document, which orphans the
+      // block object an open builder captured -- the tour-builder data loss this guard exists to
+      // stop. editor.js kept calling it by name after the region moved, behind a
+      // `typeof x === "function"` guard that a free identifier answers "undefined" to, so the
+      // rebind silently stopped running. It is bound now.
+      rebindTourBuilderToLiveDoc: rebindTourBuilderToLiveDoc,
       openTourBuilder: openTourBuilder,
       closeTourBuilder: closeTourBuilder,
       tourBoardIsOpen: tourBoardIsOpen,

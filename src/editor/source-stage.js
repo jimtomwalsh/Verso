@@ -3280,7 +3280,21 @@
       applySourceLockState: applySourceLockState, flushSourceEditSession: flushSourceEditSession, persistSourceDocModel: persistSourceDocModel,
       refreshSourceSelBar: refreshSourceSelBar, renderSourceArticle: renderSourceArticle, renderSourceDocNode: renderSourceDocNode,
       renderSourceStage: renderSourceStage, renderSourceToolbar: renderSourceToolbar, sourceMasterFor: sourceMasterFor,
-      sourceToast: sourceToast, unifiableTopicsFor: unifiableTopicsFor, updateSourceDocBar: updateSourceDocBar
+      sourceToast: sourceToast, unifiableTopicsFor: unifiableTopicsFor, updateSourceDocBar: updateSourceDocBar,
+      // The base-edit warning and the two-way jump stayed in editor.js when the stage moved, and
+      // they read and wrote this file's state by name -- which in a module is a free identifier
+      // that throws the moment its path runs. They ask through these now (arch-P3b-07).
+      sourceDocModel: function () { return __sourceDocModel; },
+      setSourceDocModel: function (model, topicId) { __sourceDocModel = model; __sourceDocModelTopicId = topicId; },
+      sourceActiveTopicId: function () { return __sourceActiveTopicId; },
+      // Opening a topic from elsewhere in the app persists it too, so a refresh returns to it --
+      // the same pair the topic list itself writes.
+      openSourceTopicId: function (id) {
+        __sourceActiveTopicId = id;
+        try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, id); } catch (e) {}
+      },
+      lockSourceEditing: function () { __sourceUnlocked = false; },
+      clearSourceEditSession: function () { __sourceEditSession = null; }
     });
     return VersoSourceStage;
   }
