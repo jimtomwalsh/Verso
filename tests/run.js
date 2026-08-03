@@ -4956,7 +4956,7 @@ section("comment mode (canvas)");
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
   // arch-P3b-07: mount, the drill handler and the keyboard shortcut all stayed here; comment mode
   // is asked for rather than read, because editor/comments.js owns it now.
-  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(src("src/editor.js")));
+  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactModeOn\(\)\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(src("src/editor.js")));
   // arch-P3b-02: applyView moved to src/editor/canvas-view.js, so this drives it instead of
   // matching its text. A pin rebuild on every pan/zoom frame is the whole contract -- pins are
   // absolutely positioned in canvas space, so a view change that skipped this would leave them
@@ -9357,6 +9357,7 @@ section("panel system v2 — layout engine");
 // last option of the "On click" dropdown. Demo overrides onExit (no real exit).
 section("exit-course action");
 (function () {
+  var INT = src("src/editor/interact.js");   // arch-P3b-07s
   var ACT = src("src/editor/actions.js");   // arch-P3b-07
   var r = src("src/render.js"), rt = src("src/runtime.js"), e = src("src/editor.js");
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
@@ -9378,8 +9379,8 @@ section("exit-course action");
   ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(ACT));
   ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(DEMO) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(DEMO));
   // Interact-mode action picker (the "On click -> Do" list): exit is an option + targetless
-  ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(e));
-  ok("editor: exit is targetless (NAV_ACTIONS -> no target picker)", /var NAV_ACTIONS = \{ next: 1, prev: 1, exit: 1 \};/.test(e));
+  ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(INT));
+  ok("editor: exit is targetless (NAV_ACTIONS -> no target picker)", /var NAV_ACTIONS = \{ next: 1, prev: 1, exit: 1 \};/.test(INT));
 })();
 
 // ---- Interact-mode contextual connectors ---------------------------------
@@ -9388,14 +9389,15 @@ section("exit-course action");
 // every selection change via refreshCanvasSelection (interact-mode only).
 section("interact contextual connectors");
 (function () {
+  var INT = src("src/editor/interact.js");   // arch-P3b-07s
   var e = src("src/editor.js");
-  ok("showAllConnectors state defaults OFF + persisted", /var showAllConnectors = false;/.test(e) && /var SHOW_ALL_CONNECTORS_KEY = "authoring\.showAllConnectors";/.test(e) && /showAllConnectors = localStorage\.getItem\(SHOW_ALL_CONNECTORS_KEY\) === "1"/.test(e));
+  ok("showAllConnectors state defaults OFF + persisted", /var showAllConnectors = false;/.test(INT) && /var SHOW_ALL_CONNECTORS_KEY = "authoring\.showAllConnectors";/.test(INT) && /showAllConnectors = localStorage\.getItem\(SHOW_ALL_CONNECTORS_KEY\) === "1"/.test(INT));
   ok("drawConnectors has a blockInSelection helper (single + multi)", /function blockInSelection\(b\)[\s\S]{0,220}multiSel\.indexOf\(b\) !== -1/.test(e));
-  ok("action-links skip non-selected links unless Show all", /if \(!showAllConnectors && !\(selection\.node === lk\.elm \|\| blockInSelection\(lk\.block\)\)\) return;/.test(e));
-  ok("gate-links skip unless gated/source selected or Show all", /if \(!showAllConnectors && !gatedSel && !srcSel\) return;/.test(e));
+  ok("action-links skip non-selected links unless Show all", /if \(!showAllConnectorsOn\(\) && !\(selection\.node === lk\.elm \|\| blockInSelection\(lk\.block\)\)\) return;/.test(e));
+  ok("gate-links skip unless gated/source selected or Show all", /if \(!showAllConnectorsOn\(\) && !gatedSel && !srcSel\) return;/.test(e));
   // arch-P3b-07i: the one choke point every selection change routes through moved with the tree.
   ok("connectors redraw on selection change (refreshCanvasSelection, interact-only)", /function refreshCanvasSelection\(\)[\s\S]*?if \(E\.interactMode\) drawConnectors\(\);\s*\}/.test(src("src/editor/outliner.js")));
-  ok("Interact inspector exposes a Show all connections toggle", /switchRow\("Show all connections", function \(\) \{ return showAllConnectors; \}/.test(e));
+  ok("Interact inspector exposes a Show all connections toggle", /switchRow\("Show all connections", function \(\) \{ return showAllConnectors; \}/.test(INT));
 })();
 
 // ---- per-hotspot popover-card size ---------------------------------------
@@ -13554,7 +13556,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("gap Add wired to addPageAfter(pi)", /addBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); addPageAfter\(pi\); \}\)/.test(e));
   ok("gap Merge wired to mergePageWithNext(pi)", /mergeBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); mergePageWithNext\(pi\); \}\)/.test(e));
   ok("gap affordances suppressed in variant/language preview", /function buildGapAffordances[\s\S]*?if \(isPreview\(\)\) return;/.test(e));
-  ok("gap affordances build in BOTH modes (before the Interact-only return)", /layoutColumns\(\);[\s\S]*?buildGapAffordances\(\);[\s\S]*?if \(!interactMode\) return;/.test(e));
+  ok("gap affordances build in BOTH modes (before the Interact-only return)", /layoutColumns\(\);[\s\S]*?buildGapAffordances\(\);[\s\S]*?if \(!interactModeOn\(\)\) return;/.test(e));
   ok("addPageAfter inherits the reference page's chapter", /function addPageAfter\(pi\)[\s\S]*?if \(ref && ref\.chapterId != null\) newPage\.chapterId = ref\.chapterId/.test(e));
   ok("addPageAfterCurrent delegates to addPageAfter", /function addPageAfterCurrent\(\) \{ addPageAfter\(currentPage\); \}/.test(e));
   ok("page-gap css: hidden tools revealed on hover", /\.page-gap__tools \{[\s\S]*?opacity: 0;[\s\S]*?\}\s*\.page-gap:hover \.page-gap__tools \{ opacity: 1;/.test(css));
