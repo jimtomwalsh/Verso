@@ -180,7 +180,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/canvas-view.js", "src/editor/selection.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -4651,7 +4651,14 @@ section("page-dup");
   // bug -> renderPageInspector(null).id threw when selecting the FIRST page).
   var setSelStart = etxt.indexOf("function setSelection(type, node)");
   var setSelHead = etxt.slice(setSelStart, etxt.indexOf("if (node != null) {", setSelStart) + 20);
-  ok("setSelection preserves index 0 (node != null guard)", setSelHead.indexOf("node != null ? node : null") !== -1 && setSelHead.indexOf("node || null") === -1);
+  // arch-P3-07: the shape is src/editor/selection.js, and page 0 is the case that breaks under a
+  // truthiness test -- it would collapse to null and take renderPageInspector down with it.
+  ok("setSelection preserves index 0 (node != null guard)", (function () {
+    var SEL = require(path.join(ROOT, "src/editor/selection.js"));
+    var zero = SEL.shape("page", 0), three = SEL.shape("page", 3), none = SEL.shape("none", null);
+    return zero.pageIndex === 0 && zero.node === 0 && three.pageIndex === 3 &&
+      none.node === null && none.pageIndex === -1;
+  })());
 })();
 
 // ---- page-merge: mergePageWithNext (concat blocks, same-chapter guard, nav sync)
@@ -4974,7 +4981,8 @@ section("#20 library-instance mirror");
 
   // 2. editor.js: selection routing, contentless inspector, tree label/icon, all mirror
   // componentGrid's existing precedent for a def-resolving block type.
-  ok("TWO_LEVEL_TYPES includes libraryInstance (contentless like componentGrid)", /TWO_LEVEL_TYPES = \{[^}]*libraryInstance: 1/.test(etxt));
+  ok("TWO_LEVEL_TYPES includes libraryInstance (contentless like componentGrid)",
+    require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("libraryInstance"));
   ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(etxt));
   ok("inspector dispatch reuses renderContentlessBlock", /if \(block\.type === "libraryInstance"\) \{ renderContentlessBlock\(node, "Library instance", renderLibraryInstanceBody\); return; \}/.test(etxt));
   ok("block-icon map has a libraryInstance glyph", /libraryInstance: "component"/.test(etxt));
@@ -5835,7 +5843,20 @@ section("select-first / progressive drill");
   // leafSelectIndex is NODE-AWARE: it steps back over the innermost node's own caret
   // level but never past it into an ancestor (else a navButton, whose only level is
   // editable, would select the card it sits in).
-  ok("leafSelectIndex steps back over the innermost node's edit level only (never into an ancestor)", /function leafSelectIndex\(levels\) \{[\s\S]*?var leafNode = levels\[levels\.length - 1\]\.node;\s*\n\s*var i = levels\.length - 1;\s*\n\s*while \(i > 0 && levels\[i\]\.kind === "edit" && levels\[i - 1\]\.node === leafNode\) i--;/.test(t));
+  // arch-P3-07: run the rule instead of matching it. The comparison is against the LEAF's node
+  // throughout -- that is what stops the walk at the first level belonging to something else.
+  ok("leafSelectIndex steps back over the innermost node's edit level only (never into an ancestor)", (function () {
+    var SEL = require(path.join(ROOT, "src/editor/selection.js"));
+    var A = { id: "container" }, B = { id: "block" };
+    // container > block > block's caret  -> the block, not the caret and not the container
+    var normal = SEL.leafSelectIndex([{ node: A, kind: "block" }, { node: B, kind: "block" }, { node: B, kind: "edit" }]);
+    // an element whose ONLY level is editable (navButton) still selects ITSELF
+    var editOnly = SEL.leafSelectIndex([{ node: A, kind: "block" }, { node: B, kind: "edit" }]);
+    // a caret belonging to something OTHER than the leaf stops the walk immediately
+    var foreign = SEL.leafSelectIndex([{ node: A, kind: "edit" }, { node: B, kind: "edit" }]);
+    return normal === 1 && editOnly === 1 && foreign === 1 &&
+      SEL.leafSelectIndex([]) === -1 && SEL.leafSelectIndex(null) === -1;
+  })());
   ok("plain click selects the leaf directly (leaf-first, not the container)", /var leafIndex = leafSelectIndex\(levels\);[\s\S]*?clearAllMulti\(\);\s*\n\s*drill\.levels = levels; drill\.index = leafIndex;/.test(t));
   // An "edit"-kind leaf (navButton-like) SELECTS without a caret on single click, so it
   // becomes draggable and doesn't jump into text edit; other leaves select normally.
@@ -5849,8 +5870,22 @@ section("select-first / progressive drill");
   ok("Shift/Cmd click multi-selects the LEAF element (not canvasTopBlock), seeded from the single selection", /if \(e\.shiftKey \|\| e\.metaKey\) \{[\s\S]*?var node = levels\.length \? levels\[leafSelectIndex\(levels\)\]\.node : null;[\s\S]*?if \(!multiSel\.length && selection && selection\.block && selection\.block !== node\.__block\) multiSel\.push\(selection\.block\);[\s\S]*?toggleMulti\(node\.__block\)/.test(t));
   ok("multi-select no longer keys off canvasTopBlock (would collapse siblings to the container)", !/if \(e\.shiftKey \|\| e\.metaKey\) \{\s*\n\s*var node = canvasTopBlock/.test(t));
   ok("a 2+ multi-selection strips the stray single is-selected highlight", /if \(multiSel\.length >= 2\) Array\.prototype\.forEach\.call\(world\.querySelectorAll\("\.is-selected"\)/.test(t));
-  ok("Escape steps OUT one drill level (rule 3)", /twoStateText\(\) && drill\.levels && drill\.index > 0[\s\S]*?drill\.index--; applyDrillLevel/.test(t));
-  ok("a non-drill setSelection resets the drill chain", /if \(!applyingDrill\) resetDrill\(\)/.test(t));
+  // arch-P3-07: the chain rules are src/editor/selection.js now, so these run them.
+  ok("Escape steps OUT one drill level (rule 3)", (function () {
+    var SEL = require(path.join(ROOT, "src/editor/selection.js"));
+    var chain = { levels: [{ node: "a" }, { node: "b" }, { node: "c" }], index: 2 };
+    var wired = /twoStateText\(\) && SEL\.escapeStep\(drill\) != null/.test(t) &&
+      /drill\.index = SEL\.escapeStep\(drill\); applyDrillLevel/.test(t);
+    return wired && SEL.escapeStep(chain) === 1 &&
+      SEL.escapeStep({ levels: chain.levels, index: 0 }) === null &&   // at the top -> deselect instead
+      SEL.escapeStep(SEL.emptyDrill()) === null;
+  })());
+  ok("a non-drill setSelection resets the drill chain", (function () {
+    var SEL = require(path.join(ROOT, "src/editor/selection.js"));
+    return SEL.resetsDrill(false) === true && SEL.resetsDrill(true) === false &&
+      /if \(SEL\.resetsDrill\(applyingDrill\)\) resetDrill\(\)/.test(t) &&
+      SEL.emptyDrill().index === -1 && SEL.emptyDrill().levels === null;
+  })());
   // isTextTarget must NOT count a checkbox/radio input as a text target, else clicking
   // one bails the drill handler (no select) AND the dragstart guard prevents the drag,
   // leaving the block stuck ("can't be picked up"). Only text-ENTRY inputs are text targets.
@@ -6313,7 +6348,7 @@ section("card deck block");
   ok("cardDeck fill switches per-mode", /--cd-fill-dark/.test(cd) && /--cd-fill-light/.test(cd));
   // registration: container-classifier treats it as a "block"; TWO_LEVEL; Layout palette
   ok("cardDeck is a container 'block' in the selection classifier", /block\.type === "cardDeck" \|\| block\.type === "courseNav"/.test(e));
-  ok("cardDeck is a two-level type", /cardReveal: 1, cardDeck: 1/.test(e));
+  ok("cardDeck is a two-level type", require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("cardDeck"));
   ok("cardDeck has a Layout palette entry", /label: "Card Deck \(carousel\)"[\s\S]*?type: "cardDeck", items:/.test(e));
   ok("block inspector dispatches cardDeck -> two-level shell (renderCardDeckInspector)", /block\.type === "cardDeck"\) \{ renderBlockTwoLevel\(node, "Card deck", CONTENT_DECL, renderCardDeckInspector\); return; \}/.test(e));
   ok("renderCardDeckInspector exists + reuses repeatedList + patternControls", /function renderCardDeckInspector\(node\)/.test(e) && /repeatedList\(inspector, "Cards"/.test(e) && /patternControls\(block, refresh\)/.test(e.slice(e.indexOf("function renderCardDeckInspector"))));
@@ -7601,7 +7636,15 @@ section("native-scroll pan (#151 lever 1)");
   ok("native zoom uses a CSS transition on the transform (compositor scales the cached layer)",
     /function startZoom\(\)[\s\S]*?world\.style\.transition = "transform " \+ _zoomDur \+ "ms linear";[\s\S]*?world\.style\.transform = "translate\(/.test(e));
   ok("zoom bakes to a crisp scale-only transform + folds the transient translate into scroll (no jump)",
-    /function bakeZoom\(z, a\)[\s\S]*?view\.x = SCROLL_PAD - \(sl - tx\)[\s\S]*?applyView\(\)/.test(e));
+    /function bakeZoom\(z, a\)[\s\S]*?CV\.bakeView\(SCROLL_PAD, \{ left: sl, top: st \}, t\)[\s\S]*?applyView\(\)/.test(e) &&
+    (function () {
+      // arch-P3-07: the fold itself, exercised. A gesture that returns to its base leaves scroll
+      // untouched; otherwise the translate comes back out of the scroll offset exactly.
+      var CV = require(path.join(ROOT, "src/editor/canvas-view.js"));
+      var same = CV.bakeView(600, { left: 100, top: 50 }, CV.zoomTranslate(1, 1, { wx: 400, wy: 300 }));
+      var moved = CV.bakeView(600, { left: 100, top: 50 }, CV.zoomTranslate(1, 0.5, { wx: 400, wy: 300 }));
+      return same.x === 500 && same.y === 550 && moved.x === 500 + 200 && moved.y === 550 + 150;
+    })());
   ok("trackpad zoom sensitivity bumped (ZOOM_SENS raised from 0.004) + live tuning hook",
     /var ZOOM_SENS = 0\.00[5-9]\d?;/.test(e) && /window\.__zoomTune = function/.test(e));
   ok("compositor zoom uses linear easing + a single tight settle (no double-phase)",
@@ -8580,7 +8623,13 @@ section("UI kit seam");
   ok("#160 depth-pure decls (CONTENT_PURE_DECL / IMAGE_PURE_DECL / ACTIONS_ONLY_DECL)", /var CONTENT_PURE_DECL = \{ fill: false, stroke: false, radius: false, pureContent: true \};/.test(e) && /var IMAGE_PURE_DECL = \{ fill: false, stroke: true, radius: false, pureContent: true \};/.test(e) && /var ACTIONS_ONLY_DECL = \{ align: false, valign: false, width: false, padding: false, gap: false, spacing: false, fill: false, stroke: false, radius: false, actions: true \};/.test(e));
   ok("layer breadcrumb: page + container ancestry, each crumb selects that layer", /function blockAncestry\(block\)/.test(e) && /function renderLayerCrumbs\(block, label\)/.test(e) && /kind: "page"/.test(e));
   ok("container actions wired to real ops (move/duplicate/delete)", /function blockChromeHandlers[\s\S]{0,200}moveBlock\(block, -1\)[\s\S]{0,200}duplicateBlock\(block\)[\s\S]{0,120}deleteBlockByRef\(block\)/.test(e));
-  ok("enteredBlock content-level state + exit-on-reselect", /var enteredBlock = null;/.test(e) && /if \(enteredBlock && selection\.block !== enteredBlock\) enteredBlock = null;/.test(e));
+  ok("enteredBlock content-level state + exit-on-reselect", (function () {
+    var SEL = require(path.join(ROOT, "src/editor/selection.js"));
+    var b1 = { type: "frame" }, b2 = { type: "image" };
+    return /var enteredBlock = null;/.test(e) && /if \(SEL\.exitsEnteredBlock\(enteredBlock, selection\.block\)\) enteredBlock = null;/.test(e) &&
+      SEL.exitsEnteredBlock(b1, b2) === true && SEL.exitsEnteredBlock(b1, b1) === false &&
+      SEL.exitsEnteredBlock(null, b2) === false && SEL.exitsEnteredBlock(b1, null) === true;
+  })());
   ok("hotspot asset: handle hidden (internal ref not author-facing)", /var isAssetSrc = typeof curScreen\.visual === "string" && curScreen\.visual\.indexOf\("asset:"\) === 0;/.test(e)); // #216: base = current screen visual
   // Ticket 6 (2/2) — sequence steps on repeatedList + the rowExtras extension.
   ok("repeatedList supports optional compact rowExtras (icons between field + trash)", /if \(opts\.rowExtras\) \{[\s\S]{0,220}row\.appendChild\(n\)/.test(e) && /row\.appendChild\(grip\); row\.appendChild\(field\);/.test(e));
@@ -12063,8 +12112,16 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   var idx = src("index.html");
   var courseCss = src("src/course.css");
   ok("grid mode is a localStorage VIEW pref (GRID_KEY)", /GRID_KEY\s*=\s*"authoring\.gridMode"/.test(ed));
-  ok("cycle order off->thirds->quarters->columns->fine", /GRID_MODES\s*=\s*\[\s*"off",\s*"thirds",\s*"quarters",\s*"columns",\s*"fine"\s*\]/.test(ed));
-  ok("cycleGrid wraps modulo the mode list", /gridMode\s*=\s*GRID_MODES\[\(GRID_MODES\.indexOf\(gridMode\)\s*\+\s*1\)\s*%\s*GRID_MODES\.length\]/.test(ed));
+  // arch-P3-07: the cycle is src/editor/canvas-view.js now.
+  ok("cycle order off->thirds->quarters->columns->fine",
+    require(path.join(ROOT, "src/editor/canvas-view.js")).GRID_MODES.join(",") === "off,thirds,quarters,columns,fine");
+  ok("cycleGrid wraps modulo the mode list", (function () {
+    var CV = require(path.join(ROOT, "src/editor/canvas-view.js"));
+    var seen = [], m = "off";
+    for (var i = 0; i < 6; i++) { m = CV.nextGridMode(m); seen.push(m); }
+    return seen.join(",") === "thirds,quarters,columns,fine,off,thirds" &&
+      CV.readGridMode("nonsense") === "off" && CV.readGridMode(null) === "off" && CV.readGridMode("fine") === "fine";
+  })());
   ok("overlay seeded on the ACTIVE page only", /i === currentPage && gridMode !== "off"\) frame\.appendChild\(makeGridOverlay\(\)\)/.test(ed));
   ok("active-page change re-places the overlay", /function setActivePage[\s\S]*refreshGridOverlay\(\);/.test(ed));
   ok("grid-toggle button present with an offline Lucide glyph", /id="grid-toggle"[^>]*data-lucide="grid-2x2"/.test(idx));
@@ -15627,6 +15684,96 @@ section("arch-P3-06 tour board layout");
     var t = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     return !/document\.[A-Za-z$_]+\s*\(/.test(t) && !/\bDate\.now|Math\.random/.test(t);
   }));
+})();
+
+// ---- arch-P3-07: the canvas view maths + the shipped debug probe ----------
+// Fit, focus and anchored zoom are four formulas that decide what the author sees. They had no
+// test, and they are the kind that go wrong quietly: an off-by-one on a pad, a label counted
+// twice, a clamp on the wrong side. Nothing throws; the canvas just sits slightly wrong.
+section("arch-P3-07 canvas view");
+(function () {
+  var CV = require(path.join(ROOT, "src/editor/canvas-view.js"));
+  var e = src("src/editor.js");
+  var VP = { width: 1000, height: 800 };
+
+  // ---- fitting ----
+  ok("a fit centres its target in the viewport", (function () {
+    var v = CV.fitRect(VP, { x: 0, y: 0, w: 500, h: 400 }, 0);
+    return v.zoom === 1 && v.x === 250 && v.y === 200;
+  })());
+  ok("a fit offsets by the target's own origin, so an off-origin rect still lands centred", (function () {
+    var v = CV.fitRect(VP, { x: 100, y: 50, w: 500, h: 400 }, 0);
+    return v.x === 250 - 100 && v.y === 200 - 50;
+  })());
+  ok("the tighter of the two axes decides the zoom", (function () {
+    var wide = CV.fitRect(VP, { x: 0, y: 0, w: 5000, h: 400 }, 0);
+    var tall = CV.fitRect(VP, { x: 0, y: 0, w: 500, h: 4000 }, 0);
+    return wide.zoom === 0.2 && tall.zoom === 0.2;
+  })());
+  ok("no fit ever magnifies past 1:1", CV.fitRect(VP, { x: 0, y: 0, w: 10, h: 10 }, 0).zoom === 1 &&
+    CV.focusRect(VP, { x: 0, y: 0, w: 10, h: 10 }, 0).zoom === 1);
+  ok("a colossal board still fits, down to the 5% floor",
+    CV.fitWorld(VP, { w: 1e6, h: 1e6 }, 0, 0).zoom === CV.ZOOM.MIN);
+  ok("the board fit accounts for the frame label in its ZOOM but offsets by half of it vertically", (function () {
+    // The asymmetry is load-bearing: it is what keeps a fitted board optically centred rather
+    // than mathematically centred and visually low.
+    var withLabel = CV.fitWorld(VP, { w: 2000, h: 1600 }, 400, 0);
+    var without = CV.fitWorld(VP, { w: 2000, h: 1600 }, 0, 0);
+    var zoomedForLabel = withLabel.zoom === 800 / 2000 && without.zoom === 800 / 1600;
+    var centredOptically = withLabel.y === (800 - 1600 * withLabel.zoom) / 2 + 400 * withLabel.zoom * 0.5;
+    var centredMathematically = withLabel.y === (800 - 1600 * withLabel.zoom) / 2;
+    return zoomedForLabel && centredOptically && !centredMathematically;
+  })());
+  ok("focus frames a page with the same width allowance as a fit, but more vertical room", (function () {
+    // 140 horizontal either way (a fit's 70 on each side); 180 vertical against a fit's 140, so a
+    // height-bound page focuses slightly smaller -- the extra room is the label and frame chrome.
+    var focus = CV.focusRect(VP, { x: 0, y: 0, w: 900, h: 700 }, 0);
+    var fit = CV.fitRect(VP, { x: 0, y: 0, w: 900, h: 700 });
+    var wideFocus = CV.focusRect({ width: 1000, height: 4000 }, { x: 0, y: 0, w: 900, h: 700 }, 0);
+    var wideFit = CV.fitRect({ width: 1000, height: 4000 }, { x: 0, y: 0, w: 900, h: 700 });
+    return focus.zoom < fit.zoom && wideFocus.zoom === wideFit.zoom;
+  })());
+  ok("focus centres the frame, allowing for the label above it", (function () {
+    var v = CV.focusRect(VP, { x: 200, y: 100, w: 400, h: 300 }, 30);
+    return v.x === 500 - (200 + 200) * v.zoom && v.y === 400 - (100 + 30 + 150) * v.zoom;
+  })());
+
+  // ---- anchored zoom ----
+  ok("a zoom that returns to its base translates by nothing", (function () {
+    var t = CV.zoomTranslate(1, 1, { wx: 400, wy: 300 });
+    return t.tx === 0 && t.ty === 0;
+  })());
+  ok("zooming out moves the world with the anchor, proportionally", (function () {
+    var t = CV.zoomTranslate(1, 0.5, { wx: 400, wy: 300 });
+    return t.tx === 200 && t.ty === 150;
+  })());
+  ok("no anchor means no translation, never a NaN", (function () {
+    var t = CV.zoomTranslate(1, 0.5, null);
+    return t.tx === 0 && t.ty === 0;
+  })());
+  ok("baking folds the translate back out of the scroll offsets", (function () {
+    var baked = CV.bakeView(600, { left: 100, top: 50 }, { tx: 200, ty: 150 });
+    return baked.x === 600 - (100 - 200) && baked.y === 600 - (50 - 150);
+  })());
+
+  // ---- the fit-button cycle ----
+  ok("the first click lands on page, then chapter, then the whole board", (function () {
+    var m = 2, seen = [];
+    for (var i = 0; i < 4; i++) { m = CV.nextFitMode(m); seen.push(CV.fitModeName(m)); }
+    return seen.join(",") === "page,chapter,world,page";
+  })());
+
+  // ---- the shipped debug probe ----
+  // editor.js carried a probe that MONKEY-PATCHED Element.prototype.setAttribute for every element
+  // on the page and logged to console.warn, under a banner reading "UNCOMMITTED, delete once
+  // caught". It shipped in every build since the repo went public. It is gone; this keeps it gone.
+  ok("no debug probe ships in the editor", !/vProbe|__vPatched/.test(e));
+  ok("nothing in src/ patches a DOM prototype", (function () {
+    var files = ["src/editor.js", "src/render.js", "src/runtime.js", "src/persist.js", "src/export.js"];
+    return files.every(function (f) {
+      return !/(Element|Node|HTMLElement)\.prototype\.[A-Za-z$_]+\s*=/.test(src(f));
+    });
+  })());
 })();
 
 // ---- arch-P2-04: the slice ratchet ----------------------------------------
