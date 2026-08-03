@@ -2233,7 +2233,8 @@ section("platform-pivot 03 doc routes");
 // ---- #81: in-app Help guide markdown renderer -----------------------------
 section("#81 Help markdown renderer");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07: the in-app guide moved to src/editor/help.js.
+  var t = src("src/editor/help.js");
   var m = t.match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
   if (!m) { ok("locate @md fence", false); return; }
   var g = new Function(m[1] + "\nreturn { mdToHtml: mdToHtml };")();
@@ -2287,15 +2288,17 @@ section("#81 Help markdown renderer");
 
 // WIRING: broken figure assets degrade gracefully (impure onerror wiring, not the pure renderer)
 (function () {
-  var ed = src("src/editor.js");
+  var ed = src("src/editor/help.js");   // arch-P3b-07
   ok("#25 openHelpModal wires figure onerror -> --missing", /doc-figure__img[\s\S]{0,220}addEventListener\("error"[\s\S]{0,120}doc-figure--missing/.test(ed));
 })();
 
 // WIRING: the Help button opens the in-app modal, not a (no-op) new tab.
 (function () {
-  var ed = src("src/editor.js");
+  // arch-P3b-07: the guide moved to src/editor/help.js; the stale-window.open guard still reads
+  // editor.js, because that is where the regression it guards against would come back.
+  var ed = src("src/editor/help.js"), e = src("src/editor.js");
   ok("#81 help-btn wired to openHelpModal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(ed));
-  ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
+  ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1 && e.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
   ok("#81 help modal fetches the guide", /fetch\("docs\/USER-GUIDE\.md"/.test(ed));
 })();
 
@@ -2304,7 +2307,7 @@ section("#81 Help markdown renderer");
 // the guide's own heading IDs, so nav + scroll-spy track the content and never drift.
 section("#8 docs reader (TOC + search)");
 (function () {
-  var ed = src("src/editor.js");
+  var ed = src("src/editor/help.js");   // arch-P3b-07
   ok("#8 reader builds the two-pane split (nav + reading pane)", /modal-box--docs/.test(ed) && /docs-split/.test(ed) && /docs-nav/.test(ed));
   // uio-F06 (OVL-21) RETARGETED: the guide's own search box is retired. It was a third search
   // field over a third index; guide sections now live in the one Cmd-K index. The TOC stays,
@@ -2494,7 +2497,7 @@ section("#28 animated-WebP muxer + motion");
 // WIRING: reduced-motion swaps a motion figure to its poster still (impure docs-panel wiring)
 (function () {
   var ed = src("src/editor.js");
-  ok("#28 openHelpModal swaps to poster under prefers-reduced-motion", /prefers-reduced-motion[\s\S]{0,220}data-poster[\s\S]{0,80}img\.src\s*=\s*img\.getAttribute\("data-poster"\)/.test(ed) || /reduce\s*&&\s*img\.getAttribute\("data-poster"\)[\s\S]{0,60}img\.src/.test(ed));
+  ok("#28 openHelpModal swaps to poster under prefers-reduced-motion", /prefers-reduced-motion[\s\S]{0,220}data-poster[\s\S]{0,80}img\.src\s*=\s*img\.getAttribute\("data-poster"\)/.test(src("src/editor/help.js")) || /reduce\s*&&\s*img\.getAttribute\("data-poster"\)[\s\S]{0,60}img\.src/.test(src("src/editor/help.js")));
 })();
 
 // ---- #29: in-editor annotation overlay (capture-only) ---------------------------------
@@ -7331,7 +7334,7 @@ section("google fonts + arial");
   // in-app Help: a toolbar button opens the User Guide (#81 — in-app modal, not a
   // new-tab window.open that no-ops in the desktop shell).
   ok("toolbar has a Help button", /id="help-btn"/.test(src("index.html")));
-  ok("Help opens the in-app guide modal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(e));
+  ok("Help opens the in-app guide modal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(src("src/editor/help.js")));
   ok("fetch is overridable for tests + air-gap note in the UI", /var doFetch = window\.__fontFetch \|\| window\.fetch/.test(e) && /downloaded and EMBEDDED now/.test(e));
 })();
 
@@ -12013,7 +12016,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   ok("generic modal prose no longer overrides the help system", /\.modal-box:not\(\.modal-box--docs\) p \{/.test(css) && !/^\.modal-box p \{/m.test(css));
 
   // --- pure: the renderer's share of the help system ----------------------------------
-  var t = e.match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
+  var t = src("src/editor/help.js").match(/\/\* @md-start \*\/([\s\S]*?)\/\* @md-end \*\//);
   if (!t) { ok("locate @md fence", false); return; }
   var md = new Function(t[1] + "\nreturn mdToHtml;")();
   ok("a callout is toned by the label the author already writes",
