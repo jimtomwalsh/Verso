@@ -9930,107 +9930,9 @@
   // so you can FEEL the difference; __wc('transform') restores it. Console-only helper.
   window.__wc = function (v) { if (world) world.style.willChange = v || "auto"; return world && (world.style.willChange || "(from CSS: transform)"); };
 
-  window.addEventListener("keydown", function (e) {
-    // Perf HUD toggle. Match on e.code (physical key) so macOS Option-mangled characters
-    // (Option+Shift+P types a special char, breaking an e.key match) never break it.
-    // Cmd/Ctrl+Shift+F (F = FPS) is the primary; Option+Shift+P kept as a fallback.
-    if (((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === "KeyF") ||
-        (e.altKey && e.shiftKey && e.code === "KeyP")) { e.preventDefault(); togglePerfHud(); return; }
-    if (e.code === "Space" && !isTextTarget(e.target)) { spaceHeld = true; canvas.classList.add("is-pannable"); e.preventDefault(); }
+  // arch-P3b-07: the global keyboard map moved to editor/shortcuts.js -- one file that says what
+  // every key does, and defers to whichever mode owns the key it is holding.
 
-    var isZ = e.key === "z" || e.key === "Z";
-    var isY = e.key === "y" || e.key === "Y";
-    var meta = e.metaKey || e.ctrlKey;
-    if (meta && !e.shiftKey && (e.key === "f" || e.key === "F")) { e.preventDefault(); openFindReplace(); return; } // Cmd/Ctrl+F = find & replace
-    if (meta && e.shiftKey && (e.key === "g" || e.key === "G") && !isTextTarget(e.target) &&
-        selection.type === "block" && selection.block && selection.block.type === "group") {
-      e.preventDefault(); ungroupBlock(selection.block); return; // Cmd+Shift+G = ungroup
-    }
-    if (meta && (e.key === "g" || e.key === "G") && multiSel.length >= 2 && !isTextTarget(e.target)) {
-      e.preventDefault(); groupMulti(); return;
-    }
-    if (meta && isZ) {
-      e.preventDefault();
-      if (document.activeElement && isTextTarget(document.activeElement)) {
-        document.activeElement.blur();
-      }
-      if (e.shiftKey) {
-        redo();
-      } else {
-        undo();
-      }
-    } else if (meta && isY) {
-      e.preventDefault();
-      if (document.activeElement && isTextTarget(document.activeElement)) {
-        document.activeElement.blur();
-      }
-      redo();
-    } else if (meta && (e.key === "=" || e.key === "+")) {
-      e.preventDefault();
-      zoomIn();
-    } else if (meta && e.key === "-") {
-      e.preventDefault();
-      zoomOut();
-    } else if (meta && e.key === "0") {
-      e.preventDefault();
-      fitAll();
-    } else if (meta && (e.key === "a" || e.key === "A") && !isTextTarget(e.target)) {
-      e.preventDefault();
-      // Select-first mode: a SELECTED (not-editing) text field -> enter edit + select ALL
-      // its text (what you expect in a box), NOT select-all-blocks. Default mode keeps the
-      // text contenteditable so isTextTarget already routes Cmd+A to the native select-all.
-      if (selection.type === "field" && selection.node && selection.node.getAttribute("data-edit") != null && selection.node.getAttribute("contenteditable") !== "true") {
-        enterTextEdit(selection.node);
-        try { var r = document.createRange(); r.selectNodeContents(selection.node); var sa = window.getSelection(); sa.removeAllRanges(); sa.addRange(r); } catch (_) {}
-      } else {
-        selectAllOnPage();
-      }
-    } else if (meta && (e.key === "d" || e.key === "D") && !isTextTarget(e.target)) {
-      e.preventDefault(); duplicateSelection();
-    } else if (meta && (e.key === "c" || e.key === "C") && !isTextTarget(e.target)) {
-      if (copySelection()) e.preventDefault();
-    } else if (meta && (e.key === "v" || e.key === "V") && !isTextTarget(e.target)) {
-      // Cmd+V pastes as-is; Cmd+Shift+V pastes WITHOUT formatting (inherits theme/target).
-      if (pasteClipboard(e.shiftKey)) e.preventDefault();
-    } else if (meta && (e.key === "p" || e.key === "P") && !isTextTarget(e.target)) {
-      e.preventDefault(); enterDemo(); // Cmd+P = open preview
-    } else if (meta && e.key === ",") {
-      // uio-F06 keyboard contract. Cmd-, opens Settings where you left it; Alt+Cmd-, opens the
-      // settings for what is selected -- which IS the inspector, since the inspector holds the
-      // sheet's Block scope. So the modified form puts the sheet away and hands the dock back.
-      e.preventDefault();
-      if (e.altKey) openSelectionSettings(); else openSettingsModal();
-    } else if (meta && (e.key === "k" || e.key === "K") && !isTextTarget(e.target)) {
-      e.preventDefault(); openQuickJump(); // the one index: settings, actions, guide, pages, blocks
-    } else if (meta && e.key === "\\" && !isTextTarget(e.target)) {
-      e.preventDefault(); togglePanels(); // Cmd+\ = hide/show side panels (maximise canvas)
-    } else if (meta && e.code === "Digit1") {
-      e.preventDefault(); zoomTo100();
-    } else if (!meta && e.shiftKey && e.code === "Digit1" && !isTextTarget(e.target)) {
-      e.preventDefault(); fitAll();
-    } else if (!meta && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && !isTextTarget(e.target) &&
-               selection.block && (selection.type === "block" || selection.type === "field" || selection.type === "embed" || selection.type === "navButton")) {
-      e.preventDefault(); moveBlock(selection.block, e.key === "ArrowUp" ? -1 : 1);
-    } else if (e.key === "." && !meta && !isTextTarget(e.target)) {
-      e.preventDefault();
-      fitSelection();
-    } else if ((e.key === "c" || e.key === "C") && !meta && !e.shiftKey && !isTextTarget(e.target) && !demoIsOpen()) {
-      e.preventDefault();
-      setCommentMode(!commentModeOn()); // §12: toggle canvas comment mode (demo has its own C)
-    } else if (e.key === "Escape" && !isTextTarget(e.target)) {
-      // §12: Escape first closes an open comment popover, then exits comment mode.
-      if (commentModeOn()) { if (openCommentIdNow()) { closeCommentPopover(); renderCommentPins(); } else setCommentMode(false); return; }
-      if (multiSel.length || multiSelPages.length) { clearAllMulti(); renderStructure(); refreshCanvasSelection(); }
-      else if (twoStateText() && SEL.escapeStep(drill) != null) {
-        // §74 rule 3: Escape steps OUT one drill level (block -> columns -> ... ),
-        // clearing only after the outermost level.
-        drill.index = SEL.escapeStep(drill); applyDrillLevel(drill.levels[drill.index]);
-      }
-      else clearSelection();
-    } else if ((e.key === "Delete" || e.key === "Backspace") && (!isTextTarget(e.target) || multiSel.length)) {
-      if (deleteSelection()) e.preventDefault();
-    }
-  });
   // arch-P3b-07: the selection verbs -- delete, duplicate, select-all, copy, paste and the
   // style-only pair -- moved to editor/clipboard.js. They share the hard part: what a block
   // DEPENDS on, and how those dependencies merge into the course you paste into.
@@ -11053,6 +10955,8 @@
     // arch-P3b-07i: the shared multi-select sets. The outliner mutates them in place; the two
     // setters are for the reassignments, because assigning to a provided getter is a TypeError.
     multiSel: function () { return multiSel; },
+    // arch-P3b-07: the progressive-drill chain the keyboard map steps through.
+    drill: function () { return drill; },
     multiSelPages: function () { return multiSelPages; },
     // arch-P3b-07i: the page the author last copied, offered as "Paste page after" in the tree.
     // arch-P3b-07: what the comment layer reads as the author works. The pin dropper runs in the
@@ -11083,6 +10987,22 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    applyDrillLevel: applyDrillLevel,
+    openCommentIdNow: openCommentIdNow,
+    fitSelection: fitSelection,
+    openQuickJump: openQuickJump,
+    openSelectionSettings: openSelectionSettings,
+    duplicateSelection: duplicateSelection,
+    selectAllOnPage: selectAllOnPage,
+    enterTextEdit: enterTextEdit,
+    zoomOut: zoomOut,
+    zoomIn: zoomIn,
+    togglePerfHud: togglePerfHud,
+    commentModeOn: commentModeOn,
+    setCommentMode: setCommentMode,
+    // arch-P3b-07: the keyboard map arms space-to-pan; the pan handler here reads it.
+    setSpaceHeld: function (v) { spaceHeld = v; },
+    SEL: window.VersoSelection,
     currentDoc: currentDoc,
     insertLoc: insertLoc,
     eachCourseNav: eachCourseNav,
@@ -11419,6 +11339,7 @@
   window.VersoComments.install(VE);   // review comments and the presence chrome
   window.VersoOutliner.install(VE);   // the document seen as a list
   window.VersoClipboard.install(VE);   // the verbs that act on a selection
+  window.VersoShortcuts.install(VE);   // one place that says what every key does
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has

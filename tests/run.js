@@ -634,6 +634,7 @@ section("#66 storage seam");
 // real serialisation -- instead of asserting that editor.js contains a particular line of text.
 section("arch-P3-01 editor storage");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var mem = STORAGE.makeMemoryAdapter();
   var store = STORAGE.create({ storage: mem.storage, adapter: mem, injected: function () { return null; }, hoist: function () {} });
 
@@ -2950,6 +2951,7 @@ section("editor-rework canvas geometry");
 // ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
 section("product-rail ProductsStore");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   // The REAL browser adapter (arch-P3-01) over an isolated store, so this exercises what ships.
   var mem = STORAGE.makeMemoryAdapter();
   ok("readProducts is null before any write (no stray default)", mem.readProducts() === null);
@@ -4911,7 +4913,8 @@ section("comment mode (canvas)");
   })());
   // mode bails: drill + C shortcut
   ok("drill handler bails in comment mode", /if \(interactMode \|\| commentModeOn\(\)\) return;/.test(src("src/editor.js")));
-  ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentModeOn\(\)\)/.test(src("src/editor.js")));
+  // arch-P3b-07: the keyboard map moved to src/editor/shortcuts.js.
+  ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentModeOn\(\)\)/.test(src("src/editor/shortcuts.js")));
   // export-strip: comment pins/store are editor.js chrome only — render.js knows nothing
   var r = src("src/render.js");
   ok("render.js has no comment/pin code", r.indexOf("comment") === -1 && r.indexOf("comment-pin") === -1 && r.indexOf("doc.comments") === -1);
@@ -4950,7 +4953,7 @@ section("comment mode (preview)");
   // preview drop: block/page only (bails on a null anchor), shared store
   ok("preview drop uses the shared store + skips null anchors", /if \(!demoCommentMode \|\| e\.button !== 0\) return;[\s\S]*?if \(!anchor\) return;[\s\S]*?doc\.comments\.push\(c\)/.test(t));
   // C routes to the demo in preview; canvas C is guarded by demo.hidden
-  ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentModeOn\(\)\)[\s\S]{0,80}demo has its own C/.test(src("src/editor.js")));
+  ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentModeOn\(\)\)[\s\S]{0,80}demo has its own C/.test(src("src/editor/shortcuts.js")));
   ok("preview C toggles demo comment mode", /setDemoCommentMode\(!demoCommentMode\)/.test(t));
   // exit re-projects onto the canvas surface (the round-trip)
   ok("exitDemo re-projects pins onto the canvas", /function exitDemo[\s\S]*?demo\.hidden = true;[\s\S]{0,140}renderCommentPins\(\)/.test(DEMO));
@@ -6349,6 +6352,7 @@ section("#169 pin-to-gutters preview");
 
 section("nav pill cleanup");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -6422,7 +6426,7 @@ section("select-first / progressive drill");
   ok("select-first is always on (toggle removed, hard-wired true)", /function twoStateText\(\) \{ return true; \}/.test(t) && !/segmentedLive\("Text editing"/.test(t));
   ok("enableEditing still branches on twoStateText()", /if \(twoStateText\(\)\) \{[\s\S]*?dblclick[\s\S]*?enterTextEdit/.test(t));
   ok("click-to-edit mode still sets contenteditable true", /\} else \{[\s\S]*?setAttribute\("contenteditable", "true"\)/.test(t));
-  ok("deleteSelection handles a selected (non-editing) text field", /selection\.type === "field"[\s\S]*?getAttribute\("contenteditable"\) !== "true"[\s\S]*?deleteBlockByRef/.test(t));
+  ok("deleteSelection handles a selected (non-editing) text field", /E\.selection\.type === "field"[\s\S]*?getAttribute\("contenteditable"\) !== "true"[\s\S]*?deleteBlockByRef/.test(src("src/editor/clipboard.js")));
   // drill engine
   ok("buildDrillLevels resolves outermost->innermost levels", /function buildDrillLevels\(target\)[\s\S]*?inner\.reverse\(\)/.test(t));
   ok("terminal editable field becomes an \"edit\" step (replaces the field-select)", /leaf\.kind === "field" && leaf\.node\.classList\.contains\("is-editable"\)[\s\S]*?levels\[levels\.length - 1\] = \{ kind: "edit"/.test(t));
@@ -6470,8 +6474,10 @@ section("select-first / progressive drill");
   ok("Escape steps OUT one drill level (rule 3)", (function () {
     var SEL = require(path.join(ROOT, "src/editor/selection.js"));
     var chain = { levels: [{ node: "a" }, { node: "b" }, { node: "c" }], index: 2 };
-    var wired = /twoStateText\(\) && SEL\.escapeStep\(drill\) != null/.test(t) &&
-      /drill\.index = SEL\.escapeStep\(drill\); applyDrillLevel/.test(t);
+    // arch-P3b-07: the Escape ladder is in the keyboard map now, reading the drill through E.
+    var K = src("src/editor/shortcuts.js");
+    var wired = /twoStateText\(\) && SEL\.escapeStep\(E\.drill\) != null/.test(K) &&
+      /E\.drill\.index = SEL\.escapeStep\(E\.drill\); applyDrillLevel/.test(K);
     return wired && SEL.escapeStep(chain) === 1 &&
       SEL.escapeStep({ levels: chain.levels, index: 0 }) === null &&   // at the top -> deselect instead
       SEL.escapeStep(SEL.emptyDrill()) === null;
@@ -6637,6 +6643,7 @@ section("inline links");
 // ---- Copy Style / Paste Style: lift presentation keys, never content -----------
 section("copy/paste style");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
@@ -6650,6 +6657,7 @@ section("copy/paste style");
 
 section("ctx copy/paste");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var CLIP = src("src/editor/clipboard.js");   // arch-P3b-07
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
@@ -6659,7 +6667,7 @@ section("ctx copy/paste");
   ok("empty-canvas menu offers Paste when the clipboard has blocks", /if \(E\.clipboard\.length\) \{ items\.push\(\{ label: "Paste", onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(ecm));
   // §84 paste-without-formatting
   ok("both menus offer Paste without formatting", (ecm.match(/label: "Paste without formatting", onClick: function \(\) \{ pasteClipboard\(true\); \}/g) || []).length >= 2);
-  ok("Cmd+Shift+V passes the strip flag to pasteClipboard", /if \(pasteClipboard\(e\.shiftKey\)\) e\.preventDefault\(\)/.test(e));
+  ok("Cmd+Shift+V passes the strip flag to pasteClipboard", /if \(pasteClipboard\(e\.shiftKey\)\) e\.preventDefault\(\)/.test(KEYS));
   ok("pasteClipboard strips formatting when asked", /clipboard\.map\(function \(b\) \{ var c = remintIds\(clone\(b\)\); if \(strip\) stripFormattingDeep\(c\)/.test(CLIP));
   // stripFormattingDeep: clears style/styleRef + inline formatting, keeps structural tags, skips embeds
   var body = CLIP.slice(CLIP.indexOf("function stripFormattingDeep("), CLIP.indexOf("window.__stripFormattingDeep"));
@@ -7217,6 +7225,7 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
@@ -7356,9 +7365,10 @@ section("list discoverability + spacing");
 // ---- multi-select + Delete removes BLOCKS, not a character (data-risk) --------
 section("multi-select delete");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var e = src("src/editor.js");
-  ok("Delete/Backspace fires deleteSelection when multiSel active", /\(e\.key === "Delete" \|\| e\.key === "Backspace"\) && \(!isTextTarget\(e\.target\) \|\| multiSel\.length\)/.test(e));
+  ok("Delete/Backspace fires deleteSelection when multiSel active", /\(e\.key === "Delete" \|\| e\.key === "Backspace"\) && \(!isTextTarget\(e\.target\) \|\| E\.multiSel\.length\)/.test(KEYS));
   ok("building a multi-selection blurs the caret", /function blurActiveText\(\)/.test(e) && /if \(E\.multiSel\.length\) blurActiveText\(\)/.test(OUT));
   ok("range-select also blurs the caret", /for \(var k = a; k <= z; k\+\+\) E\.multiSel\.push\([^)]*\);\s*\n\s*blurActiveText\(\)/.test(OUT));
 })();
@@ -12742,13 +12752,14 @@ section("uio-F06 command index (Cmd-K)");
 // ---- uio-F06: the palette + the keyboard contract --------------------------------
 section("uio-F06 palette wiring + keyboard contract");
 (function () {
+  var KEYS = src("src/editor/shortcuts.js");   // arch-P3b-07
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   // arch-P3b-07p: the palette overlay moved to src/editor/palette.js.
   var ep6 = src("src/editor/palette.js");
   var e = src("src/editor.js");
-  ok("Cmd-K opens the one palette", /meta && \(e\.key === "k" \|\| e\.key === "K"\)[\s\S]{0,120}openQuickJump\(\)/.test(e));
+  ok("Cmd-K opens the one palette", /meta && \(e\.key === "k" \|\| e\.key === "K"\)[\s\S]{0,120}openQuickJump\(\)/.test(KEYS));
   ok("Cmd-, opens Settings and Alt+Cmd-, opens the selection's settings",
-    /meta && e\.key === ","[\s\S]{0,600}if \(e\.altKey\) openSelectionSettings\(\); else openSettingsModal\(\);/.test(e));
+    /meta && e\.key === ","[\s\S]{0,600}if \(e\.altKey\) openSelectionSettings\(\); else openSettingsModal\(\);/.test(KEYS));
   ok("the selection's settings ARE the inspector, not a second surface",
     /function openSelectionSettings\(\)[\s\S]{0,500}closeSettingsModal\(\)[\s\S]{0,400}getElementById\("inspector"\)/.test(SS));
   ok("and it lands on the inspector's first control, not its tab strip",

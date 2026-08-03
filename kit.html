@@ -173,6 +173,8 @@
   <script src="src/editor/outliner.js"></script>
   <!-- arch-P3b-07 clipboard: window.VersoClipboard — delete, duplicate, select-all, copy, paste and the style-only pair, with the dependency collection and merge that stops a cross-course paste landing broken. Must precede editor.js. -->
   <script src="src/editor/clipboard.js"></script>
+  <!-- arch-P3b-07 shortcuts: window.VersoShortcuts — the one global keydown: what every key does, guarded so a key that means something while typing never steals a character, with Escape unwinding one surface at a time. Must precede editor.js. -->
+  <script src="src/editor/shortcuts.js"></script>
   <script src="src/editor.js"></script>
   <script src="kit-gallery.js"></script>
 </body>
