@@ -161,138 +161,30 @@
   var redoBtn = document.getElementById("redo-btn");
 
   // ---- Document Registry & Tabs ---------------------------------------------
-  var REGISTRY_KEY = "authoring.registry";
-  var ACTIVE_DOC_KEY = "authoring.activeDocId";
-  var OPEN_DOCS_KEY = "authoring.openDocIds";
-
-  // ---- Storage seam (#66) — the doc-registry Store behind a swappable adapter ----
-  // Phase-1 of the local-first re-home.
-  // Behaviour-preserving: the default 'browser' adapter is EXACTLY today's localStorage
-  // read/write, so at the 'browser' default (the only backend that exists yet) nothing
-  // changes. A future native-file adapter (#68) is injected as window.__storageAdapter
-  // and selected ONLY when authoring.storageBackend != 'browser' — so the registry
-  // read/write choke points route through one seam with zero call-site churn later.
-  var STORAGE_BACKEND_KEY = "authoring.storageBackend";
-  var browserRegistryAdapter = {
-    name: "browser",
-    readRegistry: function () { return localStorage.getItem(REGISTRY_KEY); },
-    writeRegistry: function (json) { return writeStore(localStorage, REGISTRY_KEY, json); }
-  };
-  // Pure selector (headless-tested): flag value + injected adapter -> chosen adapter.
-  // A flipped flag with NO injected adapter falls back to browser — never strands a save.
-  /* @store-seam-start */
-  function pickStorageAdapter(backend, injected, fallback) {
-    return (backend && backend !== "browser" && injected) ? injected : fallback;
-  }
-  /* @store-seam-end */
-  function storageBackend() { try { return localStorage.getItem(STORAGE_BACKEND_KEY) || "browser"; } catch (e) { return "browser"; } }
-  function registryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserRegistryAdapter); }
-
-  // ---- Library storage adapter (#18) — same seam/flag as the registry above, extended
-  // to the shared component library. The SAME injected window.__storageAdapter object
-  // carries both readRegistry/writeRegistry and readLibrary/writeLibrary once store-native.js
-  // (the 'file' backend) is present, so one flag flip moves both to disk together.
-  var LIBRARY_STORAGE_KEY = "authoring.library";
-  var browserLibraryAdapter = {
-    name: "browser",
-    readLibrary: function () { return localStorage.getItem(LIBRARY_STORAGE_KEY); },
-    writeLibrary: function (json) { return writeStore(localStorage, LIBRARY_STORAGE_KEY, json); }
-  };
-  function libraryAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserLibraryAdapter); }
-
-  // ---- Products storage adapter (Product Rail #1) — same seam/flag as the registry and
-  // library above. ProductsStore holds Product containers ({id,name,createdAt,groundTruthId})
-  // keyed by productId; a document only joins a Product when explicitly tagged via
-  // doc.meta.productId/stage (see docMatchesProductStage, @pure-recents fence) — untagged
-  // documents never touch this store and read/save through the registry exactly as today.
-  /* @products-adapter-start */
-  var PRODUCTS_STORAGE_KEY = "authoring.products";
-  var browserProductsAdapter = {
-    name: "browser",
-    readProducts: function () { return localStorage.getItem(PRODUCTS_STORAGE_KEY); },
-    writeProducts: function (json) { return writeStore(localStorage, PRODUCTS_STORAGE_KEY, json); }
-  };
-  /* @products-adapter-end */
-  function productsAdapter() { return pickStorageAdapter(storageBackend(), window.__storageAdapter, browserProductsAdapter); }
-
-  // ---- StorageBackend (platform-pivot 01/31 — EXPAND) -----------------------
-  // The single, highest seam the whole platform pivot introduces. It unifies the
-  // three storage choke points — the registry writer (saveRegistry), the low-level
-  // key/value writer (writeStore, for doc-session keys), and the media store
-  // (AssetStore) — behind ONE interface, so a future server-of-one backend can
-  // replace all three at once (below the HTTP storage API) with no call-site churn.
-  //
-  // EXPAND step of the storage-retarget wide refactor: this seam exists BESIDE the
-  // old form. The default impl is EXACTLY today's browser storage — the registry
-  // facet keeps the #66/#68 adapter swap (browser localStorage OR the injected
-  // 'file' adapter), the k/v facet is localStorage through the durable writeStore
-  // helper, and the media facet IS window.AssetStore (uncapped IndexedDB). Zero
-  // behaviour change; nothing points at a server yet. Do NOT flip storageBackend by
-  // hand — the cutover is a guarded migration (#68/#69).
-  //
-  // Scope: only the DOC-OF-RECORD's storage flows through here (registry, the
-  // active/open-doc session keys, media). Pure editor UI prefs (theme mode, grid,
-  // layout, view, tour) are deliberately NOT routed — they stay browser-local per
-  // client in every posture, so server mode never syncs one author's chrome onto
-  // another. Widening this seam past the doc-of-record is out of scope for EXPAND.
-  // PURE factory (DOM-free, all deps injected) so tests/run.js can exercise the
-  // three-facet routing headlessly. deps = { registryAdapter, writeStore, storage
-  // (a localStorage-shaped k/v), assetStore (a lazy () => the media store) }.
-  /* @storage-backend-start */
-  function makeStorageBackend(deps) {
-    return {
-      // reflects the live registry adapter ("browser" | "file")
-      get name() { return deps.registryAdapter().name; },
-      // --- registry (doc-of-record) — delegates to the existing adapter swap ---
-      readRegistry: function () { return deps.registryAdapter().readRegistry(); },
-      writeRegistry: function (json) { return deps.registryAdapter().writeRegistry(json); },
-      // --- low-level key/value (doc-session keys: active doc, open docs) ---
-      readKey: function (key) { try { return deps.storage.getItem(key); } catch (e) { return null; } },
-      writeKey: function (key, value) { return deps.writeStore(deps.storage, key, value); },
-      removeKey: function (key) { try { deps.storage.removeItem(key); return { ok: true }; } catch (e) { return { ok: false, error: e }; } },
-      // --- media (heavy assets) — IS the AssetStore (put/url/get/has/sweep) ---
-      get media() { return deps.assetStore(); }
-    };
-  }
-  /* @storage-backend-end */
-  var StorageBackend = makeStorageBackend({
-    registryAdapter: registryAdapter,
-    writeStore: writeStore,
-    storage: localStorage,
-    assetStore: function () { return window.AssetStore || null; }
-  });
+  // ---- Storage seam (#66/#68/#18, platform-pivot 01) -> src/editor/storage.js ----
+  // arch-P3-01: the keys, the adapter swap, the three-facet StorageBackend and the durable-write
+  // core moved out to a module with an interface a test can cross. Behaviour-preserving at the
+  // 'browser' default (which is every install today), with one fix the move exposed: an injected
+  // adapter now serves only the facets it actually implements, so the http backend can no longer
+  // swallow every library/products write into a catch. What stays HERE is the wiring plus the
+  // CHROME a write outcome drives -- the save-state chip, the red data-loss banner, the alert.
+  var Store = window.VersoStorage.create({ storage: localStorage });
+  var StorageBackend = Store.StorageBackend;
   window.StorageBackend = StorageBackend;
+  // The durable k/v writer, still the local name the publish/preset/history stores below call.
+  var writeStore = window.VersoStorage.writeStore;
+  function storageBackend() { return Store.backend(); }
+  function registryAdapter() { return Store.adapterFor("registry"); }
+  function libraryAdapter() { return Store.adapterFor("library"); }
+  function productsAdapter() { return Store.adapterFor("products"); }
 
   function getRegistry() {
-    try {
-      var r = StorageBackend.readRegistry();
-      if (r) return JSON.parse(r);
-    } catch (e) {}
-    var defaultRegistry = {};
-    defaultRegistry[window.SAMPLE_DOC.meta.code] = window.SAMPLE_DOC;
-    return defaultRegistry;
+    return Store.getRegistry(function () {
+      var defaultRegistry = {};
+      defaultRegistry[window.SAMPLE_DOC.meta.code] = window.SAMPLE_DOC;
+      return defaultRegistry;
+    });
   }
-  // ---- Save-state + durable-write core (XX: kill silent save failure) -------
-  // saveRegistry is the single choke point for every durable write (setDoc,
-  // saveActiveDoc, autosave, component saves...). A swallowed QuotaExceededError
-  // here is the #1 data-loss landmine: the write fails, the stale registry is
-  // faithfully restored next boot, and the author's latest work is gone with no
-  // signal. So: never swallow, classify quota, surface a visible save-state.
-  // // The two helpers below are PURE (DOM-free) so a headless smoke can exercise
-  // the quota-classification + write outcome without a browser. Do not add DOM
-  // or closure deps inside the pure fence marked below.
-  /* @pure-start */
-  function isQuotaExceeded(e) {
-    if (!e) return false;
-    return e.name === "QuotaExceededError" ||
-           e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
-           e.code === 22 || e.code === 1014;
-  }
-  function writeStore(storage, key, value) {
-    try { storage.setItem(key, value); return { ok: true }; }
-    catch (e) { return { ok: false, quota: isQuotaExceeded(e), error: e }; }
-  }
-  /* @pure-end */
 
   // #71 recents: last-edited / last-opened ordering for the file browser. PURE
   // (DOM-free, takes `now` as a param) so tests/run.js can exercise the comparator
@@ -580,49 +472,23 @@
   function savesSuppressed() {
     return !!(window.Migration && window.Migration.savesSuppressed && window.Migration.savesSuppressed());
   }
+  // The chrome half of the write choke point: the module does the media hoist, the serialise and
+  // the durable write and hands back an outcome; this turns that outcome into what the author
+  // sees. A swallowed QuotaExceededError is the #1 data-loss landmine (the write fails, the stale
+  // registry is faithfully restored next boot, and the day's work is gone with no signal), so
+  // every non-ok stage is LOUD.
   function saveRegistry(r) {
     if (savesSuppressed()) return false;
     setSaveState("saving");
-    // Reroute heavy htmlEmbed markup OUT of the doc JSON before it hits the
-    // ~5MB localStorage cap (the quota / data-loss bug). Raw pasted interaction
-    // HTML lives on block.html and used to serialise into the registry, so a few
-    // interactions overflowed the store on save -> "Storage full" + lost work.
-    // Hoist each raw block.html into AssetStore (IndexedDB, no cap) as an
-    // "asset:<id>" ref -- exactly the image reroute. Non-destructive: an un-
-    // hoistable block is LEFT as raw markup. Runs at the single write choke
-    // point so BOTH write paths (editor scheduleSave + persist.js autosave via
-    // saveActiveDoc) are covered. content-hashed put => idempotent across saves.
-    if (window.AssetStore) {
-      try {
-        Object.keys(r).forEach(function (id) {
-          var d = r[id];
-          if (!d) return;
-          // Drain inline base64 media (images / video / SVG / fonts) to the uncapped
-          // IndexedDB store BEFORE stringify. migrateAllAssets only runs on boot, so a
-          // doc imported AFTER boot (e.g. a 147MB course with 133MB of inline images)
-          // otherwise hits stringify -> localStorage's ~5MB cap -> "Storage full", the
-          // write fails, and the doc is LOST on reload before boot-migration can help.
-          // Hoisting here keeps the registry JSON small so it fits + persists.
-          // Idempotent + non-destructive (asset: refs and un-hoistable data: are left).
-          if (window.migrateDocMedia) window.migrateDocMedia(d, function (dataUrl) {
-            return window.AssetStore.put(dataUrl, {});
-          });
-          if (window.migrateDocEmbedHtml) window.migrateDocEmbedHtml(d, function (dataUrl) {
-            return window.AssetStore.put(dataUrl, { mime: "text/html" });
-          });
-        });
-      } catch (e) { if (window.console && console.warn) console.warn("[save] media hoist failed:", e); }
-    }
-    var json;
-    try { json = JSON.stringify(r); }
-    catch (e) {
+    var res = Store.saveRegistry(r);
+    if (res.ok) { setSaveState("saved"); if (typeof scheduleBackup === "function") scheduleBackup(); return true; }
+    if (res.stage === "suppressed") return false;
+    if (res.stage === "serialise") {
       setSaveState("failed", "Save failed: the document could not be serialised (" +
-        (e && e.message || e) + "). Export JSON now to avoid losing work.");
-      if (window.console && console.error) console.error("[save] serialise failed:", e);
+        (res.error && res.error.message || res.error) + "). Export JSON now to avoid losing work.");
+      if (window.console && console.error) console.error("[save] serialise failed:", res.error);
       return false;
     }
-    var res = StorageBackend.writeRegistry(json);
-    if (res.ok) { setSaveState("saved"); if (typeof scheduleBackup === "function") scheduleBackup(); return true; }
     setSaveState("failed", res.quota
       ? "Storage full - your latest changes are NOT saved in this browser. Click to export JSON now and avoid losing work."
       : "Save failed: " + (res.error && res.error.message || res.error) + ". Click to export JSON now.");
@@ -813,26 +679,10 @@
     if (window.console && console.error) console.error("[unhandled rejection]", e && e.reason);
     try { flushSave(); } catch (_) {}
   });
-  function getOpenDocIds() {
-    try {
-      var o = StorageBackend.readKey(OPEN_DOCS_KEY);
-      if (o) return JSON.parse(o);
-    } catch (e) {}
-    return [window.SAMPLE_DOC.meta.code];
-  }
-  function saveOpenDocIds(ids) {
-    try { StorageBackend.writeKey(OPEN_DOCS_KEY, JSON.stringify(ids)); } catch (e) {}
-  }
-  function getActiveDocId() {
-    try {
-      var a = StorageBackend.readKey(ACTIVE_DOC_KEY);
-      if (a) return JSON.parse(a);
-    } catch (e) {}
-    return window.SAMPLE_DOC.meta.code;
-  }
-  function saveActiveDocId(id) {
-    try { StorageBackend.writeKey(ACTIVE_DOC_KEY, JSON.stringify(id)); } catch (e) {}
-  }
+  function getOpenDocIds() { return Store.getOpenDocIds([window.SAMPLE_DOC.meta.code]); }
+  function saveOpenDocIds(ids) { Store.saveOpenDocIds(ids); }
+  function getActiveDocId() { return Store.getActiveDocId(window.SAMPLE_DOC.meta.code); }
+  function saveActiveDocId(id) { Store.saveActiveDocId(id); }
 
   // AAA: versioned doc-migration harness. Every load + import runs this so an
   // older saved course is UPGRADED to the current shape instead of crashing as
@@ -1366,15 +1216,9 @@
       }
     };
   }
-  function loadLibrary() {
-    var lib = { components: {} };
-    try { var raw = libraryAdapter().readLibrary(); if (raw) { var p = JSON.parse(raw); if (p && p.components) lib = p; } } catch (e) {}
-    if (!lib.components) lib.components = {};
-    if (!Object.keys(lib.components).length) seedDemoLibrary(lib);
-    return lib;
-  }
+  function loadLibrary() { return Store.loadLibrary(seedDemoLibrary); }
   window.LibraryStore = loadLibrary();
-  function saveLibrary() { try { libraryAdapter().writeLibrary(JSON.stringify(window.LibraryStore)); } catch (e) {} }
+  function saveLibrary() { Store.saveLibrary(window.LibraryStore); }
   function libComponents() { return (window.LibraryStore && window.LibraryStore.components) || {}; }
 
   // Product Rail #1 — ProductsStore: { [productId]: {id, name, createdAt, groundTruthId} }.
@@ -1383,13 +1227,12 @@
   // (meta.productId), so "Products & Variants" (model.js) is a real Product Rail example
   // out of the box — never overwrites a real, already-persisted store.
   function loadProducts() {
-    var prods = {};
-    try { var raw = productsAdapter().readProducts(); if (raw) { var p = JSON.parse(raw); if (p && typeof p === "object") prods = p; } } catch (e) {}
-    if (!Object.keys(prods).length) prods = { "prod-demo": { id: "prod-demo", name: "Sample Product Line", createdAt: 0 } };
-    return prods;
+    return Store.loadProducts(function () {
+      return { "prod-demo": { id: "prod-demo", name: "Sample Product Line", createdAt: 0 } };
+    });
   }
   window.ProductsStore = loadProducts();
-  function saveProducts() { try { productsAdapter().writeProducts(JSON.stringify(window.ProductsStore)); } catch (e) {} }
+  function saveProducts() { Store.saveProducts(window.ProductsStore); }
 
   // ---- Publish queue (Product Rail Epic 6, T1) — the persistent Publish-stage queue -----------
   // A single app-global queue (PublishQueue model, src/publish-queue.js), persisted through the
@@ -3507,9 +3350,7 @@
   // + showCourseMenu), so the picker is the one home for file management. storeLocationText survives
   // -- the picker footer reads it for the "where are my files" line.
   function storeLocationText() {
-    var backend = "browser";
-    try { backend = localStorage.getItem(STORAGE_BACKEND_KEY) || "browser"; } catch (_) {}
-    return backend === "file"
+    return storageBackend() === "file"
       ? "~/Library/Application Support/Verso/store"
       : "This browser (localStorage + IndexedDB)";
   }
@@ -25621,8 +25462,8 @@
     // The native store glue must be present (Swift bridge). Absent in a plain browser.
     var ns = opts.nativeStore || window.__nativeStore;
     if (!ns) return fail("precondition", "native file storage is not available on this build (rebuild the desktop app)");
-    var browserAdapter = opts.browserAdapter || browserRegistryAdapter;
-    var browserLibAdapter = opts.browserLibraryAdapter || browserLibraryAdapter;
+    var browserAdapter = opts.browserAdapter || Store.browserAdapter;
+    var browserLibAdapter = opts.browserLibraryAdapter || Store.browserAdapter;
     var putRegistry = opts.putRegistry || ns.putRegistry;
     var getRegistry = opts.getRegistry || ns.getRegistry;
     var putLibrary = opts.putLibrary || ns.putLibrary;
@@ -25697,7 +25538,10 @@
 
     // 5. FLIP the flag, then a controlled reload. Saves stay suppressed through it;
     // the fresh boot re-reads the on-disk registry (and library) and resets the guard.
-    var setFlag = opts.setFlag || function (vv) { localStorage.setItem(STORAGE_BACKEND_KEY, vv); };
+    // The ONE sanctioned write of the backend flag, and it happens here: after a verified backup
+    // of every course, with saves suppressed, and only once the registry (and the library) have
+    // been read BACK from disk and matched. Never flip it by hand -- that is the 2026-07-12 clobber.
+    var setFlag = opts.setFlag || function (vv) { Store.commitBackend(vv); };
     setFlag("file");
     log("flag flipped to file; reloading under the migrated store");
     await reload();

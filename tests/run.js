@@ -69,7 +69,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -83,12 +83,13 @@ section("syntax");
 });
 
 // ---- XX: durable-write core ----------------------------------------------
+// arch-P3-01: the durable-write core, the adapter swap and the StorageBackend all moved to
+// src/editor/storage.js, so these three sections call the shipping code instead of slicing
+// editor.js's text back into life through three separate fences.
+var STORAGE = require(path.join(ROOT, "src/editor/storage.js"));
 section("XX durable-write");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @pure-start \*\/([\s\S]*?)\/\* @pure-end \*\//);
-  if (!m) { ok("locate @pure fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { isQuotaExceeded: isQuotaExceeded, writeStore: writeStore };")();
+  var g = STORAGE;
   ok("QuotaExceededError name", g.isQuotaExceeded({ name: "QuotaExceededError" }) === true);
   ok("code 22", g.isQuotaExceeded({ code: 22 }) === true);
   ok("code 1014", g.isQuotaExceeded({ code: 1014 }) === true);
@@ -107,10 +108,7 @@ section("XX durable-write");
 // ---- #66: storage seam (registry adapter selection) ----------------------
 section("#66 storage seam");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @store-seam-start \*\/([\s\S]*?)\/\* @store-seam-end \*\//);
-  if (!m) { ok("locate @store-seam fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { pickStorageAdapter: pickStorageAdapter };")();
+  var g = STORAGE;
   var browser = { name: "browser" }, injected = { name: "file" };
   // Default backend is always the browser adapter -> behaviour-preserving.
   ok("default 'browser' -> browser adapter", g.pickStorageAdapter("browser", injected, browser) === browser);
@@ -120,6 +118,129 @@ section("#66 storage seam");
   ok("flag flipped + adapter injected -> injected", g.pickStorageAdapter("file", injected, browser) === injected);
   // ...but a flipped flag with no adapter present must NEVER strand a save.
   ok("flag flipped, no adapter -> browser fallback", g.pickStorageAdapter("file", null, browser) === browser);
+
+  // arch-P3-01, facet-aware selection. store-http.js implements the REGISTRY facet only. Under
+  // the all-or-nothing selector it also captured the library and the products store: every read
+  // called an undefined readLibrary, threw into a catch and returned the seeded demo library, and
+  // every save threw into a catch and vanished. Silent, total loss of the shared component
+  // library on the http backend. An injected adapter now serves only what it implements.
+  var full = { name: "file", readRegistry: f, writeRegistry: f, readLibrary: f, writeLibrary: f, readProducts: f, writeProducts: f };
+  var regOnly = { name: "http", readRegistry: f, writeRegistry: f };
+  function f() {}
+  var browserAll = g.makeBrowserAdapter({ getItem: function () { return null; }, setItem: function () {} });
+  ok("a full adapter serves every facet", ["registry", "library", "products"].every(function (facet) {
+    return g.pickFacetAdapter("file", full, browserAll, facet) === full;
+  }));
+  ok("a registry-only adapter serves the registry", g.pickFacetAdapter("http", regOnly, browserAll, "registry") === regOnly);
+  ok("a registry-only adapter does NOT swallow the library", g.pickFacetAdapter("http", regOnly, browserAll, "library") === browserAll);
+  ok("a registry-only adapter does NOT swallow the products store", g.pickFacetAdapter("http", regOnly, browserAll, "products") === browserAll);
+  ok("a half-implemented facet (read but no write) falls back too",
+    g.pickFacetAdapter("file", { name: "half", readRegistry: f, writeRegistry: f, readLibrary: f }, browserAll, "library") === browserAll);
+  ok("the browser default is never second-guessed", g.pickFacetAdapter("browser", full, browserAll, "library") === browserAll);
+})();
+
+// ---- arch-P3-01: the live store, exercised end to end on an in-memory backend ----
+// The seam's payoff. makeMemoryAdapter gives a complete storage stack with no browser, so the
+// suite now runs the code that ships -- the real adapter selection, the real durable write, the
+// real serialisation -- instead of asserting that editor.js contains a particular line of text.
+section("arch-P3-01 editor storage");
+(function () {
+  var mem = STORAGE.makeMemoryAdapter();
+  var store = STORAGE.create({ storage: mem.storage, adapter: mem, injected: function () { return null; }, hoist: function () {} });
+
+  // registry round-trip through the whole stack
+  ok("an empty store falls back to the caller's default", store.getRegistry(function () { return { seeded: 1 }; }).seeded === 1);
+  ok("no default supplied -> an empty registry, never a throw", Object.keys(store.getRegistry()).length === 0);
+  var reg = { "C-1": { meta: { code: "C-1", title: "First" }, pages: [] } };
+  ok("saveRegistry reports the write", store.saveRegistry(reg).ok === true);
+  ok("the registry round-trips through the adapter", store.getRegistry()["C-1"].meta.title === "First");
+  ok("it lands under the canonical key", typeof mem.data[STORAGE.KEYS.registry] === "string");
+  ok("a later read prefers the store over the default", store.getRegistry(function () { return { seeded: 1 }; })["C-1"].meta.code === "C-1");
+
+  // doc-session keys
+  store.saveOpenDocIds(["C-1", "C-2"]);
+  store.saveActiveDocId("C-2");
+  ok("open docs round-trip", store.getOpenDocIds([]).join(",") === "C-1,C-2");
+  ok("the active doc round-trips", store.getActiveDocId(null) === "C-2");
+  ok("an unset session key returns the caller's fallback", STORAGE.create({ storage: STORAGE.makeMemoryAdapter().storage }).getActiveDocId("C-9") === "C-9");
+
+  // library + products, seeded only when empty
+  var seeded = 0;
+  var lib = store.loadLibrary(function (l) { seeded++; l.components["demo"] = { name: "Demo" }; });
+  ok("an empty library is seeded by the caller", seeded === 1 && lib.components.demo.name === "Demo");
+  lib.components["real"] = { name: "Authored" };
+  store.saveLibrary(lib);
+  ok("a saved library is never re-seeded", store.loadLibrary(function () { seeded++; }).components.real.name === "Authored" && seeded === 1);
+  store.saveProducts({ "prod-a": { id: "prod-a", name: "Radar" } });
+  ok("products round-trip", store.loadProducts()["prod-a"].name === "Radar");
+  ok("an empty products store takes the caller's seed", STORAGE.create({ storage: STORAGE.makeMemoryAdapter().storage })
+    .loadProducts(function () { return { "prod-demo": { id: "prod-demo" } }; })["prod-demo"].id === "prod-demo");
+
+  // the write outcome is a VALUE -- the module never decides what the author sees
+  var full = STORAGE.create({
+    storage: { getItem: function () { return null; }, setItem: function () { var e = new Error("full"); e.name = "QuotaExceededError"; throw e; } },
+    hoist: function () {}
+  });
+  var quotaRes = full.saveRegistry({ "C-1": {} });
+  ok("a full store reports quota, not a throw", quotaRes.ok === false && quotaRes.quota === true && quotaRes.stage === "write");
+  var cyclic = {}; cyclic.self = cyclic;
+  var serRes = store.saveRegistry({ "C-1": cyclic });
+  ok("an unserialisable doc is reported as a serialise failure", serRes.ok === false && serRes.stage === "serialise" && !!serRes.error);
+  ok("the previous good registry is still on disk after a failed save", store.getRegistry()["C-1"].meta.title === "First");
+
+  // #69 the clobber guard: no path through the module may write while a migration is in flight
+  var frozen = STORAGE.makeMemoryAdapter();
+  var gated = STORAGE.create({ storage: frozen.storage, adapter: frozen, suppressed: function () { return true; }, hoist: function () {} });
+  var sup = gated.saveRegistry({ "C-9": {} });
+  ok("saveRegistry is a no-op while saves are suppressed", sup.ok === false && sup.stage === "suppressed");
+  ok("suppression leaves the store untouched", frozen.data[STORAGE.KEYS.registry] === undefined);
+
+  // the media hoist runs at the choke point, before serialisation, on every save
+  var hoisted = [];
+  var hoisting = STORAGE.create({ storage: STORAGE.makeMemoryAdapter().storage, hoist: function (r) { hoisted.push(Object.keys(r).join(",")); } });
+  hoisting.saveRegistry({ "C-1": {}, "C-2": {} });
+  ok("every save hoists heavy media out first", hoisted.length === 1 && hoisted[0] === "C-1,C-2");
+
+  // the backend flag: readable anywhere, written through exactly one function, and the whole
+  // stack follows it on the next read -- no re-boot, no cached adapter
+  var swap = STORAGE.makeMemoryAdapter();
+  var onDisk = { name: "file", readRegistry: function () { return '{"C-7":{"meta":{"code":"C-7"}}}'; }, writeRegistry: function () { return { ok: true }; } };
+  var swapping = STORAGE.create({ storage: swap.storage, adapter: swap, injected: function () { return onDisk; }, hoist: function () {} });
+  ok("an unset flag reads as the browser backend", swapping.backend() === "browser");
+  ok("at the default the injected adapter is ignored", swapping.StorageBackend.name === "memory");
+  swapping.commitBackend("file");
+  ok("commitBackend is what moves the flag", swapping.backend() === "file" && swap.data[STORAGE.KEYS.backend] === "file");
+  ok("the live stack follows the flag on the very next read",
+    swapping.StorageBackend.name === "file" && Object.keys(swapping.getRegistry())[0] === "C-7");
+
+  // THE CUTOVER RATCHET. A live flip of authoring.storageBackend lets the reload's pagehide
+  // flush write the in-memory registry to the NEW backend -- the 2026-07-12 clobber, which cost
+  // real courses. The flag has exactly one writer, and the guarded migration (#69) is the only
+  // caller: back up every course, verify it on disk, suppress saves, write, read back, THEN flip.
+  var WRITERS = ["src/editor.js", "src/editor/storage.js", "src/persist.js", "src/migration.js",
+                 "src/store-native.js", "src/store-http.js", "src/sync-client.js", "src/export.js"];
+  WRITERS.filter(function (f) { return f !== "src/editor/storage.js"; }).forEach(function (f) {
+    // Comments are stripped first: migration.js DESCRIBES the flip in prose, which is the point.
+    var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    ok(f + " never writes the backend flag by hand",
+      !/(setItem|writeStore)\s*\([^)]*authoring\.storageBackend/.test(code));
+  });
+  ok("the flag has exactly one writer, and it is named", /function commitBackend\(value\) \{ return writeStore\(storage, KEYS\.backend, value\); \}/.test(src("src/editor/storage.js")));
+  ok("the guarded cutover is what calls it", /setFlag = opts\.setFlag \|\| function \(vv\) \{ Store\.commitBackend\(vv\); \}/.test(src("src/editor.js")));
+
+  // editor.js reaches for both the render context and the storage seam as it LOADS, so every page
+  // that loads editor.js has to load them first. kit.html is the one that is easy to forget: it
+  // boots editor.js in __KIT_MODE, and arch-P1 wired the render context into index.html alone,
+  // which left the kit gallery throwing "window.applyRenderContext is not a function" on load
+  // with nothing to catch it. This is the ratchet on both files, on both pages.
+  ["index.html", "kit.html"].forEach(function (page) {
+    var html = src(page);
+    var iEd = html.indexOf("src/editor.js\"");
+    ["src/render-context.js", "src/editor/storage.js"].forEach(function (dep) {
+      var i = html.indexOf(dep);
+      ok(page + " loads " + dep + " before editor.js", i > -1 && iEd > -1 && i < iEd);
+    });
+  });
 })();
 
 // ---- platform-pivot 01: StorageBackend seam (EXPAND, browser conformance) ----
@@ -129,10 +250,7 @@ section("#66 storage seam");
 // behaviour change is the whole point of EXPAND, so this pins it.
 section("platform-pivot 01 StorageBackend seam");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @storage-backend-start \*\/([\s\S]*?)\/\* @storage-backend-end \*\//);
-  if (!m) { ok("locate @storage-backend fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { makeStorageBackend: makeStorageBackend };")();
+  var g = STORAGE;
 
   // Spy deps that mimic the real ones exactly (writeStore is the durable helper).
   function writeStore(storage, key, value) {
@@ -2330,28 +2448,16 @@ section("editor-rework canvas geometry");
 // ---- Product Rail #1: ProductsStore adapter round-trip (real read/write, not just wiring) --
 section("product-rail ProductsStore");
 (function () {
-  var ed = src("src/editor.js");
-  var pureFence = ed.match(/\/\* @pure-start \*\/([\s\S]*?)\/\* @pure-end \*\//);
-  if (!pureFence) { ok("locate @pure fence", false); return; }
-  var adapterFence = ed.match(/\/\* @products-adapter-start \*\/([\s\S]*?)\/\* @products-adapter-end \*\//);
-  if (!adapterFence) { ok("locate @products-adapter fence", false); return; }
-  var fake = {}; // a minimal Storage-like stub, isolated per test run
-  var fakeLocalStorage = {
-    getItem: function (k) { return Object.prototype.hasOwnProperty.call(fake, k) ? fake[k] : null; },
-    setItem: function (k, v) { fake[k] = v; }
-  };
-  // Extracted from the REAL source (not re-typed), so this can't silently drift from
-  // what actually ships: the durable-write core (writeStore) + the real adapter object.
-  var g = new Function("localStorage",
-    pureFence[1] + adapterFence[1] +
-    "\nreturn { browserProductsAdapter: browserProductsAdapter };"
-  )(fakeLocalStorage);
-  ok("readProducts is null before any write (no stray default)", g.browserProductsAdapter.readProducts() === null);
+  // The REAL browser adapter (arch-P3-01) over an isolated store, so this exercises what ships.
+  var mem = STORAGE.makeMemoryAdapter();
+  ok("readProducts is null before any write (no stray default)", mem.readProducts() === null);
   var payload = JSON.stringify({ "prod-a": { id: "prod-a", name: "Radar", createdAt: 1000 } });
-  var wr = g.browserProductsAdapter.writeProducts(payload);
+  var wr = mem.writeProducts(payload);
   ok("writeProducts reports ok", wr.ok === true);
-  ok("readProducts round-trips the exact JSON just written", g.browserProductsAdapter.readProducts() === payload);
-  ok("round-tripped JSON parses back to the same shape", JSON.parse(g.browserProductsAdapter.readProducts())["prod-a"].name === "Radar");
+  ok("readProducts round-trips the exact JSON just written", mem.readProducts() === payload);
+  ok("round-tripped JSON parses back to the same shape", JSON.parse(mem.readProducts())["prod-a"].name === "Radar");
+  ok("it writes under the products key alone", mem.data[STORAGE.KEYS.products] === payload &&
+    mem.data[STORAGE.KEYS.registry] === undefined && mem.data[STORAGE.KEYS.library] === undefined);
 })();
 
 // ---- #67: .verso portable package (zip codec + round-trip) ----------------
@@ -2580,7 +2686,7 @@ section("#69 migration cutover");
   ok("migrateToFileBackend requires the native store glue", /if \(!ns\) return fail\("precondition", "native file storage is not available/.test(ed));
   ok("migrateToFileBackend backup-gates before suppress", /window\.Migration\.runBackupsAsync\(src[\s\S]{0,700}bk\.count !== codes\.length[\s\S]{0,1900}window\.Migration\.suppress\(\)/.test(ed));
   ok("migrateToFileBackend writes then verifies from disk", /await putRegistry\(srcJson\)[\s\S]{0,400}await getRegistry\(\)[\s\S]{0,200}window\.Migration\.verifyRegistries\(srcJson, back\)/.test(ed));
-  ok("migrateToFileBackend flips flag ONLY after verify passes", /if \(!v\.ok\) \{ window\.Migration\.resume\(\); return fail\("verify"[\s\S]{0,1500}setFlag\("file"\)/.test(ed));
+  ok("migrateToFileBackend flips flag ONLY after verify passes", /if \(!v\.ok\) \{ window\.Migration\.resume\(\); return fail\("verify"[\s\S]{0,1900}setFlag\("file"\)/.test(ed));
   ok("migrateToFileBackend resumes saves on write/verify failure", /window\.Migration\.resume\(\); return fail\("write"[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify"/.test(ed));
   // #18: the shared component library rides the SAME guarded cutover as the registry --
   // one flag flip must move both, or neither (never straddle backends).
@@ -2590,15 +2696,26 @@ section("#69 migration cutover");
   ok("migrateToFileBackend writes+verifies the library after the registry, same suppression window", /window\.Migration\.verifyRegistries\(srcJson, back\)[\s\S]{0,600}if \(libJson\) \{[\s\S]{0,700}await putLibrary\(libJson\)[\s\S]{0,300}await getLibrary\(\)[\s\S]{0,300}window\.Migration\.verifyLibrary\(libJson, libBack\)/.test(ed));
   ok("migrateToFileBackend resumes saves on library write/verify failure too", /window\.Migration\.resume\(\); return fail\("write", "library:[\s\S]{0,600}window\.Migration\.resume\(\); return fail\("verify", "library:/.test(ed));
   ok("Editor exposes migrateToFileBackend", /migrateToFileBackend: migrateToFileBackend/.test(ed));
-  // WIRING (#18): the library storage seam mirrors the registry's -- same pickStorageAdapter,
-  // same flag, and loadLibrary/saveLibrary route through it (not a hardcoded localStorage call).
-  ok("libraryAdapter uses the same pickStorageAdapter seam as the registry", /function libraryAdapter\(\) \{ return pickStorageAdapter\(storageBackend\(\), window\.__storageAdapter, browserLibraryAdapter\); \}/.test(ed));
-  ok("loadLibrary reads via libraryAdapter, not a hardcoded localStorage call", /function loadLibrary\(\) \{[\s\S]{0,200}libraryAdapter\(\)\.readLibrary\(\)/.test(ed));
-  ok("saveLibrary writes via libraryAdapter, not a hardcoded localStorage call", /function saveLibrary\(\) \{ try \{ libraryAdapter\(\)\.writeLibrary\(JSON\.stringify\(window\.LibraryStore\)\); \} catch \(e\) \{\} \}/.test(ed));
-  // WIRING (Product Rail #1): ProductsStore mirrors the exact same seam pattern.
-  ok("productsAdapter uses the same pickStorageAdapter seam as the registry/library", /function productsAdapter\(\) \{ return pickStorageAdapter\(storageBackend\(\), window\.__storageAdapter, browserProductsAdapter\); \}/.test(ed));
-  ok("loadProducts reads via productsAdapter, not a hardcoded localStorage call", /function loadProducts\(\) \{[\s\S]{0,200}productsAdapter\(\)\.readProducts\(\)/.test(ed));
-  ok("saveProducts writes via productsAdapter, not a hardcoded localStorage call", /function saveProducts\(\) \{ try \{ productsAdapter\(\)\.writeProducts\(JSON\.stringify\(window\.ProductsStore\)\); \} catch \(e\) \{\} \}/.test(ed));
+  // WIRING (#18 / Product Rail #1), arch-P3-01: the library and the products store ride the same
+  // seam as the registry -- same flag, same adapter selection -- and editor.js holds no storage
+  // logic of its own. The behaviour is proved against the real module in "arch-P3-01 editor
+  // storage"; what is left here is the wiring, which IS textual: no call site may reach around
+  // the seam to localStorage. The three stores below are doc-of-record and route through it.
+  [["loadLibrary", "Store.loadLibrary("], ["saveLibrary", "Store.saveLibrary("],
+   ["loadProducts", "Store.loadProducts("], ["saveProducts", "Store.saveProducts("],
+   ["getRegistry", "Store.getRegistry("], ["saveRegistry", "Store.saveRegistry("],
+   ["getOpenDocIds", "Store.getOpenDocIds("], ["saveOpenDocIds", "Store.saveOpenDocIds("],
+   ["getActiveDocId", "Store.getActiveDocId("], ["saveActiveDocId", "Store.saveActiveDocId("]
+  ].forEach(function (pair) {
+    var i = ed.indexOf("function " + pair[0] + "(");
+    ok(pair[0] + " routes through the storage module", i !== -1 && ed.indexOf(pair[1], i) !== -1 && ed.indexOf(pair[1], i) - i < 400);
+  });
+  // The keys themselves left with the module. editor.js naming one again is a call site that has
+  // reached around the seam -- the exact drift that put storage logic in a 27k-line closure.
+  ["authoring.registry", "authoring.library", "authoring.products",
+   "authoring.activeDocId", "authoring.openDocIds", "authoring.storageBackend"].forEach(function (key) {
+    ok("editor.js no longer names the storage key " + key, ed.indexOf('"' + key + '"') === -1);
+  });
   ok("store-native.js carries the same readProducts/writeProducts pair as readLibrary/writeLibrary", /readProducts: function \(\) \{ return productsCache; \}/.test(src("src/store-native.js")) && /writeProducts: function \(json\)/.test(src("src/store-native.js")));
   // WIRING (Product Rail): "Promote to Product" -- folded into the file picker's per-card menu
   // (side-rail-cleanup slice 2); parameterised by the specific card's doc, writes ONLY its meta.
@@ -14871,7 +14988,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 166, SLICE_BUDGET = 17;
+  var FN_BUDGET = 162, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);
