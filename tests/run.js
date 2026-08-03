@@ -5509,8 +5509,8 @@ section("WWW apply-style colour");
   ok("non-string passes through", strip(42) === 42 && strip(null) === null);
   ok("idempotent", strip(strip('<span style="color: red; margin: 2px">t</span>')) === strip('<span style="color: red; margin: 2px">t</span>'));
   // wired into the apply-style handler (styleRef set -> strip the field HTML + push history)
-  ok("apply-style handler strips the field HTML", /host\.styleRef = v;[\s\S]*?stripInlineColor\(obj\[field\]\)/.test(etxt));
-  ok("apply-style pushes history (undoable)", /pushHistory\(\);\s*\n\s*host\.styleRef = v;/.test(etxt));
+  ok("apply-style handler strips the field HTML", /host\.styleRef = v;[\s\S]*?stripInlineColor\(obj\[field\]\)/.test(src("src/editor/inspector/parts.js")));
+  ok("apply-style pushes history (undoable)", /pushHistory\(\);\s*\n\s*host\.styleRef = v;/.test(src("src/editor/inspector/parts.js")));
 })();
 
 // ---- §4 theme-aware saved-text-style colour: bind to a theme token (flips light/dark) ----
@@ -6548,7 +6548,7 @@ section("select-first / progressive drill");
   ok("block drill tier forces a block selection for a data-edit text node", /getAttribute\("data-edit"\) != null && l\.node\.__block\) \{ blurActiveText\(\); setSelection\("block", l\.node\)/.test(DRILL));
   // uio-E-C02: a top-level text field inspector now shows the block chrome in one scroll (no jump
   // link); the back-to-block link survives only for the non-text / version-edit fallback branch.
-  ok("field/type inspector keeps the back-to-block link only for the non-text fallback", /insp-backlink[\s\S]*?reselectBlockNode\(selection\.block, "block"\)/.test(t) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(t));
+  ok("field/type inspector keeps the back-to-block link only for the non-text fallback", /insp-backlink[\s\S]*?reselectBlockNode\(E\.selection\.block, "block"\)/.test(src("src/editor/inspector/parts.js")) && !/\/\/ Shared footer \(Spacing \+ Block actions\)/.test(src("src/editor/inspector/parts.js")));
   ok("capture handler bails out in click-to-edit mode", /if \(!twoStateText\(\)\) return;\s*\/\/ click-to-edit/.test(DRILL));
   // LEAF-FIRST (James 2026-07-12): a plain click selects the INNERMOST non-edit level
   // (the element under the cursor), not the outermost container; Escape steps outward.
@@ -6696,6 +6696,7 @@ section("quiz correct = brand green");
 
 section("quiz per-field styles");
 (function () {
+  var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var r = src("src/render.js");
   var e = src("src/editor.js");
   // render: editable takes a styleKey and resolves a per-field style host
@@ -6709,8 +6710,8 @@ section("quiz per-field styles");
   ok("feedbackCorrect -> feedbackCorrectStyle", /q, "feedbackCorrect", true, "feedbackCorrectStyle"/.test(r));
   ok("feedbackIncorrect -> feedbackIncorrectStyle", /q, "feedbackIncorrect", true, "feedbackIncorrectStyle"/.test(r));
   // inspector edits the per-field host, not the shared obj
-  ok("renderFieldInspector resolves the style host from styleKey", /var host = styleKey \? \(obj\[styleKey\] \|\| \(obj\[styleKey\] = \{\}\)\) : obj/.test(e));
-  ok("rich style reads/writes host.style", /var s = host\.style \|\| \(host\.style = \{\}\)/.test(e));
+  ok("renderFieldInspector resolves the style host from styleKey", /var host = styleKey \? \(obj\[styleKey\] \|\| \(obj\[styleKey\] = \{\}\)\) : obj/.test(PARTS));
+  ok("rich style reads/writes host.style", /var s = host\.style \|\| \(host\.style = \{\}\)/.test(PARTS));
   // migration: shared style copied to each per-field key, idempotent
   ok("migration wraps done.style into per-field {style} hosts", /b\.done\.titleStyle = \{ style: clone\(b\.done\.style\) \}; b\.done\.bodyStyle = \{ style: clone\(b\.done\.style\) \}; delete b\.done\.style/.test(e));
   ok("migration wraps q.style into per-field {style} hosts", /q\.promptStyle = \{ style: clone\(q\.style\) \}; q\.feedbackCorrectStyle = \{ style: clone\(q\.style\) \}; q\.feedbackIncorrectStyle = \{ style: clone\(q\.style\) \}; delete q\.style/.test(e));
@@ -6743,12 +6744,13 @@ section("svg colour switching");
 // ---- Inline hyperlinks in text (external URL, new tab, theme-aware) ---------------
 section("inline links");
 (function () {
+  var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var e = src("src/editor.js");
   var css = src("src/course.css");
   ok("text inspector has a Link button using createLink", /var linkB = h\("button"[\s\S]*?execCommand\("createLink", false, url\)/.test(e));
   ok("created anchor gets target=_blank + rel=noopener", /setAttribute\("target", "_blank"\); el\.setAttribute\("rel", "noopener noreferrer"\)/.test(e));
   ok("empty URL removes the link (unlink)", /if \(!url\) \{ document\.execCommand\("unlink", false, null\)/.test(e));
-  ok("link/BIU commits are sanitised so the drag-handle can't ride in", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\)/.test(e));
+  ok("link/BIU commits are sanitised so the drag-handle can't ride in", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\)/.test(PARTS));
   ok("theme-aware link style (accent + underline, excludes nav buttons)", /\.page a:not\(\.nav-button\):not\(\.course-nav__btn\) \{[\s\S]*?color: var\(--color-accent\);[\s\S]*?text-decoration: underline/.test(css));
 })();
 
@@ -7355,6 +7357,7 @@ section("Cmd+backslash canvas spans row");
 // ---- richer bullet lists: marker style/colour + nesting + paste-clean --------
 section("richer bullet lists");
 (function () {
+  var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var BA = src("src/editor/block-actions.js");   // arch-P3b-07o
@@ -7383,20 +7386,20 @@ section("richer bullet lists");
   // block to/from the dedicated "list" type (was a switchEl, then an inline execCommand).
   ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
   ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
-  ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);[\s\S]*?customSelectRow\("Bullet style"/.test(e));
+  ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*var _typeBody = E\.inspector; E\.setInspector\(panelSection\(_typeBody, "List"\)\);[\s\S]*?customSelectRow\("Bullet style"/.test(src("src/editor/inspector/parts.js")));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
   // marker settings always show for it; the TYPE-conversion toggle only shows for a
   // genuine top-level list block (gated separately, in the shared bar, on obj.type).
-  ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(e));
-  ok("List toggle visibility is gated on obj.type in TEXT_CONTENT_TYPES, not rootIsList directly", /isListToggleable: function \(\) \{ return field === "text" && !!obj && !!obj\.type && !!TEXT_CONTENT_TYPES\[obj\.type\]; \}/.test(e));
+  ok("editor detects a root-list field (rootIsList = UL/OL tag)", /var rootIsList = node\.tagName === "UL" \|\| node\.tagName === "OL"/.test(PARTS));
+  ok("List toggle visibility is gated on obj.type in TEXT_CONTENT_TYPES, not rootIsList directly", /isListToggleable: function \(\) \{ return field === "text" && !!obj && !!obj\.type && !!TEXT_CONTENT_TYPES\[obj\.type\]; \}/.test(PARTS));
   // The canvas's own removed switchRow pair (line above) stays the precise regression
   // guard for THIS bar. source-stage-wysiwyg-editing later gave Source stage's own,
   // separate topic-body toolbar a legitimate execCommand("insertUnorderedList") --
   // free-flowing wiki prose has no block-type system to convert, unlike a canvas text
   // block, so inline execCommand is the correct fit there, not a regression of this one.
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(EDIT));
-  ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(e));
-  ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(e));
+  ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(PARTS));
+  ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(PARTS));
   ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
   ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(SHELL));
@@ -7485,17 +7488,18 @@ section("richer bullet lists");
 // ---- bullet-list discoverability: toggle on any text box + spacing promoted ----
 section("list discoverability + spacing");
 (function () {
+  var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var e = src("src/editor.js");
-  ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(inspector, s, apply/.test(e) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
+  ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
   // #170/#33: the List toggle folds into the shared inline-format bar as a whole
   // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
   // heads only the marker-settings section, shown when the field root is a list.
-  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(e));
-  ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = inspector; inspector = panelSection\(_typeBody, "List"\);/.test(e));
+  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(PARTS));
+  ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = E\.inspector; E\.setInspector\(panelSection\(_typeBody, "List"\)\);/.test(src("src/editor/inspector/parts.js")));
   ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(SOPS) && /block\.__priorTextType/.test(SOPS));
-  ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(e));
+  ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(PARTS));
 })();
 
 
@@ -9359,7 +9363,7 @@ section("panel system v2 — layout engine");
     (e.match(/window\.(prompt|confirm)\(/g) || []).length === 0 &&
     (LIB.match(/window\.(prompt|confirm)\(/g) || []).length === 1);
   // Phase 7 (D3): the flagship field inspector adopts the sectionGroup taxonomy (Type + Content)
-  ok("field inspector wraps a Type section (List folded in) via the panelLayout engine", /beginSections\(\);\s*sectionGroup\("Type", "Type", function \(secBody\)[\s\S]*?typeCluster\(inspector, s, apply[\s\S]*?endSections\(inspector\)/.test(e));
+  ok("field inspector wraps a Type section (List folded in) via the panelLayout engine", /beginSections\(\);\s*sectionGroup\("Type", "Type", function \(secBody\)[\s\S]*?typeCluster\(E\.inspector, s, apply[\s\S]*?endSections\(E\.inspector\)/.test(src("src/editor/inspector/parts.js")));
   // #155: the universal Level-1 container sections adopt the sectionGroup taxonomy. renderBlockActionsSection
   // wraps them in beginSections()/endSections(inspector); each is sectionGroup(type,...) not disclosure().
   ok("#155: Appearance is a sectionGroup (was disclosure block-appearance)", /sectionGroup\("Appearance", "Appearance", function \(body\)/.test(BA) && !/disclosure\("block-appearance"/.test(e));
@@ -9391,7 +9395,7 @@ section("panel system v2 — layout engine");
   ok("typeCluster colour adapter maps token/hex/per-mode onto the model", /if \(v && v\.token\) model\.colorToken = v\.token;[\s\S]*?else if \(v && \(v\.light \|\| v\.dark\)\) \{ model\.colorLight = v\.light; model\.colorDark = v\.dark; \}[\s\S]*?else if \(v && v\.hex\) model\.color = v\.hex;/.test(e));
   ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(e));
   // Phase 2c: the SAME typeCluster mounted in BOTH the field inspector and the style dialog
-  ok("field inspector mounts typeCluster (reference adopter)", /typeCluster\(inspector, s, apply/.test(e));
+  ok("field inspector mounts typeCluster (reference adopter)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")));
   ok("Edit-Text-Style dialog mounts the SAME typeCluster", /typeCluster\(box, draft, syncSpecimen\)/.test(THEME));
   ok("field inspector no longer hand-rolls a colour row (colorField via typeCluster)", !/colourControl\("Colour", s\.color/.test(e));
   ok("dialog persists per-mode text colour (forward-compat)", /else if \(draft\.colorLight \|\| draft\.colorDark\) \{ s\.colorLight = draft\.colorLight; s\.colorDark = draft\.colorDark;/.test(THEME));
@@ -11729,11 +11733,12 @@ section("uio-E-C01: recovered canvas — one 40px bar, single-row shell, token w
 // 2026-07-30) — reversing the 2026-07-08 Type-only drill split.
 section("uio-E-C02: text field inspector — one scroll, block chrome, no jump link");
 (function () {
+  var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var e = src("src/editor.js");
   // The field inspector wires the SAME container chrome + decl the block two-level uses.
-  ok("field inspector renders block chrome for a top-level text block", /showBlockChrome = blk && blk\.type && TEXT_CONTENT_TYPES\[blk\.type\] && !versionEditable\(\)/.test(e) && /if \(showBlockChrome\) \{[\s\S]{0,240}renderContainerChrome\(inspector, CONTENT_DECL, blockChromeIo\(blk\), blockChromeHandlers\(blk\)\)/.test(e));
+  ok("field inspector renders block chrome for a top-level text block", /showBlockChrome = blk && blk\.type && TEXT_CONTENT_TYPES\[blk\.type\] && !versionEditable\(\)/.test(PARTS) && /if \(showBlockChrome\) \{[\s\S]{0,240}renderContainerChrome\(E\.inspector, CONTENT_DECL, blockChromeIo\(blk\), blockChromeHandlers\(blk\)\)/.test(PARTS));
   // The jump link is gone for text; it survives only in the non-text / version-edit fallback.
-  ok("no jump link when block chrome is shown (backHint is the else branch)", /if \(showBlockChrome\) \{[\s\S]{0,400}\} else \{[\s\S]{0,400}insp-backlink/.test(e));
+  ok("no jump link when block chrome is shown (backHint is the else branch)", /if \(showBlockChrome\) \{[\s\S]{0,400}\} else \{[\s\S]{0,400}insp-backlink/.test(PARTS));
 })();
 
 // uio-E-C04 (EDIT-08): the two axis dropdowns are NAMED (muted Variant/Version caption), and the
@@ -13804,12 +13809,12 @@ section("inline weight on selection");
   // wiring: ONE selection-aware Weight control (the old separate "Weight (selection)" row
   // is merged away) — highlighted text is weighted inline, no selection sets the whole field.
   ok("wiring: no separate 'Weight (selection)' row (merged into the type-cluster Weight)", t.indexOf('"Weight (selection)"') === -1 && /\["Semibold", "600"\]/.test(t));
-  ok("wiring: selection-aware only when a fieldNode is passed (style dialog stays whole-model)", /if \(opts && opts\.fieldNode\)/.test(t) && /applyWeightToSelection: function \(weight, range\)/.test(t));
-  ok("wiring: wraps selection in a font-weight span", /span\.style\.fontWeight = weight;[\s\S]{0,160}r\.surroundContents\(span\)/.test(t));
+  ok("wiring: selection-aware only when a fieldNode is passed (style dialog stays whole-model)", /if \(opts && opts\.fieldNode\)/.test(t) && /applyWeightToSelection: function \(weight, range\)/.test(t + src("src/editor/inspector/parts.js")));
+  ok("wiring: wraps selection in a font-weight span", /span\.style\.fontWeight = weight;[\s\S]{0,160}r\.surroundContents\(span\)/.test(t + src("src/editor/inspector/parts.js")));
   ok("wiring: captures the field range on the Weight select mousedown", /wt\.addEventListener\("mousedown"[\s\S]{0,300}cloneRange\(\)/.test(t));
   ok("wiring: empty weight on a live selection is a no-op (does not clear the whole field)", /if \(!weight\) return; \/\/ empty on a live selection/.test(t));
   ok("wiring: no live selection falls back to whole-field / model weight", /model\.weight = weight; onChange\(\); \/\/ no selection/.test(t));
-  ok("wiring: selection commit routes through sanitizeFieldHtml (editor == export)", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); scheduleSave\(\);\s*return true;/.test(t));
+  ok("wiring: selection commit routes through sanitizeFieldHtml (editor == export)", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); scheduleSave\(\);\s*return true;/.test(t + src("src/editor/inspector/parts.js")));
 })();
 
 // ---- #116 copy-editor view-state (fullscreen alternate view shell) --------
@@ -13878,8 +13883,10 @@ section("#170/#158 shared formatting toggle-bar");
   ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(e));
 
   // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
-  var insStart = e.indexOf("function renderFieldInspector(node)");
-  var insBody = e.slice(insStart, insStart + 7400); // uio-F04 added the source-provenance line above these
+  // arch-P3b-07parts: the field inspector is editor/inspector/parts.js now.
+  var PARTSSRC = src("src/editor/inspector/parts.js");
+  var insStart = PARTSSRC.indexOf("function renderFieldInspector(node)");
+  var insBody = PARTSSRC.slice(insStart, insStart + 7400); // uio-F04 added the source-provenance line above these
   ok("field inspector's Style row uses the shared builder", /var biu = buildFormatToggleBar\(\{\s*\n\s*getNode: function \(\) \{ return node; \},\s*\n\s*onChange: function \(\) \{ obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); \},/.test(insBody));
   ok("field inspector wires the List block-conversion hooks (isListToggleable/isListBlock/toggleListBlock)", /isListToggleable: function \(\)[\s\S]{0,400}isListBlock: function \(\)[\s\S]{0,400}toggleListBlock: function \(\)/.test(insBody));
   ok("no duplicate bespoke B/I/U row remains in the field inspector", insBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
