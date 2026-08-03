@@ -1017,7 +1017,7 @@ section("platform-pivot 15 base-only editing guard");
 // chrome hangs off VersoSync.isCollaborating(), so standalone shows nothing.
 section("platform-pivot 11 presence chrome");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07: the presence chrome moved with them
   var m = t.match(/\/\* @presence-model-start \*\/([\s\S]*?)\/\* @presence-model-end \*\//);
   if (!m) { ok("locate @presence-model fence", false); return; }
   var g = new Function(m[1] + "\nreturn { presenceInitials: presenceInitials, presenceModel: presenceModel, findBlockLocation: findBlockLocation, peerHeldBlocks: peerHeldBlocks, conflictRows: conflictRows, blockPreview: blockPreview, viewerCursors: viewerCursors };")();
@@ -1044,7 +1044,7 @@ section("platform-pivot 11 presence chrome");
   ok("renderPresence gates on live() (isCollaborating) -> hidden in standalone", /if \(!live\(\) \|\| !peers\.length\) \{ el\.innerHTML = ""; el\.style\.display = "none"; return; \}/.test(t));
   ok("ensure() only subscribes/connects in server mode (enabled)", /function ensure\(\) \{\s*if \(wired \|\| !enabled\(\)\) return;/.test(t));
   ok("live() is the ONE VersoSync gate", /function live\(\) \{ return !!\(window\.VersoSync && window\.VersoSync\.isCollaborating\(\)\); \}/.test(t));
-  ok("mount() reprojects presence chrome after renderCommentPins", /renderCommentPins\(\);[\s\S]{0,140}CollabChrome\.ensure\(\); CollabChrome\.reproject\(\);/.test(t));
+  ok("mount() reprojects presence chrome after renderCommentPins", /renderCommentPins\(\);[\s\S]{0,140}collabChrome\(\)\.ensure\(\); collabChrome\(\)\.reproject\(\);/.test(src("src/editor.js")));
   ok("presence cluster mounts in the toolbar right group", /document\.querySelector\("\.toolbar__group--right"\)/.test(t));
   // presence CSS conforms to the PresenceCluster contract (20px, editing solid / viewing hollow)
   var css = src("editor.css");
@@ -1096,7 +1096,9 @@ section("platform-pivot 11 presence chrome");
   ok("viewerCursors carries the in-block caret offset (null when absent)", oc[0].offset === 12 && oc[1].offset === null);
   ok("remote caret is positioned at the offset within the block (guarded, corner fallback)", /function positionCaret\(caret, blockEl, offset\)/.test(t) && /if \(offset == null\) return;/.test(t) && /r\.setStart\(node, remaining\)/.test(t));
   ok("local caret is shared with peers, throttled", /function onCaret\(block, offset\)/.test(t) && /session\.cursorUpdate\(lastCaret\.blockId, \{ offset: lastCaret\.offset \}\)/.test(t) && /CURSOR_THROTTLE_MS/.test(t));
-  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (t.match(/CollabChrome\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
+  // arch-P3b-07: the chrome object moved to editor/comments.js; these two claims are about the
+  // EDIT LIFECYCLE, which stayed here and drives it through a bound accessor.
+  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (src("src/editor.js").match(/collabChrome\(\)\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
   // sync-client exposes the cursor.update session method + builder
   var scc = src("src/sync-client.js");
   ok("sync-client session: cursorUpdate + cursorMsg builder", /cursorUpdate: function \(blockId, selection\)/.test(scc) && /function cursorMsg\(docId, blockId, selection\)/.test(scc));
@@ -1110,15 +1112,15 @@ section("platform-pivot 11 presence chrome");
   ok("blur auto-releases the lock (after flushing any pending edit)", /function onEditBlur\(block\)/.test(t) && /session\.releaseLock\(block\.id\)/.test(t));
   ok("heartbeat timer starts in ensure() (drives presence TTL, AC4)", /beatTimer = setInterval\(beat, HEARTBEAT_MS\)/.test(t));
   ok("beat sends viewing + editing block ids over the session", /function beat\(\) \{ if \(live\(\) && session && session\.heartbeat\) session\.heartbeat\(viewingBlockId, editingBlockId\); \}/.test(t));
-  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /CollabChrome\.onEditFocus\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditCommit\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditBlur\(collabBlockOf\(node\)\)/.test(t));
+  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /collabChrome\(\)\.onEditFocus\(collabBlockOf\(node\)\)/.test(src("src/editor.js")) && /collabChrome\(\)\.onEditCommit\(collabBlockOf\(node\)\)/.test(src("src/editor.js")) && /collabChrome\(\)\.onEditBlur\(collabBlockOf\(node\)\)/.test(src("src/editor.js")));
   ok("send-side is gated on live()+session (inert in standalone)", /function onEditFocus\(block\) \{\s*if \(!live\(\) \|\| !block \|\| !block\.id \|\| !session\) return;/.test(t));
   // story 9: auto-release on IDLE (not just blur) so a focused-but-idle author doesn't hold the lock
   ok("idle-timeout releases the held block (spec story 9)", /function touchIdle\(\)/.test(t) && /session\.releaseLock\(editingBlockId\); editingBlockId = null;/.test(t) && /IDLE_RELEASE_MS/.test(t));
   ok("edit + caret activity resets the idle timer", /editingBlockId = viewingBlockId = block\.id;[\s\S]{0,120}touchIdle\(\);/.test(t) && /touchIdle\(\); \/\/ caret movement/.test(t));
   ok("blur supersedes the idle timer", /if \(idleTimer\) \{ clearTimeout\(idleTimer\); idleTimer = null; \} \/\/ blur supersedes/.test(t));
   // ticket 26 two-way: an author reply/resolve fans back to the reviewer (shared both ways)
-  ok("author reply fans out via session.comment (cid -> server block.id)", /function fanoutReply\(comment, body\)[\s\S]{0,220}session\.comment\(blockIdByCid\(doc, cid\) \|\| cid, body, comment\.threadId/.test(t));
-  ok("author resolve fans out via session.resolveComment", /function fanoutResolve\(comment, resolved\)[\s\S]{0,220}session\.resolveComment\(blockIdByCid\(doc, cid\) \|\| cid, comment\.threadId/.test(t));
+  ok("author reply fans out via session.comment (cid -> server block.id)", /function fanoutReply\(comment, body\)[\s\S]{0,220}session\.comment\(blockIdByCid\(E\.doc, cid\) \|\| cid, body, comment\.threadId/.test(t));
+  ok("author resolve fans out via session.resolveComment", /function fanoutResolve\(comment, resolved\)[\s\S]{0,220}session\.resolveComment\(blockIdByCid\(E\.doc, cid\) \|\| cid, comment\.threadId/.test(t));
   ok("the shipped reply + resolve controls call the fanout (both ways)", (t.match(/CollabChrome\.fanoutResolve\(c, v\)/g) || []).length >= 2 && /CollabChrome\.fanoutReply\(c, v\)/.test(t));
   ok("the origin echo of my optimistic reply reconciles by rp_ marker + body (author-independent, no dup/collapse)", /String\(replies\[q\]\.id\)\.indexOf\("rp_"\) === 0 && replies\[q\]\.body === c\.body/.test(t) && /slot\.id = c\.id;/.test(t));
   var scr = src("src/sync-client.js");
@@ -1155,8 +1157,9 @@ section("platform-pivot 11 presence chrome");
 // Reuses the SHIPPED comment system; the delta is guest-vs-internal + never-drop orphan surfacing.
 section("platform-pivot 26 review round-trip");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
+  var t = src("src/editor/comments.js");   // arch-P3b-07: the review round-trip moved with them
+  // The guest-identity fence stayed in editor.js, beside the rest of the identity plumbing.
+  var m = src("src/editor.js").match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
   if (!m) { ok("locate @comment-guest fence", false); return; }
   var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
 
@@ -1170,9 +1173,9 @@ section("platform-pivot 26 review round-trip");
 
   // wiring: the panel splits orphaned into a tray + tags guests; guest comments ride the SHIPPED
   // doc.comments store via the sync channel (a delta, not a parallel comment system).
-  ok("panel splits orphaned notes into their own never-drop tray", /var orphaned = shown\.filter\(function \(c\) \{ return commentIsOrphaned\(c, doc\); \}\)/.test(t) && /Orphaned — need a home/.test(t));
+  ok("panel splits orphaned notes into their own never-drop tray", /var orphaned = shown\.filter\(function \(c\) \{ return commentIsOrphaned\(c, E\.doc\); \}\)/.test(t) && /Orphaned — need a home/.test(t));
   ok("panel tags guest comments (guest-vs-internal weighing)", /if \(commentIsGuest\(c\)\) top\.appendChild\(h\("span", "comment-row__tag is-guest", "Guest"\)\)/.test(t));
-  ok("orphaned note is dismissible (kept until the author acts, never silently dropped)", /Dismiss this orphaned note[\s\S]{0,220}doc\.comments = \(doc\.comments \|\| \[\]\)\.filter/.test(t));
+  ok("orphaned note is dismissible (kept until the author acts, never silently dropped)", /Dismiss this orphaned note[\s\S]{0,220}E\.doc\.comments = \(E\.doc\.comments \|\| \[\]\)\.filter/.test(t));
   // id-space bridge: server anchors by block.id, client pins by cid -> map at ingest so a guest
   // comment resolves onto the live block (a raw id with no cid falls through to orphaned).
   var idoc = { pages: [ { blocks: [ { id: "srv-b2", cid: "c-abc", type: "para" }, { id: "srv-b5", cid: "c-def", type: "group", children: [ { id: "srv-b6", cid: "c-ghi" } ] } ] } ] };
@@ -1184,7 +1187,7 @@ section("platform-pivot 26 review round-trip");
   ok("commentFromEnv: a deleted server block -> anchor falls to raw id (surfaces orphaned, not mis-anchored)", g.commentFromEnv({ blockId: "gone", author: "A", payload: { id: "cm_9" } }, idoc, function () { return "#c"; }).anchor.blockId === "gone");
   ok("commentFromEnv: no comment id -> null (never a blank note)", g.commentFromEnv({ blockId: "srv-b2", payload: {} }, idoc, function () { return "#c"; }) === null);
 
-  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, doc, colourForName\)/.test(t) && /replies\.push\(\{ id: c\.id, body: c\.body/.test(t));
+  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, E\.doc, colourForName\)/.test(t) && /replies\.push\(\{ id: c\.id, body: c\.body/.test(t));
   ok("comment.added / comment.resolved route through the round-trip", /else if \(env\.type === "comment\.added"\) \{ ingestComment\(env\); \}/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveThread\(env\); \}/.test(t));
   ok("resolveThread marks the whole thread done (both ways)", /function resolveThread\(env\)[\s\S]{0,260}c\.id === threadId \|\| c\.threadId === threadId/.test(t));
   var css = src("editor.css");
@@ -1993,7 +1996,7 @@ section("platform-pivot 11 presence");
   var LM = require(path.join(ROOT, "server/lock-manager.js"));
   var BS = require(path.join(ROOT, "server/block-store.js"));
   // AC1: server author colours MUST match editor.js colourForName (comment-review palette)
-  var ed = src("src/editor.js");
+  var ed = src("src/editor/comments.js");   // arch-P3b-07: the reviewer palette moved with them
   var m = ed.match(/var COMMENT_COLOURS = \[[^\]]*\];[\s\S]*?function colourForName\([^)]*\) \{[^}]*\}/);
   ok("locate editor colourForName", !!m);
   if (m) {
@@ -4382,9 +4385,11 @@ section("AAA doc-migration");
     }
   })();
 
+  // arch-P3b-07: proximity capture moved with the pins it resolves.
+  var CMT = src("src/editor/comments.js");
   // ---- #197 proximity capture (pin point -> nearby blocks, nearest-first) ----
   (function () {
-    var m = et.match(/function rectPointDistance\(r, p\)[\s\S]*?window\.__resolveProximity = resolveProximity;/);
+    var m = CMT.match(/function rectPointDistance\(r, p\)[\s\S]*?window\.__resolveProximity = resolveProximity;/);
     ok("#197 resolveProximity block present for eval", !!m);
     if (m) {
       var win = {};
@@ -4413,7 +4418,7 @@ section("AAA doc-migration");
       ok("#197 empty items is safe", RP([], { x: 0, y: 0 }, 100).length === 0 && RP(undefined, { x: 0, y: 0 }, 100).length === 0);
     }
     // wiring: the DOM reader is exposed for the agent surface (#199).
-    ok("#197 resolvePinContext DOM reader exposed", /window\.__resolvePinContext = resolvePinContext;/.test(et) && /querySelectorAll\("\.canvas-block\[data-cid\]"\)/.test(et));
+    ok("#197 resolvePinContext DOM reader exposed", /window\.__resolvePinContext = resolvePinContext;/.test(CMT) && /querySelectorAll\("\.canvas-block\[data-cid\]"\)/.test(CMT));
   })();
 })();
 
@@ -4853,7 +4858,7 @@ section("#159/#163 frontend conformance gate");
 // ---- §12 slice 2: canvas comment mode (drop / anchor / render / resolve) -----
 section("comment mode (canvas)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07: review comments moved here
   ok("setCommentMode toggles the canvas class + persists", /function setCommentMode\(on\)[\s\S]*?setItem\(COMMENT_MODE_KEY[\s\S]*?canvas\.classList\.toggle\("is-comment-mode", commentMode\)/.test(t));
   // 3-tier anchor resolution (block > page > world)
   ok("makeAnchorFromPoint resolves block > page > world", /function makeAnchorFromPoint[\s\S]*?closest\("\.canvas-block\[data-cid\]"\)[\s\S]*?blockId:[\s\S]*?closest\("\.page\[data-page-id\]"\)[\s\S]*?pageId:[\s\S]*?worldX:/.test(t));
@@ -4869,7 +4874,9 @@ section("comment mode (canvas)");
   // popover: body input, resolve checkbox, delete
   ok("popover edits body / resolve / delete", /function openCommentPopover[\s\S]*?c\.body = ta\.value[\s\S]*?c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); refreshCommentPanel\(\)[\s\S]*?doc\.comments\.splice\(i, 1\)/.test(t));
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
-  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(t));
+  // arch-P3b-07: mount, the drill handler and the keyboard shortcut all stayed here; comment mode
+  // is asked for rather than read, because editor/comments.js owns it now.
+  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(src("src/editor.js")));
   // arch-P3b-02: applyView moved to src/editor/canvas-view.js, so this drives it instead of
   // matching its text. A pin rebuild on every pan/zoom frame is the whole contract -- pins are
   // absolutely positioned in canvas space, so a view change that skipped this would leave them
@@ -4882,8 +4889,8 @@ section("comment mode (canvas)");
     return calls === 1;
   })());
   // mode bails: drill + C shortcut
-  ok("drill handler bails in comment mode", /if \(interactMode \|\| commentMode\) return;/.test(t));
-  ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentMode\)/.test(t));
+  ok("drill handler bails in comment mode", /if \(interactMode \|\| commentModeOn\(\)\) return;/.test(src("src/editor.js")));
+  ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentModeOn\(\)\)/.test(src("src/editor.js")));
   // export-strip: comment pins/store are editor.js chrome only — render.js knows nothing
   var r = src("src/render.js");
   ok("render.js has no comment/pin code", r.indexOf("comment") === -1 && r.indexOf("comment-pin") === -1 && r.indexOf("doc.comments") === -1);
@@ -4892,7 +4899,7 @@ section("comment mode (canvas)");
 // ---- §12 slice 3: right-panel comment list -------------------------------
 section("comment list (panel)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07
   ok("renderInspector routes to the comment list in comment mode", (function () {
     var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
     // comment mode wins over the selection AND over interact mode (arch-P3-04: the table's order)
@@ -4909,7 +4916,7 @@ section("comment list (panel)");
 // ---- §12 slice 4: preview comment mode (same store, surface abstraction) ----
 section("comment mode (preview)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // surface abstraction: canvas vs demo, one shared store
   ok("activeSurf picks demo while the preview is open", /function activeSurf\(\) \{ return demoIsOpen\(\) \? demoSurf\(\) : canvasSurf\(\); \}/.test(t));
@@ -4922,7 +4929,7 @@ section("comment mode (preview)");
   // preview drop: block/page only (bails on a null anchor), shared store
   ok("preview drop uses the shared store + skips null anchors", /if \(!demoCommentMode \|\| e\.button !== 0\) return;[\s\S]*?if \(!anchor\) return;[\s\S]*?doc\.comments\.push\(c\)/.test(t));
   // C routes to the demo in preview; canvas C is guarded by demo.hidden
-  ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentMode\)[\s\S]{0,80}demo has its own C/.test(t) || /&& demo\.hidden\) \{\s*e\.preventDefault\(\);\s*setCommentMode/.test(t));
+  ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentModeOn\(\)\)[\s\S]{0,80}demo has its own C/.test(src("src/editor.js")));
   ok("preview C toggles demo comment mode", /setDemoCommentMode\(!demoCommentMode\)/.test(t));
   // exit re-projects onto the canvas surface (the round-trip)
   ok("exitDemo re-projects pins onto the canvas", /function exitDemo[\s\S]*?demo\.hidden = true;[\s\S]{0,140}renderCommentPins\(\)/.test(DEMO));
@@ -4935,19 +4942,20 @@ section("comment mode (preview)");
 // ---- §12 slice 5: transport primitives (identity / sidecar / threading) -----
 section("comment transport (slice 5)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07
   ok("author identity is stored + colour is deterministic", /function commentIdentity\(\)[\s\S]*?COMMENT_AUTHOR_KEY/.test(t) && /function colourForName/.test(t));
-  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(t));
-  ok("sidecar export writes a typed payload, never into the course", /type: "verso-comments"[\s\S]*?comments: doc\.comments/.test(t));
+  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(src("src/editor.js")));
+  ok("sidecar export writes a typed payload, never into the course", /type: "verso-comments"[\s\S]*?comments: E\.doc\.comments/.test(t));
   ok("import merges (never replaces) the store", /function importComments[\s\S]*?mergeComments\(list\)/.test(t));
   ok("replies are threaded via makeReply", /function makeReply[\s\S]*?rp_[\s\S]*?c\.replies\.push\(makeReply/.test(t));
   ok("a note with replies is not discarded as empty", /!\(editingComment\.replies \|\| \[\]\)\.length/.test(t));
   ok("export is a sidecar — render/export never see doc.comments", src("src/render.js").indexOf("comments") === -1 && src("src/export.js").indexOf("doc.comments") === -1);
   // functional: mergeComments is conflict-free (union by id, union replies, resolve wins)
+  // arch-P3b-07: one indent deeper inside install(), and the live document is read through E.
   var mStart = t.indexOf("function mergeComments(incoming)");
-  var mBody = t.slice(mStart, t.indexOf("\n  }", mStart) + 4);
+  var mBody = t.slice(mStart, t.indexOf("\n    }", mStart) + 6);
   var docStub = { comments: [ { id: "cm_a", body: "A", done: false, replies: [{ id: "rp_1" }] }, { id: "cm_b", body: "B", done: false, replies: [] } ] };
-  var mergeComments = new Function("doc", mBody + "\nreturn mergeComments;")(docStub);
+  var mergeComments = new Function("E", mBody + "\nreturn mergeComments;")({ doc: docStub });
   var r = mergeComments([
     { id: "cm_b", done: true, replies: [{ id: "rp_2", body: "reply" }] }, // existing: adopt resolve + new reply
     { id: "cm_c", body: "C", replies: [] }                                  // new comment
@@ -8143,9 +8151,11 @@ section("pan/zoom perf wiring (#150)");
   var persist = e.slice(e.indexOf("function persistView()"), e.indexOf("function persistView()") + 260);
   ok("persistView debounces the localStorage write (setTimeout + clearTimeout)",
     /clearTimeout\(_viewSaveT\)/.test(persist) && /setTimeout\(/.test(persist) && /localStorage\.setItem/.test(persist));
-  var pins = e.slice(e.indexOf("function renderCommentPins()"), e.indexOf("function renderCommentPins()") + 700);
+  // arch-P3b-07: the pins moved to editor/comments.js and read the live document through E.
+  var pinSrc = src("src/editor/comments.js");
+  var pins = pinSrc.slice(pinSrc.indexOf("function renderCommentPins()"), pinSrc.indexOf("function renderCommentPins()") + 900);
   ok("renderCommentPins has a no-comments fast path that skips the rebuild",
-    /if \(!\(doc\.comments && doc\.comments\.length\)\)\s*\{[\s\S]*?return;/.test(pins));
+    /if \(!\(E\.doc\.comments && E\.doc\.comments\.length\)\)\s*\{[\s\S]*?return;/.test(pins));
   var img = src("src/render.js");
   ok("image path uses the memo colour count, not a redundant detectSvgColorsFromSrc parse",
     /window\.__svgColorCount\(block\) > 1/.test(img));
@@ -14100,8 +14110,9 @@ section("#154 multi-select variant export");
 // ---- #212 comment popover clamps into the viewport -----------------------
 section("#212 comment popover clamp");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/function clampPopover\(pos, vw, vh, pw, ph, m\)\s*\{[\s\S]*?\n  \}/);
+  // arch-P3b-07: the popover clamp moved with the pins; a body inside install() closes deeper.
+  var t = src("src/editor/comments.js");
+  var m = t.match(/function clampPopover\(pos, vw, vh, pw, ph, m\)\s*\{[\s\S]*?\n    \}/);
   ok("clampPopover pure helper present", !!m);
   var fn = new Function(m[0] + "\nreturn clampPopover;")();
   var VW = 1000, VH = 800, PW = 240, PH = 216, M = 8;
@@ -15434,7 +15445,7 @@ section("Source rewrite: comments = shared canvas engine + range-mark adapter (E
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
   ok("a Source comment is a range mark PLUS a shared makeComment thread keyed by the mark id", /var cmark = SD\.addMark\(__sourceDocModel, \{ type: "comment", anchor: anchor \}\);[\s\S]{0,220}makeComment\(\{ markId: cmark\.id \}, val\)/.test(es));
-  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(es) && /c\.replies\.push\(makeReply\(v\)\)/.test(e));
+  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(es) && /c\.replies\.push\(makeReply\(v\)\)/.test(src("src/editor/comments.js")));
   ok("comment threads anchor by mark id (sectionId anchor dies with sections)", /function sourceCommentsForMark\(topic, markId\)[\s\S]{0,120}c\.anchor\.markId === markId/.test(es));
   ok("margin pins render in the gutter for each comment mark, pinned to the span", /function renderSourceCommentPins\(topic\)/.test(es) && /if \(m\.type !== "comment"\) return;/.test(es) && /pinCardToSpan\(pin, m\.id\)/.test(es));
   ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(es) && /toggleSourceCommentThread\(topic, m\.id\)/.test(es));
