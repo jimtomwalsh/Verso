@@ -522,7 +522,10 @@ section("P3b namespace (load order)");
 // `typeof x === "function"` and had been silently answering "no" ever since the region moved.
 section("P3b namespace (no orphaned call sites)");
 (function () {
-  // What the modules declare, one indent deeper because it sits inside install().
+  // What the modules declare. Most sit inside install(), one indent deeper -- but the P3-05-shaped
+  // modules (product-rail.js, dnd.js) have no install() and declare at module top level, TWO
+  // spaces in. arch-P3b-07tags moved a pure model into one of those and the gate could not see
+  // it, so a free identifier left behind in editor.js would have passed. Scan both depths.
   var owner = Object.create(null), mods = [];
   (function walk(d, rel) {
     fs.readdirSync(d).sort().forEach(function (f) {
@@ -533,13 +536,17 @@ section("P3b namespace (no orphaned call sites)");
   })(path.join(ROOT, "src/editor"), "");
   mods.forEach(function (rel) {
     var t = src(rel);
-    (t.match(/^\s{4}(?:async )?function ([A-Za-z_$][\w$]*)/gm) || []).forEach(function (m) {
+    (t.match(/^\s{2,4}(?:async )?function ([A-Za-z_$][\w$]*)/gm) || []).forEach(function (m) {
       var n = m.trim().replace(/^async /, "").split(/\s+/)[1];
       owner[n] = owner[n] || rel;
     });
-    (t.match(/^\s{4}var ([^;\n]+)/gm) || []).forEach(function (m) {
+    (t.match(/^\s{2,4}var ([^;\n]+)/gm) || []).forEach(function (m) {
       m.replace(/^\s+var /, "").split(",").forEach(function (p) {
-        var n = p.trim().split(/[\s=(\[]/)[0]; if (/^[A-Za-z_$][\w$]*$/.test(n)) owner[n] = owner[n] || rel;
+        var n = p.trim().split(/[\s=(\[]/)[0];
+        // Every module opens with its own `var window = globalThis.window || ...` shim at that
+        // same depth. It is a stand-in for the global, not something a module owns.
+        if (n === "window") return;
+        if (/^[A-Za-z_$][\w$]*$/.test(n)) owner[n] = owner[n] || rel;
       });
     });
   });
@@ -5672,9 +5679,13 @@ section("product-rail tag vocabulary");
   var etxt = src("src/editor.js");
 
   // 1. PURE: the tag-vocab fence, extracted headlessly.
-  var tStart = etxt.indexOf("/* @tag-vocab-start */");
-  var tEnd = etxt.indexOf("/* @tag-vocab-end */");
-  var mod = new Function(etxt.slice(tStart, tEnd) +
+  // arch-P3b-07tags: the fence moved to editor/product-rail.js, whose FACTS half is exactly this
+  // shape -- plain values in, the same object back. The extraction is unchanged otherwise, which
+  // is the point of fencing a pure pair.
+  var PRSRC = src("src/editor/product-rail.js");
+  var tStart = PRSRC.indexOf("/* @tag-vocab-start */");
+  var tEnd = PRSRC.indexOf("/* @tag-vocab-end */");
+  var mod = new Function(PRSRC.slice(tStart, tEnd) +
     "\nreturn { ownerProductTagValue: ownerProductTagValue, stampOwnerProductTag: stampOwnerProductTag," +
     " addTechnologyTag: addTechnologyTag, removeMasterTag: removeMasterTag, matchTagVocabulary: matchTagVocabulary };")();
   ok("tag-vocab functions extracted", typeof mod.stampOwnerProductTag === "function");

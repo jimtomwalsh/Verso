@@ -2326,59 +2326,10 @@
   }
   function isLibraryComponent(key) { return !!libComponents()[key]; }
 
-  // ---- Product Rail: tag vocabulary + reserved owning-Product tag ---------------
-  // A master's tags: [{value, reserved}]. At most one entry is reserved:true -- the
-  // "owning Product" tag, stamped ONCE at promotion time from the active doc's Product
-  // context (birthplace, not ownership -- a master promoted from an untagged doc simply
-  // gets no reserved tag, nothing to attribute). Every other entry is a freeform
-  // technology tag, global across Products (never scoped per Product). Pure; callers own
-  // persistence (saveLibrary()) after mutating the master object passed in.
-  /* @tag-vocab-start */
-  function ownerProductTagValue(productId) { return productId ? ("product:" + productId) : null; }
-  function stampOwnerProductTag(master, productId) {
-    if (!master) return master;
-    if (!Array.isArray(master.tags)) master.tags = [];
-    if (!productId) return master; // no Product context at promotion time -- nothing to attribute
-    if (master.tags.some(function (t) { return t && t.reserved; })) return master; // stamped once, never re-stamped
-    master.tags.push({ value: ownerProductTagValue(productId), reserved: true });
-    return master;
-  }
-  function addTechnologyTag(master, value) {
-    if (!master) return master;
-    var v = String(value || "").trim(); if (!v) return master;
-    if (!Array.isArray(master.tags)) master.tags = [];
-    if (master.tags.some(function (t) { return t && t.value === v; })) return master; // no dupes
-    master.tags.push({ value: v, reserved: false });
-    return master;
-  }
-  // Ordinary tag-editing can never remove the reserved tag -- matches on a non-reserved value only.
-  function removeMasterTag(master, value) {
-    if (!master || !Array.isArray(master.tags)) return master;
-    master.tags = master.tags.filter(function (t) { return !(t && t.value === value && !t.reserved); });
-    return master;
-  }
-  // Autocomplete-first matching against the global technology-tag vocabulary. "propose
-  // new" is the caller's fallback when exact is false -- never the default typing path.
-  function matchTagVocabulary(vocab, query) {
-    var q = String(query || "").trim().toLowerCase();
-    if (!q) return { matches: [], exact: false };
-    var matches = (vocab || []).filter(function (t) { return t && t.toLowerCase().indexOf(q) !== -1; });
-    var exact = (vocab || []).some(function (t) { return t && t.toLowerCase() === q; });
-    return { matches: matches, exact: exact };
-  }
-  /* @tag-vocab-end */
-  // The global technology-tag vocabulary: every non-reserved tag value already used by
-  // any master in the shared library (not scoped per Product, per the ticket's spec).
-  function collectTagVocabulary() {
-    var seen = {}, out = [];
-    var comps = libComponents();
-    Object.keys(comps).forEach(function (k) {
-      ((comps[k] && comps[k].tags) || []).forEach(function (t) {
-        if (t && !t.reserved && t.value && !seen[t.value]) { seen[t.value] = true; out.push(t.value); }
-      });
-    });
-    return out;
-  }
+  // arch-P3b-07tags: the tag MODEL moved out. The five pure helpers went to
+  // editor/product-rail.js, which is where a plain-values-in, plain-values-out fact belongs;
+  // `collectTagVocabulary` went to editor/library.js, because it reads the shared library and
+  // is therefore not pure. Four of the six have no caller at all -- see those files.
   // doc override -> shared library -> built-in. Shared by the editor + render.
   function resolveComponentDef(key) {
     return (doc.components && doc.components[key]) || libComponents()[key] || (window.COMPONENTS || {})[key];
@@ -7394,7 +7345,10 @@
     productSelectOptions: productSelectOptions,
     tagDocCell: tagDocCell,
     tagDocProductStage: tagDocProductStage,
-    stampOwnerProductTag: stampOwnerProductTag,
+    // arch-P3b-07tags: the tag model is product-rail.js's pure half now. It has no
+    // install(kernel) -- by design, the FACTS side of that file is plain functions -- so the
+    // one helper a module needs crosses from here, read off the module object.
+    stampOwnerProductTag: PR.stampOwnerProductTag,
     stampMasterVersion: stampMasterVersion,
     gridMode: gridMode,
     activeBp: activeBp,
