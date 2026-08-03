@@ -2609,309 +2609,17 @@
   }
 
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
-  // A full-screen overlay OVER the editor (editor-first: the app still boots into
-  // the editor; a top-bar Home button opens this). A grid of course cards — each a
-  // live scaled-DOM page-1 thumbnail + title + code + last-edited — sorted by
-  // recents (recentsCompare) and filtered by a title/code search box. Clicking a
-  // card opens the course via the same switchDoc path the tabs use, so the browser
-  // and tabs stay in sync. Editor chrome only: nothing here renders/exports.
-  var browserUI = null, browserQuery = "", thumbObserver = null;
-  var THUMB_DESIGN_W = 1024; // render page 1 at a desktop width, then scale the node to the card
+  // arch-P3b-07k: the course grid, its live-rendered thumbnails, the destructive verbs it offers
+  // and the store-location line moved to editor/home.js.
+  var openBrowser = VE.bind("openBrowser");
+  var closeBrowser = VE.bind("closeBrowser");
+  var browserIsOpen = VE.bind("browserIsOpen");
+  var duplicateCourse = VE.bind("duplicateCourse");
+  var renameCourse = VE.bind("renameCourse");
+  var deleteCourse = VE.bind("deleteCourse");
+  var openCourseFromBrowser = VE.bind("openCourseFromBrowser");
+  var storeLocationText = VE.bind("storeLocationText");
 
-  function renderCourseThumb(d) {
-    var frame = h("div", "vbrowser-thumb");
-    frame.__renderThumb = function () {
-      if (frame.__rendered) return; frame.__rendered = true;
-      if (!d || !d.pages || !d.pages.length) { frame.classList.add("is-empty"); frame.innerHTML = Icon("file"); return; }
-      var node = null;
-      try {
-        var restore = (window.resolveMedia && window.AssetStore) ? window.resolveMedia(d, editorAssetResolve) : null;
-        try { node = window.render(d, activeTheme()); } finally { if (restore) restore(); }
-      } catch (e) { node = null; }
-      if (!node) { frame.classList.add("is-empty"); frame.innerHTML = Icon("file"); return; }
-      var holder = h("div", "vbrowser-thumb__holder");
-      holder.style.width = THUMB_DESIGN_W + "px";
-      holder.appendChild(node);
-      frame.appendChild(holder);
-      requestAnimationFrame(function () {
-        var fw = frame.clientWidth || 220;
-        holder.style.transform = "scale(" + (fw / THUMB_DESIGN_W) + ")";
-      });
-    };
-    return frame;
-  }
-
-  function buildBrowserCard(id, d) {
-    var card = h("div", "vbrowser-card" + (id === activeDocId ? " is-active" : ""));
-    var thumb = renderCourseThumb(d);
-    var body = h("div", "vbrowser-card__body");
-    var main = h("div", "vbrowser-card__main");
-    var titleEl = h("div", "vbrowser-card__title", (d.meta && d.meta.title) || id);
-    titleEl.title = titleEl.textContent;
-    var meta = h("div", "vbrowser-card__meta");
-    meta.appendChild(h("span", "vbrowser-card__code", (d.meta && d.meta.code) || id));
-    meta.appendChild(h("span", "vbrowser-card__sep", "·"));
-    meta.appendChild(h("span", "vbrowser-card__when", formatRelativeTime(d.meta && d.meta.updatedAt, Date.now())));
-    main.appendChild(titleEl); main.appendChild(meta);
-    // SPEC 7: a badge row — Product (if tagged), interactive/static, and an open-state mark.
-    var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { interactive: true };
-    var pid = d.meta && d.meta.productId;
-    var pname = (pid && window.ProductsStore && window.ProductsStore[pid]) ? window.ProductsStore[pid].name : null;
-    var badges = h("div", "vbrowser-card__badges");
-    if (pname) badges.appendChild(h("span", "vbrowser-card__badge", pname));
-    badges.appendChild(h("span", "vbrowser-card__badge", cell.interactive ? "Interactive" : "Static"));
-    if (id === activeDocId || openDocIds.indexOf(id) !== -1) badges.appendChild(h("span", "vbrowser-card__badge vbrowser-card__badge--open", "Open"));
-    main.appendChild(badges);
-    var menuBtn = iconBtn("more-horizontal", "Course actions"); menuBtn.classList.add("vbrowser-card__menu");
-    menuBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      var r = menuBtn.getBoundingClientRect();
-      showCourseMenu(r.left, r.bottom + 4, id);
-    });
-    body.appendChild(main); body.appendChild(menuBtn);
-    card.appendChild(thumb); card.appendChild(body);
-    card.__thumb = thumb; card.__docId = id;
-    card.addEventListener("click", function () { openCourseFromBrowser(id); });
-    return card;
-  }
-
-  function openCourseFromBrowser(id) {
-    if (!registry[id]) return;
-    if (openDocIds.indexOf(id) === -1) { openDocIds.push(id); saveOpenDocIds(openDocIds); renderTabs(); }
-    closeBrowser();
-    if (id !== activeDocId) switchDoc(id);
-  }
-
-  // #74 card actions — all reuse the existing single-source logic (registry +
-  // saveRegistry choke point), just wrapped behind the browser's cards/menu.
-  function uniqueCopyCode(baseCode) {
-    var base = (baseCode || "COURSE") + "-copy", code = base, n = 1;
-    while (registry[code]) { n++; code = base + "-" + n; }
-    return code;
-  }
-  function duplicateCourse(id) {
-    var srcDoc = registry[id]; if (!srcDoc) return;
-    var copy = JSON.parse(JSON.stringify(srcDoc)); // keep asset:<id> refs (media stays in the shared store)
-    if (!copy.meta) copy.meta = {};
-    copy.meta.code = uniqueCopyCode(srcDoc.meta && srcDoc.meta.code);
-    copy.meta.title = ((srcDoc.meta && srcDoc.meta.title) || "Untitled") + " (Copy)";
-    delete copy.meta.lastOpenedAt;
-    stampDocUpdatedAt(copy, Date.now());
-    registry[copy.meta.code] = copy;
-    saveRegistry(registry);
-    renderBrowserGrid();
-  }
-  function renameCourse(id) {
-    var d = registry[id]; if (!d) return;
-    promptModal("Rename course", "Course title", (d.meta && d.meta.title) || "", function (val) {
-      val = (val || "").trim(); if (!val) return;
-      if (!d.meta) d.meta = {};
-      d.meta.title = val;
-      stampDocUpdatedAt(d, Date.now());
-      saveRegistry(registry);
-      if (id === activeDocId) renderTabs();
-      renderBrowserGrid();
-    });
-  }
-  function deleteCourse(id) {
-    var d = registry[id]; if (!d) return;
-    confirmModal("Delete course?",
-      "Permanently remove “" + ((d.meta && d.meta.title) || id) + "” (" + id + ") from this machine. This can't be undone. Any exported SCORM or backup folder on disk is not affected.",
-      function () {
-        delete registry[id];
-        var oi = openDocIds.indexOf(id);
-        if (oi !== -1) openDocIds.splice(oi, 1);
-        if (id === activeDocId) {
-          var next = openDocIds[0] || Object.keys(registry)[0];
-          if (!next) { var fresh = clone(window.SAMPLE_DOC); registry[fresh.meta.code] = fresh; next = fresh.meta.code; }
-          if (openDocIds.indexOf(next) === -1) openDocIds.push(next);
-          activateDoc(next);
-          mount();
-        }
-        saveOpenDocIds(openDocIds);
-        saveRegistry(registry);
-        renderTabs();
-        renderBrowserGrid();
-      }, { danger: true, okLabel: "Delete" });
-  }
-  function showCourseMenu(x, y, id) {
-    var d = registry[id]; if (!d) return;
-    // side-rail-cleanup slice 2: Promote / Remove-from-Product folded in from the retired save-menu, so
-    // the file picker is the one home for file actions. Remove only shows when the course is tagged.
-    var linkedPid = d.meta && d.meta.productId;
-    var linked = !!(linkedPid && window.ProductsStore && window.ProductsStore[linkedPid]);
-    var items = [
-      { label: "Open", onClick: function () { openCourseFromBrowser(id); } },
-      { label: "Duplicate", onClick: function () { duplicateCourse(id); } },
-      { label: "Rename…", onClick: function () { renameCourse(id); } },
-      { sep: true },
-      { label: "Promote to Product…", onClick: function () { promoteToProductModal(d); } }
-    ];
-    if (linked) {
-      items.push({ label: "Remove from Product", onClick: function () {
-        var pname = (window.ProductsStore[linkedPid].name) || "this Product";
-        confirmModal("Remove from Product?", "Unlinks “" + ((d.meta && d.meta.title) || id) + "” from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(d); mountProductPicker(); renderBrowserGrid(); }, { okLabel: "Remove", danger: true });
-      } });
-    }
-    items.push({ sep: true });
-    items.push({ label: "Export .verso", onClick: function () { exportVersoPackage(registry[id]); } });
-    items.push({ sep: true });
-    items.push({ label: "Delete", danger: true, onClick: function () { deleteCourse(id); } });
-    showContextMenu(x, y, items);
-  }
-
-  function buildBrowserEmpty() {
-    var wrap = h("div", "vbrowser-empty");
-    var querying = !!browserQuery;
-    wrap.appendChild(h("div", "vbrowser-empty__title", querying ? "No matching courses" : "No courses yet"));
-    wrap.appendChild(h("div", "vbrowser-empty__hint",
-      querying ? "No course title or code matches your search." : "Create a new course or import a .verso to get started."));
-    if (!querying) {
-      var b = h("button", "vbrowser__btn vbrowser__btn--primary", "New course");
-      b.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
-      wrap.appendChild(b);
-    }
-    return wrap;
-  }
-
-  function observeThumbs(cards) {
-    if (thumbObserver) { thumbObserver.disconnect(); thumbObserver = null; }
-    if (typeof IntersectionObserver === "undefined" || !browserUI) {
-      cards.forEach(function (c) { if (c.__thumb) c.__thumb.__renderThumb(); });
-      return;
-    }
-    thumbObserver = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (en.isIntersecting && en.target.__thumb) { en.target.__thumb.__renderThumb(); thumbObserver.unobserve(en.target); }
-      });
-    }, { root: browserUI.grid, rootMargin: "300px" });
-    cards.forEach(function (c) { thumbObserver.observe(c); });
-  }
-
-  // SPEC 7 file-picker: the doc browser groups documents BY DOC TYPE (geometry cell), each group
-  // colour-coded. Grouping is pure (takes a geoOf resolver) so tests/run.js exercises it headlessly.
-  var BROWSER_GEO = {
-    reflow: { label: "Reflow", colour: "#0d99ff" },
-    frame:  { label: "Fixed frame", colour: "#9747ff" },
-    paged:  { label: "Paged", colour: "#14ae5c" }
-  };
-  /* @pure-browser-geo-start */
-  var BROWSER_GEO_ORDER = ["reflow", "frame", "paged"];
-  function groupDocIdsByGeo(ids, reg, geoOf) {
-    var by = { reflow: [], frame: [], paged: [] };
-    (ids || []).forEach(function (id) {
-      var d = reg && reg[id]; if (!d) return;
-      var geo = geoOf ? geoOf(d) : "reflow";
-      if (!by[geo]) geo = "reflow"; // unknown geo groups under reflow
-      by[geo].push(id);
-    });
-    return BROWSER_GEO_ORDER.filter(function (g) { return by[g].length; })
-      .map(function (g) { return { geo: g, ids: by[g] }; });
-  }
-  /* @pure-browser-geo-end */
-  function renderBrowserGrid() {
-    if (!browserUI) return;
-    var grid = browserUI.grid; grid.innerHTML = "";
-    // Respect the global product scope (like the tabs) + the search query.
-    var scope = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
-    var ids = Object.keys(registry).filter(function (id) {
-      return courseMatchesQuery(registry[id], browserQuery) && docMatchesProductStage(registry[id], scope, null);
-    });
-    ids.sort(function (x, y) { return recentsCompare(registry[x], registry[y]); });
-    if (!ids.length) { grid.appendChild(buildBrowserEmpty()); return; }
-    var groups = groupDocIdsByGeo(ids, registry, function (d) {
-      return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d).geo : "reflow";
-    });
-    var allCards = [];
-    groups.forEach(function (grp) {
-      var gm = BROWSER_GEO[grp.geo] || BROWSER_GEO.reflow;
-      var head = h("div", "vbrowser__group");
-      var dot = h("span", "vbrowser__group-dot"); dot.style.background = gm.colour; head.appendChild(dot);
-      head.appendChild(h("span", "vbrowser__group-title", gm.label));
-      head.appendChild(h("span", "vbrowser__group-count", String(grp.ids.length)));
-      grid.appendChild(head);
-      var inner = h("div", "vbrowser__grid-inner");
-      grp.ids.forEach(function (id) { var c = buildBrowserCard(id, registry[id]); inner.appendChild(c); allCards.push(c); });
-      grid.appendChild(inner);
-    });
-    observeThumbs(allCards);
-  }
-
-  function ensureBrowser() {
-    if (browserUI) return browserUI;
-    var overlay = h("div", "vbrowser"); overlay.id = "vbrowser"; overlay.hidden = true;
-    var bar = h("div", "vbrowser__bar");
-    bar.appendChild(h("div", "vbrowser__title", "Courses"));
-    var search = h("label", "vbrowser__search");
-    search.innerHTML = Icon("search");
-    var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "search courses";
-    input.addEventListener("input", function () { browserQuery = input.value; renderBrowserGrid(); });
-    search.appendChild(input);
-    bar.appendChild(search);
-    var spacer = h("div", "vbrowser__spacer"); bar.appendChild(spacer);
-    var importBtn = h("button", "vbrowser__btn", "Import");
-    importBtn.addEventListener("click", function () {
-      pickCourseFile(function (imported) { importDocToRegistry(imported); closeBrowser(); });
-    });
-    bar.appendChild(importBtn);
-    // new-product-empty-landing: create a Product straight from the browser header. newProductPrompt
-    // sets it as the active scope and re-opens this browser onto its (empty) grid.
-    var newProdBtn = h("button", "vbrowser__btn", "New Product");
-    newProdBtn.addEventListener("click", function () { newProductPrompt(); });
-    bar.appendChild(newProdBtn);
-    var newBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "New course");
-    newBtn.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
-    bar.appendChild(newBtn);
-    var closeBtn = iconBtn("x", "Close (Esc)"); closeBtn.classList.add("vbrowser__close");
-    closeBtn.addEventListener("click", closeBrowser);
-    bar.appendChild(closeBtn);
-    var grid = h("div", "vbrowser__grid");
-    // side-rail-cleanup slice 2: the "where are my files" store path, folded in from the retired
-    // save-menu, so the picker carries every file affordance the popover used to.
-    var foot = h("div", "vbrowser__foot");
-    foot.appendChild(h("span", "vbrowser__foot-label", "Files stored in"));
-    foot.appendChild(h("span", "vbrowser__foot-path", storeLocationText()));
-    overlay.appendChild(bar); overlay.appendChild(grid); overlay.appendChild(foot);
-    document.body.appendChild(overlay);
-    browserUI = { overlay: overlay, grid: grid, input: input, foot: foot };
-    return browserUI;
-  }
-
-  function openBrowser() {
-    ensureBrowser();
-    browserQuery = ""; browserUI.input.value = "";
-    browserUI.overlay.hidden = false;
-    document.body.classList.add("vbrowser-open");
-    renderBrowserGrid();
-    setTimeout(function () { try { browserUI.input.focus(); } catch (_) {} }, 0);
-  }
-  function closeBrowser() {
-    if (!browserUI) return;
-    browserUI.overlay.hidden = true;
-    document.body.classList.remove("vbrowser-open");
-    if (thumbObserver) { thumbObserver.disconnect(); thumbObserver = null; }
-  }
-  function browserIsOpen() { return !!(browserUI && !browserUI.overlay.hidden); }
-
-  (function wireHome() {
-    var b = document.getElementById("home-btn");
-    if (b) b.addEventListener("click", openBrowser);
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && browserIsOpen()) { e.preventDefault(); closeBrowser(); }
-    });
-  })();
-
-  // ---- File store location -------------------------------------------------
-  // side-rail-cleanup slice 2: the #75 rail save/recents popover is RETIRED. Its recents were a
-  // subset of the file picker's grid; its actions (Save-as-copy = Duplicate, Open = Import,
-  // Promote / Remove-from-Product, and this store path) now all live in the picker (ensureBrowser
-  // + showCourseMenu), so the picker is the one home for file management. storeLocationText survives
-  // -- the picker footer reads it for the "where are my files" line.
-  function storeLocationText() {
-    return storageBackend() === "file"
-      ? "~/Library/Application Support/Verso/store"
-      : "This browser (localStorage + IndexedDB)";
-  }
 
   // ---- Shared "header & footer default for new courses" ---------------------
   // A machine-level default (localStorage, cross-project) captured from any course's
@@ -7523,168 +7231,14 @@
   window.__autoIngestReviews = autoIngestReviews; // test hook
 
   // ---- Project auto-backup (P0 data-safety) --------
-  // The live course exists ONLY in opaque WebKit storage; this writes durable,
-  // portable copies to a real per-project folder on every debounced autosave.
-  // Backup .json is SELF-CONTAINED (assets baked to data-URIs, like the Viewer
-  // snapshot) so a single file fully restores structure + media. Handle in IDB
-  // (verso-backup, keyed per docId); doc.backup carries serialisable metadata.
-  var backupHandle = null, backupDebounceT = null, backupLastText = null, backupLastSnapshot = 0;
-  var BACKUP_SNAPSHOT_MS = 15 * 60 * 1000;
-  // Transport: the Verso Mac app (WKWebView) has NO File System Access API, so it uses a
-  // NATIVE bridge (webkit.messageHandlers.versoBackup -> NSOpenPanel + FileManager, path
-  // string, no re-grant); a Chromium browser uses FSA (directory handle). See the Swift
-  // handler.
-  function nativeBackupBridge() { return (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.versoBackup) || null; }
-  function backupMode() { if (nativeBackupBridge()) return "native"; if (window.showDirectoryPicker) return "fsa"; return "none"; }
-  var __bkReqId = 0, __bkPending = {};
-  // Swift calls this for EVERY versoBackup reply. store-native.js (loaded before editor.js)
-  // also owns replies for its own reqIds -> CHAIN its handler instead of clobbering it, else
-  // the #69 migration's bridge replies are lost and it hangs. Fall through on an unknown id.
-  var __prevBackupReply = window.__versoBackupReply;
-  window.__versoBackupReply = function (id, result) {
-    var p = __bkPending[id];
-    if (p) { delete __bkPending[id]; p(result); return; }
-    if (typeof __prevBackupReply === "function") __prevBackupReply(id, result);
-  };
-  function nativeBackupCall(op, extra) {
-    var br = nativeBackupBridge(); if (!br) return Promise.resolve(null);
-    var id = "bk_" + (++__bkReqId);
-    return new Promise(function (resolve) {
-      __bkPending[id] = resolve;
-      var msg = { op: op, reqId: id }; if (extra) Object.keys(extra).forEach(function (k) { msg[k] = extra[k]; });
-      try { br.postMessage(msg); } catch (e) { delete __bkPending[id]; resolve(null); return; }
-      setTimeout(function () { if (__bkPending[id]) { delete __bkPending[id]; resolve(null); } }, 20000); // watchdog
-    });
-  }
-  function backupIdb() {
-    return new Promise(function (res, rej) {
-      var r = indexedDB.open("verso-backup", 1);
-      r.onupgradeneeded = function () { r.result.createObjectStore("h"); };
-      r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); };
-    });
-  }
-  async function saveBackupHandle(id, h) { try { var db = await backupIdb(); await new Promise(function (res, rej) { var tx = db.transaction("h", "readwrite"); tx.objectStore("h").put(h, id); tx.oncomplete = res; tx.onerror = function () { rej(tx.error); }; }); } catch (e) {} }
-  async function loadBackupHandle(id) { try { var db = await backupIdb(); return await new Promise(function (res) { var tx = db.transaction("h", "readonly"); var g = tx.objectStore("h").get(id); g.onsuccess = function () { res(g.result || null); }; g.onerror = function () { res(null); }; }); } catch (e) { return null; } }
-  function backupSlug() { return String((doc && (doc.code || doc.id)) || "course").replace(/[^\w.-]+/g, "_"); }
-  // SELF-CONTAINED doc text: bake every asset:<id> -> data-URI on a throwaway clone so
-  // one .json restores the course fully (structure + media), re-importable as-is.
-  function selfContainedDocText() {
-    var frozen = JSON.parse(JSON.stringify(doc));
-    if (window.resolveMedia && window.AssetStore) {
-      window.resolveMedia(frozen, function (id) { var a = window.AssetStore.get(id); return a ? a.dataUrl : window.AssetStore.placeholder; });
-    }
-    return JSON.stringify(frozen, null, 2);
-  }
-  async function writeBackupFile(dir, name, text) { var fh = await dir.getFileHandle(name, { create: true }); var w = await fh.createWritable(); await w.write(text); await w.close(); }
-  function backupTs() { var d = new Date(); function p(n) { return (n < 10 ? "0" : "") + n; } return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()); }
-  // Compose the files to write this pass (shared by both transports): live <slug>.json
-  // (self-contained) + <slug>.schema.csv when changed; a snapshot on interval/force.
-  function backupFilesFor(force) {
-    var slug = backupSlug(), jsonText = selfContainedDocText(), unchanged = (jsonText === backupLastText), didSnap = false, files = [];
-    if (!unchanged) { files.push({ name: slug + ".json", text: jsonText }); if (window.__schemaCsv) files.push({ name: slug + ".schema.csv", text: window.__schemaCsv(doc) }); }
-    if (force || (Date.now() - backupLastSnapshot) > BACKUP_SNAPSHOT_MS) { files.push({ name: slug + "-backup-" + backupTs() + ".json", text: jsonText }); didSnap = true; }
-    return { files: files, jsonText: jsonText, unchanged: unchanged, didSnap: didSnap };
-  }
-  // Write the backup now via the active transport (native app bridge or browser FSA).
-  async function writeBackupNow(force) {
-    var mode = backupMode();
-    if (mode === "native") {
-      if (!(doc && doc.backup && doc.backup.folderPath)) return { skipped: "no-folder" };
-      var b = backupFilesFor(force);
-      if (!b.files.length) return { skipped: "unchanged" };
-      var r = await nativeBackupCall("write", { folder: doc.backup.folderPath, files: b.files });
-      if (r && r.ok) { if (!b.unchanged) backupLastText = b.jsonText; if (b.didSnap) backupLastSnapshot = Date.now(); showBackupBanner(false); return { wrote: !b.unchanged, snapshot: b.didSnap, native: true }; }
-      showBackupBanner(true); return { error: (r && r.error) || "native write failed" };
-    }
-    // browser FSA
-    if (!backupHandle) return { skipped: "no-folder" };
-    if ((await dirPermission(backupHandle, true)) !== "granted") { showBackupBanner(true); return { skipped: "no-permission" }; }
-    var bb = backupFilesFor(force);
-    if (!bb.files.length) return { skipped: "unchanged" };
-    try {
-      for (var i = 0; i < bb.files.length; i++) await writeBackupFile(backupHandle, bb.files[i].name, bb.files[i].text);
-      if (!bb.unchanged) backupLastText = bb.jsonText;
-      if (bb.didSnap) backupLastSnapshot = Date.now();
-      showBackupBanner(false);
-      return { wrote: !bb.unchanged, snapshot: bb.didSnap };
-    } catch (e) { showBackupBanner(true); return { error: String((e && e.message) || e) }; }
-  }
-  function scheduleBackup() {
-    if (!(doc && doc.backup) && !backupHandle) return;
-    if (backupDebounceT) clearTimeout(backupDebounceT);
-    backupDebounceT = setTimeout(function () { backupDebounceT = null; writeBackupNow(false); }, 2000);
-  }
-  // Bind (or re-bind) the active doc to a project folder — must run under a user gesture.
-  async function bindProjectFolder() {
-    var mode = backupMode();
-    if (mode === "native") {
-      var r = await nativeBackupCall("pickFolder");
-      if (!r || !r.ok) return null;
-      backupHandle = null; backupLastText = null; backupLastSnapshot = 0;
-      doc.backup = { folderPath: r.path, folderName: r.name || "folder", boundAt: Date.now() };
-      saveRegistry(registry);
-      await writeBackupNow(true);
-      return r;
-    }
-    if (mode === "fsa") {
-      try {
-        var h = await window.showDirectoryPicker({ mode: "readwrite" });
-        backupHandle = h; backupLastText = null; backupLastSnapshot = 0;
-        doc.backup = { folderName: h.name || "folder", boundAt: Date.now() };
-        await saveBackupHandle(activeDocId, h);
-        saveRegistry(registry);
-        await writeBackupNow(true);
-        return h;
-      } catch (e) { return null; }
-    }
-    window.alert("Can't pick a folder here. In the Verso app this uses a native picker; in a browser use Chrome or Edge, opened locally.");
-    return null;
-  }
-  // On boot / doc switch: reconnect. NATIVE (non-sandboxed app) can always write, so a
-  // stored folderPath = connected. FSA needs the persisted handle to still be granted;
-  // if bound-but-not-writable -> LOUD banner (never silently drop).
-  async function connectBackupFolder() {
-    backupHandle = null; backupLastText = null; backupLastSnapshot = 0;
-    if (!(doc && doc.backup)) { showBackupBanner(!!(doc && doc.backupRequired)); return; } // unbound + required (new course) -> nag
-    if (backupMode() === "native") { showBackupBanner(!doc.backup.folderPath); return; }
-    var saved = await loadBackupHandle(activeDocId);
-    if (saved && (await dirPermission(saved, true)) === "granted") { backupHandle = saved; showBackupBanner(false); }
-    else showBackupBanner(true);
-  }
-  async function reconnectBackupFolder() { // user gesture (banner / settings button)
-    if (backupMode() === "native") { // path-based; just try a write, else re-pick
-      if (doc && doc.backup && doc.backup.folderPath) { var r = await writeBackupNow(true); if (r && !r.error) { showBackupBanner(false); return true; } }
-      return !!(await bindProjectFolder());
-    }
-    var saved = await loadBackupHandle(activeDocId);
-    if (saved && (await dirPermission(saved, false)) === "granted") { backupHandle = saved; showBackupBanner(false); await writeBackupNow(true); return true; }
-    return !!(await bindProjectFolder()); // permission lost / folder moved -> re-pick
-  }
-  // LOUD "backup OFF" banner (mirrors the save-fail banner) — decision 4.
-  var backupBannerEl = null;
-  function showBackupBanner(off) {
-    if (!off) { if (backupBannerEl) backupBannerEl.hidden = true; return; }
-    if (!backupBannerEl) {
-      backupBannerEl = document.createElement("div");
-      backupBannerEl.id = "backup-off-banner"; backupBannerEl.setAttribute("role", "alert");
-      var m = document.createElement("span"); m.className = "backup-off-banner__msg"; backupBannerEl.appendChild(m);
-      var b = document.createElement("button"); b.className = "backup-off-banner__btn"; b.type = "button";
-      b.addEventListener("click", function () { reconnectBackupFolder(); }); // reconnect if bound, else picks a folder
-      backupBannerEl.appendChild(b);
-      document.body.appendChild(backupBannerEl);
-    }
-    // Two states: BOUND-but-not-writable (reconnect) vs never bound (choose a folder — new courses).
-    var bound = !!(doc && doc.backup);
-    backupBannerEl.querySelector(".backup-off-banner__msg").textContent = bound
-      ? "Backup OFF — this course is NOT being saved to " + (doc.backup.folderName || "your project folder") + ". Reconnect to resume auto-backup."
-      : "No backup folder — this course is NOT being saved anywhere. Choose a project folder to protect your work.";
-    backupBannerEl.querySelector(".backup-off-banner__btn").textContent = bound ? "Reconnect folder" : "Choose folder";
-    backupBannerEl.hidden = false;
-  }
-  window.__setBackupHandle = function (h) { backupHandle = h; backupLastText = null; backupLastSnapshot = 0; }; // test hook
-  window.__writeBackupNow = function (force) { return writeBackupNow(force); }; // test hook
-  window.__bindProjectFolder = bindProjectFolder; window.__connectBackupFolder = connectBackupFolder;
-  window.__publishSnapshot = function () { var f = JSON.parse(JSON.stringify(doc)); delete f.comments; return { type: "verso-pub", schema: 1, course: doc.code || doc.id || "course", version: doc.version || "dev", publishedAt: Date.now(), doc: f }; }; // test hook
+  // arch-P3b-07d: the durable-copy writer moved to editor/backup.js. It read only five names from
+  // this file, the smallest set in the phase -- the banner it sat in also held the top bar, the
+  // three-stage model and the cell chip, and those are separate concerns that stayed.
+  var scheduleBackup = VE.bind("scheduleBackup");
+  var backupSlug = VE.bind("backupSlug");
+  var backupMode = VE.bind("backupMode");
+  var connectBackupFolder = VE.bind("connectBackupFolder");
+
   function renderPipelineButtons(container) {
     container.innerHTML = "";
     pipelineButtons.forEach(function (btn) {
@@ -18275,11 +17829,34 @@
   // arch-P3b-07b: what the canonical control set reads. `blockToolbarSep` is minted when this file
   // builds the canvas overlay bar, so renderContainerChrome has to read the current one.
   window.VersoEditor.provideLive({
-    blockToolbarSep: function () { return blockToolbarSep; }
+    blockToolbarSep: function () { return blockToolbarSep; },
+    // arch-P3b-07d: which document is open. Reassigned on every tab switch, and the backup writer
+    // keys its folder and its debounce off it -- a captured value would keep backing up the course
+    // the author closed.
+    activeDocId: function () { return activeDocId; }
   });
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    openDocIds: openDocIds,
+    renderTabs: renderTabs,
+    storageBackend: storageBackend,
+    newProductPrompt: newProductPrompt,
+    importDocToRegistry: importDocToRegistry,
+    pickCourseFile: pickCourseFile,
+    recentsCompare: recentsCompare,
+    docMatchesProductStage: docMatchesProductStage,
+    courseMatchesQuery: courseMatchesQuery,
+    exportVersoPackage: exportVersoPackage,
+    unlinkDocFromProduct: unlinkDocFromProduct,
+    promoteToProductModal: promoteToProductModal,
+    mount: mount,
+    activateDoc: activateDoc,
+    switchDoc: switchDoc,
+    formatRelativeTime: formatRelativeTime,
+    showNewDocDialog: showNewDocDialog,
+    stampDocUpdatedAt: stampDocUpdatedAt,
+    saveOpenDocIds: saveOpenDocIds,
     pushLayer: pushLayer,
     popLayer: popLayer,
     selectBlock: selectBlock,
@@ -18377,6 +17954,8 @@
   window.VersoInspectorPrimitives.install(VE);   // and every settings row resolves to one of these
   window.VersoDndUi.install(VE);             // owns the drag state the outliner and Assets tab read
   window.VersoPalette.install(VE);   // the Cmd-K index over everything above
+  window.VersoBackup.install(VE);   // P0 data-safety: the durable copy on disk
+  window.VersoHome.install(VE);   // the pre-document course browser
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has
