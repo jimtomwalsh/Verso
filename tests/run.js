@@ -180,7 +180,7 @@ function withServer(probe) {
 
 // ---- node --check on every src file --------------------------------------
 section("syntax");
-["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/persist.js", "src/export.js",
+["src/render.js", "src/render-context.js", "src/editor.js", "src/editor/storage.js", "src/editor/history.js", "src/editor/publish.js", "src/editor/inspector/dispatch.js", "src/editor/product-rail.js", "src/editor/board/layout.js", "src/editor/board/harvest.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -3112,12 +3112,11 @@ section("YY asset-seam");
 // ---- tour source MediaTransport: pure time/mark helpers ------------------
 section("tour media transport (pure)");
 (function () {
-  var etxt = src("src/editor.js");
-  var a = etxt.indexOf("/* __TOUR_MEDIA_PURE__ start");
-  var b = etxt.indexOf("/* __TOUR_MEDIA_PURE__ end");
-  if (a < 0 || b < 0) { ok("tour media pure block present", false); return; }
-  var block = etxt.slice(etxt.indexOf("\n", a) + 1, b);
-  var api = new Function(block + "; return { fmt: tourFormatTime, mark: tourApplyMark, crop: tourCropRect, segReady: tourSegReady, speedField: tourSpeedField, applyCut: tourApplyCut, mergeCuts: tourMergeCuts, clipCuts: tourClipCutsToBounds, keptRanges: tourKeptRanges, netLength: tourNetLength };")();
+  // arch-P3-06: the segment math is src/editor/board/harvest.js now.
+  var HV = require(path.join(ROOT, "src/editor/board/harvest.js"));
+  var api = { fmt: HV.formatTime, mark: HV.applyMark, crop: HV.cropRect, segReady: HV.segReady,
+              speedField: HV.speedField, applyCut: HV.applyCut, mergeCuts: HV.mergeCuts,
+              clipCuts: HV.clipCutsToBounds, keptRanges: HV.keptRanges, netLength: HV.netLength };
   ok("fmt 0 -> 0:00", api.fmt(0) === "0:00");
   ok("fmt 65 -> 1:05", api.fmt(65) === "1:05");
   ok("fmt neg -> 0:00", api.fmt(-5) === "0:00");
@@ -3146,10 +3145,9 @@ section("tour media transport (pure)");
 // ---- ripple cuts: T1 pure model + logic ----------------------------------
 section("tour ripple cuts (pure)");
 (function () {
-  var etxt = src("src/editor.js");
-  var a = etxt.indexOf("/* __TOUR_MEDIA_PURE__ start"), b = etxt.indexOf("/* __TOUR_MEDIA_PURE__ end");
-  var block = etxt.slice(etxt.indexOf("\n", a) + 1, b);
-  var api = new Function(block + "; return { applyCut: tourApplyCut, mergeCuts: tourMergeCuts, clipCuts: tourClipCutsToBounds, keptRanges: tourKeptRanges, netLength: tourNetLength, segReady: tourSegReady };")();
+  var HV = require(path.join(ROOT, "src/editor/board/harvest.js"));
+  var api = { applyCut: HV.applyCut, mergeCuts: HV.mergeCuts, clipCuts: HV.clipCutsToBounds,
+              keptRanges: HV.keptRanges, netLength: HV.netLength, segReady: HV.segReady };
   // applyCut: commit a pending cut-in + playhead into an ordered removed range; reject crossings
   ok("applyCut forms ordered cut", (function () { var c = api.applyCut(3, 8); return c && c.start === 3 && c.end === 8; })());
   ok("applyCut rejects out<=in", api.applyCut(8, 3) === null && api.applyCut(5, 5) === null);
@@ -15517,6 +15515,120 @@ section("arch-P3-04 inspector dispatch");
     !/if \(selection\.type === "instance"\) renderInstanceInspector/.test(e));
 })();
 
+// ---- arch-P3-06: the tour board's geometry --------------------------------
+// These coordinates are AUTHOR DATA. They persist on screens[].bx/by and loops[].bx/by, they
+// survive in the saved document, and render() deliberately ignores them so the board can exist
+// without making render impure. A layout bug does not throw -- it quietly moves the author's
+// arrangement. None of this had a test, because all of it was closure-local inside 2,000 lines of
+// board DOM.
+section("arch-P3-06 tour board layout");
+(function () {
+  var BL = require(path.join(ROOT, "src/editor/board/layout.js"));
+  var e = src("src/editor.js");
+
+  // ---- loop frames auto-fit their members ----
+  ok("an empty loop still has a frame to drop into", (function () {
+    var s = BL.loopSize({ screens: [] });
+    return s.w === BL.LOOP.MIN_W && s.h === BL.LOOP.EMPTY_H;
+  })());
+  ok("one member is one column", BL.loopCols(1) === 1 && BL.loopSize({ screens: ["a"] }).w === BL.LOOP.MIN_W);
+  ok("members grow the frame across, then down", (function () {
+    var one = BL.loopSize({ screens: ["a"] }), four = BL.loopSize({ screens: ["a", "b", "c", "d"] });
+    var five = BL.loopSize({ screens: ["a", "b", "c", "d", "e"] });
+    return four.w > one.w && four.h === one.h && five.w === four.w && five.h > four.h;
+  })());
+  ok("the grid never exceeds four columns", BL.loopCols(9) === BL.LOOP.COLS_MAX && BL.loopCols(0) === 1);
+  ok("slots step by node width plus the gap, row-major", (function () {
+    var loop = { screens: ["a", "b", "c", "d", "e"], bx: 100, by: 200 };
+    var s0 = BL.loopSlotPos(loop, 0), s1 = BL.loopSlotPos(loop, 1), s4 = BL.loopSlotPos(loop, 4);
+    return s1.x - s0.x === BL.METRICS.NODE_W + BL.LOOP.GAP && s1.y === s0.y &&
+      s4.x === s0.x && s4.y - s0.y === BL.LOOP.CELL_H + BL.LOOP.GAP;
+  })());
+  ok("a slot is inside its own frame", (function () {
+    var loop = { screens: ["a", "b", "c"], bx: 40, by: 40 };
+    var r = BL.loopRect(loop), p = BL.loopSlotPos(loop, 2);
+    return BL.ptInRect(p.x, p.y, r) && BL.ptInRect(p.x + BL.METRICS.NODE_W - 1, p.y, r);
+  })());
+  ok("hit-testing includes the edges and excludes the outside", (function () {
+    var r = { x: 10, y: 10, w: 100, h: 50 };
+    return BL.ptInRect(10, 10, r) && BL.ptInRect(110, 60, r) && !BL.ptInRect(9, 30, r) && !BL.ptInRect(60, 61, r) && !BL.ptInRect(1, 1, null);
+  })());
+  ok("a screen belongs to at most one loop, and the map covers every member", (function () {
+    var loops = [{ id: "L1", screens: ["s1", "s2"] }, { id: "L2", screens: ["s3"] }];
+    var slots = BL.memberSlots(loops);
+    return BL.loopOfScreen(loops, "s2").id === "L1" && BL.loopOfScreen(loops, "s3").id === "L2" &&
+      BL.loopOfScreen(loops, "free") === null && Object.keys(slots).sort().join(",") === "s1,s2,s3";
+  })());
+
+  // ---- first open: blanks get a slot, placed nodes keep theirs ----
+  ok("a document authored before the board existed lays out on first open", (function () {
+    var ss = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    BL.autoLayoutCoords(ss);
+    return ss.every(function (s) { return typeof s.bx === "number" && typeof s.by === "number"; }) &&
+      ss[0].bx !== ss[1].bx;
+  })());
+  ok("already-placed nodes are never moved, and blanks fill in after them", (function () {
+    var ss = [{ id: "a", bx: 999, by: 999 }, { id: "b" }];
+    BL.autoLayoutCoords(ss);
+    return ss[0].bx === 999 && ss[0].by === 999 && ss[1].bx === BL.TIDY.ORIGIN_X + BL.TIDY.GAP_X;
+  })());
+
+  // ---- the tidy plan ----
+  function screens() {
+    return [{ id: "a", bx: 500, by: 20 }, { id: "b", bx: 100, by: 30 }, { id: "c", bx: 300, by: 400 }];
+  }
+  ok("tidy reads the CURRENT rough order (row-banded by y, then x) rather than array order", (function () {
+    var plan = BL.tidyPlan(screens(), [], []);
+    return plan.screens.map(function (m) { return m.id; }).join(",") === "b,a,c";
+  })());
+  ok("a whole-board tidy starts at the board origin", (function () {
+    var plan = BL.tidyPlan(screens(), [], []);
+    return plan.screens[0].bx === BL.TIDY.ORIGIN_X && plan.screens[0].by === BL.TIDY.ORIGIN_Y;
+  })());
+  ok("a SELECTED tidy anchors at the selection's own top-left, so a cluster is not dragged home", (function () {
+    var plan = BL.tidyPlan(screens(), [], ["a", "c"]);
+    return plan.selecting === true && plan.screens.length === 2 && plan.screens[0].bx === 300 && plan.screens[0].by === 20;
+  })());
+  ok("loop MEMBERS are never in the plan -- their frame owns their slots", (function () {
+    var plan = BL.tidyPlan(screens(), [{ id: "L1", screens: ["b"] }], []);
+    return plan.screens.map(function (m) { return m.id; }).join(",") === "a,c";
+  })());
+  ok("a whole-board tidy stacks the loop frames below the grid, in their current order", (function () {
+    var loops = [{ id: "L2", screens: ["x"], bx: 0, by: 900 }, { id: "L1", screens: ["y"], bx: 0, by: 100 }];
+    var plan = BL.tidyPlan(screens(), loops, []);
+    var lowest = Math.max.apply(null, plan.screens.map(function (m) { return m.by; }));
+    return plan.loops.map(function (m) { return m.id; }).join(",") === "L1,L2" &&
+      plan.loops[0].by > lowest && plan.loops[1].by > plan.loops[0].by;
+  })());
+  ok("a SELECTED tidy leaves the loop frames alone", BL.tidyPlan(screens(), [{ id: "L1", screens: ["x"] }], ["a"]).loops.length === 0);
+  ok("tidying nothing is a no-op, not an empty board", (function () {
+    var plan = BL.tidyPlan([], [], []);
+    return plan.screens.length === 0 && plan.loops.length === 0;
+  })());
+  ok("planning mutates nothing until it is applied", (function () {
+    var ss = screens(), before = JSON.stringify(ss);
+    var plan = BL.tidyPlan(ss, [], []);
+    var untouched = JSON.stringify(ss) === before;
+    BL.applyTidyPlan(plan, ss, []);
+    return untouched && ss.filter(function (s) { return s.id === "b"; })[0].bx === BL.TIDY.ORIGIN_X;
+  })());
+  ok("applying a plan ignores ids that are no longer there", (function () {
+    var ss = screens();
+    BL.applyTidyPlan({ screens: [{ id: "ghost", bx: 1, by: 1 }], loops: [] }, ss, []);
+    return ss.length === 3;
+  })());
+
+  // ---- the wiring ----
+  ok("editor.js plans, then applies, and keeps history + the repaint",
+    /var plan = BL\.tidyPlan\(tourScreens\(\), tourLoops\(\), tourNodeSel\);[\s\S]{0,220}pushHistory\(\);[\s\S]{0,120}BL\.applyTidyPlan\(plan, tourScreens\(\), tourLoops\(\)\);/.test(e));
+  ok("editor.js keeps no board geometry of its own",
+    !/LOOP_PAD|LOOP_HEADER|LOOP_CELL_H|LOOP_MIN_W|LOOP_EMPTY_H|LOOP_COLS_MAX/.test(e));
+  ok("both board modules are DOM-free", ["src/editor/board/layout.js", "src/editor/board/harvest.js"].every(function (f) {
+    var t = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    return !/document\.[A-Za-z$_]+\s*\(/.test(t) && !/\bDate\.now|Math\.random/.test(t);
+  }));
+})();
+
 // ---- arch-P2-04: the slice ratchet ----------------------------------------
 // The suite reconstitutes source text with `new Function` 166 times and with its own
 // three-argument string-slice helper 17 times. Those numbers may fall; they may not rise. A new test
@@ -15527,7 +15639,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 154, SLICE_BUDGET = 17;
+  var FN_BUDGET = 152, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);
