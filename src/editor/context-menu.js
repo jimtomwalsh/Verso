@@ -18,7 +18,7 @@
 
   function install(kernel) {
     var E = kernel.need(
-      "pasteClipboard", "previewVariant", "newVariantPrompt", "reselectBlockNode", "popLayer", "pushLayer",
+      "h", "pasteClipboard", "previewVariant", "newVariantPrompt", "reselectBlockNode", "popLayer", "pushLayer",
       "openSettingsSection", "canvas", "variantNames", "moveBlock", "reapplyBlock", "duplicateBlock",
       "copySelection", "copyBlockStyle", "pasteBlockStyle", "ungroupBlock", "saveBlockAsComponent", "clearBlockContentAction",
       "canSplitAtBlock", "splitPageAtBlock", "deleteBlockByRef", "isHiddenIn", "toggleHiddenIn", "versionNames",
@@ -29,7 +29,8 @@
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
-    var pasteClipboard = E.pasteClipboard,
+    var h = E.h,
+        pasteClipboard = E.pasteClipboard,
         previewVariant = E.previewVariant,
         newVariantPrompt = E.newVariantPrompt,
         reselectBlockNode = E.reselectBlockNode,
