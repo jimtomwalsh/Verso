@@ -9890,45 +9890,12 @@
   try { if (localStorage.getItem(PANELS_HIDDEN_KEY) === "1") applyPanelsHidden(true); } catch (_) {}
 
   // ---- perf HUD (diagnostic; editor chrome, OFF by default, never ships) -------------
-  // Cmd/Ctrl+Shift+F toggles a readout of the browser's real frame cadence during pan/zoom vs
-  // the JS cost of applyView, so we can separate paint/composite-bound jank (frame ms >>
-  // applyView-JS ms) from script-bound jank. This is how we decide whether the canvas
-  // needs an architectural change (native-scroll pan / cached-layer zoom) rather than more
-  // JS micro-opt. Purely diagnostic; the loop only runs while the HUD is on.
-  var perfHud = null, perfOn = false, _perfRaf = 0, _perfLast = 0, _perfFrames = [], _perfMaxFrame = 0, _perfViewJs = 0, _perfViewN = 0;
-  function perfTick(ts) {
-    if (!perfOn) return;
-    if (_perfLast) { var dt = ts - _perfLast; _perfFrames.push(dt); if (dt > _perfMaxFrame) _perfMaxFrame = dt; if (_perfFrames.length > 90) _perfFrames.shift(); }
-    _perfLast = ts;
-    if (!perfTick._acc || ts - perfTick._acc > 250) {
-      perfTick._acc = ts;
-      var n = _perfFrames.length || 1;
-      var avg = _perfFrames.reduce(function (a, b) { return a + b; }, 0) / n;
-      var fps = avg > 0 ? Math.round(1000 / avg) : 0;
-      var vjs = _perfViewN ? (_perfViewJs / _perfViewN) : 0;
-      if (perfHud) perfHud.textContent = "FPS " + fps + "   frame " + avg.toFixed(1) + "ms (max " + _perfMaxFrame.toFixed(0) + ")   applyView-JS " + vjs.toFixed(2) + "ms/" + _perfViewN;
-      _perfViewJs = 0; _perfViewN = 0; _perfMaxFrame = 0;
-    }
-    _perfRaf = requestAnimationFrame(perfTick);
-  }
-  function togglePerfHud() {
-    perfOn = !perfOn;
-    if (perfOn) {
-      if (!perfHud) { perfHud = h("div", "perf-hud"); document.body.appendChild(perfHud); }
-      perfHud.hidden = false; perfHud.textContent = "perf HUD on - pan / zoom now";
-      _perfLast = 0; _perfFrames = []; _perfMaxFrame = 0; _perfViewJs = 0; _perfViewN = 0;
-      _perfRaf = requestAnimationFrame(perfTick);
-    } else {
-      if (_perfRaf) { cancelAnimationFrame(_perfRaf); _perfRaf = 0; }
-      if (perfHud) perfHud.hidden = true;
-    }
-  }
-  window.__perfHud = togglePerfHud;
-  // Diagnostic A/B: the world carries a permanent `will-change: transform` (CSS). On a
-  // very large world that layer can be too big to GPU-cache, so the browser repaints it
-  // every pan/zoom frame -- worse than not promoting it. __wc('auto') drops the promotion
-  // so you can FEEL the difference; __wc('transform') restores it. Console-only helper.
-  window.__wc = function (v) { if (world) world.style.willChange = v || "auto"; return world && (world.style.willChange || "(from CSS: transform)"); };
+  // arch-P3b-07u: the frame-cadence readout and the will-change A/B moved to
+  // editor/diagnostics.js. Proximity capture, which shared this ticket, moved with the comments.
+  var togglePerfHud = VE.bind("togglePerfHud");
+  var perfTick = VE.bind("perfTick");
+  var noteViewJsSample = VE.bind("noteViewJsSample");
+
 
   // arch-P3b-07: the global keyboard map moved to editor/shortcuts.js -- one file that says what
   // every key does, and defers to whichever mode owns the key it is holding.
@@ -10906,7 +10873,6 @@
     framePos: function () { return framePos; },
     numCols: function () { return _numCols; },
     currentPage: function () { return currentPage; },
-    perfOn: function () { return perfOn; }
   });
   window.VersoEditor.provide({
     canvas: canvas,
@@ -10920,7 +10886,7 @@
     // focusFrame sets the current page, and the perf HUD counts applyView's JS cost. Both are
     // writes INTO this file, so they cross as functions rather than as exposed variables.
     setCurrentPage: function (i) { currentPage = i; },
-    noteViewJs: function (ms) { _perfViewJs += ms; _perfViewN++; }
+    noteViewJs: function (ms) { noteViewJsSample(ms); }
   });
   // arch-P3b-03: what the inspector section engine reads. `inspector` is the panel host, and this
   // file reassigns it as a render target at thirty-odd sites (`var _ins = inspector; inspector =
@@ -11340,6 +11306,7 @@
   window.VersoOutliner.install(VE);   // the document seen as a list
   window.VersoClipboard.install(VE);   // the verbs that act on a selection
   window.VersoShortcuts.install(VE);   // one place that says what every key does
+  window.VersoDiagnostics.install(VE);   // the frame-cadence readout
 
   // arch-P3b-07b: the style-key lists and the container IO list are DATA, not entry points, so they
   // cannot cross as bound forwarders. They are read here, once, the moment their owner has
