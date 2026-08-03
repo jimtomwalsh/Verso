@@ -3859,6 +3859,7 @@ section("group as a single side-by-side target (#95)");
 section("customisable preview preset sizes (#42)");
 (function () {
   var e = src("src/editor.js");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   var bpClampDim = new Function("v", "def", "min", "max",
     'var n = parseInt(v,10); if (isNaN(n)) return def; return Math.max(min, Math.min(max, n));');
   ok("clamp: a valid dimension passes through", bpClampDim(800, 1200, 240, 4000) === 800);
@@ -3874,9 +3875,9 @@ section("customisable preview preset sizes (#42)");
   // stage), not fit-scaled to the monitor: zoom is cleared and demoFitScale is no longer used.
   ok("forced-device preview is exact pixels, not fit-scaled", !/demoDevice\.style\.zoom = demoFitScale/.test(e));
   ok("forced device sets exact w/h then clears zoom",
-     /demoDevice\.style\.width = dw \+ "px"[\s\S]{0,160}demoDevice\.style\.zoom = "";/.test(e));
+     /demoDevice\.style\.width = dw \+ "px"[\s\S]{0,160}demoDevice\.style\.zoom = "";/.test(DEMO));
   ok("forced device is framed (inline nav, no ghost pill without the zoom containing block)",
-     /demoDevice\.classList\.add\("demo__device--framed"\)/.test(e));
+     /demoDevice\.classList\.add\("demo__device--framed"\)/.test(DEMO));
 })();
 
 // #100: exiting preview lands the canvas on the page the preview was showing (demoPage),
@@ -3884,10 +3885,11 @@ section("customisable preview preset sizes (#42)");
 section("exit preview focuses the demo's page (#100)");
 (function () {
   var e = src("src/editor.js");
-  var body = e.slice(e.indexOf("function exitDemo()"), e.indexOf("function wireDemo()"));
-  ok("exitDemo clamps demoPage to a valid page index", /var __exitPage = clamp\(demoPage, 0, doc\.pages\.length - 1\)/.test(body));
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
+  var body = DEMO.slice(DEMO.indexOf("function exitDemo()"), DEMO.indexOf("function wireDemo()"));
+  ok("exitDemo clamps demoPage to a valid page index", /var __exitPage = clamp\(demoPage, 0, E\.doc\.pages\.length - 1\)/.test(body));
   ok("exitDemo focuses + activates + selects that page", /focusFrame\(__exitPage\); setActivePage\(__exitPage\); setSelection\("page", __exitPage\);/.test(body));
-  ok("exitDemo guards against a page-less doc", /if \(doc\.pages && doc\.pages\.length\) \{/.test(body));
+  ok("exitDemo guards against a page-less doc", /if \(E\.doc\.pages && E\.doc\.pages\.length\) \{/.test(body));
 })();
 
 // #90: native Table block — 4-file contract wiring (render / course.css / editor).
@@ -3938,7 +3940,7 @@ section("#111 completion screen");
   // editor.js — inspector + demo preview
   ok("editor adds a Completion screen settings section", /\{ key: "endScreen", title: "Completion screen", build: buildEndScreenBody \}/.test(ed));
   ok("editor builds the end-screen inspector body", /function buildEndScreenBody\(host\)/.test(ed) && /Show completion screen/.test(ed));
-  ok("editor demo previews the real splash on Exit", /function previewEndScreen\(\)/.test(ed) && /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(ed));
+  ok("editor demo previews the real splash on Exit", /function previewEndScreen\(\)/.test(src("src/editor/demo.js")) && /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(src("src/editor/demo.js")));
   // course.css — hidden until revealed; reduced-motion honoured
   ok("course.css hides the splash until .is-shown", /\.course-end \{[\s\S]*?display: none;[\s\S]*?\}\s*\.course-end\.is-shown \{ display: flex; \}/.test(cs));
   ok("course.css gates the check draw on prefers-reduced-motion", /prefers-reduced-motion: reduce[\s\S]*?course-end__badge-check \{ animation: none/.test(cs));
@@ -4754,25 +4756,26 @@ section("comment list (panel)");
 section("comment mode (preview)");
 (function () {
   var t = src("src/editor.js");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // surface abstraction: canvas vs demo, one shared store
-  ok("activeSurf picks demo while the preview is open", /function activeSurf\(\) \{ return \(demo && !demo\.hidden\) \? demoSurf\(\) : canvasSurf\(\); \}/.test(t));
+  ok("activeSurf picks demo while the preview is open", /function activeSurf\(\) \{ return demoIsOpen\(\) \? demoSurf\(\) : canvasSurf\(\); \}/.test(t));
   ok("demoSurf disallows world anchors (canvas-only)", /function demoSurf\(\)[\s\S]*?allowWorld: false/.test(t));
   ok("makeAnchorFromPoint is surface-scoped + drops world in preview", /var s = activeSurf\(\);[\s\S]*?s\.root\.contains\(blockEl\)[\s\S]*?if \(!s\.allowWorld\) return null;/.test(t));
   ok("anchorToScreen resolves against the active surface root", /function anchorToScreen[\s\S]*?var s = activeSurf\(\);[\s\S]*?s\.root\.querySelector/.test(t));
   // demo DOM gets data-cid (renderPage is pure -> stamp here) + pins re-projected
-  ok("renderDemo stamps cids + renders pins", /stampDemoCids\(cr\);[\s\S]*?renderCommentPins\(\);/.test(t));
-  ok("stampDemoCids stamps data-cid from __block.cid", /function stampDemoCids[\s\S]*?n\.setAttribute\("data-cid", n\.__block\.cid\)/.test(t));
+  ok("renderDemo stamps cids + renders pins", /stampDemoCids\(cr\);[\s\S]*?renderCommentPins\(\);/.test(DEMO));
+  ok("stampDemoCids stamps data-cid from __block.cid", /function stampDemoCids[\s\S]*?n\.setAttribute\("data-cid", n\.__block\.cid\)/.test(DEMO));
   // preview drop: block/page only (bails on a null anchor), shared store
   ok("preview drop uses the shared store + skips null anchors", /if \(!demoCommentMode \|\| e\.button !== 0\) return;[\s\S]*?if \(!anchor\) return;[\s\S]*?doc\.comments\.push\(c\)/.test(t));
   // C routes to the demo in preview; canvas C is guarded by demo.hidden
   ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentMode\)[\s\S]{0,80}demo has its own C/.test(t) || /&& demo\.hidden\) \{\s*e\.preventDefault\(\);\s*setCommentMode/.test(t));
   ok("preview C toggles demo comment mode", /setDemoCommentMode\(!demoCommentMode\)/.test(t));
   // exit re-projects onto the canvas surface (the round-trip)
-  ok("exitDemo re-projects pins onto the canvas", /function exitDemo[\s\S]*?demo\.hidden = true;[\s\S]{0,140}renderCommentPins\(\)/.test(t));
+  ok("exitDemo re-projects pins onto the canvas", /function exitDemo[\s\S]*?demo\.hidden = true;[\s\S]{0,140}renderCommentPins\(\)/.test(DEMO));
   // #76: authoring-only chrome must not float over the learner preview.
   // enterDemo/exitDemo toggle body.demo-open.
-  ok("enterDemo adds body.demo-open", /function enterDemo[\s\S]*?document\.body\.classList\.add\("demo-open"\)/.test(t));
-  ok("exitDemo removes body.demo-open", /function exitDemo[\s\S]*?document\.body\.classList\.remove\("demo-open"\)/.test(t));
+  ok("enterDemo adds body.demo-open", /function enterDemo[\s\S]*?document\.body\.classList\.add\("demo-open"\)/.test(DEMO));
+  ok("exitDemo removes body.demo-open", /function exitDemo[\s\S]*?document\.body\.classList\.remove\("demo-open"\)/.test(DEMO));
 })();
 
 // ---- §12 slice 5: transport primitives (identity / sidecar / threading) -----
@@ -8700,6 +8703,7 @@ section("Verso Viewer (V1 + app)");
 section("mode crossfade");
 (function () {
   var css = src("src/course.css");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // reading surfaces ease their palette; scoped to [data-mode] so no-JS first paint doesn't animate
   ok("root+text reading surfaces transition on mode flip (var-driven)", /\.course-root\[data-mode\],\s*\[data-mode\] \.course-root,\s*\[data-mode\] \.page,[\s\S]*?transition: background-color var\(--motion-mode-fade, 300ms\) ease, color var\(--motion-mode-fade, 300ms\) ease, border-color var\(--motion-mode-fade, 300ms\) ease/.test(css));
   // matches BOTH self ([data-mode] ON the root, editor canvas) AND ancestor ([data-mode] .page, preview/export where html/body carry it)
@@ -8712,8 +8716,8 @@ section("mode crossfade");
   // data-mode), NOT renderDemo() -- a rebuild recreates the DOM already in the new mode
   // so the crossfade has no old->new value to animate (the hard cut James saw in preview).
   var e = src("src/editor.js");
-  ok("demo mode-toggle re-themes in place (applyTheme on existing root), not a rebuild", /closest\("\[data-mode-toggle\]"\)[\s\S]*?demoDevice\.querySelectorAll\("\.course-root"\)[\s\S]*?window\.applyTheme\(r, __t\); r\.setAttribute\("data-mode", activeMode\)/.test(e));
-  ok("demo mode-toggle only falls back to renderDemo when nothing is mounted", /if \(__roots\.length\) \{[\s\S]*?\} else \{\s*renderDemo\(\);/.test(e));
+  ok("demo mode-toggle re-themes in place (applyTheme on existing root), not a rebuild", /closest\("\[data-mode-toggle\]"\)[\s\S]*?demoDevice\.querySelectorAll\("\.course-root"\)[\s\S]*?window\.applyTheme\(r, __t\); r\.setAttribute\("data-mode", E\.activeMode\)/.test(DEMO));
+  ok("demo mode-toggle only falls back to renderDemo when nothing is mounted", /if \(__roots\.length\) \{[\s\S]*?\} else \{\s*renderDemo\(\);/.test(DEMO));
 })();
 
 // ---- image lightbox (click-to-zoom overlay) ------------------------------
@@ -8984,6 +8988,7 @@ section("panel system v2 — layout engine");
 section("exit-course action");
 (function () {
   var r = src("src/render.js"), rt = src("src/runtime.js"), e = src("src/editor.js");
+  var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // render: exit -> data-nav-action="exit" (NOT data-goto), href stays "#"
   var nb = slice(r, "navButton: function (block) {", "modeToggle: function (block) {");
   ok("render: action.exit -> data-nav-action=exit", /if \(act\.exit\)[\s\S]{0,120}setAttribute\("data-nav-action", "exit"\)/.test(nb));
@@ -9000,7 +9005,7 @@ section("exit-course action");
   // authoring: Exit option in the On-click dropdown + non-destructive demo override
   ok("editor: EXIT_ACTION sentinel + setExitAction writes action.exit", /var EXIT_ACTION = "__exit";/.test(e) && /function setExitAction\(host\) \{ pushHistory\(\); host\.action = \{ exit: true \}; \}/.test(e));
   ok("editor: On-click dropdown offers Exit course", /\["Exit course \(end SCORM session\)", EXIT_ACTION\]/.test(e));
-  ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(e) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(e));
+  ok("editor: demo passes a non-destructive onExit (#111 splash preview, no real SCORM/close)", /onExit: function \(\) \{ previewEndScreen\(\); \}/.test(DEMO) && /function previewEndScreen\(\)[\s\S]{0,400}flashDemoNotice\(/.test(DEMO));
   // Interact-mode action picker (the "On click -> Do" list): exit is an option + targetless
   ok("editor: Interact ACTION_TYPES includes Exit course", /var ACTION_TYPES = \[[\s\S]*?\["Exit course", "exit"\][\s\S]*?\];/.test(e));
   ok("editor: exit is targetless (NAV_ACTIONS -> no target picker)", /var NAV_ACTIONS = \{ next: 1, prev: 1, exit: 1 \};/.test(e));
@@ -9265,7 +9270,7 @@ section("UI kit seam");
   // Regression (same family): entering PREVIEW / navigating in demo rebuilds fresh embed
   // iframes; renderDemo must push the theme (tokens + embedColorMap) into demoDevice or
   // the interaction shows its own default palette (colours "change" on entering preview).
-  ok("renderDemo pushes theme into preview embeds", /fitEmbedsIn\(demoDevice\); renderCommentPins\(\);[\s\S]{0,160}pushEmbedTheme\(demoDevice, activeMode, activeTheme\(\)\.color\)/.test(e));
+  ok("renderDemo pushes theme into preview embeds", /fitEmbedsIn\(demoDevice\); renderCommentPins\(\);[\s\S]{0,160}pushEmbedTheme\(demoDevice, E\.activeMode, activeTheme\(\)\.color\)/.test(src("src/editor/demo.js")));
   // arch-P3-02: the guard lives in the module now (and is tested there against a null document).
   ok("the kit gallery loads the history seam before editor.js", src("kit.html").indexOf("src/editor/history.js") < src("kit.html").indexOf("src/editor.js\""));
   ok("renderInspector no-ops in kit mode (gallery owns #inspector)", (function () {
@@ -10177,7 +10182,7 @@ section("Product Rail: Publish presets (T2)");
   ok("the shared action routes through the module and toasts the pending count it returns", /var added = Publish\.addDoc\(docId\);/.test(e) && /publishToast\("Added to the publish queue — " \+ added\.pending/.test(e));
   ok("the Edit-stage top bar registers a 'Send to publish queue' pipeline action (queues the open doc)", /registerPipelineButton\("Send to publish queue", function \(\) \{ if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\); \}, false\)/.test(e));
   // send-to-publish-wire: the editor-header glyph calls the real addToQueue (no leftover stub toast)
-  ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(activeDocId && registry\[activeDocId\]\) addToQueue\(activeDocId\);/.test(e) && !/Send to publish — coming soon/.test(e));
+  ok("the editor-header send-to-publish glyph is wired to addToQueue, not the 'coming soon' stub", /send-to-publish-btn"\)[\s\S]{0,220}if \(E\.activeDocId && registry\[E\.activeDocId\]\) addToQueue\(E\.activeDocId\);/.test(src("src/editor/demo.js")) && !/Send to publish — coming soon/.test(e));
 })();
 
 // ---- product-rail-publish-queue-t3: remembered save path + version preview ----
@@ -16147,14 +16152,16 @@ section("arch-P1 render-context");
   ok("export.js assigns no render hook directly" + (strayExport.length ? " -- STRAY: " + strayExport.join(", ") : ""), strayExport.length === 0);
 
   ok("the editor canvas builds its context from the doc it is about to render", /window\.applyRenderContext\(window\.buildRenderContext\(renderDoc\)\)/.test(ed));
-  ok("the editor preview builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ed));
+  ok("the editor preview builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(E\.doc\)\)/.test(src("src/editor/demo.js")));
   ok("the export builds its context the same way", /window\.applyRenderContext\(window\.buildRenderContext\(doc\)\)/.test(ex));
 
   // Same call SHAPE on both sides: one argument, the doc. A caller that starts passing its own
   // opts is a caller that can diverge, so it fails here rather than in a shipped package.
-  var callShapes = (ed + ex).match(/buildRenderContext\([^)]*\)/g) || [];
+  // arch-P3b-07j: the preview is its own file now, and reads the live document through the
+  // namespace, so `E.doc` is a doc reference like any other here.
+  var callShapes = (ed + ex + src("src/editor/demo.js")).match(/buildRenderContext\([^)]*\)/g) || [];
   ok("every caller passes the doc and nothing else (no per-caller opts)",
-    callShapes.length >= 3 && callShapes.every(function (c) { return /^buildRenderContext\([A-Za-z_$][\w$]*\)$/.test(c); }));
+    callShapes.length >= 3 && callShapes.every(function (c) { return /^buildRenderContext\((?:E\.)?[A-Za-z_$][\w$]*\)$/.test(c); }));
 
   // render.js reads through the one accessor, so the set of things render depends on stays
   // enumerable -- and dropping the globals is a one-function change.
