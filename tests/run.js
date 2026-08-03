@@ -321,6 +321,25 @@ section("P3b namespace");
     try { K.provideLive("bad", {}); return false; } catch (e) { return /needs a getter/.test(e.message); }
   })());
 
+  // Rule 5, and it is the most expensive bug this phase shipped. `provide("selection", selection)`
+  // sat in a forty-entry literal and replaced the live getter with a snapshot taken at boot, so
+  // every moved region read an empty selection forever while editor.js's own copy updated on every
+  // click. Nothing failed: no boot error, no unmet name, no test that reads source text can see it.
+  // A live binding may not be downgraded to a constant.
+  K.reset();
+  K.provideLive("selection", function () { return { type: "block" }; });
+  ok("a live binding cannot be re-provided as a constant", (function () {
+    try { K.provide("selection", { type: "none" }); return false; }
+    catch (e) { return /provided LIVE/.test(e.message); }
+  })());
+  ok("the live getter survives the attempt", K.get("selection").type === "block");
+  ok("re-providing it LIVE is still allowed (the host may rewire)", (function () {
+    K.provideLive("selection", function () { return { type: "page" }; });
+    return K.get("selection").type === "page";
+  })());
+  K.reset();
+  K.provide("h", function () { return "node"; });
+
   // Rule 2: a name nobody supplies is recorded the moment it is asked for, so a boot alone
   // reveals it -- no one has to open the panel that would have rendered empty.
   K.need("neverProvided");
@@ -1017,7 +1036,7 @@ section("platform-pivot 15 base-only editing guard");
 // chrome hangs off VersoSync.isCollaborating(), so standalone shows nothing.
 section("platform-pivot 11 presence chrome");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07: the presence chrome moved with them
   var m = t.match(/\/\* @presence-model-start \*\/([\s\S]*?)\/\* @presence-model-end \*\//);
   if (!m) { ok("locate @presence-model fence", false); return; }
   var g = new Function(m[1] + "\nreturn { presenceInitials: presenceInitials, presenceModel: presenceModel, findBlockLocation: findBlockLocation, peerHeldBlocks: peerHeldBlocks, conflictRows: conflictRows, blockPreview: blockPreview, viewerCursors: viewerCursors };")();
@@ -1044,7 +1063,7 @@ section("platform-pivot 11 presence chrome");
   ok("renderPresence gates on live() (isCollaborating) -> hidden in standalone", /if \(!live\(\) \|\| !peers\.length\) \{ el\.innerHTML = ""; el\.style\.display = "none"; return; \}/.test(t));
   ok("ensure() only subscribes/connects in server mode (enabled)", /function ensure\(\) \{\s*if \(wired \|\| !enabled\(\)\) return;/.test(t));
   ok("live() is the ONE VersoSync gate", /function live\(\) \{ return !!\(window\.VersoSync && window\.VersoSync\.isCollaborating\(\)\); \}/.test(t));
-  ok("mount() reprojects presence chrome after renderCommentPins", /renderCommentPins\(\);[\s\S]{0,140}CollabChrome\.ensure\(\); CollabChrome\.reproject\(\);/.test(t));
+  ok("mount() reprojects presence chrome after renderCommentPins", /renderCommentPins\(\);[\s\S]{0,140}collabChrome\(\)\.ensure\(\); collabChrome\(\)\.reproject\(\);/.test(src("src/editor.js")));
   ok("presence cluster mounts in the toolbar right group", /document\.querySelector\("\.toolbar__group--right"\)/.test(t));
   // presence CSS conforms to the PresenceCluster contract (20px, editing solid / viewing hollow)
   var css = src("editor.css");
@@ -1096,7 +1115,9 @@ section("platform-pivot 11 presence chrome");
   ok("viewerCursors carries the in-block caret offset (null when absent)", oc[0].offset === 12 && oc[1].offset === null);
   ok("remote caret is positioned at the offset within the block (guarded, corner fallback)", /function positionCaret\(caret, blockEl, offset\)/.test(t) && /if \(offset == null\) return;/.test(t) && /r\.setStart\(node, remaining\)/.test(t));
   ok("local caret is shared with peers, throttled", /function onCaret\(block, offset\)/.test(t) && /session\.cursorUpdate\(lastCaret\.blockId, \{ offset: lastCaret\.offset \}\)/.test(t) && /CURSOR_THROTTLE_MS/.test(t));
-  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (t.match(/CollabChrome\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
+  // arch-P3b-07: the chrome object moved to editor/comments.js; these two claims are about the
+  // EDIT LIFECYCLE, which stayed here and drives it through a bound accessor.
+  ok("the edit lifecycle shares the caret (input + keyup -> onCaret)", (src("src/editor.js").match(/collabChrome\(\)\.onCaret\(collabBlockOf\(node\), caretOffsetIn\(node\)\)/g) || []).length >= 2);
   // sync-client exposes the cursor.update session method + builder
   var scc = src("src/sync-client.js");
   ok("sync-client session: cursorUpdate + cursorMsg builder", /cursorUpdate: function \(blockId, selection\)/.test(scc) && /function cursorMsg\(docId, blockId, selection\)/.test(scc));
@@ -1110,15 +1131,15 @@ section("platform-pivot 11 presence chrome");
   ok("blur auto-releases the lock (after flushing any pending edit)", /function onEditBlur\(block\)/.test(t) && /session\.releaseLock\(block\.id\)/.test(t));
   ok("heartbeat timer starts in ensure() (drives presence TTL, AC4)", /beatTimer = setInterval\(beat, HEARTBEAT_MS\)/.test(t));
   ok("beat sends viewing + editing block ids over the session", /function beat\(\) \{ if \(live\(\) && session && session\.heartbeat\) session\.heartbeat\(viewingBlockId, editingBlockId\); \}/.test(t));
-  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /CollabChrome\.onEditFocus\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditCommit\(collabBlockOf\(node\)\)/.test(t) && /CollabChrome\.onEditBlur\(collabBlockOf\(node\)\)/.test(t));
+  ok("the editor edit lifecycle drives collab (focus/input/blur -> CollabChrome)", /collabChrome\(\)\.onEditFocus\(collabBlockOf\(node\)\)/.test(src("src/editor.js")) && /collabChrome\(\)\.onEditCommit\(collabBlockOf\(node\)\)/.test(src("src/editor.js")) && /collabChrome\(\)\.onEditBlur\(collabBlockOf\(node\)\)/.test(src("src/editor.js")));
   ok("send-side is gated on live()+session (inert in standalone)", /function onEditFocus\(block\) \{\s*if \(!live\(\) \|\| !block \|\| !block\.id \|\| !session\) return;/.test(t));
   // story 9: auto-release on IDLE (not just blur) so a focused-but-idle author doesn't hold the lock
   ok("idle-timeout releases the held block (spec story 9)", /function touchIdle\(\)/.test(t) && /session\.releaseLock\(editingBlockId\); editingBlockId = null;/.test(t) && /IDLE_RELEASE_MS/.test(t));
   ok("edit + caret activity resets the idle timer", /editingBlockId = viewingBlockId = block\.id;[\s\S]{0,120}touchIdle\(\);/.test(t) && /touchIdle\(\); \/\/ caret movement/.test(t));
   ok("blur supersedes the idle timer", /if \(idleTimer\) \{ clearTimeout\(idleTimer\); idleTimer = null; \} \/\/ blur supersedes/.test(t));
   // ticket 26 two-way: an author reply/resolve fans back to the reviewer (shared both ways)
-  ok("author reply fans out via session.comment (cid -> server block.id)", /function fanoutReply\(comment, body\)[\s\S]{0,220}session\.comment\(blockIdByCid\(doc, cid\) \|\| cid, body, comment\.threadId/.test(t));
-  ok("author resolve fans out via session.resolveComment", /function fanoutResolve\(comment, resolved\)[\s\S]{0,220}session\.resolveComment\(blockIdByCid\(doc, cid\) \|\| cid, comment\.threadId/.test(t));
+  ok("author reply fans out via session.comment (cid -> server block.id)", /function fanoutReply\(comment, body\)[\s\S]{0,220}session\.comment\(blockIdByCid\(E\.doc, cid\) \|\| cid, body, comment\.threadId/.test(t));
+  ok("author resolve fans out via session.resolveComment", /function fanoutResolve\(comment, resolved\)[\s\S]{0,220}session\.resolveComment\(blockIdByCid\(E\.doc, cid\) \|\| cid, comment\.threadId/.test(t));
   ok("the shipped reply + resolve controls call the fanout (both ways)", (t.match(/CollabChrome\.fanoutResolve\(c, v\)/g) || []).length >= 2 && /CollabChrome\.fanoutReply\(c, v\)/.test(t));
   ok("the origin echo of my optimistic reply reconciles by rp_ marker + body (author-independent, no dup/collapse)", /String\(replies\[q\]\.id\)\.indexOf\("rp_"\) === 0 && replies\[q\]\.body === c\.body/.test(t) && /slot\.id = c\.id;/.test(t));
   var scr = src("src/sync-client.js");
@@ -1155,8 +1176,9 @@ section("platform-pivot 11 presence chrome");
 // Reuses the SHIPPED comment system; the delta is guest-vs-internal + never-drop orphan surfacing.
 section("platform-pivot 26 review round-trip");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
+  var t = src("src/editor/comments.js");   // arch-P3b-07: the review round-trip moved with them
+  // The guest-identity fence stayed in editor.js, beside the rest of the identity plumbing.
+  var m = src("src/editor.js").match(/\/\* @comment-guest-start \*\/([\s\S]*?)\/\* @comment-guest-end \*\//);
   if (!m) { ok("locate @comment-guest fence", false); return; }
   var g = new Function(m[1] + "\nreturn { commentIsGuest: commentIsGuest, commentIsOrphaned: commentIsOrphaned, docCids: docCids, blockCidById: blockCidById, blockIdByCid: blockIdByCid, commentFromEnv: commentFromEnv };")();
 
@@ -1170,9 +1192,9 @@ section("platform-pivot 26 review round-trip");
 
   // wiring: the panel splits orphaned into a tray + tags guests; guest comments ride the SHIPPED
   // doc.comments store via the sync channel (a delta, not a parallel comment system).
-  ok("panel splits orphaned notes into their own never-drop tray", /var orphaned = shown\.filter\(function \(c\) \{ return commentIsOrphaned\(c, doc\); \}\)/.test(t) && /Orphaned — need a home/.test(t));
+  ok("panel splits orphaned notes into their own never-drop tray", /var orphaned = shown\.filter\(function \(c\) \{ return commentIsOrphaned\(c, E\.doc\); \}\)/.test(t) && /Orphaned — need a home/.test(t));
   ok("panel tags guest comments (guest-vs-internal weighing)", /if \(commentIsGuest\(c\)\) top\.appendChild\(h\("span", "comment-row__tag is-guest", "Guest"\)\)/.test(t));
-  ok("orphaned note is dismissible (kept until the author acts, never silently dropped)", /Dismiss this orphaned note[\s\S]{0,220}doc\.comments = \(doc\.comments \|\| \[\]\)\.filter/.test(t));
+  ok("orphaned note is dismissible (kept until the author acts, never silently dropped)", /Dismiss this orphaned note[\s\S]{0,220}E\.doc\.comments = \(E\.doc\.comments \|\| \[\]\)\.filter/.test(t));
   // id-space bridge: server anchors by block.id, client pins by cid -> map at ingest so a guest
   // comment resolves onto the live block (a raw id with no cid falls through to orphaned).
   var idoc = { pages: [ { blocks: [ { id: "srv-b2", cid: "c-abc", type: "para" }, { id: "srv-b5", cid: "c-def", type: "group", children: [ { id: "srv-b6", cid: "c-ghi" } ] } ] } ] };
@@ -1184,7 +1206,7 @@ section("platform-pivot 26 review round-trip");
   ok("commentFromEnv: a deleted server block -> anchor falls to raw id (surfaces orphaned, not mis-anchored)", g.commentFromEnv({ blockId: "gone", author: "A", payload: { id: "cm_9" } }, idoc, function () { return "#c"; }).anchor.blockId === "gone");
   ok("commentFromEnv: no comment id -> null (never a blank note)", g.commentFromEnv({ blockId: "srv-b2", payload: {} }, idoc, function () { return "#c"; }) === null);
 
-  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, doc, colourForName\)/.test(t) && /replies\.push\(\{ id: c\.id, body: c\.body/.test(t));
+  ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, E\.doc, colourForName\)/.test(t) && /replies\.push\(\{ id: c\.id, body: c\.body/.test(t));
   ok("comment.added / comment.resolved route through the round-trip", /else if \(env\.type === "comment\.added"\) \{ ingestComment\(env\); \}/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveThread\(env\); \}/.test(t));
   ok("resolveThread marks the whole thread done (both ways)", /function resolveThread\(env\)[\s\S]{0,260}c\.id === threadId \|\| c\.threadId === threadId/.test(t));
   var css = src("editor.css");
@@ -1993,7 +2015,7 @@ section("platform-pivot 11 presence");
   var LM = require(path.join(ROOT, "server/lock-manager.js"));
   var BS = require(path.join(ROOT, "server/block-store.js"));
   // AC1: server author colours MUST match editor.js colourForName (comment-review palette)
-  var ed = src("src/editor.js");
+  var ed = src("src/editor/comments.js");   // arch-P3b-07: the reviewer palette moved with them
   var m = ed.match(/var COMMENT_COLOURS = \[[^\]]*\];[\s\S]*?function colourForName\([^)]*\) \{[^}]*\}/);
   ok("locate editor colourForName", !!m);
   if (m) {
@@ -3835,8 +3857,9 @@ section("split-page tool wired into the two-level Actions row");
 // and deletable from the structure tree — not just columns/group/frame.
 section("outliner: items[] containers expose their nested blocks");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/function containerChildGroups\(block\)\s*\{[\s\S]*?\n  \}/);
+  // arch-P3b-07i: the tree moved; a body inside install() closes one indent deeper.
+  var t = src("src/editor/outliner.js");
+  var m = t.match(/function containerChildGroups\(block\)\s*\{[\s\S]*?\n    \}/);
   if (!m) { ok("locate containerChildGroups", false); return; }
   var ccg = new Function(m[0] + "\nreturn containerChildGroups;")();
   var emptyGroup = { type: "group", children: [] };
@@ -3860,7 +3883,7 @@ section("outliner: items[] containers expose their nested blocks");
   ok("all-empty items expose a droppable group each", allEmpty && allEmpty.length === 1 && allEmpty[0].arrayKey === "children" && allEmpty[0].blocks.length === 0);
   ok("non-items block still null", ccg({ type: "paragraph" }) === null);
   // friendly outliner labels for the items[] containers (were showing the raw type)
-  var lm = t.match(/function blockLabel\(b\)\s*\{[\s\S]*?\n  \}/);
+  var lm = t.match(/function blockLabel\(b\)\s*\{[\s\S]*?\n    \}/);
   var bl = new Function(lm[0] + "\nreturn blockLabel;")();
   ok("cardDeck label", bl({ type: "cardDeck", items: [1, 2] }) === "Card deck (2)");
   ok("cardReveal label", bl({ type: "cardReveal", items: [1] }) === "Card reveal (1)");
@@ -4045,6 +4068,7 @@ section("exit preview focuses the demo's page (#100)");
 // #90: native Table block — 4-file contract wiring (render / course.css / editor).
 section("table block (#90)");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var rn = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ic = src("src/icons.js");
@@ -4061,7 +4085,7 @@ section("table block (#90)");
   ok("table selects as a block (not an inline field)", /=== "table"\) return "block"/.test(e));
   ok("table dispatches to renderTableInspector via two-level", /block\.type === "table"\) \{ renderBlockTwoLevel\(node, "Table", CONTENT_DECL, renderTableInspector\)/.test(e));
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
-  ok("table has a Lucide glyph", /table: "table"/.test(e) && /"table":/.test(ic));
+  ok("table has a Lucide glyph", /table: "table"/.test(OUT) && /"table":/.test(ic));
   // F&R parity: cells wired into the enumerator
   ok("frTargets enumerates table cells", /b\.type === "table" && Array\.isArray\(b\.rows\)[\s\S]*?host: cell, key: "t"/.test(CE));
 })();
@@ -4382,9 +4406,11 @@ section("AAA doc-migration");
     }
   })();
 
+  // arch-P3b-07: proximity capture moved with the pins it resolves.
+  var CMT = src("src/editor/comments.js");
   // ---- #197 proximity capture (pin point -> nearby blocks, nearest-first) ----
   (function () {
-    var m = et.match(/function rectPointDistance\(r, p\)[\s\S]*?window\.__resolveProximity = resolveProximity;/);
+    var m = CMT.match(/function rectPointDistance\(r, p\)[\s\S]*?window\.__resolveProximity = resolveProximity;/);
     ok("#197 resolveProximity block present for eval", !!m);
     if (m) {
       var win = {};
@@ -4413,7 +4439,7 @@ section("AAA doc-migration");
       ok("#197 empty items is safe", RP([], { x: 0, y: 0 }, 100).length === 0 && RP(undefined, { x: 0, y: 0 }, 100).length === 0);
     }
     // wiring: the DOM reader is exposed for the agent surface (#199).
-    ok("#197 resolvePinContext DOM reader exposed", /window\.__resolvePinContext = resolvePinContext;/.test(et) && /querySelectorAll\("\.canvas-block\[data-cid\]"\)/.test(et));
+    ok("#197 resolvePinContext DOM reader exposed", /window\.__resolvePinContext = resolvePinContext;/.test(CMT) && /querySelectorAll\("\.canvas-block\[data-cid\]"\)/.test(CMT));
   })();
 })();
 
@@ -4853,7 +4879,7 @@ section("#159/#163 frontend conformance gate");
 // ---- §12 slice 2: canvas comment mode (drop / anchor / render / resolve) -----
 section("comment mode (canvas)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07: review comments moved here
   ok("setCommentMode toggles the canvas class + persists", /function setCommentMode\(on\)[\s\S]*?setItem\(COMMENT_MODE_KEY[\s\S]*?canvas\.classList\.toggle\("is-comment-mode", commentMode\)/.test(t));
   // 3-tier anchor resolution (block > page > world)
   ok("makeAnchorFromPoint resolves block > page > world", /function makeAnchorFromPoint[\s\S]*?closest\("\.canvas-block\[data-cid\]"\)[\s\S]*?blockId:[\s\S]*?closest\("\.page\[data-page-id\]"\)[\s\S]*?pageId:[\s\S]*?worldX:/.test(t));
@@ -4869,7 +4895,9 @@ section("comment mode (canvas)");
   // popover: body input, resolve checkbox, delete
   ok("popover edits body / resolve / delete", /function openCommentPopover[\s\S]*?c\.body = ta\.value[\s\S]*?c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); refreshCommentPanel\(\)[\s\S]*?doc\.comments\.splice\(i, 1\)/.test(t));
   // pins re-projected from mount + applyView (canvas.innerHTML is cleared on mount)
-  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(t));
+  // arch-P3b-07: mount, the drill handler and the keyboard shortcut all stayed here; comment mode
+  // is asked for rather than read, because editor/comments.js owns it now.
+  ok("mount re-renders pins", /refreshCanvasSelection\(\);\s*if \(interactMode\) decorateInteractHandle\(\);[\s\S]{0,400}renderCommentPins\(\);/.test(src("src/editor.js")));
   // arch-P3b-02: applyView moved to src/editor/canvas-view.js, so this drives it instead of
   // matching its text. A pin rebuild on every pan/zoom frame is the whole contract -- pins are
   // absolutely positioned in canvas space, so a view change that skipped this would leave them
@@ -4882,8 +4910,8 @@ section("comment mode (canvas)");
     return calls === 1;
   })());
   // mode bails: drill + C shortcut
-  ok("drill handler bails in comment mode", /if \(interactMode \|\| commentMode\) return;/.test(t));
-  ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentMode\)/.test(t));
+  ok("drill handler bails in comment mode", /if \(interactMode \|\| commentModeOn\(\)\) return;/.test(src("src/editor.js")));
+  ok("C toggles comment mode", /\(e\.key === "c" \|\| e\.key === "C"\) && !meta && !e\.shiftKey[\s\S]*?setCommentMode\(!commentModeOn\(\)\)/.test(src("src/editor.js")));
   // export-strip: comment pins/store are editor.js chrome only — render.js knows nothing
   var r = src("src/render.js");
   ok("render.js has no comment/pin code", r.indexOf("comment") === -1 && r.indexOf("comment-pin") === -1 && r.indexOf("doc.comments") === -1);
@@ -4892,14 +4920,14 @@ section("comment mode (canvas)");
 // ---- §12 slice 3: right-panel comment list -------------------------------
 section("comment list (panel)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07
   ok("renderInspector routes to the comment list in comment mode", (function () {
     var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
     // comment mode wins over the selection AND over interact mode (arch-P3-04: the table's order)
     return VI.pick({ commentMode: true, selectionType: "block" }).render === "renderCommentList" &&
       VI.pick({ commentMode: true, interactMode: true, multiSelCount: 5 }).render === "renderCommentList";
   })());
-  ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(interactMode\) setInteractMode\(false\)/.test(t));
+  ok("comment mode + interact mode are mutually exclusive", /if \(commentMode\) \{ if \(E\.interactMode\) setInteractMode\(false\)/.test(t));
   ok("list filters Open vs Resolved", /function renderCommentList[\s\S]*?commentFilter === "resolved" \? c\.done : !c\.done/.test(t));
   ok("row = colour-dot + snippet + done checkbox", /comment-row__dot[\s\S]*?comment-row__snip[\s\S]*?comment-row__done/.test(t));
   ok("resolve from the list syncs the pin", /c\.done = v;[\s\S]{0,90}scheduleSave\(\); renderCommentPins\(\); renderCommentList\(\)/.test(t));
@@ -4909,7 +4937,7 @@ section("comment list (panel)");
 // ---- §12 slice 4: preview comment mode (same store, surface abstraction) ----
 section("comment mode (preview)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // surface abstraction: canvas vs demo, one shared store
   ok("activeSurf picks demo while the preview is open", /function activeSurf\(\) \{ return demoIsOpen\(\) \? demoSurf\(\) : canvasSurf\(\); \}/.test(t));
@@ -4922,7 +4950,7 @@ section("comment mode (preview)");
   // preview drop: block/page only (bails on a null anchor), shared store
   ok("preview drop uses the shared store + skips null anchors", /if \(!demoCommentMode \|\| e\.button !== 0\) return;[\s\S]*?if \(!anchor\) return;[\s\S]*?doc\.comments\.push\(c\)/.test(t));
   // C routes to the demo in preview; canvas C is guarded by demo.hidden
-  ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentMode\)[\s\S]{0,80}demo has its own C/.test(t) || /&& demo\.hidden\) \{\s*e\.preventDefault\(\);\s*setCommentMode/.test(t));
+  ok("canvas C is guarded by demo.hidden", /setCommentMode\(!commentModeOn\(\)\)[\s\S]{0,80}demo has its own C/.test(src("src/editor.js")));
   ok("preview C toggles demo comment mode", /setDemoCommentMode\(!demoCommentMode\)/.test(t));
   // exit re-projects onto the canvas surface (the round-trip)
   ok("exitDemo re-projects pins onto the canvas", /function exitDemo[\s\S]*?demo\.hidden = true;[\s\S]{0,140}renderCommentPins\(\)/.test(DEMO));
@@ -4935,19 +4963,20 @@ section("comment mode (preview)");
 // ---- §12 slice 5: transport primitives (identity / sidecar / threading) -----
 section("comment transport (slice 5)");
 (function () {
-  var t = src("src/editor.js");
+  var t = src("src/editor/comments.js");   // arch-P3b-07
   ok("author identity is stored + colour is deterministic", /function commentIdentity\(\)[\s\S]*?COMMENT_AUTHOR_KEY/.test(t) && /function colourForName/.test(t));
-  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(t));
-  ok("sidecar export writes a typed payload, never into the course", /type: "verso-comments"[\s\S]*?comments: doc\.comments/.test(t));
+  ok("makeComment stamps the current identity", /var id = \(typeof commentIdentity === "function"\)[\s\S]*?author: id\.name \|\| null/.test(src("src/editor.js")));
+  ok("sidecar export writes a typed payload, never into the course", /type: "verso-comments"[\s\S]*?comments: E\.doc\.comments/.test(t));
   ok("import merges (never replaces) the store", /function importComments[\s\S]*?mergeComments\(list\)/.test(t));
   ok("replies are threaded via makeReply", /function makeReply[\s\S]*?rp_[\s\S]*?c\.replies\.push\(makeReply/.test(t));
   ok("a note with replies is not discarded as empty", /!\(editingComment\.replies \|\| \[\]\)\.length/.test(t));
   ok("export is a sidecar — render/export never see doc.comments", src("src/render.js").indexOf("comments") === -1 && src("src/export.js").indexOf("doc.comments") === -1);
   // functional: mergeComments is conflict-free (union by id, union replies, resolve wins)
+  // arch-P3b-07: one indent deeper inside install(), and the live document is read through E.
   var mStart = t.indexOf("function mergeComments(incoming)");
-  var mBody = t.slice(mStart, t.indexOf("\n  }", mStart) + 4);
+  var mBody = t.slice(mStart, t.indexOf("\n    }", mStart) + 6);
   var docStub = { comments: [ { id: "cm_a", body: "A", done: false, replies: [{ id: "rp_1" }] }, { id: "cm_b", body: "B", done: false, replies: [] } ] };
-  var mergeComments = new Function("doc", mBody + "\nreturn mergeComments;")(docStub);
+  var mergeComments = new Function("E", mBody + "\nreturn mergeComments;")({ doc: docStub });
   var r = mergeComments([
     { id: "cm_b", done: true, replies: [{ id: "rp_2", body: "reply" }] }, // existing: adopt resolve + new reply
     { id: "cm_c", body: "C", replies: [] }                                  // new comment
@@ -5116,7 +5145,7 @@ section("P2 auto page-naming");
   ok("frame-label uses pageDisplayName", /frame-label__name", pageDisplayName\(page, doc\)/.test(etxt));
   // uio-E-C07 (EDIT-12): the outliner row splits the derived number into its own column; the name
   // shows only the title part (frame-label on the canvas keeps the combined pageDisplayName).
-  ok("outliner tree row has a number column + title-only name", /tree-page__num", pageNumberOf\(page, doc\)/.test(etxt) && /tree-page__name"[\s\S]{0,140}pageTitlePart\(page\)/.test(etxt));
+  ok("outliner tree row has a number column + title-only name", /tree-page__num", pageNumberOf\(page, E\.doc\)/.test(src("src/editor/outliner.js")) && /tree-page__name"[\s\S]{0,140}pageTitlePart\(page\)/.test(src("src/editor/outliner.js")));
   ok("inline rename writes via setPageTitle", /setPageTitle\(page, v\)/.test(etxt));
 })();
 
@@ -5231,10 +5260,13 @@ section("page-merge");
 // ---- outliner-name: blockLabel honours an author-given block.name ----------
 section("outliner-name");
 (function () {
-  var etxt = src("src/editor.js");
+  // arch-P3b-07i: blockLabel moved with the tree that shows it.
+  var etxt = src("src/editor/outliner.js");
   var s = etxt.indexOf("function blockLabel(b)");
-  var body = etxt.slice(s, etxt.indexOf("return b.type;", s) + "return b.type;".length + 4);
-  var blockLabel = new Function("COMPONENTS", body + "\nreturn blockLabel;")({});
+  // The body ends at its own closing brace, which sits one indent deeper inside install(); and it
+  // reaches resolveComponentDef for a library instance, so the eval gets a stub for that too.
+  var body = etxt.slice(s, etxt.indexOf("\n    }", etxt.indexOf("return b.type;", s)) + 6);
+  var blockLabel = new Function("COMPONENTS", "resolveComponentDef", body + "\nreturn blockLabel;")({}, function () { return null; });
   ok("author name wins over derived label", blockLabel({ name: "My Intro", type: "heading", text: "Heading text" }) === "My Intro");
   ok("no name -> derived label unchanged", blockLabel({ type: "heading", text: "Heading text" }) === "Heading text");
   ok("empty/absent name falls through", blockLabel({ name: "", type: "divider" }) === "Divider");
@@ -5448,6 +5480,7 @@ section("theme-aware style colour");
 // ---- WWW retroactive: existing styleRef blocks get inline colour stripped on load ----
 section("WWW retroactive auto-clean");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var etxt = src("src/editor.js");
   var body = etxt.slice(etxt.indexOf("function stripInlineColor("), etxt.indexOf("function normalizeDoc("));
   var strip = new Function("window", body + "\nreturn stripStyledColorsDeep;")({});
@@ -5503,7 +5536,8 @@ section("shared-library palette insert");
 // ---- #20: library-instance mirror (live-linked, promote ANY composed block) -----
 section("#20 library-instance mirror");
 (function () {
-  var etxt = src("src/editor.js");
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
+  var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
   var rtxt = src("src/render.js");
 
   // 1. render.js resolves the CURRENT master live (doc override -> library -> built-in),
@@ -5522,8 +5556,8 @@ section("#20 library-instance mirror");
     require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("libraryInstance"));
   ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(etxt));
   ok("inspector dispatch reuses renderContentlessBlock", /if \(block\.type === "libraryInstance"\) \{ renderContentlessBlock\(node, "Library instance", renderLibraryInstanceBody\); return; \}/.test(etxt));
-  ok("block-icon map has a libraryInstance glyph", /libraryInstance: "component"/.test(etxt));
-  ok("tree label resolves the master's name via resolveComponentDef", /if \(b\.type === "libraryInstance"\) \{ var libDef = resolveComponentDef\(b\.ref\)/.test(etxt));
+  ok("block-icon map has a libraryInstance glyph", /libraryInstance: "component"/.test(OUT));
+  ok("tree label resolves the master's name via resolveComponentDef", /if \(b\.type === "libraryInstance"\) \{ var libDef = resolveComponentDef\(b\.ref\)/.test(OUT));
 
   // 3. the inspector body reuses componentGrid card's OWN "instance" header language
   // (prop-component--instance), and offers Detach as the only structural action in v1.
@@ -5861,20 +5895,21 @@ section("product-rail facet pointer schema");
 // ---- #22: section + page library masters ------------------------------------
 section("#22 section + page library masters");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var rtxt = src("src/render.js");
-  var etxt = src("src/editor.js");
+  var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
   var css = src("editor.css");
 
   // 1. SECTION masters: groupMulti + saveBlockAsComponent, reused verbatim.
-  ok("groupMulti returns the resulting group block", /return frame; \/\/ #22/.test(etxt));
-  var ssStart = etxt.indexOf("function saveSelectionAsSectionMaster()");
+  ok("groupMulti returns the resulting group block", /return frame; \/\/ #22/.test(OUT));
+  var ssStart = OUT.indexOf("function saveSelectionAsSectionMaster()");
   ok("saveSelectionAsSectionMaster found", ssStart !== -1);
-  var ssBody = etxt.slice(ssStart, ssStart + 200);
+  var ssBody = OUT.slice(ssStart, ssStart + 200);
   ok("reuses groupMulti + saveBlockAsComponent, no new capture logic", /var frame = groupMulti\(\);[\s\S]{0,40}if \(frame\) saveBlockAsComponent\(frame\)/.test(ssBody));
-  ok("'Save selection to library…' wired into the outliner context menu", /label: "Save selection to library…", onClick: function \(\) \{ saveSelectionAsSectionMaster\(\); \}/.test(etxt));
+  ok("'Save selection to library…' wired into the outliner context menu", /label: "Save selection to library…", onClick: function \(\) \{ saveSelectionAsSectionMaster\(\); \}/.test(OUT));
   // arch-P3b-07q: the canvas menu moved to editor/context-menu.js; the outliner's tree menu
   // stayed. Same claim -- two doors -- counted across both files.
-  var multiMenuCount = (etxt.match(/label: "Save selection to library…"/g) || []).length +
+  var multiMenuCount = (OUT.match(/label: "Save selection to library…"/g) || []).length +
                        (src("src/editor/context-menu.js").match(/label: "Save selection to library…"/g) || []).length;
   ok("wired into BOTH multi-select context menus (outliner + canvas)", multiMenuCount === 2);
 
@@ -5937,19 +5972,20 @@ section("#22 section + page library masters");
 // ---- outliner multi-select spans columns / containers / pages (Shift + Cmd) ----
 section("outliner multi-select any-scope");
 (function () {
-  var etxt = src("src/editor.js");
-  ok("flatOutlineBlocks walks nested containers (recurses on openContainers)", /function flatOutlineBlocks[\s\S]*?openContainers\.has\(b\)[\s\S]*?walkBlocks\(grp\.blocks/.test(etxt));
-  ok("flatOutlineBlocks spans pages + chapters", /function flatOutlineBlocks[\s\S]*?groupPagesByChapter[\s\S]*?walkPage/.test(etxt));
-  var h = etxt.slice(etxt.indexOf("function handleBlockRowClick"), etxt.indexOf("function handleBlockRowClick") + 1400);
-  ok("shift-range uses the flat cross-scope order (not one page's blocks)", /e\.shiftKey[\s\S]*?flatOutlineBlocks\(\)[\s\S]*?multiSel\.push\(flat\[k\]\.block\)/.test(h));
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
+  var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
+  ok("flatOutlineBlocks walks nested containers (recurses on openContainers)", /function flatOutlineBlocks[\s\S]*?openContainers\.has\(b\)[\s\S]*?walkBlocks\(grp\.blocks/.test(OUT));
+  ok("flatOutlineBlocks spans pages + chapters", /function flatOutlineBlocks[\s\S]*?groupPagesByChapter[\s\S]*?walkPage/.test(OUT));
+  var h = OUT.slice(OUT.indexOf("function handleBlockRowClick"), OUT.indexOf("function handleBlockRowClick") + 1600);
+  ok("shift-range uses the flat cross-scope order (not one page's blocks)", /e\.shiftKey[\s\S]*?flatOutlineBlocks\(\)[\s\S]*?E\.multiSel\.push\(flat\[k\]\.block\)/.test(h));
   ok("cmd/ctrl toggles multi at any depth", /e\.metaKey \|\| e\.ctrlKey[\s\S]*?toggleMulti\(block\)/.test(h));
-  ok("BOTH top-level AND nested rows use the shared handler", (etxt.match(/handleBlockRowClick\(e, pi, block, bi, 0\)/) && etxt.match(/handleBlockRowClick\(e, pi, block, bi, depth\)/)) != null);
+  ok("BOTH top-level AND nested rows use the shared handler", (OUT.match(/handleBlockRowClick\(e, pi, block, bi, 0\)/) && OUT.match(/handleBlockRowClick\(e, pi, block, bi, depth\)/)) != null);
   // the pre-existing filter that dropped nested blocks on re-render is now nesting-aware
-  ok("renderStructure keeps nested selections (findBlockParent, not top-level-only)", /multiSel = multiSel\.filter\(function \(b\) \{\s*\n\s*for \(var pi = 0; pi < doc\.pages\.length; pi\+\+\) \{ var pg = doc\.pages\[pi\]; if \(pg && findBlockParent/.test(etxt));
+  ok("renderStructure keeps nested selections (findBlockParent, not top-level-only)", /E\.setMultiSel\(E\.multiSel\.filter\(function \(b\) \{\s*\n\s*for \(var pi = 0; pi < E\.doc\.pages\.length/.test(OUT));
   // actions on the whole set: delete + group resolve nested via findBlockParent
   var del = etxt.slice(etxt.indexOf("function deleteSelection"), etxt.indexOf("function deleteSelection") + 900);
   ok("multi-delete removes NESTED blocks too (findBlockParent)", /if \(multiSel\.length\)[\s\S]*?findBlockParent\(doc\.pages\[pi\]\.blocks, b\)[\s\S]*?parentArray\.splice/.test(del));
-  var grp = etxt.slice(etxt.indexOf("function groupMulti"), etxt.indexOf("function groupMulti") + 1100);
+  var grp = OUT.slice(OUT.indexOf("function groupMulti"), OUT.indexOf("function groupMulti") + 1100);
   ok("groupMulti resolves by ref + needs one shared parent", /findBlockParent[\s\S]*?parentArray !== pa/.test(grp));
   // selection must persist through PAN (middle-click / space+left) — the deselect handler
   // returns early for pan gestures, but a plain left-click on empty canvas still deselects.
@@ -5959,6 +5995,7 @@ section("outliner multi-select any-scope");
 // ---- §105 batch-apply a text style / colour / align to a multi-selection ----
 section("multi-selection batch style");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var etxt = src("src/editor.js");
   ok("renderInspector routes a >=2 multi-selection to the batch inspector", (function () {
     var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
@@ -5974,7 +6011,7 @@ section("multi-selection batch style");
   var a = etxt.slice(etxt.indexOf("function applyStyleToBlock"), etxt.indexOf("function applyStyleToBlock") + 300);
   ok("applyStyleToBlock references the style, clears overrides, strips colour", /block\.styleRef = styleName;\s*\n\s*block\.style = \{\};\s*\n\s*stripStyledColorsDeep\(block\)/.test(a));
   // multi-select mutation points refresh the inspector so the panel appears immediately
-  ok("outliner multi-select refreshes the inspector", /refreshCanvasSelection\(\); renderInspector\(\); return;/.test(etxt));
+  ok("outliner multi-select refreshes the inspector", /refreshCanvasSelection\(\); renderInspector\(\); return;/.test(OUT));
 })();
 
 // ---- DDD: undo coverage — structural mutators push history, redo invalidates
@@ -6377,6 +6414,7 @@ section("global motion");
 // ---- §74: select-first (progressive drill) is now the DEFAULT --------------
 section("select-first / progressive drill");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var t = src("src/editor.js");
   // rule 6: the flag is reused, flipped -> select-first ON unless an explicit "0".
   ok("select-first is always on (toggle removed, hard-wired true)", /function twoStateText\(\) \{ return true; \}/.test(t) && !/segmentedLive\("Text editing"/.test(t));
@@ -6425,7 +6463,7 @@ section("select-first / progressive drill");
   ok("leaf-first click handler bails on Shift/Cmd (the multi-select handler owns them)", /if \(e\.button !== 0 \|\| e\.shiftKey \|\| e\.metaKey \|\| spaceHeld\) return;/.test(t));
   ok("Shift/Cmd click multi-selects the LEAF element (not canvasTopBlock), seeded from the single selection", /if \(e\.shiftKey \|\| e\.metaKey\) \{[\s\S]*?var node = levels\.length \? levels\[leafSelectIndex\(levels\)\]\.node : null;[\s\S]*?if \(!multiSel\.length && selection && selection\.block && selection\.block !== node\.__block\) multiSel\.push\(selection\.block\);[\s\S]*?toggleMulti\(node\.__block\)/.test(t));
   ok("multi-select no longer keys off canvasTopBlock (would collapse siblings to the container)", !/if \(e\.shiftKey \|\| e\.metaKey\) \{\s*\n\s*var node = canvasTopBlock/.test(t));
-  ok("a 2+ multi-selection strips the stray single is-selected highlight", /if \(multiSel\.length >= 2\) Array\.prototype\.forEach\.call\(world\.querySelectorAll\("\.is-selected"\)/.test(t));
+  ok("a 2+ multi-selection strips the stray single is-selected highlight", /if \(E\.multiSel\.length >= 2\) Array\.prototype\.forEach\.call\(E\.world\.querySelectorAll\("\.is-selected"\)/.test(OUT));
   // arch-P3-07: the chain rules are src/editor/selection.js now, so these run them.
   ok("Escape steps OUT one drill level (rule 3)", (function () {
     var SEL = require(path.join(ROOT, "src/editor/selection.js"));
@@ -6451,16 +6489,17 @@ section("select-first / progressive drill");
 // ---- §74 PHASE 2: grab handle removed; selected block IS the drag surface -----
 section("select-first / grab-handle removal (phase 2)");
 (function () {
-  var t = src("src/editor.js");
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
+  var t = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
   // select-first branch: block body is draggable, gated on the draggable attr + not editing
   ok("select-first block dragstart is gated on draggable + not editing", /if \(node\.getAttribute\("draggable"\) !== "true"\) \{ e\.preventDefault\(\); return; \}[\s\S]*?if \(isTextTarget\(e\.target\)\) \{ e\.preventDefault\(\); return; \}/.test(t));
   // the gripper handle now ONLY exists in the click-to-edit escape-hatch branch
   ok("gripper handle only in the click-to-edit (else) branch", /Click-to-edit escape hatch keeps the gripper[\s\S]*?canvas-drag-handle/.test(t));
   ok("select-first branch does NOT create a handle", !/if \(twoStateText\(\)\) \{[\s\S]{0,400}canvas-drag-handle/.test(t));
   // updateDragAffordance: only the selected block, never group/columns/locked/editing
-  ok("updateDragAffordance skips group/columns/locked/editing", /b\.type !== "group" && b\.type !== "columns" &&\s*!\(editing && host\.contains\(editing\)\)/.test(t));
-  ok("updateDragAffordance sets draggable on the selected block", /if \(sel\) sel\.setAttribute\("draggable", "true"\)/.test(t));
-  ok("refreshCanvasSelection updates the drag affordance", /drawContainerOutline\(selection\.block\);\s*updateDragAffordance\(\);/.test(t));
+  ok("updateDragAffordance skips group/columns/locked/editing", /b\.type !== "group" && b\.type !== "columns" &&\s*!\(editing && host\.contains\(editing\)\)/.test(OUT));
+  ok("updateDragAffordance sets draggable on the selected block", /if \(sel\) sel\.setAttribute\("draggable", "true"\)/.test(OUT));
+  ok("refreshCanvasSelection updates the drag affordance", /drawContainerOutline\(E\.selection\.block\);\s*updateDragAffordance\(\);/.test(OUT));
   // a press-drag on the selected leaf defers to mouseup so a native MOVE wins over edit
   ok("press-drag on the selected leaf defers to mouseup (move wins over dbl-click edit)", /if \(onSelectedLeaf\) \{/.test(t) && /window\.addEventListener\("mouseup", onUp, true\)/.test(t) && /if \(!moved && e\.detail >= 2 && editLevel\.kind === "edit"\)/.test(t));
 })();
@@ -7089,6 +7128,7 @@ section("sequence per-step icons");
 // sub-block, column, item and question (the skeleton), and recurse the canonical subtree shape.
 section("clear content #174");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
@@ -7135,7 +7175,7 @@ section("clear content #174");
   ok("clearBlockContent is safe on null/non-object", (function () { try { clearBlockContent(null); clearBlockContent(undefined); clearBlockContent(5); return true; } catch (_) { return false; } })());
 
   // wiring guards: exposed on both surfaces + gated
-  ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? multiSel\.slice\(\) : block\); \}/.test(e));
+  ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? E\.multiSel\.slice\(\) : block\); \}/.test(OUT));
   ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(ecm));
   ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(e));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
@@ -7312,10 +7352,11 @@ section("list discoverability + spacing");
 // ---- multi-select + Delete removes BLOCKS, not a character (data-risk) --------
 section("multi-select delete");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var e = src("src/editor.js");
   ok("Delete/Backspace fires deleteSelection when multiSel active", /\(e\.key === "Delete" \|\| e\.key === "Backspace"\) && \(!isTextTarget\(e\.target\) \|\| multiSel\.length\)/.test(e));
-  ok("building a multi-selection blurs the caret", /function blurActiveText\(\)/.test(e) && /if \(multiSel\.length\) blurActiveText\(\)/.test(e));
-  ok("range-select also blurs the caret", /for \(var k = a; k <= z; k\+\+\) multiSel\.push\([^)]*\);\s*\n\s*blurActiveText\(\)/.test(e));
+  ok("building a multi-selection blurs the caret", /function blurActiveText\(\)/.test(e) && /if \(E\.multiSel\.length\) blurActiveText\(\)/.test(OUT));
+  ok("range-select also blurs the caret", /for \(var k = a; k <= z; k\+\+\) E\.multiSel\.push\([^)]*\);\s*\n\s*blurActiveText\(\)/.test(OUT));
 })();
 
 // ---- HTML embed Center align actually centres (fit offset) --------------------
@@ -7546,6 +7587,7 @@ section("LLL resolveBlockStyle");
 // contamination class). Pure fn, no prior test.
 section("resolveVariant (variants)");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var t = src("src/render.js");
   var body = t.slice(t.indexOf("var VARIANT_AXIS"), t.indexOf("window.getVariants"));
   var win = {};
@@ -7792,6 +7834,7 @@ section("resolveHeaderFooter");
 // appearance (block.cardBox) applied to EACH card, and the cols knob -> CSS var.
 section("cardReveal render");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var t = src("src/render.js");
   var body = t.slice(t.indexOf("cardReveal: function (block) {"), t.indexOf("accordion: function (block) {"));
   function mknode(tag, cls, text) {
@@ -8143,9 +8186,11 @@ section("pan/zoom perf wiring (#150)");
   var persist = e.slice(e.indexOf("function persistView()"), e.indexOf("function persistView()") + 260);
   ok("persistView debounces the localStorage write (setTimeout + clearTimeout)",
     /clearTimeout\(_viewSaveT\)/.test(persist) && /setTimeout\(/.test(persist) && /localStorage\.setItem/.test(persist));
-  var pins = e.slice(e.indexOf("function renderCommentPins()"), e.indexOf("function renderCommentPins()") + 700);
+  // arch-P3b-07: the pins moved to editor/comments.js and read the live document through E.
+  var pinSrc = src("src/editor/comments.js");
+  var pins = pinSrc.slice(pinSrc.indexOf("function renderCommentPins()"), pinSrc.indexOf("function renderCommentPins()") + 900);
   ok("renderCommentPins has a no-comments fast path that skips the rebuild",
-    /if \(!\(doc\.comments && doc\.comments\.length\)\)\s*\{[\s\S]*?return;/.test(pins));
+    /if \(!\(E\.doc\.comments && E\.doc\.comments\.length\)\)\s*\{[\s\S]*?return;/.test(pins));
   var img = src("src/render.js");
   ok("image path uses the memo colour count, not a redundant detectSvgColorsFromSrc parse",
     /window\.__svgColorCount\(block\) > 1/.test(img));
@@ -8789,18 +8834,19 @@ section("panel-standards");
 // tree-block / asset-group__title) are preserved, so selection/DnD/rename don't move.
 section("LeftPanel DS re-skin (issue #13)");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var css = src("editor.css");
   var icons = src("src/icons.js");
   // Outliner: block-type icons are Lucide (a map, resolved through the accessor) —
   // no text glyphs. Pages get file-text; carets are the Lucide chevron.
-  ok("outliner block icons map to Lucide (BLOCK_LUCIDE)", /var BLOCK_LUCIDE = \{/.test(e) && /blockIcon\(b\) \{ return BLOCK_LUCIDE/.test(e));
-  ok("block rows render the Lucide icon via the accessor", /outlineIcon\("tree-block__icon", blockIcon\(block\)\)/.test(e));
-  ok("page rows carry the DS file-text icon", /outlineIcon\("tree-page__icon", "file-text"\)/.test(e));
-  ok("outliner carets are the Lucide chevron (accessor, no triangle markup)", /window\.Icon\("chevron-right"\)/.test(e) && /\.tree-caret\.is-open svg \{ transform: rotate\(90deg\)/.test(css));
+  ok("outliner block icons map to Lucide (BLOCK_LUCIDE)", /var BLOCK_LUCIDE = \{/.test(OUT) && /blockIcon\(b\) \{ return BLOCK_LUCIDE/.test(OUT));
+  ok("block rows render the Lucide icon via the accessor", /outlineIcon\("tree-block__icon", blockIcon\(block\)\)/.test(OUT));
+  ok("page rows carry the DS file-text icon", /outlineIcon\("tree-page__icon", "file-text"\)/.test(OUT));
+  ok("outliner carets are the Lucide chevron (accessor, no triangle markup)", /window\.Icon\("chevron-right"\)/.test(OUT) && /\.tree-caret\.is-open svg \{ transform: rotate\(90deg\)/.test(css));
   // Chapter count is the canonical Badge; names stay upper-cased (in the skin).
-  ok("chapter count is the canonical VersoUI.Badge", /window\.VersoUI\.Badge\(\{ children: String\(\(ch\.pages/.test(e));
+  ok("chapter count is the canonical VersoUI.Badge", /window\.VersoUI\.Badge\(\{ children: String\(\(ch\.pages/.test(OUT));
   ok("chapter names stay upper-cased (CSS text-transform)", /\.tree-chapter__name \{[^}]*text-transform: uppercase/.test(css));
   // Palette is built from the canonical control set with a persisted grid/list view.
   ok("palette entries build from BlockTile / BlockPaletteItem", /U\.BlockTile\(\{/.test(ASSETS) && /U\.BlockPaletteItem\(\{/.test(ASSETS));
@@ -8820,7 +8866,7 @@ section("LeftPanel DS re-skin (issue #13)");
   // Wiring hooks preserved (re-skin, never re-wire): the tests/queries that key off
   // these class names keep matching.
   ok("wiring hooks preserved (tree-page__name / tree-block / asset-group__title)",
-     /tree-page__name"/.test(e) && /"tree-block"/.test(e) && /"asset-group__title", g\)/.test(ASSETS) && /"asset-group__title", title\)/.test(ASSETS));
+     /tree-page__name"/.test(OUT) && /"tree-block"/.test(OUT) && /"asset-group__title", g\)/.test(ASSETS) && /"asset-group__title", title\)/.test(ASSETS));
   // The DS Lucide glyphs the LeftPanel uses are inlined offline in the accessor.
   ["file-text", "heading", "type", "list-checks", "layout-grid", "component", "target"].forEach(function (n) {
     ok("icons.js provides the DS glyph: " + n, new RegExp('"' + n + '":').test(icons));
@@ -9209,7 +9255,8 @@ section("interact contextual connectors");
   ok("drawConnectors has a blockInSelection helper (single + multi)", /function blockInSelection\(b\)[\s\S]{0,220}multiSel\.indexOf\(b\) !== -1/.test(e));
   ok("action-links skip non-selected links unless Show all", /if \(!showAllConnectors && !\(selection\.node === lk\.elm \|\| blockInSelection\(lk\.block\)\)\) return;/.test(e));
   ok("gate-links skip unless gated/source selected or Show all", /if \(!showAllConnectors && !gatedSel && !srcSel\) return;/.test(e));
-  ok("connectors redraw on selection change (refreshCanvasSelection, interact-only)", /function refreshCanvasSelection\(\)[\s\S]*?if \(interactMode\) drawConnectors\(\);\s*\}/.test(e));
+  // arch-P3b-07i: the one choke point every selection change routes through moved with the tree.
+  ok("connectors redraw on selection change (refreshCanvasSelection, interact-only)", /function refreshCanvasSelection\(\)[\s\S]*?if \(E\.interactMode\) drawConnectors\(\);\s*\}/.test(src("src/editor/outliner.js")));
   ok("Interact inspector exposes a Show all connections toggle", /switchRow\("Show all connections", function \(\) \{ return showAllConnectors; \}/.test(e));
 })();
 
@@ -9407,6 +9454,7 @@ section("PERF one-page re-render");
 // ---- UI kit gallery seam ----------------------
 section("UI kit seam");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the block glyph map moved with the tree
   var THEME = src("src/editor/theme.js");   // arch-P3b-07f
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
@@ -9570,7 +9618,7 @@ section("UI kit seam");
   ok("hotspot asset: handle hidden (internal ref not author-facing)", /var isAssetSrc = typeof curScreen\.visual === "string" && curScreen\.visual\.indexOf\("asset:"\) === 0;/.test(eh)); // #216: base = current screen visual
   // Ticket 6 (2/2) — sequence steps on repeatedList + the rowExtras extension.
   ok("repeatedList supports optional compact rowExtras (icons between field + trash)", /if \(opts\.rowExtras\) \{[\s\S]{0,220}row\.appendChild\(n\)/.test(ep) && /row\.appendChild\(grip\); row\.appendChild\(field\);/.test(ep));
-  ok("image glyph is canonical Lucide (icons.js, for the step marker upload)", /"image":/.test(src("src/icons.js")) && /image: "image"/.test(e));
+  ok("image glyph is canonical Lucide (icons.js, for the step marker upload)", /"image":/.test(src("src/icons.js")) && /image: "image"/.test(OUT));
   ok("sequence Content has no duplicate footer (spacing+actions at Block level)", /no renderBlockActionsSection here/.test(e));
   // Ticket 8 (1/n) — frame/group two-level via renderContainerChrome.
   ok("frame/group dispatched to the two-level shell", /if \(block\.type === "frame" \|\| block\.type === "group"\) \{ renderFrameOrGroupTwoLevel\(node\); return; \}/.test(e));
@@ -10385,6 +10433,7 @@ section("Product Rail: Publish presets (T2)");
 // overwrite -- a new incremented version by default, overwrite only on an explicit per-row opt-in.
 section("Product Rail: Publish save paths + version ledger (T3)");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var PA = require(path.join(ROOT, "src/publish-paths.js"));
   var PQ = require(path.join(ROOT, "src/publish-queue.js"));
   var PP = require(path.join(ROOT, "src/publish-presets.js"));
@@ -13211,7 +13260,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
       CV.readGridMode("nonsense") === "off" && CV.readGridMode(null) === "off" && CV.readGridMode("fine") === "fine";
   })());
   ok("overlay seeded on the ACTIVE page only", /i === currentPage && gridMode !== "off"\) frame\.appendChild\(makeGridOverlay\(\)\)/.test(ed));
-  ok("active-page change re-places the overlay", /function setActivePage[\s\S]*refreshGridOverlay\(\);/.test(ed));
+  // arch-P3b-07i: setActivePage moved with the tree rows it highlights.
+  ok("active-page change re-places the overlay", /function setActivePage[\s\S]*refreshGridOverlay\(\);/.test(src("src/editor/outliner.js")));
   ok("grid-toggle button present with an offline Lucide glyph", /id="grid-toggle"[^>]*data-lucide="grid-2x2"/.test(idx));
   ok("editor.css defines all 4 preset overlays", /\.grid-overlay--thirds/.test(css) && /\.grid-overlay--quarters/.test(css) && /\.grid-overlay--columns/.test(css) && /\.grid-overlay--fine/.test(css));
   ok("overlay is click-through (pointer-events:none)", /\.grid-overlay\s*\{[^}]*pointer-events:\s*none/.test(css));
@@ -13360,6 +13410,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 
 // ---- #101 follow-on: footer guided tour (coach-marks) --------------------
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   section("guided tour (coach-marks)");
   var rsrc = src("src/render.js");
   // pure copy resolver: extract TOUR_DEFAULTS + tourItemCopy and exercise the fallback
@@ -13410,6 +13461,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // ---- #131: merge stacked text boxes (pure gate + join) --------------------
 section("#131 merge text boxes");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the multi toolbar and merge moved
   var t = src("src/editor.js");
   var m = t.match(/\/\* @merge-text-start \*\/([\s\S]*?)\/\* @merge-text-end \*\//);
   if (!m) { ok("locate @merge-text fence", false); return; }
@@ -13432,7 +13484,7 @@ section("#131 merge text boxes");
   ok("join: all empty -> empty string", join(["", ""]) === "");
   ok("join: null input null-safe", join(null) === "" && join(undefined) === "");
   // wiring: exposed in the floating bar, canvas context menu, and outline multi menu
-  ok("wiring: floating multi toolbar shows Merge (gated)", /function showMultiToolbar\(\)[\s\S]{0,260}canMergeTextBoxes\(multiSel\)[\s\S]{0,140}iconBtn\("merge", "Merge text boxes"\)/.test(t));
+  ok("wiring: floating multi toolbar shows Merge (gated)", /function showMultiToolbar\(\)[\s\S]{0,260}canMergeTextBoxes\(E\.multiSel\)[\s\S]{0,140}iconBtn\("merge", "Merge text boxes"\)/.test(OUT));
   ok("wiring: renderInspector multi branch shows the bar", (function () {
     var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
     var multi = VI.pick({ multiSelCount: 2 });
@@ -13440,10 +13492,10 @@ section("#131 merge text boxes");
   })());
   // arch-P3b-07q: the canvas menu moved to editor/context-menu.js, where multiSel is read live.
   ok("wiring: canvas context menu multi branch offers Merge", /inMulti\(target\.block\) && E\.multiSel\.length >= 2[\s\S]{0,240}canMergeTextBoxes\(E\.multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(src("src/editor/context-menu.js")));
-  ok("wiring: outline multi menu offers Merge", /multi && canMergeTextBoxes\(multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(t));
+  ok("wiring: outline multi menu offers Merge", /multi && canMergeTextBoxes\(E\.multiSel\)[\s\S]{0,80}"Merge text boxes"/.test(OUT));
   // action: writes the join into the survivor + shared-parent guard (mirrors groupMulti)
-  ok("action: mergeTextBoxes folds into the survivor via mergeTextValues", /survivor\.text = mergeTextValues\(locs\.map\(function \(l\) \{ return l\.block\.text; \}\)\);/.test(t));
-  ok("action: mergeTextBoxes gates on canMergeTextBoxes + pushHistory", /function mergeTextBoxes\(\) \{\s*if \(!canMergeTextBoxes\(multiSel\)\) return;/.test(t) && /function mergeTextBoxes\(\)[\s\S]{0,900}pushHistory\(\);/.test(t));
+  ok("action: mergeTextBoxes folds into the survivor via mergeTextValues", /survivor\.text = mergeTextValues\(locs\.map\(function \(l\) \{ return l\.block\.text; \}\)\);/.test(OUT));
+  ok("action: mergeTextBoxes gates on canMergeTextBoxes + pushHistory", /function mergeTextBoxes\(\) \{\s*if \(!canMergeTextBoxes\(E\.multiSel\)\) return;/.test(OUT) && /function mergeTextBoxes\(\)[\s\S]{0,900}pushHistory\(\);/.test(OUT));
 })();
 
 // ---- #120: inline styles (1/4) — render resolves data-style-ref spans -----
@@ -14009,8 +14061,9 @@ section("P0 spellcheck");
 // ---- #134 every card/side is a drop-target container ----------------------
 section("#134 cards as drop containers");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var e = src("src/editor.js");
-  var body = e.slice(e.indexOf("function containerChildGroups(block)"), e.indexOf("// DD: select a nested block by REF"));
+  var body = OUT.slice(OUT.indexOf("function containerChildGroups(block)"), OUT.indexOf("// DD: select a nested block by REF"));
   var ccg = new Function(body + "\nreturn containerChildGroups;")();
   // an EMPTY cardDeck exposes a droppable group per card (previously invisible -> undroppable)
   var deck = { type: "cardDeck", items: [{}, {}, {}] };
@@ -14048,8 +14101,8 @@ section("#134 cards as drop containers");
   // characters per line the extra indent costs.
   ok("canvas wires each card/side body (incl. front) as a drop target", /function wireItemBodyDrops\(root\)[\s\S]{0,1000}card-reveal__front[\s\S]{0,140}"front"/.test(src("src/editor/dnd-ui.js")));
   ok("canvas wiring is called from enableEditing", /wireItemBodyDrops\(root\); \/\/ #134/.test(e));
-  ok("outliner cap rows drop into the item array", /if \(g\.arrayOwner\) \{[\s\S]{0,240}intoBlocks: \{ arrayRef: arr, ownerBlock: blk \}/.test(e));
-  ok("outliner block-row drop for items containers routes to the first item", /if \(isItems\) \{[\s\S]{0,260}it0\.children = it0\.children \|\| \[\]/.test(e));
+  ok("outliner cap rows drop into the item array", /if \(g\.arrayOwner\) \{[\s\S]{0,240}intoBlocks: \{ arrayRef: arr, ownerBlock: blk \}/.test(OUT));
+  ok("outliner block-row drop for items containers routes to the first item", /if \(isItems\) \{[\s\S]{0,260}it0\.children = it0\.children \|\| \[\]/.test(OUT));
 })();
 
 // ---- #154: multi-select variant export (plan + orchestration) ------------
@@ -14100,8 +14153,9 @@ section("#154 multi-select variant export");
 // ---- #212 comment popover clamps into the viewport -----------------------
 section("#212 comment popover clamp");
 (function () {
-  var t = src("src/editor.js");
-  var m = t.match(/function clampPopover\(pos, vw, vh, pw, ph, m\)\s*\{[\s\S]*?\n  \}/);
+  // arch-P3b-07: the popover clamp moved with the pins; a body inside install() closes deeper.
+  var t = src("src/editor/comments.js");
+  var m = t.match(/function clampPopover\(pos, vw, vh, pw, ph, m\)\s*\{[\s\S]*?\n    \}/);
   ok("clampPopover pure helper present", !!m);
   var fn = new Function(m[0] + "\nreturn clampPopover;")();
   var VW = 1000, VH = 800, PW = 240, PH = 216, M = 8;
@@ -14410,10 +14464,12 @@ section("left-panel Components reorg");
   // "Save as component…" (canvas + outliner) and page "Save page to library…"
   // (canvas frame-label + outliner), mirroring the existing Inspector buttons.
   // arch-P3b-07q: the canvas door moved; the outliner's stayed. Two doors, counted across both.
-  var saveAsComponentCount = (e.match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length +
+  // arch-P3b-07i: the outliner door moved again, to editor/outliner.js.
+  var saveAsComponentCount = (src("src/editor/outliner.js").match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length +
                              (src("src/editor/context-menu.js").match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length;
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
-  var savePageCount = (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
+  var savePageCount = (src("src/editor/outliner.js").match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length +
+                       (e.match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
   ok("\"Save page to library…\" wired on both page context menus (canvas frame-label + outliner)", savePageCount === 2);
 })();
 
@@ -14553,6 +14609,7 @@ section("SPEC 8: source-link 08 — alternates from the canvas");
 // ---- SPEC 8 source-link 09: base-edit warning + fork ----
 section("SPEC 8: source-link 09 — base-edit warning + fork");
 (function () {
+  var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
@@ -15434,7 +15491,7 @@ section("Source rewrite: comments = shared canvas engine + range-mark adapter (E
   var es = src("src/editor/source-stage.js");
   var e = src("src/editor.js");
   ok("a Source comment is a range mark PLUS a shared makeComment thread keyed by the mark id", /var cmark = SD\.addMark\(__sourceDocModel, \{ type: "comment", anchor: anchor \}\);[\s\S]{0,220}makeComment\(\{ markId: cmark\.id \}, val\)/.test(es));
-  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(es) && /c\.replies\.push\(makeReply\(v\)\)/.test(e));
+  ok("comments reuse the shared canvas engine, not a second model (makeComment/makeReply)", /function buildSourceCommentItem\(topic, c, opts\)/.test(es) && /c\.replies\.push\(makeReply\(v\)\)/.test(src("src/editor/comments.js")));
   ok("comment threads anchor by mark id (sectionId anchor dies with sections)", /function sourceCommentsForMark\(topic, markId\)[\s\S]{0,120}c\.anchor\.markId === markId/.test(es));
   ok("margin pins render in the gutter for each comment mark, pinned to the span", /function renderSourceCommentPins\(topic\)/.test(es) && /if \(m\.type !== "comment"\) return;/.test(es) && /pinCardToSpan\(pin, m\.id\)/.test(es));
   ok("clicking a pin opens the in-place thread card (reuses .comment-thread)", /source-commentthread comment-thread/.test(es) && /toggleSourceCommentThread\(topic, m\.id\)/.test(es));

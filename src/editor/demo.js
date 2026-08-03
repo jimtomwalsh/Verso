@@ -39,7 +39,6 @@
         setDemoCommentMode = E.setDemoCommentMode,
         pageIndexById = E.pageIndexById,
         fitEmbedsIn = E.fitEmbedsIn,
-        demoCommentBtn = E.demoCommentBtn,
         closeCommentPopover = E.closeCommentPopover,
         isTextTarget = E.isTextTarget,
         persistTheme = E.persistTheme,
@@ -295,7 +294,9 @@
       demoBp = "auto"; demoPage = E.currentPage || 0;
       demoStore = { visited: {}, watched: {}, checked: {} }; // fresh run each session
       E.resetDemoCommentMode(); demoStage.classList.remove("is-comment-mode"); // §12: start in read mode
-      if (demoCommentBtn) demoCommentBtn.classList.remove("is-active");
+      // Read live: the button belongs to comments.js, which installs AFTER this file, so an alias
+      // taken at install time would be undefined (arch-P3b-07).
+      if (E.demoCommentBtn) E.demoCommentBtn.classList.remove("is-active");
       demo.hidden = false;
       document.body.classList.add("demo-open"); // #76: hide authoring-only chrome while previewing
       renderDemo();

@@ -41,7 +41,6 @@
         Store = E.Store,
         setDragPayload = E.setDragPayload,
         setCurrentPage = E.setCurrentPage,
-        BLOCK_LUCIDE = E.BLOCK_LUCIDE,
         clearDropMarks = E.clearDropMarks,
         paletteAllowsType = E.paletteAllowsType,
         getComponents = E.getComponents,
@@ -121,7 +120,9 @@
     function libLucide(item) {
       if (item.__lucide) return item.__lucide;
       var t = null; try { t = item.make().type; } catch (e) {}
-      return (item.__lucide = (BLOCK_LUCIDE[t] || "square"));
+      // Read live: the glyph table belongs to outliner.js, which installs AFTER this file, so an
+      // alias taken at install time would be undefined (arch-P3b-07i).
+      return (item.__lucide = (E.BLOCK_LUCIDE[t] || "square"));
     }
     // Build ONE palette entry from the canonical control set: a BlockTile (grid) or a
     // BlockPaletteItem (list). Re-skin only — the click-to-insert + drag-to-canvas
