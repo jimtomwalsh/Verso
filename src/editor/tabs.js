@@ -29,7 +29,9 @@
       "openDocIds", "h", "showNewDocDialog", "activateDoc", "mount",
       "connectBackupFolder", "PR", "colourForName", "saveOpenDocIds", "stampDocOpenedAt", "renderVariantSwitch",
       "renderVersionSwitch", "syncCellChip", "registry", "setActiveVariant", "setActiveVersion", "activeDocId",
-      "doc", "activeVariant", "activeVersion"
+      "doc", "activeVariant", "activeVersion",
+      // uio-W11: the overflow dropdown is the canonical menu, not a bespoke popover.
+      "showContextMenu"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -75,7 +77,12 @@
       if (!container) return;
       container.innerHTML = "";
       var U = window.VersoUI;
-      var shown = visibleTabIds(openDocIds, registry);
+      var all = visibleTabIds(openDocIds, registry);
+      // uio-W11: past the threshold the remainder moves into a `+N more` dropdown. The strip keeps
+      // its width and never reflows; the active document is always among the shown, because a strip
+      // that hid the tab you are looking at would be describing somebody else's session.
+      var split = PR.tabOverflow(all, E.activeDocId);
+      var shown = split.shown;
       shown.forEach(function (id) {
         var d = registry[id];
         if (!d) return;
@@ -122,21 +129,46 @@
       // a strip that spanned two products while saying only "3 open" would leave the reader to work
       // that out from the colour dots. The product count appears only when the strip really does
       // span more than one.
-      var meta = PR.stripMeta(shown.map(function (id) {
+      // uio-W11: the tail PINS to the end of the strip. The strip scrolls, and a `+N more` that
+      // scrolled away with it would be unreachable at exactly the moment it matters -- you go
+      // looking for the tab that is not there, and the control that would have found it has gone
+      // too.
+      var tail = h("div", "toolbar-tabs__tail");
+      if (split.hidden.length) tail.appendChild(overflowControl(split.hidden));
+      // The meta counts EVERYTHING open, not just what fits: "8 open" beside a `+4 more` would be
+      // two numbers disagreeing about the same set.
+      var meta = PR.stripMeta(all.map(function (id) {
         var d = registry[id];
         return { productId: (d && d.meta && d.meta.productId) || "" };
       }));
-      if (meta.open) container.appendChild(h("span", "toolbar-tabs__meta", meta.label));
+      if (meta.open) tail.appendChild(h("span", "toolbar-tabs__meta", meta.label));
       if (U && U.IconButton) {
         var addBtn = U.IconButton({ icon: "plus", label: "Create or import a document…", size: "md", onClick: showNewDocDialog });
         addBtn.classList.add("toolbar-tabs__add");
-        container.appendChild(addBtn);
-        return;
+        tail.appendChild(addBtn);
+      } else {
+        var add = h("span", "toolbar-tabs__add", "+");
+        add.title = "Create or import a document...";
+        add.addEventListener("click", showNewDocDialog);
+        tail.appendChild(add);
       }
-      var add = h("span", "toolbar-tabs__add", "+");
-      add.title = "Create or import a document...";
-      add.addEventListener("click", showNewDocDialog);
-      container.appendChild(add);
+      container.appendChild(tail);
+    }
+
+    // The overflow dropdown. It lists the hidden documents with the SHARED document row (uio-W02),
+    // so an overflowed tab reads as the same document it is in Files rather than as a menu item.
+    function overflowControl(hidden) {
+      var btn = h("button", "toolbar-tabs__more", "+" + hidden.length + " more");
+      btn.type = "button";
+      btn.title = hidden.length + " more open document" + (hidden.length === 1 ? "" : "s");
+      btn.addEventListener("click", function (e) {
+        var r = e.currentTarget.getBoundingClientRect();
+        E.showContextMenu(r.left, r.bottom + 4, [{ head: "Also open" }].concat(hidden.map(function (id) {
+          var d = registry[id];
+          return { label: (d && d.meta && d.meta.title) || id, onClick: function () { switchDoc(id); } };
+        })));
+      });
+      return btn;
     }
 
     function closeTab(id) {

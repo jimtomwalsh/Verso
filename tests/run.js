@@ -11117,6 +11117,70 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W11: tab overflow -- scroll, then +N more ------------------------
+// A strip that shrinks its tabs to fit trades one problem for a worse one: at twelve open documents
+// every tab is too narrow to read, and you have lost the thing tabs are for.
+section("uio-W11 tab overflow");
+(function () {
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+  function ids(n) { var a = []; for (var i = 1; i <= n; i++) a.push("D-" + i); return a; }
+
+  ok("the threshold is eight", PR.TAB_LIMIT === 8);
+  ok("under the threshold nothing overflows",
+    PR.tabOverflow(ids(8), "D-1").hidden.length === 0 && PR.tabOverflow(ids(8), "D-1").shown.length === 8);
+  ok("past it the remainder moves out of the strip",
+    PR.tabOverflow(ids(12), "D-1").shown.length === 8 && PR.tabOverflow(ids(12), "D-1").hidden.length === 4);
+  ok("no document is lost or duplicated by the split", (function () {
+    var s = PR.tabOverflow(ids(12), "D-1");
+    return s.shown.concat(s.hidden).sort().join() === ids(12).sort().join();
+  })());
+  // A strip that hid the tab you are looking at would be describing somebody else's session.
+  ok("THE ACTIVE DOCUMENT IS ALWAYS SHOWN, even when it falls past the threshold",
+    PR.tabOverflow(ids(12), "D-11").shown.indexOf("D-11") !== -1 &&
+    PR.tabOverflow(ids(12), "D-11").hidden.indexOf("D-11") === -1);
+  ok("swapping it in keeps the tabs in front of it in the order they had",
+    PR.tabOverflow(ids(12), "D-11").shown.slice(0, 7).join() === ids(7).join());
+  ok("and the one it displaced is not lost, only hidden",
+    PR.tabOverflow(ids(12), "D-11").hidden.indexOf("D-8") !== -1);
+  ok("an active id that is not open at all changes nothing",
+    PR.tabOverflow(ids(12), "D-99").shown.join() === ids(8).join());
+  ok("the limit is overridable for a test, and junk falls back to the default",
+    PR.tabOverflow(ids(5), "D-1", 3).shown.length === 3 && PR.tabOverflow(ids(12), "D-1", 0).shown.length === 8);
+  ok("empty and absent are quiet", PR.tabOverflow([], "x").shown.length === 0 && PR.tabOverflow().shown.length === 0);
+
+  // --- the wiring, in BOTH strips ---
+  var TB = src("src/editor/tabs.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var SS = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("Edit's strip splits through the one pure function", /var split = PR\.tabOverflow\(all, E\.activeDocId\);/.test(TB));
+  ok("Source's strip splits through the same one",
+    /var split = window\.VersoProductRail\.tabOverflow\(ids, __sourceActiveTopicId\);/.test(SS));
+  ok("both raise a +N more that names the count",
+    /"\+" \+ hidden\.length \+ " more"/.test(TB) && /"\+" \+ split\.hidden\.length \+ " more"/.test(SS));
+  ok("the dropdown is the canonical menu, not a bespoke popover",
+    /E\.showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Also open" \}\]/.test(TB) &&
+    /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Also open" \}\]/.test(SS));
+  ok("activating a hidden document switches to it, which reveals its tab",
+    /onClick: function \(\) \{ switchDoc\(id\); \}/.test(TB) && /onClick: function \(\) \{ openSourceDoc\(id\); \}/.test(SS));
+
+  // --- A TAB NEVER SHRINKS ---
+  var CTL = src("styles/editor/12-controls.css");
+  ok("the tab has a fixed width and refuses to be squeezed by its flex parent",
+    /\.vds-doctab \{[^}]*flex: 0 0 auto[^}]*width: 168px/.test(CTL));
+  ok("its label is one line, ellipsised -- a wrapped label would grow the strip past its toolbar",
+    /\.vds-doctab__label \{[^}]*white-space: nowrap[^}]*text-overflow: ellipsis/.test(CTL));
+  var OVL = src("styles/editor/10-overlays.css");
+  ok("the strip scrolls rather than wrapping, in both destinations",
+    /\.toolbar-tabs \{[\s\S]{0,500}overflow-x: auto/.test(OVL) &&
+    /\.source-stage__tabs \{[^}]*overflow-x: auto/.test(OVL) &&
+    !/\.toolbar-tabs \{[\s\S]{0,500}flex-wrap: wrap/.test(OVL));
+  ok("the +N more is never mistaken for a tab -- it names a count, not a document",
+    /\.toolbar-tabs__more \{[^}]*border: 1px dashed/.test(OVL));
+  // A `+N more` that scrolled away with the tabs would be gone at exactly the moment it matters.
+  ok("the tail pins to the end of the strip rather than scrolling away with the tabs",
+    /\.toolbar-tabs__tail \{[^}]*position: sticky; right: 0/.test(OVL) &&
+    /var tail = h\("div", "toolbar-tabs__tail"\);/.test(TB) && /var tail = h\("div", "toolbar-tabs__tail"\);/.test(SS));
+})();
+
 // ---- uio-W07: open vs reveal, and the open-elsewhere marker ---------------
 // A row that does not say a document is already open leaves you to find out by clicking, and the
 // wrong answer to that click is a second copy of a document you already had, in a strip you then
@@ -11564,7 +11628,9 @@ section("uio-W10 per-destination tab strips");
   ok("a document tab states its type, so the one-type-each contract is visible",
     /if \(props\.type\) tab\.setAttribute\("data-doc-type", props\.type\);/.test(src("src/ui-kit.js")));
   ok("Source states what its strip holds", /window\.VersoProductRail\.stripMeta\(open\)/.test(SS));
-  ok("Edit states what its strip holds, from the same pure function", /PR\.stripMeta\(shown\.map\(/.test(TB));
+  // uio-W11 made this count EVERYTHING open rather than only what fits: "8 open" beside a `+4 more`
+  // would be two numbers disagreeing about the same set.
+  ok("Edit states what its strip holds, from the same pure function", /PR\.stripMeta\(all\.map\(/.test(TB));
   ok("Source's strip has a host of its own in the page, outside the nav",
     /id="source-tabs"/.test(src("index.html")) &&
     /<div class="source-stage__tabs"[\s\S]{0,200}<div class="source-stage__body">/.test(src("index.html")));

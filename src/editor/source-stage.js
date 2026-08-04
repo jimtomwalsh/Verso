@@ -2821,7 +2821,10 @@
       var comps = libComponents();
       var ids = window.VersoProductRail.visibleSourceTabIds(openSourceDocIds(), comps);
       var open = ids.map(function (id) { return comps[id]; });
-      open.forEach(function (c) {
+      // uio-W11: the same overflow rule Edit's strip follows -- tabs never shrink, the remainder
+      // goes into a `+N more`, and the open document is always among the shown.
+      var split = window.VersoProductRail.tabOverflow(ids, __sourceActiveTopicId);
+      split.shown.map(function (id) { return comps[id]; }).forEach(function (c) {
         // The per-product colour dot survives from the Edit strip as IDENTITY, keyed on the stable
         // productId so a rename never shifts the colour. Shared material carries no dot, which is
         // the honest rendering of "belongs to no product".
@@ -2842,8 +2845,23 @@
       // The strip states what it holds. On Source that is "2 open"; the product count appears only
       // when the strip actually spans more than one, so the mixed-product fact is stated rather
       // than left to be inferred from the dots.
+      var tail = h("div", "toolbar-tabs__tail");
+      if (split.hidden.length) {
+        var more = h("button", "toolbar-tabs__more", "+" + split.hidden.length + " more");
+        more.type = "button";
+        more.title = split.hidden.length + " more open source document" + (split.hidden.length === 1 ? "" : "s");
+        more.addEventListener("click", function (e) {
+          var r = e.currentTarget.getBoundingClientRect();
+          showContextMenu(r.left, r.bottom + 4, [{ head: "Also open" }].concat(split.hidden.map(function (id) {
+            return { label: (comps[id] && comps[id].name) || id, onClick: function () { openSourceDoc(id); } };
+          })));
+        });
+        tail.appendChild(more);
+      }
+      // The meta counts EVERYTHING open, not just what fits.
       var meta = window.VersoProductRail.stripMeta(open);
-      if (meta.open) host.appendChild(h("span", "source-stage__tabs-meta", meta.label));
+      if (meta.open) tail.appendChild(h("span", "source-stage__tabs-meta", meta.label));
+      if (tail.childNodes.length) host.appendChild(tail);
     }
 
     // Called each time Source becomes the active stage (setStage("source")) -- mounts the

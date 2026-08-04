@@ -175,6 +175,29 @@
   //
   // The product count appears only when it is more than one, because "1 product" on a strip that
   // has never held two is noise on every screen.
+  // uio-W11: OVERFLOW. Tabs scroll and never shrink -- a strip that shrinks its tabs to fit trades
+  // one problem for a worse one, because at twelve open documents every tab is too narrow to read
+  // and you have lost the thing tabs are for. Past the threshold the strip keeps its width and the
+  // remainder moves into a `+N more` dropdown, so the strip never reflows and never wraps.
+  //
+  // The ACTIVE document is always shown, even when it falls past the threshold: a strip that hid
+  // the tab you are looking at would be describing somebody else's session.
+  var TAB_LIMIT = 8;
+  function tabOverflow(ids, activeId, limit) {
+    var list = (ids || []).slice();
+    var max = typeof limit === "number" && limit > 0 ? limit : TAB_LIMIT;
+    if (list.length <= max) return { shown: list, hidden: [] };
+    var shown = list.slice(0, max), hidden = list.slice(max);
+    var ai = hidden.indexOf(activeId);
+    if (ai !== -1) {
+      // Swap the active document into the last visible slot rather than prepending it, so the tabs
+      // in front of it keep the order they have always had.
+      hidden[ai] = shown[max - 1];
+      shown[max - 1] = activeId;
+    }
+    return { shown: shown, hidden: hidden };
+  }
+
   function stripMeta(items) {
     var list = items || [];
     var seen = {}, products = 0;
@@ -456,6 +479,7 @@
     visibleTabIds: visibleTabIds,
     // uio-W10: the per-destination split, and what a strip says about itself.
     visibleSourceTabIds: visibleSourceTabIds, stripMeta: stripMeta,
+    tabOverflow: tabOverflow, TAB_LIMIT: TAB_LIMIT,
     // uio-W01: the retired scope's migration, exported so tests reach the pure core directly.
     LEGACY_PRODUCT_SCOPE_KEY: LEGACY_PRODUCT_SCOPE_KEY,
     FILES_PRODUCT_FACET_SEED_KEY: FILES_PRODUCT_FACET_SEED_KEY,
