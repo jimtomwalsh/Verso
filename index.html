@@ -50,10 +50,12 @@
   <header class="toolbar" id="toolbar">
     <div class="toolbar__group toolbar__group--left">
       <span class="toolbar__brand" aria-hidden="true">Verso<span class="toolbar__brand-dot">.</span></span>
-      <!-- uio-W01: the persistent Product picker stood here and is gone. It held one global active
-           Product that every stage filtered itself by, which meant choosing one silently emptied the
-           tab strip and hid Publish rows. Product is a tag, a facet and an inspector now. uio-W03
-           puts the single where-am-I identity line in this spot. -->
+      <!-- uio-W03 §3.1: the ONE element that answers "where am I". Source/Edit name the open
+           document and its Product; Files and Publish name themselves. There is deliberately no
+           breadcrumb, no second product chip in a panel header and no toolbar echo -- when several
+           surfaces answer the same question they drift apart and the reader learns to trust none of
+           them. The persistent Product picker that stood here was retired in uio-W01. -->
+      <div class="stage-identity" id="stage-identity" role="status" aria-live="polite"></div>
       <!-- #92b storage-health dot, beside the wordmark now that the product picker is gone
            (uio-E-C01, uio-W01): green healthy /
            amber getting full / red near-quota or a save failure. Click opens a popover
@@ -111,6 +113,10 @@
         <!-- uio-E-C08 (EDIT-15): the three stages are NAMED (icon over a 9px caption), so the rail
              reads as a Source -> Edit -> Publish stepper instead of three unlabelled glyphs. The
              glyph moves to an inner span so its caption sibling survives icon hydration. -->
+        <!-- uio-W03: four destinations. Files leads -- it is where you browse and manage from, and
+             the four read left-to-right as the order you work in. No rail item carries a count, a
+             badge or a dot: a badge on a rail item teaches people to watch the rail, not the work. -->
+        <button class="rail-btn rail-tab" id="rail-tab-files" data-rail-tab="files" title="Files" aria-label="Files"><span class="rail-tab__icon" data-lucide="folder"></span><span class="rail-tab__label">Files</span></button>
         <button class="rail-btn rail-tab" id="rail-tab-source" data-rail-tab="source" title="Source" aria-label="Source"><span class="rail-tab__icon" data-lucide="book-open"></span><span class="rail-tab__label">Source</span></button>
         <button class="rail-btn rail-tab is-active" id="rail-tab-edit" data-rail-tab="edit" title="Edit" aria-label="Edit"><span class="rail-tab__icon" data-lucide="pen"></span><span class="rail-tab__label">Edit</span></button>
         <button class="rail-btn rail-tab" id="rail-tab-publish" data-rail-tab="publish" title="Publish" aria-label="Publish"><span class="rail-tab__icon" data-lucide="upload"></span><span class="rail-tab__label">Publish</span></button>
@@ -139,6 +145,10 @@
          in the editor script, which rebuilds head + pills + sections together on every
          render (topic switch, facet toggle, variant toggle, section edit) -- one
          container, one source of render truth. -->
+    <!-- uio-W03: the Files destination's region. Until uio-W04 fills it, entering Files opens the
+         document browser that does the job today -- so the destination is somewhere you land rather
+         than a dead end. This surface sits under it so Edit's canvas is not showing through. -->
+    <div class="files-stage" id="stage-files" hidden></div>
     <div class="source-stage" id="stage-source" hidden>
       <nav class="source-stage__nav" aria-label="Source topics">
         <div class="source-stage__search" id="source-stage-search"></div>

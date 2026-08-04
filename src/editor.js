@@ -6101,6 +6101,7 @@
     publishQueue: publishQueue,
     renderSettingsBody: renderSettingsBody,
     openBrowser: openBrowser,
+    closeBrowser: closeBrowser,
     renderSourceStage: renderSourceStage,
     syncCellChip: syncCellChip,
     renderVersionSwitch: renderVersionSwitch,

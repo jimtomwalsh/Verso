@@ -38,6 +38,14 @@
   padding: 0 10px 0 6px; user-select: none; white-space: nowrap;
 }
 .toolbar__brand-dot { color: var(--accent); }
+/* uio-W03 §3.1: the ONE where-am-I line, immediately right of the wordmark. Quiet by design --
+   it states where you are, it is not a control and nothing here is clickable. There is no second
+   answer anywhere in the app: no breadcrumb, no product chip in a panel header, no toolbar echo. */
+.stage-identity {
+  align-self: center; margin-left: 4px; min-width: 0;
+  font-size: var(--text-xs, 11px); color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
 
 /* #12 — the editor-exclusive icon-only tool, re-skinned to the DS IconButton. */
 .tool {

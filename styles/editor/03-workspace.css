@@ -155,6 +155,9 @@
    out the whole edit-only region (Structure/Blocks/Components + canvas + inspector)
    for a placeholder, same "hide the grid items, span the leftover column" approach
    as .is-panels-hidden above -- reused rather than a second bespoke mechanism. */
+.workspace--stage-files .panel,
+.workspace--stage-files #canvas-viewport,
+.workspace--stage-files .canvas-overlay-bar,
 .workspace--stage-source .panel,
 .workspace--stage-source #canvas-viewport,
 .workspace--stage-source .canvas-overlay-bar,
@@ -336,6 +339,12 @@
 .publish-queuerow.is-done { opacity: 0.6; }
 .publish-queuerow.is-error { border-color: var(--danger, #d9534f); }
 .publish-queuerow.is-error .publish-queuerow__status { color: var(--danger, #d9534f); }
+
+/* uio-W03: the Files destination's surface. Empty until uio-W04 builds the destination proper --
+   entering Files opens today's document browser over this, so what the author sees is their
+   documents rather than a dead end, and Edit's canvas is not showing through behind them. */
+.files-stage { display: none; grid-column: 2 / -1; min-height: 0; background: var(--surface-canvas); }
+.workspace--stage-files #stage-files.files-stage { display: flex; }
 
 /* Source stage (source-stage-nav-article): left nav (search + topic list, grouped by
    Product) + a flowing article for the selected topic. Same grid-column/hide mechanism

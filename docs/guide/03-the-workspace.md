@@ -6,7 +6,12 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
 - **Top bar.** One bar carries everything, left to right. **Identity** (always shown): the **Verso**
-  mark and the **storage-health dot**.
+  mark, the line saying **where you are**, and the **storage-health dot**.
+
+  **One place answers "where am I".** In Source and Edit that line reads *document title · product*
+  (or *· No product*); in Files and Publish it reads **Files** or **Publish**. There is no
+  breadcrumb and no second copy of it anywhere — when several places answer the same question they
+  drift apart and none of them can be trusted.
 
   **Product is a tag, not a mode.** There is no product picker and no "active product". A document
   carries a product or carries none, and nothing is hidden either way: every open document has a
@@ -36,9 +41,19 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   **Light / dark** lives in the Demo button's **▾** menu, under the size presets. When
   many courses are open the tabs scroll within their own strip so the Document and Output clusters
   never move. In Source and Publish the bar shows the Identity zone only.
-- **Stage rail (far left).** A slim icon rail names the three stages — **Source**, **Edit**,
-  **Publish** — as a stepper; click one to switch. Below them sit the **User guide** and
+- **Destination rail (far left).** A slim icon rail names four destinations — **Files**,
+  **Source**, **Edit**, **Publish**; click one to switch. Below them sit the **User guide** and
   **Settings** glyphs.
+
+  **They are destinations, not steps.** None depends on another: you can write source without ever
+  laying a document out, lay one out without touching source, or publish without either. **Files**
+  is where you browse and manage everything.
+
+  **Switching is a swap, not a reload.** Leaving a destination does not close, reset or rebuild it —
+  come back and you find the same tabs, the same active document and the same scroll position. Rail
+  items deliberately carry no counts or badges: what matters is in the work, not on the rail.
+
+  Verso reopens the destination you left when you relaunch. A brand-new install starts on Files.
 - **Left (a 3-way switcher: Structure · Blocks · Source).** Pick one section at the top of the
   panel. **Structure** — the outliner of chapters and pages as a tree. **Blocks** — the insert
   palette for built-in block types (Text, Media, Layout, Interactive…), with **Reusable
