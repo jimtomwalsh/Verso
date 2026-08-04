@@ -1,0 +1,307 @@
+/* ==================== infinite canvas (pan/zoom) ==================== */
+.canvas {
+  position: relative;
+  overflow: hidden;
+  /* colour is set on background-color by editor.js (configurable + persisted);
+     the dot grid is a separate background-image so it survives any bg colour */
+  background-color: #2d2d2d;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0);
+  background-size: 26px 26px;
+  cursor: default;
+}
+.canvas.is-pannable { cursor: grab; }
+.canvas.is-panning { cursor: grabbing; }
+/* Perf (#151 lever 1): native-scroll pan. The viewport scrolls (GPU tiles move, no re-raster)
+   with the world in a sizer; scrollbars hidden (pan is drag / trackpad, and the dot grid stays
+   fixed to the viewport). Only active when editor.js sets .native-scroll (flag default OFF). */
+.canvas.native-scroll { overflow: auto; overscroll-behavior: contain; }
+.canvas.native-scroll::-webkit-scrollbar { width: 0; height: 0; }
+.canvas-scroll { position: relative; }
+
+.world {
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+/* Perf (#150): while a pan/zoom gesture is IN MOTION (JS adds .nav-lod, clears it ~120ms
+   after the last movement), stop painting the heavy leaf content so the GPU only moves
+   cheap boxes -> smooth motion; full detail snaps back the instant you stop. The wrappers
+   keep a faint fill so hidden media reads as a placeholder box, not an empty gap. Editor
+   chrome only; never exported. This is motion-only, never a persistent blank. */
+.world.nav-lod img,
+.world.nav-lod svg,
+.world.nav-lod video,
+.world.nav-lod canvas,
+.world.nav-lod .embed__iframe,
+.world.nav-lod .embed__video { visibility: hidden; }
+.world.nav-lod .block-image,
+.world.nav-lod .embed,
+.world.nav-lod .hotspot-frame,
+.world.nav-lod .block-image__svg { background: rgba(128, 128, 128, 0.12); border-radius: 4px; }
+
+/* Perf (#172): zoomed OUT (< FAR_ZOOM) the whole multi-page world is on-screen, so the
+   compositor re-rasterises every page's text + layout each pan/zoom frame -- and on an
+   asset-light course the nav-lod media cull above buys nothing (no media to hide). While a
+   gesture is IN MOTION at far zoom, drop the page CONTENT paint entirely: each frame
+   collapses to its plain background box (a thumbnail), so the GPU only moves
+   cheap rectangles -> smooth motion. Full content snaps back ~120ms after the last movement
+   (nav-lod clears). The .frame keeps its exported page colour, so this reads as a blank
+   PAGE, never an empty gap. Editor chrome only; render()/doc/export are untouched, and this
+   is motion-only -- a still canvas always shows full detail at any zoom. */
+.world.nav-lod.world--far .course-root { visibility: hidden; }
+
+/* prototype-flow connectors sit behind frames and pan/zoom with the world */
+.connectors { position: absolute; top: 0; left: 0; overflow: visible; z-index: 10; pointer-events: none !important; }
+
+/* #62: hover affordance in the gap between two stacked same-chapter pages —
+   Add page + Merge pages. Narrow centred zone so it doesn't swallow marquee drags. */
+.page-gap { position: absolute; display: flex; align-items: center; justify-content: center; z-index: 6; }
+.page-gap__tools {
+  display: flex; gap: 6px; padding: 5px; border-radius: 9px;
+  background: var(--surface-panel); border: 1px solid var(--border-strong);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  opacity: 0; transform: translateY(4px); transition: opacity .12s ease, transform .12s ease;
+  pointer-events: none;
+}
+.page-gap:hover .page-gap__tools { opacity: 1; transform: none; pointer-events: auto; }
+.page-gap__btn {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  border-radius: 6px; border: 1px solid transparent; background: transparent;
+  color: var(--text-secondary); cursor: pointer;
+}
+.page-gap__btn:hover { background: var(--surface-raised); color: var(--text-primary); border-color: var(--border-strong); }
+.page-gap__btn svg { width: 16px; height: 16px; display: block; }
+/* structural spine: faint dashed page-order line (no arrow) */
+.flow-link { fill: none; stroke: #565656; stroke-width: 1.25; stroke-dasharray: 1.5 6; stroke-linecap: round; opacity: 0.5; }
+/* action links: real navigation (nav-button / card -> page), the headline */
+.action-link { fill: none; stroke: #0d99ff; stroke-width: 1.75; opacity: 0.62; stroke-linecap: round; }
+.action-link.is-selected { stroke: #ff9f0a !important; stroke-width: 2.5 !important; opacity: 1 !important; }
+
+/* gate connectors: gated element -> condition source. DISTINCT locked style
+   (greyscale + dashed + a drawn lock glyph) so "locked until" never reads like
+   the blue "navigates to" nav arrows. */
+.gate-link { fill: none; stroke: #9b9b9b; stroke-width: 1.5; stroke-dasharray: 5 4; stroke-linecap: round; opacity: 0.75; }
+.gate-link.is-selected { stroke: #ff9f0a !important; opacity: 1 !important; stroke-width: 2 !important; }
+.gate-lock__bg { fill: #1e1e1e; stroke: #9b9b9b; stroke-width: 1; opacity: 0.95; }
+.gate-lock__mark { stroke: #cfcfcf; stroke-width: 1.2; fill: none; }
+.gate-lock rect.gate-lock__mark { fill: #cfcfcf; stroke: none; }
+.gate-lock.is-selected .gate-lock__bg { stroke: #ff9f0a; }
+.gate-lock.is-selected .gate-lock__mark { stroke: #ffd9a0; }
+
+/* drag-to-link: screen-space preview arrow while dragging from the inspector */
+.link-overlay { position: fixed; inset: 0; z-index: 90; overflow: visible; pointer-events: none; display: none; }
+.link-overlay__path { fill: none; stroke: #0d99ff; stroke-width: 2; stroke-dasharray: 5 4; }
+body.is-linking, body.is-linking .frame, body.is-linking .canvas { cursor: crosshair; }
+.frame.is-link-target { outline: 3px solid var(--accent); outline-offset: -3px; }
+
+/* ---- Interact mode: canvas tint + indicator (SPEC §5) ---- */
+.canvas.is-interact { box-shadow: inset 0 0 0 2px rgba(13, 153, 255, 0.35); }
+.canvas.is-interact::after {
+  content: "Interact mode"; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  z-index: 40; pointer-events: none;
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.03em; color: #cfe8ff;
+  background: rgba(13, 153, 255, 0.16); border: 1px solid rgba(13, 153, 255, 0.4);
+  padding: 3px 10px; border-radius: 999px;
+}
+/* connection handle on the selected element (drag onto a page to link) */
+.interact-handle {
+  position: absolute; right: -7px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5); cursor: crosshair; z-index: 30;
+}
+.interact-handle:hover { background: #3db0ff; }
+/* click-to-pick: highlight blocks under the cursor while picking a target/source */
+body.is-picking .canvas { cursor: crosshair; }
+body.is-picking .canvas-block:hover { outline: 2px dashed var(--accent); outline-offset: 2px; }
+
+/* Interact inspector rows */
+.prop-component--interact span:first-child { color: #cfe8ff; }
+.insp-int-row { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 2px; }
+.insp-int-row__idx { font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); text-transform: none; }
+.insp-hint--picking { color: #cfe8ff; background: rgba(13, 153, 255, 0.12); border-radius: 6px; padding: 6px 8px; }
+
+.frame-wrap { position: absolute; z-index: 1; }
+/* #169: preview the footer nav's "Pin to gutters" toggle ON the authoring canvas. At
+   runtime prev/next use position:fixed to the VIEWPORT bottom gutters (course.css, scoped
+   to [data-env="runtime"]) so they stay visible as the learner scrolls — fixed can't work
+   on the zoomed canvas, so toggling the option changed nothing on the canvas and read as
+   broken. Here we mirror the INTENT editor-only: detach prev/next to the page frame's
+   bottom corners so the toggle is visibly WYSIWYG. Scoped to #canvas-viewport, so it never
+   ships in SCORM (the exported course has no viewport element). We anchor the buttons to
+   the bounded .course-root--fill page frame rather than the nav, leaving the nav's own
+   position:relative anchor (interaction-gate reminder / tour dots) intact at runtime. */
+#canvas-viewport .course-root--fill { position: relative; }
+#canvas-viewport .course-nav--pin { position: static; }
+#canvas-viewport .course-nav--pin .course-nav__prev,
+#canvas-viewport .course-nav--pin .course-nav__next { position: absolute; bottom: 16px; z-index: 6; }
+#canvas-viewport .course-nav--pin .course-nav__prev { left: 24px; }
+#canvas-viewport .course-nav--pin .course-nav__next { right: 24px; }
+/* JJJJ: chapter column header bar */
+.chapter-header {
+  position: absolute; height: 38px; box-sizing: border-box; z-index: 3;
+  display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  background: var(--surface-panel); border: 1px solid var(--border-strong); border-radius: 8px;
+  cursor: default;
+}
+.chapter-header:hover { border-color: var(--accent); }
+.chapter-header__name { font-family: "Inter", system-ui, sans-serif; font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.chapter-header__count { font-size: var(--text-sm); color: var(--text-secondary); }
+.chapter-header__acts { margin-left: auto; display: flex; gap: 4px; }
+.chapter-header__btn {
+  width: 22px; height: 22px; padding: 0; font-size: 14px; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong); border-radius: 5px;
+  background: var(--surface-raised); color: var(--text-secondary);
+}
+.chapter-header__btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.chapter-header__btn--danger:hover { color: var(--danger); border-color: var(--danger); }
+.chapter-header--add { background: transparent; border-style: dashed; cursor: pointer; justify-content: center; }
+.chapter-header--add .chapter-header__name { color: var(--text-tertiary); font-weight: 500; }
+.chapter-header--add:hover { border-color: var(--accent); }
+.chapter-header--add:hover .chapter-header__name { color: var(--accent); }
+/* JJJJ: page drag-reparent — target-column highlight + grab cursor */
+.page-drop-col {
+  position: absolute; top: 0; height: 100%; pointer-events: none; z-index: 5;
+  background: var(--accent-quiet); border: 2px dashed var(--accent); border-radius: 10px;
+}
+.frame-label { cursor: grab; }
+.is-dragging-page, .is-dragging-page .frame-label { cursor: grabbing; }
+.frame-label {
+  height: 30px; display: inline-flex; align-items: center; max-width: 100%;
+  box-sizing: border-box; white-space: nowrap;
+  font-size: var(--text-sm); font-weight: 550; letter-spacing: 0.01em;
+  color: var(--text-secondary); cursor: pointer;
+  padding: 0 6px; margin-left: -2px; user-select: none; border-radius: 5px;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+.frame-label:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.05); }
+.frame-label.is-active { color: var(--accent); font-weight: 600; }
+.frame-label__name { overflow: hidden; text-overflow: ellipsis; }
+/* Item U: reveal-all-blocks glyph beside the page title. */
+.frame-label__reveal {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; margin-left: 4px; border-radius: 4px;
+  color: var(--text-tertiary); cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease;
+}
+.frame-label__reveal:hover { color: var(--accent); background: var(--accent-quiet); }
+.frame-label__reveal svg { width: 14px; height: 14px; display: block; }
+/* transient outline map applied to every block while the glyph is hovered */
+.reveal-block-outline {
+  position: relative;
+  outline: 1.5px solid var(--accent); outline-offset: -1px;
+  box-shadow: 0 0 0 4px var(--accent-quiet);
+}
+.reveal-block-tag {
+  position: absolute; top: 0; left: 0; z-index: 20; pointer-events: none;
+  font-size: 9.5px; line-height: 1; letter-spacing: 0.02em;
+  padding: 2px 4px; border-radius: 0 0 4px 0;
+  color: var(--icon-on-accent); background: var(--accent);
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.frame {
+  position: relative;
+  background: #1b1c1e;               /* course is dark-themed; frame matches */
+  border-radius: 3px;
+  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.07), 0 12px 40px rgba(0,0,0,0.55);
+  /* frame height = full content height (no internal scroll); overflow clips the
+     fold marker when a page is shorter than one screenful */
+  overflow: hidden;
+}
+
+/* SPEC 7 canvas geometry (reflow / frame / paged): the block render() is identical in every
+   geometry -- only this frame CONTAINER changes, driven by the .geo-<geo> class on .world.
+   REFLOW is today's fluid vertical flow and gets NO rule here, so it stays pixel-identical. */
+/* Fixed-frame (deck): a page is one fixed screen; content beyond it is clipped (the base
+   .frame already has overflow:hidden) and flagged, never silently pushed onto a new slide. */
+.world.geo-frame .frame { height: var(--vp-h, 720px); }
+.world.geo-frame .frame.is-overflowing::after {
+  content: "\26A0  Overflows frame \2014 trim or resize";
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
+  padding: 4px 8px; font-size: var(--text-2xs); font-weight: 600; text-align: center;
+  color: #1b1c1e; background: var(--warning, #f5a623);
+  pointer-events: none;
+}
+/* Paged (print): a page-height surface with a page-break guide every page-height, so content
+   visibly flows across page sections. The repeating guide needs no measurement -- its period
+   is the frame's own --vp-h. */
+.world.geo-paged .frame {
+  background-image: repeating-linear-gradient(to bottom,
+    transparent 0,
+    transparent calc(var(--vp-h, 720px) - 1px),
+    rgba(255, 255, 255, 0.16) calc(var(--vp-h, 720px) - 1px),
+    rgba(255, 255, 255, 0.16) var(--vp-h, 720px));
+}
+/* Perf (#150): pages scrolled out of the viewport skip paint + layout of their
+   contents. contain-intrinsic-size (set inline per-frame from the measured height in
+   layoutColumns) reserves the exact box, so stacking is unchanged; the frame's own bg
+   still paints, so an offscreen page reads as a solid page rectangle until scrolled in.
+   JS only adds .frame--cull after seeding the size, so first paint is never collapsed. */
+.frame.frame--cull { content-visibility: auto; }
+
+/* Perf HUD (diagnostic; Alt+Shift+P). Editor chrome only, never exported. */
+.perf-hud {
+  position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+  z-index: 99999; pointer-events: none;
+  background: rgba(0, 0, 0, 0.82); color: #7CFC96;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 6px 12px; border-radius: 8px; white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* Staging environment cue (2026-07-26). Editor chrome only, never exported -- flags
+   the /staging/ Pages deploy so it's never mistaken for production. See mountStagingBanner. */
+#staging-banner {
+  position: fixed; bottom: 12px; left: 12px;
+  z-index: 99999; pointer-events: none;
+  background: var(--yellow-500); color: var(--gray-1000);
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.06em;
+  padding: 5px 10px; border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* fold marker — approximates the device viewport's bottom edge so you can gauge
+   how much content sits below the fold before scrolling (authoring canvas only) */
+.fold-line {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.16);
+  pointer-events: none; z-index: 2;
+}
+.fold-line__label {
+  position: absolute; right: 8px; top: 5px;
+  font-family: "Inter", system-ui, sans-serif; font-size: var(--text-2xs); font-weight: 500;
+  color: var(--text-tertiary); background: rgba(0, 0, 0, 0.4);
+  padding: 2px 6px; border-radius: 4px; white-space: nowrap;
+}
+
+/* alignment grid overlay — editor chrome only, never rendered/exported. Sits inside
+   the frame (rides the world zoom transform), above content, click-through. */
+.grid-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.grid-overlay--thirds {
+  background-image:
+    repeating-linear-gradient(to right, rgba(255,255,255,0.16) 0 1px, transparent 1px calc(100% / 3)),
+    repeating-linear-gradient(to bottom, rgba(255,255,255,0.16) 0 1px, transparent 1px calc(100% / 3));
+}
+.grid-overlay--quarters {
+  background-image:
+    repeating-linear-gradient(to right, rgba(255,255,255,0.14) 0 1px, transparent 1px 25%),
+    repeating-linear-gradient(to bottom, rgba(255,255,255,0.14) 0 1px, transparent 1px 25%);
+}
+.grid-overlay--fine {
+  background-image:
+    repeating-linear-gradient(to right, rgba(255,255,255,0.09) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(to bottom, rgba(255,255,255,0.09) 0 1px, transparent 1px 24px);
+}
+/* 12 columns with a ~6px gutter between the tinted bands */
+.grid-overlay--columns {
+  background-image: repeating-linear-gradient(to right,
+    rgba(120,150,255,0.11) 0,
+    rgba(120,150,255,0.11) calc(100% / 12 - 6px),
+    transparent calc(100% / 12 - 6px),
+    transparent calc(100% / 12));
+}
+
+.tool--play { color: var(--text-primary); }
+.tool--play:hover { background: var(--surface-raised); color: var(--accent); }

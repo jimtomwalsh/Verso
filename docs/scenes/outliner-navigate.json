@@ -2,7 +2,7 @@
   "id": "outliner-navigate",
   "covers": [
     "src/editor.js",
-    "editor.css",
+    "styles/editor/",
     "pages-outliner",
     "page-navigation"
   ],

@@ -21,6 +21,7 @@
 
   function install(kernel) {
     var E = kernel.need(
+      "loadGuide",
       "h", "line", "setStage", "openHelpModal", "canvas", "layout",
       "enterDemo", "openSettingsModal", "openFindReplace", "addPageAfterCurrent", "undo", "redo",
       "fitAll", "zoomTo100", "togglePanels", "getSettingsSections", "blockLabel", "openSettingsSection",
@@ -213,8 +214,7 @@
     function loadGuideIndex(then) {
       if (__guideIndexCache) { then(__guideIndexCache); return; }
       if (typeof fetch !== "function") { __guideIndexCache = []; then(__guideIndexCache); return; }
-      fetch("docs/USER-GUIDE.md", { cache: "no-store" })
-        .then(function (r) { return r.ok ? r.text() : ""; })
+      E.loadGuide()
         .then(function (md) { __guideIndexCache = parseGuideHeadings(md); then(__guideIndexCache); })
         .catch(function () { __guideIndexCache = []; then(__guideIndexCache); });
     }

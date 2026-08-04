@@ -1,0 +1,46 @@
+[
+ {
+  "file": "01-base.css",
+  "is": "tokens, the course root, typography and the page frame"
+ },
+ {
+  "file": "02-motion.css",
+  "is": "global motion: the chapter-change fade and what honours reduced-motion"
+ },
+ {
+  "file": "03-tour.css",
+  "is": "the guided tour: learner coach-marks"
+ },
+ {
+  "file": "04-flip.css",
+  "is": "flip mode: the 3D card face swap"
+ },
+ {
+  "file": "05-embeds.css",
+  "is": "embed blocks"
+ },
+ {
+  "file": "06-breakpoints.css",
+  "is": "responsive breakpoints"
+ },
+ {
+  "file": "07-primitives.css",
+  "is": "the primitive blocks: text, media and layout"
+ },
+ {
+  "file": "08-quiz.css",
+  "is": "the quiz block"
+ },
+ {
+  "file": "09-interaction.css",
+  "is": "the interaction/gating system"
+ },
+ {
+  "file": "10-hotspots.css",
+  "is": "image hotspots"
+ },
+ {
+  "file": "11-accordion.css",
+  "is": "the accordion / tabs block"
+ }
+]

@@ -2,7 +2,7 @@
   "id": "annotated-navigate",
   "covers": [
     "src/editor.js",
-    "editor.css",
+    "styles/editor/",
     "src/capture-mode.js",
     "pages-outliner",
     "page-navigation",

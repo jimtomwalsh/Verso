@@ -1,0 +1,166 @@
+/* ---- Flip mode: click flips the card in 3D (front cover face <-> content back face).
+   Reuses the runtime .is-revealed toggle. Additive overrides keyed on data-reveal-style
+   so reveal/off are untouched. prefers-reduced-motion removes the animation. ---- */
+.card-reveal[data-reveal-style="flip"] { perspective: 1400px; }
+.card-reveal[data-reveal-style="flip"] .card-reveal__card {
+  /* isolation:auto is REQUIRED, not just overflow: the base card's isolation:isolate
+     is a grouping property that forces used transform-style to FLAT, which kills
+     preserve-3d and with it ALL backface culling — every face (and the index) then
+     paints by z-index and the flipped card shows the front's content mirrored. */
+  overflow: visible; isolation: auto; background: transparent; border: none; cursor: pointer;
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(.4, .05, .2, 1);
+}
+.card-reveal[data-reveal-style="flip"] .card-reveal__card::before { display: none; } /* texture lives on the faces */
+.card-reveal[data-reveal-style="flip"] .card-reveal__card.is-revealed { transform: rotateY(180deg); }
+/* both faces fill the card, opaque, and hide their own backface */
+.card-reveal[data-reveal-style="flip"] .card-reveal__cover,
+.card-reveal[data-reveal-style="flip"] .card-reveal__content {
+  position: absolute; inset: 0; box-sizing: border-box; overflow: hidden;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: var(--cr-card-fill, #2a2a2a); border: 1px solid var(--color-hair); border-radius: inherit;
+}
+/* front = cover: opaque (no frost/blur), always shown on the front (out-specifies the reveal fade) */
+.card-reveal[data-reveal-style="flip"] .card-reveal__card .card-reveal__cover {
+  z-index: 2; opacity: 1; pointer-events: auto;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+/* Side 1 (item.front): authored blocks on the flip FRONT face. Fills the cover and
+   mirrors the back face's content layout/typography so both sides read as one card.
+   Only ever rendered in flip mode, so reveal/off styling is untouched.
+   position+z-index (Chrome/WebKit bug fix, 2026-07-27): being an unpositioned flow
+   child of the z-indexed `.card-reveal__cover` left `.card-reveal__front` (and its
+   authored content) UNCLICKABLE — every point inside it hit-tested back to the cover
+   itself, so double-click-to-edit on the front never reached the real block (the BACK
+   face has no such wrapper — its children sit directly in `.card-reveal__content` — so
+   it never showed the bug). Stacking it explicitly fixes hit-testing; the existing
+   belt-and-braces cull below (`.card-reveal__cover *`) already covers this element and
+   its descendants, so backface culling on flip is unaffected (stress-tested with a
+   will-change/filter/transform descendant — no bleed-through onto the back face). */
+.card-reveal__front {
+  width: 100%; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; padding: 26px; text-align: left;
+  position: relative; z-index: 1;
+}
+/* Belt-and-braces for the same compositing quirk: authored face content is arbitrary
+   blocks (images, frames, editor-decorated nodes), any of which may layer-promote and
+   escape the parent face's cull — so cull every face descendant explicitly. Accumulated
+   transforms make this correct on both sides: front subtree faces away exactly when the
+   card is flipped, back subtree exactly when it isn't. */
+.card-reveal[data-reveal-style="flip"] .card-reveal__cover *,
+.card-reveal[data-reveal-style="flip"] .card-reveal__content * {
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+}
+.card-reveal__card:has(.card-reveal__index) .card-reveal__front { padding-top: 60px; }
+.card-reveal__front .page-title { font-size: 20px; line-height: 1.15; margin: 0; }
+.card-reveal__front .page-title::after {
+  content: ""; display: block; width: 34px; height: 2px;
+  background: var(--color-ink-soft); margin: 14px 0 16px;
+}
+.card-reveal__front .body-copy { font-size: 14px; line-height: 1.6; color: var(--color-ink-soft); margin: 0; }
+/* back = content: pre-rotated so it reads only once the card is flipped */
+.card-reveal[data-reveal-style="flip"] .card-reveal__content { transform: rotateY(180deg); }
+.card-reveal[data-reveal-style="flip"] .card-reveal__index { backface-visibility: hidden; z-index: 3; }
+@media (prefers-reduced-motion: reduce) {
+  .card-reveal[data-reveal-style="flip"] .card-reveal__card { transition: none; }
+}
+.course-root[data-bp="tablet"] .card-reveal { grid-template-columns: repeat(2, 1fr); }
+.course-root[data-bp="mobile"] .card-reveal { grid-template-columns: 1fr; }
+@media (prefers-reduced-motion: reduce) { .card-reveal__card, .card-reveal__cover { transition: none; } }
+
+.card-grid {
+  display: grid;
+  /* --grid-cols / --grid-gap are set inline by render.js from the block's
+     Columns / Gap fields; the responsive rules below still override at
+     tablet/mobile (more specific selector wins). */
+  grid-template-columns: repeat(var(--grid-cols, 2), 1fr);
+  gap: var(--grid-gap, var(--space-md));
+}
+
+.chapter-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-hair);
+  border-top: 3px solid var(--color-muted);
+  border-radius: var(--radius-card);
+}
+
+/* style-swap: completed chapters take the green accent (matches the COMPLETE
+   menu-card SVG); incomplete stay muted grey. Colour comes only from tokens. */
+.chapter-card.is-complete { border-top-color: var(--color-success); }
+.chapter-card.is-incomplete { border-top-color: var(--color-muted); }
+
+.chapter-card__num {
+  font-family: var(--font-heading);
+  font-size: var(--size-card-num);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--color-muted);
+}
+.chapter-card.is-complete .chapter-card__num { color: var(--color-success); }
+
+.chapter-card__title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: var(--size-card-title);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.chapter-card__rule {
+  width: 44px;
+  height: 2px;
+  background: var(--color-hair);
+}
+
+.chapter-card__obj {
+  margin: 0;
+  font-size: var(--size-card-body);
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+
+/* nav button — the flagship Actions control; a real navigation control in the
+   shipped course. Accent-filled, token-driven; the chevron is a pure-CSS
+   affordance so it never pollutes the editable label text. */
+/* KK: the button LOOK is the theme buttonStyle bundle (--button-*), consumed as
+   defaults here; per-block overrides (applyButtonStyle inline styles) still win.
+   Each var carries a fallback = the prior hardcoded value, so a course with no
+   button tokens (older persisted theme) renders identically. */
+.nav-button {
+  display: inline-flex; align-items: center; gap: 8px;
+  /* TT: hug the label. inline-flex in a stretch-aligning flex column (fill pages,
+     layout-column) otherwise gets align-self:stretch -> full width. flex-start
+     keeps it label-width; the --block opt-in (width:100%) still overrides. */
+  align-self: flex-start;
+  margin: 0 0 var(--space-md);
+  padding: var(--button-pad-y, 12px) var(--button-pad-x, 22px);
+  font-family: var(--font-heading); font-size: var(--button-font-size, 15px); font-weight: var(--button-font-weight, 600);
+  letter-spacing: 0.02em;
+  color: var(--button-fg, #14150f); background: var(--button-bg, var(--color-accent));
+  border: var(--button-border-width, 0) solid var(--button-border-color, transparent);
+  border-radius: var(--button-radius, 8px); text-decoration: none; cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease;
+}
+.nav-button::after { content: "\203A"; font-size: 18px; line-height: 1; margin-top: -2px; }
+/* KK: hover-state colour is the buttonStyle bundle's --button-hover-*, falling
+   back to the base fill/text so an unstyled button just brightens as before.
+   Empty hover tokens resolve to the fallback; a per-block override sets the var
+   inline on the node (applyButtonStyle) and wins here. */
+.nav-button:hover {
+  filter: brightness(1.06);
+  background: var(--button-hover-bg, var(--button-bg, var(--color-accent)));
+  color: var(--button-hover-fg, var(--button-fg, #14150f));
+}
+.nav-button--block { display: flex; width: 100%; justify-content: center; }
+
+.block-unknown {
+  padding: var(--space-md);
+  border: 1px dashed var(--color-muted);
+  color: var(--color-muted);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+}

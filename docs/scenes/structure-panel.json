@@ -1,6 +1,6 @@
 {
   "id": "structure-panel",
-  "covers": ["src/editor.js", "editor.css", "pages-outliner"],
+  "covers": ["src/editor.js", "styles/editor/", "pages-outliner"],
   "kind": "still",
   "viewport": { "width": 1440, "height": 900, "dpr": 2 },
   "theme": "dark",

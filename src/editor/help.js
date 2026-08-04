@@ -1,6 +1,6 @@
 // editor/help.js -- the user guide, read inside the app (arch-P3b-07).
 //
-// docs/USER-GUIDE.md is the truth for authors, and this renders it in place: a modal with a table
+// docs/guide/*.md is the truth for authors (arch-P5-03: one guide, many files, one declared order), and this renders it in place: a modal with a table
 // of contents built from the guide's own headings, a reading pane, and a deep link so a search
 // result lands on its section rather than at the top.
 //
@@ -22,6 +22,24 @@
   var window = (typeof globalThis !== "undefined" && globalThis.window) || Object.create(null);
 
   function install(kernel) {
+    // arch-P5-03: the guide is docs/guide/*.md now, in the order declared by docs/guide/order.json.
+    // Fetching the parts and joining them reproduces exactly what the single file held, so
+    // mdToHtml, the anchors it mints and the Cmd-K heading index all behave as they did. ONE loader
+    // for both readers on purpose: two concatenations that could disagree would let the palette
+    // offer a heading the guide does not show.
+    var __guideCache = null;
+    function loadGuide() {
+      if (__guideCache) return Promise.resolve(__guideCache);
+      return fetch("docs/guide/order.json", { cache: "no-store" })
+        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+        .then(function (order) {
+          return Promise.all(order.map(function (o) {
+            return fetch("docs/guide/" + o.file, { cache: "no-store" })
+              .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status + " " + o.file); return r.text(); });
+          }));
+        })
+        .then(function (parts) { __guideCache = parts.join("\n"); return __guideCache; });
+    }
     var E = kernel.need(
       "h", "modalHead", "popLayer", "pushLayer", "openFindReplace"
     );
@@ -39,7 +57,7 @@
     // SCORM export uses for local src files) and render it into a modal.
     /* @md-start */
     // Minimal Markdown -> HTML for the in-app Help guide. Trusted, bundled content
-    // (docs/USER-GUIDE.md) but HTML-escaped defensively. Covers the guide's subset:
+    // (docs/guide/) but HTML-escaped defensively. Covers the guide's subset:
     // headings, fenced code, pipe tables, blockquotes, ordered/unordered lists,
     // horizontal rules, paragraphs, and inline bold / code / links. Deliberately small
     // (no bundler, classic script) — not a general CommonMark parser.
@@ -206,8 +224,7 @@
       modal.addEventListener("mousedown", function (e) { if (e.target === modal) close(); });
       pushLayer("help", close);
 
-      fetch("docs/USER-GUIDE.md", { cache: "no-store" })
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      loadGuide()
         .then(function (md) {
           body.innerHTML = mdToHtml(md);
           postProcessFigures(body);
@@ -219,7 +236,7 @@
         })
         .catch(function () {
           body.innerHTML = "";
-          body.appendChild(h("p", null, "The guide could not be loaded in this context. Open docs/USER-GUIDE.md from the app folder in a text editor or browser."));
+          body.appendChild(h("p", null, "The guide could not be loaded in this context. Open the files in docs/guide/ from the app folder in a text editor or browser."));
         });
     }
 
@@ -282,6 +299,7 @@
     })();
 
     kernel.expose({
+      loadGuide: loadGuide,
       openHelpModal: openHelpModal
     });
   }

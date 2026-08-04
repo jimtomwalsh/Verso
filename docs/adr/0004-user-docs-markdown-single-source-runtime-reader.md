@@ -1,6 +1,6 @@
 # User docs: markdown single-source, runtime reader, committed regenerable captures
 
-The in-app user docs (#91) stay single-sourced from `docs/USER-GUIDE.md` markdown and are
+The in-app user docs (#91) stay single-sourced from markdown under `docs/guide/` and are
 rendered at runtime by the bundled `mdToHtml` (extended: heading IDs, images, figure
 directive, nested lists) into a floating docs panel with popout. We deliberately rejected a
 hand-authored HTML docs bundle (dual-maintenance breaks the CLAUDE.md same-session
@@ -11,10 +11,42 @@ as size-budgeted static/animated WebP under `docs/assets/` — committed so docs
 fresh clone, `file://`, and the packaged shell; regenerable so they track the UI (code is
 truth), unlike hand-authored motion which rots silently.
 
+## Amendment, 2026-08-04 (arch-P5): SINGLE SOURCE IS ABOUT TRUTH, NOT FILE COUNT
+
+This ADR rejected a generated static site because it *"adds a build step to a no-build stack, and
+the built bundle drifts from its source between builds."* Both objections are about a SECOND
+artifact: something generated, shipped, and able to disagree with the thing it came from.
+
+Splitting one markdown file into several is neither. `docs/USER-GUIDE.md` is twenty files under
+`docs/guide/` now, joined at runtime in the order `docs/guide/order.json` declares. Nothing is
+generated, nothing is built, and there is no second copy that can drift — the reader concatenates
+source, exactly as it previously read source. The same reasoning covers `styles/editor/*.css`
+(fourteen files the browser concatenates via `<link>`) and `styles/course/*.css` (eleven the SCORM
+exporter inlines into the one `course.css` it always shipped; the package is byte-identical).
+
+**So the rule this ADR sets is: ONE SOURCE OF TRUTH, read at runtime, never a generated bundle. It
+is not a rule about how many files that source occupies.** A future reviewer meeting a directory
+where this ADR named a file should read it that way rather than as a violation.
+
+What DOES still hold, and is now enforced rather than trusted:
+
+- **Order is part of the source.** A concatenated stylesheet cascades and a guide is read top to
+  bottom, so the order is declared once in an `order.json` beside the parts. `tests/run.js` fails
+  if the directory, the declared list, the `<link>` sequence in either page, or the exporter's read
+  disagree — in both directions, so a stray file and a phantom entry each fail.
+- **One reader, one concatenation.** The help modal and the Cmd-K heading index share a single
+  `loadGuide()`. Two readers with their own joins could disagree, and the palette would offer a
+  heading the guide does not show.
+- **The exporter reading N files is not a build step.** It already assembles a dozen sources into
+  one zip on every run. Reading eleven stylesheets instead of one produces the same bytes it always
+  produced, which is measured against a real `buildPackage`, not asserted.
+
 ## Consequences
 
 - Guide headings are **docs anchors**: editor surfaces deep-link to them, so renaming a
-  section heading is a breaking change for those surfaces.
+  section heading is a breaking change for those surfaces. (arch-P5-03: still true across the
+  split — the anchors are minted from the JOINED document, so they are unchanged, and the suite
+  asserts the `##` numbering still runs 1..19 without a gap.)
 - Docs authors (human + agent) keep to the `mdToHtml` subset; the renderer is extended, not
   swapped for a vendored CommonMark parser.
 - Capture scenes must use a synthetic demo doc only — real course content is
@@ -35,7 +67,7 @@ truth), unlike hand-authored motion which rots silently.
   the whole canvas. The runner is a dev tool (needs Puppeteer via NODE_PATH), never shipped in
   the app; its pure scene-schema core is unit-tested in `tests/run.js`.
 - Annotations (#29): a capture-only overlay (highlight ring / numbered callout chip / pointer)
-  drawn into a body-level `#capture-annotate-layer`, DS-token styled in editor.css so it
+  drawn into a body-level `#capture-annotate-layer`, DS-token styled in styles/editor/ so it
   inherits the theme, driven by scene steps (highlight/callout/pointer/clearAnnotations). It is
   editor chrome only — rendered outside `.course-root`, so render()/course.css/the SCORM export
   never see it (invariant held; verified against a real `buildPackage`). Absent from normal

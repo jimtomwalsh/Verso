@@ -9,8 +9,37 @@
   <!-- The real editor chrome styles + course tokens. The gallery renders the
        ACTUAL canonical primitives from src/editor.js (window.__kit) — no copied
        markup — so a change to a primitive shows here without editing this page. -->
-  <link rel="stylesheet" href="editor.css">
-  <link rel="stylesheet" href="src/course.css">
+  <!-- arch-P5-01: editor.css was 4,581 lines. It is styles/editor/*.css now, loaded in the ORDER
+       declared by styles/editor/order.json -- the browser concatenates, so the cascade is byte-for-byte
+       what one file produced. No build step. A suite gate fails if this list and order.json disagree. -->
+  <link rel="stylesheet" href="styles/editor/01-tokens.css">   <!-- the file header and the design-system tokens — the source of truth -->
+  <link rel="stylesheet" href="styles/editor/02-toolbar.css">   <!-- the top bar -->
+  <link rel="stylesheet" href="styles/editor/03-workspace.css">   <!-- the workspace frame: rails, panels, stage -->
+  <link rel="stylesheet" href="styles/editor/04-source-stage.css">   <!-- the Source stage: continuous article, marks, toolbars -->
+  <link rel="stylesheet" href="styles/editor/05-canvas.css">   <!-- the infinite canvas, pan/zoom, and Interact mode -->
+  <link rel="stylesheet" href="styles/editor/06-editing.css">   <!-- in-place editing and selection -->
+  <link rel="stylesheet" href="styles/editor/07-inspector.css">   <!-- the properties panel and the live model view -->
+  <link rel="stylesheet" href="styles/editor/08-alt-views.css">   <!-- demo mode and the copy editor -->
+  <link rel="stylesheet" href="styles/editor/09-outliner.css">   <!-- the structure outliner and the floating text toolbar -->
+  <link rel="stylesheet" href="styles/editor/10-overlays.css">   <!-- tabs, modals, and the help typographic system -->
+  <link rel="stylesheet" href="styles/editor/11-comments.css">   <!-- comment mode and canvas-only hotspot affordances -->
+  <link rel="stylesheet" href="styles/editor/12-controls.css">   <!-- the canonical control set -->
+  <link rel="stylesheet" href="styles/editor/13-home.css">   <!-- the course browser -->
+  <link rel="stylesheet" href="styles/editor/14-collab.css">   <!-- live-collaboration presence chrome -->
+  <!-- arch-P5-02: src/course.css was 2,104 lines. It is styles/course/*.css now, in the order
+       declared by styles/course/order.json. The SCORM exporter reads that same list and inlines them
+       into one course.css, so the shipped package is byte-identical. No build step. -->
+  <link rel="stylesheet" href="styles/course/01-base.css">   <!-- tokens, the course root, typography and the page frame -->
+  <link rel="stylesheet" href="styles/course/02-motion.css">   <!-- global motion: the chapter-change fade and what honours reduced-motion -->
+  <link rel="stylesheet" href="styles/course/03-tour.css">   <!-- the guided tour: learner coach-marks -->
+  <link rel="stylesheet" href="styles/course/04-flip.css">   <!-- flip mode: the 3D card face swap -->
+  <link rel="stylesheet" href="styles/course/05-embeds.css">   <!-- embed blocks -->
+  <link rel="stylesheet" href="styles/course/06-breakpoints.css">   <!-- responsive breakpoints -->
+  <link rel="stylesheet" href="styles/course/07-primitives.css">   <!-- the primitive blocks: text, media and layout -->
+  <link rel="stylesheet" href="styles/course/08-quiz.css">   <!-- the quiz block -->
+  <link rel="stylesheet" href="styles/course/09-interaction.css">   <!-- the interaction/gating system -->
+  <link rel="stylesheet" href="styles/course/10-hotspots.css">   <!-- image hotspots -->
+  <link rel="stylesheet" href="styles/course/11-accordion.css">   <!-- the accordion / tabs block -->
   <style>
     /* editor.css locks the app shell to `body { height:100vh; overflow:hidden }`
        (fixed full-screen editor). The gallery is a normal scrolling document, so

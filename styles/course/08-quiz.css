@@ -1,0 +1,188 @@
+/* ==================== quiz block (knowledge check) ==================== */
+/* Matches the reference knowledge-check: sharp panels, letter pills, chip-into-
+   blank, animated progress + feedback. Colours come only from theme tokens, so
+   restyling the quiz = switching/adjusting the theme. Ships in the SCORM package.
+   Author view (all panels visible) is the base; quiz-runtime.js adds .quiz--play
+   and steps through one panel at a time. */
+.kc { color: var(--color-ink); }
+.kc-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.kc-kicker { font-family: var(--font-heading); font-weight: 600; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-accent); }
+.kc-counter { font-family: var(--font-heading); font-weight: 500; font-size: 12px; color: var(--color-muted); }
+.kc-title { font-family: var(--font-heading); font-weight: 700; font-size: 22px; letter-spacing: -0.2px; margin: 2px 0 20px; color: var(--color-ink); }
+.kc-progress { display: flex; gap: 6px; margin-bottom: 24px; }
+.kc-seg { flex: 1; height: 3px; border-radius: 2px; background: var(--color-hair); overflow: hidden; }
+.kc-seg i { display: block; height: 100%; width: 0; background: var(--color-accent); transition: width 0.4s cubic-bezier(0.4, 0.05, 0.2, 1); }
+.kc-seg.done i, .kc-seg.active i { width: 100%; }
+.kc-seg.active i { transition-delay: 0.05s; }
+
+.kc-panel { background: var(--color-surface); border: 1px solid var(--color-hair); border-radius: 2px; padding: 30px 30px 26px; margin-bottom: 14px; }
+.kc-method { font-family: var(--font-heading); font-weight: 500; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 10px; }
+.kc-qtext { font-size: 17px; line-height: 1.5; color: var(--color-ink); margin: 0 0 22px; }
+.kc-intro__body { font-size: 15px; line-height: 1.6; color: var(--color-ink-soft); margin: 0 0 20px; }
+
+/* multiple choice — tap-select letter pills */
+.kc-pills { display: flex; flex-direction: column; gap: 10px; }
+.kc-pill {
+  display: flex; align-items: center; gap: 12px; text-align: left; width: 100%;
+  font-family: var(--font-body); font-size: 14.5px; color: var(--color-ink-soft);
+  background: var(--color-surface-alt); border: 1px solid var(--color-hair); border-radius: 2px;
+  padding: 13px 16px; cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+.kc-pill__letter { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--color-muted); display: flex; align-items: center; justify-content: center; font-family: var(--font-heading); font-weight: 700; font-size: 12px; color: var(--color-muted); }
+.kc-pill__text { flex: 1 1 auto; }
+.quiz--play .kc-pill:hover:not(:disabled) { border-color: var(--color-muted); }
+.quiz--play .kc-pill:disabled { cursor: default; }
+.quiz--play .kc-pill.faded { opacity: 0.4; }
+/* Correct answer = brand GREEN (--color-success), not the amber accent. Incorrect stays
+   --color-danger; the quiz progress bar (.kc-seg) keeps the accent. Author can retheme. */
+.kc-pill.correct { border-color: var(--color-success); background: color-mix(in srgb, var(--color-success) 12%, transparent); color: var(--color-ink); }
+.kc-pill.correct .kc-pill__letter { border-color: var(--color-success); color: var(--color-success); }
+.kc-pill.incorrect { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); color: var(--color-ink); }
+.kc-pill.incorrect .kc-pill__letter { border-color: var(--color-danger); color: var(--color-danger); }
+
+/* fill in the blank — chip into blank slot */
+.kc-sentence { font-size: 17px; line-height: 1.7; color: var(--color-ink); margin: 0 0 22px; }
+.kc-blank { display: inline-flex; align-items: center; justify-content: center; min-width: 180px; padding: 2px 12px; margin: 0 2px; border-bottom: 2px dashed var(--color-muted); color: var(--color-muted); font-family: var(--font-heading); font-size: 13px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; vertical-align: baseline; transition: border-color 0.25s ease, color 0.2s ease; }
+.kc-blank.filled { border-bottom-style: solid; border-color: var(--color-accent); color: var(--color-ink); font-family: var(--font-body); font-size: 17px; text-transform: none; font-weight: 400; letter-spacing: normal; }
+.kc-blank.wrong { border-color: var(--color-danger); }
+.kc-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.kc-chip { font-family: var(--font-body); font-size: 13.5px; color: var(--color-ink-soft); background: var(--color-surface-alt); border: 1px solid var(--color-hair); border-radius: 2px; padding: 10px 14px; cursor: pointer; transition: border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease; }
+.quiz--play .kc-chip:hover:not(:disabled) { border-color: var(--color-muted); }
+.quiz--play .kc-chip:disabled { cursor: default; }
+.kc-chip.wrong-flash { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
+.kc-chip.used { opacity: 0.3; pointer-events: none; }
+
+/* feedback — animated expand; author-editable text lives in .kc-fb-holder */
+.kc-fb-holder { display: none; }
+.kc-feedback { display: flex; align-items: flex-start; gap: 12px; max-height: 0; opacity: 0; overflow: hidden; transition: max-height 0.35s ease, opacity 0.3s ease, margin 0.35s ease; }
+.kc-feedback.show { max-height: 300px; opacity: 1; margin-top: 20px; }
+.kc-fb-icon { flex: none; width: 22px; height: 22px; border-radius: 50%; margin-top: 1px; display: flex; align-items: center; justify-content: center; }
+.kc-fb-icon.good { border: 1.5px solid var(--color-success); color: var(--color-success); }
+.kc-fb-icon.bad { border: 1.5px solid var(--color-danger); color: var(--color-danger); }
+.kc-fb-icon svg { width: 11px; height: 11px; }
+.kc-fb-text { font-size: 14px; line-height: 1.6; color: var(--color-ink-soft); padding-top: 1px; }
+.kc-fb-text strong { color: var(--color-ink); }
+
+.kc-actions { display: flex; justify-content: flex-end; margin-top: 22px; align-items: center; }
+/* Quiz CTA buttons use the SAME theme buttonStyle bundle (--button-*) as the course's
+   .nav-button / "Continue" buttons, so they match everywhere + follow the author's
+   button theme. Fallbacks = the course button defaults. */
+.kc-next, .kc-start, .kc-retry {
+  font-family: var(--font-heading); font-weight: var(--button-font-weight, 600);
+  font-size: var(--button-font-size, 15px); letter-spacing: 0.02em;
+  color: var(--button-fg, #14150f); background: var(--button-bg, var(--color-accent));
+  border: var(--button-border-width, 0) solid var(--button-border-color, transparent);
+  border-radius: var(--button-radius, 8px);
+  padding: var(--button-pad-y, 12px) var(--button-pad-x, 22px); cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease;
+}
+.kc-next:hover, .kc-start:hover, .kc-retry:hover {
+  filter: brightness(1.06);
+  background: var(--button-hover-bg, var(--button-bg, var(--color-accent)));
+  color: var(--button-hover-fg, var(--button-fg, #14150f));
+}
+.quiz--play .kc-next { opacity: 0; transform: translateY(4px); transition: opacity 0.3s ease, transform 0.3s ease; pointer-events: none; }
+.quiz--play .kc-next.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+/* completion */
+.kc-done { text-align: center; }
+.kc-done__badge { width: 52px; height: 52px; margin: 0 auto 18px; border-radius: 50%; border: 2px solid var(--color-success); color: var(--color-success); display: flex; align-items: center; justify-content: center; }
+.kc-done__badge svg { width: 22px; height: 22px; }
+.kc-done__title { font-family: var(--font-heading); font-weight: 700; font-size: 20px; margin: 0 0 8px; color: var(--color-ink); }
+.kc-done__body { font-size: 14.5px; color: var(--color-ink-soft); line-height: 1.6; margin: 0 auto; max-width: 420px; }
+.kc-retry { margin-top: 18px; } /* look shared with .kc-next/.kc-start above (button bundle) */
+.quiz-empty { color: var(--color-muted); font-style: italic; padding: var(--space-md) 0; }
+
+/* course-completion / exit splash (#111) — a branded terminal screen shipped inside the
+   SCORM package so the learner sees this on Exit, not the LMS default. Token-only, same
+   family as .kc-done. Hidden until the runtime reveals it (.is-shown) on the Exit action. */
+/* the splash is wrapped in a .course-root (for token/data-mode context); neutralise
+   the page padding/width so the splash owns its own full-viewport layout. */
+.course-end-host { padding: 0; margin: 0; max-width: none; width: 100%; min-height: 0; display: block; }
+.course-end {
+  display: none;                      /* revealed as flex by .is-shown on Exit */
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 8vh 24px;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  /* the only atmospheric flourish: a faint amber top-wash */
+  background-image: radial-gradient(120% 60% at 50% -10%, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 60%);
+}
+.course-end.is-shown { display: flex; }
+.course-end__panel {
+  width: 100%; max-width: 520px; text-align: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-hair);
+  border-radius: 2px;                 /* flat 2px radii, house style */
+  padding: 44px 40px 36px;
+}
+.course-end__badge {
+  width: 68px; height: 68px; margin: 0 auto 22px;
+  color: var(--color-success);
+}
+.course-end__badge svg { width: 68px; height: 68px; display: block; }
+.course-end__badge-ring { opacity: 0.35; }
+.course-end__badge-check {
+  stroke-dasharray: 22; stroke-dashoffset: 22;
+  animation: course-end-check 0.55s ease 0.15s forwards;
+}
+@keyframes course-end-check { to { stroke-dashoffset: 0; } }
+.course-end__eyebrow {
+  font-family: var(--font-heading); font-weight: 700;
+  font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-accent); margin-bottom: 12px;
+}
+.course-end__title {
+  font-family: var(--font-heading); font-weight: 700;
+  font-size: 26px; line-height: 1.2; margin: 0 0 12px; color: var(--color-ink);
+}
+.course-end__body {
+  font-size: 15px; line-height: 1.65; color: var(--color-ink-soft);
+  margin: 0 auto; max-width: 420px;
+}
+.course-end__meta {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  margin: 26px 0 4px;
+}
+.course-end__chip {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 16px; min-width: 120px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-hair); border-radius: 2px;
+}
+.course-end__chip:empty, .course-end__chip[data-end-empty="1"] { display: none; }
+.course-end__chip-label {
+  font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+.course-end__chip-val {
+  font-family: var(--font-heading); font-weight: 700; font-size: 17px;
+  color: var(--color-ink); font-variant-numeric: tabular-nums;
+}
+.course-end__foot {
+  margin-top: 24px; padding-top: 18px;
+  border-top: 1px solid var(--color-hair);
+  font-size: 12.5px; color: var(--color-ink-soft);
+}
+@media (prefers-reduced-motion: reduce) {
+  .course-end__badge-check { animation: none; stroke-dashoffset: 0; }
+}
+
+/* card sort — tap a card, tap a group (no drag lib; touch + keyboard friendly) */
+.kc-sort { display: flex; flex-direction: column; gap: 16px; }
+.kc-sort__pool { display: flex; flex-wrap: wrap; gap: 10px; min-height: 44px; }
+.kc-card { font-family: var(--font-body); font-size: 13.5px; color: var(--color-ink-soft); background: var(--color-surface-alt); border: 1px solid var(--color-hair); border-radius: 2px; padding: 10px 14px; cursor: pointer; transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease; }
+.quiz--play .kc-card:hover:not(:disabled) { border-color: var(--color-muted); }
+.kc-card.picked { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-ink); }
+.kc-card.placed { border-color: var(--color-accent); color: var(--color-ink); cursor: default; }
+.kc-card.wrong { border-color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
+.kc-sort__cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.kc-cat { border: 1px solid var(--color-hair); border-radius: 2px; padding: 12px; min-height: 96px; transition: border-color 0.18s ease; }
+.quiz--play .kc-cat { cursor: pointer; }
+.quiz--play .kc-cat:hover { border-color: var(--color-muted); }
+.kc-cat.wrong { border-color: var(--color-danger); }
+.kc-cat__label { font-family: var(--font-heading); font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent); margin-bottom: 10px; }
+.kc-cat__drop { display: flex; flex-direction: column; gap: 8px; }
