@@ -10815,6 +10815,106 @@ section("HFDEF header-footer default");
   ok("the delete button rides the row's trailing slot", /trailing: del,/.test(DOCS));
 })();
 
+// ---- uio-W03: four destinations, live instances, one where-am-I -----------
+// The rail grows to four and Files leads. Each destination keeps a LIVE INSTANCE -- switching is a
+// swap, not a reload -- and exactly one element in the whole app answers "where am I".
+section("uio-W03 four-destination rail");
+(function () {
+  var SHELL = src("src/editor/shell.js");
+  var SHELL_CODE = SHELL.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var IDX = src("index.html");
+  var WS = src("styles/editor/03-workspace.css"), RAIL = src("styles/editor/04-source-stage.css");
+  var TB = src("styles/editor/02-toolbar.css");
+
+  // --- four destinations, in order, Files leading ---
+  ok("STAGE_IDS is the four destinations, Files first",
+    /var STAGE_IDS = \["files", "source", "edit", "publish"\];/.test(SHELL_CODE));
+  ok("every destination has a rail button", ["files", "source", "edit", "publish"].every(function (id) {
+    return IDX.indexOf('id="rail-tab-' + id + '"') !== -1;
+  }));
+  ok("Files leads the rail", IDX.indexOf('id="rail-tab-files"') < IDX.indexOf('id="rail-tab-source"'));
+  ok("Edit is still the default active segment on a fresh page",
+    /class="rail-btn rail-tab is-active" id="rail-tab-edit"/.test(IDX));
+  // A badge on a rail item teaches people to watch the rail instead of the work.
+  ok("no rail item carries a count, badge or dot", (function () {
+    var rail = IDX.slice(IDX.indexOf('id="left-rail"'), IDX.indexOf('id="left-rail"') + 2500);
+    return !/rail-tab__(count|badge|dot)/.test(rail);
+  })());
+  // Every rail glyph must actually be vendored. `folder` was NOT, so the Files button rendered a
+  // fallback empty square -- invisible to the suite, obvious in one screenshot.
+  ok("every rail glyph is in the vendored icon set", (function () {
+    var ICONS = src("src/icons.js");
+    var rail = IDX.slice(IDX.indexOf('id="left-rail"'), IDX.indexOf('id="left-rail"') + 2500);
+    var names = (rail.match(/data-lucide="([a-z0-9-]+)"/g) || []).map(function (m) { return m.slice(13, -1); });
+    return names.length >= 4 && names.every(function (n) { return ICONS.indexOf('"' + n + '":') !== -1; });
+  })());
+  ok("active state is the accent-quiet fill PLUS the 2px leading bar",
+    /\.rail-tab\.is-active \{[^}]*background: var\(--accent-quiet\)/.test(RAIL) &&
+    /\.rail-tab\.is-active::before \{[^}]*background: var\(--accent\)/.test(RAIL));
+
+  // --- ONE where-am-I ---
+  ok("Files names itself", /if \(stage === "files"\) return "Files";/.test(SHELL_CODE));
+  ok("Publish names itself", /if \(stage === "publish"\) return "Publish";/.test(SHELL_CODE));
+  ok("Source and Edit name the document and its Product",
+    /return title \+ " \u00b7 " \+ \(\(productName \|\| ""\)\.trim\(\) \|\| "No product"\);/.test(SHELL_CODE));
+  ok("an untagged document says so rather than showing a blank", /"No product"/.test(SHELL_CODE));
+  ok("the identity line exists exactly once in the page",
+    (IDX.match(/id="stage-identity"/g) || []).length === 1);
+  ok("it sits immediately right of the wordmark",
+    IDX.indexOf('class="toolbar__brand"') < IDX.indexOf('id="stage-identity"') &&
+    IDX.indexOf('id="stage-identity"') < IDX.indexOf('id="storage-dot"'));
+  ok("it is styled as a statement, not a control", /\.stage-identity \{[^}]*color: var\(--text-secondary\)/.test(TB));
+  ok("every destination change rewrites it", /syncStageIdentity\(\);/.test(SHELL_CODE));
+  // The whole point of "stated once": no second answer anywhere.
+  ok("no surface carries a competing product chip", ["src/editor.js", "src/editor/shell.js",
+    "src/editor/tabs.js", "src/editor/source-stage.js", "src/editor/publish.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/product-chip|__productchip|productBreadcrumb/.test(code);
+    }));
+
+  // --- live instances: a swap, not a reload ---
+  ok("a destination is built once, not on every entry",
+    /if \(!__stageMounted\[stage\]\) \{[\s\S]{0,200}__stageMounted\[stage\] = true;/.test(SHELL_CODE));
+  ok("Source and Publish mount INSIDE that guard", (function () {
+    var i = SHELL_CODE.indexOf("if (!__stageMounted[stage])");
+    var body = SHELL_CODE.slice(i, i + 260);
+    return /renderSourceStage\(\)/.test(body) && /mountPublishStage\(\)/.test(body);
+  })());
+  ok("a destination that genuinely went stale can be marked so", /function invalidateStage\(stage\)/.test(SHELL_CODE) &&
+    /invalidate: invalidateStage/.test(SHELL_CODE));
+  // Without scroll restoration a "swap" still throws you to the top, which reads as a reload.
+  ok("the outgoing destination's scroll offset is remembered", /__stageScroll\[__activeStage\] = leaving\.scrollTop;/.test(SHELL_CODE));
+  ok("the incoming destination is put back where it was", /entering\.scrollTop = __stageScroll\[stage\]/.test(SHELL_CODE));
+  ok("Edit is deliberately NOT scroll-restored -- its canvas owns its own pan",
+    /return null; \/\/ Edit/.test(SHELL) || /function stageScroller/.test(SHELL_CODE));
+  // The framing guard must survive: a canvas fitted while hidden measures 0x0 and lands the
+  // author in blank space.
+  ok("first-Edit canvas framing still fires", /stage === "edit" && !__framedWhileVisible/.test(SHELL_CODE) &&
+    /view\.ready = false; fitAll\(\); __framedWhileVisible = true;/.test(SHELL_CODE));
+
+  // --- the Files region, and the bridge until uio-W04 fills it ---
+  ok("Files has its own region, hidden by default", /<div class="files-stage" id="stage-files" hidden><\/div>/.test(IDX));
+  ok("the region hides Edit's grid the same way its siblings do",
+    /\.workspace--stage-files \.panel,/.test(WS) && /\.workspace--stage-files #canvas-viewport,/.test(WS));
+  ok("it is a surface, not a see-through gap", /\.files-stage \{[^}]*background: var\(--surface-canvas\)/.test(WS));
+  ok("entering Files opens today's document browser rather than a dead end",
+    /if \(stage === "files" && typeof openBrowser === "function"\) openBrowser\(\);/.test(SHELL_CODE));
+  ok("leaving Files closes it again", /else if \(typeof E\.closeBrowser === "function"\) E\.closeBrowser\(\);/.test(SHELL_CODE));
+
+  // --- launch restores the destination you left ---
+  ok("the active destination still persists across a refresh",
+    /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(SHELL_CODE) &&
+    /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(SHELL_CODE));
+  ok("the persisted key now validates against four values, not three",
+    /function isValidStage\(s\) \{ return STAGE_IDS\.indexOf\(s\) !== -1; \}/.test(SHELL_CODE));
+  ok("a FIRST run lands on Files -- there is no destination to return to",
+    /else if \(saved === null \|\| saved === undefined\) __activeStage = "files";/.test(SHELL_CODE));
+  ok("a returning author is never sent to Files, only restored", (function () {
+    var i = SHELL_CODE.indexOf("if (isValidStage(saved)) __activeStage = saved;");
+    return i !== -1 && SHELL_CODE.indexOf('__activeStage = "files"') > i;
+  })());
+})();
+
 // ---- uio-W02: one noun, four type glyphs, one document row ----------------
 // A document is a Document. Four TYPES of one thing -- source, course, presentation, guide -- and
 // "Course" is a type label, never the generic. The glyph vocabulary has ONE definition, shared by
@@ -11034,11 +11134,12 @@ section("Product Rail: 3-stage rail + product dropdown");
     return H.rail.retiredProductScope && typeof H.rail.filesProductFacetSeed === "function";
   })());
 
-  // index.html wiring: exactly 3 rail segments (Source/Edit/Publish free-form, no
-  // gating), Edit active by default (preserves today's boot-straight-into-canvas
-  // behaviour), the pinned bottom actions untouched, and a top-bar product-picker host.
+  // index.html wiring: the rail segments, Edit active by default (preserves today's
+  // boot-straight-into-canvas behaviour) and the pinned bottom actions untouched.
+  // uio-W03 grew the rail from three to FOUR -- see the "uio-W03" section for the rest.
   var idx = src("index.html");
-  ok("rail has exactly the 3 new segments", /id="rail-tab-source"/.test(idx) && /id="rail-tab-edit"/.test(idx) && /id="rail-tab-publish"/.test(idx));
+  ok("rail carries all four destinations", /id="rail-tab-files"/.test(idx) && /id="rail-tab-source"/.test(idx) &&
+    /id="rail-tab-edit"/.test(idx) && /id="rail-tab-publish"/.test(idx));
   ok("old single Document tab is gone", idx.indexOf('id="rail-tab-document"') === -1);
   ok("Edit is the default active segment", /id="rail-tab-edit" data-rail-tab="edit"[^>]*class="[^"]*"|class="rail-btn rail-tab is-active" id="rail-tab-edit"/.test(idx));
   // side-rail-cleanup slice 2: the rail keeps Help + Settings; the Recents/file-actions popover is

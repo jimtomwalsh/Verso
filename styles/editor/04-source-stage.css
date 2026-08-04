@@ -256,8 +256,10 @@ h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.s
 .rail-tab__icon { display: inline-flex; align-items: center; justify-content: center; }
 .rail-tab__icon svg { width: 18px; height: 18px; }
 .rail-tab__label { font-size: var(--text-2xs); line-height: 1; letter-spacing: 0.02em; }
-/* active nav tab: accent glyph + left-edge marker */
-.rail-tab.is-active { color: var(--text-primary); position: relative; }
+/* active nav tab: accent-quiet fill + a 2px accent bar on the leading edge (uio-W03 §3). The fill
+   is what makes the active destination readable at a glance; the bar is what makes it unambiguous
+   when two destinations sit next to each other. Rail items carry no count, badge or dot. */
+.rail-tab.is-active { color: var(--text-primary); position: relative; background: var(--accent-quiet); }
 .rail-tab.is-active::before {
   content: ""; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
   width: 2px; height: 18px; border-radius: 1px; background: var(--accent);

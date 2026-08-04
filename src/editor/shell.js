@@ -36,7 +36,7 @@
       "showContextMenu", "openSettingsModal", "mount", "renderSettingsBody", "pipelineByDirection",
       "publishQueue", "publishOptionsForRow", "publishFormatSummary", "publishFormatRows", "applyLeftSection", "activeLeftSection",
       "mountPublishStage", "openDocIds", "view", "fitAll", "saveRegistry", "registry",
-      "confirmModal", "promptModal", "createProduct", "doc"
+      "confirmModal", "promptModal", "createProduct", "doc", "closeBrowser"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -176,16 +176,34 @@
     // content -- this ticket only owns the segment switch + the shared product
     // context, not what renders inside each stage.
     /* @stage-rail-start */
-    var STAGE_IDS = ["source", "edit", "publish"];
+    // uio-W03: four destinations, not three. This deliberately AMENDS the locked DaVinci
+    // three-stage rail (`product-rail-left-rail-and-topbar-3-stage`, memory
+    // `verso-davinci-rail-pivot`) -- a revision made on purpose, recorded as one, not drift.
+    // Files leads: it is the place you browse and manage from, and the four read left-to-right as
+    // the order you work in. Rail items carry NO count, badge or dot; a badge on a rail item
+    // teaches people to watch the rail instead of the work.
+    var STAGE_IDS = ["files", "source", "edit", "publish"];
     function isValidStage(s) { return STAGE_IDS.indexOf(s) !== -1; }
     // Edit renders through the workspace's ORIGINAL grid (no extra class) so today's
     // editing experience never changes; Source/Publish get a modifier class that hides
     // the edit-only grid items and reveals their own placeholder (same "hide the grid
     // items, span the leftover column" approach as .workspace.is-panels-hidden).
     function stageWorkspaceClass(stage) {
+      if (stage === "files") return "workspace--stage-files";
       if (stage === "source") return "workspace--stage-source";
       if (stage === "publish") return "workspace--stage-publish";
       return null;
+    }
+    // uio-W03 §3.1: ONE element answers "where am I" -- the identity line beside the wordmark.
+    // Pure, so the four cases are a table rather than four branches buried in a DOM function.
+    // Source/Edit name the open document and its Product; Files and Publish name themselves. A
+    // document with no Product says so rather than leaving the reader to infer it from a blank.
+    function stageIdentity(stage, docTitle, productName) {
+      if (stage === "files") return "Files";
+      if (stage === "publish") return "Publish";
+      var title = (docTitle || "").trim();
+      if (!title) return stage === "source" ? "Source" : "Edit";
+      return title + " · " + ((productName || "").trim() || "No product");
     }
     // ProductsStore ({id: {id,name,...}}) -> dropdown options, "All products" first.
     function productSelectOptions(store) {
@@ -201,22 +219,64 @@
 
     var __activeStage = "edit";
     var STAGE_PERSIST_KEY = "verso.activeStage"; // persist the active stage so a refresh returns here, not Edit
+    // uio-W03 §3.2: EACH DESTINATION KEEPS A LIVE INSTANCE. Switching is a swap, not a reload --
+    // leaving a destination does not close, reset or re-render it, and coming back finds it as you
+    // left it. Two pieces of state make that true:
+    //
+    //   __stageMounted  a destination builds its contents ONCE. Re-entering shows what is already
+    //                   there. Anything that genuinely invalidates a destination calls
+    //                   invalidateStage() rather than the stage re-rendering on every entry on the
+    //                   off-chance something moved.
+    //   __stageScroll   the scroll offset each destination was left at, restored on return. Without
+    //                   this a "swap" still throws the author back to the top, which reads exactly
+    //                   like a reload even though nothing re-rendered.
+    var __stageMounted = {};
+    var __stageScroll = {};
+    // The scrollable element a destination owns. Edit scrolls its canvas viewport; Source and
+    // Publish scroll their own region.
+    function stageScroller(stage) {
+      if (typeof document === "undefined") return null;
+      if (stage === "source") return document.getElementById("stage-source");
+      if (stage === "publish") return document.getElementById("stage-publish");
+      if (stage === "files") return document.getElementById("stage-files");
+      return null; // Edit's canvas keeps its own pan/zoom in `view`, which nothing here resets
+    }
+    // Mark a destination stale so the NEXT entry rebuilds it. The queue pane already refreshes
+    // itself on every change (renderPublishQueue), so this is for the coarser case: the set of
+    // documents changed underneath a destination that lists them.
+    function invalidateStage(stage) {
+      if (stage) delete __stageMounted[stage]; else __stageMounted = {};
+    }
+    // uio-W03 §3.1: write the one where-am-I line. Everything it needs it reads live -- the open
+    // document and its Product -- so a document swap or a rename shows up the next time this runs.
+    function syncStageIdentity() {
+      if (typeof document === "undefined") return;
+      var el = document.getElementById("stage-identity"); if (!el) return;
+      var d = E.doc;
+      var pid = d && d.meta && d.meta.productId;
+      var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
+      el.textContent = stageIdentity(__activeStage, d && d.meta && d.meta.title, prod && prod.name);
+    }
     // The canvas viewport is display:none on Source/Publish, so any fit computed while it's hidden
     // measures a 0x0 rect and lands the author in blank space. Frame the content ONCE the first time
     // Edit is shown with a laid-out canvas; later Edit entries keep the author's pan.
     var __framedWhileVisible = false;
     function setStage(stage) {
       if (!isValidStage(stage)) return;
+      // Remember where the destination we are LEAVING was scrolled to, before anything hides it.
+      var leaving = stageScroller(__activeStage);
+      if (leaving && stage !== __activeStage) __stageScroll[__activeStage] = leaving.scrollTop;
       __activeStage = stage;
       try { localStorage.setItem(STAGE_PERSIST_KEY, stage); } catch (e) {}
       if (typeof document === "undefined") return;
       applyLeftSection(activeLeftSection()); // SPEC 7: re-apply the left switcher's active section (Edit shows the panel; the switcher owns pane visibility)
       var ws = document.getElementById("workspace");
       if (ws) {
-        ws.classList.remove("workspace--stage-source", "workspace--stage-publish");
+        ws.classList.remove("workspace--stage-files", "workspace--stage-source", "workspace--stage-publish");
         var cls = stageWorkspaceClass(stage);
         if (cls) ws.classList.add(cls);
       }
+      var filesEl = document.getElementById("stage-files"); if (filesEl) filesEl.hidden = stage !== "files";
       var srcEl = document.getElementById("stage-source"); if (srcEl) srcEl.hidden = stage !== "source";
       var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
       // uio-E-C01 (EDIT-07): the doc zones (tabs / doc controls / output) were merged into the
@@ -226,10 +286,29 @@
         var btn = document.getElementById("rail-tab-" + s);
         if (btn) btn.classList.toggle("is-active", s === stage);
       });
-      if (stage === "source") renderSourceStage();
-      if (stage === "publish") mountPublishStage();
+      syncStageIdentity();
+      // uio-W03 §3.2: build a destination ONCE. Re-entering shows what is already there -- no
+      // re-render, no loading state, nothing reset. Source and Publish used to rebuild on every
+      // entry, which is what made returning feel like a reload even though the DOM was still there.
+      if (!__stageMounted[stage]) {
+        __stageMounted[stage] = true;
+        if (stage === "source") renderSourceStage();
+        if (stage === "publish") mountPublishStage();
+      }
+      // Files has no destination of its own until uio-W04, so entering it opens the document
+      // browser that does the job today. The region below it is a plain surface rather than Edit's
+      // canvas, so this is a destination you land in and not a dialog over your work. W04 replaces
+      // this call with the real Files destination; W09 retires the overlay entirely.
+      if (stage === "files" && typeof openBrowser === "function") openBrowser();
+      else if (typeof E.closeBrowser === "function") E.closeBrowser(); // a no-op when it is not open
       // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
       if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
+      // Put the destination back where the author left it. rAF so it happens after the region is
+      // visible and has a scroll height to set.
+      var entering = stageScroller(stage);
+      if (entering && __stageScroll[stage] && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(function () { if (__activeStage === stage) entering.scrollTop = __stageScroll[stage]; });
+      }
       // Frame the content the first time Edit is actually visible (see __framedWhileVisible). rAF so the
       // canvas has a real, non-zero rect before fitAll measures it.
       if (stage === "edit" && !__framedWhileVisible && typeof requestAnimationFrame === "function") {
@@ -254,14 +333,21 @@
         if (t.__navWired) return; t.__navWired = true;
         t.addEventListener("click", function () { setStage(t.getAttribute("data-rail-tab")); });
       });
-      // restore the stage the author left on (a refresh should not snap back to Edit)
-      try { var saved = localStorage.getItem(STAGE_PERSIST_KEY); if (isValidStage(saved)) __activeStage = saved; } catch (e) {}
+      // uio-W03 §3.3: launch restores the destination the author left on -- a refresh must not snap
+      // back to Edit. Files is the landing ONLY on a first run, where there is no destination to
+      // return to and browsing is the honest place to start. A returning author is never sent to
+      // Files just because a document happens to be closed: they left somewhere, and that is where
+      // they expect to be.
+      var saved = null;
+      try { saved = localStorage.getItem(STAGE_PERSIST_KEY); } catch (e) {}
+      if (isValidStage(saved)) __activeStage = saved;
+      else if (saved === null || saved === undefined) __activeStage = "files"; // first run
       setStage(__activeStage);
     }
     // The stage is this file's own state. editor.js reads it in one place and asks rather than
     // reaching for the variable.
     function activeStage() { return __activeStage; }
-    window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; } }; // boot + settings
+    window.__leftRail = { mount: mountLeftRail, setStage: setStage, getStage: function () { return __activeStage; }, invalidate: invalidateStage }; // boot + settings
 
     // SPEC 7 (cell switcher + tiered mutability): the editor-header chip shows the document's matrix
     // cell (geometry . interactivity) and opens a menu to change it AFTER creation. Tiered: toggling
@@ -351,7 +437,8 @@
       activeStage: activeStage, mountLeftRail: mountLeftRail, currentCell: currentCell,
       applyCellChange: applyCellChange, setCellInteractive: setCellInteractive, setCellGeo: setCellGeo,
       syncCellChip: syncCellChip, mountDocSettingsBtn: mountDocSettingsBtn,
-      newProductPrompt: newProductPrompt
+      newProductPrompt: newProductPrompt, stageIdentity: stageIdentity,
+      syncStageIdentity: syncStageIdentity, invalidateStage: invalidateStage
     });
     // Constants the rest of the chrome reads as DATA. They cannot cross as bound forwarders,
     // because bind() returns a function.
