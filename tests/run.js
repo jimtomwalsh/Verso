@@ -459,6 +459,45 @@ section("arch-P5-02 split course stylesheet");
      ["b.css", "a.css"].join("|") !== ["a.css", "b.css"].join("|"));
 })();
 
+// ---- arch-P3b-08: the module map, enforced -------------------------------
+// src/editor/README.md states what lives in each module. A map nobody checks rots: the
+// hand-maintained `node --check` list above had drifted FOUR modules behind this directory before
+// 07a caught it, which meant a syntax error in any of them would have shipped. So the map is a
+// gate. Both directions fail -- a file with no row, and a row naming no file -- because a stale
+// row is the more misleading of the two: it sends a reader to a file that is not there.
+section("arch-P3b-08 module map");
+(function () {
+  var README = path.join(ROOT, "src/editor/README.md");
+  if (!fs.existsSync(README)) { ok("src/editor/README.md exists", false); return; }
+  ok("src/editor/README.md exists", true);
+  var md = fs.readFileSync(README, "utf8");
+  // every module file under src/editor/, relative to that directory
+  var files = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, rel + f + "/");
+      else if (/\.js$/.test(f)) files.push(rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+  // a row is a leading table cell holding a backticked path: | `board/layout.js` | 175 | ... |
+  var rows = (md.match(/^\|\s*`([^`]+\.js)`\s*\|/gm) || []).map(function (m) {
+    return m.replace(/^\|\s*`/, "").replace(/`\s*\|$/, "");
+  });
+  var undocumented = files.filter(function (f) { return rows.indexOf(f) === -1; });
+  var phantom = rows.filter(function (r) { return files.indexOf(r) === -1; });
+  ok("every module in src/editor/ has a README row" + (undocumented.length ? " -- MISSING: " + undocumented.join(", ") : ""),
+     undocumented.length === 0);
+  ok("every README row names a real file" + (phantom.length ? " -- PHANTOM: " + phantom.join(", ") : ""),
+     phantom.length === 0);
+  ok("the map covers every module (" + files.length + " files, " + rows.length + " rows)", files.length === rows.length);
+  // and it proves it can fail
+  ok("the gate would catch an undocumented module (proof)",
+     ["a-module-that-does-not-exist.js"].filter(function (f) { return rows.indexOf(f) === -1; }).length === 1);
+  ok("the gate would catch a phantom row (proof)",
+     ["nope/gone.js"].filter(function (r) { return files.indexOf(r) === -1; }).length === 1);
+})();
+
 // ---- arch-P4-04: the four-file block contract, enforced ------------------
 // CONTRIBUTING.md and design-system/readme.md have said for a long time that a block has four
 // concerns. Prose does not fail a build. src/blocks/manifest.js is that contract as data, and this
@@ -552,6 +591,52 @@ section("arch-P4-04 four-file block contract");
      ["notARealBlock"].filter(function (t) { return renderTypes.indexOf(t) === -1; }).length === 1);
   ok("the gate would catch a CSS selector that no longer exists (proof)",
      css.indexOf(".a-class-course-css-does-not-have") === -1);
+})();
+
+// ---- the architecture map cannot silently lie ----------------------------
+// docs/architecture.html is the orientation page a developer opens first, and CONTRIBUTING and
+// the verso-dev skill both send people to it. It is hand-authored, which is right -- prose about
+// WHY the shape is this shape does not generate -- but the one fact in it that rots without
+// anyone noticing is the module index. So that number is checked, and nothing else is: the
+// per-module truth lives in src/editor/README.md, which has its own gate.
+section("architecture map");
+(function () {
+  var MAP = "docs/architecture.html";
+  if (!fs.existsSync(path.join(ROOT, MAP))) { ok("docs/architecture.html exists", false); return; }
+  ok("docs/architecture.html exists", true);
+  var html = src(MAP);
+
+  var onDisk = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) return walk(full, rel + f + "/");
+      if (/\.js$/.test(f)) onDisk.push(rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+
+  // every card carries its filename in a <span class="f">
+  var listed = (html.match(/<span class="f">([^<]+)<\/span>/g) || [])
+    .map(function (m) { return m.replace(/<[^>]+>/g, "").trim(); });
+  var missing = onDisk.filter(function (f) { return listed.indexOf(f) === -1; });
+  var phantom = listed.filter(function (f) { return onDisk.indexOf(f) === -1; });
+
+  ok("every editor module appears in the map" + (missing.length ? " -- MISSING: " + missing.join(", ") : ""),
+     missing.length === 0);
+  ok("the map lists no module that does not exist" + (phantom.length ? " -- PHANTOM: " + phantom.join(", ") : ""),
+     phantom.length === 0);
+
+  // the count it prints in its own masthead has to be the count it lists
+  var claimed = (html.match(/<b>(\d+)<\/b>\s*editor modules/) || [])[1];
+  ok("the map's stated module count matches what it lists (" + listed.length + ")",
+     claimed && parseInt(claimed, 10) === listed.length, claimed + " != " + listed.length);
+
+  // it must not link anything off-box: the repo makes no external network calls
+  ok("the map loads nothing from the network (no CDN, no remote font)",
+     !/https?:\/\/(?!localhost)/.test(html.replace(/<!--[\s\S]*?-->/g, "")));
+
+  ok("the gate would catch a module missing from the map (proof)",
+     ["a-module-not-in-the-map.js"].filter(function (f) { return listed.indexOf(f) === -1; }).length === 1);
 })();
 
 // ---- arch-P3b-01: the editor namespace -----------------------------------
@@ -3254,9 +3339,10 @@ section("editor-rework cell switcher");
 // ---- SPEC 7: capability inspector (Document context) ----
 section("editor-rework capability inspector");
 (function () {
-  var e = src("src/editor.js");
+  // arch-P3b-08: the Document panel is inspector/scopes.js now.
+  var e = src("src/editor/inspector/scopes.js");
   ok("the Document inspector leads with a Document type section", /renderDocumentInspector\(\)[\s\S]{0,700}sectionGroup\("Layout", "Document type"/.test(e));
-  ok("it reads the cell from the pure doc-type model", /window\.__docType\.docCell\(doc\)[\s\S]{0,500}CELL_GEO_LABEL\[_cell\.geo\]/.test(e));
+  ok("it reads the cell from the pure doc-type model", /window\.__docType\.docCell\(E\.doc\)[\s\S]{0,500}CELL_GEO_LABEL\[_cell\.geo\]/.test(e));
   ok("it renders the geometry-specific tools from condToolsFor", /window\.__docType\.condToolsFor\(_cell\.geo\)[\s\S]{0,220}tools\.forEach/.test(e));
   ok("the cell summary points at Document settings (cell chip retired)", /change it in Document settings \(the sliders button in the editor header\)/.test(e));
   ok("the Document type section comes before the Canvas/Appearance section", e.indexOf('sectionGroup("Layout", "Document type"') < e.indexOf('sectionGroup("Appearance", "Canvas"'));
@@ -5822,7 +5908,12 @@ section("theme-aware style colour");
   // editor dialog: token XOR hex on save + specimen resolves the var
   var etxt = src("src/editor.js");
   ok("Edit-style dialog saves colorToken (token clears hex)", /s\.colorToken = draft\.colorToken; delete s\.color/.test(THEME));
-  ok("Edit-style dialog offers theme-token options", /COLOUR_TOKENS = \[\["Ink", "ink"\]/.test(etxt));
+  // arch-P3b-08: this read against editor.js and was matching the MULTI-selection panel's own
+  // token list, not the dialog's. The dialog mounts typeCluster (inspector/primitives.js), whose
+  // Colour row is colorField (color.js), and the token pane is where the options actually are.
+  ok("Edit-style dialog offers theme-token options", /typeCluster\(box, draft, syncSpecimen\)/.test(THEME)
+    && /colorField\("Colour", tcVal\(\)/.test(src("src/editor/inspector/primitives.js"))
+    && /COLOR_FIELD_TOKENS = \[\["Ink", "ink"\]/.test(src("src/editor/color.js")));
   ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(THEME));
   ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(src("src/editor/inspector/primitives.js")) && /"First-line indent"/.test(src("src/editor/inspector/primitives.js")));   // arch-P3b-07prim2: both are typeCluster rows
   ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(THEME));
@@ -6322,8 +6413,10 @@ section("#22 section + page library masters");
   ok("libraryWhereUsed also counts PAGE instances, not just libraryInstance blocks", /if \(p && p\.libraryRef === ref\) count\+\+/.test(src("src/editor/library.js")));
 
   // 4. editor.js wiring: the page Inspector's Library section (mirrors renderLibraryInstanceBody).
-  var piStart = etxt.indexOf("function renderPageInspector(pi)");
-  var piBody = etxt.slice(piStart, piStart + 9200);
+  // arch-P3b-08: the page panel is inspector/scopes.js now.
+  var SCOPES = src("src/editor/inspector/scopes.js");
+  var piStart = SCOPES.indexOf("function renderPageInspector(pi)");
+  var piBody = SCOPES.slice(piStart, piStart + 9600);
   ok("page Inspector reconciles on open (page-level reconcile fn, not the block-level one)", /var prec = reconcilePageOverrides\(pdef\.template\.blocks, page\.overrides \|\| \{\}\)/.test(piBody));
   ok("lists override fields via the canonical fieldRow control", /pfields\.forEach\(function \(f\) \{[\s\S]{0,200}fieldRow\(/.test(piBody));
   ok("offers Detach when linked, Save-to-library when not", /pDetachB\.disabled = !pdef/.test(piBody) && /pSaveB\.addEventListener\("click", function \(\) \{ savePageAsLibraryMaster\(pi\); \}\)/.test(piBody));
@@ -6372,19 +6465,23 @@ section("outliner multi-select any-scope");
 section("multi-selection batch style");
 (function () {
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
-  var etxt = src("src/editor.js");
+  // arch-P3b-08: the batch panel itself is inspector/scopes.js; the routing claim below is the
+  // dispatch TABLE's, which is a pure module and unchanged.
+  var etxt = src("src/editor/inspector/scopes.js");
   ok("renderInspector routes a >=2 multi-selection to the batch inspector", (function () {
     var VI = require(path.join(ROOT, "src/editor/inspector/dispatch.js"));
     return VI.pick({ multiSelCount: 2, selectionType: "block" }).render === "renderMultiInspector" &&
       VI.pick({ multiSelCount: 1, selectionType: "block" }).render === "renderBlockInspector";
   })());
   var m = etxt.slice(etxt.indexOf("function renderMultiInspector"), etxt.indexOf("function renderMultiInspector") + 3600);
+  // arch-P3b-08: applyStyleToBlock stayed in editor.js -- it is the write, not the panel.
+  var ASB = src("src/editor.js");
   ok("filters the selection to text blocks (TEXT_STYLE_TYPES)", /multiSel\.filter\(function \(b\) \{ return TEXT_STYLE_TYPES\[b\.type\]/.test(m));
   ok("batch loops over EVERY selected text block", /function batch\(mut\) \{ pushHistory\(\); textBlocks\.forEach\(function \(b\) \{ mut\(b\)/.test(m));
   ok("offers a Text style picker applied to all", /customSelectRow\("Text style"[\s\S]*?applyStyleToBlock\(b, v\)/.test(m));
   ok("offers a batch Colour (token or custom)", /b\.style\.colorToken = v[\s\S]*?colourControl\("Custom colour"/.test(m) || /colourControl\("Custom colour"[\s\S]*?b\.style\.colorToken = v/.test(m));
   ok("offers a batch Align", /segmentedIconLive\("Align"[\s\S]*?b\.style\.align = v/.test(m));
-  var a = etxt.slice(etxt.indexOf("function applyStyleToBlock"), etxt.indexOf("function applyStyleToBlock") + 300);
+  var a = ASB.slice(ASB.indexOf("function applyStyleToBlock"), ASB.indexOf("function applyStyleToBlock") + 300);
   ok("applyStyleToBlock references the style, clears overrides, strips colour", /block\.styleRef = styleName;\s*\n\s*block\.style = \{\};\s*\n\s*stripStyledColorsDeep\(block\)/.test(a));
   // multi-select mutation points refresh the inspector so the panel appears immediately
   ok("outliner multi-select refreshes the inspector", /refreshCanvasSelection\(\); renderInspector\(\); return;/.test(OUT));
@@ -6571,7 +6668,7 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
   // authoring: per-page override in the page inspector + course-level message field
   // uio-F03: still tri-state DATA (true / false / absent = inherit), but the picker's explicit
   // "inherit" option is gone — the switch shows the resolved value and Reset clears the page flag.
-  ok("page inspector writes tri-state page.gateInteractions", /page\.gateInteractions = !!v;/.test(ed) && /delete page\.gateInteractions;/.test(ed));
+  ok("page inspector writes tri-state page.gateInteractions", /page\.gateInteractions = !!v;/.test(src("src/editor/inspector/scopes.js")) && /delete page\.gateInteractions;/.test(src("src/editor/inspector/scopes.js")));
   ok("progression panel exposes the reminder-message field", /gmIn\.value = E\.doc\.gateMessage \|\| "";[\s\S]*?if \(v\) E\.doc\.gateMessage = v; else delete E\.doc\.gateMessage/.test(src("src/editor/header-footer.js")));
 })();
 
@@ -7678,8 +7775,8 @@ section("richer bullet lists");
   ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(src("src/editor/inspector/primitives.js")));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
   ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(SHELL));
-  var ecss = EDITOR_CSS;
-  ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
+  var ecss = EDITOR_CSS;   // arch-P5-01: editor.css is styles/editor/*.css
+  ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(src("src/editor/inspector/scopes.js")) && ((src("src/editor/inspector/scopes.js")).match(/disclosure\("headerFooter"/g) || []).length === 0);   // arch-P3b-08
   ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(SS));
   ok("settings PROJECT tab = the document sections (rail order)", /key: "header", title: "Header", build: buildHeaderBody[\s\S]*?key: "footer", title: "Footer"[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(SS));
   // uio-F05: the 220px nav rail + one-section-at-a-time are GONE. The sheet body is one scroll
@@ -8128,7 +8225,13 @@ section("#145 text-role auto-styling");
 (function () {
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
-  var slice = e.slice(e.indexOf("function getTextRoles()"), e.indexOf("// Multi-selection (>=2) batch inspector"));
+  // arch-P3b-08: the multi-selection panel that used to bound this slice is inspector/scopes.js
+  // now. The end marker is the pointer comment that replaced it -- and the slice ASSERTS it found
+  // both ends, because indexOf(-1) silently widened this to the whole file and threw an illegal
+  // return rather than a failed claim.
+  var _rs = e.indexOf("function getTextRoles()"), _re = e.indexOf("  // arch-P3b-08 (folding in 03b):");
+  ok("role-styling slice found both of its ends", _rs !== -1 && _re > _rs);
+  var slice = e.slice(_rs, _re);
   var doc = { textRoles: { heading: "Heading 1", paragraph: "Body 1", note: "Warnings" }, styles: { "Heading 1": {}, "Body 1": {} }, pages: [] };
   var win = { TEXT_ROLES: { heading: "Heading 1" } };
   var api = new Function("doc", "clone", "getTextStyles", "TEXT_STYLE_TYPES", "applyStyleToBlock", "window",
@@ -9659,7 +9762,7 @@ section("panel system v2 — layout engine");
   // #165: the shared footer is buffered INTO the nav inspector's open cycle, then flushed once —
   // one PanelLayout-sorted stream (Behaviour after Layout/Spacing), not two independent sorts.
   ok("#161/#165 navButton: Content(Label)/Appearance(Style)/Behaviour(On click) then renderBlockActionsSection buffered, endSections once", /function renderNavButtonInspector\(node\)[\s\S]*?beginSections\(\);[\s\S]*?sectionGroup\("Content", "Label"[\s\S]*?sectionGroup\("Appearance", "Style"[\s\S]*?sectionGroup\("Behaviour", "On click"[\s\S]*?renderBlockActionsSection\(block\);\s*endSections\(E\.inspector\);/.test(ACT));
-  ok("#161 multiSelect batch: one canonical Type sectionGroup", /function renderMultiInspector\(\)[\s\S]*?beginSections\(\);\s*sectionGroup\("Type", "Text — applies to all "[\s\S]*?endSections\(inspector\);/.test(e));
+  ok("#161 multiSelect batch: one canonical Type sectionGroup", /function renderMultiInspector\(\)[\s\S]*?beginSections\(\);\s*sectionGroup\("Type", "Text — applies to all "[\s\S]*?endSections\(E\.inspector\);/.test(src("src/editor/inspector/scopes.js")));
   // RETIRED 2026-07-08 (James): iconField wheel scroll-to-fine-tune removed (accidental value
   // changes while scrolling the panel). Assert the wheel-to-change handler is GONE; the glyph
   // drag-scrub (makeScrubbable) remains the deliberate quick-adjust.
@@ -13437,7 +13540,7 @@ section("uio-F03 scope + inheritance model");
   })());
   ok("real rows carry the tail at three different rungs", (function () {
     var atBlock = /resolveScoped\(blockBoxChain\(block\), "border", \{ at: "block" \}\)/.test(BA);
-    var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(e);
+    var atPage = /resolveScoped\(gateScopeChain\(page\), "gateInteractions", \{ at: "page" \}\)/.test(src("src/editor/inspector/scopes.js"));   // arch-P3b-08
     var atCourse = /resolveScoped\(gateScopeChain\(null\), "gateInteractions", \{ at: "course" \}\)/.test(ehf);
     return atBlock && atPage && atCourse;
   })());
@@ -13724,7 +13827,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   // switchDoc must drop the outgoing doc's selection/page cursor (else a stale page
   // index crashes renderPageInspector on the new doc — hit via cross-file page paste).
   ok("a doc switch resets selection + page cursor before mount", /function activateDoc\(id\)[\s\S]{0,400}clearSelection\(\); clearMultiPages\(\); multiSel = \[\]; currentPage = 0;/.test(ed) && /function switchDoc[\s\S]{0,600}activateDoc\(id\)[\s\S]{0,900}mount\(\);/.test(src("src/editor/tabs.js")));
-  ok("renderPageInspector guards a stale/out-of-range page index", /function renderPageInspector\(pi\) \{\s*var page = doc\.pages\[pi\];\s*if \(!page\) return;/.test(ed));
+  ok("renderPageInspector guards a stale/out-of-range page index", /function renderPageInspector\(pi\) \{\s*var page = E\.doc\.pages\[pi\];\s*if \(!page\) return;/.test(src("src/editor/inspector/scopes.js")));   // arch-P3b-08
 
   // Variant UX: switchDoc must refresh the top-bar variant pill + drop a stale variant;
   // the variant-text field placeholder shows the flagship copy with tags stripped.
@@ -13890,7 +13993,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("padY sets the vertical var", run({ padY: 40 })["--page-pad-y"] === "40px");
   // editor inspector wiring + split-page inheritance
   var ed = src("src/editor.js");
-  ok("inspector writes per-breakpoint padX keys", /pagePadX\("padX"/.test(ed) && /pagePadX\("padXTablet"/.test(ed) && /pagePadX\("padXMobile"/.test(ed));
+  ok("inspector writes per-breakpoint padX keys", /pagePadX\("padX"/.test(src("src/editor/inspector/scopes.js")) && /pagePadX\("padXTablet"/.test(src("src/editor/inspector/scopes.js")) && /pagePadX\("padXMobile"/.test(src("src/editor/inspector/scopes.js")));   // arch-P3b-08
   // arch-P3b-07w: splitPageAtBlock moved to editor/structure-ops.js.
   var SOPS = src("src/editor/structure-ops.js");
   ok("split-page carries padXTablet/padXMobile", /newPage\.padXTablet = P\.padXTablet/.test(SOPS) && /newPage\.padXMobile = P\.padXMobile/.test(SOPS));
