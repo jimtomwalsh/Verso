@@ -6588,6 +6588,10 @@
   // Source and Edit. An inspector, never a filter: it reads the open document, and every action it
   // offers OPENS something rather than narrowing something. It installs after tabs.js (whose
   // switchDoc it uses to reach a sibling) and before the two stages that render it.
+  // uio-W08: Files' three creation actions mint a source document through the Source stage's own
+  // write path, so "start writing" and "import" seed a document the same way. A need() resolves
+  // against provide(), so it is bound and provided here.
+  VE.provide({ createSourceDocument: VE.bind("createSourceDocument") });
   window.VersoProductPanel.install(VE);
   VE.provide({
     renderEditProductPanel: VE.bind("renderEditProductPanel"),

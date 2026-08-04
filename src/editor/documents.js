@@ -26,7 +26,9 @@
       "openDocIds", "registry", "confirmModal", "h", "saveOpenDocIds", "saveRegistry",
       "switchDoc", "modalSection", "modalField", "modalText", "tagDocProductStage",
       "tagDocCell", "clone", "dsModalShell", "bindProjectFolder", "iconBtn", "productSelectOptions",
-      "doc", "findRegistryId", "colourForName", "formatRelativeTime"
+      "doc", "findRegistryId", "colourForName", "formatRelativeTime",
+      // uio-W08: the product choice offers "+ New product…" from inside the form that needs it.
+      "promptModal", "createProduct"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -332,12 +334,31 @@
 
       box = modalSection(box, "New document");
       // Product (defaults to the current scope) -> preset (matrix cell) -> name, per SPEC 7.
+      // uio-W08: the SAME product choice the source-document form offers, from the same builder.
+      // The empty option reads "None (shared)", never "All products" -- they look alike and mean
+      // opposite things, one a filter declining to narrow and the other a deliberate choice that
+      // this document belongs to no product.
       var prodRow = modalField(box, "Product");
-      prodRow.appendChild(window.VersoUI.Select({
-        options: productSelectOptions(window.ProductsStore),
-        value: newDocProduct,
-        onChange: function (v) { newDocProduct = v || ""; }
-      }));
+      var prodSel = null;
+      function rebuildProductSelect() {
+        var next = window.VersoUI.Select({
+          options: window.VersoFiles._pure.productChoices(window.ProductsStore),
+          value: newDocProduct,
+          onChange: function (v) {
+            if (v === window.VersoFiles._pure.NEW_PRODUCT_VALUE) {
+              E.promptModal("New product", "Name", "", function (name) {
+                if ((name || "").trim()) newDocProduct = E.createProduct(name).id;
+                rebuildProductSelect();
+              });
+              return;
+            }
+            newDocProduct = v || "";
+          }
+        });
+        if (prodSel) prodRow.replaceChild(next, prodSel); else prodRow.appendChild(next);
+        prodSel = next;
+      }
+      rebuildProductSelect();
       if (DT && window.VersoUI.ChoiceCards) {
         modalField(box, "Start from a preset");
         box.appendChild(window.VersoUI.ChoiceCards({

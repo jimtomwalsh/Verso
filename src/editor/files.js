@@ -302,6 +302,40 @@
   // The key is REMOVED in the same pass, always -- including when the product it names no longer
   // exists. A seed that survived would be a persisted scope by another route, which is exactly what
   // this ticket exists not to rebuild.
+  // ---- uio-W08: what a creation form offers -------------------------------
+  //
+  // The empty option reads "None (shared)", never "All products". They look alike and mean opposite
+  // things: one is a filter saying "do not narrow", the other is a CHOICE saying "this belongs to no
+  // product", which is a real and deliberate state for a glossary or a standard. Reusing the filter's
+  // wording here would tell an author they were declining to choose when they were choosing.
+  //
+  // "+ New product…" sits at the bottom so a product can be made from inside the form that needs it,
+  // rather than sending the author away to make one and come back.
+  var NO_PRODUCT_LABEL = "None (shared)";
+  var NEW_PRODUCT_VALUE = "__new";
+  function productChoices(products) {
+    products = products || {};
+    var opts = [{ value: "", label: NO_PRODUCT_LABEL }];
+    Object.keys(products).sort(function (a, b) {
+      var na = ((products[a] && products[a].name) || a).toLowerCase();
+      var nb = ((products[b] && products[b].name) || b).toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    }).forEach(function (id) {
+      opts.push({ value: id, label: (products[id] && products[id].name) || id });
+    });
+    opts.push({ value: NEW_PRODUCT_VALUE, label: "+ New product…" });
+    return opts;
+  }
+  // "Make this the primary source" AUTO-TICKS when the product has no primary yet, because that is
+  // what the author almost always means: the first source document you write for a product is what
+  // it traces back to. It does NOT auto-tick when one exists, because silently displacing a
+  // product's primary is the one thing this checkbox must never do by default.
+  function primaryDefault(products, productId) {
+    if (!productId) return false;              // shared material is nobody's primary
+    var p = (products || {})[productId];
+    return !!p && !p.groundTruthId;
+  }
+
   var FACET_SEED_KEY = "verso.filesProductFacetSeed";
   function consumeFacetSeed(storage, products) {
     if (!storage) return "";
@@ -319,7 +353,9 @@
     matchesQuery: matchesQuery, byRecent: byRecent, byBand: byBand, bandPrimary: bandPrimary,
     normGrouping: normGrouping, normMode: normMode,
     normFacets: normFacets, facetCount: facetCount, applyFacets: applyFacets,
-    facetCounts: facetCounts, facetChips: facetChips, consumeFacetSeed: consumeFacetSeed
+    facetCounts: facetCounts, facetChips: facetChips, consumeFacetSeed: consumeFacetSeed,
+    productChoices: productChoices, primaryDefault: primaryDefault,
+    NO_PRODUCT_LABEL: NO_PRODUCT_LABEL, NEW_PRODUCT_VALUE: NEW_PRODUCT_VALUE
   };
 
   // ---- the destination -----------------------------------------------------
@@ -329,6 +365,10 @@
       "h", "registry", "libComponents", "switchDoc", "openDocIds", "saveOpenDocIds",
       "colourForName", "formatRelativeTime", "showContextMenu", "promoteToProductModal",
       "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse", "openSourceTopicId",
+      // uio-W08: the three creation actions. All three live here, and none of them needs a
+      // pre-selected product -- there is no scope left to inherit.
+      "createSourceDocument", "createProduct", "showNewDocDialog",
+      "promptModal", "modalText", "saveProducts",
       "deleteCourse", "tagDocProductStage", "saveRegistry", "dsModalShell", "modalField",
       "confirmModal"
     );
@@ -422,6 +462,12 @@
       });
       modeSeg.classList.add("files__mode");
       controls.appendChild(modeSeg);
+      // uio-W08: ONE New control opening the three actions, rather than three buttons competing for
+      // the header. The full three-up set lives in the empty state, where naming every way in is the
+      // whole job of the screen.
+      var newBtn = window.VersoUI.Button({ variant: "primary", size: "sm", label: "New", onClick: newMenu });
+      newBtn.classList.add("files__new");
+      controls.appendChild(newBtn);
       head.appendChild(controls);
       host.appendChild(head);
 
@@ -598,6 +644,136 @@
       return bar;
     }
 
+    // ---- uio-W08: the three creation actions --------------------------------
+    //
+    // ALL THREE LIVE HERE, and none of them needs a pre-selected product. Creation used to inherit
+    // the global scope -- a new document was silently stamped with whatever the top bar happened to
+    // be showing -- and the Source path refused outright when nothing was selected. There is no
+    // scope left to inherit and nothing left to refuse: the author chooses, in the form, including
+    // choosing none.
+
+    // The product row every creation form shares, so the three read the same and a product made in
+    // one is a product made in all. Returns a getter for the chosen id.
+    function productField(body, initial, onProductMade) {
+      var chosen = initial || "";
+      var row = E.modalField(body, "Product");
+      var sel = null;
+      function announce() { if (typeof onProductMade === "function") onProductMade(chosen); }
+      function onChange(v) {
+        // "+ New product…" makes one from inside the form that needs it, rather than sending the
+        // author away to make one and come back to a form they would have to fill in again. Either
+        // way the select is rebuilt, so cancelling puts the previous choice back rather than
+        // leaving the row showing a product that was never created.
+        if (v === NEW_PRODUCT_VALUE) {
+          E.promptModal("New product", "Name", "", function (name) {
+            if ((name || "").trim()) chosen = E.createProduct(name).id;
+            rebuild(); announce();
+          });
+          return;
+        }
+        chosen = v || "";
+        announce();
+      }
+      function rebuild() {
+        var next = window.VersoUI.Select({
+          options: productChoices(window.ProductsStore || {}), value: chosen, onChange: onChange
+        });
+        if (sel) row.replaceChild(next, sel); else row.appendChild(next);
+        sel = next;
+      }
+      rebuild();
+      return { get: function () { return chosen; } };
+    }
+
+    function newSourceDocumentModal() {
+      var primaryTick = null, nameIn = null, product = null;
+      var shell = E.dsModalShell({
+        id: "files-new-source-modal",
+        title: "New source document",
+        subtitle: "The written material a product traces back to. Shared material — a glossary, a standard — belongs to no product on purpose.",
+        primaryLabel: "Create",
+        onPrimary: function () {
+          var name = (nameIn.value || "").trim();
+          if (!name) { window.alert("Give the document a name."); return; }
+          var pid = product.get();
+          var master = E.createSourceDocument(name, pid);
+          // The tick is what sets groundTruthId, so an author who unticks it on a product with no
+          // primary gets a second source document and a product that still has none -- which is a
+          // legitimate thing to want and used to be impossible to express.
+          var p = pid && window.ProductsStore[pid];
+          if (p) {
+            if (primaryTick.checked) p.groundTruthId = master.id;
+            else if (p.groundTruthId === master.id) delete p.groundTruthId;
+            E.saveProducts();
+          }
+          shell.modal.remove();
+          // Files is stale the moment a document is created, and it keeps a live instance
+          // (uio-W03) -- so it is marked for a rebuild on the next entry rather than re-rendered
+          // behind a destination the author is leaving.
+          if (window.__leftRail && window.__leftRail.invalidate) window.__leftRail.invalidate("files");
+          E.openSourceTopicId(master.id);
+          if (window.__leftRail) window.__leftRail.setStage("source");
+        }
+      });
+      nameIn = E.modalText(shell.body, "Name", "", "e.g. Aegis Node Reference");
+      product = productField(shell.body, "", function (pid) { syncPrimary(pid); });
+      var tickRow = E.modalField(shell.body, "Primary source");
+      primaryTick = h("input", "files__tick"); primaryTick.type = "checkbox";
+      var tickLabel = h("label", "files-new__tick");
+      tickLabel.appendChild(primaryTick);
+      tickLabel.appendChild(h("span", null, "Make this the primary source"));
+      tickRow.appendChild(tickLabel);
+      function syncPrimary(pid) {
+        primaryTick.checked = primaryDefault(window.ProductsStore || {}, pid);
+        primaryTick.disabled = !pid;   // shared material is nobody's primary
+      }
+      syncPrimary("");
+    }
+
+    function newProductModal() {
+      E.promptModal("New product", "Name", "", function (name) {
+        if (!(name || "").trim()) return;
+        var p = E.createProduct(name);
+        // Creation RETURNS TO FILES with the new (empty) band in view. It used to land on a
+        // dedicated product page, which was a screen whose only content was the absence of content.
+        if (window.__leftRail) window.__leftRail.setStage("files");
+        render();
+        var band = ui && ui.body.querySelector('[data-band="' + p.id + '"]');
+        if (band && band.scrollIntoView) band.scrollIntoView({ block: "nearest" });
+      });
+    }
+
+    function newMenu(ev) {
+      var r = ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect
+        ? ev.currentTarget.getBoundingClientRect() : { left: 0, bottom: 0 };
+      E.showContextMenu(r.left, r.bottom + 4, [
+        { head: "New" },
+        { label: "Source document…", onClick: newSourceDocumentModal },
+        { label: "Design document…", onClick: function () { E.showNewDocDialog(); } },
+        { sep: true },
+        { label: "Product…", onClick: newProductModal }
+      ]);
+    }
+
+    // uio-W08 §4.7. FIRST RUN NAMES WHAT YOU CAN DO AND OFFERS ALL THREE WAYS TO DO IT. No
+    // destination instructs you to go and use a different one first -- the whole reason Source used
+    // to say "Pick a Product in the top bar" and the top bar no longer exists.
+    function emptyState() {
+      var wrap = h("div", "files-empty");
+      var glyph = h("div", "files-empty__glyph");
+      glyph.innerHTML = window.Icon ? window.Icon("folder") : "";
+      wrap.appendChild(glyph);
+      wrap.appendChild(h("div", "files-empty__title", "Nothing here yet"));
+      wrap.appendChild(h("div", "files-empty__body",
+        "Create a product, a source document, or a design document to get started."));
+      var acts = h("div", "files-empty__actions");
+      acts.appendChild(window.VersoUI.Button({ variant: "primary", size: "sm", label: "New source document", onClick: newSourceDocumentModal }));
+      acts.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", label: "New design document", onClick: function () { E.showNewDocDialog(); } }));
+      acts.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", label: "New product", onClick: newProductModal }));
+      wrap.appendChild(acts);
+      return wrap;
+    }
+
     function docRow(d, showTypeChip) {
       var prod = d.productId && window.ProductsStore ? window.ProductsStore[d.productId] : null;
       return window.VersoUI.DocumentRow({
@@ -668,15 +844,22 @@
       if (bar) ui.body.appendChild(bar);
 
       if (!all.length) {
-        ui.body.appendChild(h("div", "files__empty",
-          facetCount(facets) ? "No document matches those filters." :
-          query ? "No document matches that." : "No documents yet."));
+        // A search or a facet that finds nothing is NOT first run: the library is not empty, this
+        // lens is. Offering "create a product to get started" there would answer a question nobody
+        // asked. Only a genuinely empty corpus gets the first-run state.
+        if (facetCount(facets) || query) {
+          ui.body.appendChild(h("div", "files__empty",
+            facetCount(facets) ? "No document matches those filters." : "No document matches that."));
+          return;
+        }
+        ui.body.appendChild(emptyState());
         return;
       }
       // A type chip is redundant in the Type view -- the band above already says it.
       var showTypeChip = grouping !== "type";
       groupCorpus(all, grouping, window.ProductsStore || {}).forEach(function (g) {
         var band = h("div", "files-band");
+        band.setAttribute("data-band", g.key);
         if (g.label || g.note) band.appendChild(bandHeader(g));
         var list = h("div", mode === "card" ? "files-band__cards" : "files-band__rows");
         g.docs.forEach(function (d) {

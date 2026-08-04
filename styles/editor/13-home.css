@@ -651,3 +651,24 @@
 .vds-docrow.is-selected .files__tick,
 .files__body.has-selection .files__tick { visibility: visible; }
 .files-band__rows .vds-docrow.is-selected { background: var(--accent-quiet); }
+
+/* uio-W08 -- the three creation actions, and the screen that names all three.
+   FIRST RUN MUST NEVER INSTRUCT YOU TO GO AND USE A DIFFERENT DESTINATION FIRST. That is the whole
+   reason Source used to say "Pick a Product in the top bar", pointing at a control that no longer
+   exists. Here the three ways in are the content of the screen. */
+.files__new { flex: 0 0 auto; }
+.files-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-4, 8px);
+  padding: var(--space-16, 32px) var(--space-8, 16px);
+  text-align: center;
+}
+.files-empty__glyph { color: var(--icon-idle); }
+.files-empty__glyph svg { width: 32px; height: 32px; }
+.files-empty__title { font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); font-family: var(--font-brand, var(--font-ui)); }
+.files-empty__body { max-width: 380px; font-size: var(--text-xs, 11px); line-height: 1.5; color: var(--text-secondary); }
+.files-empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-4, 8px); margin-top: var(--space-4, 8px); }
+/* The tick reads as a sentence rather than a bare box: "Make this the primary source" is a decision
+   about what the product traces back to, not a preference. */
+.files-new__tick { display: inline-flex; align-items: center; gap: var(--space-3, 6px); font-size: var(--text-xs, 11px); color: var(--text-primary); cursor: pointer; }
+.files-new__tick input { margin: 0; accent-color: var(--accent); visibility: visible; }
+.files-new__tick input:disabled { cursor: default; opacity: 0.5; }

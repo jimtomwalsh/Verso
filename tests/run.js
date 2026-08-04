@@ -11112,6 +11112,74 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W08: three creation actions + the Files empty state --------------
+// Creation used to inherit the global scope -- a new document was silently stamped with whatever
+// the top bar happened to be showing -- and the Source path refused outright when nothing was
+// selected. There is no scope left to inherit and nothing left to refuse.
+section("uio-W08 creation actions + empty state");
+(function () {
+  var F = require(path.join(ROOT, "src/editor/files.js"))._pure;
+  var products = {
+    "p-b": { id: "p-b", name: "Beta" },
+    "p-a": { id: "p-a", name: "Alpha", groundTruthId: "m-alpha" }
+  };
+
+  // --- the product choice every form shares ---
+  var opts = F.productChoices(products);
+  ok("the empty option reads NONE (SHARED), never the filter's 'All products'",
+    opts[0].value === "" && opts[0].label === "None (shared)");
+  ok("products are listed by name between the two ends",
+    opts.slice(1, -1).map(function (o) { return o.label; }).join() === "Alpha,Beta");
+  ok("a product can be made from inside the form that needs it",
+    opts[opts.length - 1].value === "__new" && opts[opts.length - 1].label === "+ New product…");
+  ok("no products yet is still a usable choice, not an empty select",
+    F.productChoices({}).length === 2 && F.productChoices().length === 2);
+
+  // --- "Make this the primary source" ---
+  ok("it AUTO-TICKS for a product with no primary -- the first source you write is what it traces back to",
+    F.primaryDefault(products, "p-b") === true);
+  ok("IT NEVER AUTO-TICKS WHEN ONE EXISTS -- silently displacing a primary is what this must not do",
+    F.primaryDefault(products, "p-a") === false);
+  ok("shared material is nobody's primary", F.primaryDefault(products, "") === false);
+  ok("an unknown product does not auto-tick", F.primaryDefault(products, "p-gone") === false &&
+    F.primaryDefault(null, "p-a") === false);
+
+  // --- the wiring ---
+  var FS = src("src/editor/files.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("all three creation actions live in Files",
+    /label: "Source document…", onClick: newSourceDocumentModal/.test(FS) &&
+    /label: "Design document…", onClick: function \(\) \{ E\.showNewDocDialog\(\); \}/.test(FS) &&
+    /label: "Product…", onClick: newProductModal/.test(FS));
+  ok("none of them needs a pre-selected product", !/Pick a Product/.test(FS) && !/Create a Product first/.test(FS));
+  ok("the tick is what sets groundTruthId, so unticking leaves the product without one",
+    /if \(primaryTick\.checked\) p\.groundTruthId = master\.id;\s*else if \(p\.groundTruthId === master\.id\) delete p\.groundTruthId;/.test(FS));
+  ok("the tick is disabled for shared material rather than silently ignored",
+    /primaryTick\.disabled = !pid;/.test(FS));
+  ok("a new source document opens where it belongs, and marks Files stale rather than re-rendering it",
+    /window\.__leftRail\.invalidate\("files"\)/.test(FS) && /E\.openSourceTopicId\(master\.id\)/.test(FS));
+  ok("creating a product RETURNS TO FILES with its band in view, not to a page of its own",
+    /window\.__leftRail\.setStage\("files"\)/.test(FS) && /querySelector\('\[data-band="' \+ p\.id \+ '"\]'\)/.test(FS));
+  ok("the design-document form offers the SAME choice, from the same builder",
+    /window\.VersoFiles\._pure\.productChoices\(window\.ProductsStore\)/.test(src("src/editor/documents.js")) &&
+    /window\.VersoFiles\._pure\.NEW_PRODUCT_VALUE/.test(src("src/editor/documents.js")));
+
+  // --- the empty state ---
+  ok("first run names what you can do and offers all three ways to do it",
+    /"Nothing here yet"/.test(FS) &&
+    /"Create a product, a source document, or a design document to get started\."/.test(FS) &&
+    /label: "New source document"/.test(FS) && /label: "New design document"/.test(FS) && /label: "New product"/.test(FS));
+  ok("NO DESTINATION INSTRUCTS YOU TO GO AND USE A DIFFERENT ONE FIRST", ["src/editor/files.js",
+    "src/editor/source-stage.js", "src/editor/publish.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/Pick a Product in the top bar/.test(code) && !/Create a Product first/.test(code);
+    }));
+  ok("a search or a facet that finds nothing is NOT first run -- the library is not empty, the lens is",
+    /if \(facetCount\(facets\) \|\| query\) \{[\s\S]{0,300}return;\s*\}\s*ui\.body\.appendChild\(emptyState\(\)\);/.test(FS));
+  var HOME3 = src("styles/editor/13-home.css");
+  ok("the empty state is a screen, not a one-line hint",
+    /\.files-empty \{[^}]*flex-direction: column/.test(HOME3) && /\.files-empty__actions \{/.test(HOME3));
+})();
+
 // ---- uio-W15: documents join the one ⌘K index -----------------------------
 // ⌘K is the only quick-switch and Files is the only browse surface. There is no third finder, so a
 // document that cannot be found here cannot be found by searching at all — which is why documents
