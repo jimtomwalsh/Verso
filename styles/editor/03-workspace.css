@@ -37,6 +37,16 @@
 .toolbar .editor-window__zone,
 .toolbar .editor-window__sep--doc { display: none; }
 .toolbar.toolbar--edit .editor-window__zone { display: flex; }
+/* uio-W10 fb1: Source shows the TABS zone -- its strip lives in the bar like Edit's -- and nothing
+   else. The doc controls and the output cluster stay Edit-only, because they act on a canvas Source
+   does not have. */
+.toolbar.toolbar--source .editor-window__zone--tabs { display: flex; }
+/* One strip at a time, in the one host. The other is not merely empty -- it is absent, so it cannot
+   take the gap its `gap` would give it. */
+.toolbar #source-tabs { display: none; }
+.toolbar.toolbar--source #toolbar-tabs,
+.toolbar.toolbar--source .editor-window__filepicker { display: none; }
+.toolbar.toolbar--source #source-tabs { display: flex; }
 .toolbar.toolbar--edit .editor-window__sep--doc { display: block; }
 .editor-window__zone { align-items: center; gap: 6px; min-width: 0; }
 /* The tabs zone takes basis 0, so it fills exactly the slack (bar width minus the fixed doc +
@@ -45,6 +55,7 @@
    position and never clip (Tier-2 reachability, #79/#80). */
 .editor-window__zone--tabs { flex: 1 1 0; min-width: 0; align-items: center; }
 .editor-window__zone--tabs .toolbar-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; }
+.editor-window__zone--tabs #source-tabs { align-items: flex-end; height: 100%; gap: 4px; }
 /* doc + output are fixed-size and stay put no matter how many tabs are open */
 .editor-window__zone--doc, .editor-window__zone--output { flex: 0 0 auto; }
 .editor-window__filepicker { flex: 0 0 auto; align-self: center; }
@@ -360,6 +371,8 @@
    two places. */
 .source-stage { display: none; grid-column: 2 / -1; min-height: 0; flex-direction: column; }
 .workspace--stage-source #stage-source.source-stage { display: flex; }
+/* uio-W10 fb1: the strip moved up into the toolbar, so the body is the whole stage again. The
+   column stays -- it costs nothing and the row lives one level down. */
 .source-stage__body { flex: 1 1 auto; min-height: 0; display: flex; }
 .source-stage__nav {
   width: var(--left-w, 240px); flex: 0 0 auto;

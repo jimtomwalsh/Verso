@@ -63,10 +63,14 @@
       <button class="storage-dot storage-dot--ok" id="storage-dot" title="Storage healthy — click for details" aria-label="Storage health"></button>
     </div>
 
-    <!-- Zone 1 -- tabs / file management (Edit only) -->
+    <!-- Zone 1 -- tabs / file management. uio-W10 fb1: BOTH destinations that hold documents put
+         their strip HERE, in the top bar, rather than Edit using the bar and Source growing a
+         second strip of its own inside the stage. One place answers "which document am I in",
+         whichever destination is answering it. Only one strip is ever shown at a time. -->
     <div class="editor-window__zone editor-window__zone--tabs">
       <button class="tool editor-window__filepicker" id="home-btn" data-lucide="layout-grid" title="Browse all courses"></button>
       <div class="toolbar-tabs" id="toolbar-tabs"></div>
+      <div class="toolbar-tabs" id="source-tabs" role="tablist" aria-label="Open source documents"></div>
     </div>
     <span class="editor-window__sep editor-window__sep--doc" aria-hidden="true"></span>
     <!-- Zone 2 -- document settings + live switches (the "matrix" is the face-up controls) -->
@@ -150,11 +154,6 @@
          than a dead end. This surface sits under it so Edit's canvas is not showing through. -->
     <div class="files-stage" id="stage-files" hidden></div>
     <div class="source-stage" id="stage-source" hidden>
-      <!-- uio-W10: Source's OWN tab strip. Source has never had a document switcher — it resolved
-           exactly one master from the global product and showed it. Several source documents may be
-           open at once now, product-tagged and product-less alike, and this strip holds only source
-           documents: it never mixes with Edit's, which holds only design documents. -->
-      <div class="source-stage__tabs" id="source-tabs" role="tablist" aria-label="Open source documents"></div>
       <div class="source-stage__body">
         <nav class="source-stage__nav" aria-label="Source topics">
           <!-- uio-W12: the same panel, reading the open SOURCE document. Extras and siblings are

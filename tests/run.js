@@ -11210,8 +11210,9 @@ section("uio-W11 tab overflow");
   var OVL = src("styles/editor/10-overlays.css");
   ok("the strip scrolls rather than wrapping, in both destinations",
     /\.toolbar-tabs \{[\s\S]{0,500}overflow-x: auto/.test(OVL) &&
-    /\.source-stage__tabs \{[^}]*overflow-x: auto/.test(OVL) &&
-    !/\.toolbar-tabs \{[\s\S]{0,500}flex-wrap: wrap/.test(OVL));
+    !/\.toolbar-tabs \{[\s\S]{0,500}flex-wrap: wrap/.test(OVL) &&
+    // Both strips are the same class, so one rule covers both destinations.
+    /<div class="toolbar-tabs" id="source-tabs"/.test(src("index.html")));
   ok("the +N more is never mistaken for a tab -- it names a count, not a document",
     /\.toolbar-tabs__more \{[^}]*border: 1px dashed/.test(OVL));
   // A `+N more` that scrolled away with the tabs would be gone at exactly the moment it matters.
@@ -11670,15 +11671,26 @@ section("uio-W10 per-destination tab strips");
   // uio-W11 made this count EVERYTHING open rather than only what fits: "8 open" beside a `+4 more`
   // would be two numbers disagreeing about the same set.
   ok("Edit states what its strip holds, from the same pure function", /PR\.stripMeta\(all\.map\(/.test(TB));
-  ok("Source's strip has a host of its own in the page, outside the nav",
-    /id="source-tabs"/.test(src("index.html")) &&
-    /<div class="source-stage__tabs"[\s\S]{0,200}<div class="source-stage__body">/.test(src("index.html")));
+  // uio-W10 fb1 (James, on the live app): BOTH strips live in the top bar. Source used to grow a
+  // second strip of its own inside the stage, which meant two different answers to "where do I
+  // switch documents" depending on which destination you were in. One host, one place.
+  ok("Source's strip lives in the toolbar's tabs zone, beside Edit's",
+    /<div class="editor-window__zone editor-window__zone--tabs">[\s\S]{0,600}id="toolbar-tabs"[\s\S]{0,300}id="source-tabs"/.test(src("index.html")));
+  ok("and the stage holds no strip of its own any more",
+    src("index.html").indexOf('class="source-stage__tabs"') === -1);
+  ok("only one strip is shown at a time, and the other is ABSENT rather than empty",
+    /\.toolbar #source-tabs \{ display: none; \}/.test(src("styles/editor/03-workspace.css")) &&
+    /\.toolbar\.toolbar--source #toolbar-tabs,[\s\S]{0,120}display: none;/.test(src("styles/editor/03-workspace.css")));
+  ok("the bar knows which destination it is dressing, rather than being Edit-or-nothing",
+    /tb\.classList\.toggle\("toolbar--source", stage === "source"\)/.test(src("src/editor/shell.js")));
   var WS = src("styles/editor/03-workspace.css");
   ok("the destination became a column so the strip spans it",
     /\.source-stage \{[^}]*flex-direction: column/.test(WS) && /\.source-stage__body \{[^}]*display: flex/.test(WS));
   var OV = src("styles/editor/10-overlays.css");
+  // They share the metrics by BEING the same class now, rather than by two rules kept in step.
   ok("the two strips share the tab metrics, so a document reads the same in either",
-    /\.source-stage__tabs \{[^}]*align-items: flex-end/.test(OV) && /\.source-stage__tabs:empty \{ display: none; \}/.test(OV));
+    /<div class="toolbar-tabs" id="source-tabs"/.test(src("index.html")) &&
+    /\.toolbar-tabs \{[\s\S]{0,300}align-items: flex-end/.test(OV));
   ok("the strip meta is quiet and non-interactive in both",
     /\.toolbar-tabs__meta,\s*\.source-stage__tabs-meta \{/.test(OV));
 })();

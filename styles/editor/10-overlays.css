@@ -63,15 +63,9 @@
   padding: 0 var(--space-4, 8px);
   font-size: var(--text-2xs, 10px); color: var(--text-tertiary, var(--text-secondary));
 }
-/* Source's own strip. Same tab component and the same gap as Edit's, so a document reads the same
-   whichever destination is holding it — the only difference is which type each strip holds. */
-.source-stage__tabs {
-  flex: 0 0 auto; display: flex; align-items: flex-end; gap: var(--space-2, 4px);
-  min-height: 34px; min-width: 0; padding: 0 var(--space-5, 10px);
-  overflow-x: auto; overflow-y: hidden;
-  background: var(--surface-panel); border-bottom: 1px solid var(--border-strong);
-}
-.source-stage__tabs:empty { display: none; }
+/* uio-W10 fb1: Source's strip IS a .toolbar-tabs, in the same toolbar host Edit's uses. It used to
+   be a second strip of its own inside the stage, which meant two different answers to "where do I
+   switch documents" depending on which destination you were in. */
 .toolbar-tabs__add {
   display: inline-flex;
   align-items: center;
@@ -824,4 +818,4 @@
   padding-left: var(--space-2, 4px);
   background: var(--surface-app);
 }
-.source-stage__tabs .toolbar-tabs__tail { background: var(--surface-panel); }
+

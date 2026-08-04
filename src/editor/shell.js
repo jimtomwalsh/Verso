@@ -291,7 +291,13 @@
       var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
       // uio-E-C01 (EDIT-07): the doc zones (tabs / doc controls / output) were merged into the
       // single .toolbar and show only in Edit; Source/Publish show the identity zone only.
-      var tb = document.querySelector(".toolbar"); if (tb) tb.classList.toggle("toolbar--edit", stage === "edit");
+      // uio-W10 fb1: Source carries its tab strip in the SAME bar Edit does, so the bar knows which
+      // destination it is dressing rather than being Edit-or-nothing.
+      var tb = document.querySelector(".toolbar");
+      if (tb) {
+        tb.classList.toggle("toolbar--edit", stage === "edit");
+        tb.classList.toggle("toolbar--source", stage === "source");
+      }
       STAGE_IDS.forEach(function (s) {
         var btn = document.getElementById("rail-tab-" + s);
         if (btn) btn.classList.toggle("is-active", s === stage);
