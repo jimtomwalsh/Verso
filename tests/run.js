@@ -31,6 +31,14 @@ function editorCss() {
   return order.map(function (o) { return src("styles/editor/" + o.file); }).join("\n");
 }
 var EDITOR_CSS = editorCss();
+// arch-P5-02: the same for the course stylesheet, which SHIPS -- the exporter reads this same
+// declared order and inlines the parts into one course.css, so what the suite reads here is what
+// the package contains.
+function courseCss() {
+  var order = JSON.parse(fs.readFileSync(path.join(ROOT, "styles/course/order.json"), "utf8"));
+  return order.map(function (o) { return src("styles/course/" + o.file); }).join("\n");
+}
+var COURSE_CSS = courseCss();
 // arch-P2: the behavioural test seam. LOAD.load(rel, opts) runs one of the app's classic scripts
 // in a node:vm context with a stub window/document and returns what it published -- for the files
 // a plain `require` cannot reach (DOM at load, or an activation gate that must be seeded first).
@@ -344,6 +352,55 @@ section("arch-P5-01 split chrome stylesheet");
      ["99-not-declared.css"].filter(function (f) { return declared.indexOf(f) === -1; }).length === 1);
 })();
 
+// ---- arch-P5-02: the split COURSE stylesheet, which ships ------------------
+// Same split as the chrome sheet, with one difference that matters: this one goes into every SCORM
+// package. The exporter reads styles/course/order.json and inlines the parts into a single
+// course.css, so what ships is byte-for-byte what shipped before. Reading N files instead of 1 is
+// the exporter doing its job -- it already assembles a dozen sources into one zip -- and nothing is
+// generated that source does not already hold, which is what keeps this inside ADR-0004.
+section("arch-P5-02 split course stylesheet");
+(function () {
+  var order = JSON.parse(src("styles/course/order.json"));
+  var declared = order.map(function (o) { return o.file; });
+  var onDisk = fs.readdirSync(path.join(ROOT, "styles/course"))
+    .filter(function (f) { return /\.css$/.test(f); }).sort();
+
+  var undeclared = onDisk.filter(function (f) { return declared.indexOf(f) === -1; });
+  var phantom = declared.filter(function (f) { return onDisk.indexOf(f) === -1; });
+  ok("every stylesheet in styles/course/ is in order.json" + (undeclared.length ? " -- MISSING: " + undeclared.join(", ") : ""),
+     undeclared.length === 0);
+  ok("every order.json entry names a real stylesheet" + (phantom.length ? " -- PHANTOM: " + phantom.join(", ") : ""),
+     phantom.length === 0);
+
+  ["index.html", "kit.html"].forEach(function (page) {
+    var linked = (src(page).match(/<link rel="stylesheet" href="styles\/course\/([^"]+)"/g) || [])
+      .map(function (m) { return m.match(/styles\/course\/([^"]+)/)[1]; });
+    ok(page + " links every declared course stylesheet, in the declared ORDER",
+       linked.join("|") === declared.join("|"), linked.join("|") + "  !=  " + declared.join("|"));
+  });
+
+  ok("src/course.css no longer exists", !fs.existsSync(path.join(ROOT, "src/course.css")));
+
+  // THE EXPORTER. It must read the declared order and emit ONE course.css -- if it fetched the
+  // directory, or joined in the wrong order, every shipped course would cascade differently.
+  var ex = src("src/export.js");
+  ok("the exporter reads the declared order, not the directory",
+     /fetchText\("styles\/course\/order\.json"\)/.test(ex));
+  ok("the exporter inlines the parts into ONE course.css, joined in order",
+     /order\.map\(function \(o\) \{ return fetchText\("styles\/course\/" \+ o\.file\); \}\)/.test(ex)
+     && /files\.push\(textFile\("course\.css", parts\.join\("\\n"\)\)\)/.test(ex));
+  ok("nothing still fetches the old monolith", ex.indexOf('fetchText("src/course.css")') === -1);
+
+  // and the join reproduces what the single file held: the helper the suite itself reads with is
+  // the same concatenation the exporter performs, so an assertion elsewhere that finds a rule
+  // proves that rule reaches the package.
+  ok("the suite reads the course CSS by the same concatenation the exporter ships",
+     COURSE_CSS === declared.map(function (f) { return src("styles/course/" + f); }).join("\n"));
+
+  ok("the gate would catch a reordered course link list (proof)",
+     ["b.css", "a.css"].join("|") !== ["a.css", "b.css"].join("|"));
+})();
+
 // ---- arch-P4-04: the four-file block contract, enforced ------------------
 // CONTRIBUTING.md and design-system/readme.md have said for a long time that a block has four
 // concerns. Prose does not fail a build. src/blocks/manifest.js is that contract as data, and this
@@ -355,7 +412,7 @@ section("arch-P5-01 split chrome stylesheet");
 section("arch-P4-04 four-file block contract");
 (function () {
   var MAN = require(path.join(ROOT, "src/blocks/manifest.js")).BLOCK_MANIFEST;
-  var render = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js");
+  var render = src("src/render.js"), css = COURSE_CSS, rt = src("src/runtime.js");
   var IB = src("src/editor/inspector/blocks.js");
 
   // ---- the register: the BLOCKS table in render.js -------------------------
@@ -2807,7 +2864,7 @@ section("#29 annotation overlay");
   ok("#29 a valid annotated scene passes", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "highlight", target: "#x" }, { do: "callout", target: "#x", n: 1 }, { do: "pointer", target: "#x" }, { do: "clearAnnotations" }, { do: "shoot", out: "a.webp" }] }).ok === true);
 
   // -- INVARIANT: annotation overlay is editor chrome only, never course output --
-  ok("#29 annotation classes live in editor.css (chrome), NOT course.css (ships)", EDITOR_CSS.indexOf("capture-annot") !== -1 && src("src/course.css").indexOf("capture-annot") === -1);
+  ok("#29 annotation classes live in editor.css (chrome), NOT course.css (ships)", EDITOR_CSS.indexOf("capture-annot") !== -1 && COURSE_CSS.indexOf("capture-annot") === -1);
   ok("#29 render.js + export.js never emit annotation classes", src("src/render.js").indexOf("capture-annot") === -1 && src("src/export.js").indexOf("capture-annot") === -1);
   ok("#29 overlay uses the DS accent token (theme-inherited)", /\.capture-annot--ring\s*\{[^}]*var\(--accent\)/.test(EDITOR_CSS) && /\.capture-annot--chip\s*\{[\s\S]*?var\(--accent\)/.test(EDITOR_CSS));
 
@@ -3868,7 +3925,7 @@ section("hotspot marker viewed recolour");
   var ex = src("src/export.js");
   ok("export bundles runtime.js", /fetchText\("src\/runtime\.js"\)[\s\S]*?textFile\("runtime\.js"/.test(ex));
   // course.css no longer hue-tints the whole frame; recolours via .hs-key + var-flip
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   ok("svg viewed targets .hs-key-fill/.hs-key-stroke", /\.hotspot-marker--custom\.is-viewed \.hs-key-fill/.test(css) && /\.hotspot-marker--custom\.is-viewed \.hs-key-stroke/.test(css));
   ok("no whole-frame hue filter on viewed", css.indexOf("hue-rotate(75deg)") === -1);
 })();
@@ -3887,7 +3944,7 @@ section("#146 hotspot base-image size + margin popover");
   ok("render: popover appended to the STAGE (can open into the margin)", /stage\.appendChild\(pop\);/.test(r));
   ok("render: back (in nav) wrapped in .hotspot-nav, placed in the chrome band (#52)", /nav\.appendChild\(back\);[\s\S]*?chrome\.appendChild\(nav\);/.test(r) && /topbar\.appendChild\(counter\);/.test(r)); // #216 wrap; nav below, counter in the top band above
 
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   ok("css: .hotspot-frame sizes via --hotspot-img-width and centres", /\.hotspot-frame \{[^}]*max-width: var\(--hotspot-img-width, 100%\);[^}]*margin-inline: auto;/.test(css));
   ok("css: stage overflow visible (margin popover not clipped)", /\.hotspot-stage \{[^}]*overflow: visible;/.test(css));
 
@@ -3907,7 +3964,7 @@ section("#48 box (region) hotspot marker");
   var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
-  var r = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ecss = EDITOR_CSS;
+  var r = src("src/render.js"), css = COURSE_CSS, e = src("src/editor.js"), ecss = EDITOR_CSS;
   // render: a box marker renders as a sized region (transparent, no glyph), not a point badge.
   ok("render: shape==box adds .hotspot-marker--box + inline w/h %", /if \(hs\.shape === "box"\) \{[\s\S]*?mk\.classList\.add\("hotspot-marker--box"\);[\s\S]*?mk\.style\.width = \(hs\.w == null \? 20 : hs\.w\) \+ "%";[\s\S]*?mk\.style\.height = \(hs\.h == null \? 12 : hs\.h\) \+ "%";/.test(r));
   ok("render: box branch bypasses the glyph/custom marker path (else-if)", /if \(hs\.shape === "box"\) \{[\s\S]*?mk\.classList\.add\("hotspot-marker--box"\);[\s\S]*?\} else if \(block\.markerHtml\)/.test(r));
@@ -3944,7 +4001,7 @@ section("#49 mix card + navigate hotspots (per-marker action)");
 
 section("#52 tour nav + progress outside the screen frame");
 (function () {
-  var r = src("src/render.js"), css = src("src/course.css");
+  var r = src("src/render.js"), css = COURSE_CSS;
   // render: a .hotspot-chrome band is appended to the STAGE (below the frame); nav + counter go IN it.
   ok("render: chrome band appended to the stage after the frame", /stage\.appendChild\(frame\);[\s\S]*?var chrome = el\("div", "hotspot-chrome"\);\s*stage\.appendChild\(chrome\);/.test(r));
   ok("render: nav goes in the chrome band; neither nav nor counter is in the frame", /chrome\.appendChild\(nav\)/.test(r) && !/frame\.appendChild\(nav\)/.test(r) && !/frame\.appendChild\(counter\)/.test(r));
@@ -3960,7 +4017,7 @@ section("#53 reveal hotspots after a play-once video ends");
   var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
-  var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
+  var r = src("src/render.js"), css = COURSE_CSS, rt = src("src/runtime.js"), e = src("src/editor.js");
   // render: markers on a video+once+revealAfterEnd screen start gated (hidden).
   ok("render: gates markers on a play-once reveal-after-end screen", /scr\.kind === "video" && scr\.playback === "once" && scr\.revealAfterEnd[\s\S]*?mk\.classList\.add\("hotspot-marker--gated"\);/.test(r));
   ok("css: gated marker hidden until .is-revealed", /\.hotspot-marker--gated \{ opacity: 0; pointer-events: none;[\s\S]*?\.hotspot-marker--gated\.is-revealed \{ opacity: 1; pointer-events: auto; \}/.test(css));
@@ -4018,7 +4075,7 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
-  var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
+  var r = src("src/render.js"), css = COURSE_CSS, rt = src("src/runtime.js"), e = src("src/editor.js");
   // caption: an updating below-screen line; per-screen text rides the DOM; runtime syncs on nav.
   ok("render: caption emitted (entry text) when any screen has one", /screens\.some\(function \(s\) \{ return s && s\.caption; \}\)[\s\S]*?el\("div", "hotspot-caption", entry\.caption \|\| ""\)/.test(r));
   ok("render: per-screen caption rides the DOM (panel + entry attrs)", /panel\.setAttribute\("data-screen-caption", s\.caption\)/.test(r) && /stage\.setAttribute\("data-hotspot-entry-caption", entry\.caption\)/.test(r));
@@ -4298,7 +4355,7 @@ section("table block (#90)");
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var CE = src("src/editor/copy-editor.js");   // arch-P3b-07j
-  var rn = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ic = src("src/icons.js");
+  var rn = src("src/render.js"), css = COURSE_CSS, e = src("src/editor.js"), ic = src("src/icons.js");
   // render.js: pure renderer — editable cells (th/td by header), scroll wrapper, borders/zebra/pad/align
   ok("render defines a table renderer", /table: function \(block\) \{/.test(rn));
   ok("table cells are editable() rich fields bound to cell.t", /editable\(isHead \? "th" : "td", "table-block__cell", cell, "t", true\)/.test(rn));
@@ -4322,7 +4379,7 @@ section("#111 completion screen");
 (function () {
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
-  var rn = src("src/render.js"), ex = src("src/export.js"), ed = src("src/editor.js"), cs = src("src/course.css");
+  var rn = src("src/render.js"), ex = src("src/export.js"), ed = src("src/editor.js"), cs = COURSE_CSS;
   // render.js — pure render, default-on, defaults published for the editor
   ok("render exposes VERSO_ENDSCREEN_DEFAULTS", /window\.VERSO_ENDSCREEN_DEFAULTS = ENDSCREEN_DEFAULTS/.test(rn));
   ok("endScreenOn is default-on (off only on explicit on===false)", /function endScreenOn\(doc\) \{ return !\(doc && doc\.endScreen && doc\.endScreen\.on === false\); \}/.test(rn));
@@ -5693,7 +5750,7 @@ section("theme-aware style colour");
   // Per-mode text colour (colorField Per-mode tab): applyTextStyle emits color:var(--tc-c)
   var nPM = { style: {} }; applyTextStyle(nPM, { colorLight: "#111111", colorDark: "#eeeeee" });
   ok("per-mode text colour → color:var(--tc-c)", nPM.style.color === "var(--tc-c)");
-  ok("course.css switches --tc-c by data-mode", /\[style\*="--tc-light"\] \{ --tc-c: var\(--tc-light\); \}/.test(src("src/course.css")) && /\.course-root\[data-mode="dark"\] \[style\*="--tc-light"\] \{ --tc-c: var\(--tc-dark\); \}/.test(src("src/course.css")));
+  ok("course.css switches --tc-c by data-mode", /\[style\*="--tc-light"\] \{ --tc-c: var\(--tc-light\); \}/.test(COURSE_CSS) && /\.course-root\[data-mode="dark"\] \[style\*="--tc-light"\] \{ --tc-c: var\(--tc-dark\); \}/.test(COURSE_CSS));
   // MM: justify (4th align) + word-spacing
   var n8 = { style: {} }; applyTextStyle(n8, { align: "justify", wordSpacing: 4 });
   ok("MM: justify emits text-align:justify", n8.style.textAlign === "justify");
@@ -5713,7 +5770,7 @@ section("theme-aware style colour");
   ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(THEME));
   // body paragraphs default to full ink (matching .body-list), not ink-soft — else a
   // colourless text style leaves paragraphs a shade lighter than lists (James's mismatch).
-  var ccss = src("src/course.css");
+  var ccss = COURSE_CSS;
   var bcStart = ccss.indexOf(".body-copy {");
   var bodyCopy = ccss.slice(bcStart, ccss.indexOf("}", bcStart));
   ok(".body-copy default colour is --color-ink (not ink-soft)", /color:\s*var\(--color-ink\)\s*;/.test(bodyCopy) && !/color:\s*var\(--color-ink-soft\)\s*;/.test(bodyCopy));
@@ -5825,7 +5882,7 @@ section("#20 library-instance mirror");
   // applies to course.css/render output (editor-only chrome, per the pure-render invariant).
   var css = EDITOR_CSS;
   ok("editor.css disables pointer-events on nested canvas-blocks inside a library instance", /\[data-library-instance\] \.canvas-block \{ pointer-events: none; \}/.test(css));
-  ok("course.css does not reference the library-instance marker (editor-chrome only)", src("src/course.css").indexOf("data-library-instance") === -1);
+  ok("course.css does not reference the library-instance marker (editor-chrome only)", COURSE_CSS.indexOf("data-library-instance") === -1);
 })();
 
 // ---- Product Rail: tag vocabulary + reserved owning-Product tag --------------
@@ -6225,7 +6282,7 @@ section("#22 section + page library masters");
   // 6. editor.css: the page-scope opacity guard mirrors #20's block-scope one, and never
   // leaks into course.css (editor-only chrome, same invariant as #20).
   ok("pointer-events guard at page scope", /\[data-library-page-instance\] \.canvas-block \{ pointer-events: none; \}/.test(css));
-  ok("course.css does not reference the page-instance marker", src("src/course.css").indexOf("data-library-page-instance") === -1);
+  ok("course.css does not reference the page-instance marker", COURSE_CSS.indexOf("data-library-page-instance") === -1);
 })();
 
 // ---- outliner multi-select spans columns / containers / pages (Shift + Cmd) ----
@@ -6345,7 +6402,7 @@ section("chapter-progression");
   ok("normalizeDoc flattens summary to bare <li> items (no <ul> wrap)", /function normalizeSummary\(html\)[\s\S]*?return lines\.length \? lines\.map[\s\S]*?join\(""\) : ""/.test(_ed64s));
   ok("normalizeDoc no longer wraps summary in <ul>", !/normalizeSummary[\s\S]*?"<ul>" \+ lines\.map/.test(_ed64s));
   ok("render no longer stamps data-recap (recap retired)", !/setAttribute\("data-recap"/.test(rn));
-  var _css64 = src("src/course.css");
+  var _css64 = COURSE_CSS;
   ok("kc-done summary hidden at runtime when it has no non-empty bullet", /\.kc-done__summary-wrap:has\(\.kc-done__summary:not\(:has\(li:not\(:empty\)\)\)\)\s*\{\s*display:\s*none/.test(_css64));
   // #82 behavioural guard: the migration core, in isolation. Empty stays empty (render seeds
   // a bullet), plain text is untouched, a legacy <ul>-wrapped list flattens to bare <li>s, and
@@ -6427,7 +6484,7 @@ section("auto-gate all interactions");
 // sequence/accordion emitters, and the author-overridable reminder copy.
 section("interaction-gate: visible + explained (grey Next + reminder)");
 (function () {
-  var rt = src("src/runtime.js"), rn = src("src/render.js"), css = src("src/course.css"), ed = src("src/editor.js"), ex = src("src/export.js");
+  var rt = src("src/runtime.js"), rn = src("src/render.js"), css = COURSE_CSS, ed = src("src/editor.js"), ex = src("src/export.js");
   // no longer self-disables (a disabled button fires no click -> no reminder possible)
   ok("gateFooterNav does NOT set btn.disabled", !/btn\.disabled = !pass/.test(rt));
   ok("gateFooterNav marks aria-disabled + .is-nav-gated instead", /btn\.classList\.toggle\("is-nav-gated", !pass\)[\s\S]*?setAttribute\("aria-disabled", "true"\)/.test(rt));
@@ -6468,7 +6525,7 @@ section("footer nav corner-pin: framed preview matches export");
 (function () {
   var ec = EDITOR_CSS;
   // runtime pin (course.css) is unchanged: fixed to the viewport at 24/12/16px.
-  var cc = src("src/course.css");
+  var cc = COURSE_CSS;
   ok("runtime: pin uses position:fixed (viewport corners)", /\.course-root\[data-env="runtime"\] \.course-nav--pin \.course-nav__prev,\s*\.course-root\[data-env="runtime"\] \.course-nav--pin \.course-nav__next \{\s*position: fixed;/.test(cc));
   // framed preview: prev/next are ABSOLUTE-pinned (contained by the device, no ghost),
   // NOT reverted to static inline gutters.
@@ -6558,7 +6615,7 @@ section("glossary");
 // ---- chapter menu: viewport-centred at runtime + close box + outside-click ----
 section("chapter menu dismiss");
 (function () {
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var r = src("src/render.js");
   var rt = src("src/runtime.js");
   ok("render emits a top-right close box", /course-nav__modal-close/.test(r) && /data-modal-close/.test(r));
@@ -6594,7 +6651,7 @@ section("#168 learner-nav single source");
 section("#169 pin-to-gutters preview");
 (function () {
   var r = src("src/render.js");
-  var course = src("src/course.css");
+  var course = COURSE_CSS;
   var chrome = EDITOR_CSS;
   // render: pinning is the GLOBAL DEFAULT (#169b) — course-nav--pin unless pinButtons === false.
   ok("render pins by default (opt-out via pinButtons === false)", /var pinned = block\.pinButtons !== false;/.test(r) && /pinned \? " course-nav--pin" : ""/.test(r));
@@ -6622,7 +6679,7 @@ section("nav pill cleanup");
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var r = src("src/render.js");
   var e = src("src/editor.js");
   // (1)+(2) title + bar are a GROUP centred as one unit on the pill midline: progress-main is
@@ -6650,7 +6707,7 @@ section("nav pill cleanup");
 section("global motion");
 (function () {
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var r = src("src/render.js");
   var rt = src("src/runtime.js");
   var e = src("src/editor.js");
@@ -6836,7 +6893,7 @@ section("isTextTarget text-entry only");
 // ---- §5: quiz rich sub-fields carry PER-FIELD styles (no title<->body bleed) ----
 section("quiz correct = brand green");
 (function () {
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // correct answer pill + its letter = --color-success (green), NOT the amber accent
   ok("correct pill uses --color-success", /\.kc-pill\.correct \{ border-color: var\(--color-success\);[\s\S]*?color-mix\(in srgb, var\(--color-success\) 12%/.test(css));
   ok("correct pill letter uses --color-success", /\.kc-pill\.correct \.kc-pill__letter \{ border-color: var\(--color-success\); color: var\(--color-success\); \}/.test(css));
@@ -6900,7 +6957,7 @@ section("inline links");
 (function () {
   var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var e = src("src/editor.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // arch-P3b-07fmt: the Link button belongs to the shared format bar (editor/text-format.js), which the
   // text inspector mounts. The claim was always about that bar; it only read against editor.js
   // because the bar and the inspector sat in one file.
@@ -6983,7 +7040,7 @@ section("vimeo hash");
   ok("player src builds ...video/ID?h=HASH&…app_id (unlisted plays)", /"https:\/\/player\.vimeo\.com\/video\/" \+ info\.id \+ "\?" \+ \(info\.hash \? "h=" \+ info\.hash \+ "&" : ""\) \+ "badge=0[^"]*app_id=58479"/.test(r));
   // no black bars: the iframe is sized 16:9 (video fills it) + the wrapper fills the
   // sides with the THEME bg (tracks light/dark) instead of black.
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // #176/#180: EVERY web embed (generic included) gets the .embed--filled wrapper so
   // the surround is a managed colour on ALL providers; the video SIZING concern
   // (.embed--video: centre + forced 16:9) is decoupled and gated to real media ONLY,
@@ -7023,8 +7080,8 @@ section("embed palette linking");
   ok("theme shim applies the interaction-var map", /if\(m\.map\)\{for\(var mk in m\.map\)/.test(r));
   ok("pushEmbedTheme forwards the map in the message + direct apply", /var msg = \{ type: "theme"[^}]*map: map, fadeMs: fadeMs \}/.test(r) && /if \(map\) Object\.keys\(map\)\.forEach/.test(r));
   // §34 LINKED mode fade: recoloured SVGs + HTML interactions must ease with the bg (one --motion-mode-fade)
-  ok("SVG fill/stroke transition off --motion-mode-fade (vector art fades with the bg)", /\[data-mode\] svg \*\s*\{\s*transition: fill var\(--motion-mode-fade, 300ms\) ease, stroke var\(--motion-mode-fade, 300ms\) ease/.test(src("src/course.css")));
-  ok("reduced-motion disables the svg fade too", /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\[data-mode\] svg \*\s*\{ transition: none;/.test(src("src/course.css")));
+  ok("SVG fill/stroke transition off --motion-mode-fade (vector art fades with the bg)", /\[data-mode\] svg \*\s*\{\s*transition: fill var\(--motion-mode-fade, 300ms\) ease, stroke var\(--motion-mode-fade, 300ms\) ease/.test(COURSE_CSS));
+  ok("reduced-motion disables the svg fade too", /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\[data-mode\] svg \*\s*\{ transition: none;/.test(COURSE_CSS));
   ok("pushEmbedTheme reads the fade duration off the themed root", /getComputedStyle\(themed\)\.getPropertyValue\("--motion-mode-fade"\)/.test(r));
   ok("embed shim eases its bg/color over m.fadeMs (skips on reduced-motion)", /m\.fadeMs>0&&!rm[\s\S]*?transition:background-color '\+m\.fadeMs\+'ms ease,color '\+m\.fadeMs\+'ms ease/.test(r));
   // exported runtime forwards + applies the map too
@@ -7058,7 +7115,7 @@ section("embed palette linking");
 section("card-reveal flip / off modes");
 (function () {
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
-  var r = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js"), e = src("src/editor.js");
+  var r = src("src/render.js"), css = COURSE_CSS, rt = src("src/runtime.js"), e = src("src/editor.js");
   // render: revealStyle -> data-reveal-style, face suppressed for off
   ok("render stamps data-reveal-style (reveal|flip|off)", /var revealStyle = block\.revealStyle === "flip" \? "flip" : block\.revealStyle === "off" \? "off" : "reveal";\s*root\.setAttribute\("data-reveal-style", revealStyle\)/.test(r));
   ok("render shows a face for reveal+flip, none for off", /var showFace = revealStyle === "off" \? false : \(revealStyle === "flip" \? true : !block\.noCover\)/.test(r));
@@ -7098,7 +7155,7 @@ section("card-reveal flip / off modes");
 section("card-reveal cover glass");
 (function () {
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var r = src("src/render.js");
   var e = src("src/editor.js");
   // the fill must be TRANSLUCENT (color-mix w/ transparent) or the backdrop-blur is defeated
@@ -7117,7 +7174,7 @@ section("card-reveal cover glass");
 // ---- §6: Accordion/Tabs beautified to the Card-Reveal visual standard ------
 section("accordion card-reveal standard");
 (function () {
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // accordion/tabs use the SAME per-mode solid fill as the cards (dark #2a2a2a / light #fff)
   ok("acc per-mode fill dark = #2a2a2a", /\.course-root\[data-mode="dark"\] \.acc\s*\{[\s\S]*?--acc-fill:\s*var\(--acc-fill-dark, #2a2a2a\)/.test(css));
   ok("acc per-mode fill light = #ffffff", /\.course-root\[data-mode="light"\] \.acc\s*\{[\s\S]*?--acc-fill:\s*var\(--acc-fill-light, #ffffff\)/.test(css));
@@ -7136,7 +7193,7 @@ section("accordion card-reveal standard");
 section("surface pattern controls");
 (function () {
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var r = src("src/render.js");
   var e = src("src/editor.js");
   // texture colour is parametrised (--tex-color) on BOTH blocks, defaulting to the hairline
@@ -7204,7 +7261,7 @@ section("sequence block tracer");
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // render function is registered in the BLOCKS map
   ok("render registers a sequence block", /\n    sequence: function \(block\) \{/.test(r));
   // node numbering is DERIVED from the index at render (index+1), never read from a stored field
@@ -7239,7 +7296,7 @@ section("card deck block");
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var r = src("src/render.js");
   var e = src("src/editor.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var rt = src("src/runtime.js");
   ok("render registers a cardDeck block", /\n    cardDeck: function \(block\) \{/.test(r));
   var cd = r.slice(r.indexOf("cardDeck: function"), r.indexOf("accordion: function"));
@@ -7303,7 +7360,7 @@ section("sequence inspector + toggles");
 (function () {
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var e = src("src/editor.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // dedicated inspector, dispatched like accordion / cardReveal
   ok("renderSequenceInspector exists", /function renderSequenceInspector\(node\)/.test(IB));
   ok("block inspector dispatches sequence -> two-level shell (Content = renderSequenceInspector)", /sequence:\s+\{ kind: "twoLevel",\s+label: "Sequence",\s+decl: "CONTENT_DECL"[\s\S]{0,90}renderSequenceInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
@@ -7340,7 +7397,7 @@ section("sequence reveal engine");
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var rt = src("src/runtime.js");
   var r = src("src/render.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var e = src("src/editor.js");
   // one bind function, registered in the engine + exported like the other binds
   ok("bindSequence exists in the runtime", /function bindSequence\(root\)/.test(rt));
@@ -7379,7 +7436,7 @@ section("sequence reveal engine");
 section("sequence appearance + texture");
 (function () {
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var r = src("src/render.js");
   var e = src("src/editor.js");
   // texture ::before on the .seq root, keyed by data-pattern + --tex-color (shape shared with
@@ -7403,7 +7460,7 @@ section("sequence per-step icons");
   var IB = src("src/editor/inspector/blocks.js");   // arch-P3b-07x
   var r = src("src/render.js");
   var e = src("src/editor.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var seqFn = r.slice(r.indexOf("sequence: function"), r.indexOf("// Item FF"));
   // icon REPLACES the marker; SVG data-URL is inlined + recoloured, raster falls back to <img>
   ok("icon replaces the marker (inlineSvg mono, else <img>)", /if \(item\.icon\) \{[\s\S]*?inlineSvg\(\{ src: item\.icon, mono: true \}\)[\s\S]*?el\("img", "seq__icon-img"\); iimg\.src = assetSrc\(item\.icon\)/.test(seqFn));
@@ -7529,7 +7586,7 @@ section("richer bullet lists");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var r = src("src/render.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var e = src("src/editor.js");
   ok("editable stamps data-list-marker", /obj\.listMarker\) node\.setAttribute\("data-list-marker", obj\.listMarker\)/.test(r));
   ok("editable pipes --li-marker-color", /obj\.listMarkerColor\) node\.style\.setProperty\("--li-marker-color", obj\.listMarkerColor\)/.test(r));
@@ -7632,7 +7689,7 @@ section("richer bullet lists");
   ok("header\/footer padding pokes live on .course-header\/.course-footer", /function pokeHeaderFooterLive\(cfg, key\)[\s\S]*?cfg === hf\.header\) \? "\.course-header"[\s\S]*?cfg === hf\.footer\) \? "\.course-footer"/.test(e));
   ok("headerFooterNum tries the live poke before a full rebuild", /if \(!pokeHeaderFooterLive\(cfg, key\)\) reapplyHeaderFooter\(\)/.test(ehf));
   // nav progress pill: author Width + Height (BACKLOG §pill P2, James 2026-07-08)
-  var rjs = src("src/render.js"), ccss = src("src/course.css");
+  var rjs = src("src/render.js"), ccss = COURSE_CSS;
   ok("render pipes pillWidth/pillHeight -> --nav-pill-width/-height + --pill-scale", /block\.pillWidth != null\) wrap\.style\.setProperty\("--nav-pill-width", block\.pillWidth \+ "px"\)[\s\S]*?block\.pillHeight != null\) \{[\s\S]*?setProperty\("--nav-pill-height", block\.pillHeight \+ "px"\)[\s\S]*?setProperty\("--pill-scale"/.test(rjs));
   ok("css pill forces width + height from the vars (border-box)", /box-sizing: border-box[\s\S]*?width: var\(--nav-pill-width, auto\); max-width: var\(--nav-pill-width, 460px\)[\s\S]*?height: var\(--nav-pill-height, auto\)/.test(ccss));
   ok("pill Width + Height iconFields in the Progress-pill nest", /iconField\("W", \{ value: child\.pillWidth/.test(ehf) && /iconField\("H", \{ value: child\.pillHeight/.test(ehf));
@@ -7680,7 +7737,7 @@ section("embed align centering");
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
   var x = src("src/export.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // unified responsive model: fit-to-width capped at natural (no fitFill), centred default
   ok("fitEmbedsIn scales fit-to-width capped at natural", /var s = Math\.min\(1, avail \/ dw\); \/\/ .174 unified/.test(e));
   ok("no Fit/Fill toggle in embed inspector", !/segmentedLive\("Width", \[\["Fit", "fit"\], \["Fill", "fill"\]\]/.test(e));
@@ -8073,7 +8130,7 @@ section("#152 image blend mode");
   // arch-P3b-06: the hotspots editor moved to src/editor/hotspots-editor.js.
   var eh = src("src/editor/hotspots-editor.js");
   var r = src("src/render.js");
-  var c = src("src/course.css");
+  var c = COURSE_CSS;
   var e = src("src/editor.js");
   // render is PURE: reads block.blendMode, sets the --img-blend var on the figure,
   // and skips it when unset or "normal" (so the default stays untouched).
@@ -8581,7 +8638,7 @@ section("zoomed-out plain-page LOD (#172)");
   ok("world--far / FAR_ZOOM never leak into render() or course output",
     src("src/render.js").indexOf("world--far") === -1 &&
     src("src/render.js").indexOf("FAR_ZOOM") === -1 &&
-    src("src/course.css").indexOf("world--far") === -1);
+    COURSE_CSS.indexOf("world--far") === -1);
 })();
 
 // ---- background-pause power governor (#179): stop forever-timers while occluded -----------
@@ -8607,7 +8664,7 @@ section("background-pause power governor (#179)");
   // Invariant: a power tweak, never course output.
   ok("__autosaveGov / visibilitychange pause never leak into render()/course.css",
     src("src/render.js").indexOf("__autosaveGov") === -1 &&
-    src("src/course.css").indexOf("visibilitychange") === -1);
+    COURSE_CSS.indexOf("visibilitychange") === -1);
 })();
 
 // ---- native-snapshot gesture proxy (#151): real bitmap instead of blanking while moving -----
@@ -8675,7 +8732,7 @@ section("native-snapshot gesture proxy (#151)");
   ok("snapshot proxy never leaks into render()/course.css",
     src("src/render.js").indexOf("nativeSnapshot") === -1 &&
     src("src/render.js").indexOf("canvas-proxy") === -1 &&
-    src("src/course.css").indexOf("canvas-proxy") === -1);
+    COURSE_CSS.indexOf("canvas-proxy") === -1);
 })();
 
 // ---- native-scroll pan (#151 lever 1): pan by native scrolling, no re-raster, no blanking ----
@@ -8750,7 +8807,7 @@ section("native-scroll pan (#151 lever 1)");
     /\.canvas\.native-scroll \{ overflow: auto;/.test(css) && /\.canvas\.native-scroll::-webkit-scrollbar \{ width: 0; height: 0; \}/.test(css) && /\.canvas-scroll \{ position: relative; \}/.test(css));
   ok("native-scroll never leaks into render()/course.css",
     src("src/render.js").indexOf("NATIVE_SCROLL") === -1 &&
-    src("src/course.css").indexOf("native-scroll") === -1);
+    COURSE_CSS.indexOf("native-scroll") === -1);
   ok("under native-scroll, markNavigating skips the blanking classes (zoom paints LIVE, not black)", (function () {
     var win = EDITOR_BOOT.boot();
     win.__nativeScroll(true);
@@ -9221,7 +9278,7 @@ section("note callout container");
   var noteFn = slice(r, "note: function (block)", "},");
   ok("note renders as a div (not a p)", /editable\("div",\s*"body-note"/.test(noteFn));
   ok("note is NOT a <p> callout", !/editable\("p",\s*"body-note"/.test(noteFn));
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   ok("course.css keeps the .body-note accent", /\.body-note\s*\{[^}]*border-left:/.test(css));
   ok("nested block margins collapse inside the callout", /\.body-note\s*>\s*:first-child/.test(css) && /\.body-note\s*>\s*:last-child/.test(css));
 })();
@@ -9271,7 +9328,7 @@ section("Verso Viewer (V1 + app)");
 // ---- §1: light/dark mode crossfade ---------------------------------------
 section("mode crossfade");
 (function () {
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   var DEMO = src("src/editor/demo.js");   // arch-P3b-07j
   // reading surfaces ease their palette; scoped to [data-mode] so no-JS first paint doesn't animate
   ok("root+text reading surfaces transition on mode flip (var-driven)", /\.course-root\[data-mode\],\s*\[data-mode\] \.course-root,\s*\[data-mode\] \.page,[\s\S]*?transition: background-color var\(--motion-mode-fade, 300ms\) ease, color var\(--motion-mode-fade, 300ms\) ease, border-color var\(--motion-mode-fade, 300ms\) ease/.test(css));
@@ -9294,7 +9351,7 @@ section("image lightbox");
 (function () {
   // arch-P3b-07e: the header/footer editor moved to src/editor/header-footer.js.
   var ehf = src("src/editor/header-footer.js");
-  var r = src("src/render.js"), rt = src("src/runtime.js"), css = src("src/course.css"), e = src("src/editor.js");
+  var r = src("src/render.js"), rt = src("src/runtime.js"), css = COURSE_CSS, e = src("src/editor.js");
   // render: standard-on zoomable + caption carried on the figure, opt-out via noZoom
   ok("render marks images zoomable unless noZoom", /if \(block\.noZoom !== true\) \{\s*fig\.classList\.add\("block-image--zoomable"\)/.test(r));
   // Author image corner radius: block.radius -> --img-radius on the figure (0 = square),
@@ -9327,7 +9384,7 @@ section("image lightbox");
 // ---- onboarding tour RETIRED (#215): settings-driven tour fully removed -----
 section("onboarding tour retired");
 (function () {
-  var r = src("src/render.js"), rt = src("src/runtime.js"), css = src("src/course.css"), e = src("src/editor.js"), ex = src("src/export.js");
+  var r = src("src/render.js"), rt = src("src/runtime.js"), css = COURSE_CSS, e = src("src/editor.js"), ex = src("src/export.js");
   // The retired feature is the doc-level onboarding OVERLAY (doc.tour + window.__tour hook +
   // bindTour + .tour-ring/.tour-bubble/.tour-layer + a "Guided tour" settings TAB). The later
   // footer coach-mark tour (block.tour -> data-tour-page/-key, no __tour hook) is a SEPARATE
@@ -9376,7 +9433,7 @@ section("outliner collapse-all");
 // ---- neon-pink empty placeholders (authoring build aid) ------------------
 section("neon-pink empty placeholders");
 (function () {
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // scoped to the authoring canvas (:not([data-env])) so it never ships / never shows in preview
   ok("empty image/embed placeholders glare neon pink on the authoring canvas", /\.course-root:not\(\[data-env\]\) \.block-image--empty,[\s\S]*?\.course-root:not\(\[data-env\]\) \.embed--empty \.embed__iframe \{\s*border: 2px dashed #ff2bd6/.test(css));
   ok("neon-pink text on empty titles/subs/frame", /\.course-root:not\(\[data-env\]\) \.block-frame__empty \{ color: #ff2bd6; \}/.test(css));
@@ -9632,7 +9689,7 @@ section("hotspot per-card size");
   ok("editor: per-card size guarded to card markers (#215 action !== 'navigate')", /if \(active\.action !== "navigate"\) \{\s*\/\/ Per-hotspot popover-card size\./.test(eh));
   // centre-overlay placement: card centred on the image, arrow hidden, X/outside/Esc close
   var rt = src("src/runtime.js");
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   ok("runtime: place='center' centres the card in the stage + data-side=center (no arrow anchor)", /if \(place === "center"\) \{[\s\S]{0,200}left = \(sw - pw\) \/ 2;[\s\S]{0,120}top = \(sh - ph\) \/ 2;[\s\S]{0,260}pop\.setAttribute\("data-side", "center"\);/.test(rt));
   ok("css: centre overlay hides the pointer arrow", /\.hotspot-popover\[data-side="center"\]::after \{ display: none; \}/.test(css));
   ok("editor: placement segmented offers Centre -> 'center'", /\["Centre", "center"\]/.test(eh));
@@ -10199,7 +10256,7 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   // still present. The flip to a hard --ui-* fail lands with the alias teardown
   // (#21) — do not hard-fail on it here.
   var css = EDITOR_CSS;
-  var courseCss11 = src("src/course.css");
+  var courseCss11 = COURSE_CSS;
   var icons = src("src/icons.js");
   var uiKit = src("src/ui-kit.js");
 
@@ -10214,11 +10271,11 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
        fs.existsSync(path.join(ROOT, "design-system/tokens", f)));
   });
   IMPORTED_TOKEN_FILES.forEach(function (f) {
-    ok("editor.css imports design-system/tokens/" + f,
-       new RegExp('@import\\s+"design-system/tokens/' + f.replace(".", "\\.") + '"').test(css));
+    ok("the chrome stylesheet imports design-system/tokens/" + f,
+       new RegExp('@import\\s+"\\.\\./\\.\\./design-system/tokens/' + f.replace(".", "\\.") + '"').test(css));   // arch-P5-01: ../../ from styles/editor/
   });
-  ok("editor.css does NOT import the DS font token file (fonts vendored locally, no CDN)",
-     !/@import\s+"design-system\/tokens\/fonts\.css"/.test(css));
+  ok("the chrome stylesheet does NOT import the DS font token file (fonts vendored locally, no CDN)",
+     !/@import\s+"(\.\.\/)*design-system\/tokens\/fonts\.css"/.test(css));
 
   // (air-gap invariant) NO shipping CSS may reach an external font CDN. The
   // editor claims "no external network calls at all" / "no phone-home"; a
@@ -10228,7 +10285,8 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   // whole file -- a @import could otherwise hide in any of the fourteen.
   var CDN_FONT_CSS = JSON.parse(src("styles/editor/order.json"))
     .map(function (o) { return "styles/editor/" + o.file; })
-    .concat(["src/course.css", "design-system/tokens/fonts.css", "design-system/styles.css"]);
+    .concat(JSON.parse(src("styles/course/order.json")).map(function (o) { return "styles/course/" + o.file; }))
+    .concat(["design-system/tokens/fonts.css", "design-system/styles.css"]);   // arch-P5-02
   CDN_FONT_CSS.forEach(function (f) {
     var body = src(f);
     ok("no external font-CDN reference in " + f + " (fonts.googleapis/gstatic)",
@@ -10412,7 +10470,7 @@ section("ui-kit #10 DS control set");
   ok("switchEl keeps a local fallback (library-absent safety)", /b\.appendChild\(h\("span", "uiswitch__knob"\)\);/.test(ed));
 
   // Chrome-only invariant: the DS control set never leaks into the ship path.
-  var courseCss = src("src/course.css");
+  var courseCss = COURSE_CSS;
   ok("course.css carries no vds-* chrome classes", courseCss.indexOf("vds-") === -1);
   var renderJs = src("src/render.js");
   ok("render() never imports the chrome control library", renderJs.indexOf("VersoUI") === -1);
@@ -10511,7 +10569,7 @@ section("Product Rail: 3-stage rail + product dropdown");
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
   var renderJs = src("src/render.js");
   ok("render() never reads the rail/product-picker state", renderJs.indexOf("stageWorkspaceClass") === -1 && renderJs.indexOf("__activeStage") === -1);
-  var courseCss = src("src/course.css");
+  var courseCss = COURSE_CSS;
   ok("course.css carries no stage-placeholder/product-picker chrome classes", courseCss.indexOf("stage-placeholder") === -1 && courseCss.indexOf("product-picker") === -1);
 })();
 
@@ -10614,7 +10672,7 @@ section("Product Rail: Source stage nav + article");
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
   var renderJs = src("src/render.js");
   ok("render() never reads Source-stage state", renderJs.indexOf("__sourceActiveTopicId") === -1 && renderJs.indexOf("renderSourceStage") === -1);
-  var courseCss = src("src/course.css");
+  var courseCss = COURSE_CSS;
   ok("course.css carries no source-stage chrome classes", courseCss.indexOf("source-stage") === -1);
 })();
 
@@ -11119,7 +11177,7 @@ section("Product Rail: Source stage variant columns");
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
   ok("render() never reads variant-column pill state", renderJs.indexOf("__sourceActiveVariants") === -1 && renderJs.indexOf("buildVariantPillsRow") === -1);
-  var courseCss = src("src/course.css");
+  var courseCss = COURSE_CSS;
   ok("course.css carries no variant-column/toggle-chip chrome classes", courseCss.indexOf("vds-chip") === -1 && courseCss.indexOf("source-stage__col") === -1);
 })();
 
@@ -11339,7 +11397,7 @@ section("Product Rail: Source stage info panel");
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
   ok("render() never reads the info-panel state", renderJs.indexOf("renderSourceInfoPanel") === -1 && renderJs.indexOf("libraryWhereUsedDetail") === -1);
-  var courseCss = src("src/course.css");
+  var courseCss = COURSE_CSS;
   ok("course.css carries no info-panel chrome classes", courseCss.indexOf("source-stage__info") === -1 && courseCss.indexOf("source-stage__linked-row") === -1);
 })();
 
@@ -13637,7 +13695,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   var ed = src("src/editor.js");
   var css = EDITOR_CSS;
   var idx = src("index.html");
-  var courseCss = src("src/course.css");
+  var courseCss = COURSE_CSS;
   ok("grid mode is a localStorage VIEW pref (GRID_KEY)", /GRID_KEY\s*=\s*"authoring\.gridMode"/.test(ed));
   // arch-P3-07: the cycle is src/editor/canvas-view.js now.
   ok("cycle order off->thirds->quarters->columns->fine",
@@ -13830,7 +13888,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("runtime toggles .is-tour-live per visit", /classList\.toggle\("is-tour-live", live\)/.test(run));
   ok("runtime binds accordion dot clicks", /course-tour__dot[\s\S]{0,600}closeTour\(open \? m : null\)/.test(run));
   // course.css: hidden until live, tokens-only (no raw accent hex)
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   ok("css hides markers until .is-tour-live", /\.course-tour \{[\s\S]{0,200}visibility: hidden/.test(css) && /\.course-nav\.is-tour-live \.course-tour \{ visibility: visible/.test(css));
   ok("css tour colours are theme tokens (no raw hex)", /\.course-tour__core \{[\s\S]{0,120}var\(--color-accent\)/.test(css) && !/course-tour[\s\S]*?#[0-9a-fA-F]{3,6}/.test(css.slice(css.indexOf(".course-tour"), css.indexOf("/* disclaimer footer"))));
   ok("css label is LEFT-aligned with Exo title / body copy", /\.course-tour__inner \{[\s\S]{0,240}text-align: left/.test(css) && /\.course-tour__title \{[\s\S]{0,160}var\(--font-heading\)/.test(css) && /\.course-tour__desc \{[\s\S]{0,160}var\(--font-body\)/.test(css));
@@ -14021,7 +14079,7 @@ section("#116 copy-editor shell");
   ok("markup: empty doc container for slices 2-4", /<div class="copyedit__doc" id="copyedit-doc"><\/div>/.test(html));
   // pure-render invariant: the copy editor is Verso UI only — render.js / course.css untouched
   ok("invariant: no copy-editor leak into render.js", src("src/render.js").indexOf("copyedit") === -1 && src("src/render.js").indexOf("copy-editor") === -1);
-  ok("invariant: no copy-editor leak into course.css", src("src/course.css").indexOf("copyedit") === -1);
+  ok("invariant: no copy-editor leak into course.css", COURSE_CSS.indexOf("copyedit") === -1);
 })();
 
 // chrome invariant (product-rail-editor-fb-chrome-invariant-defullscreen): the file picker
@@ -14363,7 +14421,7 @@ section("#104 copy-editor variant columns");
 
   // invariant: still editor chrome only — no leak into render/course output
   ok("invariant: no side-by-side leak into render.js", src("src/render.js").indexOf("copyedit-cell") === -1 && src("src/render.js").indexOf("copyEditSbs") === -1);
-  ok("invariant: no side-by-side leak into course.css", src("src/course.css").indexOf("copyedit-cell") === -1);
+  ok("invariant: no side-by-side leak into course.css", COURSE_CSS.indexOf("copyedit-cell") === -1);
 })();
 
 // ---- #44 light mode for the tool's own UI (editor chrome) -----------------
@@ -14388,7 +14446,7 @@ section("#44 editor-chrome light mode");
   ok("rich-text toolbar is tokenised (flips)", /\.rt-toolbar \{[\s\S]{0,200}background: var\(--surface-raised\); border: 1px solid var\(--border-strong\);/.test(css));
   ok("no hardcoded #2f2f2f focus backgrounds remain in the shell", css.indexOf("background: #2f2f2f") === -1);
   // invariant: chrome theme never leaks into the course output (course.css owns its own tokens)
-  ok("course.css does not define the DS chrome surface token", src("src/course.css").indexOf("--surface-app:") === -1);
+  ok("course.css does not define the DS chrome surface token", COURSE_CSS.indexOf("--surface-app:") === -1);
   ok("render.js never reads the chrome theme class", src("src/render.js").indexOf("theme-light") === -1);
 })();
 
@@ -14595,7 +14653,7 @@ section("#212 comment popover clamp");
 // ---- interaction-gate reminder pins above the pinned Next button ---------
 section("gate-hint pins above pinned Next");
 (function () {
-  var css = src("src/course.css");
+  var css = COURSE_CSS;
   // default (unpinned): floats above the footer bar, right-aligned
   ok("gate-hint floats above the bar by default",
     /\.course-nav__gate-hint \{[\s\S]*?position: absolute; bottom: calc\(100% \+ 10px\); right: 0;/.test(css));

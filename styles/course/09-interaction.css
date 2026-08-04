@@ -1,0 +1,11 @@
+/* ---- interaction system ---------------------------- */
+/* Acknowledge / Checkbox: shipped course content, token-driven. */
+.block-checkbox { display: flex; align-items: flex-start; gap: var(--space-sm); font-family: var(--font-body); font-size: 15px; line-height: 1.5; color: var(--color-ink); cursor: pointer; }
+.block-checkbox__input { width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--color-accent); cursor: pointer; }
+.block-checkbox__input:disabled { cursor: not-allowed; }
+.block-checkbox__label { flex: 1 1 auto; }
+
+/* Reactive gate — locked visual state (the runtime toggles .is-locked live). */
+.is-locked { opacity: 0.45; pointer-events: none; filter: saturate(0.6); transition: opacity 0.2s ease; }
+.block-gate-hint { margin-top: var(--space-xs); font-family: var(--font-body); font-size: 12.5px; font-style: italic; color: var(--color-muted); }
+.is-locked .block-gate-hint { pointer-events: none; }

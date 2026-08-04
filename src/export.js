@@ -839,7 +839,20 @@
     var fetches = [];
 
     // live single-source assets
-    fetches.push(fetchText("src/course.css").then(function (css) { files.push(textFile("course.css", css)); }));
+    // arch-P5-02: course.css is styles/course/*.css now. The exporter reads the DECLARED order and
+    // concatenates -- so the package still contains exactly one course.css, byte for byte what it
+    // contained before. Reading N files instead of 1 is the exporter doing its job (it already
+    // assembles a dozen sources into one zip); it is not a build step, and nothing is generated
+    // that source does not already hold. Order is the correctness property: CSS cascades, so the
+    // sequence in order.json IS the stylesheet.
+    fetches.push(
+      fetchText("styles/course/order.json")
+        .then(function (json) {
+          var order = JSON.parse(json);
+          return Promise.all(order.map(function (o) { return fetchText("styles/course/" + o.file); }));
+        })
+        .then(function (parts) { files.push(textFile("course.css", parts.join("\n"))); })
+    );
     fetches.push(fetchText("export/scorm-api.js").then(function (js) { files.push(textFile("scorm-api.js", js)); }));
     // the shared interaction engine — bundled live from source (single source of
     // truth, same as course.css) and loaded by the shell before its inline runtime

@@ -25,7 +25,20 @@
   <link rel="stylesheet" href="styles/editor/12-controls.css">   <!-- the canonical control set -->
   <link rel="stylesheet" href="styles/editor/13-home.css">   <!-- the course browser -->
   <link rel="stylesheet" href="styles/editor/14-collab.css">   <!-- live-collaboration presence chrome -->
-  <link rel="stylesheet" href="src/course.css">
+  <!-- arch-P5-02: src/course.css was 2,104 lines. It is styles/course/*.css now, in the order
+       declared by styles/course/order.json. The SCORM exporter reads that same list and inlines them
+       into one course.css, so the shipped package is byte-identical. No build step. -->
+  <link rel="stylesheet" href="styles/course/01-base.css">   <!-- tokens, the course root, typography and the page frame -->
+  <link rel="stylesheet" href="styles/course/02-motion.css">   <!-- global motion: the chapter-change fade and what honours reduced-motion -->
+  <link rel="stylesheet" href="styles/course/03-tour.css">   <!-- the guided tour: learner coach-marks -->
+  <link rel="stylesheet" href="styles/course/04-flip.css">   <!-- flip mode: the 3D card face swap -->
+  <link rel="stylesheet" href="styles/course/05-embeds.css">   <!-- embed blocks -->
+  <link rel="stylesheet" href="styles/course/06-breakpoints.css">   <!-- responsive breakpoints -->
+  <link rel="stylesheet" href="styles/course/07-primitives.css">   <!-- the primitive blocks: text, media and layout -->
+  <link rel="stylesheet" href="styles/course/08-quiz.css">   <!-- the quiz block -->
+  <link rel="stylesheet" href="styles/course/09-interaction.css">   <!-- the interaction/gating system -->
+  <link rel="stylesheet" href="styles/course/10-hotspots.css">   <!-- image hotspots -->
+  <link rel="stylesheet" href="styles/course/11-accordion.css">   <!-- the accordion / tabs block -->
 </head>
 <body>
   <!-- ==================== top toolbar ==================== -->

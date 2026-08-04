@@ -1,0 +1,68 @@
+/* ==================== embed blocks (M7) ==================== */
+.embed { margin: 0 0 var(--space-md); }
+.embed__cap {
+  margin-bottom: var(--space-xs);
+  font-family: var(--font-heading); font-size: 13px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent);
+}
+/* embeds render exactly as authored — NO imposed border/radius. Optional border
+   + corner radius are per-embed params (set inline by render from the block). */
+.embed__fit { width: 100%; overflow: hidden; }
+/* §174: align in plain page flow — a SIZED top-level block (fit-width image/embed)
+   centres / right-aligns, not only inside a flex group. Full-width blocks are
+   unaffected (margin auto no-ops at 100% width); the embed centres its scaled iframe
+   via the fit runtime, this handles images + other intrinsically-narrow blocks. */
+.page > [data-align="center"]:not([data-embed]) { margin-inline: auto; }
+.page > [data-align="end"]:not([data-embed]) { margin-left: auto; margin-right: 0; }
+.embed--html .embed__iframe {
+  display: block; width: 100%; border: 0; background: var(--color-surface);
+}
+.embed--web .embed__video {
+  display: block; width: 100%; border: 0; background: #000;
+}
+/* §176/§180: managed letterbox fill on EVERY web embed. Fills any space around the
+   media with the THEME background (tracks light/dark; overridden inline by author
+   embedBg) so no unmanaged white bands on any provider. Background ONLY — no sizing:
+   a generic (non-video) embed keeps its full-width iframe + authored height. */
+.embed--filled { background: var(--color-bg); }
+/* Video embeds (Vimeo / YouTube / self-hosted) ONLY: the media is sized 16:9 (render
+   sets aspect-ratio + width:auto) so it FILLS its frame with no player letterbox; the
+   wrapper centres it — so the old black bars become the page colour + the video floats
+   on it. §180: these sizing rules are gated on .embed--video, which render adds ONLY to
+   real media — a generic form embed (e.g. Microsoft Forms) never receives it, so it is
+   no longer collapsed to width:auto/contain. */
+.embed--video { display: flex; align-items: center; justify-content: center; }
+.embed--video .embed__video { width: auto; max-width: 100%; background: var(--color-bg); object-fit: contain; }
+.embed__empty-hint {
+  display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  padding: var(--space-lg);
+  background: repeating-linear-gradient(45deg, var(--color-surface), var(--color-surface) 12px, var(--color-surface-alt) 12px, var(--color-surface-alt) 24px);
+  border: 1px dashed var(--color-hair); border-radius: var(--radius-card);
+}
+.embed__empty-title {
+  font-family: var(--font-heading); font-size: 14px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-accent);
+}
+.embed__empty-sub { font-size: 13px; color: var(--color-muted); }
+.embed--empty .embed__iframe {
+  min-height: 200px;
+  background: repeating-linear-gradient(45deg, var(--color-surface), var(--color-surface) 10px, var(--color-surface-alt) 10px, var(--color-surface-alt) 20px);
+}
+.embed--web .embed__web-card {
+  display: flex; align-items: center; gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface); border: 1px solid var(--color-hair);
+  border-radius: var(--radius-card);
+}
+.embed__play {
+  flex: 0 0 auto; width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-accent); color: #1b1c1e; font-size: 18px;
+}
+.embed__meta { min-width: 0; }
+.embed__provider {
+  font-family: var(--font-heading); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.08em; color: var(--color-ink);
+}
+.embed__url { font-size: 13px; color: var(--color-ink-soft); word-break: break-all; }
+.embed__note { margin-top: 2px; font-size: 12px; font-style: italic; color: var(--color-muted); }
