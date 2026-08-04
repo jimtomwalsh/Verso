@@ -1436,6 +1436,160 @@ section("platform-pivot 02 server-of-one");
 })();
 
 // ---- platform-pivot 02: server source-shape invariants (never renders / no deps) ----
+// ---- platform-pivot 34: the server-mode bootstrap (THE ON-RAMP) --------------
+// Before this ticket, `grep -rn '__versoServerUrl'` returned ONLY readers. store-http.js
+// gated on it, sync-client.js gated on it, and nothing in the app, the server, or the
+// desktop shell ever set it -- so the whole server posture (HTTP storage, presence,
+// locking, reconnect replay) was built, tested, and unreachable. These tests exist so it
+// can never quietly become unreachable again.
+section("platform-pivot 34 server-mode bootstrap");
+(function () {
+  // --- index.html wiring (the ordering that makes the sync-read contract work) ---
+  var html = src("index.html");
+  var iBoot = html.indexOf('src="api/bootstrap.js"');
+  var iHttp = html.indexOf('src="src/store-http.js"');
+  ok("34: index.html loads the bootstrap", iBoot > -1);
+  ok("34: bootstrap precedes store-http.js (blocking + ordered -> globals exist before any reader)", iBoot > -1 && iHttp > iBoot);
+  ok("34: the bootstrap src is RELATIVE, never absolute (offline-safe; hygiene gate)",
+    !/<script[^>]+src=["']https?:\/\/[^"']*bootstrap\.js/i.test(html));
+
+  // --- the app must SAY it is on a server ---
+  // Found in this ticket's own verification screenshot: the Files footer read "This browser
+  // (localStorage + IndexedDB)" while every save was going to SQLite on a shared backend.
+  // The one line whose job is to say where the work lives was saying the wrong thing.
+  (function () {
+    var home = src("src/editor/home.js");
+    ok("34: the store-location line handles the http backend", /b === "http"/.test(home));
+    ok("34: it names the server host", /__versoServerUrl/.test(home) && /shared with your team/.test(home));
+    ok("34: signed out says nothing is saving", /signed out, nothing is saving/.test(home));
+  })();
+
+  // --- exactly ONE script may be absent from disk, and this is it ---
+  // The boot harness skips a script the repo does not contain, because that is what a
+  // browser does with a 404 and it IS the standalone posture. That tolerance must not
+  // become cover for a typo'd src, so the absent set is pinned to one name.
+  (function () {
+    var missing = [];
+    ["index.html", "kit.html"].forEach(function (page) {
+      var seen = {};
+      require(path.join(__dirname, "_editor.js")).scripts(page).forEach(function (e) {
+        if (typeof e !== "string" || seen[e]) return;
+        seen[e] = true;
+        if (!fs.existsSync(path.join(ROOT, e))) missing.push(e);
+      });
+    });
+    ok("34: exactly one page script is absent from disk, and it is the server-generated bootstrap",
+      missing.length === 1 && missing[0] === "api/bootstrap.js");
+  })();
+
+  // --- store-http must fail LOUDLY when signed out, never fall back ---
+  var sh = src("src/store-http.js");
+  ok("34: store-http reads __versoServerAuthRequired", /__versoServerAuthRequired/.test(sh));
+  ok("34: signed-out writes return {ok:false} rather than an optimistic ok",
+    /if \(authRequired\) \{ reportFailure\(SIGNED_OUT\); return \{ ok: false/.test(sh));
+  ok("34: a 401/403 on a durable write flips the adapter to the signed-out state",
+    /r\.status === 401 \|\| r\.status === 403/.test(sh));
+
+  // CI pins Node 20, and node:sqlite arrived in 22.5 -- so on CI server/verso-server.js cannot
+  // even be REQUIRED: server/store.js pulls the driver in at module load. Everything above this
+  // line reads source text and needs no server at all, so it runs everywhere; the guard sits
+  // immediately in front of the first require, which is the only thing that cannot survive it.
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> bootstrap server tests skipped"); return; }
+
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var B = srv.buildBootstrap;
+  // Run the emitted text as real JS against a stand-in window, which is the only honest
+  // check: a bootstrap that is subtly invalid JS fails silently in a script tag. Executed
+  // through vm, the same way tests/_load.js runs a real page script -- NOT `new Function`,
+  // which the arch-P2 slice ratchet counts (and rightly: this is the suite's one and only
+  // legitimate reason to execute generated text, and it should not blur into that habit).
+  var vm34 = require("vm");
+  function runBootstrap(text) {
+    var win = { location: { origin: "https://verso.internal" } };
+    win.window = win;
+    vm34.runInContext(text, vm34.createContext(win), { filename: "api/bootstrap.js" });
+    return win;
+  }
+
+  // --- signed in: the data arrives ---
+  var reg = JSON.stringify({ "C-1": { meta: { code: "C-1", title: "Sample" } } });
+  var w = runBootstrap(B({ mode: "server" }, reg, { kind: "user", role: "author", name: "Ada" }));
+  ok("34: bootstrap is valid, executable JS", typeof w.__versoServerUrl === "string");
+  ok("34: server URL is the browser's own origin (survives whatever host IIS presents)", w.__versoServerUrl === "https://verso.internal");
+  ok("34: mode is reported", w.__versoServerMode === "server");
+  ok("34: signed in -> authRequired false", w.__versoServerAuthRequired === false);
+  ok("34: registry arrives base64-inlined, byte-faithful",
+    Buffer.from(w.__versoServerRegistryB64, "base64").toString("utf8") === reg);
+  ok("34: the principal is named (kind/role/name only)",
+    w.__versoServerPrincipal.role === "author" && w.__versoServerPrincipal.name === "Ada" &&
+    Object.keys(w.__versoServerPrincipal).sort().join(",") === "kind,name,role");
+
+  // --- signed out: the mode still arrives, the data does not ---
+  // This is the ticket's whole point. If a signed-out client learned nothing, store-http
+  // would not install, pickFacetAdapter would fall back to the browser store, and the
+  // author would edit into localStorage believing they were on the shared server.
+  var wo = runBootstrap(B({ mode: "server" }, reg, null));
+  ok("34: signed out STILL sets the server URL (never a silent local fallback)", wo.__versoServerUrl === "https://verso.internal");
+  ok("34: signed out -> authRequired true", wo.__versoServerAuthRequired === true);
+  ok("34: signed out -> no registry leaks", wo.__versoServerRegistryB64 === undefined);
+  ok("34: signed out -> no principal leaks", wo.__versoServerPrincipal === undefined);
+
+  // --- fresh store: absent, not empty ---
+  var wf = runBootstrap(B({ mode: "local" }, null, { kind: "owner", role: "admin", name: "Owner" }));
+  ok("34: local mode reported", wf.__versoServerMode === "local" && wf.__versoServerAuthRequired === false);
+  ok("34: a fresh store yields NO registry global (absent is distinguishable from empty)", wf.__versoServerRegistryB64 === undefined);
+
+  // --- script-context safety ---
+  ok("34: '<' is escaped so the text is safe inside a <script>",
+    B({ mode: "</script><b>" }, null, null).indexOf("</script>") === -1);
+
+  // --- HTTP: the route itself, against a real running server ---
+  __async.push(withServer(async function (base) {
+    var r = await fetch(base + "/api/bootstrap.js");
+    ok("34: GET /api/bootstrap.js -> 200", r.status === 200);
+    ok("34: served as JavaScript", /application\/javascript/.test(r.headers.get("content-type") || ""));
+    ok("34: never cached (a stale bootstrap boots an author into a stale world)", /no-store/.test(r.headers.get("cache-control") || ""));
+    var wl = runBootstrap(await r.text());
+    ok("34: local mode -> no auth required", wl.__versoServerAuthRequired === false);
+    ok("34: fresh server -> no registry global yet", wl.__versoServerRegistryB64 === undefined);
+    // save, then re-bootstrap: the registry an author boots into is the one on disk
+    var regJson = JSON.stringify({ "C-9": { meta: { code: "C-9", title: "Saved" } } });
+    await (await fetch(base + "/api/registry", { method: "PUT", body: regJson })).json();
+    var w2 = runBootstrap(await (await fetch(base + "/api/bootstrap.js")).text());
+    ok("34: after a save, the bootstrap carries the on-disk registry",
+      Buffer.from(w2.__versoServerRegistryB64, "base64").toString("utf8") === regJson);
+  }));
+
+  // --- server mode, no session: 200 with no data, NOT 401 ---
+  var os = require("os");
+  var tmp34 = fs.mkdtempSync(path.join(os.tmpdir(), "verso-boot34-"));
+  __async.push((async function () {
+    var server, base;
+    await new Promise(function (resolve) {
+      server = srv.startServer({ mode: "server", host: "127.0.0.1", port: 0, dbPath: path.join(tmp34, "verso.sqlite"), linkSecret: "s3cr3t" }, function (s) { base = "http://127.0.0.1:" + s.address().port; resolve(); });
+    });
+    try {
+      var r = await fetch(base + "/api/bootstrap.js");
+      ok("34: server mode + no session -> 200, NOT 401 (a 401 here is the silent-strand bug)", r.status === 200);
+      var wns = runBootstrap(await r.text());
+      ok("34: unauthenticated client still learns it is in server mode", wns.__versoServerMode === "server" && wns.__versoServerAuthRequired === true);
+      ok("34: unauthenticated client gets no registry", wns.__versoServerRegistryB64 === undefined);
+      // and a real storage route still rejects, so the boundary itself is untouched
+      ok("34: the identity boundary is unchanged (/api/registry still 401s)", (await fetch(base + "/api/registry")).status === 401);
+      // signed in, the same route hands over the data
+      server.__identity.registerLocalAccount("ada@x", "Ada", "pw", "author");
+      var lr = await fetch(base + "/auth/login", { method: "POST", body: JSON.stringify({ email: "ada@x", password: "pw" }) });
+      var cookie = (lr.headers.get("set-cookie") || "").split(";")[0];
+      var wsi = runBootstrap(await (await fetch(base + "/api/bootstrap.js", { headers: { cookie: cookie } })).text());
+      ok("34: signed in -> authRequired false and the principal is named", wsi.__versoServerAuthRequired === false && wsi.__versoServerPrincipal.name === "Ada");
+    } finally {
+      try { server.close(); } catch (e) {}
+      try { fs.rmSync(tmp34, { recursive: true, force: true }); } catch (e) {}
+    }
+  })());
+})();
+
 section("platform-pivot 02 server invariants");
 (function () {
   var s = src("server/verso-server.js") + src("server/store.js") + src("server/index.js") + src("server/block-store.js") + src("server/sync.js") + src("server/sync-wire.js") + src("server/lock-manager.js") + src("server/lock-reaper.js");

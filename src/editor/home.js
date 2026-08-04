@@ -148,10 +148,22 @@
     // ---- File store location -------------------------------------------------
     // The one place the app admits out loud whether the work is in a real folder or in browser
     // storage. The retired overlay's footer read it; Files reads it now.
+    // platform-pivot 34: the server posture has to appear here too. It read "This browser
+    // (localStorage + IndexedDB)" while every save was going to a shared server -- the one
+    // line whose whole job is to say where the work lives, saying the wrong thing. On a
+    // shared backend that is not cosmetic: an author who believes their work is local
+    // hoards it, and an author who believes it is shared assumes a colleague can see it.
+    // Signed out is called out by name, because then it is going NOWHERE.
     function storeLocationText() {
-      return storageBackend() === "file"
-        ? "~/Library/Application Support/Verso/store"
-        : "This browser (localStorage + IndexedDB)";
+      var b = storageBackend();
+      if (b === "file") return "~/Library/Application Support/Verso/store";
+      if (b === "http") {
+        if (window.__versoServerAuthRequired) return "Verso server — signed out, nothing is saving";
+        var host = "";
+        try { host = new URL(window.__versoServerUrl || "").host; } catch (e) {}
+        return "Verso server" + (host ? " (" + host + ")" : "") + " — shared with your team";
+      }
+      return "This browser (localStorage + IndexedDB)";
     }
 
     kernel.expose({
