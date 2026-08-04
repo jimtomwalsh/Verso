@@ -519,8 +519,33 @@
   padding: var(--space-4, 8px) var(--space-4, 8px) var(--space-2, 4px);
   border-bottom: 1px solid var(--border-strong);
 }
-.files-band__name { font-size: var(--text-sm, 12px); font-weight: 600; color: var(--text-primary); }
+.files-band__name { font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); font-family: var(--font-brand, var(--font-ui)); }
 .files-band__note { font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+/* uio-W05: WHICH SOURCE DOCUMENT DOES THIS PRODUCT TRACE BACK TO? The band header answers it
+   without you opening anything -- that relationship is what makes a product more than a tag, and a
+   header that only counted documents left it invisible. The name carries the accent because it is
+   the answer; the label in front of it is just scaffolding. */
+.files-band__primary { display: inline-flex; align-items: baseline; gap: var(--space-2, 4px); font-size: var(--text-xs, 11px); min-width: 0; }
+.files-band__primary-label { color: var(--text-tertiary, var(--text-secondary)); }
+.files-band__primary-name { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A product with no primary source says so. A blank where a name should be reads as a bug, and a
+   new product legitimately has none yet. */
+.files-band__primary-none { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+
+/* THE DIVIDER TREATMENT. The primary source is not merely first in its band -- it is visibly the
+   thing the rest descend from: an accent left border, a heavier title, and a rule beneath it
+   separating it from the design documents. The prototype's subtitle variant is deliberately NOT
+   shipped; at forty products a second line per band is noise. */
+.files-band__rows .vds-docrow.is-primary-source {
+  border-left: 2px solid var(--accent);
+  padding-left: var(--space-3, 6px);
+  border-radius: 0 var(--radius-sm, 4px) var(--radius-sm, 4px) 0;
+}
+.files-band__rows .vds-docrow.is-primary-source .vds-docrow__title { font-weight: 600; color: var(--text-primary); }
+.files-band__rows .vds-docrow.is-primary-source + .vds-docrow { border-top: 2px solid var(--border-strong); }
+/* The chip is BORDERED here, so it reads as a role rather than another tinted tag in a row that
+   already carries a type chip. */
+.files-band__rows .vds-docrow.is-primary-source .vds-docrow__chip--accent { border: 1px solid var(--accent); }
 .files-band__count { margin-left: auto; font-size: var(--text-xs, 11px); color: var(--text-secondary); }
 .files-band__rows { padding: var(--space-1, 2px) 0; }
 

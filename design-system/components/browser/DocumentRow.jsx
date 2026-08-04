@@ -99,7 +99,7 @@ export function DocumentRow({
         {title}
       </span>
 
-      {primary ? <Chip label="Primary" tone="accent" /> : null}
+      {primary ? <Chip label="Primary source" tone="accent" /> : null}
       {typeChip ? <Chip label={t.label} /> : null}
 
       {/* Open-state is a FACT about the document, not a value you set and not a click target --

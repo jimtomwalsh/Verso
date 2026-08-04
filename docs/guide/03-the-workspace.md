@@ -52,10 +52,16 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   one place. Nothing else in Verso ever showed you both. Its header states the size of what you are
   looking at (*"12 documents · 3 products"*), and a search box filters on title or code.
 
-  Three ways to arrange the same list, chosen with one switch: **Product** (the default — a band per
-  product, its source document first, and a trailing **No product** band for shared cross-product
-  material), **Type** (Source, Courses, Presentations, Guides), and **Recent** (one flat list,
-  newest first). Switching only rearranges: the same documents, the same rows, the same actions.
+  Three ways to arrange the same list, chosen with one switch: **Product** (the default), **Type**
+  (Source, Courses, Presentations, Guides), and **Recent** (one flat list, newest first). Switching
+  only rearranges: the same documents, the same rows, the same actions.
+
+  **In the Product view you can see what each product traces back to without opening anything.** The
+  band header names the product and then its **primary source** — the one source document everything
+  else in that product descends from. That document sits at the top of its band with an accent edge
+  and a rule under it, separating it from the design documents beneath. A product that has no
+  primary source yet says **No primary source** rather than showing you a blank. The trailing **No
+  product** band holds shared, cross-product material — glossaries, standards — not leftovers.
 
   **List or cards.** List is the default and works at any size; cards are there for visual recall.
   Click any document to open it where it belongs — a source document into **Source**, a design
