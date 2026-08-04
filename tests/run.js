@@ -1239,6 +1239,85 @@ section("arch-P3-01 editor storage");
   });
 })();
 
+// ---- document identity: one name per document -----------------------------
+// The registry key is a document's name. meta.code was a second copy of it that nothing kept in
+// step, and a drifted pair made a re-imported .verso backup look like a NEW document: the
+// collision check missed the entry the file was a backup of, wrote a second one with no prompt,
+// and left the author with two rows sharing a title -- the new tab on one, the file picker on the
+// other. Reproduced in the browser on 2026-08-04 against a real registry that had drifted this
+// way. These pin the repair, the resolver and the open-tab reconcile.
+section("document identity");
+(function () {
+  var g = STORAGE;
+
+  // --- meta.code follows the key, never the other way round ---
+  var reg = {
+    "ACME-101x": { meta: { title: "Acme", code: "ACME-101" } },   // drifted
+    "OK-1": { meta: { title: "Fine", code: "OK-1" } },            // already agrees
+    "NOMETA": {}                                                  // no meta at all
+  };
+  var fix = g.reconcileRegistryCodes(reg);
+  ok("a drifted entry is repaired", reg["ACME-101x"].meta.code === "ACME-101x");
+  ok("an entry that already agrees is left alone", reg["OK-1"].meta.code === "OK-1");
+  ok("a doc with no meta gets one carrying its key", reg.NOMETA.meta.code === "NOMETA");
+  ok("only the repairs are reported", fix.repaired.length === 2 &&
+    fix.repaired.indexOf("ACME-101x") !== -1 && fix.repaired.indexOf("NOMETA") !== -1);
+  ok("re-running repairs nothing", g.reconcileRegistryCodes(reg).repaired.length === 0);
+  ok("a missing registry is not a crash", g.reconcileRegistryCodes(null).repaired.length === 0);
+
+  // --- which entry does an incoming code refer to? ---
+  var live = {
+    "ACME-101x": { meta: { code: "ACME-101" } },  // key and code disagree
+    "DRO-055-E-101": { meta: { code: "DRO-055-E-101" } }
+  };
+  ok("an exact key wins outright", g.findRegistryId(live, "ACME-101x") === "ACME-101x");
+  ok("a code that no key matches still finds its entry", g.findRegistryId(live, "ACME-101") === "ACME-101x");
+  ok("case is not a different document", g.findRegistryId(live, "dro-055-e-101") === "DRO-055-E-101");
+  ok("a genuinely new code resolves to nothing", g.findRegistryId(live, "BRAND-NEW") === null);
+  ok("an empty code resolves to nothing", g.findRegistryId(live, "") === null);
+  ok("a missing registry resolves to nothing", g.findRegistryId(null, "ACME-101") === null);
+  // The regression itself, stated as the app sees it: a backup of ACME-101x carries meta.code
+  // "ACME-101", and the import must land on the entry it came from rather than mint a second.
+  ok("re-importing a drifted document's backup targets the entry it came from",
+    g.findRegistryId(live, "ACME-101") === "ACME-101x" && Object.keys(live).length === 2);
+
+  // --- the open-tab set cannot name documents that do not exist ---
+  var registry2 = { "A": {}, "B": {} };
+  var r1 = g.reconcileOpenDocIds(["A", "GHOST", "B", "A"], registry2, "A", "SAMPLE");
+  ok("an id with no document is dropped", r1.ids.join(",") === "A,B");
+  ok("the drop is reported", r1.dropped.indexOf("GHOST") !== -1);
+  ok("a duplicate id is dropped too", r1.dropped.indexOf("A") !== -1);
+  ok("a valid active id is kept", r1.activeId === "A");
+  var r2 = g.reconcileOpenDocIds(["A"], registry2, "GONE", "SAMPLE");
+  ok("an active id with no document moves to a real one", r2.activeId === "A" && r2.ids.indexOf("A") !== -1);
+  var r3 = g.reconcileOpenDocIds([], {}, "GONE", "SAMPLE");
+  ok("an empty registry falls back to the sample id", r3.activeId === "SAMPLE" && r3.ids.join(",") === "SAMPLE");
+  var r4 = g.reconcileOpenDocIds(["B"], registry2, "A", "SAMPLE");
+  ok("an active id outside the open set is added, not dropped", r4.ids.indexOf("A") !== -1 && r4.ids.indexOf("B") !== -1);
+
+  // --- the wiring, so a future move cannot quietly unhook it ---
+  var ed = src("src/editor.js");
+  ok("boot repairs the registry before anything reads a code",
+    /reconcileRegistryCodes\(registry\)/.test(ed) &&
+    ed.indexOf("reconcileRegistryCodes(registry)") < ed.indexOf("var activeDocId = getActiveDocId();"));
+  ok("boot reconciles the open-tab set", /reconcileOpenDocIds\(openDocIds, registry, activeDocId/.test(ed));
+  ok("the open-tab array is mutated in place, not replaced",
+    /openDocIds\.length = 0;/.test(ed) && !/^\s*openDocIds = /m.test(ed));
+  var dj = src("src/editor/documents.js");
+  ok("import resolves the target entry rather than trusting the code",
+    /var existingId = E\.findRegistryId\(registry, code\);/.test(dj));
+  // Comments stripped first: the body DESCRIBES the old registry[code] check in prose, which is
+  // the point of the comment.
+  var importBody = dj.slice(dj.indexOf("function importDocToRegistry"), dj.indexOf("function readCourseFile"))
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("import never writes under a key it did not resolve",
+    !/registry\[code\]/.test(importBody) && /registry\[targetId\] = importedDoc;/.test(importBody));
+  ok("creating a blank course uses the same resolver, so case alone cannot mint a twin",
+    /var clash = E\.findRegistryId\(registry, code\);/.test(dj));
+  ok("the overwrite prompt names the document being replaced",
+    /confirmModal\("Replace this document\?"/.test(dj));
+})();
+
 // ---- platform-pivot 01: StorageBackend seam (EXPAND, browser conformance) ----
 // The single interface unifying the 3 storage choke points. At the browser default
 // each facet must route to EXACTLY today's behaviour: registry -> the registry

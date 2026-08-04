@@ -69,6 +69,79 @@
     catch (e) { return { ok: false, quota: isQuotaExceeded(e), error: e }; }
   }
 
+  // ---- 2b. document identity (pure) ----------------------------------------
+  // A document has ONE name. The registry key is it: tabs, the active-doc pointer, publish rows
+  // and every menu action hold the key, never doc.meta.code. But meta.code is a second copy of
+  // that name, written into every .verso export and every SCORM package, and nothing kept the two
+  // in step -- so a registry could hold an entry keyed "ACME-101x" whose meta.code said
+  // "ACME-101", and both were "the code" depending on which surface you asked.
+  //
+  // THE BUG THAT COMES OF IT, reproduced in the browser before this was written: re-import that
+  // document's own .verso backup and the collision check looks up registry["ACME-101"], finds
+  // nothing, and writes a SECOND entry -- no overwrite prompt, no warning. The author now has two
+  // rows with one title. The new tab holds one of them; the file picker lists the other; edits go
+  // to whichever the surface they used resolved. That is the "imported backups don't stay
+  // consistent in the picker or in tabs" report, and it is still sitting in a real registry.
+  //
+  // Two functions, both pure, both DOM-free and store-free.
+  function docCodeOf(d) {
+    return (d && d.meta && typeof d.meta.code === "string") ? d.meta.code : null;
+  }
+  // Make meta.code agree with the key it is filed under. The KEY wins, always: it is what every
+  // reference in the app already holds, so rewriting keys to match codes would orphan open tabs,
+  // the active-doc pointer and every publish row at once. Returns the ids it repaired so a caller
+  // can decide whether the registry needs writing back.
+  function reconcileRegistryCodes(registry) {
+    var repaired = [];
+    if (!registry || typeof registry !== "object") return { repaired: repaired };
+    Object.keys(registry).forEach(function (id) {
+      var d = registry[id];
+      if (!d || typeof d !== "object") return;
+      if (!d.meta || typeof d.meta !== "object") d.meta = {};
+      if (d.meta.code !== id) { d.meta.code = id; repaired.push(id); }
+    });
+    return { repaired: repaired };
+  }
+  // Which existing entry does an incoming code refer to? Answers with a registry KEY or null.
+  // Four passes, most exact first, because an import has to find the entry it is a backup OF even
+  // when that entry's key drifted from its code, and macOS filenames make a case-only difference
+  // an easy way to get there. Null means genuinely new -- and only then may an import mint a key.
+  function findRegistryId(registry, code) {
+    if (!registry || typeof registry !== "object" || typeof code !== "string" || !code) return null;
+    var ids = Object.keys(registry);
+    if (Object.prototype.hasOwnProperty.call(registry, code)) return code;
+    var byCode = null, lowered = code.toLowerCase(), byKeyCI = null, byCodeCI = null;
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i], c = docCodeOf(registry[id]);
+      if (byCode === null && c === code) byCode = id;
+      if (byKeyCI === null && id.toLowerCase() === lowered) byKeyCI = id;
+      if (byCodeCI === null && typeof c === "string" && c.toLowerCase() === lowered) byCodeCI = id;
+    }
+    return byCode || byKeyCI || byCodeCI || null;
+  }
+  // The open-tab set is a list of registry keys held in a SEPARATE store (localStorage, even when
+  // the registry itself lives on disk), so the two drift apart on their own: delete a course in
+  // one place, abandon an import halfway, restore an older registry file, and the strip is left
+  // holding a key nothing answers to. renderTabs skips such an id, which makes it invisible rather
+  // than harmless -- it still counts toward "is this the last tab?", and activateDoc() will hand
+  // `undefined` to the live-doc pair-write if the close logic ever lands on one. Drop them at boot,
+  // dedupe, and guarantee the active id is a real document.
+  function reconcileOpenDocIds(openDocIds, registry, activeDocId, fallbackId) {
+    var reg = (registry && typeof registry === "object") ? registry : {};
+    var seen = Object.create(null), ids = [], dropped = [];
+    (Array.isArray(openDocIds) ? openDocIds : []).forEach(function (id) {
+      if (typeof id !== "string" || seen[id]) { if (typeof id === "string") dropped.push(id); return; }
+      seen[id] = true;
+      if (Object.prototype.hasOwnProperty.call(reg, id)) ids.push(id); else dropped.push(id);
+    });
+    var activeId = activeDocId;
+    if (!Object.prototype.hasOwnProperty.call(reg, activeId)) {
+      activeId = ids[0] || (Object.prototype.hasOwnProperty.call(reg, fallbackId) ? fallbackId : Object.keys(reg)[0]) || fallbackId;
+    }
+    if (typeof activeId === "string" && ids.indexOf(activeId) === -1) ids.push(activeId);
+    return { ids: ids, activeId: activeId, dropped: dropped };
+  }
+
   // ---- 3. the adapter swap -------------------------------------------------
   // A facet is one content type with its own key and its own read/write pair. Three of them, and
   // an adapter may implement any subset (store-http.js implements only the registry).
@@ -301,6 +374,10 @@
     FACETS: FACETS,
     isQuotaExceeded: isQuotaExceeded,
     writeStore: writeStore,
+    docCodeOf: docCodeOf,
+    reconcileRegistryCodes: reconcileRegistryCodes,
+    findRegistryId: findRegistryId,
+    reconcileOpenDocIds: reconcileOpenDocIds,
     pickStorageAdapter: pickStorageAdapter,
     pickFacetAdapter: pickFacetAdapter,
     makeBrowserAdapter: makeBrowserAdapter,

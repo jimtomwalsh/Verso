@@ -26,7 +26,7 @@
       "openDocIds", "registry", "confirmModal", "h", "saveOpenDocIds", "saveRegistry",
       "switchDoc", "getActiveProduct", "modalSection", "modalField", "modalText", "tagDocProductStage",
       "tagDocCell", "clone", "dsModalShell", "bindProjectFolder", "iconBtn", "productSelectOptions",
-      "doc"
+      "doc", "findRegistryId"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -104,8 +104,11 @@
     // matrix cell (doc.meta.geo/interactive) at birth. Omitted -> an untagged doc = today's
     // {reflow, interactive} default, so the old callers are unchanged.
     function createBlankDoc(title, code, opts) {
-      if (registry[code]) {
-        alert("A course with code '" + code + "' already exists.");
+      // Same resolver the import path uses: a code that differs only in case is not a new
+      // document, and letting one through is how two rows end up sharing a name.
+      var clash = E.findRegistryId(registry, code);
+      if (clash) {
+        alert("A course with code '" + clash + "' already exists.");
         return;
       }
       var newDoc = {
@@ -137,8 +140,17 @@
     }
 
     function importDocToRegistry(importedDoc) {
+      if (!importedDoc.meta || typeof importedDoc.meta !== "object") importedDoc.meta = {};
       var code = importedDoc.meta.code || ("IMPORTED-" + Math.floor(Math.random() * 1000));
-      importedDoc.meta.code = code;
+      // WHICH ENTRY IS THIS A BACKUP OF? Not necessarily registry[code]. The registry key is a
+      // document's real name and meta.code is a copy of it, and a pair that drifted apart used to
+      // make this check answer "new document" for a file that was plainly a backup of an existing
+      // one -- so the import wrote a second entry, silently, with no prompt. Two rows, one title,
+      // the new tab on one and the file picker on the other. findRegistryId matches the key first,
+      // then the code, then either without case, and only a null means genuinely new.
+      var existingId = E.findRegistryId(registry, code);
+      var targetId = existingId || code;
+      importedDoc.meta.code = targetId; // key and code leave here as one name
       // Commit + load. Wrapped so any failure is VISIBLE: native alert()/confirm()
       // are swallowed by the Verso WKWebView host (no WKUIDelegate panels), so the
       // old raw confirm()/alert() here failed silently -> "picked a file, nothing
@@ -146,23 +158,25 @@
       // every step so a failed import self-reports in the Web Inspector console.
       function commit() {
         try {
-          registry[code] = importedDoc;
+          registry[targetId] = importedDoc;
           saveRegistry(registry);
-          if (openDocIds.indexOf(code) === -1) {
-            openDocIds.push(code);
+          if (openDocIds.indexOf(targetId) === -1) {
+            openDocIds.push(targetId);
             saveOpenDocIds(openDocIds);
           }
-          switchDoc(code);
-          if (window.console && console.log) console.log("[import] loaded course '" + code + "'");
+          switchDoc(targetId);
+          if (window.console && console.log) console.log("[import] loaded course '" + targetId + "'");
         } catch (e) {
           if (window.console && console.error) console.error("[import] commit failed:", e);
           confirmModal("Import failed", "Could not load the course: " + (e && e.message || e), function () {});
         }
       }
-      if (registry[code]) {
-        confirmModal("Overwrite existing course?",
-          "A course with code '" + code + "' already exists. Overwrite it?",
-          commit, { danger: true, okLabel: "Overwrite" });
+      if (existingId) {
+        var existing = registry[existingId];
+        var name = (existing && existing.meta && existing.meta.title) || existingId;
+        confirmModal("Replace this document?",
+          "“" + name + "” (" + existingId + ") is already on this machine. Importing replaces it with the version in this file. The copy you have now is not recovered afterwards.",
+          commit, { danger: true, okLabel: "Replace" });
         return;
       }
       commit();
