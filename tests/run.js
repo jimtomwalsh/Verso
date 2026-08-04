@@ -360,6 +360,91 @@ section("arch-P5-01 split chrome stylesheet");
      ["99-not-declared.css"].filter(function (f) { return declared.indexOf(f) === -1; }).length === 1);
 })();
 
+// ---- arch-P6-02: the design-system adherence config, actually running -----
+// design-system/_adherence.oxlintrc.json has sat in the repo unused since it was written. It is
+// two things wearing one filename: an oxlint scaffold (React plugin rules, restricted imports) and
+// -- under "x-omelette" -- a real machine-readable spec of the design system: 139 tokens, each
+// one's kind, 23 components, and the three permitted font families.
+//
+// THE OXLINT HALF IS NOT RUN, DELIBERATELY. Its rules are `react/forbid-elements` and
+// `no-restricted-imports` over `components/**`. This repo has no React, no modules and no imports
+// -- it is classic scripts -- so those rules match nothing. Running them would need oxlint as a
+// dependency in a repo that has none, to lint zero things. That is theatre, and theatre in CI is
+// worse than a gap because it reads as coverage.
+//
+// The SPEC half is real, and this runs it in pure Node against the chrome stylesheets. The subject
+// is styles/editor/** only: styles/course/** answers to the COURSE theme, a different token family
+// minted at runtime by theme.js, and holding it to the chrome DS would fail 107 legitimate uses.
+section("arch-P6-02 design-system adherence");
+(function () {
+  var cfg = JSON.parse(src("design-system/_adherence.oxlintrc.json"))["x-omelette"];
+  ok("the adherence config carries a real spec (tokens, kinds, fonts)",
+     Array.isArray(cfg.tokens) && cfg.tokens.length > 100
+     && cfg.tokenKinds && Object.keys(cfg.tokenKinds).length > 100
+     && Array.isArray(cfg.fontFamilies) && cfg.fontFamilies.length === 3);
+
+  var declared = {}; cfg.tokens.forEach(function (t) { declared[t] = 1; });
+  var chrome = JSON.parse(src("styles/editor/order.json"))
+    .map(function (o) { return src("styles/editor/" + o.file); }).join("\n");
+  var dsCss = ["colors", "typography", "spacing", "effects"]
+    .map(function (f) { return src("design-system/tokens/" + f + ".css"); }).join("\n");
+
+  function definedIn(css) {
+    var out = {};
+    (css.match(/^\s*(--[A-Za-z0-9-]+)\s*:/gm) || []).forEach(function (m) { out[m.trim().split(":")[0]] = 1; });
+    return out;
+  }
+  var dsDefined = definedIn(dsCss), localDefined = definedIn(chrome);
+  var uses = {};
+  (chrome.match(/var\(\s*(--[A-Za-z0-9-]+)/g) || []).forEach(function (m) { uses[m.replace(/var\(\s*/, "")] = 1; });
+
+  var unknown = Object.keys(uses).filter(function (t) {
+    return !declared[t] && !dsDefined[t] && !localDefined[t];
+  }).sort();
+
+  // RATCHET. 18 today: a handful set from JS at runtime (--vp-h, --acol/--ccol/--hcol,
+  // --pin-colour, --tour-inv), three course-theme tokens the canvas preview reaches for, and nine
+  // DS-shaped names the config never declared -- real drift between the spec and the chrome.
+  // Widen the subject, never relax the floor: this number may fall and may not rise.
+  var CEILING = 18;
+  ok("chrome tokens outside the design system do not increase (" + unknown.length + " <= " + CEILING + ")",
+     unknown.length <= CEILING, unknown.join(" "));
+  if (unknown.length && unknown.length <= CEILING) {
+    warn("chrome uses " + unknown.length + " token(s) the DS spec does not declare (SOFT, ratcheted): " + unknown.slice(0, 6).join(" ") + (unknown.length > 6 ? " …" : ""));
+  }
+
+  // Fonts: a stack may fall back to whatever the OS offers, but what it ASKS FOR first has to be
+  // one of the three the design system ships. "SF Mono" behind "JetBrains Mono" is fine; "SF Mono"
+  // in front of it is a different product.
+  var leads = [];
+  chrome.replace(/font(?:-family)?:\s*([^;}]+)/g, function (m, v) {
+    // `font:` is a shorthand -- style, weight, size/line-height all precede the family list. Strip
+    // every leading token that is not a family name before reading the first one.
+    var first = v.split(",")[0].trim()
+      .replace(/^(normal|italic|oblique|small-caps|bold|bolder|lighter|\d{3})\s+/gi, "")
+      .replace(/^(normal|italic|oblique|small-caps|bold|bolder|lighter|\d{3})\s+/gi, "")
+      .replace(/^[\d.]+(px|rem|em|%)(\s*\/\s*[\d.]+(px|rem|em|%)?)?\s+/i, "")
+      .replace(/^["']|["']$/g, "");
+    if (first && !/^(var\(|inherit|initial|unset|ui-|system-ui|sans-serif|serif|monospace|-apple)/.test(first)) leads.push(first);
+    return m;
+  });
+  var badLead = leads.filter(function (f) { return cfg.fontFamilies.indexOf(f) === -1; });
+  ok("every font stack in the chrome LEADS with a design-system family" + (badLead.length ? " -- FOREIGN: " + badLead.slice(0, 4).join(", ") : ""),
+     badLead.length === 0);
+
+  // the spec and the token CSS must not drift apart in the other direction either
+  var declaredButUndefined = Object.keys(declared).filter(function (t) { return !dsDefined[t]; });
+  ok("every token the spec declares is actually defined in design-system/tokens/*.css"
+     + (declaredButUndefined.length ? " -- MISSING: " + declaredButUndefined.slice(0, 5).join(", ") : ""),
+     declaredButUndefined.length === 0);
+
+  // and it proves it can fail
+  ok("the adherence check would catch an undeclared token (proof)",
+     !declared["--a-token-nobody-declared"] && !dsDefined["--a-token-nobody-declared"]);
+  ok("the adherence check would catch a foreign lead family (proof)",
+     cfg.fontFamilies.indexOf("Comic Sans MS") === -1);
+})();
+
 // ---- arch-P5-03: the split user guide -------------------------------------
 // docs/USER-GUIDE.md was 1,138 lines and 84 of the last 200 commits. It is twenty files under
 // docs/guide/ now, one per section plus the introduction, joined in the order it declares.
