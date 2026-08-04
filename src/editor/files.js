@@ -18,9 +18,13 @@
 // LIST IS THE DEFAULT AND THE SHIPPED ANSWER. Forty products in a card grid is a scrolling problem;
 // four products in a list still reads fine. Card mode exists for visual recall, not as the primary.
 //
-// WHAT THIS FILE DOES NOT OWN. The band headers and the primary-source treatment are uio-W05; the
-// facet rail is uio-W06; open-vs-reveal is uio-W07; creation actions are uio-W08. Files renders
-// bands here with a plain header on purpose, so W05 has one place to make them speak.
+// FACETS ARE A LENS, NEVER A MODE (uio-W06). Type and Product narrow what is listed and change
+// nothing else: the bands keep their identity underneath, the header keeps counting the whole
+// corpus, and clearing every facet returns to exactly the unfiltered view. The selection is a local
+// in this module -- never persisted, never on the kernel -- because a filter state the rest of the
+// app could read is the global Product scope uio-W01 deleted, rebuilt under a friendlier name.
+//
+// WHAT THIS FILE DOES NOT OWN. Open-vs-reveal is uio-W07; creation actions are uio-W08.
 //
 // The pure core -- the corpus, the grouping, the summary -- is DOM-free and exported, because
 // merging two stores into one list is the part that has to be right and the part a browser cannot
@@ -183,12 +187,139 @@
   function normGrouping(g) { return GROUPINGS.indexOf(g) === -1 ? "product" : g; }
   function normMode(m) { return MODES.indexOf(m) === -1 ? "list" : m; }
 
+  // ---- uio-W06: facets, which are a LENS and must never become a mode ------
+  //
+  // This is the ticket most likely to regress into the thing uio-W01 just deleted. The global
+  // Product scope was app state that every destination read: it filtered the Edit tab strip,
+  // filtered Publish, hard-gated Source. A facet rail that persisted, or that anything outside
+  // Files could read, would be that same mechanism wearing a filter's clothes.
+  //
+  // So the guard rails are structural, not a note in a comment:
+  //   - facet state lives in a local in the destination and is NEVER written to storage,
+  //   - it is never exposed on the kernel, so no other module can reach it,
+  //   - and clearing every facet returns to EXACTLY the unfiltered view -- which is true by
+  //     construction here, because applyFacets on an empty selection is the identity function.
+  //
+  // Within a dimension the selections are an OR (Course *or* Guide); across dimensions an AND
+  // (a Course *in* Alpha). That is what "lens" means: narrowing, never switching.
+  var FACET_DIMS = ["type", "product"];
+
+  function normFacets(f) {
+    var out = { type: {}, product: {} };
+    if (!f || typeof f !== "object") return out;
+    FACET_DIMS.forEach(function (dim) {
+      var sel = f[dim];
+      if (!sel || typeof sel !== "object") return;
+      Object.keys(sel).forEach(function (k) { if (sel[k]) out[dim][k] = true; });
+    });
+    return out;
+  }
+  function facetCount(f) {
+    f = normFacets(f);
+    return Object.keys(f.type).length + Object.keys(f.product).length;
+  }
+  // A document's value in a dimension. Product is "" for the No product facet, which is a real
+  // selection -- shared cross-product material is a thing you look for, not an absence.
+  function facetValue(d, dim) { return dim === "type" ? (d && d.type) || "" : (d && d.productId) || ""; }
+
+  // The identity function when nothing is selected. That is the whole acceptance criterion:
+  // clearing every facet returns to exactly the prior view, with no path that rebuilds it
+  // differently.
+  function applyFacets(docs, facets) {
+    var f = normFacets(facets);
+    var dims = FACET_DIMS.filter(function (dim) { return Object.keys(f[dim]).length; });
+    if (!dims.length) return (docs || []).slice();
+    return (docs || []).filter(function (d) {
+      return dims.every(function (dim) { return !!f[dim][facetValue(d, dim)]; });
+    });
+  }
+
+  // Counts for a dimension are computed with every OTHER dimension applied but not that one --
+  // the standard faceted-search rule, and the one that stops a facet you can click from
+  // promising results it cannot deliver. Counting with the dimension applied to itself would
+  // show every unselected row as 0 the moment you picked one.
+  //
+  // Every type is listed even at zero, so the four document types read as a fixed vocabulary
+  // rather than a list that grows as you create things. Products list every product that exists
+  // plus No product.
+  function facetCounts(docs, facets, products) {
+    docs = docs || [];
+    products = products || {};
+    var f = normFacets(facets);
+    function tally(dim) {
+      var others = FACET_DIMS.filter(function (x) { return x !== dim; });
+      var pool = docs.filter(function (d) {
+        return others.every(function (x) {
+          var sel = f[x];
+          return !Object.keys(sel).length || !!sel[facetValue(d, x)];
+        });
+      });
+      var n = {};
+      pool.forEach(function (d) { var v = facetValue(d, dim); n[v] = (n[v] || 0) + 1; });
+      return n;
+    }
+    var tn = tally("type");
+    var pn = tally("product");
+    var productKeys = Object.keys(products).sort(function (a, b) {
+      var na = ((products[a] && products[a].name) || a).toLowerCase();
+      var nb = ((products[b] && products[b].name) || b).toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    // A product with no documents at all is still worth listing -- an empty product is a real
+    // thing you just made, and hiding it reads as the creation having failed.
+    Object.keys(pn).forEach(function (k) { if (k && productKeys.indexOf(k) === -1) productKeys.push(k); });
+    return {
+      type: TYPE_ORDER.map(function (t) {
+        return { dim: "type", key: t, label: TYPE_LABEL[t], count: tn[t] || 0, active: !!f.type[t] };
+      }),
+      product: productKeys.map(function (pid) {
+        return { dim: "product", key: pid, label: (products[pid] && products[pid].name) || pid,
+                 count: pn[pid] || 0, active: !!f.product[pid] };
+      }).concat([{ dim: "product", key: "", label: "No product", count: pn[""] || 0, active: !!f.product[""] }])
+    };
+  }
+
+  // What the dismissible chips above the results say. Named in the same words the rail uses, so
+  // dismissing a chip and unticking its row are visibly the same act.
+  function facetChips(facets, products) {
+    var f = normFacets(facets);
+    products = products || {};
+    var out = [];
+    TYPE_ORDER.forEach(function (t) {
+      if (f.type[t]) out.push({ dim: "type", key: t, label: "Type: " + TYPE_LABEL[t] });
+    });
+    Object.keys(f.product).forEach(function (pid) {
+      out.push({ dim: "product", key: pid,
+                 label: "Product: " + (pid ? ((products[pid] && products[pid].name) || pid) : "No product") });
+    });
+    return out;
+  }
+
+  // THE ONE-TIME SEED, and the reason it is one-time. uio-W01 retired the global Product scope but
+  // kept the last selected Product under a new name, because it is the best guess at the facet
+  // Files should open on. Reading it here is a courtesy on the first launch after the upgrade.
+  //
+  // The key is REMOVED in the same pass, always -- including when the product it names no longer
+  // exists. A seed that survived would be a persisted scope by another route, which is exactly what
+  // this ticket exists not to rebuild.
+  var FACET_SEED_KEY = "verso.filesProductFacetSeed";
+  function consumeFacetSeed(storage, products) {
+    if (!storage) return "";
+    var saved = null;
+    try { saved = storage.getItem(FACET_SEED_KEY); } catch (e) { return ""; }
+    try { storage.removeItem(FACET_SEED_KEY); } catch (e) {}
+    if (!saved) return "";
+    return (products && products[saved]) ? saved : "";
+  }
+
   var PURE = {
     GROUPING_KEY: GROUPING_KEY, MODE_KEY: MODE_KEY, GROUPINGS: GROUPINGS, MODES: MODES,
-    TYPE_ORDER: TYPE_ORDER, TYPE_LABEL: TYPE_LABEL,
+    TYPE_ORDER: TYPE_ORDER, TYPE_LABEL: TYPE_LABEL, FACET_DIMS: FACET_DIMS, FACET_SEED_KEY: FACET_SEED_KEY,
     buildCorpus: buildCorpus, corpusSummary: corpusSummary, groupCorpus: groupCorpus,
     matchesQuery: matchesQuery, byRecent: byRecent, byBand: byBand, bandPrimary: bandPrimary,
-    normGrouping: normGrouping, normMode: normMode
+    normGrouping: normGrouping, normMode: normMode,
+    normFacets: normFacets, facetCount: facetCount, applyFacets: applyFacets,
+    facetCounts: facetCounts, facetChips: facetChips, consumeFacetSeed: consumeFacetSeed
   };
 
   // ---- the destination -----------------------------------------------------
@@ -211,6 +342,11 @@
     var selected = {};
     var grouping = normGrouping(readPref(GROUPING_KEY));
     var mode = normMode(readPref(MODE_KEY));
+    // uio-W06: the facet selection. A LOCAL, deliberately. It is never written to storage and
+    // never exposed on the kernel, because a facet state anything else could read is the global
+    // Product scope uio-W01 deleted, rebuilt.
+    var facets = { type: {}, product: {} };
+    var seedConsumed = false;
 
     function readPref(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
     function writePref(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -285,10 +421,70 @@
       head.appendChild(controls);
       host.appendChild(head);
 
+      // uio-W06: the facet rail sits BESIDE the results, not above them, so it reads as a lens you
+      // are looking through rather than a control that changed the screen. The results keep their
+      // own scroll; the rail does not scroll away from under your hand while you use it.
+      var main = h("div", "files__main");
+      var rail = h("div", "files__facets");
       var body = h("div", "files__body");
-      host.appendChild(body);
-      ui = { host: host, count: count, body: body };
+      main.appendChild(rail);
+      main.appendChild(body);
+      host.appendChild(main);
+      ui = { host: host, count: count, body: body, rail: rail };
       return ui;
+    }
+
+    // One facet row: the canonical Checkbox, a name, a count. A CHECKBOX because the selections
+    // within a dimension are an OR and you can hold several -- a radio would say "mode", which is
+    // the one thing this rail must never become.
+    function facetRow(f) {
+      var row = window.VersoUI.Checkbox({
+        checked: !!f.active, label: f.label,
+        onChange: function (on) {
+          if (on) facets[f.dim][f.key] = true; else delete facets[f.dim][f.key];
+          render();
+        }
+      });
+      row.classList.add("files-facet");
+      if (f.active) row.classList.add("is-active");
+      if (!f.count) row.classList.add("is-empty");
+      row.appendChild(h("span", "files-facet__count", String(f.count)));
+      row.title = f.label + " — " + f.count + (f.count === 1 ? " document" : " documents");
+      return row;
+    }
+
+    function renderFacetRail(all) {
+      var counts = facetCounts(all, facets, window.ProductsStore || {});
+      ui.rail.innerHTML = "";
+      [["Type", counts.type], ["Product", counts.product]].forEach(function (pair) {
+        var group = h("div", "files-facets__group");
+        group.appendChild(h("div", "files-facets__group-label", pair[0]));
+        pair[1].forEach(function (f) { group.appendChild(facetRow(f)); });
+        ui.rail.appendChild(group);
+      });
+    }
+
+    // The chips are the same act as the rail's ticks, said again where the results are, because
+    // "why am I seeing only these?" has to be answerable without looking away from the list.
+    function facetChipBar() {
+      var chips = facetChips(facets, window.ProductsStore || {});
+      if (!chips.length) return null;
+      var bar = h("div", "files__chips");
+      chips.forEach(function (c) {
+        var chip = h("button", "files__chip", c.label);
+        chip.type = "button";
+        chip.title = "Remove this filter";
+        chip.appendChild(h("span", "files__chip-x", "✕"));
+        chip.addEventListener("click", function () { delete facets[c.dim][c.key]; render(); });
+        bar.appendChild(chip);
+      });
+      if (chips.length > 1) {
+        bar.appendChild(window.VersoUI.Button({
+          variant: "ghost", size: "sm", label: "Clear all",
+          onClick: function () { facets = { type: {}, product: {} }; render(); }
+        }));
+      }
+      return bar;
     }
 
     // uio-W05: THE BAND HEADER IS THE SPINE OF THE WHOLE MODEL. You must be able to see which
@@ -437,22 +633,39 @@
 
     function render() {
       if (!ensureUI()) return;
-      var all = corpus().filter(function (d) { return matchesQuery(d, query); });
-      var sum = corpusSummary(all);
+      // The one-time facet seed from the retired global scope (uio-W01). Consumed on the first
+      // render, when the product store is populated, and the key is removed in the same pass.
+      if (!seedConsumed) {
+        seedConsumed = true;
+        var seed = consumeFacetSeed(typeof localStorage !== "undefined" ? localStorage : null,
+                                    window.ProductsStore || {});
+        if (seed) facets.product[seed] = true;
+      }
+      var searched = corpus().filter(function (d) { return matchesQuery(d, query); });
+      // uio-W06: facets narrow what is LISTED. The header keeps counting the whole searched corpus,
+      // so the number you are filtering down from stays on screen -- a count that shrank with the
+      // filter would leave you unable to tell a narrow lens from an empty library.
+      var all = applyFacets(searched, facets);
+      var sum = corpusSummary(searched);
       ui.count.textContent = sum.documents + (sum.documents === 1 ? " document" : " documents") +
         (sum.products ? (" · " + sum.products + (sum.products === 1 ? " product" : " products")) : "");
+      renderFacetRail(searched);
       ui.body.innerHTML = "";
       ui.body.classList.toggle("files__body--cards", mode === "card");
-      // Drop ticks for documents no longer listed -- deleted, or filtered out by a search. A
-      // selection that outlives what it pointed at is how a bulk action touches the wrong thing.
+      // Drop ticks for documents no longer listed -- deleted, or filtered out by a search or a
+      // facet. A selection that outlives what it pointed at is how a bulk action touches the wrong
+      // thing.
       var visible = {}; all.forEach(function (d) { visible[d.id] = 1; });
       Object.keys(selected).forEach(function (id) { if (!visible[id]) delete selected[id]; });
+      var chips = facetChipBar();
+      if (chips) ui.body.appendChild(chips);
       var bar = bulkBar();
       ui.body.classList.toggle("has-selection", !!bar);
       if (bar) ui.body.appendChild(bar);
 
       if (!all.length) {
         ui.body.appendChild(h("div", "files__empty",
+          facetCount(facets) ? "No document matches those filters." :
           query ? "No document matches that." : "No documents yet."));
         return;
       }

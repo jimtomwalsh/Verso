@@ -509,8 +509,63 @@
    In a header the segments size to their own labels. */
 .files__controls .prop-toggle { flex: 0 0 auto; padding-left: var(--space-4, 8px); padding-right: var(--space-4, 8px); }
 .files__search { width: 200px; }
-.files__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-4, 8px) var(--space-8, 16px) var(--space-10, 20px); }
+.files__main { flex: 1 1 auto; min-height: 0; display: flex; }
+.files__body { flex: 1 1 auto; min-width: 0; min-height: 0; overflow-y: auto; padding: var(--space-4, 8px) var(--space-8, 16px) var(--space-10, 20px); }
 .files__empty { padding: var(--space-10, 20px) 0; color: var(--text-secondary); font-size: var(--text-xs, 11px); text-align: center; }
+
+/* uio-W06 -- FACETS ARE A LENS, NEVER A MODE. The rail sits BESIDE the results rather than above
+   them, so it reads as something you are looking through: the list underneath keeps its bands, its
+   rows and its actions, and the only thing that changed is how much of it you can see. A control
+   that sat across the top, pushing the results down, would read as a screen having been switched.
+
+   The rail has its own panel surface and a hard right border, the same seam every docked panel in
+   the app uses -- nothing floats while docked. */
+.files__facets {
+  flex: 0 0 200px; width: 200px; overflow-y: auto;
+  padding: var(--space-5, 10px) var(--space-4, 8px);
+  background: var(--surface-panel); border-right: 1px solid var(--border-strong);
+  display: flex; flex-direction: column; gap: var(--space-8, 16px);
+}
+.files-facets__group-label {
+  font: var(--type-label); font-size: var(--text-2xs, 10px); font-weight: 600;
+  text-transform: uppercase; letter-spacing: var(--tracking-caps);
+  color: var(--text-tertiary, var(--text-secondary)); margin-bottom: var(--space-3, 6px);
+}
+/* The row IS the canonical Checkbox (.vds-check) -- the selections within a dimension are an OR, so
+   the control that says "you can hold several" is the one the design system already publishes. What
+   is added here is the count and the row's own hit area. */
+.files-facet {
+  display: flex; align-items: center; gap: var(--space-3, 6px);
+  height: 22px; padding: 0 var(--space-2, 4px);
+  border-radius: var(--radius-xs, 2px);
+}
+.files-facet:hover { background: var(--surface-input); }
+.files-facet.is-active { background: var(--accent-quiet); }
+/* A facet with nothing behind it stays listed and stays clickable -- the four types are a fixed
+   vocabulary, and an empty product is a real thing you just made. It reads quieter, not gone. */
+.files-facet.is-empty .vds-check__label,
+.files-facet.is-empty .files-facet__count { color: var(--text-tertiary, var(--text-secondary)); }
+.files-facet .vds-check__box { flex: 0 0 auto; }
+.files-facet .vds-check__label {
+  flex: 1 1 auto; min-width: 0; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.files-facet.is-active .vds-check__label { color: var(--accent); }
+.files-facet__count { flex: 0 0 auto; font-size: var(--text-2xs, 10px); color: var(--text-tertiary, var(--text-secondary)); }
+
+/* The applied facets, said again where the results are. "Why am I seeing only these?" has to be
+   answerable without looking away from the list, and each chip undoes exactly the tick that made
+   it. */
+.files__chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3, 6px); padding-bottom: var(--space-4, 8px); }
+.files__chip {
+  display: inline-flex; align-items: center; gap: var(--space-2, 4px);
+  height: 20px; padding: 0 var(--space-4, 8px); cursor: pointer;
+  font-size: var(--text-xs, 11px); font-family: inherit;
+  background: var(--accent-quiet); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: var(--radius-full, 999px);
+}
+.files__chip-x { color: var(--accent); opacity: 0.7; }
+.files__chip:hover .files__chip-x { opacity: 1; }
 
 .files-band { margin-top: var(--space-6, 12px); }
 .files-band:first-child { margin-top: 0; }

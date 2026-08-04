@@ -10995,6 +10995,121 @@ section("uio-W04 Files destination");
     /__activeStage === "source" && typeof E\.activeSourceDocName === "function"/.test(SH));
   ok("Source supplies that name from its own state",
     /function activeSourceDocName\(\)/.test(src("src/editor/source-stage.js")));
+
+  // --- uio-W06: facets are a LENS, never a mode ---------------------------
+  // The ticket most likely to regress into the thing uio-W01 deleted. A facet rail that persisted,
+  // or that anything outside Files could read, would be the global Product scope rebuilt under a
+  // friendlier name. The guard rails are asserted here, not trusted to a comment.
+  function facetIds(docs) { return docs.map(function (d) { return d.id; }).sort().join(); }
+
+  // Clearing every facet returns to EXACTLY the unfiltered view -- the whole acceptance criterion,
+  // and true by construction because an empty selection is the identity function.
+  ok("no facet selected is the identity function",
+    facetIds(F.applyFacets(corpus, {})) === facetIds(corpus) &&
+    facetIds(F.applyFacets(corpus, null)) === facetIds(corpus) &&
+    facetIds(F.applyFacets(corpus, { type: {}, product: {} })) === facetIds(corpus));
+  ok("applying then clearing returns the same list, not a rebuilt one",
+    facetIds(F.applyFacets(F.applyFacets(corpus, { type: { reflow: true } }), {})) ===
+    facetIds(corpus.filter(function (d) { return d.type === "reflow"; })));
+
+  ok("a type facet narrows to that type",
+    facetIds(F.applyFacets(corpus, { type: { source: true } })) === "topic-master-a");
+  ok("selections WITHIN a dimension are an OR",
+    F.applyFacets(corpus, { type: { frame: true, paged: true } }).length === 2);
+  ok("selections ACROSS dimensions are an AND",
+    facetIds(F.applyFacets(corpus, { type: { reflow: true }, product: { "p-a": true } })) === "C-1");
+  ok("No product is a real selection, not an absence",
+    facetIds(F.applyFacets(corpus, { product: { "": true } })) === "U-1");
+  ok("a facet that matches nothing yields an empty list rather than everything",
+    F.applyFacets(corpus, { type: { source: true }, product: { "p-b": true } }).length === 0);
+  ok("junk in the facet state is ignored, not obeyed",
+    facetIds(F.applyFacets(corpus, { type: { reflow: false }, nonsense: { x: true } })) === facetIds(corpus));
+  ok("the selection count is across both dimensions",
+    F.facetCount({ type: { reflow: true }, product: { "p-a": true, "": true } }) === 3 &&
+    F.facetCount({}) === 0 && F.facetCount(null) === 0);
+
+  // --- counts: computed with the OTHER dimensions applied, never with their own ---
+  var C0 = F.facetCounts(corpus, {}, products);
+  ok("every document type is listed, even at zero",
+    C0.type.map(function (t) { return t.key; }).join() === "source,reflow,frame,paged");
+  ok("type counts are live", C0.type.map(function (t) { return t.key + ":" + t.count; }).join() ===
+    "source:1,reflow:2,frame:1,paged:1");
+  ok("products are listed by name with No product trailing",
+    C0.product.map(function (p) { return p.label; }).join() === "Alpha,Beta,No product");
+  ok("product counts are live, and No product counts the untagged",
+    C0.product.map(function (p) { return p.count; }).join() === "3,1,1");
+  var C1 = F.facetCounts(corpus, { type: { reflow: true } }, products);
+  ok("choosing a type re-counts the PRODUCTS beneath it",
+    C1.product.map(function (p) { return p.count; }).join() === "1,0,1");
+  ok("but never re-counts its own dimension, so the other types stay clickable",
+    C1.type.map(function (t) { return t.count; }).join() === C0.type.map(function (t) { return t.count; }).join());
+  ok("the chosen facet is marked active in the rail",
+    C1.type.filter(function (t) { return t.active; }).map(function (t) { return t.key; }).join() === "reflow");
+  ok("a product with no documents at all is still offered",
+    F.facetCounts([], {}, products).product.map(function (p) { return p.label; }).join() === "Alpha,Beta,No product");
+  ok("empty everything is not a crash",
+    F.facetCounts().type.length === 4 && F.facetCounts().product.length === 1);
+
+  // --- the chips say the same thing the rail does ---
+  var chips = F.facetChips({ type: { reflow: true }, product: { "p-a": true, "": true } }, products);
+  ok("a chip is named in the rail's own words",
+    chips.map(function (c) { return c.label; }).sort().join("|") ===
+    "Product: Alpha|Product: No product|Type: Courses");
+  ok("a chip carries what it takes to undo exactly one tick",
+    chips.every(function (c) { return c.dim && typeof c.key === "string"; }));
+  ok("no facets means no chips", F.facetChips({}, products).length === 0);
+
+  // --- the one-time seed from the retired global scope ---
+  function fstore(seed) {
+    var m = Object.assign({}, seed || {});
+    return { data: m, getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+             setItem: function (k, v) { m[k] = String(v); }, removeItem: function (k) { delete m[k]; } };
+  }
+  ok("the seed key is the one uio-W01 hands forward", F.FACET_SEED_KEY === "verso.filesProductFacetSeed");
+  var sd1 = fstore({ "verso.filesProductFacetSeed": "p-a" });
+  ok("the retired scope seeds the Product facet once", F.consumeFacetSeed(sd1, products) === "p-a");
+  ok("and the key is gone in the same pass, so it can never seed twice",
+    sd1.data["verso.filesProductFacetSeed"] === undefined && F.consumeFacetSeed(sd1, products) === "");
+  var sd2 = fstore({ "verso.filesProductFacetSeed": "p-deleted" });
+  ok("a seed naming a product that no longer exists applies nothing, and STILL clears the key",
+    F.consumeFacetSeed(sd2, products) === "" && sd2.data["verso.filesProductFacetSeed"] === undefined);
+  ok("no seed and no store are both quiet", F.consumeFacetSeed(fstore({}), products) === "" && F.consumeFacetSeed(null, products) === "");
+
+  // --- THE GUARD RAILS. This is what stops the lens becoming a scope again. ---
+  ok("the facet selection is a local in the destination, never persisted",
+    /var facets = \{ type: \{\}, product: \{\} \};/.test(FILESRC) &&
+    !/setItem\([^)]*facet/i.test(FILESRC) && FILESRC.indexOf("verso.filesFacet") === -1);
+  ok("Files exposes no way for anything else to read its facets",
+    !/kernel\.expose\(\{[^}]*facet/i.test(FILESRC));
+  ok("no other destination reads Files' facet state", ["src/editor/shell.js", "src/editor/tabs.js",
+    "src/editor/source-stage.js", "src/editor/publish.js", "src/editor/home.js",
+    "src/editor/product-rail.js", "src/editor/documents.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/filesFacet|facetCounts|applyFacets|facetChips/.test(code);
+    }));
+  ok("the seed key is written by the uio-W01 migration and read by nobody but Files",
+    ["src/editor/shell.js", "src/editor/tabs.js", "src/editor/source-stage.js", "src/editor/publish.js",
+     "src/editor/home.js", "src/editor/documents.js"].every(function (f) {
+      return src(f).indexOf("filesProductFacetSeed") === -1;
+    }));
+  ok("the header keeps counting the whole searched corpus, not the faceted slice",
+    /var sum = corpusSummary\(searched\);/.test(FILESRC));
+  ok("the bands keep their identity underneath the lens",
+    /groupCorpus\(all, grouping, window\.ProductsStore \|\| \{\}\)/.test(FILESRC));
+  ok("an empty result says which of the two narrowed it", /No document matches those filters\./.test(FILESRC));
+  ok("a selection does not outlive a facet that hid it",
+    /Object\.keys\(selected\)\.forEach\(function \(id\) \{ if \(!visible\[id\]\) delete selected\[id\]; \}\);/.test(FILESRC));
+
+  // --- the rail's own chrome ---
+  ok("the rail is 200px and sits beside the results, not above them",
+    /\.files__facets \{[^}]*flex: 0 0 200px/.test(HOME2) && /\.files__main \{[^}]*display: flex/.test(HOME2));
+  ok("a facet row is the canonical Checkbox, because within a dimension you can hold several",
+    /function facetRow\(f\) \{\s*var row = window\.VersoUI\.Checkbox\(\{/.test(FILESRC) &&
+    FILESRC.indexOf("files-facet__box") === -1);
+  ok("an empty facet reads quieter rather than disappearing",
+    /\.files-facet\.is-empty/.test(HOME2) && !/\.files-facet\.is-empty[^}]*display: none/.test(HOME2));
+  ok("the chips are accent and dismissible", /\.files__chip \{[^}]*var\(--accent-quiet\)/.test(HOME2) &&
+    /files__chip-x/.test(FILESRC));
 })();
 
 // ---- uio-W03: four destinations, live instances, one where-am-I -----------
