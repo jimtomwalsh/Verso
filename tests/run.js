@@ -1600,6 +1600,176 @@ section("platform-pivot 34 server-mode bootstrap");
 // saveLibrary() hands over the WHOLE store on every write -- so simply forwarding the blob
 // would have made the library shared and simultaneously let two authors in two different
 // source documents overwrite each other. The adapter decomposes instead.
+// ---- platform-pivot 33: pre-flight client backup + guarded cutover ----------
+// James made this a CONDITION of moving real data, and confirmed every install holds
+// work that must survive. server/backup.js already covers the server side; nothing
+// covered the client side. These tests are mostly about REFUSAL: a cutover that proceeds
+// when it should not is the only outcome that loses an author's work, so every stage is
+// tested by breaking it.
+section("platform-pivot 33 pre-flight backup + guarded cutover");
+(function () {
+  var M = require(path.join(ROOT, "src/migration.js")).Migration;
+
+  var REG = JSON.stringify({ "C-1": { meta: { code: "C-1" }, pages: [] }, "C-2": { meta: { code: "C-2" }, pages: [] } });
+  var LIB = JSON.stringify({ components: { "cmp-1": { kind: "component" }, "top-1": { kind: "topic" } } });
+  var PRD = JSON.stringify({ "prod-1": { id: "prod-1", name: "Line" } });
+  var FACETS = { registry: REG, library: LIB, products: PRD };
+
+  // --- the archive carries everything, and proves it against a written-down manifest ---
+  var archive = M.buildClientBackup(FACETS, { tsLabel: "20260804-1200" });
+  var parsed = JSON.parse(archive);
+  ok("33: the archive carries all three facets", !!parsed.registry && !!parsed.library && !!parsed.products);
+  ok("33: and a manifest of what it should contain",
+    parsed.manifest.courses.join(",") === "C-1,C-2" &&
+    parsed.manifest.components.join(",") === "cmp-1,top-1" &&
+    parsed.manifest.products.join(",") === "prod-1");
+  var v = M.verifyClientBackup(archive, FACETS);
+  ok("33: verification passes on a faithful archive", v.ok && v.courses === 2 && v.components === 2 && v.products === 1);
+
+  // --- verification catches every way an archive can be wrong ---
+  ok("33: refuses an unparseable archive", M.verifyClientBackup("{not json", FACETS).ok === false);
+  ok("33: refuses something that is not a backup archive", M.verifyClientBackup('{"kind":"something-else"}', FACETS).ok === false);
+  (function () {
+    var short = JSON.parse(archive); delete short.registry["C-2"];
+    var r = M.verifyClientBackup(JSON.stringify(short), FACETS);
+    ok("33: refuses an archive missing a course that is on this machine", r.ok === false && /courses/.test(r.reason));
+  })();
+  (function () {
+    var lied = JSON.parse(archive); lied.manifest.courses = ["C-1"];
+    ok("33: refuses an archive that disagrees with its OWN manifest",
+      M.verifyClientBackup(JSON.stringify(lied), FACETS).ok === false);
+  })();
+  (function () {
+    var hollow = JSON.parse(archive); hollow.registry["C-2"] = null;
+    var r = M.verifyClientBackup(JSON.stringify(hollow), FACETS);
+    ok("33: refuses a course archived EMPTY (the key survives, the work does not)",
+      r.ok === false && /archived empty/.test(r.reason));
+  })();
+  (function () {
+    // built from nothing, checked against nothing -- the self-consistency trap
+    var empty = M.buildClientBackup({ registry: "{}", library: null, products: null }, {});
+    ok("33: an archive built from an empty machine does not pass for a full one",
+      M.verifyClientBackup(empty, FACETS).ok === false);
+  })();
+
+  // --- the staged cutover ---
+  function makeBrowser(f) {
+    return {
+      readRegistry: function () { return f.registry; },
+      readLibrary: function () { return f.library; },
+      readProducts: function () { return f.products; }
+    };
+  }
+  function makeServer(broken) {
+    var held = {};
+    return {
+      __held: held,
+      writeRegistry: function (j) { if (broken === "write") return { ok: false, error: "disk full" }; held.registry = j; return { ok: true }; },
+      writeLibrary: function (j) { held.library = j; return { ok: true }; },
+      writeProducts: function (j) { held.products = j; return { ok: true }; },
+      readRegistry: function () { return broken === "verify" ? JSON.stringify({ "C-1": {} }) : held.registry; },
+      readLibrary: function () { return held.library; },
+      readProducts: function () { return held.products; }
+    };
+  }
+  function harness(over) {
+    var state = { suppressed: false, delivered: null, stashed: null, logs: [] };
+    var o = {
+      tsLabel: "20260804-1200",
+      suppress: function () { state.suppressed = true; },
+      resume: function () { state.suppressed = false; },
+      log: function (m) { state.logs.push(m); },
+      deliver: function (name, json) { state.delivered = { name: name, json: json }; return { ok: true }; },
+      stash: function (json) { state.stashed = json; return { ok: true }; },
+      readStash: function () { return state.stashed; }
+    };
+    Object.keys(over || {}).forEach(function (k) { o[k] = over[k]; });
+    return { opts: o, state: state };
+  }
+
+  (function () {
+    var h = harness(), srv = makeServer();
+    var r = M.runToServer(makeBrowser(FACETS), srv, h.opts);
+    ok("33: a clean cutover succeeds and tells the caller to flip", r.ok === true && r.flip === true && r.stage === "done");
+    ok("33: all three facets reached the server", srv.__held.registry === REG && srv.__held.library === LIB && srv.__held.products === PRD);
+    ok("33: the author was handed a backup file", !!h.state.delivered && /verso-preflight-backup-20260804-1200\.json/.test(h.state.delivered.name));
+    ok("33: a copy was stashed on the server too", h.state.stashed === h.state.delivered.json);
+    ok("33: saves stay suppressed through the flip + reload", h.state.suppressed === true);
+    ok("33: the backup happened BEFORE any server write",
+      h.state.logs.findIndex(function (m) { return /backup built and checked/.test(m); }) <
+      h.state.logs.findIndex(function (m) { return /saves suppressed/.test(m); }));
+    ok("33: the delivery stage says out loud what a browser cannot prove",
+      h.state.logs.some(function (m) { return /cannot confirm it reached your disk/.test(m); }));
+  })();
+
+  // --- every stage refuses, and refusing never leaves saves suppressed ---
+  (function () {
+    var h = harness({ deliver: function () { return { ok: false, error: "download blocked" }; } });
+    var r = M.runToServer(makeBrowser(FACETS), makeServer(), h.opts);
+    ok("33: a failed hand-over of the backup stops the cutover", r.ok === false && r.stage === "deliver");
+    ok("33: and nothing was suppressed, so the author keeps working", h.state.suppressed === false);
+  })();
+  (function () {
+    var h = harness({ stash: function () { return { ok: false, error: "server refused" }; } });
+    var r = M.runToServer(makeBrowser(FACETS), makeServer(), h.opts);
+    ok("33: a failed server-side backup copy stops the cutover", r.ok === false && r.stage === "stash");
+  })();
+  (function () {
+    var h = harness({ readStash: function () { return '{"kind":"verso-preflight-backup"}'; } });
+    var r = M.runToServer(makeBrowser(FACETS), makeServer(), h.opts);
+    ok("33: a server backup copy that reads back DIFFERENT stops the cutover",
+      r.ok === false && r.stage === "stash" && /does not match/.test(r.error));
+  })();
+  (function () {
+    var h = harness(), r = M.runToServer(makeBrowser(FACETS), makeServer("write"), h.opts);
+    ok("33: a failed server write stops the cutover", r.ok === false && r.stage === "write");
+    ok("33: and saves RESUME, so the author is not silently frozen", h.state.suppressed === false);
+  })();
+  (function () {
+    var h = harness(), r = M.runToServer(makeBrowser(FACETS), makeServer("verify"), h.opts);
+    ok("33: a server read-back that does not match stops the cutover", r.ok === false && r.stage === "verify");
+    ok("33: and saves resume", h.state.suppressed === false);
+  })();
+  (function () {
+    var h = harness();
+    var r = M.runToServer(makeBrowser({ registry: null }), makeServer(), h.opts);
+    ok("33: nothing to migrate is refused, not treated as success", r.ok === false && r.stage === "read");
+    var r2 = M.runToServer(makeBrowser({ registry: "{}" }), makeServer(), h.opts);
+    ok("33: an empty registry is refused too", r2.ok === false && r2.stage === "read");
+    var r3 = M.runToServer(makeBrowser({ registry: "{oops" }), makeServer(), h.opts);
+    ok("33: an unreadable local registry is refused, and says to export by hand",
+      r3.ok === false && /export a backup by hand/.test(r3.error));
+  })();
+
+  // --- the dry run proves the path without making anything irreversible ---
+  (function () {
+    var h = harness({ dryRun: true }), srv = makeServer();
+    var r = M.runToServer(makeBrowser(FACETS), srv, h.opts);
+    ok("33: a dry run succeeds but does NOT tell the caller to flip", r.ok === true && r.flip === false && r.stage === "dry-run");
+    ok("33: it still proved the real server write", srv.__held.registry === REG);
+    ok("33: and it leaves the author able to keep working", h.state.suppressed === false);
+  })();
+
+  // --- a facet the machine does not have is skipped, never written as "{}" ---
+  (function () {
+    var h = harness(), srv = makeServer();
+    var r = M.runToServer(makeBrowser({ registry: REG, library: null, products: null }), srv, h.opts);
+    ok("33: a fresh install migrates its registry", r.ok === true && srv.__held.registry === REG);
+    ok("33: and does NOT overwrite the server's library with an empty one",
+      srv.__held.library === undefined && srv.__held.products === undefined);
+  })();
+
+  // --- the flag still has exactly ONE writer ---
+  (function () {
+    var mig = src("src/migration.js");
+    // The file may NAME the flag in prose -- it has to, to explain itself. What it must
+    // never do is write it: commitBackend in editor/storage.js is the one writer, and a
+    // live hand-flip is the 2026-07-12 clobber.
+    ok("33: the cutover writes no storage key itself (commitBackend is the one writer)",
+      !/setItem\s*\(/.test(mig));
+  })();
+})();
+
 section("platform-pivot 32 library + products facets");
 (function () {
   // server/verso-server.js is required only AFTER the node:sqlite guard below: it pulls
