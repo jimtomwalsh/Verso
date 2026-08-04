@@ -157,6 +157,9 @@
       <div class="source-stage__tabs" id="source-tabs" role="tablist" aria-label="Open source documents"></div>
       <div class="source-stage__body">
         <nav class="source-stage__nav" aria-label="Source topics">
+          <!-- uio-W12: the same panel, reading the open SOURCE document. Extras and siblings are
+               Edit-only — a source document IS the source. -->
+          <div class="source-stage__product" id="source-product-panel"></div>
           <div class="source-stage__search" id="source-stage-search"></div>
           <div class="source-stage__nav-actions" id="source-stage-nav-actions"></div>
           <div class="source-stage__topics" id="source-topic-list"></div>
@@ -223,6 +226,10 @@
         </div>
       </div>
       <div class="lpane lpane--source" id="lpane-source" data-lsec="source" hidden>
+        <!-- uio-W12: what this document belongs to — product, primary source, extras, siblings and
+             its release state. An inspector reading the OPEN document, never a filter; the read-only
+             source reading column below it is unchanged. -->
+        <div class="lpane__body lpane__body--product" id="edit-product-panel"></div>
         <div class="lpane__body" id="tab-source"></div>
       </div>
       <div class="panel-resizer" id="resizer-left"></div>
@@ -383,6 +390,10 @@
   <!-- arch-P3b-07k Home: window.VersoHome — the pre-document course browser, grouped by document geometry, with each card rendering its real first page behind an IntersectionObserver rather than showing a cached image. Must precede editor.js. -->
   <script src="src/editor/home.js"></script>
   <script src="src/editor/files.js"></script>
+  <!-- uio-W12 Product panel: window.VersoProductPanel — what the open document belongs to (product,
+       primary source, extras, siblings, release state), in the left panel of Source and Edit. An
+       inspector, never a filter. Must precede editor.js, which installs it. -->
+  <script src="src/editor/product-panel.js"></script>
   <!-- arch-P3b-07q context menu: window.VersoContextMenu — the right-click menu (build, place, dismiss) and the hit-testing that decides whether a click is on a block, a page, a chapter or the canvas. Joins the overlay layer stack rather than owning Escape. Must precede editor.js. -->
   <script src="src/editor/context-menu.js"></script>
   <!-- arch-P3b-07c modals: window.VersoModals — the canonical .modal-* dialog builders every editor dialog composes from, plus promptModal and confirmModal. Joins the overlay layer stack. Must precede editor.js. -->

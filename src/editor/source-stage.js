@@ -29,7 +29,8 @@
       "importMenuLabel", "unlinkAllCoursesFromProduct", "deleteProductSource", "deleteProduct", "saveLibrary", "modalSection",
       "makeReply", "modalText", "f04ProductFacts", "panelSection", "snapshotSourceLinkBase", "sourceBaseEditImpact", "showSourceBaseEditModal",
       "finalizeSourceLock", "sourceLinkAlternates", "registry", "applyAltToLocation", "saveRegistry", "decorateSourceLinks",
-      "sourceAltSnippet", "History", "dsSelect", "promptModal", "saveProducts", "selection", "colourForName"
+      "sourceAltSnippet", "History", "dsSelect", "promptModal", "saveProducts", "selection", "colourForName",
+      "renderSourceProductPanel"
     );
     // Aliased once: every one of these is stable (a function declaration, a constant, or an object
     // that is mutated but never reassigned), so the moved body reads exactly as it did.
@@ -2866,6 +2867,9 @@
         try { var savedT = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY); if (savedT && libComponents()[savedT]) __sourceActiveTopicId = savedT; } catch (e) {}
       }
       renderSourceTabs();
+      // uio-W12: what this source document belongs to, above the outline. It reads the open
+      // document; it never narrows the outline beneath it.
+      if (typeof E.renderSourceProductPanel === "function") E.renderSourceProductPanel(activeSourceMaster());
       mountSourceStageSearch();
       renderSourceTopicList();
       renderSourceArticle();

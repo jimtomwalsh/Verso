@@ -11112,6 +11112,140 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W12: the Product panel (contextual, never a filter) --------------
+// Product used to be a global mode. uio-W01 deleted the picker, which was right and left a real
+// question with nowhere to be answered: what does this document belong to, what does it trace back
+// to, what lives alongside it, has it fallen behind. This is an INSPECTOR that answers it -- and
+// the specific failure it must not have is becoming the picker again, so the assertions below are
+// as much about what it CANNOT do as about what it shows.
+section("uio-W12 Product panel");
+(function () {
+  var PP;
+  try { PP = require(path.join(ROOT, "src/editor/product-panel.js"))._pure; }
+  catch (e) { ok("require product-panel.js", false); return; }
+
+  var comps = {
+    "m-alpha": { id: "m-alpha", kind: "topic", sourceMaster: true, name: "Alpha manual", productId: "p-a" },
+    "m-glossary": { id: "m-glossary", kind: "topic", sourceMaster: true, name: "Shared glossary" },
+    "m-gone": { id: "m-gone", kind: "topic", name: "Not a document" }
+  };
+  var products = {
+    "p-a": { id: "p-a", name: "Alpha", groundTruthId: "m-alpha" },
+    "p-new": { id: "p-new", name: "Brand new" }
+  };
+  var registry = {
+    "C-1": { meta: { code: "C-1", title: "Alpha course", productId: "p-a", extraSourceIds: ["m-glossary"] } },
+    "C-2": { meta: { code: "C-2", title: "Alpha deck", productId: "p-a" } },
+    "C-3": { meta: { code: "C-3", title: "Zeta guide", productId: "p-a" } },
+    "C-4": { meta: { code: "C-4", title: "Other product", productId: "p-new" } },
+    "U-1": { meta: { code: "U-1", title: "Untagged" } }
+  };
+  function model(docId, extra) {
+    return PP.panelModel(Object.assign({
+      kind: "design", doc: registry[docId], components: comps, products: products,
+      registry: registry, openDocIds: ["C-1", "C-3"]
+    }, extra || {}));
+  }
+
+  // --- it reads the OPEN document, and nothing else ---
+  var m1 = model("C-1");
+  ok("the panel names the product the open document carries", m1.tagged && m1.productName === "Alpha");
+  ok("the primary source resolves automatically from that tag", m1.primary.id === "m-alpha");
+  ok("extras are the hand-attached sources, listed apart from the primary",
+    m1.extras.map(function (x) { return x.id; }).join() === "m-glossary");
+  ok("siblings are the OTHER documents in the product, never this one",
+    m1.siblings.map(function (s) { return s.id; }).join() === "C-2,C-3");
+  ok("siblings are ordered by title so the list is stable across renders",
+    m1.siblings.map(function (s) { return s.title; }).join() === "Alpha deck,Zeta guide");
+  ok("a sibling already open elsewhere SAYS so, rather than opening a second copy silently",
+    m1.siblings.filter(function (s) { return s.openElsewhere; }).map(function (s) { return s.id; }).join() === "C-3");
+  ok("a document in another product borrows none of this one's relationships",
+    model("C-4").siblings.length === 0 && model("C-4").primary === null);
+
+  // --- the states that are real, and degrade rather than break ---
+  var mu = model("U-1");
+  ok("an untagged document reads as untagged, with no product invented for it",
+    mu.present && !mu.tagged && mu.productName === "" && mu.primary === null);
+  ok("a product with no primary source reports none rather than a blank",
+    model("C-4").tagged && model("C-4").primary === null);
+  ok("no document at all is absent, not a crash", PP.panelModel({ kind: "design" }).present === false);
+  ok("empty stores are not a crash",
+    PP.panelModel({ kind: "design", doc: registry["C-1"] }).present === true);
+
+  // --- Source asks the same question and gets the same shape ---
+  var ms = PP.panelModel({ kind: "source", doc: comps["m-alpha"], components: comps, products: products, registry: registry });
+  ok("Source reads the product off the open source document", ms.tagged && ms.productName === "Alpha");
+  ok("looking at the primary itself, the panel says so instead of linking back to where you are",
+    ms.isPrimary === true);
+  ok("EXTRAS AND SIBLINGS ARE EDIT-ONLY -- a source document IS the source",
+    ms.extras.length === 0 && ms.siblings.length === 0);
+  var msh = PP.panelModel({ kind: "source", doc: comps["m-glossary"], components: comps, products: products });
+  ok("a shared source document reads as untagged, which is a fact and not an error", !msh.tagged);
+
+  // --- the release line: read from the ONE staleness computation, and silent when it has nothing ---
+  ok("in sync reads in the success tone",
+    PP.releaseLine({ state: "current" }).tone === "success" &&
+    PP.releaseLine({ state: "current" }).text === "In sync with source");
+  ok("behind reads in the warning tone, and counts",
+    PP.releaseLine({ state: "drifted", count: 3 }).tone === "warning" &&
+    PP.releaseLine({ state: "drifted", count: 3 }).text === "3 revisions behind source");
+  ok("one revision is singular", PP.releaseLine({ state: "drifted", count: 1 }).text === "1 revision behind source");
+  ok("a document that links no source has nothing to be behind, and says nothing",
+    PP.releaseLine({ state: "unlinked" }) === null);
+  ok("nor does one that has never been published", PP.releaseLine({ state: "unpublished" }) === null);
+  ok("no drift data at all is silent", PP.releaseLine(null) === null && PP.releaseLine() === null);
+  ok("the line rides on the model", model("C-1", { drift: { state: "current" } }).release.tone === "success");
+
+  // --- THE GUARD RAIL: an inspector, never the picker uio-W01 removed ---
+  var PPSRC = src("src/editor/product-panel.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the panel holds no state of its own -- there is nothing in it to persist",
+    !/localStorage/.test(PPSRC) && !/setItem/.test(PPSRC));
+  ok("it never writes a scope any other surface could read",
+    PPSRC.indexOf("activeProduct") === -1 && PPSRC.indexOf("filesProductFacetSeed") === -1);
+  // Every navigation out of this panel goes through one of two openers, both of which LAND a
+  // destination. There is no third path, and in particular nothing that hands a product id to
+  // another surface to narrow itself by -- which is exactly what the retired picker did.
+  ok("every action it offers OPENS something rather than narrowing something",
+    /function openSource\(id\)/.test(PPSRC) && /function openDesign\(id\)/.test(PPSRC) &&
+    !/facet|visibleTabIds|filterTopics|setActiveProduct/i.test(PPSRC));
+  // Found by browser-verifying this panel: `window.__productRail.openSourceTopicId` is never
+  // assigned -- that hook object carries the browser-verify entry points, not this one -- so Files
+  // has landed Source and left whatever was already open showing, since uio-W04. Both callers go
+  // through the kernel now, and a ratchet keeps them there.
+  ok("opening a source document goes through the kernel, not a hook object that never had it",
+    ["src/editor/files.js", "src/editor/product-panel.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return /E\.openSourceTopicId\(/.test(code) && code.indexOf("__productRail.openSourceTopicId") === -1;
+    }));
+  ok("it reads the ONE staleness computation rather than recomputing drift a second way",
+    /E\.f04DocFacts\(doc\.meta\.code\)/.test(PPSRC) && !/lastPublishedGroundTruthVersions/.test(PPSRC));
+  ok("the pure model is DOM-free", !/document\.|innerHTML/.test(PPSRC.slice(0, PPSRC.indexOf("function install"))));
+
+  // --- the wiring: one panel, both destinations ---
+  ok("it renders into a host of its own in each destination's left panel",
+    /id="edit-product-panel"/.test(src("index.html")) && /id="source-product-panel"/.test(src("index.html")));
+  ok("the Edit panel repaints with the reading column, so the two never show different documents",
+    /if \(typeof E\.renderEditProductPanel === "function"\) E\.renderEditProductPanel\(\);/.test(src("src/editor/source-link.js")));
+  ok("the Source panel repaints with the stage, reading the open source document",
+    /E\.renderSourceProductPanel\(activeSourceMaster\(\)\)/.test(src("src/editor/source-stage.js")));
+  ok("both entry points cross through provide(), not another module's expose()",
+    /renderEditProductPanel: VE\.bind\("renderEditProductPanel"\)/.test(src("src/editor.js")) &&
+    /renderSourceProductPanel: VE\.bind\("renderSourceProductPanel"\)/.test(src("src/editor.js")));
+  ok("it installs after tabs.js, whose switchDoc a sibling link uses",
+    src("src/editor.js").indexOf("window.VersoTabs.install(VE)") <
+    src("src/editor.js").indexOf("window.VersoProductPanel.install(VE)"));
+  ["index.html", "kit.html"].forEach(function (page) {
+    ok(page + " loads product-panel.js", src(page).indexOf("src/editor/product-panel.js") !== -1);
+  });
+  var INS = src("styles/editor/07-inspector.css");
+  ok("untagged is styled as a plain fact -- no red, no alarm",
+    /\.prodpanel__untagged \{[^}]*var\(--text-secondary\)/.test(INS) &&
+    !/\.prodpanel__untagged[^}]*danger/.test(INS));
+  ok("the release line is the only coloured thing, because it is the only thing that is ever news",
+    /\.prodpanel__release--success \{[^}]*var\(--success/.test(INS) &&
+    /\.prodpanel__release--warning \{[^}]*var\(--warning/.test(INS));
+})();
+
 // ---- uio-W10: per-destination tab strips, one type each -------------------
 // Source has never had a document switcher: it resolved exactly one master from the global product
 // and showed it, so two manuals open at once was not a thing you could do. Edit's strip, meanwhile,
@@ -12369,7 +12503,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
   // uio-W10 put Source's own tab strip in front of the search mount; the actions row is still not
   // mounted separately.
-  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,1400}renderSourceTabs\(\);\s*mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,1800}renderSourceTabs\(\);[\s\S]{0,300}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(SHELL) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(SHELL));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(es) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(es));
@@ -16156,7 +16290,7 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
   // uio-W14 widened this from "the open doc's product" to "the open doc's SOURCES" -- its product's
   // primary plus any extras attached by hand -- so an untagged course with a shared glossary
   // attached reads it here instead of being told it has no source.
-  ok("renderEditSourcePanel keys off the OPEN document, not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,500}window\.SourceOwnership\.sourcesForDoc\(E\.doc,/.test(SL));
+  ok("renderEditSourcePanel keys off the OPEN document, not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,900}window\.SourceOwnership\.sourcesForDoc\(E\.doc,/.test(SL));
   ok("it resolves that document's source and builds a live model from master.doc", /var master = owned\.primary \|\| owned\.extras\[0\] \|\| null;[\s\S]{0,700}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
   // uio-W04b re-pointed the first of these: it used to send the author to "Save/Recents -> Promote
   // to Product", a menu that had already been retired. An empty state that names a route the app no

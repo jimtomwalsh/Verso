@@ -6485,6 +6485,9 @@
   window.VersoEditor.provide({
     libComponents: libComponents, dsModalShell: dsModalShell, modalField: modalField,
     modalSection: modalSection, f04Badge: f04Badge, f04ProductFacts: f04ProductFacts,
+    // uio-W12: the Product panel's release line reads the ONE staleness computation, rather than
+    // recomputing drift a second way and getting a second answer.
+    f04DocFacts: f04DocFacts,
     layout: layout, view: view, variantNames: variantNames, registry: registry, History: History,
     // Document identity: which existing registry entry an incoming code refers to. Provided from
     // here rather than read off window inside the module, because a module under bare `require`
@@ -6581,6 +6584,15 @@
   var mountFilesStage = VE.bind("mountFilesStage");
   var refreshFiles = VE.bind("refreshFiles");
   VE.provide({ mountFilesStage: mountFilesStage, refreshFiles: refreshFiles });
+  // uio-W12: the Product panel -- what the open document belongs to, in the left panel of both
+  // Source and Edit. An inspector, never a filter: it reads the open document, and every action it
+  // offers OPENS something rather than narrowing something. It installs after tabs.js (whose
+  // switchDoc it uses to reach a sibling) and before the two stages that render it.
+  window.VersoProductPanel.install(VE);
+  VE.provide({
+    renderEditProductPanel: VE.bind("renderEditProductPanel"),
+    renderSourceProductPanel: VE.bind("renderSourceProductPanel")
+  });
   window.VersoShell.install(VE);   // the frame around the work: stage, Product, cell
   window.VersoEditing.install(VE);   // what makes the canvas typeable
   window.VersoTextFormat.install(VE);   // inline formatting: the toggle set and both bars that render it

@@ -328,7 +328,7 @@
     var E = kernel.need(
       "h", "registry", "libComponents", "switchDoc", "openDocIds", "saveOpenDocIds",
       "colourForName", "formatRelativeTime", "showContextMenu", "promoteToProductModal",
-      "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse",
+      "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse", "openSourceTopicId",
       "deleteCourse", "tagDocProductStage", "saveRegistry", "dsModalShell", "modalField",
       "confirmModal"
     );
@@ -369,7 +369,11 @@
     function openDoc(d) {
       if (!d) return;
       if (d.kind === "source") {
-        if (window.__productRail && window.__productRail.openSourceTopicId) window.__productRail.openSourceTopicId(d.id);
+        // This reached for `window.__productRail.openSourceTopicId`, which is never assigned -- the
+        // hook object carries the browser-verify entry points, not this one. So Files landed Source
+        // and left whatever was already open showing, since uio-W04. It goes through the kernel now,
+        // which is also what puts the document in Source's strip (uio-W10).
+        E.openSourceTopicId(d.id);
         if (window.__leftRail) window.__leftRail.setStage("source");
         return;
       }

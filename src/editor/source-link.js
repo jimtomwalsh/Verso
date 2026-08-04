@@ -35,6 +35,7 @@
       "activeLeftSection", "walkBlocks", "setActivePage", "insertBlock", "mintId", "pushHistory",
       "reapplyBlock", "dsModalShell", "registry", "lockSourceEditing", "pushSourceAlternate", "setStage",
       "sourceMasterFor", "renderSourceDocNode", "applyLeftSection", "canvas", "scheduleSave", "modalText",
+      "renderEditProductPanel",
       "modalField", "showContextMenu", "sourceActiveTopicId", "saveRegistry", "flushSourceEditSession", "applySourceLockState",
       "refreshSourceSelBar", "updateSourceDocBar", "setSourceDocModel", "persistSourceDocModel", "clearSourceEditSession", "renderSourceArticle",
       "openSourceTopicId", "openCourseFromBrowser", "blockById", "findPageOfBlock", "focusFrame", "reselectBlockNode",
@@ -98,6 +99,10 @@
     function renderEditSourcePanel() {
       var host = document.getElementById("tab-source"); if (!host) return;
       host.innerHTML = "";
+      // uio-W12: the Product panel sits ABOVE this reading column, in the same left pane, and is
+      // repainted with it -- both answer questions about the open document, so they must never be
+      // showing two different documents.
+      if (typeof E.renderEditProductPanel === "function") E.renderEditProductPanel();
       var SD = window.SourceDoc, U = window.VersoUI;
       var owned = window.SourceOwnership.sourcesForDoc(E.doc, libComponents(), window.ProductsStore || {});
       // The primary is what the panel reads when there is one; an untagged document with an
