@@ -339,6 +339,10 @@
   <!-- Source rewrite (Epic 2b): continuous-document node model + owned undo (DOM-free), and the range-mark painting engine (CSS Custom Highlight over live Ranges). Must load before editor.js, which mounts them in the Source stage. -->
   <script src="src/source-doc.js"></script>
   <script src="src/source-marks.js"></script>
+  <!-- uio-W14: which source documents a piece of work draws on — product-optional source documents,
+       one primary per product, plus hand-attached extras. Pure, DOM-free; must precede editor.js,
+       whose Source stage and Edit source panel resolve through it. -->
+  <script src="src/source-ownership.js"></script>
   <script src="src/publish-queue.js"></script>
   <script src="src/publish-presets.js"></script>
   <script src="src/publish-paths.js"></script>

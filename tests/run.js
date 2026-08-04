@@ -303,7 +303,7 @@ section("syntax");
  "src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/source-ownership.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -11112,6 +11112,166 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W14: source documents go product-optional; primary + extras ------
+// Source was keyed on Product end to end, and two things fell out of that. A source document with
+// NO product could be created and then never opened again -- every path in went through a Product,
+// so glossaries and standards, the material that serves every product because it belongs to none,
+// were unreachable by construction. And a design document could draw on exactly one source, its
+// product's primary, even though the link marks already carry a masterId that would have resolved
+// either. Ownership is a pure question now, and this is where it is settled.
+section("uio-W14 source ownership");
+(function () {
+  var SO;
+  try { SO = require(path.join(ROOT, "src/source-ownership.js")); }
+  catch (e) { ok("require source-ownership.js", false); return; }
+
+  var comps = {
+    "m-alpha": { id: "m-alpha", kind: "topic", sourceMaster: true, name: "Alpha manual", productId: "p-a", updatedAt: 10 },
+    "m-beta": { id: "m-beta", kind: "topic", sourceMaster: true, name: "Beta manual", productId: "p-b", updatedAt: 20 },
+    "m-glossary": { id: "m-glossary", kind: "topic", sourceMaster: true, name: "Shared glossary", updatedAt: 30 },
+    "m-standards": { id: "m-standards", kind: "topic", sourceMaster: true, name: "House standards", productId: "", updatedAt: 40 },
+    "m-folded": { id: "m-folded", kind: "topic", sourceMaster: true, name: "Folded in", archivedInto: "m-alpha" },
+    "t-loose": { id: "t-loose", kind: "topic", name: "A loose topic", productId: "p-a" },
+    "c-block": { id: "c-block", kind: "block", name: "Not a document" }
+  };
+  var products = {
+    "p-a": { id: "p-a", name: "Alpha", groundTruthId: "m-alpha" },
+    "p-b": { id: "p-b", name: "Beta", groundTruthId: "m-beta" },
+    "p-new": { id: "p-new", name: "Brand new" },                    // no primary yet
+    "p-broken": { id: "p-broken", name: "Broken", groundTruthId: "m-deleted" }  // points at nothing
+  };
+
+  // --- what a source document is ---
+  ok("a reserved master is a source document", SO.isSourceDocument(comps["m-alpha"]));
+  ok("a product-LESS master is a source document too", SO.isSourceDocument(comps["m-glossary"]));
+  ok("a chapter folded into a master is not a document", !SO.isSourceDocument(comps["m-folded"]));
+  ok("a loose topic is not a document", !SO.isSourceDocument(comps["t-loose"]));
+  ok("a library component that is not a topic is not a document", !SO.isSourceDocument(comps["c-block"]));
+  ok("junk is not a document", !SO.isSourceDocument(null) && !SO.isSourceDocument({}) && !SO.isSourceDocument("m-alpha"));
+
+  ok("every source document is listed, product or not",
+    SO.sourceDocuments(comps).map(function (c) { return c.id; }).join() === "m-alpha,m-beta,m-standards,m-glossary");
+  ok("the order is by name, not by store insertion",
+    SO.sourceDocuments(comps).map(function (c) { return c.name; }).join() === "Alpha manual,Beta manual,House standards,Shared glossary");
+  ok("SHARED material is the product-less set, and both spellings of absent count",
+    SO.sharedSourceDocuments(comps).map(function (c) { return c.id; }).join() === "m-standards,m-glossary");
+  ok("empty stores are not a crash", SO.sourceDocuments({}).length === 0 && SO.sourceDocuments().length === 0);
+
+  // --- one primary per product, and a product with none degrades ---
+  ok("a product resolves exactly one primary", SO.primaryFor(comps, products, "p-a").id === "m-alpha");
+  ok("a product with no primary degrades to null, not to an exception",
+    SO.primaryFor(comps, products, "p-new") === null && SO.primaryIdFor(products, "p-new") === "");
+  ok("a groundTruthId pointing at nothing resolves to null rather than half a document",
+    SO.primaryFor(comps, products, "p-broken") === null);
+  ok("a groundTruthId pointing at a folded chapter resolves to null",
+    SO.primaryFor(comps, { x: { groundTruthId: "m-folded" } }, "x") === null);
+  ok("no product at all resolves to null", SO.primaryFor(comps, products, "") === null &&
+    SO.primaryFor(comps, products, "nope") === null);
+  ok("the reverse index answers 'whose primary is this?'",
+    SO.primaryIndex(products)["m-alpha"] === "p-a" && SO.primaryIndex(products)["m-glossary"] === undefined);
+
+  // --- a design document's sources: primary (automatic) + extras (by hand) ---
+  var tagged = { meta: { productId: "p-a", extraSourceIds: ["m-glossary"] } };
+  var untagged = { meta: { extraSourceIds: ["m-glossary", "m-standards"] } };
+  var plain = { meta: { productId: "p-a" } };
+  ok("the primary resolves automatically from the product tag",
+    SO.sourcesForDoc(plain, comps, products).primary.id === "m-alpha" &&
+    SO.sourcesForDoc(plain, comps, products).extras.length === 0);
+  ok("extras are the hand-attached ones, beside the primary",
+    SO.sourcesForDoc(tagged, comps, products).all.map(function (c) { return c.id; }).join() === "m-alpha,m-glossary");
+  ok("an UNTAGGED document can still draw on shared material",
+    SO.sourcesForDoc(untagged, comps, products).all.map(function (c) { return c.id; }).join() === "m-glossary,m-standards");
+  ok("a document with nothing at all resolves to an empty set, not to null",
+    SO.sourcesForDoc({ meta: {} }, comps, products).all.length === 0 &&
+    SO.sourcesForDoc(null, comps, products).all.length === 0);
+  ok("an extra naming the primary is not listed twice",
+    SO.sourcesForDoc({ meta: { productId: "p-a", extraSourceIds: ["m-alpha"] } }, comps, products).all.length === 1);
+  ok("an extra naming something deleted is dropped, leaving one fewer source rather than a hole",
+    SO.sourcesForDoc({ meta: { extraSourceIds: ["m-gone", "m-glossary"] } }, comps, products).all
+      .map(function (c) { return c.id; }).join() === "m-glossary");
+  ok("an extra naming a folded chapter is dropped",
+    SO.sourcesForDoc({ meta: { extraSourceIds: ["m-folded"] } }, comps, products).all.length === 0);
+
+  // --- the field itself, defended at one place because it round-trips through four ---
+  ok("the extras list is normalised: strings, no blanks, no duplicates, order kept",
+    SO.extraSourceIds({ meta: { extraSourceIds: ["a", "", "a", null, 7, "b"] } }).join() === "a,b");
+  ok("a missing or malformed field reads as empty",
+    SO.extraSourceIds({ meta: {} }).length === 0 && SO.extraSourceIds({}).length === 0 &&
+    SO.extraSourceIds({ meta: { extraSourceIds: "a" } }).length === 0 && SO.extraSourceIds().length === 0);
+
+  // --- attaching and detaching, as list arithmetic ---
+  ok("attaching adds one", SO.attachExtra(plain, "m-glossary", comps, products).join() === "m-glossary");
+  ok("attaching the same twice is a no-op", SO.attachExtra(tagged, "m-glossary", comps, products).join() === "m-glossary");
+  ok("THE PRIMARY IS NEVER AN EXTRA -- it is already attached by the product tag",
+    SO.attachExtra(plain, "m-alpha", comps, products).length === 0);
+  ok("attaching something that is not a source document is refused",
+    SO.attachExtra(plain, "t-loose", comps, products).length === 0 &&
+    SO.attachExtra(plain, "m-gone", comps, products).length === 0);
+  ok("detaching removes exactly one", SO.detachExtra(untagged, "m-glossary").join() === "m-standards");
+  ok("detaching what was never attached changes nothing", SO.detachExtra(untagged, "m-nope").join() === "m-glossary,m-standards");
+
+  // A document that never attached an extra must round-trip byte-identical to one from before this
+  // ticket existed, so an empty list is DELETED rather than persisted as [].
+  var d1 = { meta: { productId: "p-a" } };
+  SO.setExtraSourceIds(d1, []);
+  ok("an empty list is deleted, never written as []",
+    !Object.prototype.hasOwnProperty.call(d1.meta, "extraSourceIds") &&
+    JSON.stringify(d1) === JSON.stringify({ meta: { productId: "p-a" } }));
+  SO.setExtraSourceIds(d1, ["m-glossary", "m-glossary", "", "m-standards"]);
+  ok("the write normalises the same way the read does", d1.meta.extraSourceIds.join() === "m-glossary,m-standards");
+  ok("extraSourceIds round-trips through JSON -- the shape save, load and .verso all use",
+    SO.extraSourceIds(JSON.parse(JSON.stringify(d1))).join() === "m-glossary,m-standards");
+  ok("setting on a doc with no meta mints one", SO.setExtraSourceIds({}, ["m-glossary"]).meta.extraSourceIds.join() === "m-glossary");
+
+  // --- A LINK MARK RESOLVING TO AN EXTRA WORKS IDENTICALLY TO ONE ON THE PRIMARY ---
+  // The mark model needs no change: it carries a masterId, and resolution just has a longer list to
+  // look down. This is the assertion that says so.
+  ok("a mark on the primary resolves", SO.resolveLinkedSource("m-alpha", tagged, comps, products).id === "m-alpha");
+  ok("a mark on an EXTRA resolves identically", SO.resolveLinkedSource("m-glossary", tagged, comps, products).id === "m-glossary");
+  ok("a mark on a source this document does not draw on resolves to null",
+    SO.resolveLinkedSource("m-beta", tagged, comps, products) === null);
+  ok("a mark on an extra of an UNTAGGED document resolves",
+    SO.resolveLinkedSource("m-standards", untagged, comps, products).id === "m-standards");
+  ok("no masterId resolves to null", SO.resolveLinkedSource("", tagged, comps, products) === null);
+
+  // --- the wiring: Source resolves a DOCUMENT now, not a product ---
+  var SS = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("Source resolves which DOCUMENT to show, and reads the product off it",
+    /function activeSourceDocId\(\)/.test(SS) && /function activeSourceMaster\(\)/.test(SS) &&
+    /function activeSourceProductId\(\)\s*\{\s*var open = activeSourceMaster\(\);/.test(SS));
+  ok("the remembered document is honoured whether or not it carries a product",
+    /window\.SourceOwnership\.isSourceDocument\(comps\[lastId\]\)/.test(SS));
+  ok("a shared source document is reachable when no product has one",
+    /window\.SourceOwnership\.sharedSourceDocuments\(comps\)/.test(SS));
+  ok("no call site still asks a product for the open master",
+    SS.indexOf("sourceMasterFor(activeSourceProductId())") === -1);
+  ok("the migration entry point lost the global product from its name, and takes one instead",
+    /function ensureUnifiedDocFor\(productId\)/.test(SS));
+  ok("minting a source document is product-OPTIONAL",
+    /function createSourceDocument\(name, productId\)/.test(SS) &&
+    /var pid = \(productId && window\.ProductsStore\[productId\]\) \? productId : "";/.test(SS));
+  ok("a second source document never displaces a product's primary",
+    /if \(product && !product\.groundTruthId\) \{ product\.groundTruthId = master\.id;/.test(SS));
+  ok("Source no longer refuses to create a document because there is no product",
+    SS.indexOf("Create a Product first") === -1);
+  ok("the mechanism is exposed for Files' creation actions and the Product panel",
+    /createSourceDocument: createSourceDocument/.test(SS) && /activeSourceMaster: activeSourceMaster/.test(SS));
+
+  var SL = src("src/editor/source-link.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the Edit source panel resolves through ownership, not through the product alone",
+    /window\.SourceOwnership\.sourcesForDoc\(E\.doc, libComponents\(\), window\.ProductsStore \|\| \{\}\)/.test(SL));
+  ok("it falls back to an attached extra rather than giving up on an untagged document",
+    /var master = owned\.primary \|\| owned\.extras\[0\] \|\| null;/.test(SL));
+  ok("a placement is made against the RESOLVED master, never silently against the primary",
+    /__editSourceMasterId = master\.id \|\| null;/.test(SL));
+  ["index.html", "kit.html"].forEach(function (page) {
+    ok(page + " loads source-ownership.js", src(page).indexOf("src/source-ownership.js") !== -1);
+  });
+  ok("the module is pure: no DOM, no storage, no stores reached for",
+    !/document\.|localStorage|window\.ProductsStore|window\.LibraryStore/.test(src("src/source-ownership.js")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+})();
+
 // ---- uio-W03: four destinations, live instances, one where-am-I -----------
 // The rail grows to four and Files leads. Each destination keeps a LIVE INSTANCE -- switching is a
 // swap, not a reload -- and exactly one element in the whole app answers "where am I".
@@ -12125,7 +12285,9 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // LibraryStore write, not a course edit).
   // uio-W01: the gate stays -- a source document belongs to a Product -- but it resolves from the
   // stage's own state instead of a top-bar picker, and says something true now that the bar is gone.
-  ok("newTopicModal resolves its Product from the stage, and only stops when there is none", /function newTopicModal\(\) \{[\s\S]{0,400}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{ window\.alert\("Create a Product first[^"]*"\); return; \}/.test(es));
+  // uio-W14 took away the last reason to refuse: a source document no longer needs a Product, so
+  // "no Product" now makes SHARED material rather than an alert.
+  ok("newTopicModal resolves its Product from the stage, and makes shared material when there is none", /function newTopicModal\(\) \{[\s\S]{0,500}var productId = activeSourceProductId\(\);[\s\S]{0,400}if \(!productId\) \{ createSourceDocument\(name, ""\);/.test(es));
   ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(es));
   var ntmStart = es.indexOf("function newTopicModal()");
   var ntmBody = es.slice(ntmStart, ntmStart + 1200);
@@ -12136,7 +12298,10 @@ section("Product Rail: New Topic / Import from Markdown UI");
 
   // Import from Markdown: same active-Product gate, blocked without a chosen file, and
   // the variant file list is the Product's OWN declared variants (no free-form entry).
-  ok("importMarkdownModal resolves its Product the same way", /function importMarkdownModal\(\) \{[\s\S]{0,1400}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{ window\.alert\("Create a Product first[^"]*"\); return; \}/.test(es));
+  // uio-W14: and it no longer refuses either. An import with nowhere to land mints SHARED material
+  // and lands there additively -- the one destination that can import must never tell you to go and
+  // use a different one first.
+  ok("importMarkdownModal resolves its Product the same way, and makes shared material when there is none", /function importMarkdownModal\(\) \{[\s\S]{0,1800}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{\s*createSourceDocument\("Imported source", ""\);/.test(es));
   ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(es));
   ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(es));
   ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(es));
@@ -12186,7 +12351,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
       && !/function deleteSelectedTopics/.test(e) && !/function moveSelectedTopicsModal/.test(e)
       && !/function topicNeedsReview/.test(e) && !/function structMoveTopic/.test(e) && !/function exitSelectMode/.test(e);
   })());
-  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(es) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(es));
+  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(es) && /if \(!activeSourceMaster\(\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(es));
 
   // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
   // confirms with the author first, and covers both "no ambiguity" fast-paths.
@@ -15888,13 +16053,16 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
 (function () {
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js"), css = EDITOR_CSS;
-  ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(E\.doc && E\.doc\.meta && E\.doc\.meta\.productId\)/.test(SL));
-  ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
+  // uio-W14 widened this from "the open doc's product" to "the open doc's SOURCES" -- its product's
+  // primary plus any extras attached by hand -- so an untagged course with a shared glossary
+  // attached reads it here instead of being told it has no source.
+  ok("renderEditSourcePanel keys off the OPEN document, not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,500}window\.SourceOwnership\.sourcesForDoc\(E\.doc,/.test(SL));
+  ok("it resolves that document's source and builds a live model from master.doc", /var master = owned\.primary \|\| owned\.extras\[0\] \|\| null;[\s\S]{0,700}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
   // uio-W04b re-pointed the first of these: it used to send the author to "Save/Recents -> Promote
   // to Product", a menu that had already been retired. An empty state that names a route the app no
   // longer has is worse than a blank one.
-  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a product[\s\S]{0,600}This Product has no source document yet/.test(SL));
-  ok("and the route it names actually exists", /Assign one from its row menu in Files/.test(SL));
+  ok("no-source + no-master both render a named empty state, not a blank panel", /This Product has no source document yet[\s\S]{0,400}This document isn't attached to a product and has no source attached/.test(SL));
+  ok("and the route it names actually exists", /Assign a product from its row menu in Files/.test(SL));
   ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(SL));
   ok("the panel is read-only: its function never sets contentEditable / applySourceLockState", (function () {
     var start = SL.indexOf("function renderEditSourcePanel()");
@@ -17155,9 +17323,12 @@ section("Source/Editor feedback batch (UI wiring guards)");
   // author's saved scope before it had been restored -- cannot happen, because there is no saved
   // scope and the auto-pick writes nothing. What replaces it: Source resolves what it shows from its
   // own last-open document, and the resolution is READ-ONLY.
+  // uio-W14 moved the read up a level: the resolution answers which DOCUMENT is open, and the
+  // product is read off it. The invariant is unchanged -- it reads, and writes nothing global.
   ok("Source's resolution reads the last-open document and writes nothing global", (function () {
-    var body = es.slice(es.indexOf("function activeSourceProductId()"), es.indexOf("function activeSourceProductId()") + 900);
-    return /localStorage\.getItem\(SOURCE_TOPIC_PERSIST_KEY\)/.test(body) &&
+    var start = es.indexOf("function activeSourceDocId()");
+    var body = es.slice(start, es.indexOf("function ensureUnifiedDocFor(productId)"));
+    return start !== -1 && /localStorage\.getItem\(SOURCE_TOPIC_PERSIST_KEY\)/.test(body) &&
            body.indexOf("setActiveProduct") === -1 &&
            body.indexOf("adoptActiveProduct") === -1 &&
            body.indexOf("setItem") === -1;
@@ -17673,7 +17844,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(es) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(es));
 
   // md-import-additive wiring (spec 2c section 4)
-  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(es));
+  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(activeSourceMaster\(\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(es));
   ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(es));
   ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(es));
   ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(topic, n, shown\)/.test(es));
@@ -17690,12 +17861,12 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
 
   // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
   ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(es));
-  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = sourceMasterFor\(activeSourceProductId\(\)\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(es));
+  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = activeSourceMaster\(\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(es));
   ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(es) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(es));
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(es));
   ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(es));
   ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(ep) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(es));
-  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(es));
+  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!activeSourceMaster\(\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(es));
   ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(es));
   ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(es) && /it\.classList\.toggle\("is-selected", on\)/.test(es));
   ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(es));
