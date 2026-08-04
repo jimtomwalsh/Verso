@@ -17,7 +17,7 @@ There is **no build step and no install.** The app is vanilla JavaScript with cl
 mounts its output onto the canvas, and the SCORM export serialises the *same* output — so
 what you see in the editor is what ships.
 
-- Nothing in `editor.js` / `editor.css` may leak into `render()`.
+- Nothing in `editor.js` / `styles/editor/` may leak into `render()`.
 - New per-document state is **data on the `doc`**; render reads per-pass hooks
   (`window.__navSections`, `__docStyles`, `__glossary`, …), never editor state.
 - If a change would make the editor and the export diverge, it's wrong.
@@ -27,7 +27,7 @@ what you see in the editor is what ships.
 Content blocks are split across four files, each with one job:
 
 - `src/render.js` — pure render
-- `src/course.css` — course styling (tokens-only) that ships in SCORM
+- `styles/course/` — course styling (tokens-only) that ships in SCORM, inlined by the exporter
 - `src/runtime.js` — learner-side behaviour in the exported course
 - `src/editor.js` — the inspector / authoring UI
 
@@ -38,7 +38,7 @@ pattern is missing, add it there first, then build to it.
 
 - **Vanilla JS, classic `<script>` globals** — no ES modules, no bundler, no `npm install`
   in the app. It must open from `file://`.
-- `editor.css` = editor UI only (never bleeds into course output). `src/course.css` =
+- `styles/editor/` = editor UI only (never bleeds into course output). `styles/course/` =
   tokens-only, ships in SCORM.
 - **No emojis** in code or files.
 - **No runtime dependencies, ever.** Dev-only tools are permitted, but the app must always
@@ -67,12 +67,12 @@ node --check src/<file>.js
 
 ## Keep the docs in sync (code is truth)
 
-The in-app User Guide (`docs/USER-GUIDE.md`) must track the feature set — if a change adds or
+The in-app User Guide (`docs/guide/*.md`) must track the feature set — if a change adds or
 alters something an author sees or does, update the guide in the same change. Two tools help:
 
 ```bash
 node tools/docs-maintain.js            # fail if a palette block is undocumented (--report to list)
-node tools/docs-capture.js --stale src/editor.js editor.css   # which figure scenes a diff touches
+node tools/docs-capture.js --stale src/editor.js styles/editor/   # which figure scenes a diff touches
 ```
 
 `docs-maintain` catches missing block docs (the same coverage the suite enforces); `docs-capture
