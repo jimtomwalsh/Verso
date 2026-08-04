@@ -26,7 +26,7 @@
       "openDocIds", "registry", "confirmModal", "h", "saveOpenDocIds", "saveRegistry",
       "switchDoc", "modalSection", "modalField", "modalText", "tagDocProductStage",
       "tagDocCell", "clone", "dsModalShell", "bindProjectFolder", "iconBtn", "productSelectOptions",
-      "doc", "findRegistryId"
+      "doc", "findRegistryId", "colourForName", "formatRelativeTime"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -46,7 +46,9 @@
         dsModalShell = E.dsModalShell,
         bindProjectFolder = E.bindProjectFolder,
         iconBtn = E.iconBtn,
-        productSelectOptions = E.productSelectOptions;
+        productSelectOptions = E.productSelectOptions,
+        colourForName = E.colourForName,
+        formatRelativeTime = E.formatRelativeTime;
 
     // ---- Shared "header & footer default for new courses" ---------------------
     // A machine-level default (localStorage, cross-project) captured from any course's
@@ -107,7 +109,7 @@
       // document, and letting one through is how two rows end up sharing a name.
       var clash = E.findRegistryId(registry, code);
       if (clash) {
-        alert("A course with code '" + clash + "' already exists.");
+        alert("A document with code '" + clash + "' already exists.");
         return;
       }
       var newDoc = {
@@ -167,7 +169,7 @@
           if (window.console && console.log) console.log("[import] loaded course '" + targetId + "'");
         } catch (e) {
           if (window.console && console.error) console.error("[import] commit failed:", e);
-          confirmModal("Import failed", "Could not load the course: " + (e && e.message || e), function () {});
+          confirmModal("Import failed", "Could not load the document: " + (e && e.message || e), function () {});
         }
       }
       if (existingId) {
@@ -260,7 +262,7 @@
       var shell = dsModalShell({
         id: "new-doc-modal", keys: false,
         title: "New document",
-        subtitle: "Open a saved course, import a document, or start a blank one.",
+        subtitle: "Open a saved document, import one, or start a blank one.",
         extras: [btnImport, btnSample],
         primaryLabel: "Create blank",
         onPrimary: function () {
@@ -282,40 +284,53 @@
         return openDocIds.indexOf(id) === -1;
       });
       if (closedIds.length > 0) {
-        var openBody = modalSection(box, "Open a saved course");
+        // uio-W02: this list is built from the ONE document row (VersoUI.DocumentRow), the same
+        // component Files and Publish use, so a document reads identically wherever it is listed.
+        // It used to be a hand-rolled title/meta pair that resembled nothing else in the app.
+        var openBody = modalSection(box, "Open a saved document");
         var list = h("div", "modal-list");
+        var nowTs = Date.now();
         closedIds.forEach(function (id) {
           var d = registry[id];
-          var item = h("div", "modal-list__item");
-          var left = h("div", "insp-list__text");
-          left.appendChild(h("span", "insp-list__title", d.meta.title || id));
-          left.appendChild(h("span", "insp-list__meta", id));
-          item.appendChild(left);
-          item.addEventListener("click", function () {
-            openDocIds.push(id);
-            saveOpenDocIds(openDocIds);
-            switchDoc(id);
-            modal.remove();
-          });
-          // Delete a saved (closed) course from the registry. Confirm first; permanent
-          // local removal (any exported SCORM / on-disk backup folder is left alone).
-          var del = iconBtn("trash", "Delete this saved course", true);
+          var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { geo: "reflow" };
+          var pid = d.meta && d.meta.productId;
+          var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
+          var ts = (d.meta && typeof d.meta.updatedAt === "number") ? d.meta.updatedAt : null;
+          // Delete a saved (closed) document from the registry. Confirm first; permanent
+          // local removal (any exported SCORM / on-disk backup folder is left alone). It rides in
+          // the row's `trailing` slot rather than being bolted on after it, so it sits inside the
+          // row's anatomy like Publish's own affordances will (uio-W16).
+          var del = iconBtn("trash", "Delete this saved document", true);
           del.addEventListener("click", function (e) {
-            e.stopPropagation(); // don't open the course we're deleting
-            confirmModal("Delete course?", "Permanently remove “" + (d.meta.title || id) + "” (" + id + ") from this machine. This can't be undone. Any exported SCORM or backup folder on disk is not affected.", function () {
+            e.stopPropagation(); // don't open the document we're deleting
+            confirmModal("Delete document?", "Permanently remove “" + (d.meta.title || id) + "” (" + id + ") from this machine. This can't be undone. Any exported SCORM or backup folder on disk is not affected.", function () {
               delete registry[id];
               saveRegistry(registry);
               var oi = openDocIds.indexOf(id); if (oi !== -1) { openDocIds.splice(oi, 1); saveOpenDocIds(openDocIds); }
               modal.remove(); showNewDocDialog(); // re-render the list fresh
             }, { okLabel: "Delete", danger: true });
           });
-          item.appendChild(del);
-          list.appendChild(item);
+          list.appendChild(window.VersoUI.DocumentRow({
+            title: d.meta.title || id,
+            type: cell.geo,
+            typeChip: true, // a mixed, ungrouped list of types -- the chip earns its place here
+            dot: pid ? colourForName(pid) : null,
+            dotTitle: pid ? ("Product: " + ((prod && prod.name) || pid)) : null,
+            updated: window.VersoUI._pure.compactRelativeTime(ts, nowTs),
+            updatedTitle: ts ? formatRelativeTime(ts, nowTs) : null,
+            trailing: del,
+            onOpen: function () {
+              openDocIds.push(id);
+              saveOpenDocIds(openDocIds);
+              switchDoc(id);
+              modal.remove();
+            }
+          }));
         });
         openBody.appendChild(list);
       }
 
-      box = modalSection(box, "New course");
+      box = modalSection(box, "New document");
       // Product (defaults to the current scope) -> preset (matrix cell) -> name, per SPEC 7.
       var prodRow = modalField(box, "Product");
       prodRow.appendChild(window.VersoUI.Select({
@@ -333,8 +348,11 @@
           onChange: function (v) { newDocPreset = v; }
         }));
       }
-      titleIn = modalText(box, "Course title", "", "e.g. My New Course");
-      codeIn = modalText(box, "Course code", "", "e.g. DRO-NEW-101");
+      // uio-W02: these fields create ANY of the four types -- the preset picker above offers a
+      // presentation and a guide -- so they name a document, not a course. The code is the name the
+      // document is filed under (see storage.js, "document identity").
+      titleIn = modalText(box, "Document title", "", "e.g. My new document");
+      codeIn = modalText(box, "Document code", "", "e.g. ACME-101-E");
     }
 
     kernel.expose({

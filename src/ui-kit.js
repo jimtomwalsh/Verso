@@ -108,7 +108,55 @@
     // unlike SegmentedControl's one-of-N). `disabled` reads as a permanent baseline.
     toggleChipClass: function (active, disabled) {
       return "vds-chip" + (active ? " is-on" : "") + (disabled ? " is-disabled" : "");
+    },
+    // uio-W02: a document's type, resolved to the ONE glyph vocabulary below. An unknown or
+    // missing type reads as a course rather than drawing nothing, so a document is never a
+    // blank well.
+    docType: function (type) {
+      return Object.prototype.hasOwnProperty.call(DOCUMENT_TYPES, type) ? type : "reflow";
+    },
+    // The open-state label. A FACT about the document ("it is already open, over there"), which is
+    // why it is plain text and never a chip -- and why an unopened document says nothing at all
+    // rather than "Closed", which would be noise on every row in the list.
+    openStateLabel: function (openIn) {
+      if (openIn === "edit") return "Open in Edit";
+      if (openIn === "source") return "Open in Source";
+      return null;
+    },
+    // Compact relative time for a LIST row. formatRelativeTime's long form ("11 months ago") is
+    // 75-85px at 11px Inter and would ellipsise in every row of a 64px column, so a row gets the
+    // short form and keeps the long phrase as its tooltip. Cards have the room and keep the long
+    // form. Pure, and deliberately the same thresholds as the long formatter so the two never
+    // disagree about which unit a moment falls in.
+    compactRelativeTime: function (ts, now) {
+      if (typeof ts !== "number" || !isFinite(ts)) return "—";
+      var s = Math.floor((now - ts) / 1000);
+      if (s < 0) s = 0;
+      if (s < 45) return "just now";
+      var mins = Math.floor(s / 60);
+      if (mins < 60) return mins + "m";
+      var hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + "h";
+      var days = Math.floor(hrs / 24);
+      if (days < 7) return days + "d";
+      var wks = Math.floor(days / 7);
+      if (wks < 5) return wks + "w";
+      var mos = Math.floor(days / 30);
+      if (mos < 12) return mos + "mo";
+      return Math.floor(days / 365) + "y";
     }
+  };
+
+  // uio-W02: THE document-type vocabulary. One definition, consumed by the top-bar DocumentTab and
+  // by every document list, so a glyph cannot come to mean one thing in a strip and another in a
+  // list. Source documents get the accent-quiet well; design documents the neutral input well --
+  // that single colour difference is what makes written material legible from laid-out material
+  // without reading a word. Contract: design-system/components/browser/DocumentRow.d.ts.
+  var DOCUMENT_TYPES = {
+    source: { icon: "book-open", label: "Source", well: "source" },
+    reflow: { icon: "layers", label: "Course", well: "design" },
+    frame: { icon: "monitor", label: "Presentation", well: "design" },
+    paged: { icon: "file-text", label: "Guide", well: "design" }
   };
 
   // ==========================================================================
@@ -439,6 +487,75 @@
     return tab;
   }
 
+  // uio-W02: ONE document row, for every list -- Files, Publish, the pickers, the palette. 32px
+  // (--row-height-doc), one anatomy everywhere:
+  //
+  //   [type icon well 24px] [title, flex, ellipsis] [Primary?] [type chip?] [open-state] [updated]
+  //
+  // NOT the spine's shared row. That one is a settings row: a fixed label column plus a canonical
+  // control, for a value you SET. This is a list item you CLICK to open. They share the token set
+  // and nothing else, which is why this lives beside CourseCard in the browser group rather than
+  // beside FieldRow in controls.
+  //
+  // `trailing` is the extension slot. Publish needs a selection box, a drift badge, an alignment
+  // meter and a variant chip; no other list does. They go in the slot so a consumer never forks
+  // the row to add one (uio-W16).
+  // Contract: design-system/components/browser/DocumentRow.d.ts.
+  function DocumentRow(props) {
+    props = props || {};
+    var type = _pure.docType(props.type);
+    var t = DOCUMENT_TYPES[type];
+    var row = h("div", "vds-docrow" + (props.active ? " is-active" : ""));
+    row.setAttribute("data-doc-type", type);
+
+    var well = h("span", "vds-docrow__well vds-docrow__well--" + t.well);
+    well.innerHTML = iconSvg(t.icon);
+    well.title = t.label;
+    well.setAttribute("aria-label", t.label);
+    row.appendChild(well);
+
+    // The same per-product identity marker the document's tab carries, so one document reads the
+    // same in the strip and in the list.
+    if (props.dot) {
+      var dot = h("span", "vds-docrow__dot");
+      dot.style.background = props.dot;
+      if (props.dotTitle) dot.title = props.dotTitle;
+      row.appendChild(dot);
+    }
+
+    var title = h("span", "vds-docrow__title", props.title == null ? "" : String(props.title));
+    title.title = props.title == null ? "" : String(props.title); // the ellipsised name, in full
+    row.appendChild(title);
+
+    if (props.primary) row.appendChild(h("span", "vds-docrow__chip vds-docrow__chip--accent", "Primary"));
+    // Off by default: a view already grouped by type does not repeat it on every row.
+    if (props.typeChip) row.appendChild(h("span", "vds-docrow__chip", t.label));
+
+    var openLabel = _pure.openStateLabel(props.openIn);
+    if (openLabel) row.appendChild(h("span", "vds-docrow__open", openLabel));
+
+    if (props.trailing != null) {
+      var tr = h("span", "vds-docrow__trailing");
+      appendChildren(tr, props.trailing);
+      row.appendChild(tr);
+    }
+
+    var upd = h("span", "vds-docrow__updated", props.updated == null ? "—" : String(props.updated));
+    if (props.updatedTitle) upd.title = String(props.updatedTitle);
+    row.appendChild(upd);
+
+    if (typeof props.onMenu === "function") {
+      var menu = h("button", "vds-docrow__menu"); menu.type = "button";
+      menu.title = "Document actions"; menu.setAttribute("aria-label", "Document actions");
+      menu.innerHTML = iconSvg("more-horizontal");
+      menu.addEventListener("click", function (e) { e.stopPropagation(); props.onMenu(e); });
+      row.appendChild(menu);
+    }
+
+    if (typeof props.onOpen === "function") row.addEventListener("click", props.onOpen);
+    return row;
+  }
+
   // ==========================================================================
   // STRUCTURE
   // ==========================================================================
@@ -632,7 +749,7 @@
     SegmentedControl: SegmentedControl, ChoiceCards: ChoiceCards, Switch: Switch, SwitchRow: SwitchRow,
     Select: Select, Checkbox: Checkbox, ColorField: ColorField,
     Panel: Panel, PanelSection: PanelSection, Breadcrumb: Breadcrumb,
-    Tabs: Tabs, DocumentTab: DocumentTab,
+    Tabs: Tabs, DocumentTab: DocumentTab, DocumentRow: DocumentRow, DOCUMENT_TYPES: DOCUMENT_TYPES,
     TreeItem: TreeItem, BlockPaletteItem: BlockPaletteItem, BlockTile: BlockTile, BlockGrid: BlockGrid, Badge: Badge, Meter: Meter, ToggleChip: ToggleChip, Timeline: Timeline,
     Modal: Modal, ContextMenu: ContextMenu, Tooltip: Tooltip,
     _pure: _pure

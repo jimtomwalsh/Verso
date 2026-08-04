@@ -29,6 +29,16 @@ can switch back. In a **Static** document the interactive block types (Quiz, Ima
 Web/HTML Embed, Accordion, Card Reveal, and the rest) are hidden from the Blocks library; any
 interactive blocks you already placed are kept, and turning interactivity back on restores them.
 
+**One noun: document.** A source document, a course, a presentation and a paged guide are four
+**types** of one thing, and Verso calls all of them documents. "Course" names a *type*, never the
+generic. Each type has a fixed glyph, and source documents carry a tinted icon well while the other
+three carry a neutral one — so you can tell written material from laid-out material in a list
+without reading a word.
+
+**The same row everywhere.** Any list of documents — the picker, and later Publish — draws the same
+row: type glyph, title, its product's colour dot, a type chip, whether it's already open, and when
+it was last edited. Learn it once.
+
 **The code is the document's name.** Every document is filed under its **code**, and that code is
 what tabs, the picker and the publish queue all refer to. Two documents cannot share one — and
 codes that differ only in capitalisation (`ACME-101-E` and `ACME-101-e`) count as the same code, so

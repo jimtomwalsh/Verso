@@ -154,7 +154,7 @@
     }
     function renameCourse(id) {
       var d = registry[id]; if (!d) return;
-      promptModal("Rename course", "Course title", (d.meta && d.meta.title) || "", function (val) {
+      promptModal("Rename document", "Document title", (d.meta && d.meta.title) || "", function (val) {
         val = (val || "").trim(); if (!val) return;
         if (!d.meta) d.meta = {};
         d.meta.title = val;
@@ -218,7 +218,7 @@
       wrap.appendChild(h("div", "vbrowser-empty__hint",
         querying ? "No course title or code matches your search." : "Create a new course or import a .verso to get started."));
       if (!querying) {
-        var b = h("button", "vbrowser__btn vbrowser__btn--primary", "New course");
+        var b = h("button", "vbrowser__btn vbrowser__btn--primary", "New document");
         b.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
         wrap.appendChild(b);
       }
@@ -313,7 +313,7 @@
       var newProdBtn = h("button", "vbrowser__btn", "New Product");
       newProdBtn.addEventListener("click", function () { newProductPrompt(function () { renderBrowserGrid(); }); });
       bar.appendChild(newProdBtn);
-      var newBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "New course");
+      var newBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "New document");
       newBtn.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
       bar.appendChild(newBtn);
       var closeBtn = iconBtn("x", "Close (Esc)"); closeBtn.classList.add("vbrowser__close");
