@@ -273,7 +273,8 @@ section("syntax");
   })(path.join(ROOT, "src/editor"), "");
   return acc;
 })().concat(
-["src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
+["src/blocks/manifest.js",
+ "src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
  "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
@@ -323,6 +324,101 @@ section("arch-P3b-08 module map");
      ["a-module-that-does-not-exist.js"].filter(function (f) { return rows.indexOf(f) === -1; }).length === 1);
   ok("the gate would catch a phantom row (proof)",
      ["nope/gone.js"].filter(function (r) { return files.indexOf(r) === -1; }).length === 1);
+})();
+
+// ---- arch-P4-04: the four-file block contract, enforced ------------------
+// CONTRIBUTING.md and design-system/readme.md have said for a long time that a block has four
+// concerns. Prose does not fail a build. src/blocks/manifest.js is that contract as data, and this
+// checks every row of it against the four real registries in BOTH directions.
+//
+// The reverse direction is the one that matters. A forward-only check catches a block you did not
+// finish; it does not catch a concern left behind after a block changed shape -- CSS for a class
+// nothing renders, a binder for a type that was deleted. Both fail here, by name.
+section("arch-P4-04 four-file block contract");
+(function () {
+  var MAN = require(path.join(ROOT, "src/blocks/manifest.js")).BLOCK_MANIFEST;
+  var render = src("src/render.js"), css = src("src/course.css"), rt = src("src/runtime.js");
+  var IB = src("src/editor/inspector/blocks.js");
+
+  // ---- the register: the BLOCKS table in render.js -------------------------
+  var bi = render.indexOf("var BLOCKS = {");
+  ok("render.js has the BLOCKS table (the register every other concern is checked against)", bi !== -1);
+  var renderTypes = (render.slice(bi).match(/^    ([a-zA-Z]+): function/gm) || [])
+    .map(function (m) { return m.trim().split(":")[0]; });
+  var manTypes = Object.keys(MAN);
+
+  var notInManifest = renderTypes.filter(function (t) { return manTypes.indexOf(t) === -1; });
+  var notInRender = manTypes.filter(function (t) { return renderTypes.indexOf(t) === -1; });
+  ok("every rendered block type has a manifest row" + (notInManifest.length ? " -- MISSING: " + notInManifest.join(", ") : ""),
+     notInManifest.length === 0);
+  ok("every manifest row names a rendered block type" + (notInRender.length ? " -- PHANTOM: " + notInRender.join(", ") : ""),
+     notInRender.length === 0);
+  ok("the manifest covers the register exactly (" + renderTypes.length + " types)", renderTypes.length === manTypes.length);
+
+  // ---- concern 2: course CSS ----------------------------------------------
+  // A declared selector must literally appear in course.css. A null must be honest: the two
+  // component types delegate their rendering, so owning no CSS is correct for them and a lie for
+  // anything else.
+  var cssMissing = manTypes.filter(function (t) {
+    return MAN[t].css !== null && css.indexOf("." + MAN[t].css) === -1;
+  });
+  ok("every declared block CSS selector exists in course.css" + (cssMissing.length ? " -- MISSING: " + cssMissing.map(function (t) { return t + " (." + MAN[t].css + ")"; }).join(", ") : ""),
+     cssMissing.length === 0);
+  var cssNull = manTypes.filter(function (t) { return MAN[t].css === null; });
+  ok("only the delegating component types declare no CSS of their own (" + cssNull.join(", ") + ")",
+     cssNull.length === 2 && cssNull.indexOf("componentGrid") !== -1 && cssNull.indexOf("libraryInstance") !== -1);
+
+  // ---- concern 3: learner runtime -----------------------------------------
+  var ri = rt.indexOf("var RUNTIME = {");
+  ok("runtime.js has the RUNTIME table (arch-P4-01)", ri !== -1);
+  var rtKeys = (rt.slice(ri, rt.indexOf("};", ri)).match(/^    ([a-zA-Z]+):/gm) || [])
+    .map(function (m) { return m.trim().slice(0, -1); });
+  var declaredRt = manTypes.filter(function (t) { return MAN[t].runtime; });
+  var rtOrphan = rtKeys.filter(function (k) { return declaredRt.indexOf(k) === -1; });
+  var rtUnbuilt = declaredRt.filter(function (t) { return rtKeys.indexOf(MAN[t].runtime) === -1; });
+  ok("every block declaring runtime has a RUNTIME binder" + (rtUnbuilt.length ? " -- MISSING: " + rtUnbuilt.join(", ") : ""),
+     rtUnbuilt.length === 0);
+  ok("every RUNTIME binder belongs to a block that declares one" + (rtOrphan.length ? " -- ORPHAN: " + rtOrphan.join(", ") : ""),
+     rtOrphan.length === 0);
+  ok("seven of twenty-seven block types have learner runtime, and the manifest says which",
+     declaredRt.length === 7 && rtKeys.length === 7);
+  // course chrome is listed apart, so "no runtime" and "not a block" stay distinguishable
+  ok("course chrome binders are declared separately from block runtime (CHROME_RUNTIME)",
+     /var CHROME_RUNTIME = \{/.test(rt) && /pinnedHeader:/.test(rt) && /scrollGate:/.test(rt) && /keyboardScroll:/.test(rt));
+
+  // ---- concern 4: the inspector panel -------------------------------------
+  var ii = IB.indexOf("var INSPECTORS = {");
+  ok("inspector/blocks.js has the INSPECTORS table (arch-P4-02)", ii !== -1);
+  var insKeys = (IB.slice(ii, IB.indexOf("\n    };", ii)).match(/^      ([a-zA-Z]+):\s+\{ kind:/gm) || [])
+    .map(function (m) { return m.trim().split(":")[0]; });
+  var declaredIns = manTypes.filter(function (t) { return MAN[t].inspector; });
+  var insOrphan = insKeys.filter(function (k) { return declaredIns.indexOf(k) === -1; });
+  var insUnbuilt = declaredIns.filter(function (t) { return insKeys.indexOf(t) === -1; });
+  ok("every block declaring an inspector row has one" + (insUnbuilt.length ? " -- MISSING: " + insUnbuilt.join(", ") : ""),
+     insUnbuilt.length === 0);
+  ok("every INSPECTORS row belongs to a block that declares one" + (insOrphan.length ? " -- ORPHAN: " + insOrphan.join(", ") : ""),
+     insOrphan.length === 0);
+  ok("the types with no row take the label-only default on purpose (" + manTypes.filter(function (t) { return !MAN[t].inspector; }).join(", ") + ")",
+     manTypes.filter(function (t) { return !MAN[t].inspector; }).length === renderTypes.length - insKeys.length);
+
+  // ---- the palette agrees with the register --------------------------------
+  var palette = src("src/editor/assets.js");
+  // only the top-level `make:` return names a BLOCK type -- a quiz's `questions[].type`
+  // (multipleChoice, fillBlank) is question data, and matching it would be the gate misreading
+  // the palette rather than the palette being wrong.
+  var made = (palette.match(/make: function \(\) \{ return \{\s*\n?\s*type: "([a-zA-Z]+)"/g) || [])
+    .map(function (m) { return m.match(/type: "([a-zA-Z]+)"/)[1]; });
+  var paletteOrphan = made.filter(function (t) { return manTypes.indexOf(t) === -1; });
+  ok("every palette entry inserts a block type the manifest knows" + (paletteOrphan.length ? " -- UNKNOWN: " + paletteOrphan.slice(0, 6).join(", ") : ""),
+     paletteOrphan.length === 0);
+
+  // ---- and it proves it can fail ------------------------------------------
+  ok("the gate would catch an unmanifested block type (proof)",
+     ["a-block-that-does-not-exist"].filter(function (t) { return manTypes.indexOf(t) === -1; }).length === 1);
+  ok("the gate would catch a phantom manifest row (proof)",
+     ["notARealBlock"].filter(function (t) { return renderTypes.indexOf(t) === -1; }).length === 1);
+  ok("the gate would catch a CSS selector that no longer exists (proof)",
+     css.indexOf(".a-class-course-css-does-not-have") === -1);
 })();
 
 // ---- arch-P3b-01: the editor namespace -----------------------------------
@@ -4196,7 +4292,7 @@ section("table block (#90)");
   // editor.js: palette entry, block-selection type, inspector dispatch, BLOCK_LUCIDE glyph
   ok("Table is in the block palette (Layout group)", /label: "Table", make: function \(\) \{ return \{ type: "table"/.test(ASSETS));
   ok("table selects as a block (not an inline field)", /=== "table"\) return "block"/.test(SOPS));
-  ok("table dispatches to renderTableInspector via two-level", /block\.type === "table"\) \{ renderBlockTwoLevel\(node, "Table", CONTENT_DECL, renderTableInspector\)/.test(IB));
+  ok("table dispatches to renderTableInspector via two-level", /table:\s+\{ kind: "twoLevel",\s+label: "Table",\s+decl: "CONTENT_DECL"[\s\S]{0,90}renderTableInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("table inspector adds/removes rows + columns", /function renderTableInspector[\s\S]*?block\.rows\.push\(newRow\(ncols\(\)\)\)[\s\S]*?r\.push\(\{ t: "" \}\)/.test(e));
   ok("table has a Lucide glyph", /table: "table"/.test(OUT) && /"table":/.test(ic));
   // F&R parity: cells wired into the enumerator
@@ -5690,7 +5786,7 @@ section("#20 library-instance mirror");
   ok("TWO_LEVEL_TYPES includes libraryInstance (contentless like componentGrid)",
     require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("libraryInstance"));
   ok("getSelectionTypeForBlock routes libraryInstance to 'block'", /if \(block\.type === "componentGrid"\) return "block";\s*\n\s*if \(block\.type === "libraryInstance"\) return "block";/.test(SOPS));
-  ok("inspector dispatch reuses renderContentlessBlock", /if \(block\.type === "libraryInstance"\) \{ renderContentlessBlock\(node, "Library instance", renderLibraryInstanceBody\); return; \}/.test(IB));
+  ok("inspector dispatch reuses renderContentlessBlock", /libraryInstance:\s+\{ kind: "contentless",\s+label: "Library instance"[\s\S]{0,90}renderLibraryInstanceBody/.test(IB) && /renderContentlessBlock\(node, row\.label, row\.body\(\)\)/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("block-icon map has a libraryInstance glyph", /libraryInstance: "component"/.test(OUT));
   ok("tree label resolves the master's name via resolveComponentDef", /if \(b\.type === "libraryInstance"\) \{ var libDef = resolveComponentDef\(b\.ref\)/.test(OUT));
 
@@ -7156,10 +7252,10 @@ section("card deck block");
   ok("cardDeck is a container 'block' in the selection classifier", /block\.type === "cardDeck" \|\| block\.type === "courseNav"/.test(SOPS));
   ok("cardDeck is a two-level type", require(path.join(ROOT, "src/editor/selection.js")).canEnterContent("cardDeck"));
   ok("cardDeck has a Layout palette entry", /label: "Card Deck \(carousel\)"[\s\S]*?type: "cardDeck", items:/.test(ASSETS));
-  ok("block inspector dispatches cardDeck -> two-level shell (renderCardDeckInspector)", /block\.type === "cardDeck"\) \{ renderBlockTwoLevel\(node, "Card deck", CONTENT_DECL, renderCardDeckInspector\); return; \}/.test(IB));
+  ok("block inspector dispatches cardDeck -> two-level shell (renderCardDeckInspector)", /cardDeck:\s+\{ kind: "twoLevel",\s+label: "Card deck",\s+decl: "CONTENT_DECL"[\s\S]{0,90}renderCardDeckInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("renderCardDeckInspector exists + reuses repeatedList + patternControls", /function renderCardDeckInspector\(node\)/.test(IB) && /repeatedList\(E\.inspector, "Cards"/.test(IB) && /patternControls\(block, refresh\)/.test(IB.slice(IB.indexOf("function renderCardDeckInspector"))));
   // runtime paging engine wired into create(), armed so the editor still shows all cards
-  ok("runtime defines bindCardDeck + create() calls it", /function bindCardDeck\(root\)/.test(rt) && /bindCardDeck\(root\); \/\/ Card Deck paging/.test(rt));
+  ok("runtime defines bindCardDeck + create() runs it from the RUNTIME table", /function bindCardDeck\(root\)/.test(rt) && /cardDeck:\s*function \(root\) \{ bindCardDeck\(root\); \}/.test(rt) && /Object\.keys\(RUNTIME\)\.forEach\(function \(type\) \{\s*\n\s*var out = RUNTIME\[type\]\(root\);/.test(rt));   // arch-P4-01
   ok("cardDeck paging is runtime-gated (is-armed), clamped (no wrap)", /deck\.classList\.add\("is-armed"\)/.test(rt) && /active > 0/.test(rt) && /active < cards\.length - 1/.test(rt));
   // CSS: token-driven, per-mode fill, is-armed shows only the active card
   ok("cardDeck css: per-mode fill + is-armed active-only paging", /data-mode="dark"\] \.card-deck \{ --cd-card-fill: var\(--cd-fill-dark/.test(css) && /\.card-deck\.is-armed \.card-deck__card \{ display: none; \}/.test(css) && /\.card-deck\.is-armed \.card-deck__card\.is-active \{ display: flex; \}/.test(css));
@@ -7203,7 +7299,7 @@ section("sequence inspector + toggles");
   var css = src("src/course.css");
   // dedicated inspector, dispatched like accordion / cardReveal
   ok("renderSequenceInspector exists", /function renderSequenceInspector\(node\)/.test(IB));
-  ok("block inspector dispatches sequence -> two-level shell (Content = renderSequenceInspector)", /block\.type === "sequence"\) \{ renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\); return; \}/.test(IB));
+  ok("block inspector dispatches sequence -> two-level shell (Content = renderSequenceInspector)", /sequence:\s+\{ kind: "twoLevel",\s+label: "Sequence",\s+decl: "CONTENT_DECL"[\s\S]{0,90}renderSequenceInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
   var insp = IB.slice(IB.indexOf("function renderSequenceInspector"), IB.indexOf("// TTTT: Card Reveal inspector"));
   // Spine segmented toggle (Numbered / Dated / Plain) writes block.spine
   ok("spine toggle offers Numbered/Dated/Plain", /segmentedLive\("Marker", \[\["Numbered", "numbered"\], \["Dated", "dated"\], \["Plain", "plain"\]\]/.test(insp) && /block\.spine = v;/.test(insp));
@@ -7241,7 +7337,7 @@ section("sequence reveal engine");
   var e = src("src/editor.js");
   // one bind function, registered in the engine + exported like the other binds
   ok("bindSequence exists in the runtime", /function bindSequence\(root\)/.test(rt));
-  ok("create() calls bindSequence(root)", /bindSequence\(root\); \/\/ FLAGSHIP sequence reveal engine/.test(rt));
+  ok("create() runs bindSequence from the RUNTIME table", /sequence:\s*function \(root\) \{ bindSequence\(root\); \}/.test(rt) && /Object\.keys\(RUNTIME\)\.forEach\(function \(type\) \{\s*\n\s*var out = RUNTIME\[type\]\(root\);/.test(rt));   // arch-P4-01
   ok("bindSequence is exported on CourseRuntime", /bindSequence: bindSequence/.test(rt));
   var bs = rt.slice(rt.indexOf("function bindSequence"), rt.indexOf("// ---- the engine"));
   // reads the author mode off the DOM hook
@@ -7517,7 +7613,7 @@ section("richer bullet lists");
   ok("settings overlay hides via [hidden] override (css)", /\.modal-overlay\[hidden\] \{ display: none; \}/.test(ecss));
   ok("settings surface is DS-canonical (VersoUI tabs + a plain Close, no commit control)", /window\.VersoUI\.Tabs\(\{/.test(SS) && /window\.VersoUI\.Button\(\{ variant: "secondary", label: "Close"/.test(SS));
   // Contextual sidebar: selecting the footer nav bar surfaces its Learner-nav controls
-  ok("courseNav selection has its own inspector (Learner nav controls inline)", /if \(block\.type === "courseNav"\) \{ renderCourseNavInspector\(node\); return; \}/.test(IB) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, E\.inspector\)/.test(IB));
+  ok("courseNav selection has its own inspector (Learner nav controls inline)", /courseNav:\s+\{ kind: "custom",\s+run: function \(node\) \{ renderCourseNavInspector\(node\); \}/.test(IB) && /function renderCourseNavInspector\(node\)[\s\S]*?courseNavControls\(block, E\.inspector\)/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("courseNav is treated as a block selection", /block\.type === "courseNav"\) return "block"/.test(SOPS));
   ok("clicking the nav-bar background selects it (not its buttons/toggle)", /var navBar = e\.target\.closest\("\.course-nav\.canvas-block"\)[\s\S]*?!e\.target\.closest\("\[data-edit\], \.course-nav__btn, \.mode-toggle, button, a"\)[\s\S]*?setSelection\("block", navBar\)/.test(DRILL));
   // PERF: incremental single-page render — James 2026-07-08
@@ -9217,7 +9313,7 @@ section("image lightbox");
   // runtime: bind fn exists, clones media, wires close, and is called in create (export + demo)
   ok("runtime defines bindImageLightbox cloning media into a shared overlay", /function bindImageLightbox\(root\)[\s\S]*?qsAll\(fig, "img, svg"\)[\s\S]*?cloneNode\(true\)/.test(rt));
   ok("lightbox closes on X/backdrop and Esc", /\[data-lightbox-close\]/.test(rt) && /if \(e\.key === "Escape"\) overlay\.hidden = true/.test(rt));
-  ok("create() binds the lightbox (runs in export + demo)", /bindImageLightbox\(root\); \/\/ click-to-zoom/.test(rt));
+  ok("create() binds the lightbox from the RUNTIME table (runs in export + demo)", /image:\s*function \(root\) \{ bindImageLightbox\(root\); \}/.test(rt) && /Object\.keys\(RUNTIME\)\.forEach\(function \(type\) \{\s*\n\s*var out = RUNTIME\[type\]\(root\);/.test(rt));   // arch-P4-01
   ok("runtime stamps is-lightbox-bound so the cursor only shows where clickable", /fig\.classList\.add\("is-lightbox-bound"\)/.test(rt));
   // css: fixed overlay + zoom cursor keyed on the bound class (not the raw authoring canvas)
   ok("css: zoom cursor keyed on .is-lightbox-bound", /\.block-image--zoomable\.is-lightbox-bound \{ cursor: zoom-in; \}/.test(css));
@@ -9863,7 +9959,7 @@ section("UI kit seam");
 
   // Tickets 5-6 — two-level inspector: a generic shell, proven on hotspots + sequence.
   ok("generic two-level shell defined (renderBlockTwoLevel)", /function renderBlockTwoLevel\(node, label, decl, renderContent, io, handlers\) \{/.test(e));
-  ok("hotspot + sequence dispatched to the two-level shell (#160: hotspot depth-pure)", /renderBlockTwoLevel\(node, "Image hotspots", CONTENT_PURE_DECL/.test(IB) && /renderBlockTwoLevel\(node, "Sequence", CONTENT_DECL, renderSequenceInspector\)/.test(IB));
+  ok("hotspot + sequence dispatched to the two-level shell (#160: hotspot depth-pure)", /hotspot:\s+\{ kind: "twoLevel",\s+label: "Image hotspots",\s+decl: "CONTENT_PURE_DECL"/.test(IB) && /sequence:\s+\{ kind: "twoLevel",\s+label: "Sequence",\s+decl: "CONTENT_DECL"[\s\S]{0,90}renderSequenceInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("shell: crumbs, container chrome (actions-only at content level for a pureContent block), then specific content when entered (#160 depth-pure)",
     // uio-F04 (EDIT-06): a source-linked block's provenance line is appended between the crumb and the
     // container chrome, so the window here allows for it.
@@ -9885,7 +9981,7 @@ section("UI kit seam");
   ok("image glyph is canonical Lucide (icons.js, for the step marker upload)", /"image":/.test(src("src/icons.js")) && /image: "image"/.test(OUT));
   ok("sequence Content has no duplicate footer (spacing+actions at Block level)", /no renderBlockActionsSection here/.test(IB));
   // Ticket 8 (1/n) — frame/group two-level via renderContainerChrome.
-  ok("frame/group dispatched to the two-level shell", /if \(block\.type === "frame" \|\| block\.type === "group"\) \{ renderFrameOrGroupTwoLevel\(node\); return; \}/.test(IB));
+  ok("frame/group dispatched to the two-level shell", /frame:\s+\{ kind: "custom",\s+run: function \(node\) \{ renderFrameOrGroupTwoLevel\(node\); \}/.test(IB) && /group:\s+\{ kind: "custom",\s+run: function \(node\) \{ renderFrameOrGroupTwoLevel\(node\); \}/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("renderContainerChrome supports stroke:\"switch\" (on/off, no dead colour/width)", /if \(decl\.stroke === "switch"\) \{\s*switchRow\("Stroke"/.test(ep));
   ok("frame Block level = container decl (padding/gap/radius/fill/stroke-switch)", /renderBlockTwoLevel\(node, "Card", \{ padding: true, gap: true, radius: true, fill: true, stroke: "switch" \}/.test(e));
   ok("group Block level = CONTENT_DECL (invisible, spacing+actions)", /renderBlockTwoLevel\(node, "Group", CONTENT_DECL, renderFrameContent\)/.test(e));
@@ -9893,31 +9989,31 @@ section("UI kit seam");
   ok("frame Content = children (Inside) + actions (renderFrameContent)", /function renderFrameContent\(node\) \{[\s\S]{0,400}panelSection\(_frameRoot, "Inside"\)[\s\S]{0,2200}Convert to group/.test(e));
   // Ticket 7 (1/n) — image two-level (image params = content). #88: the box STROKE is
   // exposed (IMAGE_DECL) with an io mapping it to block.box so a border can be removed.
-  ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /if \(block\.type === "image"\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(block\), blockChromeHandlers\(block\)\); return; \}/.test(IB));
+  ok("image dispatched to the two-level shell (IMAGE_PURE_DECL + imageChromeIo; #160 depth-pure)", /image:\s+\{ kind: "custom",\s+run: function \(node\) \{ renderBlockTwoLevel\(node, "Image", IMAGE_PURE_DECL, function \(n\) \{ renderImageContent\(n\.__block\); \}, imageChromeIo\(node\.__block\), blockChromeHandlers\(node\.__block\)\); \}/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("#88 IMAGE_DECL exposes the box stroke (fill/radius stay off)", /var IMAGE_DECL = \{ fill: false, stroke: true, radius: false \};/.test(e));
   ok("#88 imageChromeIo maps hasStroke/colour/width to block.box + clears legacy border", /function imageChromeIo\(block\)[\s\S]{0,400}return !!\(block\.box && block\.box\.border\)[\s\S]{0,900}block\.box\.border = true;[\s\S]{0,200}delete block\.box\.border; delete block\.box\.borderColor; delete block\.box\.borderWidth;[\s\S]{0,120}delete block\.border;/.test(eh));
   ok("renderImageContent holds the image params in a canonical Content section (url/upload/alt)", /function renderImageContent\(block\) \{[\s\S]{0,1100}sectionGroup\("Content", "Image"[\s\S]{0,400}Image URL[\s\S]{0,300}Upload image/.test(e));
   // Ticket 7 (2/n) — text blocks (heading/paragraph/note) two-level.
-  ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", /if \(block\.type === "heading" \|\| block\.type === "paragraph" \|\| block\.type === "note"\) \{ renderBlockTwoLevel\(node, block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\), CONTENT_DECL, renderTextContent\); return; \}/.test(IB));
+  ok("text blocks dispatched to the two-level shell (type-name breadcrumb)", ["heading", "paragraph", "note"].every(function (t) { return new RegExp(t + ':\\s+\\{ kind: "twoLevel",\\s+label: null,\\s+decl: "CONTENT_DECL"[\\s\\S]{0,60}renderTextContent').test(IB); }) && /var label = row\.label \|\| \(block\.type\.charAt\(0\)\.toUpperCase\(\) \+ block\.type\.slice\(1\)\)/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("renderTextContent = the copy textarea (writes block.text)", /function renderTextContent\(node\) \{[\s\S]{0,250}panelSection\(inspector, "Content"\)[\s\S]{0,200}h\("textarea"[\s\S]{0,200}block\.text = textIn\.value/.test(e));
   // Ticket 7 (3/n) — content-less blocks (spacer, divider).
   ok("renderContentlessBlock delegates to the all-in-one shell (body = specific)", /function renderContentlessBlock\(node, label, renderBody\) \{[\s\S]{0,200}renderBlockTwoLevel\(node, label, BOX_ONLY_DECL, function \(n\) \{ if \(renderBody\) renderBody\(n\); \}\)/.test(e));
-  ok("spacer + divider dispatched as content-less", /if \(block\.type === "spacer"\) \{ renderContentlessBlock\(node, "Spacer", renderSpacerBody\); return; \}/.test(IB) && /if \(block\.type === "divider"\) \{ renderContentlessBlock\(node, "Divider"/.test(IB));
+  ok("spacer + divider dispatched as content-less", /spacer:\s+\{ kind: "contentless",\s+label: "Spacer"[\s\S]{0,90}renderSpacerBody/.test(IB) && /divider:\s+\{ kind: "contentless",\s+label: "Divider"/.test(IB));   // arch-P4-02: the dispatch is a table now
   // Ticket 8 (2/n) — columns (container; children canvas-edited -> single-level).
-  ok("columns dispatched as single-level (renderColumnsBody)", /if \(block\.type === "columns"\) \{ renderContentlessBlock\(node, "Columns", renderColumnsBody\); return; \}/.test(IB));
+  ok("columns dispatched as single-level (renderColumnsBody)", /columns:\s+\{ kind: "contentless",\s+label: "Columns"[\s\S]{0,90}renderColumnsBody/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("renderColumnsBody = column gap / row gap layout", /function renderColumnsBody\(node\)/.test(e) && /title: "Column gap \(horizontal\)"/.test(e) && /title: "Row gap \(vertical/.test(e));
   // Ticket 8 (3/n) — specialized inspectors (accordion, quiz) wrapped in two-level.
-  ok("accordion wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "accordion"\) \{ renderBlockTwoLevel\(node, "Accordion", CONTENT_PURE_DECL, renderAccordionInspector\); return; \}/.test(IB));
-  ok("quiz wrapped in the two-level shell (#160 depth-pure)", /if \(block\.type === "quiz"\) \{ renderBlockTwoLevel\(node, "Quiz", CONTENT_PURE_DECL, renderQuizInspector\); return; \}/.test(IB));
+  ok("accordion wrapped in the two-level shell (#161 depth-pure)", /accordion:\s+\{ kind: "twoLevel",\s+label: "Accordion",\s+decl: "CONTENT_PURE_DECL"[\s\S]{0,90}renderAccordionInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
+  ok("quiz wrapped in the two-level shell (#160 depth-pure)", /quiz:\s+\{ kind: "twoLevel",\s+label: "Quiz",\s+decl: "CONTENT_PURE_DECL"[\s\S]{0,90}renderQuizInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("specialized inspectors omit their own head + footer (shell provides them)", (IB.match(/head omitted \(two-level breadcrumb/g) || []).length >= 1 && (IB.match(/footer omitted \(spacing \+ actions at Block level\)/g) || []).length >= 2);
   // Ticket 8 (4/n) — componentGrid single-level.
-  ok("componentGrid dispatched single-level (renderComponentGridBody)", /if \(block\.type === "componentGrid"\) \{ renderContentlessBlock\(node, "Component grid", renderComponentGridBody\); return; \}/.test(IB));
+  ok("componentGrid dispatched single-level (renderComponentGridBody)", /componentGrid:\s+\{ kind: "contentless",\s+label: "Component grid"[\s\S]{0,90}renderComponentGridBody/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("renderComponentGridBody = grid layout (template/instances)", /function renderComponentGridBody\(node\)/.test(e) && /panelSection\(inspector, "Grid Layout"\)/.test(e) && /Component Template/.test(e));
   // Ticket 8 (5/n) — checkbox single-level.
-  ok("checkbox dispatched single-level (renderCheckboxBody)", /if \(block\.type === "checkbox"\) \{ renderContentlessBlock\(node, "Checkbox", renderCheckboxBody\); return; \}/.test(IB));
+  ok("checkbox dispatched single-level (renderCheckboxBody)", /checkbox:\s+\{ kind: "contentless",\s+label: "Checkbox"[\s\S]{0,90}renderCheckboxBody/.test(IB));   // arch-P4-02: the dispatch is a table now
   ok("renderCheckboxBody = acknowledgement + require-to-continue gate", /function renderCheckboxBody\(node\)/.test(e) && /panelSection\(inspector, "Acknowledgement"\)/.test(e) && /Require to continue/.test(e));
   // Ticket 8 (6/n) — cardReveal wrapped in two-level.
-  ok("cardReveal wrapped in the two-level shell (#161 depth-pure)", /if \(block\.type === "cardReveal"\) \{ renderBlockTwoLevel\(node, "Card reveal", CONTENT_PURE_DECL, renderCardRevealInspector\); return; \}/.test(IB));
+  ok("cardReveal wrapped in the two-level shell (#161 depth-pure)", /cardReveal:\s+\{ kind: "twoLevel",\s+label: "Card reveal",\s+decl: "CONTENT_PURE_DECL"[\s\S]{0,90}renderCardRevealInspector/.test(IB));   // arch-P4-02: the dispatch is a table now
   // Ticket 8 (7/n) — embed (htmlEmbed/webEmbed) wrapped in two-level.
   ok("embed wrapped in the two-level shell (type-aware label; #161 depth-pure)", /renderEmbedPanel: function \(\) \{\s*renderBlockTwoLevel\(selection\.node, selection\.node\.__block\.type === "htmlEmbed" \? "HTML Interaction" : "Web Embed",\s*CONTENT_PURE_DECL, renderEmbedInspector\);/.test(e));
   // PERF: a large interaction's source (MBs of inlined base64) is NOT eagerly injected into

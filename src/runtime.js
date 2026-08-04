@@ -1187,6 +1187,37 @@
     });
   }
 
+  // ---- RUNTIME: block type -> the binder that makes it behave (arch-P4-01) --
+  // render.js has BLOCKS, a table from block type to the DOM it produces. This is the same seam
+  // for the other end: the block types whose learner behaviour is DOM-bound. Before this table the
+  // binders were seven bare calls in the middle of create(), and nothing said which block type any
+  // of them belonged to -- so "does this block have runtime behaviour?" was a question you answered
+  // by reading 1,700 lines.
+  //
+  // SEVEN OF TWENTY-SEVEN BLOCK TYPES ARE HERE, and that is the honest number. A heading has no
+  // runtime; it is rendered and then it is finished. Declaring an empty binder for the other twenty
+  // to make the table look complete would be a lie the contract test then has to encode.
+  //
+  // Every binder takes (root) and is idempotent per root -- create() may run more than once on the
+  // same document in the editor's preview.
+  var RUNTIME = {
+    hotspot:    function (root) { bindHotspots(root); },      // marker open/close, DOM-bound; no map entry needed
+    accordion:  function (root) { bindAccordion(root); },     // collapses the author-view render into tabs/accordion
+    cardReveal: function (root) { bindCardReveal(root); },    // TTTT: card tap/keyboard reveal
+    sequence:   function (root) { bindSequence(root); },      // FLAGSHIP reveal engine (scroll / click / static)
+    cardDeck:   function (root) { bindCardDeck(root); },      // paging, one card at a time
+    image:      function (root) { bindImageLightbox(root); }, // click-to-zoom overlay (opt-out per image)
+    courseNav:  function (root) { return bindCourseNav(root); } // returns the nav updaters the engine keeps
+  };
+  // Course CHROME, not a block: these bind to the page or the course frame and belong to no block
+  // type. Listed separately rather than faked into RUNTIME so the contract test can tell the
+  // difference between "this block has no runtime" and "this runtime has no block".
+  var CHROME_RUNTIME = {
+    pinnedHeader:   function (root) { bindPinnedHeader(root); },   // JJJ: auto-hide/reveal on scroll
+    scrollGate:     bindScrollGate,                                // CCCC: reaching a page bottom marks it reached
+    keyboardScroll: bindKeyboardScroll                             // arrow/page keys reach the inner overflow owner
+  };
+
   // ---- the engine ----------------------------------------------------------
   function create(opts) {
     opts = opts || {};
@@ -1650,26 +1681,23 @@
       if (entry && entry.gate) gates.push({ id: id, el: elFor(id), gate: entry.gate });
     });
 
-    // image-hotspot open/close (DOM-bound; no map entry needed)
-    bindHotspots(root);
-    // accordion / tabs block (DOM-bound; collapses the author-view render)
-    bindAccordion(root);
-    // footer course-nav (DOM-bound view; arrows routed through the engine above)
-    navUpdaters = bindCourseNav(root);
-    // JJJ: pinned-header auto-hide/reveal on scroll (base pin is CSS sticky)
-    bindPinnedHeader(root);
-    bindCardReveal(root); // TTTT: card tap/keyboard reveal
-    bindSequence(root); // FLAGSHIP sequence reveal engine (scroll / click / static)
-    bindCardDeck(root); // Card Deck paging (‹ › one card at a time)
-    bindImageLightbox(root); // click-to-zoom overlay on every image (opt-out per image)
+    // arch-P4-01: the per-block binders run from the RUNTIME table rather than as seven bare
+    // calls. courseNav is read back explicitly because it is the one that returns something the
+    // engine keeps; the rest are fire-and-forget. Order within the table is the order they ran in.
+    Object.keys(RUNTIME).forEach(function (type) {
+      var out = RUNTIME[type](root);
+      if (type === "courseNav") navUpdaters = out;
+    });
+    // course chrome, which belongs to no block type
+    CHROME_RUNTIME.pinnedHeader(root);
     // CCCC scroll-completion gate: reaching a page's bottom (or it fitting) marks
     // it reached (-> visited -> completion) and reveals its Next button.
-    scrollGate = bindScrollGate(root, nav, function (pid) {
+    scrollGate = CHROME_RUNTIME.scrollGate(root, nav, function (pid) {
       if (pid && !state.visited[pid]) { state.visited[pid] = true; changed(); }
     });
     // Arrow / Page keys scroll the current page (browser default doesn't reach the
     // inner overflow owner); guarded against fields / quizzes / open modals.
-    bindKeyboardScroll(root, nav);
+    CHROME_RUNTIME.keyboardScroll(root, nav);
 
     // initial: mark/gate the start page, lock/hide gates per their conditions
     (function start() {
@@ -1695,5 +1723,5 @@
     };
   }
 
-  window.CourseRuntime = { create: create, defaultNav: defaultNav, positionPopover: positionPopover, bindHotspots: bindHotspots, bindCourseNav: bindCourseNav, bindAccordion: bindAccordion, bindScrollGate: bindScrollGate, bindPinnedHeader: bindPinnedHeader, bindCardReveal: bindCardReveal, bindSequence: bindSequence, bindImageLightbox: bindImageLightbox };
+  window.CourseRuntime = { RUNTIME: RUNTIME, CHROME_RUNTIME: CHROME_RUNTIME, create: create, defaultNav: defaultNav, positionPopover: positionPopover, bindHotspots: bindHotspots, bindCourseNav: bindCourseNav, bindAccordion: bindAccordion, bindScrollGate: bindScrollGate, bindPinnedHeader: bindPinnedHeader, bindCardReveal: bindCardReveal, bindSequence: bindSequence, bindImageLightbox: bindImageLightbox };
 })();
