@@ -23,7 +23,11 @@ export interface DocumentRowProps {
    * the chip is pure redundancy, so each view opts in rather than the row assuming.
    */
   typeChip?: boolean;
-  /** Mark this document as its product's primary source. Renders the `Primary` chip. */
+  /**
+   * Mark this document as its product's primary source -- the document everything else in the
+   * product traces back to. Renders the bordered accent `Primary source` chip; in a banded list the
+   * consumer adds the divider treatment around it (uio-W05).
+   */
   primary?: boolean;
   /** Where this document is already open. Renders "Open in Edit" / "Open in Source". */
   openIn?: DocumentOpenState;

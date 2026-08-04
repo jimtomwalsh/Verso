@@ -10928,6 +10928,31 @@ section("uio-W04 Files destination");
   ["index.html", "kit.html"].forEach(function (page) {
     ok(page + " loads files.js", src(page).indexOf("src/editor/files.js") !== -1);
   });
+  // --- uio-W05: the band header answers "what does this product trace back to?" ---
+  ok("a band's primary source is found by role, not by position",
+    F.bandPrimary({ docs: [{ id: "x" }, { id: "y", primary: true }] }).id === "y");
+  ok("a band with no primary source resolves to null",
+    F.bandPrimary({ docs: [{ id: "x" }] }) === null && F.bandPrimary({ docs: [] }) === null && F.bandPrimary() === null);
+  var FILESRC = src("src/editor/files.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the header names the primary source in the band", /files-band__primary-name/.test(FILESRC));
+  ok("a product with no primary source says so, rather than rendering a blank",
+    /"No primary source"/.test(FILESRC) && /files-band__primary-none/.test(FILESRC));
+  ok("the No product band keeps its own line instead of a primary one",
+    /if \(g\.note\) \{[\s\S]{0,120}\} else if \(g\.key\)/.test(FILESRC));
+  ok("the primary row carries the divider treatment", /if \(d\.primary\) el\.classList\.add\("is-primary-source"\);/.test(FILESRC));
+  var HOME2 = src("styles/editor/13-home.css");
+  ok("the divider treatment is an accent left border, a heavier title and a rule beneath",
+    /\.vds-docrow\.is-primary-source \{[^}]*border-left: 2px solid var\(--accent\)/.test(HOME2) &&
+    /\.is-primary-source \.vds-docrow__title \{[^}]*font-weight: 600/.test(HOME2) &&
+    /\.is-primary-source \+ \.vds-docrow \{[^}]*border-top: 2px/.test(HOME2));
+  ok("the prototype's subtitle variant is NOT shipped", HOME2.indexOf("files-band__primary-subtitle") === -1);
+  ok("a 'Primary source' row does not also carry a redundant 'Source' type chip",
+    /var chip = showTypeChip && !\(d\.primary && d\.type === "source"\);/.test(FILESRC));
+  ok("the band name uses the brand face at 13px",
+    /\.files-band__name \{[^}]*--text-md[^}]*--font-brand/.test(HOME2));
+  ok("the chip names the ROLE, not a rank", /"Primary source"/.test(src("src/ui-kit.js")) &&
+    src("src/ui-kit.js").indexOf('vds-docrow__chip--accent", "Primary")') === -1);
+
   // Two defects one screenshot found that 5,700 assertions could not. Both now guarded.
   var HOMECSS = src("styles/editor/13-home.css");
   ok("the header's grouping segments size to their labels, not to a shared width",

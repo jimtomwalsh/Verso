@@ -171,6 +171,15 @@
            (((d && d.id) || "").toLowerCase().indexOf(q) !== -1);
   }
 
+  // uio-W05: the band's primary source, or null. Pure, because "which document does this product
+  // trace back to" is the question the whole band header exists to answer, and it must not depend
+  // on the order a store happened to enumerate.
+  function bandPrimary(band) {
+    var docs = (band && band.docs) || [];
+    for (var i = 0; i < docs.length; i++) if (docs[i] && docs[i].primary) return docs[i];
+    return null;
+  }
+
   function normGrouping(g) { return GROUPINGS.indexOf(g) === -1 ? "product" : g; }
   function normMode(m) { return MODES.indexOf(m) === -1 ? "list" : m; }
 
@@ -178,7 +187,7 @@
     GROUPING_KEY: GROUPING_KEY, MODE_KEY: MODE_KEY, GROUPINGS: GROUPINGS, MODES: MODES,
     TYPE_ORDER: TYPE_ORDER, TYPE_LABEL: TYPE_LABEL,
     buildCorpus: buildCorpus, corpusSummary: corpusSummary, groupCorpus: groupCorpus,
-    matchesQuery: matchesQuery, byRecent: byRecent, byBand: byBand,
+    matchesQuery: matchesQuery, byRecent: byRecent, byBand: byBand, bandPrimary: bandPrimary,
     normGrouping: normGrouping, normMode: normMode
   };
 
@@ -275,12 +284,32 @@
       return ui;
     }
 
+    // uio-W05: THE BAND HEADER IS THE SPINE OF THE WHOLE MODEL. You must be able to see which
+    // source document a product traces back to WITHOUT OPENING ANYTHING -- that relationship is
+    // what makes a product more than a tag, and a header that only counted documents left it
+    // invisible.
+    //
+    // Product name, then the primary source named in accent, then the count on the right. A
+    // product with no primary source says so plainly rather than rendering an empty line where a
+    // name should be: "no primary source" is a real state, common on a new product, and a blank
+    // reads as a bug. The No product band substitutes its own line, because shared material has no
+    // primary by definition.
     function bandHeader(g) {
-      // uio-W05 gives this its full voice -- the primary-source line, the brand face, the counts.
-      // It is a plain header here on purpose, so W05 has ONE place to change rather than three.
       var head = h("div", "files-band__head");
       if (g.label) head.appendChild(h("span", "files-band__name", g.label));
-      if (g.note) head.appendChild(h("span", "files-band__note", g.note));
+      if (g.note) {
+        head.appendChild(h("span", "files-band__note", g.note));
+      } else if (g.key) { // a real product band -- "" is No product, which has no primary by definition
+        var primary = bandPrimary(g);
+        var line = h("span", "files-band__primary");
+        if (primary) {
+          line.appendChild(h("span", "files-band__primary-label", "Primary source"));
+          line.appendChild(h("span", "files-band__primary-name", primary.title));
+        } else {
+          line.appendChild(h("span", "files-band__primary-none", "No primary source"));
+        }
+        head.appendChild(line);
+      }
       head.appendChild(h("span", "files-band__count", g.docs.length + (g.docs.length === 1 ? " document" : " documents")));
       return head;
     }
@@ -305,7 +334,7 @@
       card.setAttribute("data-doc-type", d.type);
       // The same primary treatment the list carries, so switching mode never changes what a
       // document IS -- only how much room it takes.
-      if (d.primary) card.appendChild(h("span", "files-card__primary", "Primary"));
+      if (d.primary) card.appendChild(h("span", "files-card__primary", "Primary source"));
       var glyph = h("span", "files-card__glyph files-card__glyph--" +
         (d.type === "source" ? "source" : "design"));
       var T = window.VersoUI.DOCUMENT_TYPES[window.VersoUI._pure.docType(d.type)];
@@ -341,7 +370,19 @@
         var band = h("div", "files-band");
         if (g.label || g.note) band.appendChild(bandHeader(g));
         var list = h("div", mode === "card" ? "files-band__cards" : "files-band__rows");
-        g.docs.forEach(function (d) { list.appendChild(mode === "card" ? docCard(d, showTypeChip) : docRow(d, showTypeChip)); });
+        g.docs.forEach(function (d) {
+          // A row reading "Primary source" does not also need a "Source" type chip beside it -- the
+          // role chip already says what type it is, and two chips saying one thing is the noise the
+          // type chip is switched off for elsewhere.
+          var chip = showTypeChip && !(d.primary && d.type === "source");
+          var el = mode === "card" ? docCard(d, chip) : docRow(d, chip);
+          // uio-W05, the DIVIDER treatment: the primary source is not just first in its band, it is
+          // visibly the thing the rest descend from -- an accent left border, a heavier title, and a
+          // rule separating it from the design documents beneath. The prototype's subtitle variant
+          // is deliberately NOT shipped: at forty products a second line per band is noise.
+          if (d.primary) el.classList.add("is-primary-source");
+          list.appendChild(el);
+        });
         band.appendChild(list);
         ui.body.appendChild(band);
       });

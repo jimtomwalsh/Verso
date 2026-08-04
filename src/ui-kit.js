@@ -527,7 +527,9 @@
     title.title = props.title == null ? "" : String(props.title); // the ellipsised name, in full
     row.appendChild(title);
 
-    if (props.primary) row.appendChild(h("span", "vds-docrow__chip vds-docrow__chip--accent", "Primary"));
+    // uio-W05: "Primary source", not "Primary" -- the chip names a ROLE (the document this
+    // product traces back to), and "Primary" alone reads as a rank among equals.
+    if (props.primary) row.appendChild(h("span", "vds-docrow__chip vds-docrow__chip--accent", "Primary source"));
     // Off by default: a view already grouped by type does not repeat it on every row.
     if (props.typeChip) row.appendChild(h("span", "vds-docrow__chip", t.label));
 
