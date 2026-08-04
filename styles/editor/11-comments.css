@@ -305,7 +305,7 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .frame .kc-pill[data-correct="true"] .kc-pill__letter { border-color: var(--color-success, #6bbe46); color: var(--color-success, #6bbe46); }
 .frame .kc-chip[data-correct="true"] { border-color: var(--color-success, #6bbe46); }
 .frame .kc-fb-holder { display: block; margin-top: 16px; }
-.frame .kc-fb { position: relative; margin-top: 12px; padding: 8px 10px; border: 1px dashed var(--color-hair); border-radius: 4px; }
+.frame .kc-fb { position: relative; margin-top: 12px; padding: 8px 10px; border: 1px dashed var(--border-subtle); border-radius: 4px; }
 .frame .kc-fb::before {
   position: absolute; top: -7px; left: 10px; padding: 0 5px;
   font: 700 9px Inter, system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase;
@@ -322,6 +322,6 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 .frame .hotspot-marker:active { cursor: grabbing; }
 /* A popover being edited is force-shown (render leaves it hidden) with a dashed
    ring so the author knows they're editing overlay content, not the page. */
-.hotspot-popover.is-editing { outline: 1px dashed var(--color-accent); outline-offset: 3px; }
+.hotspot-popover.is-editing { outline: 1px dashed var(--accent); outline-offset: 3px; }
 .frame .hotspot-stage__empty { min-height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 

@@ -402,16 +402,33 @@ section("arch-P6-02 design-system adherence");
     return !declared[t] && !dsDefined[t] && !localDefined[t];
   }).sort();
 
-  // RATCHET. 18 today: a handful set from JS at runtime (--vp-h, --acol/--ccol/--hcol,
-  // --pin-colour, --tour-inv), three course-theme tokens the canvas preview reaches for, and nine
-  // DS-shaped names the config never declared -- real drift between the spec and the chrome.
+  // RATCHET, lowered 18 -> 10 once the drift behind it was fixed.
+  //
+  // What is left is all legitimate and all SAFE: six names the JavaScript fills in at runtime
+  // (--vp-h, --acol/--ccol/--hcol, --pin-colour, --tour-inv) and four that carry a written
+  // fallback beside them. Every one of them resolves or degrades to a real value.
+  //
+  // The eight that USED to be here were not: nothing defined them and nothing fell back, so 27
+  // declarations were being thrown away by the browser -- pills rendering square, shadows not
+  // drawing, a title not taking its weight. They were replaced with tokens the design system
+  // already publishes (--radius-full, --type-label, --type-label-strong, --surface-canvas,
+  // --accent, --border-subtle, --shadow-popover, --shadow-menu), so nothing new was minted.
+  //
   // Widen the subject, never relax the floor: this number may fall and may not rise.
-  var CEILING = 18;
+  var CEILING = 10;
   ok("chrome tokens outside the design system do not increase (" + unknown.length + " <= " + CEILING + ")",
      unknown.length <= CEILING, unknown.join(" "));
   if (unknown.length && unknown.length <= CEILING) {
     warn("chrome uses " + unknown.length + " token(s) the DS spec does not declare (SOFT, ratcheted): " + unknown.slice(0, 6).join(" ") + (unknown.length > 6 ? " …" : ""));
   }
+  // The one that is not a matter of taste: a name nothing defines AND nothing falls back from is a
+  // declaration the browser throws away. That is broken styling, not untidy styling, so it is HARD.
+  var noFallback = unknown.filter(function (t) {
+    return new RegExp("var\\(\\s*" + t.replace(/-/g, "\\-") + "\\s*\\)").test(chrome);
+  });
+  ok("no chrome style asks for an undefined token with no fallback"
+     + (noFallback.length ? " -- DEAD: " + noFallback.join(", ") : ""),
+     noFallback.length === 0);
 
   // Fonts: a stack may fall back to whatever the OS offers, but what it ASKS FOR first has to be
   // one of the three the design system ships. "SF Mono" behind "JetBrains Mono" is fine; "SF Mono"

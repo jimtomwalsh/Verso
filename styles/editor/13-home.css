@@ -153,7 +153,7 @@
 .tourb-source {
   position: absolute; display: flex; flex-direction: column; gap: var(--space-2);
   background: var(--surface-raised); border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-100);
+  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-popover);
   padding: var(--space-2); cursor: grab; user-select: none;
 }
 .tourb-source.is-dragging { cursor: grabbing; z-index: 5; }
@@ -161,11 +161,11 @@
 .tourb-source__glyph { display: inline-flex; color: var(--accent); }
 .tourb-source__glyph svg { width: 15px; height: 15px; }
 .tourb-source__tag {
-  flex: none; font: var(--type-caption); letter-spacing: .04em; text-transform: uppercase;
+  flex: none; font: var(--type-label); letter-spacing: .04em; text-transform: uppercase;
   color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
-  padding: 1px 6px; border-radius: var(--radius-pill);
+  padding: 1px 6px; border-radius: var(--radius-full);
 }
-.tourb-source__title { flex: 1 1 auto; min-width: 0; font: var(--type-body-strong); color: var(--text-primary); background: transparent; border: 0; padding: 2px 4px; border-radius: var(--radius-sm); }
+.tourb-source__title { flex: 1 1 auto; min-width: 0; font: var(--type-label-strong); color: var(--text-primary); background: transparent; border: 0; padding: 2px 4px; border-radius: var(--radius-sm); }
 .tourb-source__title:focus { outline: none; background: var(--surface-canvas); box-shadow: inset 0 0 0 1px var(--border-input); }
 .tourb-source__remove { flex: none; width: 24px; height: 24px; }
 .tourb-source__thumb { position: relative; width: 100%; border-radius: var(--radius-sm); background: var(--surface-canvas); overflow: hidden; }
@@ -175,18 +175,18 @@
 /* MediaTransport (DSLMS board/SourceNode): scrub rail + playhead + in/out ticks, then a
    controls row. Bound to DSLMS tokens; the transport lives ON the media it controls. */
 .tourb-transport { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) 2px 2px; }
-.tourb-transport__rail { position: relative; height: 4px; border-radius: var(--radius-pill); background: var(--border-subtle); cursor: pointer; touch-action: none; }
-.tourb-transport__range { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 24%, transparent); pointer-events: none; }
-.tourb-transport__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: var(--radius-pill); background: var(--accent); pointer-events: none; }
+.tourb-transport__rail { position: relative; height: 4px; border-radius: var(--radius-full); background: var(--border-subtle); cursor: pointer; touch-action: none; }
+.tourb-transport__range { position: absolute; top: 0; bottom: 0; border-radius: var(--radius-full); background: color-mix(in srgb, var(--accent) 24%, transparent); pointer-events: none; }
+.tourb-transport__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: var(--radius-full); background: var(--accent); pointer-events: none; }
 .tourb-transport__tick { position: absolute; top: -3px; width: 2px; height: 10px; border-radius: 1px; background: var(--accent); transform: translateX(-1px); pointer-events: none; }
-.tourb-transport__knob { position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: var(--radius-pill); background: var(--accent); box-shadow: var(--shadow-100); transform: translateY(-50%); pointer-events: none; }
+.tourb-transport__knob { position: absolute; top: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: var(--radius-full); background: var(--accent); box-shadow: var(--shadow-popover); transform: translateY(-50%); pointer-events: none; }
 .tourb-transport__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); row-gap: var(--space-2); }
 .tourb-transport__play { flex: none; width: 28px; height: 28px; }
-.tourb-transport__time { flex: none; font-variant-numeric: tabular-nums; font: var(--type-caption); color: var(--text-secondary); }
+.tourb-transport__time { flex: none; font-variant-numeric: tabular-nums; font: var(--type-label); color: var(--text-secondary); }
 .tourb-transport__spacer { flex: 1 1 auto; }
-.tourb-transport__mark { flex: none; font: var(--type-caption); color: var(--text-secondary); background: var(--surface-canvas); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__mark { flex: none; font: var(--type-label); color: var(--text-secondary); background: var(--surface-canvas); border: 1px solid var(--border-input); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
 .tourb-transport__mark:hover { color: var(--text-primary); border-color: var(--border-focus); }
-.tourb-transport__harvest { flex: none; display: inline-flex; align-items: center; gap: 4px; font: var(--type-caption); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
+.tourb-transport__harvest { flex: none; display: inline-flex; align-items: center; gap: 4px; font: var(--type-label); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: var(--radius-sm); padding: 2px 8px; cursor: pointer; }
 .tourb-transport__harvest svg { width: 13px; height: 13px; }
 .tourb-transport__harvest:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .tourb-transport__harvest:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -195,7 +195,7 @@
 /* speed sub-row: caption label + segmented preset picker, disclosed with the segment tools */
 .tourb-transport__speed { display: flex; align-items: center; gap: var(--space-2); }
 .tourb-transport__speed[hidden] { display: none; }
-.tourb-transport__speed-label { flex: none; font: var(--type-caption); color: var(--text-secondary); }
+.tourb-transport__speed-label { flex: none; font: var(--type-label); color: var(--text-secondary); }
 /* ripple cuts (T3/T4): cut sub-row + rail punch-out bands. Removed = ABSENCE, so a flat neutral
    sunken fill (accent means kept/live); pending = dashed accent bracket; selected = 1px accent outline. */
 .tourb-transport__cutrow { display: flex; align-items: center; gap: var(--space-2); }
@@ -203,7 +203,7 @@
 .tourb-transport__mark.is-on { color: var(--accent); border-color: var(--accent); }
 .tourb-transport__cuts { position: absolute; inset: 0; pointer-events: none; }
 /* committed removed band: extends a little above/below the 4px rail so it is a comfortable click target */
-.tourb-transport__cut { position: absolute; top: -4px; bottom: -4px; background: var(--surface-sunken); box-shadow: inset 1px 0 0 var(--border-subtle), inset -1px 0 0 var(--border-subtle); border-radius: 2px; pointer-events: auto; cursor: pointer; }
+.tourb-transport__cut { position: absolute; top: -4px; bottom: -4px; background: var(--surface-canvas); box-shadow: inset 1px 0 0 var(--border-subtle), inset -1px 0 0 var(--border-subtle); border-radius: 2px; pointer-events: auto; cursor: pointer; }
 .tourb-transport__cut.is-sel { box-shadow: inset 0 0 0 1px var(--accent); } /* the one place accent touches a cut */
 .tourb-transport__cut--pending { background: transparent; border: 1px dashed var(--accent); box-shadow: none; pointer-events: none; }
 .tourb-transport__cutrm { flex: none; width: var(--control-sm); height: var(--control-sm); }
@@ -243,7 +243,7 @@
 .tourb-node {
   position: absolute; display: flex; flex-direction: column; gap: var(--space-2);
   background: var(--surface-raised); border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-100);
+  box-shadow: inset 0 0 0 1px var(--border-subtle), var(--shadow-popover);
   padding: var(--space-2); cursor: grab; user-select: none;
 }
 .tourb-node.is-dragging { cursor: grabbing; z-index: 5; }
@@ -265,7 +265,7 @@
 .tourb-node__badge {
   position: absolute; top: var(--space-2); left: var(--space-2); z-index: 2;
   display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 var(--space-2);
-  border-radius: var(--radius-pill); font: var(--type-caption);
+  border-radius: var(--radius-full); font: var(--type-label);
   background: var(--surface-app); color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-subtle);
   transform: scale(var(--tour-inv, 1)); transform-origin: top left;
 }
@@ -280,7 +280,7 @@
 .tourb-node__title:focus { box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-input); }
 .tourb-node__title::placeholder { color: var(--text-tertiary); }
 /* secondary caption field beneath the node title (the learner's below-screen caption) */
-.tourb-node__caption { border: none; outline: none; background: transparent; font: var(--type-caption); color: var(--text-secondary);
+.tourb-node__caption { border: none; outline: none; background: transparent; font: var(--type-label); color: var(--text-secondary);
   padding: 1px var(--space-1); border-radius: var(--radius-xs); width: 100%; }
 .tourb-node__caption:focus { box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-input); color: var(--text-primary); }
 .tourb-node__caption::placeholder { color: var(--text-tertiary); }
@@ -289,9 +289,9 @@
 .tourb-pin {
   position: absolute; transform: translate(-50%, -50%) scale(var(--tour-inv, 1)); z-index: 3;
   width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font: var(--type-caption); font-style: italic; font-weight: 700; line-height: 1;
+  font: var(--type-label); font-style: italic; font-weight: 700; line-height: 1;
   background: var(--accent); color: var(--text-on-accent);
-  box-shadow: 0 0 0 2px var(--surface-raised), var(--shadow-100); cursor: grab; touch-action: none;
+  box-shadow: 0 0 0 2px var(--surface-raised), var(--shadow-popover); cursor: grab; touch-action: none;
 }
 .tourb-pin:active { cursor: grabbing; }
 .tourb-pin:hover { filter: brightness(1.08); }
@@ -350,12 +350,12 @@
 .tourb-port {
   position: absolute; transform: translate(calc(-50% + 15px), calc(-50% - 15px)) scale(var(--tour-inv, 1)); z-index: 6;
   width: 15px; height: 15px; border-radius: 50%; background: var(--surface-raised);
-  box-shadow: inset 0 0 0 2px var(--border-strong), var(--shadow-100); cursor: crosshair; touch-action: none;
+  box-shadow: inset 0 0 0 2px var(--border-strong), var(--shadow-popover); cursor: crosshair; touch-action: none;
   transition: transform var(--dur-fast) var(--ease-standard);
 }
 .tourb-port::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--border-strong); }
 .tourb-port:hover { transform: translate(calc(-50% + 15px), calc(-50% - 15px)) scale(calc(var(--tour-inv, 1) * 1.3)); }
-.tourb-port.is-connected, .tourb-port.is-active { box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-100); }
+.tourb-port.is-connected, .tourb-port.is-active { box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-popover); }
 .tourb-port.is-connected::after, .tourb-port.is-active::after { background: var(--accent); }
 
 /* Edge connectors (reuse connectorPathD geometry) */
@@ -374,10 +374,10 @@
 .tourb-card {
   position: absolute; z-index: 7;
   background: var(--surface-panel); color: var(--text-primary); border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-200), inset 0 0 0 1px var(--border-subtle);
+  box-shadow: var(--shadow-menu), inset 0 0 0 1px var(--border-subtle);
   padding: var(--space-3); font: var(--type-value); display: flex; flex-direction: column; gap: var(--space-2); cursor: auto;
 }
-.tourb-card.is-hot { box-shadow: var(--shadow-200), inset 0 0 0 2px var(--accent); }
+.tourb-card.is-hot { box-shadow: var(--shadow-menu), inset 0 0 0 2px var(--accent); }
 .tourb-card .is-editable:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-xs); }
 .tourb-card__empty { color: var(--text-tertiary); font: var(--type-label); }
 
@@ -412,7 +412,7 @@
   font: var(--type-label); color: var(--text-tertiary); transform: scale(var(--tour-inv, 1)); transform-origin: top left;
 }
 /* member node: a subtle accent ring + an order pill so its place in the carousel reads */
-.tourb-node.is-loop-member { box-shadow: inset 0 0 0 1.5px var(--accent), var(--shadow-100); }
+.tourb-node.is-loop-member { box-shadow: inset 0 0 0 1.5px var(--accent), var(--shadow-popover); }
 .tourb-node__badge--loop { left: auto; right: var(--space-2); color: var(--accent); transform-origin: top right; }
 
 /* loop inspector — ordered member strip */
