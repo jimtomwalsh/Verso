@@ -21,6 +21,16 @@ var cp = require("child_process");
 
 var ROOT = path.join(__dirname, "..");
 function src(rel) { return fs.readFileSync(path.join(ROOT, rel), "utf8"); }
+// arch-P5-01: editor.css is styles/editor/*.css now. `editorCss()` reads them in the ORDER
+// declared by order.json and joins them exactly as the browser's <link> sequence does, so every
+// assertion below sees the same bytes it saw when the file was one. A claim that depends on rule
+// ORDER (a later override winning) therefore still holds -- and would fail if order.json were
+// wrong, which is the point of reading the declared order rather than the directory listing.
+function editorCss() {
+  var order = JSON.parse(fs.readFileSync(path.join(ROOT, "styles/editor/order.json"), "utf8"));
+  return order.map(function (o) { return src("styles/editor/" + o.file); }).join("\n");
+}
+var EDITOR_CSS = editorCss();
 // arch-P2: the behavioural test seam. LOAD.load(rel, opts) runs one of the app's classic scripts
 // in a node:vm context with a stub window/document and returns what it published -- for the files
 // a plain `require` cannot reach (DOM at load, or an activation gate that must be seeded first).
@@ -286,6 +296,53 @@ section("syntax");
   ok("node --check " + f, r.status === 0);
   if (r.status !== 0) console.error(r.stderr);
 });
+
+// ---- arch-P5-01: the split chrome stylesheet, and its ORDER ---------------
+// editor.css was 4,581 lines and 74 of the last 200 commits. It is fourteen files now, loaded as
+// fourteen <link>s. The browser concatenates them, so the cascade is byte-for-byte what one file
+// produced -- PROVIDED the order is right. Order is the entire safety argument: a later rule
+// overriding an earlier one is how CSS works, and a reordered split silently changes which wins.
+//
+// So the order is declared once, in styles/editor/order.json, and this checks three things against
+// it: the directory holds exactly those files, index.html links exactly those files in exactly
+// that sequence, and kit.html does too. No build step -- the <link> list is hand-written, which is
+// precisely why it needs a gate.
+section("arch-P5-01 split chrome stylesheet");
+(function () {
+  var order = JSON.parse(src("styles/editor/order.json"));
+  var declared = order.map(function (o) { return o.file; });
+  var onDisk = fs.readdirSync(path.join(ROOT, "styles/editor"))
+    .filter(function (f) { return /\.css$/.test(f); }).sort();
+
+  var undeclared = onDisk.filter(function (f) { return declared.indexOf(f) === -1; });
+  var phantom = declared.filter(function (f) { return onDisk.indexOf(f) === -1; });
+  ok("every stylesheet in styles/editor/ is in order.json" + (undeclared.length ? " -- MISSING: " + undeclared.join(", ") : ""),
+     undeclared.length === 0);
+  ok("every order.json entry names a real stylesheet" + (phantom.length ? " -- PHANTOM: " + phantom.join(", ") : ""),
+     phantom.length === 0);
+  ok("every entry says what its file is for (the map is prose, not just a list)",
+     order.every(function (o) { return typeof o.is === "string" && o.is.length > 8; }));
+
+  // the <link> sequence in each page must BE the declared sequence -- same files, same order
+  ["index.html", "kit.html"].forEach(function (page) {
+    var html = src(page);
+    var linked = (html.match(/<link rel="stylesheet" href="styles\/editor\/([^"]+)"/g) || [])
+      .map(function (m) { return m.match(/styles\/editor\/([^"]+)/)[1]; });
+    ok(page + " links every declared stylesheet, in the declared ORDER",
+       linked.join("|") === declared.join("|"), linked.join("|") + "  !=  " + declared.join("|"));
+  });
+
+  // the old monolith is gone, and nothing still points at it
+  ok("editor.css no longer exists", !fs.existsSync(path.join(ROOT, "editor.css")));
+  ok("no page still links the old monolith",
+     src("index.html").indexOf('href="editor.css"') === -1 && src("kit.html").indexOf('href="editor.css"') === -1);
+
+  // and it proves it can fail
+  ok("the gate would catch a reordered link list (proof)",
+     ["b.css", "a.css"].join("|") !== ["a.css", "b.css"].join("|"));
+  ok("the gate would catch an undeclared stylesheet (proof)",
+     ["99-not-declared.css"].filter(function (f) { return declared.indexOf(f) === -1; }).length === 1);
+})();
 
 // ---- arch-P4-04: the four-file block contract, enforced ------------------
 // CONTRIBUTING.md and design-system/readme.md have said for a long time that a block has four
@@ -1216,7 +1273,7 @@ section("platform-pivot 11 presence chrome");
   ok("mount() reprojects presence chrome after renderCommentPins", /renderCommentPins\(\);[\s\S]{0,140}collabChrome\(\)\.ensure\(\); collabChrome\(\)\.reproject\(\);/.test(src("src/editor.js")));
   ok("presence cluster mounts in the toolbar right group", /document\.querySelector\("\.toolbar__group--right"\)/.test(t));
   // presence CSS conforms to the PresenceCluster contract (20px, editing solid / viewing hollow)
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("presence avatar is control-sm + radius-full", /\.collab-av \{[\s\S]{0,160}var\(--control-sm, 20px\)[\s\S]{0,160}var\(--radius-full/.test(css));
   ok("viewing state is the hollow/tinted variant", /\.collab-av\.is-viewing \{/.test(css));
 
@@ -1364,7 +1421,7 @@ section("platform-pivot 26 review round-trip");
   ok("guest comment ingest maps the envelope + upserts (reply attaches to its parent's thread)", /function ingestComment\(env\)/.test(t) && /commentFromEnv\(env, E\.doc, colourForName\)/.test(t) && /replies\.push\(\{ id: c\.id, body: c\.body/.test(t));
   ok("comment.added / comment.resolved route through the round-trip", /else if \(env\.type === "comment\.added"\) \{ ingestComment\(env\); \}/.test(t) && /else if \(env\.type === "comment\.resolved"\) \{ resolveThread\(env\); \}/.test(t));
   ok("resolveThread marks the whole thread done (both ways)", /function resolveThread\(env\)[\s\S]{0,260}c\.id === threadId \|\| c\.threadId === threadId/.test(t));
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("26 CSS: guest tag + orphan tray", /\.comment-row__tag\.is-guest/.test(css) && /\.comment-list\.is-orphan-tray/.test(css));
 })();
 
@@ -2501,8 +2558,8 @@ section("#8 docs reader (TOC + search)");
   // first. The guide now joins the F05 layer stack, so Escape closes the topmost layer only.
   ok("#8 the guide is a layer, so Escape closes the topmost surface only", /pushLayer\("help", close\)/.test(ed) && /popLayer\("help"\)/.test(ed));
   ok("#8 a guide result lands on its section, not the top of the guide", /function openHelpModal\(focusId\)/.test(ed) && /if \(focusId\)[\s\S]{0,220}scrollToHead\(body, target\)/.test(ed));
-  ok("#8 CSS: TOC active item reuses the accent-quiet/accent token pair", /\.docs-toc__item\.is-active\s*\{[^}]*var\(--accent-quiet\)[^}]*var\(--accent\)/.test(src("editor.css")));
-  ok("#8 CSS: the retired search box left no dead rules behind", !/\.docs-search/.test(src("editor.css")) && !/\.docs-toc__empty/.test(src("editor.css")));
+  ok("#8 CSS: TOC active item reuses the accent-quiet/accent token pair", /\.docs-toc__item\.is-active\s*\{[^}]*var\(--accent-quiet\)[^}]*var\(--accent\)/.test(EDITOR_CSS));
+  ok("#8 CSS: the retired search box left no dead rules behind", !/\.docs-search/.test(EDITOR_CSS) && !/\.docs-toc__empty/.test(EDITOR_CSS));
 })();
 
 // ---- #8 docs auto-maintenance — the drift checker tool (code is truth) -----------------
@@ -2750,9 +2807,9 @@ section("#29 annotation overlay");
   ok("#29 a valid annotated scene passes", dc.validateScene({ id: "s", covers: ["x"], steps: [{ do: "highlight", target: "#x" }, { do: "callout", target: "#x", n: 1 }, { do: "pointer", target: "#x" }, { do: "clearAnnotations" }, { do: "shoot", out: "a.webp" }] }).ok === true);
 
   // -- INVARIANT: annotation overlay is editor chrome only, never course output --
-  ok("#29 annotation classes live in editor.css (chrome), NOT course.css (ships)", src("editor.css").indexOf("capture-annot") !== -1 && src("src/course.css").indexOf("capture-annot") === -1);
+  ok("#29 annotation classes live in editor.css (chrome), NOT course.css (ships)", EDITOR_CSS.indexOf("capture-annot") !== -1 && src("src/course.css").indexOf("capture-annot") === -1);
   ok("#29 render.js + export.js never emit annotation classes", src("src/render.js").indexOf("capture-annot") === -1 && src("src/export.js").indexOf("capture-annot") === -1);
-  ok("#29 overlay uses the DS accent token (theme-inherited)", /\.capture-annot--ring\s*\{[^}]*var\(--accent\)/.test(src("editor.css")) && /\.capture-annot--chip\s*\{[\s\S]*?var\(--accent\)/.test(src("editor.css")));
+  ok("#29 overlay uses the DS accent token (theme-inherited)", /\.capture-annot--ring\s*\{[^}]*var\(--accent\)/.test(EDITOR_CSS) && /\.capture-annot--chip\s*\{[\s\S]*?var\(--accent\)/.test(EDITOR_CSS));
 
   // -- shipped annotated scenes + committed assets --
   ok("#29 annotated still scene valid", dc.validateScene(JSON.parse(src("docs/scenes/annotated-structure.json"))).ok === true);
@@ -2799,9 +2856,10 @@ section("#30 staleness coverage");
     return (sc.covers || []).some(function (c) { return dc.isFileSurface(c); });
   });
   ok("#30 every shipped scene covers >= 1 file surface", allHaveFileSurface);
-  // real coverage: an editor.css change re-runs every shipped scene
+  // real coverage: a chrome-stylesheet change re-runs every shipped scene (arch-P5-01: the scenes
+  // name the styles/editor/ directory, since the surface they cover is the chrome CSS, not a file)
   var real = fs.readdirSync(path.join(ROOT, "docs/scenes")).filter(function (f) { return /\.json$/.test(f); }).map(function (f) { return JSON.parse(src("docs/scenes/" + f)); });
-  ok("#30 editor.css change maps to all shipped scenes", dc.staleScenes(real, ["editor.css"]).length === real.length);
+  ok("#30 a chrome-stylesheet change maps to all shipped scenes", dc.staleScenes(real, ["styles/editor/"]).length === real.length);
   // documented: the staleness aid is referenced in the scene README + ADR (deferral noted)
   ok("#30 scene README documents --stale + covers schema", /--stale/.test(src("docs/scenes/README.md")) && /covers/.test(src("docs/scenes/README.md")));
   ok("#30 hash-ratchet/CI regeneration noted as deferred", /defer/i.test(src("docs/adr/0004-user-docs-markdown-single-source-runtime-reader.md")));
@@ -3849,7 +3907,7 @@ section("#48 box (region) hotspot marker");
   var eh = src("src/editor/hotspots-editor.js");
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
-  var r = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ecss = src("editor.css");
+  var r = src("src/render.js"), css = src("src/course.css"), e = src("src/editor.js"), ecss = EDITOR_CSS;
   // render: a box marker renders as a sized region (transparent, no glyph), not a point badge.
   ok("render: shape==box adds .hotspot-marker--box + inline w/h %", /if \(hs\.shape === "box"\) \{[\s\S]*?mk\.classList\.add\("hotspot-marker--box"\);[\s\S]*?mk\.style\.width = \(hs\.w == null \? 20 : hs\.w\) \+ "%";[\s\S]*?mk\.style\.height = \(hs\.h == null \? 12 : hs\.h\) \+ "%";/.test(r));
   ok("render: box branch bypasses the glyph/custom marker path (else-if)", /if \(hs\.shape === "box"\) \{[\s\S]*?mk\.classList\.add\("hotspot-marker--box"\);[\s\S]*?\} else if \(block\.markerHtml\)/.test(r));
@@ -3915,7 +3973,7 @@ section("#53 reveal hotspots after a play-once video ends");
   // authoring visibility: gated markers are opacity:0 at runtime but must be visible (dimmed) on
   // the editing canvas so the author can place them -- scoped to #canvas-viewport so it does not
   // leak into Demo / the tour Preview (which show the true reveal-after-video behaviour).
-  var ecss = src("editor.css");
+  var ecss = EDITOR_CSS;
   ok("editor.css: gated markers shown dimmed on the editing canvas only", /#canvas-viewport \.hotspot-marker--gated \{ opacity: 0\.5;[^}]*outline: 1px dashed/.test(ecss));
 })();
 
@@ -3923,7 +3981,7 @@ section("#55 video vs image tour-node badge");
 (function () {
   // arch-P3b-04: the tour board moved to src/editor/board/builder.js.
   var eb = src("src/editor/board/builder.js");
-  var e = src("src/editor.js"), ecss = src("editor.css");
+  var e = src("src/editor.js"), ecss = EDITOR_CSS;
   ok("editor: renderTourNodes adds a video badge for kind==video", /if \(s\.kind === "video"\) \{ var vbadge = h\("span", "tourb-node__badge tourb-node__badge--video"\)[\s\S]*?window\.Icon\("play"\)/.test(eb));
   ok("editor.css: .tourb-node__badge--video styled at a free corner", /\.tourb-node__badge--video \{[^}]*bottom: var\(--space-2\);[^}]*left: var\(--space-2\);/.test(ecss));
 })();
@@ -3996,7 +4054,7 @@ section("hotspot chrome: caption + video progress + nav toggle + counter placeme
   // canvas screen cycler (editor chrome): prev/next buttons flank a multi-screen hotspot.
   ok("editor: hsCanvasCycle steps hotspotEditScreenId + re-shows + re-renders", /function hsCanvasCycle\(node, block, dir\)[\s\S]*?hotspotEditScreenId = next\.id; hotspotEditId = null;\s*renderInspector\(\);\s*showEditScreen\(node, next\.id\);/.test(eh));
   ok("editor: wireHotspotNode injects the prev/next canvas nav for multi-screen only", /\(block\.screens \|\| \[\]\)\.filter\(Boolean\)\.length > 1 && !node\.querySelector\("\.hotspot-canvas-nav"\)[\s\S]*?hsCanvasCycle\(node, block, d\[1\]\)/.test(e));
-  ok("editor.css: .hotspot-canvas-nav flanks the interaction (left/right, centred)", /\.hotspot-canvas-nav--prev \{ left: 8px; \}/.test(src("editor.css")) && /\.hotspot-canvas-nav--next \{ right: 8px; \}/.test(src("editor.css")));
+  ok("editor.css: .hotspot-canvas-nav flanks the interaction (left/right, centred)", /\.hotspot-canvas-nav--prev \{ left: 8px; \}/.test(EDITOR_CSS) && /\.hotspot-canvas-nav--next \{ right: 8px; \}/.test(EDITOR_CSS));
 })();
 
 // Split-page (slice) tool lives in the two-level inspector's Actions row (the floating
@@ -5765,7 +5823,7 @@ section("#20 library-instance mirror");
 
   // 5. editor.css scopes the "opaque instance" rule to the marker attribute, and never
   // applies to course.css/render output (editor-only chrome, per the pure-render invariant).
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("editor.css disables pointer-events on nested canvas-blocks inside a library instance", /\[data-library-instance\] \.canvas-block \{ pointer-events: none; \}/.test(css));
   ok("course.css does not reference the library-instance marker (editor-chrome only)", src("src/course.css").indexOf("data-library-instance") === -1);
 })();
@@ -6097,7 +6155,7 @@ section("#22 section + page library masters");
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var rtxt = src("src/render.js");
   var etxt = src("src/editor.js"), OUT = src("src/editor/outliner.js");   // arch-P3b-07i: the tree and its verbs moved to src/editor/outliner.js
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
 
   // 1. SECTION masters: groupMulti + saveBlockAsComponent, reused verbatim.
   ok("groupMulti returns the resulting group block", /return frame; \/\/ #22/.test(OUT));
@@ -6408,7 +6466,7 @@ section("interaction-gate: visible + explained (grey Next + reminder)");
 //      (static) gutters, so they no longer stuck to the corners at smaller sizes.
 section("footer nav corner-pin: framed preview matches export");
 (function () {
-  var ec = src("editor.css");
+  var ec = EDITOR_CSS;
   // runtime pin (course.css) is unchanged: fixed to the viewport at 24/12/16px.
   var cc = src("src/course.css");
   ok("runtime: pin uses position:fixed (viewport corners)", /\.course-root\[data-env="runtime"\] \.course-nav--pin \.course-nav__prev,\s*\.course-root\[data-env="runtime"\] \.course-nav--pin \.course-nav__next \{\s*position: fixed;/.test(cc));
@@ -6537,7 +6595,7 @@ section("#169 pin-to-gutters preview");
 (function () {
   var r = src("src/render.js");
   var course = src("src/course.css");
-  var chrome = src("editor.css");
+  var chrome = EDITOR_CSS;
   // render: pinning is the GLOBAL DEFAULT (#169b) — course-nav--pin unless pinButtons === false.
   ok("render pins by default (opt-out via pinButtons === false)", /var pinned = block\.pinButtons !== false;/.test(r) && /pinned \? " course-nav--pin" : ""/.test(r));
   // runtime: prev/next pin fixed to the viewport gutters, scoped to [data-env="runtime"] (ships)
@@ -7436,7 +7494,7 @@ section("clear content #174");
 // instead of column index 0). Guard the geometry: top:-16px + height:16px = [-16,0].
 section("columns top-band clears content");
 (function () {
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("top edge-band lifted above content (top:-16px)", /\.columns-edge-band--top\s*\{[^}]*top:\s*-16px/.test(css));
   ok("top edge-band height 16px (bottom edge = node top)", /\.columns-edge-band--top\s*\{[^}]*height:\s*16px/.test(css));
   // bottom band untouched (it works today)
@@ -7450,7 +7508,7 @@ section("columns top-band clears content");
 // this guards the CSS rule so the fix can't silently regress.)
 section("Cmd+backslash canvas spans row");
 (function () {
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("panels-hidden pins the canvas across all grid tracks", /\.workspace\.is-panels-hidden \.canvas\s*\{[^}]*grid-column:\s*1 \/ -1/.test(css));
 })();
 
@@ -7505,7 +7563,7 @@ section("richer bullet lists");
   ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(src("src/editor/inspector/primitives.js")));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
   ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(SHELL));
-  var ecss = src("editor.css");
+  var ecss = EDITOR_CSS;
   ok("doc inspector is lean (Canvas + pointer to the ⚙ modal)", /function renderDocumentInspector\(\)[\s\S]*?openSettingsModal\("project"\)/.test(e) && (e.match(/disclosure\("headerFooter"/g) || []).length === 0);
   ok("settings SYSTEM tab = Canvas + Component Library sections", /tab === "system"\) return \[[\s\S]*?key: "canvas"[\s\S]*?colourControl\("Background"[\s\S]*?key: "library", title: "Component Library", build: buildLibraryBody/.test(SS));
   ok("settings PROJECT tab = the document sections (rail order)", /key: "header", title: "Header", build: buildHeaderBody[\s\S]*?key: "footer", title: "Footer"[\s\S]*?key: "glossary"[\s\S]*?key: "pipeline", title: "Review \(Viewer\)"/.test(SS));
@@ -7640,7 +7698,7 @@ section("embed align centering");
 section("font preview picker");
 (function () {
   var FONTS = src("src/editor/fonts.js");   // arch-P3b-07
-  var r = src("src/render.js"), e = src("src/editor.js"), css = src("editor.css");
+  var r = src("src/render.js"), e = src("src/editor.js"), css = EDITOR_CSS;
   ok("render exposes fontStackFor (known stack or quoted family)", /window\.fontStackFor = function \(name\) \{ return name \? \(FONT_STACKS\[name\] \|\| \("'" \+ name \+ "', sans-serif"\)\) : ""; \}/.test(r));
   // the picker renders each option in its own font + exposes .value + fires change (attachFontWarn stays compatible)
   ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(FONTS));
@@ -8002,7 +8060,7 @@ section("#145 text-role auto-styling");
   ok("renameTextStyle repoints the role map", /E\.doc\.textRoles\[t\] === oldName\) E\.doc\.textRoles\[t\] = newName/.test(src("src/editor/theme.js")));
   ok("Editor exposes applyTextRolesByType", /applyTextRolesByType: function \(\)/.test(e));
   ok("audit decorator wired into mount + per-page", (e.match(/decorateStyleAudit\(/g) || []).length >= 3);
-  ok("audit marks unstyled canvas blocks red (editor-only class)", /node\.classList\.add\("is-unstyled-audit"\)/.test(e) && /\.canvas-block\.is-unstyled-audit/.test(src("editor.css")));
+  ok("audit marks unstyled canvas blocks red (editor-only class)", /node\.classList\.add\("is-unstyled-audit"\)/.test(e) && /\.canvas-block\.is-unstyled-audit/.test(EDITOR_CSS));
   ok("render.js has NO styleRole leak (pure render unchanged)", !/textRoles|roleStyleFor|is-unstyled-audit/.test(src("src/render.js")));
 })();
 
@@ -8199,7 +8257,7 @@ section("columns colWidths guards");
   })());
   ok("resize drag redistributes only the adjacent pair (total held)", /var nj = drag\.total - ni/.test(edui) && /COL_MIN_PX/.test(edui));
   ok("resize handle attached in the columns decorate branch", /attachColumnResizers\(node, block\)/.test(EDIT));
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("col-resize handle uses col-resize cursor", /\.col-resize-handle\s*\{[^}]*cursor:\s*col-resize/.test(css));
   ok("handle line uses the accent token + hover reveal", /\.col-resize-handle__line\s*\{[^}]*var\(--accent\)/.test(css) && /:hover \.col-resize-handle__line/.test(css));
   ok("handles yield to edge bands while a block is dragged", /body\.is-dragging-block \.col-resize-handle\s*\{\s*pointer-events:\s*none/.test(css));
@@ -8253,7 +8311,7 @@ section("swap-columns affordance");
   ok("arrow-left-right is a vendored Lucide glyph (icons.js), not an inline one-off <svg>", /"arrow-left-right":\s*"<path/.test(icons));
 
   // 4. css: hover-revealed, positioned absolute, yields to drag/resize like its siblings.
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("col-swap-btn is absolutely positioned + hover-revealed (mirrors the resize handle's reveal pattern)", /\.col-swap-btn\s*\{[^}]*position:\s*absolute/.test(css) && /:hover \.col-swap-btn/.test(css));
   ok("col-swap-btn yields to drag/resize (no competing pointer targets)", /body\.is-dragging-block \.col-swap-btn/.test(css) && /body\.is-col-resizing \.col-swap-btn/.test(css));
 })();
@@ -8296,7 +8354,7 @@ section("project auto-backup");
   ok("create flow offers a ChoiceCards preset grid from the doc-type model", /window\.VersoUI\.ChoiceCards\(\{[\s\S]{0,200}DT\.PRESETS\.map/.test(DOCS));
   ok("Backup section registered at the top of Project settings", /\{ key: "backup", title: "Backup", build: buildBackupBody \}/.test(SS));
   ok("schema CSV has a pure text builder for reuse", /window\.__schemaCsv = schemaCsvText/.test(src("src/schema.js")));
-  ok("backup-off banner styled (loud, [hidden]-toggled)", /#backup-off-banner\s*\{[\s\S]{0,320}position: fixed/.test(src("editor.css")) && /#backup-off-banner\[hidden\] \{ display: none; \}/.test(src("editor.css")));
+  ok("backup-off banner styled (loud, [hidden]-toggled)", /#backup-off-banner\s*\{[\s\S]{0,320}position: fixed/.test(EDITOR_CSS) && /#backup-off-banner\[hidden\] \{ display: none; \}/.test(EDITOR_CSS));
 })();
 
 // ---- desktop image file-drop onto an image block ------------------------------
@@ -8311,7 +8369,7 @@ section("image file drop");
   ok("drop accepts image/* files only", /!f \|\| !\/\^image\\\/\/\.test\(f\.type\)/.test(e));
   ok("drop reuses the assetRef upload path", /block\.src = assetRef\(r\.result, f\); reapplyStructural\(findPageOfBlock\(block\)\); reselectBlockNode\(block, "block"\)/.test(e));
   ok("drop guarded against internal moves (dragPayload)", /node\.addEventListener\("drop", function \(e\) \{\s*if \(dragPayloadNow\(\)\) return;/.test(e));
-  ok("file-drop highlight styled", /\.canvas-block\.is-file-drop\s*\{[^}]*dashed var\(--(?:ui-)?accent\)/.test(src("editor.css")));
+  ok("file-drop highlight styled", /\.canvas-block\.is-file-drop\s*\{[^}]*dashed var\(--(?:ui-)?accent\)/.test(EDITOR_CSS));
 })();
 
 // ---- learner keyboard scroll: Arrow / Page keys scroll the current page --------
@@ -8484,7 +8542,7 @@ section("pan/zoom perf wiring (#150)");
       ok(name + " marks the gesture as navigating", w2.get("world").classList.contains("nav-lod"));
     });
   })();
-  var css2 = src("editor.css");
+  var css2 = EDITOR_CSS;
   ok("nav-lod stops painting heavy leaf content (img/svg/embed/video)",
     /\.world\.nav-lod img,[\s\S]*?\.world\.nav-lod \.embed__video \{ visibility: hidden; \}/.test(css2));
 })();
@@ -8514,7 +8572,7 @@ section("zoomed-out plain-page LOD (#172)");
     ok("applyView toggles .world--far off the current zoom vs FAR_ZOOM", farOn && !atThreshold && !farOff);
     ok("the zoom readout follows the same write", K.get("zoomLevelEl").textContent === "100%");
   })();
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("far-zoom LOD is gated on BOTH nav-lod (in motion) AND world--far (zoomed out)",
     /\.world\.nav-lod\.world--far \.course-root \{ visibility: hidden; \}/.test(css));
   ok("far-zoom LOD hides page CONTENT (.course-root), not the frame box",
@@ -8687,7 +8745,7 @@ section("native-scroll pan (#151 lever 1)");
     ok("flag on: a drag pan scrolls rather than transforming",
       canvas.scrollLeft === 2490 && canvas.scrollTop === 2190 && world.style.transform === before);
   })();
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("native-scroll CSS: viewport scrolls + scrollbars hidden + sizer positioned",
     /\.canvas\.native-scroll \{ overflow: auto;/.test(css) && /\.canvas\.native-scroll::-webkit-scrollbar \{ width: 0; height: 0; \}/.test(css) && /\.canvas-scroll \{ position: relative; \}/.test(css));
   ok("native-scroll never leaks into render()/course.css",
@@ -8802,7 +8860,7 @@ section("offscreen-frame culling (#150 slice B)");
     /containIntrinsicSize = E\.FRAME_W \+ "px " \+ Math\.round\(f\.h/.test(lc));
   ok("the cull pass is gated by FRAME_CULL and adds frame--cull",
     /if \(FRAME_CULL\) E\.frameDescs\.forEach/.test(lc) && /classList\.add\("frame--cull"\)/.test(lc));
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("CSS enables content-visibility:auto only on culled frames",
     /\.frame\.frame--cull \{ content-visibility: auto; \}/.test(css));
 })();
@@ -9114,7 +9172,7 @@ section("LeftPanel DS re-skin (issue #13)");
   var OUT = src("src/editor/outliner.js");   // arch-P3b-07i
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
   var e = src("src/editor.js");
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   var icons = src("src/icons.js");
   // Outliner: block-type icons are Lucide (a map, resolved through the accessor) —
   // no text glyphs. Pages get file-text; carets are the Lucide chevron.
@@ -10059,7 +10117,7 @@ section("uio-F01 shared settings row anatomy");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js");
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   var tokens = src("design-system/tokens/spacing.css");
   var dts = src("design-system/components/controls/FieldRow.d.ts");
   // The one shared-row primitive exists and is test-exposed.
@@ -10094,7 +10152,7 @@ section("uio-F01 shared settings row anatomy");
 // guard freezes it: no bare integer- or half-step font-size may return to the chrome CSS.
 section("uio-F02 density baseline — type tokens + focus ring");
 (function () {
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   var bare = (css.match(/font-size:\s*1[012](\.5)?px\b/g) || []);
   ok("editor.css: no bare 10/10.5/11/11.5/12/12.5px font-size (use the --text-* scale)", bare.length === 0);
   if (bare.length) console.error("    bare font-size: " + bare.slice(0, 8).join(" · "));
@@ -10140,7 +10198,7 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   // run SOFT via warn() because the --ui-* alias layer (#7) is intentionally
   // still present. The flip to a hard --ui-* fail lands with the alias teardown
   // (#21) — do not hard-fail on it here.
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   var courseCss11 = src("src/course.css");
   var icons = src("src/icons.js");
   var uiKit = src("src/ui-kit.js");
@@ -10166,8 +10224,11 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   // editor claims "no external network calls at all" / "no phone-home"; a
   // Google Fonts @import in any editor-loaded stylesheet silently breaks that
   // and any IT/security air-gap review. Guard every CSS the editor pulls in.
-  var CDN_FONT_CSS = ["editor.css", "src/course.css",
-                      "design-system/tokens/fonts.css", "design-system/styles.css"];
+  // arch-P5-01: every split editor stylesheet is guarded, not just the one that used to be the
+  // whole file -- a @import could otherwise hide in any of the fourteen.
+  var CDN_FONT_CSS = JSON.parse(src("styles/editor/order.json"))
+    .map(function (o) { return "styles/editor/" + o.file; })
+    .concat(["src/course.css", "design-system/tokens/fonts.css", "design-system/styles.css"]);
   CDN_FONT_CSS.forEach(function (f) {
     var body = src(f);
     ok("no external font-CDN reference in " + f + " (fonts.googleapis/gstatic)",
@@ -10232,7 +10293,9 @@ section("UI kit conformance gate (ticket 9 — HARD FAIL)");
   // ui-alias references may remain in ANY chrome file (entry CSS + all chrome JS).
   // render.js / course.css are the SHIP path and are excluded by construction.
   var UI_ALIAS = /--ui-[a-z][a-z-]*/g;
-  var chromeFiles = ["editor.css", "src/editor.js", "src/csv.js", "src/ui-kit.js", "src/icons.js"];
+  var chromeFiles = JSON.parse(src("styles/editor/order.json"))
+    .map(function (o) { return "styles/editor/" + o.file; })
+    .concat(["src/editor.js", "src/csv.js", "src/ui-kit.js", "src/icons.js"]);   // arch-P5-01
   var uiRefs = chromeFiles.reduce(function (n, f) {
     return n + ((src(f).match(UI_ALIAS) || []).length);
   }, 0);
@@ -10421,7 +10484,7 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("pinned bottom rail actions = Settings + Help/Docs; the save-menu popover is retired", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && !/id="save-menu-btn"/.test(idx));
   ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
   ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(ehm));
-  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(src("editor.css")));
+  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(EDITOR_CSS));
   ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
   // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
   ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(SHELL) && /function mountProductPicker/.test(SHELL));
@@ -10656,12 +10719,12 @@ section("Product Rail: Release history store (whole-family export)");
   })());
   // uio-P-C03 flipped the DEFAULT: reverse-chron and per-release expansion are unchanged, but the
   // section is now open and fills the pane's empty half instead of hiding collapsed below the queue.
-  ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(src("editor.css")));
+  ok("the Publish stage renders a reverse-chron Release history, entries expandable", /function renderPublishHistory\(host\)[\s\S]{0,700}RH\.list\(releaseHistory\(\)\)[\s\S]{0,2000}publish-release__entry/.test(e) && /h\("details", "publish-release"\)/.test(e) && /\.publish-history/.test(EDITOR_CSS));
   // source-alignment-metric: shown on the Publish pick rows + live in the Edit-stage storage popover.
   // uio-F04 moved BOTH onto the shared resolver (f04DocFacts), so neither phrases the number itself.
   // uio-P-C01 (PUB-01): on Publish the alignment fact is drawn as the labelled Meter, still fed by
   // the same shared resolver.
-  ok("the Publish pick rows show the alignment meter from the shared resolver", /var facts = d\.facts \|\| f04DocFacts\(d\.id\);[\s\S]{0,600}f04AlignmentMeter\(facts\.alignment, "publish-pickrow__align"\)/.test(e) && /\.publish-pickrow__align/.test(src("editor.css")));
+  ok("the Publish pick rows show the alignment meter from the shared resolver", /var facts = d\.facts \|\| f04DocFacts\(d\.id\);[\s\S]{0,600}f04AlignmentMeter\(facts\.alignment, "publish-pickrow__align"\)/.test(e) && /\.publish-pickrow__align/.test(EDITOR_CSS));
   ok("the Edit-stage storage popover shows a live 'Source alignment' readout (from f04DocFacts)", /var stFacts = f04DocFacts\(activeDocId\);[\s\S]{0,120}row\("Source alignment", stFacts\.alignment\.label\)/.test(e));
   ok("index.html loads release-history.js before editor.js", (function () {
     var idx = src("index.html"); return idx.indexOf("src/release-history.js") > -1 && idx.indexOf("src/release-history.js") < idx.indexOf("src/editor.js");
@@ -10749,7 +10812,7 @@ section("Product Rail: Publish save paths + version ledger (T3)");
   var PP = require(path.join(ROOT, "src/publish-presets.js"));
   var RH = require(path.join(ROOT, "src/release-history.js"));
   var VP = require(path.join(ROOT, "src/editor/publish.js"));
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
 
   // --- keys: one output = one document + one variant ---
   ok("a path key is doc + variant, and flagship is the empty variant", PA.pathKey("D1", "coastal") === "D1::coastal" && PA.pathKey("D1", null) === "D1::" && PA.pathKey("D1", "") === "D1::");
@@ -11180,7 +11243,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
   // (the per-section 'Source updated' conflict pill retired with the section-cells path; the Badge
   // warning tone it introduced stays in the DS and is still asserted below)
   ok("Badge's canonical tone set was extended with 'warning' (design-system/components/structure/Badge), not hacked via an inline style override", /tone === "danger" \|\| tone === "warning" \|\| tone === "component"/.test(src("src/ui-kit.js")) &&
-    /\.vds-badge--warning \{ background: var\(--warning, #e0a83e\); color: #1a1a1a; \}/.test(src("editor.css")));
+    /\.vds-badge--warning \{ background: var\(--warning, #e0a83e\); color: #1a1a1a; \}/.test(EDITOR_CSS));
   ok("openSourceUpdateModal offers BOTH sides explicitly (Use updated text = primary, Keep mine = secondary extra), never auto-picks one", /function openSourceUpdateModal\(topic, sec\) \{[\s\S]{0,300}primaryLabel: "Use updated text",[\s\S]{0,200}label: "Keep mine",/.test(es));
   // product-rail-review-diff: a real line-level diff (LineDiff), not two flat side-by-side blocks.
   ok("the review compares via the real LineDiff.diff, not a flat two-block dump", /var ops = window\.LineDiff \? window\.LineDiff\.diff\(sec\.facets\.technical \|\| "", sec\.sourceUpdate\.text \|\| ""\) : \[\];/.test(es));
@@ -11248,7 +11311,7 @@ section("Product Rail: Source stage info panel");
   var dsTimelineDts = src("design-system/components/structure/Timeline.d.ts");
   ok("Timeline's DSLMS contract (.d.ts) exists with the entries prop", /interface TimelineProps/.test(dsTimelineDts) && /entries: TimelineEntry\[\];/.test(dsTimelineDts));
   ok("readme.md's canonical control list includes Timeline under structure/", /\*\*structure\/\*\* · `TreeItem` · `BlockPaletteItem` · `BlockTile` \+ `BlockGrid` · `Badge` · `Meter` · `Timeline`/.test(src("design-system/readme.md")));
-  ok("editor.css styles the canonical .vds-timeline* classes, not the old source-stage__timeline ad-hoc names", /\.vds-timeline \{/.test(src("editor.css")) && src("editor.css").indexOf(".source-stage__timeline") === -1);
+  ok("editor.css styles the canonical .vds-timeline* classes, not the old source-stage__timeline ad-hoc names", /\.vds-timeline \{/.test(EDITOR_CSS) && EDITOR_CSS.indexOf(".source-stage__timeline") === -1);
   ok("timeline rows sort newest-first across both provenance streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(es));
   ok("a hand-created topic with neither stream still gets ONE synthetic 'Created' node, never an empty timeline", /if \(!rows\.length\) rows = \[\{ ts: topic\.createdAt \|\| 0, importedAt: topic\.createdAt, label: "Created", detail: null \}\];/.test(es));
   ok("a legacy edit newer than the last import leads with a synthetic 'Last edited' node (only when there are no doc commits)", /if \(!hasCommit\) \{[\s\S]{0,400}label: "Last edited"/.test(es));
@@ -11773,7 +11836,7 @@ section("line diff (LineDiff)");
   ok("version menu offers 'Back to Base' as the editable-anchor return", /openVersionMenu[\s\S]{0,800}"Base \(edit\)"/.test(VARIANTS));
   // canvas rings: teal version ring, split from the purple variant ring.
   ok("canvas toggles a distinct is-version-preview ring", /canvas\.classList\.toggle\("is-version-preview", !!activeVersion\)/.test(e));
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("editor.css defines the teal version preview ring + badge (DSLMS --preview-version)", /\.canvas\.is-version-preview \{ box-shadow: inset 0 0 0 3px #0e9384/.test(css) && /\.version-preview-badge \{/.test(css));
   var ds = src("design-system/tokens/colors.css");
   ok("DSLMS anchors the version-axis hue (--preview-version)", /--preview-version: var\(--teal-500\);/.test(ds));
@@ -11787,7 +11850,7 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
 (function () {
   var SHELL = src("src/editor/shell.js");   // arch-P3b-07shell
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
-  var html = src("index.html"), e = src("src/editor.js"), css = src("editor.css");
+  var html = src("index.html"), e = src("src/editor.js"), css = EDITOR_CSS;
   var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   // MARKUP: one bar, three zones, two hairline seps, no leftover two-row structure.
   // uio-E-C01 (EDIT-07): the doc header was merged UP into the single global .toolbar. The
@@ -11822,7 +11885,7 @@ section("edit-header-ia-v2: single-bar three-zone editor header");
 // workspace grid loses the second row; all shell widths resolve to DSLMS structural tokens.
 section("uio-E-C01: recovered canvas — one 40px bar, single-row shell, token widths");
 (function () {
-  var css = src("editor.css"), spacing = src("design-system/tokens/spacing.css");
+  var css = EDITOR_CSS, spacing = src("design-system/tokens/spacing.css");
   // ONE bar at the DS toolbar height (no 44px literal on the bar).
   ok(".toolbar height resolves to --toolbar-height (40px), not a literal", /\.toolbar \{[\s\S]*?height: var\(--toolbar-height/.test(css));
   // SINGLE-ROW workspace: the old `grid-template-rows: auto 1fr` (bar row + body row) is gone.
@@ -11851,7 +11914,7 @@ section("uio-E-C02: text field inspector — one scroll, block chrome, no jump l
 // tracks the real mode (read-only vs editing the dynamic-flagship version).
 section("uio-E-C04: labelled variant/version axes + off-base return chip");
 (function () {
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   var VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   ok("both axis buttons carry a muted axis-name caption", /axis-btn__axis">Variant</.test(VARIANTS) && /axis-btn__axis">Version</.test(VARIANTS) && /\.axis-btn__axis \{[^}]*color: var\(--text-tertiary\)/.test(css));
   ok("an off-base chip appears when previewing (isPreview) with Return to base", /function syncAxisReturnChip\(\)[\s\S]{0,200}var off = isPreview\(\)/.test(VARIANTS) && /axis-return-chip__btn", "Return to base"/.test(VARIANTS));
@@ -11885,7 +11948,7 @@ section("uio-E-C05: JSON model behind Developer tools + reorder in the panel ove
 // is a labelled secondary button carrying the pending queue count.
 section("uio-E-C08: named stage rail + labelled Send-to-publish w/ count");
 (function () {
-  var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
+  var e = src("src/editor.js"), html = src("index.html"), css = EDITOR_CSS;
   // each stage tab = an icon span + a caption naming the stage
   ok("rail stage tabs carry an icon span + a caption label", /rail-tab__icon" data-lucide="book-open"[\s\S]{0,80}rail-tab__label">Source</.test(html) && /rail-tab__label">Edit</.test(html) && /rail-tab__label">Publish</.test(html));
   ok("the rail tab is styled icon-over-caption", /\.rail-tab \{ flex-direction: column;[\s\S]{0,300}\.rail-tab__label \{ font-size: var\(--text-2xs\)/.test(css));
@@ -11901,7 +11964,7 @@ section("uio-S-C05: Source product actions moved to a rail footer strip");
 (function () {
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
-  var e = src("src/editor.js"), html = src("index.html"), css = src("editor.css");
+  var e = src("src/editor.js"), html = src("index.html"), css = EDITOR_CSS;
   ok("the Source nav has a footer strip element", /id="source-stage-nav-footer"/.test(html) && /\.source-stage__nav-footer \{[^}]*border-top: 1px solid/.test(css));
   ok("Product actions render into the footer (not the top toolbar row)", /source-stage-nav-footer"\);[\s\S]{0,320}label: "Product actions"[\s\S]{0,400}footer\.appendChild/.test(es));
   ok("the top row keeps New topic + Import only", /var row = h\("div", "source-stage__toolbar"\);[\s\S]{0,320}"New topic"[\s\S]{0,400}label: "Import…"[\s\S]{0,300}host\.appendChild\(row\)/.test(es));
@@ -11913,7 +11976,7 @@ section("uio-S-C03: source mark cards clamp to a reserved right lane");
 (function () {
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("the article reserves a right lane when a where/alt/comment card is open (:has)", /\.source-stage__article:has\(\[data-source-wherepanel\]\)[\s\S]{0,220}data-source-commentthread\]\) \{ padding-right: 312px; \}/.test(css));
   ok("the lane is desktop-scoped (min-width) so narrow screens aren't over-squeezed", /@media \(min-width: 1181px\) \{[\s\S]{0,260}padding-right: 312px/.test(css));
   // SRC-02: the where-used zero state reads as an invitation, and the title isn't the contradictory "Linked in 0".
@@ -11928,7 +11991,7 @@ section("uio-S-C02: one Source search field + in-field match nav + reveal-on-dem
 (function () {
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   // in-field adornment holds the match nav + a replace-toggle glyph
   ok("the match nav + replace glyph sit IN the field (source-search__adorn)", /var adorn = h\("div", "source-search__adorn"\);[\s\S]{0,200}findNav\.id = "source-find-nav";[\s\S]{0,300}icon: "replace"[\s\S]{0,600}search\.appendChild\(adorn\)/.test(es) && /\.source-search__adorn \{/.test(css));
   // replace row is revealed on demand (gated on __sourceReplaceOpen), not always shown
@@ -11948,7 +12011,7 @@ section("uio-P-C05: format control on Publish, import on Source");
   var ecm = src("src/editor/context-menu.js");
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
-  var e = src("src/editor.js"), x = src("src/export.js"), css = src("editor.css"), ds = src("design-system/components/overlays/ContextMenu.d.ts");
+  var e = src("src/editor.js"), x = src("src/export.js"), css = EDITOR_CSS, ds = src("design-system/components/overlays/ContextMenu.d.ts");
   var m = e.match(/\/\* @publish-format-start \*\/([\s\S]*?)\/\* @publish-format-end \*\//);
   if (!m) { ok("locate @publish-format fence", false); return; }
   var g = new Function(m[1] + "\nreturn { pipelineDirection: pipelineDirection, pipelineDirectionOf: pipelineDirectionOf, pipelineByDirection: pipelineByDirection, importMenuLabel: importMenuLabel, publishFormatRows: publishFormatRows, publishFormatSummary: publishFormatSummary };")();
@@ -12125,9 +12188,9 @@ section("uio-F04: cross-stage data surfacing");
   })());
   ok("where-used comes from sourceLinkWhereUsed, not a stored list", /f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, null\)\)/.test(e));
   ok("the Source top bar reads f04ProductFacts", /function renderSourceFactsStrip\(topic\)[\s\S]{0,300}f04ProductFacts\(pid, topic && topic\.id\)/.test(es));
-  ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(es) && /\.source-stage__facts/.test(src("editor.css")));
+  ok("the Source strip is mounted under the document title", /headEl\.appendChild\(renderSourceFactsStrip\(topic\)\);/.test(es) && /\.source-stage__facts/.test(EDITOR_CSS));
   ok("the Publish QUEUE row reads the same f04DocFacts as the picker row", /var qf = f04DocFacts\(r\.docId\);[\s\S]{0,400}f04AlignmentMeter\(qf\.alignment, "publish-queuerow__align"\)/.test(e));
-  ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(src("editor.css")));
+  ok("a linked block's Edit provenance line reads the same resolver", /function renderSourceLinkProvenance\(block\)[\s\S]{0,900}f04WhereUsedFact\(sourceLinkWhereUsed\(masterId, markId\)\)/.test(e) && /\.insp-provenance/.test(EDITOR_CSS));
   ok("every fact is drawn as the canonical DS Badge, quiet, never a bespoke chip", /function f04Badge\(fact, cls\)[\s\S]{0,320}U\.Badge\(\{ tone: fact\.tone \|\| "neutral", quiet: true, size: "sm"/.test(e));
   ok("the retired one-off alignment + staleness chips are gone from the picker", !/publish-pickrow__stale/.test(e) && !/apct \+ "% source"/.test(e));
   ok("a read API is exposed for the tickets that consume this layer (P-C01 / P-C08)", /window\.__f04 = \{[\s\S]{0,400}docFacts: f04DocFacts[\s\S]{0,400}productFacts: f04ProductFacts/.test(e));
@@ -12139,7 +12202,7 @@ section("uio-F04: cross-stage data surfacing");
 // (fed only by the F04 alignment fact) and the DS gained the Meter component BEFORE its first use.
 section("uio-P-C01: alignment meter on Publish");
 (function () {
-  var e = src("src/editor.js"), css = src("editor.css"), kit = src("src/ui-kit.js");
+  var e = src("src/editor.js"), css = EDITOR_CSS, kit = src("src/ui-kit.js");
   var PR5 = require(path.join(ROOT, "src/editor/product-rail.js"));
   var g = { meterModel: PR5.alignmentMeterModel, alignmentFact: PR5.alignmentFact };
   var fact = function (pct, indexed) { return g.alignmentFact({ linkedWords: pct, totalWords: 100 }, indexed !== false); };
@@ -12195,7 +12258,7 @@ section("uio-P-C01: alignment meter on Publish");
 // were unreachable. The whole view is a pure function of the decorated rows.
 section("uio-P-C04: picker scope + count + search + sort + needs-attention");
 (function () {
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   var m = e.match(/\/\* @publish-pick-start \*\/([\s\S]*?)\/\* @publish-pick-end \*\//);
   if (!m) { ok("locate @publish-pick fence", false); return; }
   var g = new Function(m[1] + "\nreturn { publishPickView: publishPickView, publishNeedsAttention: publishNeedsAttention, PUBLISH_SORTS: PUBLISH_SORTS };")();
@@ -12262,7 +12325,7 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
 // leave the selection alone, and the footer states how much of it the current lens is hiding.
 section("uio-P-C06: picker multi-select + queue selected");
 (function () {
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   var m = e.match(/\/\* @publish-sel-start \*\/([\s\S]*?)\/\* @publish-sel-end \*\//);
   if (!m) { ok("locate @publish-sel fence", false); return; }
   var g = new Function(m[1] + "\nreturn { ids: publishSelectedIds, hiddenBy: publishHiddenBy, summary: publishSelectionSummary };")();
@@ -12354,7 +12417,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   var ecm = src("src/editor/context-menu.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
-  var e = src("src/editor.js"), css = src("editor.css"), typo = src("design-system/tokens/typography.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS, typo = src("design-system/tokens/typography.css");
 
   // --- OVL-09: the fake Done is gone; the surface states its contract ------------------
   ok("the settings footer no longer offers a commit button", !/label: "Done"/.test(e));
@@ -12461,7 +12524,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
 section("uio-P-C03: release history fills the empty half + last-published per row");
 (function () {
   var RH = require(path.join(ROOT, "src/release-history.js"));
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
 
   // --- pure: releaseSummary states count / preset / destination / outcome ---
   var store = RH.create();
@@ -12536,7 +12599,7 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
 // promise and the written file cannot disagree.
 section("uio-P-C07: destination chip + resolved filename on every queue row");
 (function () {
-  var e = src("src/editor.js"), css = src("editor.css"), ex = src("src/export.js");
+  var e = src("src/editor.js"), css = EDITOR_CSS, ex = src("src/export.js");
   // arch-P3-03: these are the module's now, so the suite calls them instead of re-animating a fence.
   var VP = require(path.join(ROOT, "src/editor/publish.js"));
   var g = { publishRowDestSummary: VP.destSummary, commonPrefix: VP.commonPrefix,
@@ -12613,7 +12676,7 @@ section("uio-P-C07: destination chip + resolved filename on every queue row");
 // variants itself, so the chip and the queue's publish run read the same expansion.
 section("uio-P-C08: variant roll-up chip + variant popover on Publish");
 (function () {
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   var f04 = { outputsFact: require(path.join(ROOT, "src/editor/product-rail.js")).outputsFact };
   // arch-P3-03: the roll-up is the module's.
   var g = { rollup: require(path.join(ROOT, "src/editor/publish.js")).variantRollup };
@@ -12795,7 +12858,7 @@ section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
 section("uio-O-W2 section switch vs disclosure (OVL-08)");
 (function () {
   var EDIT = src("src/editor/editing.js");   // arch-P3b-07n
-  var e = src("src/editor.js"), ecss = src("editor.css");
+  var e = src("src/editor.js"), ecss = EDITOR_CSS;
   // Retargeted by OVL-07: these behaviours now live on the ONE section (`.insp-section`),
   // not on the second twirl chrome they were first built in — the claims are unchanged.
   // arch-P3b-03: sectionGroup moved to src/editor/inspector/sections.js, and the OVL-08 claim is
@@ -12857,7 +12920,7 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
   var ehf = src("src/editor/header-footer.js");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
-  var e = src("src/editor.js"), ecss = src("editor.css"), ex = src("src/export.js");
+  var e = src("src/editor.js"), ecss = EDITOR_CSS, ex = src("src/export.js");
 
   // --- one notation: the rivals are gone, and the survivors are adapters, not chromes ---
   ok("the plain bold heading is gone from the source", !/function sub\(title\)/.test(e) && !/[^_.]sub\("/.test(e));
@@ -12950,7 +13013,7 @@ section("uio-O-W2 one section notation, two levels (OVL-07)");
 section("uio-O-W1 scroll-edge affordance (OVL-10)");
 (function () {
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
-  var e = src("src/editor.js"), ecss = src("editor.css"), html = src("index.html");
+  var e = src("src/editor.js"), ecss = EDITOR_CSS, html = src("index.html");
   ok("the frame is the positioned host, not the scroller itself",
     /\.scroll-frame \{ position: relative;/.test(ecss)
     && /\.scroll-frame::before, \.scroll-frame::after \{[\s\S]{0,220}opacity: 0;/.test(ecss));
@@ -13094,7 +13157,7 @@ section("uio-F05 escalation links (popover/menu -> sheet)");
 (function () {
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   ok("there is ONE escalation control, not one per surface", /function escalateLink\(spec\)/.test(e)
     && (e.match(/function escalateLink/g) || []).length === 1);
   ok("the popover takes it as an option and appends it after its own rows", /if \(opts && opts\.escalate\) pop\.appendChild\(escalateLink\(opts\.escalate\)\);/.test(e));
@@ -13122,7 +13185,7 @@ section("uio-F03 scope + inheritance model");
   // arch-P3b-07b: the canonical control set moved to src/editor/inspector/primitives.js.
   var ep = src("src/editor/inspector/primitives.js");
   var e = src("src/editor.js");
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   var tokens = src("design-system/tokens/spacing.css");
   var ds = src("design-system/readme.md");
   var dts = src("design-system/components/panels/PanelSection.d.ts");
@@ -13284,7 +13347,7 @@ section("uio-S-C01: grouped mark rows + counted labelled filter + fixed palette"
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
   var SD = require(path.join(ROOT, "src/source-doc.js"));
-  var e = src("src/editor.js"), css = src("editor.css"), sm = src("src/source-marks.js"), tok = src("design-system/tokens/colors.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS, sm = src("src/source-marks.js"), tok = src("design-system/tokens/colors.css");
 
   // --- pure: markPath states where a mark sits, as a heading path ---
   var m = SD.create([
@@ -13484,7 +13547,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("FIX 2: the field (inline text) inspector stays live — only block/instance/embed are disabled", /\["block", "instance", "embed"\]\.indexOf\(selection\.type\) === -1\) return;/.test(e));
   ok("FIX 3: switching version flushes an in-flight edit", (VARIANTS.match(/flushSave\(\);/g) || []).length >= 3 && /function onVersionPick\(v\) \{\s*flushSave\(\);/.test(VARIANTS));
   ok("editable badge uses the 'type' glyph (editing this version's text)", /Ic\("type"\)/.test(VARIANTS));
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   ok("editor.css disables the version-readonly inspector + styles the notice", /#inspector\.is-version-readonly-panel > \*:not\(\.version-edit-notice\)/.test(css) && /\.version-edit-notice \{/.test(css));
 })();
 
@@ -13495,7 +13558,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   var ed = src("src/editor.js"), VARIANTS = src("src/editor/variants.js");   // arch-P3b-07l
   var CE96 = src("src/editor/copy-editor.js");   // arch-P3b-07j
   var CLIP96 = src("src/editor/clipboard.js");   // arch-P3b-07
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   // arch-P3b-07: the paste-dependency core moved with the clipboard verbs.
   var m = src("src/editor/clipboard.js").match(/\/\* @pastedeps-start \*\/([\s\S]*?)\/\* @pastedeps-end \*\//);
   ok("pastedeps region is extractable", !!m);
@@ -13572,7 +13635,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 (function () {
   section("§101 alignment grid overlay");
   var ed = src("src/editor.js");
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   var idx = src("index.html");
   var courseCss = src("src/course.css");
   ok("grid mode is a localStorage VIEW pref (GRID_KEY)", /GRID_KEY\s*=\s*"authoring\.gridMode"/.test(ed));
@@ -13720,7 +13783,7 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
 // ---- #62 canvas gap affordance (add / merge between stacked pages) --------
 (function () {
   section("#62 page-gap affordance");
-  var e = src("src/editor.js"), css = src("editor.css"), ic = src("src/icons.js");
+  var e = src("src/editor.js"), css = EDITOR_CSS, ic = src("src/icons.js");
   var WORLD = src("src/editor/world.js");   // arch-P3b-07world
   ok("buildGapAffordances only spans same-column adjacent pages", /function buildGapAffordances[\s\S]*?E\.framePos\[i\]\.col !== E\.framePos\[i \+ 1\]\.col\) continue/.test(src("src/editor/world.js")));
   ok("gap Add wired to addPageAfter(pi)", /addBtn\.addEventListener\("click", function \(e\) \{ e\.stopPropagation\(\); addPageAfter\(pi\); \}\)/.test(WORLD));
@@ -13967,7 +14030,7 @@ section("#116 copy-editor shell");
 // picker + stage rail stay visible + interactive. Demo/Preview stays inset:0 (sanctioned exception).
 section("chrome invariant: file picker + Read view are contained, not full-screen");
 (function () {
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   function block(sel){ var m = css.match(new RegExp("\\" + sel + " \\{[^}]*\\}")); return m ? m[0] : ""; }
   var copyedit = block(".copyedit"), vbrowser = block(".vbrowser");
   // uio-E-C01: the overlays sit below the single 40px bar -> top resolves to --toolbar-height.
@@ -14016,7 +14079,7 @@ section("#170/#158 shared formatting toggle-bar");
   ok("clicking runs execCommand (no separate write path -- fires the field's own input->writeModel)", /document\.execCommand\(t\.cmd, false, null\); syncCanvasFmtBarActive\(bar\)/.test(fb) && fb.indexOf("writeModel") === -1);
   ok("the bar binds ONLY to a live editable [data-edit] canvas field (never the Source [data-node] selbar)", /function canvasEditableFieldOf\(node\)[\s\S]{0,200}closest\("\[data-edit\]\.is-editable"\)[\s\S]{0,120}getAttribute\("contenteditable"\) === "true"/.test(fb));
   ok("a collapsed / non-field selection hides the bar (no bar over a caret or outside a field)", /if \(!sel \|\| !sel\.rangeCount \|\| sel\.isCollapsed\) \{ hideCanvasFmtBar\(\); return; \}[\s\S]{0,160}if \(!canvasEditableFieldOf\(r\.commonAncestorContainer\)\) \{ hideCanvasFmtBar\(\); return; \}/.test(fb));
-  ok("the selection listener + the 'underline' glyph are wired", /document\.addEventListener\("selectionchange", onCanvasSelectionChange\)/.test(e) && /"underline":/.test(src("src/icons.js")) && /\.canvas-fmtbar__btn/.test(src("editor.css")));
+  ok("the selection listener + the 'underline' glyph are wired", /document\.addEventListener\("selectionchange", onCanvasSelectionChange\)/.test(e) && /"underline":/.test(src("src/icons.js")) && /\.canvas-fmtbar__btn/.test(EDITOR_CSS));
 })();
 
 // ---- #170/#33: text<->list block-type conversion (pure) -----------------------
@@ -14245,7 +14308,7 @@ section("#104 copy-editor variant columns");
 (function () {
   // arch-P3b-07j: the Read view and find & replace moved to src/editor/copy-editor.js.
   var e = src("src/editor/copy-editor.js");
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   // real frTargets/frValueOf/frWrite + the new frHasOverride from the F&R fence
   var a = e.indexOf("/* @fr-start */"), b = e.indexOf("/* @fr-end */");
   var fr = new Function(e.slice(a, b) + "\nreturn { targets: frTargets, valueOf: frValueOf, write: frWrite, hasOverride: frHasOverride };")();
@@ -14308,7 +14371,7 @@ section("#44 editor-chrome light mode");
 (function () {
   var SS = src("src/editor/settings-sheet.js");   // arch-P3b-07g
   var e = src("src/editor.js");
-  var css = src("editor.css");
+  var css = EDITOR_CSS;
   var colors = src("design-system/tokens/colors.css");
   // applyUiTheme toggles .theme-light on <html> and persists; boot restores it
   ok("applyUiTheme toggles .theme-light on the root + persists", /function applyUiTheme\(light\) \{\s*document\.documentElement\.classList\.toggle\("theme-light", !!light\);\s*try \{ localStorage\.setItem\("verso\.uiTheme", light \? "light" : "dark"\); \}/.test(e));
@@ -14547,7 +14610,7 @@ section("gate-hint pins above pinned Next");
   // Demo-preview parity: the framed device has no zoom containing block, so a position:fixed
   // hint escapes to the app viewport (ghost pill). editor.css must remap it to absolute inside
   // the device, mirroring how the pinned prev/next are remapped -- so preview stays WYSIWYG.
-  var ecss = src("editor.css");
+  var ecss = EDITOR_CSS;
   ok("framed demo remaps the gate-hint to absolute inside the device",
     /\.demo__device--framed \.course-root\[data-env="runtime"\] \.course-nav--pin \.course-nav__gate-hint \{[\s\S]*?position: absolute; bottom: calc\(16px \+ 34px \+ 10px\); right: 24px;/.test(ecss));
   ok("framed demo gate-hint hugs the 12px gutter on mobile",
@@ -14847,7 +14910,7 @@ section("editor-rework left-panel 3-way switcher");
 section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
 (function () {
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(E\.doc && E\.doc\.meta && E\.doc\.meta\.productId\)/.test(SL));
   ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
   ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a Product[\s\S]{0,600}This Product has no source document yet/.test(SL));
@@ -14868,7 +14931,7 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
 section("SPEC 8: source-link 03 — select + place a linked block");
 (function () {
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   // A selection in the read-only panel builds a SourceDoc range descriptor: single-node -> one
   // anchor; cross-node -> anchor(first, start..end) + endAnchor(last, 0..end), matching addMark.
   ok("panelSelectionDescriptor builds a single-node OR cross-node range from the DOM selection", /function panelSelectionDescriptor\(docCol, model\)/.test(SL) && /if \(sKey === eKey\) \{[\s\S]{0,140}return \{ anchor: \{ nodeKey: sKey, start: sOff, len: eOff - sOff \} \};/.test(SL) && /endAnchor: \{ nodeKey: eKey, start: 0, len: eOff \}/.test(SL));
@@ -14891,7 +14954,7 @@ section("SPEC 8: source-link 03 — select + place a linked block");
 section("SPEC 8: source-link 04 — pointer-drag placement");
 (function () {
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   ok("the Place bar carries a grab handle that starts a CUSTOM pointer-drag (pointerdown, not native DnD)", /var grip = h\("button", "source-placebar__grip"\)[\s\S]{0,260}grip\.addEventListener\("pointerdown", function \(ev\) \{ ev\.preventDefault\(\); startSourceLinkDrag\(desc, ev\); \}\)/.test(SL));
   ok("the drag is driven by custom pointer events (pointermove/pointerup on window), not native HTML5 DnD", /window\.addEventListener\("pointermove", move\); window\.addEventListener\("pointerup", up\);/.test(SL) && /grip\.addEventListener\("pointerdown"/.test(SL));
   ok("the drag shows a ghost following the cursor + lights up the frame under it (drop target)", /function startSourceLinkDrag\(desc, ev\)[\s\S]{0,600}source-link-ghost[\s\S]{0,1400}frameElementUnder\(e\.clientX, e\.clientY\); if \(fr\) fr\.classList\.add\("is-drop-target"\)/.test(SL));
@@ -14905,7 +14968,7 @@ section("SPEC 8: source-link 04 — pointer-drag placement");
 section("SPEC 8: source-link 06 — inline span append");
 (function () {
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   ok("a drop onto an editable text block (not itself a linked block) routes to the inline path", /function isSourceLinkTextBlock\(b\)[\s\S]{0,120}SOURCE_LINK_TEXT_TYPES\[b\.type\] && !b\.sourceLink/.test(SL));
   ok("dropInlineSourceLink flattens the range to ONE link mark and appends a <span data-source-link> to the block's text", /function dropInlineSourceLink\(a, block\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor, endAnchor: a\.descriptor\.endAnchor \}\)[\s\S]{0,260}block\.text = \(block\.text \? block\.text \+ " " : ""\) \+ span;/.test(SL));
   ok("the appended span carries the mark + master ids (resolved live by 01's inline post-pass)", /var span = '<span data-source-link="' \+ mk\.id \+ '" data-master="' \+ a\.masterId \+ '">' \+ slEscape\(SD\.markText\(model, mk\)\)/.test(SL));
@@ -14919,7 +14982,7 @@ section("SPEC 8: source-link 07 — linked image drop");
 (function () {
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var ASSETS = src("src/editor/assets.js");   // arch-P3b-07h
-  var e = src("src/editor.js"), r = src("src/render.js"), css = src("editor.css");
+  var e = src("src/editor.js"), r = src("src/render.js"), css = EDITOR_CSS;
   ok("render's image block resolves src/alt LIVE from the source figure (01 object branch), purely (shallow copy)", /image: function \(block\) \{[\s\S]{0,400}block\.sourceLink && block\.sourceLink\.markId && window\.resolveSourceLinkContent[\s\S]{0,300}rlink\.type === "object"[\s\S]{0,260}c\.src = rlink\.src \|\| block\.src[\s\S]{0,120}block = c;/.test(r));
   ok("placement routes an OBJECT anchor (no start/len) to a linked IMAGE block, never inline/format-split", /var isObject = !!\(a\.descriptor && a\.descriptor\.anchor && a\.descriptor\.anchor\.len == null\);/.test(SL) && /var result = isObject \? placeSourceLinkImage\(a\) : placeSourceLinkBlocks\(a\);/.test(SL));
   // #161 part 1: a source-link drop lands at the between-block gap under the cursor (drop-line), not the
@@ -14927,7 +14990,7 @@ section("SPEC 8: source-link 07 — linked image drop");
   ok("a source-link drop targets the between-block gap under the cursor (#161 part 1)", /var gap = sourceLinkDropGap\(cx, cy\);\s*\n\s*if \(gap\) __sourceLinkDropAt = \{ pageIndex: gap\.pageIndex, index: gap\.index \};/.test(SL) && /__sourceLinkDropAt = null; \/\/ one placement only/.test(SL));
   ok("insertBlock honours an explicit __sourceLinkDropAt gap + auto-advances for a format-split's blocks", /if \(E\.__sourceLinkDropAt && E\.doc\.pages\[E\.__sourceLinkDropAt\.pageIndex\]\)[\s\S]{0,260}E\.__sourceLinkDropAt\.index = L\.index \+ 1;/.test(ASSETS));
   ok("sourceLinkDropGap targets TOP-LEVEL page blocks only (a link drops between page blocks, not inside a column)", /function sourceLinkDropGap\(cx, cy\)[\s\S]{0,400}page\.blocks\.indexOf\(el\.__block\) !== -1;/.test(SL));
-  ok("the drag shows a between-block drop-line for a gap, an inline-target ring over a text block (#161 part 1)", /function showSourceLinkDropLine\(cx, cy\)/.test(SL) && /is-sl-inline-target/.test(SL) && /\.source-link-dropline/.test(src("editor.css")) && /\.canvas-block\.is-sl-inline-target/.test(src("editor.css")));
+  ok("the drag shows a between-block drop-line for a gap, an inline-target ring over a text block (#161 part 1)", /function showSourceLinkDropLine\(cx, cy\)/.test(SL) && /is-sl-inline-target/.test(SL) && /\.source-link-dropline/.test(EDITOR_CSS) && /\.canvas-block\.is-sl-inline-target/.test(EDITOR_CSS));
   ok("placeSourceLinkImage adds an OBJECT link mark (anchor {nodeKey}, no len) + inserts an image block with sourceLink", /function placeSourceLinkImage\(a\)[\s\S]{0,300}SD\.addMark\(model, \{ type: "link", anchor: a\.descriptor\.anchor \}\)[\s\S]{0,160}insertBlock\(\{ type: "image", id: mintId\(\), sourceLink: \{ masterId: a\.masterId, markId: mk\.id \} \}\)/.test(SL));
   ok("a source figure in the panel is draggable as one unit (pointerdown -> object-anchor drag)", /docCol\.querySelectorAll\("figure\.source-doc__figure\[data-object\]"\)[\s\S]{0,260}startSourceLinkDrag\(\{ anchor: \{ nodeKey: figEl\.getAttribute\("data-node"\) \} \}, ev\)/.test(SL));
   ok("the draggable figure carries its own grab-affordance CSS", /\.edit-source__figure/.test(css));
@@ -14991,7 +15054,7 @@ section("SPEC 8: source-link 10 — where-used + push");
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
   // arch-P3b-05: the Source stage moved to src/editor/source-stage.js.
   var es = src("src/editor/source-stage.js");
-  var e = src("src/editor.js"), css = src("editor.css");
+  var e = src("src/editor.js"), css = EDITOR_CSS;
   ok("sourceLinkWhereUsed walks the registry for block + inline-span references to a link mark", /function sourceLinkWhereUsed\(masterId, markId\)[\s\S]{0,400}b\.sourceLink\.masterId === masterId[\s\S]{0,700}querySelectorAll\("span\[data-source-link\]"\)/.test(SL));
   ok("the where-used panel lists live locations, each jumping to the exact block (both directions)", /var used = sourceLinkWhereUsed\(__sourceActiveTopicId, m\.id\);[\s\S]{0,1900}jumpToLinkedBlock\(loc\.docCode, loc\.blockId\)/.test(es));
   ok("a 'Push an alternate…' action appears when the link has alternates", /var alts = sourceLinkAlternates\(model, m\);[\s\S]{0,360}label: "Push an alternate…", onClick: function \(\) \{ openSourceAltPushDialog\(m, alts, used\)/.test(es));
@@ -15679,7 +15742,7 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   ok("the four block-format glyphs are vendored in icons.js", /"heading-1":/.test(src("src/icons.js")) && /"heading-2":/.test(src("src/icons.js")) && /"pilcrow":/.test(src("src/icons.js")) && /"triangle-alert":/.test(src("src/icons.js")));
   ok("block-format is gated behind the unlock (a base edit), applied across the selection, rides SD.setNodeType", /if \(cmd === "fmt-h1" \|\| cmd === "fmt-h2" \|\| cmd === "fmt-body" \|\| cmd === "fmt-caution"\) \{[\s\S]{0,200}if \(!__sourceUnlocked\)[\s\S]{0,700}SD\.nodesInAnchor\(__sourceDocModel, __sourceSelAnchor\)[\s\S]{0,160}SD\.setNodeType\(__sourceDocModel, k, spec\)/.test(es));
   ok("the reassignment persists + rebuilds the article (element type changed)", /keys\.forEach\(function \(k\) \{ if \(SD\.setNodeType\(__sourceDocModel, k, spec\)\) changed\+\+; \}\);[\s\S]{0,120}persistSourceDocModel\(topic, __sourceDocModel\);\s*\n\s*renderSourceArticle\(\);/.test(es));
-  ok("the source reading render is heading-level aware so H1/H2 read distinctly (h1/h2/h3 + h1 CSS)", /node\.level === 1 \? "h1" : node\.level === 3 \? "h3" : "h2"/.test(es) && /h1\.source-doc__h \{ font-size:/.test(src("editor.css")));
+  ok("the source reading render is heading-level aware so H1/H2 read distinctly (h1/h2/h3 + h1 CSS)", /node\.level === 1 \? "h1" : node\.level === 3 \? "h3" : "h2"/.test(es) && /h1\.source-doc__h \{ font-size:/.test(EDITOR_CSS));
   // B1: create-link IS on the bar now, but object-only (source-selbar__obj) -- a text selection
   // still never sees it (it's default-hidden and only un-hidden in selectSourceObject).
   ok("create-link is present as an OBJECT-only action (source-selbar__obj)", /seg\("link", "link", "Add a link", "source-selbar__obj"\)/.test(es));

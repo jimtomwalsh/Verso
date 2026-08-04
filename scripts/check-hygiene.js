@@ -57,7 +57,7 @@ var SKIP = /^(?:scripts\/check-hygiene\.js|tests\/run\.js)$/;
 // state which role it belongs to and why in the PR.
 var ROLES = {
   // The product. Present in every install; the app runs from these alone.
-  ships: ["index.html", "editor.css", "src/", "export/", "assets/", "fonts/",
+  ships: ["index.html", "styles/", "src/", "export/", "assets/", "fonts/",
           "serve.command", "course_schema_template.csv"],
   // Real surfaces for one posture each. The app runs without them.
   optional: ["server/", "desktop/"],

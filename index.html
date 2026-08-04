@@ -8,7 +8,23 @@
   <!-- All editor fonts (Inter + JetBrains Mono + Exo 2) are vendored locally and
        @font-face'd in editor.css, so the editor makes NO external network calls
        and renders fully offline / air-gapped. -->
-  <link rel="stylesheet" href="editor.css">
+  <!-- arch-P5-01: editor.css was 4,581 lines. It is styles/editor/*.css now, loaded in the ORDER
+       declared by styles/editor/order.json -- the browser concatenates, so the cascade is byte-for-byte
+       what one file produced. No build step. A suite gate fails if this list and order.json disagree. -->
+  <link rel="stylesheet" href="styles/editor/01-tokens.css">   <!-- the file header and the design-system tokens — the source of truth -->
+  <link rel="stylesheet" href="styles/editor/02-toolbar.css">   <!-- the top bar -->
+  <link rel="stylesheet" href="styles/editor/03-workspace.css">   <!-- the workspace frame: rails, panels, stage -->
+  <link rel="stylesheet" href="styles/editor/04-source-stage.css">   <!-- the Source stage: continuous article, marks, toolbars -->
+  <link rel="stylesheet" href="styles/editor/05-canvas.css">   <!-- the infinite canvas, pan/zoom, and Interact mode -->
+  <link rel="stylesheet" href="styles/editor/06-editing.css">   <!-- in-place editing and selection -->
+  <link rel="stylesheet" href="styles/editor/07-inspector.css">   <!-- the properties panel and the live model view -->
+  <link rel="stylesheet" href="styles/editor/08-alt-views.css">   <!-- demo mode and the copy editor -->
+  <link rel="stylesheet" href="styles/editor/09-outliner.css">   <!-- the structure outliner and the floating text toolbar -->
+  <link rel="stylesheet" href="styles/editor/10-overlays.css">   <!-- tabs, modals, and the help typographic system -->
+  <link rel="stylesheet" href="styles/editor/11-comments.css">   <!-- comment mode and canvas-only hotspot affordances -->
+  <link rel="stylesheet" href="styles/editor/12-controls.css">   <!-- the canonical control set -->
+  <link rel="stylesheet" href="styles/editor/13-home.css">   <!-- the course browser -->
+  <link rel="stylesheet" href="styles/editor/14-collab.css">   <!-- live-collaboration presence chrome -->
   <link rel="stylesheet" href="src/course.css">
 </head>
 <body>

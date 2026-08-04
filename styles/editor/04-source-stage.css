@@ -1,0 +1,465 @@
+/* ===== Source rewrite (Epic 2b): continuous-document article + marks + toolbars ===== */
+/* The node-model article. Reading-width column; text blocks are contentEditable when unlocked. */
+/* Reading column + sticky left TOC (toc-search-drawer). The article stays centred; the TOC
+   pins to the left of the pane and hides on a narrow pane so the column keeps full width. */
+.source-doc__layout { display: flex; align-items: flex-start; gap: 24px; }
+.source-doc__col { position: relative; flex: 1 1 auto; max-width: 760px; margin: 0 auto; padding-bottom: 120px; }
+.source-doc__toc { position: sticky; top: 0; flex: 0 0 188px; align-self: flex-start; max-height: calc(100vh - 130px); overflow-y: auto; padding: 2px 0 20px; }
+.source-doc__toc-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 8px; padding-left: 12px; }
+.source-doc__toc-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-left: 2px solid transparent; padding: 4px 10px 4px 12px; font-size: var(--text-sm); line-height: 1.45; color: var(--text-secondary); cursor: pointer; border-radius: 0 5px 5px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-doc__toc-item:hover { background: var(--surface-panel); color: var(--text-primary, var(--text-secondary)); }
+.source-doc__toc-item--l3 { padding-left: 24px; font-size: var(--text-xs); }
+.source-doc__toc-item.is-current { border-left-color: var(--accent); color: var(--accent); font-weight: 600; }
+@media (max-width: 1080px) { .source-doc__toc { display: none; } }
+.source-doc { outline: none; color: var(--text-primary, var(--text-secondary)); font-size: var(--text-md, 15px); line-height: 1.65; }
+.source-doc__h { font-weight: 650; letter-spacing: -0.01em; margin: 1.4em 0 0.4em; }
+h1.source-doc__h { font-size: 26px; } h2.source-doc__h { font-size: 21px; } h3.source-doc__h { font-size: 17px; }
+.source-doc__h:first-child { margin-top: 0; }
+.source-doc__p { margin: 0.7em 0; }
+/* source import hardening: inline **bold**/*italic*/`code` are lifted into structured format
+   runs (node.formats) at import and rendered by fillSourceInline as transparent strong/em/code --
+   the model text stays plain so mark offsets line up. code gets a subtle chip. */
+.source-doc code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; background: var(--surface-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs, 2px); padding: 0 4px; }
+/* spec 2d: variant comparison columns. A diverged node splits into side-by-side columns inside the
+   reading column (never a new panel); shared nodes stay full-width. */
+.source-doc__vrow { display: flex; gap: var(--space-4); margin: 0.7em 0; align-items: stretch; }
+.source-doc__vcol { flex: 1 1 0; min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px); padding: var(--space-3) var(--space-4); background: var(--surface-panel); }
+.source-doc__vcol.is-diverged { border-color: var(--accent); }
+.source-doc__vcol.is-absent { opacity: 0.6; }
+.source-doc__vcol-head { font: var(--type-label); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-tertiary, var(--text-secondary)); margin-bottom: var(--space-2); }
+.source-doc__vcol.is-diverged .source-doc__vcol-head { color: var(--accent); }
+.source-doc__vcol-body { color: var(--text-primary); }
+.source-doc__vcol-absent { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+/* B2: per-variant image column -- the picture plus its swap/hide actions. */
+.source-doc__vcol-fig { margin: var(--space-3) 0 0; }
+.source-vcol__imgacts { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
+.source-vcol__imgbtn { display: inline-flex; align-items: center; justify-content: center; width: var(--control-md, 24px); height: var(--control-md, 24px); padding: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 4px); background: var(--surface-input); color: var(--icon-strong, var(--text-secondary)); cursor: pointer; }
+.source-vcol__imgbtn svg { width: 14px; height: 14px; }
+.source-vcol__imgbtn:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary); }
+.source-doc__cols-hint { font: var(--type-label); color: var(--text-tertiary, var(--text-secondary)); margin: 0 0 var(--space-4); }
+.source-doc__list { margin: 0.6em 0; padding-left: 22px; }
+.source-doc__list li { margin: 0.25em 0; }
+.source-doc__callout { border-left: 3px solid var(--accent); background: var(--surface-panel); padding: 12px 16px; border-radius: 4px; margin: 1.1em 0; }
+.source-doc__callout-tag { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
+.source-doc__table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: var(--text-sm, 13px); }
+.source-doc__table td { border: 1px solid var(--border-strong); padding: 6px 9px; }
+.source-doc__figure { margin: 1.2em 0; text-align: center; }
+/* A3: a row lays 2-3 image figures side by side; each keeps its own width + align chrome. */
+.source-doc__row { display: flex; gap: var(--space-6, 12px); align-items: flex-start; margin: 1.2em 0; }
+.source-doc__row .source-doc__figure { flex: 1 1 0; margin: 0; min-width: 0; }
+/* A1: the image lives in a centred, width-sized wrap so the resize handles pin to the image edges. */
+.source-doc__imgwrap { position: relative; display: inline-block; max-width: 100%; line-height: 0; vertical-align: top; }
+.source-doc__figure img { max-width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; }
+.source-doc__imgwrap > img { width: 100%; display: block; }
+/* A1: resize grab handles -- shown only when the image is object-selected (selection gates them). */
+.source-doc__handle { display: none; position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; background: var(--surface-raised); border: 1.5px solid var(--accent); border-radius: var(--radius-xs, 2px); cursor: ew-resize; z-index: 5; touch-action: none; }
+.source-doc__handle--l { left: -5px; }
+.source-doc__handle--r { right: -5px; }
+.source-doc__figure.is-object-selected .source-doc__handle { display: block; }
+.source-doc__resize-guide { position: absolute; top: -6px; bottom: -6px; left: 50%; width: 1px; background: var(--accent); opacity: 0.5; pointer-events: none; }
+.source-doc__figure figcaption { font-size: var(--text-sm); color: var(--text-tertiary, var(--text-secondary)); margin-top: 6px; }
+.source-doc--unlocked [data-editable], .source-doc--unlocked [data-node-body] { box-shadow: inset 0 0 0 9999px transparent; }
+.source-doc--unlocked { }
+
+/* The three visually-distinct mark types (CSS Custom Highlight -- no wrapper spans), painted from
+   the DS mark palette (uio-S-C01 / SRC-07): link = accent, alternate = the components purple,
+   comment = warning yellow. Each type also carries its own underline treatment, so the three stay
+   apart for a reader who can't separate the hues. The focus wash layers OVER the type tint (the
+   engine paints an active mark into both sets), so "the one I clicked" never costs you "what it
+   is" -- and it is hueless, so it can't be read as a fourth type. */
+::highlight(sd-link) { background-color: var(--mark-link-wash); text-decoration: underline; text-decoration-color: var(--mark-link); text-decoration-thickness: 2px; }
+::highlight(sd-alt) { background-color: var(--mark-alt-wash); text-decoration: underline; text-decoration-color: var(--mark-alt); text-decoration-thickness: 2px; }
+::highlight(sd-comment) { background-color: var(--mark-note-wash); text-decoration: underline dotted; text-decoration-color: var(--warning); text-decoration-thickness: 2px; }
+::highlight(sd-active) { background-color: var(--mark-focus-wash); }
+::highlight(sd-stale) { background-color: rgba(249, 115, 22, 0.18); }
+::highlight(sd-broken) { background-color: var(--danger-quiet); text-decoration: line-through; text-decoration-color: var(--danger); }
+/* Source v2 (find-word-cycling): the current find hit -- a distinct, strong tint so the cycled-to
+   match reads apart from the alternate/link/comment mark sets. */
+::highlight(sd-find) { background-color: rgba(250, 204, 21, 0.45); color: inherit; }
+
+/* Objects (image/table) as first-class markable nodes: hover invites the click; a ring shows the
+   current selection; a status tint mirrors the ::highlight() mark colours (no Range to highlight). */
+.source-doc__obj { cursor: pointer; border-radius: 8px; transition: box-shadow 120ms ease, background-color 120ms ease; }
+.source-doc__obj:hover { box-shadow: 0 0 0 2px var(--border-strong); }
+.source-doc__obj.is-object-selected { box-shadow: 0 0 0 2px var(--accent); }
+.source-doc__obj.sd-obj-marked { background-color: rgba(234, 179, 8, 0.12); box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.45); }
+.source-doc__obj.sd-obj-active { background-color: rgba(234, 179, 8, 0.22); box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7); }
+.source-doc__obj.sd-obj-stale { box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.6); }
+.source-doc__obj.sd-obj-broken { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.7); }
+
+/* Document-level bar, docked bottom-centre (canvas idiom). */
+.source-docbar { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--surface-inverse, #111827); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.28); }
+.source-docbar__lbl { color: var(--text-on-inverse, #cbd5e1); font-size: var(--text-xs); padding: 0 6px 0 4px; }
+.source-docbar__btn { color: #fff; }
+
+/* The mark-navigator rows (Source v2 consolidated-panel): they live inside the one right panel's
+   Marks section. The retired fixed overlay drawer's container styling was removed with it (cleanup);
+   only the row/dot/type/snip/empty styling below survives, reused by that section. */
+.source-drawer__empty { color: var(--text-tertiary, var(--text-secondary)); font-size: var(--text-sm); padding: 18px 12px; text-align: center; }
+.source-drawer__row { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; background: transparent; border: 0; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+.source-drawer__row:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+/* Source v2 (consolidated-panel): the Marks list now lives INSIDE the one right panel as a
+   section, not the retired fixed overlay drawer. Reuses the row/dot/type/snip styling above. */
+.source-marks__list { padding: 4px 0 2px; }
+/* Marks is the title-less primary block; separate it from the first sectioned divider below. */
+.source-marks__primary { padding-bottom: var(--space-4); }
+.source-drawer__row.is-active { background: var(--accent-quiet); }
+.source-info__subhead { margin: 10px 0 4px; font: var(--type-label); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-tertiary, var(--text-secondary)); }
+
+/* Source v2 (md-import-additive): the reconcile preview list in the import modal -- one row per
+   chapter op (add / update), each with a small type dot, shown BEFORE the import is applied. */
+.source-import__preview { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; margin-top: 4px; }
+.source-import__op { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text-primary); }
+.source-import__op-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; margin-top: 1px; background: var(--text-tertiary, var(--text-secondary)); }
+.source-import__op.is-add .source-import__op-dot { background: #22c55e; }
+.source-import__op.is-update .source-import__op-dot { background: #eab308; }
+.source-import__op-text { flex: 1 1 auto; }
+.source-drawer__dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; }
+.source-drawer__dot--green { background: var(--success); }
+.source-drawer__dot--yellow { background: var(--warning); }
+.source-drawer__dot--red { background: var(--danger); }
+/* uio-S-C01: a comment mark whose whole thread is resolved -- present, but not live work. */
+.source-drawer__dot--grey { background: var(--mark-resolved); }
+.source-drawer__row-body { min-width: 0; flex: 1 1 auto; }
+/* uio-S-C01 (SRC-01) row anatomy: type + count on one line, then the passage, then where the
+   passage sits. The path is what lets a row identify itself when the snippet is truncated. */
+.source-drawer__row-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+.source-drawer__row-type { flex: 0 0 auto; font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+.source-drawer__row-type.sd-mark-link { color: var(--mark-link); }
+.source-drawer__row-type.sd-mark-alt { color: var(--mark-alt); }
+.source-drawer__row-type.sd-mark-comment { color: var(--mark-note); }
+/* Count + path ride the 11px chrome baseline (--text-xs), not the 10px badge size: they are
+   metadata you read, not a badge. The count truncates before the type eyebrow does. */
+.source-drawer__row-count { min-width: 0; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-drawer__row-snip { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.source-drawer__row-where { margin-top: 2px; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A whole-topic component placement is NOT a mark, so it doesn't wear a mark row (or a mark
+   colour). It closes the list as one plain footnote you can still click through. */
+.source-marks__rollup { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 6px 10px 2px; font-size: var(--text-xs); color: var(--text-tertiary, var(--text-secondary)); cursor: pointer; }
+.source-marks__rollup:hover { color: var(--text-secondary); text-decoration: underline; }
+
+/* Contextual alternate panel (alternates-staleness): a margin card pinned in the right gutter,
+   tracking its span (absolutely positioned within the scrolling article, so scroll tracks free). */
+/* uio-S-C03 (SRC-03): mark cards (where-used / alternate / comment) must never sit ON TOP of the
+   passage they annotate. While any card is open, reserve a right-margin LANE on the article so the
+   prose measure shifts clear of the card zone instead of being covered. The cards themselves stay
+   absolutely pinned to the right (right:20/42px); this just guarantees the text ends before them. */
+@media (min-width: 1181px) {
+  .source-stage__article:has([data-source-wherepanel]),
+  .source-stage__article:has([data-source-altpanel]),
+  .source-stage__article:has([data-source-commentthread]) { padding-right: 312px; }
+}
+.source-altpanel { position: absolute; right: 20px; width: 244px; z-index: 25; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.12); padding: 12px 14px; }
+.source-altpanel__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.source-altpanel__title { flex: 1 1 auto; font-weight: 650; font-size: 13px; }
+.source-altpanel__head .source-drawer__dot { margin-top: 0; }
+.source-altpanel__close { display: inline-flex; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 5px; }
+.source-altpanel__close svg { width: 15px; height: 15px; }
+.source-altpanel__close:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+.source-altpanel__tag { margin-bottom: 8px; }
+.source-altpanel__field { margin-bottom: 8px; }
+.source-altpanel__label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 3px; }
+.source-altpanel__base { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.45; }
+.source-altpanel__alt { font-size: 13px; color: var(--text-primary, var(--text-secondary)); line-height: 1.5; }
+.source-altpanel__stale { font-size: var(--text-xs); color: #b45309; background: rgba(234,179,8,0.12); border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; line-height: 1.4; }
+.source-altpanel__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.source-altpanel__btn { font-size: var(--text-sm); padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-secondary); cursor: pointer; }
+.source-altpanel__btn:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+.source-altpanel__btn--primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.source-altpanel__btn--danger { color: #dc2626; }
+.source-composer__tag { width: 100%; margin-top: 6px; font-size: var(--text-sm); padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; box-sizing: border-box; }
+@media (max-width: 1180px) { .source-altpanel { position: fixed; right: 16px; bottom: 84px; top: auto !important; } }
+/* Where-used ("Linked in N") panel: reuses the pinned-card chrome above + a blue link glyph; each
+   destination is a canonical VersoUI.Breadcrumb (insp-crumbs), so no bespoke crumb styling. */
+.source-wherepanel__glyph { display: inline-flex; color: var(--accent); }
+.source-wherepanel__glyph svg { width: 15px; height: 15px; }
+.source-wherepanel__dest { margin-bottom: 6px; }
+.source-wherepanel__dest .insp-crumbs { flex-wrap: wrap; }
+
+/* Comment margin pins (comments-canvas-adapter): a subtle blue glyph converged to the canvas comment
+   idiom -- smaller, no bounding box, anchored just right of the text margin (pilot feedback 2026-07-28).
+   Pinned to its span (absolute within the scrolling article, tracking on scroll; left set in JS). */
+.source-commentpin { position: absolute; right: 8px; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 50%; background: none; color: var(--pin-colour, var(--accent)); cursor: pointer; box-shadow: none; z-index: 24; }
+.source-commentpin svg { width: 16px; height: 16px; }
+.source-commentpin:hover { background: var(--accent-quiet, rgba(59,108,246,0.14)); }
+.source-commentpin.is-open { background: var(--accent-quiet, rgba(59,108,246,0.2)); color: var(--accent); }
+.source-commentpin.is-done { opacity: 0.5; }
+.source-commentpin__count { position: absolute; top: -5px; right: -5px; min-width: 13px; height: 13px; padding: 0 3px; box-sizing: border-box; font-size: 8px; line-height: 13px; text-align: center; color: #fff; background: var(--accent); border-radius: 999px; }
+/* In-place thread card, pinned beside the span (reuses .comment-thread from the canvas engine). */
+.source-commentthread { position: absolute; right: 42px; width: 258px; z-index: 26; background: var(--surface-panel, #fff); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,0.14); padding: 12px 14px; max-height: 60vh; overflow-y: auto; }
+.source-commentthread__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.source-commentthread__title { font-weight: 650; font-size: 13px; }
+.source-commentthread__close { display: inline-flex; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 5px; }
+.source-commentthread__close svg { width: 15px; height: 15px; }
+.source-commentthread__close:hover { background: var(--surface-hover, rgba(0,0,0,0.05)); }
+@media (max-width: 1180px) { .source-commentthread { position: fixed; right: 16px; bottom: 84px; top: auto !important; } }
+
+/* Contextual selection bar, above the highlight (canvas idiom, glyph-only). */
+.source-selbar { position: absolute; z-index: 40; display: none; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }
+/* floating-format-bar: the above-selection B/I/U bar on the Edit canvas -- same idiom as the Source
+   selbar, but fixed-positioned (viewport coords from the selection rect). Editor chrome only. */
+.canvas-fmtbar { position: fixed; z-index: 60; display: inline-flex; align-items: center; gap: 1px; padding: 4px; background: var(--surface-inverse, #111827); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.32); transform: translate(-50%, -132%); }
+.canvas-fmtbar__btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; background: transparent; border: 0; color: #fff; border-radius: 6px; cursor: pointer; }
+.canvas-fmtbar__btn svg { width: 16px; height: 16px; }
+.canvas-fmtbar__btn:hover { background: rgba(255,255,255,0.14); }
+.canvas-fmtbar__btn.is-active { color: var(--accent); background: rgba(255,255,255,0.14); }
+.source-selbar__btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; background: transparent; border: 0; color: #fff; border-radius: 6px; cursor: pointer; }
+.source-selbar__btn svg { width: 16px; height: 16px; }
+.source-selbar__btn:hover { background: rgba(255,255,255,0.14); }
+.source-selbar__update { color: #93c5fd; }
+.source-selbar__btn.is-active { color: var(--accent); background: rgba(255,255,255,0.14); }
+.source-selbar__sep { width: 1px; height: 18px; background: rgba(255,255,255,0.2); margin: 0 3px; }
+
+.source-stage__convert-row { margin: 22px 0 8px; }
+.source-stage__convert-btn { font-size: var(--text-sm, 12px); color: var(--accent); background: transparent; border: 1px dashed var(--border-strong); border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+.source-stage__convert-btn:hover { background: var(--surface-panel); }
+
+.source-toast { position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%) translateY(10px); z-index: 60; background: var(--surface-inverse, #111827); color: #fff; font-size: var(--text-sm); padding: 8px 14px; border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.18s, transform 0.18s; pointer-events: none; max-width: 380px; }
+.source-toast.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.source-composer { position: absolute; z-index: 50; transform: translateX(-50%); width: 300px; background: var(--surface-panel); border: 1px solid var(--border-strong); border-radius: 9px; box-shadow: 0 10px 34px rgba(0,0,0,0.2); padding: 10px; }
+.source-composer__lbl { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary, var(--text-secondary)); font-weight: 700; margin-bottom: 6px; }
+.source-composer__text { width: 100%; min-height: 58px; font: inherit; font-size: 13px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px; resize: vertical; box-sizing: border-box; }
+.source-note__text { width: 100%; min-height: 66px; font: inherit; font-size: 13px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px; resize: vertical; box-sizing: border-box; }
+.source-composer__row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.source-composer__btn { font: inherit; font-size: var(--text-sm); border: 1px solid var(--border-strong); background: var(--surface-canvas); color: var(--text-primary, var(--text-secondary)); padding: 5px 11px; border-radius: 6px; cursor: pointer; }
+.source-composer__btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Product Rail top-bar dropdown (next to the brand) -- a plain VersoUI.Select host. */
+.product-picker { align-self: center; display: flex; align-items: center; gap: 4px; margin: 0 6px 0 2px; }
+.product-picker .vds-select { width: 140px; }
+.product-picker__add { flex: 0 0 auto; }
+
+/* #89 left icon rail: a fixed-width glyph column.
+   Top nav-tab glyphs (swap the adjacent panel) + bottom pinned action glyphs. */
+.left-rail {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0; gap: 8px;
+  background: var(--surface-app, #1e1e1e);
+  border-right: 1px solid var(--border-strong);
+  overflow: hidden;
+}
+.left-rail__group { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; }
+.left-rail__actions { margin-top: auto; } /* pin the action glyphs to the bottom */
+.rail-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  color: var(--icon-idle); background: transparent;
+  border: none; border-radius: var(--radius-sm, 4px); cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.rail-btn:hover { background: var(--surface-hover, rgba(255,255,255,0.06)); color: var(--text-primary); }
+.rail-btn svg { width: 18px; height: 18px; }
+/* uio-E-C08 (EDIT-15): the three stage tabs are icon-over-caption, so the rail names its stages
+   (Source -> Edit -> Publish) instead of showing three unlabelled glyphs. */
+.rail-tab { flex-direction: column; gap: 2px; width: 100%; height: auto; padding: 5px 0; }
+.rail-tab__icon { display: inline-flex; align-items: center; justify-content: center; }
+.rail-tab__icon svg { width: 18px; height: 18px; }
+.rail-tab__label { font-size: var(--text-2xs); line-height: 1; letter-spacing: 0.02em; }
+/* active nav tab: accent glyph + left-edge marker */
+.rail-tab.is-active { color: var(--text-primary); position: relative; }
+.rail-tab.is-active::before {
+  content: ""; position: absolute; left: -8px; top: 50%; transform: translateY(-50%);
+  width: 2px; height: 18px; border-radius: 1px; background: var(--accent);
+}
+
+/* #86 floating canvas overlay bar: persistent, always-visible
+   bottom-centre bar of canvas tools. Anchored to the workspace and centred horizontally
+   over the canvas column (between the rail+left panel and the right panel). */
+.canvas-overlay-bar {
+  position: absolute; z-index: 40;
+  bottom: 20px;
+  left: calc(var(--rail-w, 44px) + var(--left-w, 240px));
+  right: var(--dock-w, 248px); /* follows whichever surface holds the right dock */
+  display: flex; justify-content: center;
+  pointer-events: none; /* only the bar itself is interactive */
+}
+.canvas-overlay-bar__inner {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 2px;
+  padding: 4px 6px;
+  background: var(--surface-raised, #262626);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.canvas-overlay-bar__sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
+/* contextual block-actions segment (move/duplicate/split/hide/lock/delete), appended
+   to the bar when a block is selected. Its buttons adopt the flat canvas-tool look so
+   the segment reads as one bar with the grid/find/comment/zoom tools. */
+.canvas-overlay-bar__actions { display: inline-flex; align-items: center; gap: 2px; }
+.canvas-overlay-bar__actions[hidden], .canvas-overlay-bar__sep--actions[hidden] { display: none; }
+.canvas-overlay-bar .icon-btn, .tourb__pill .icon-btn { width: 28px; height: 28px; background: transparent; border: none; color: var(--icon-idle); border-radius: var(--radius-sm, 4px); transition: background 0.12s ease, color 0.12s ease; }
+.canvas-overlay-bar .icon-btn:hover, .tourb__pill .icon-btn:hover { background: var(--surface-hover); color: var(--icon-strong); border: none; }
+.canvas-overlay-bar .icon-btn.is-on, .tourb__pill .icon-btn.is-on { background: var(--accent-quiet); color: var(--accent); }
+.canvas-overlay-bar .icon-btn.is-off, .tourb__pill .icon-btn.is-off { color: var(--text-tertiary); }
+.canvas-overlay-bar .icon-btn--danger:hover, .tourb__pill .icon-btn--danger:hover { color: var(--danger); background: var(--surface-hover); }
+.canvas-overlay-bar .tb-sep, .tourb__pill .tb-sep { width: 1px; height: 20px; background: var(--border-strong); margin: 0 4px; }
+/* hide the overlay with the panels in zen/preview (its left/right offsets assume the panels) */
+.workspace.is-panels-hidden .canvas-overlay-bar { display: none; }
+
+/* #92b storage-health dot: a tri-state coloured dot in the top
+   bar + a click popover. Green healthy / amber getting full / red near-quota or save-fail. */
+.storage-dot {
+  width: 10px; height: 10px; padding: 0; margin: 0 4px;
+  border: none; border-radius: var(--radius-full, 999px); cursor: pointer;
+  background: var(--text-tertiary);
+  box-shadow: 0 0 0 3px transparent;
+  transition: box-shadow 0.12s ease, background 0.12s ease;
+}
+.storage-dot:hover { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08); }
+.storage-dot--ok { background: var(--success); }
+.storage-dot--warn { background: var(--warning); }
+.storage-dot--fail { background: var(--danger); }
+/* The ONE anchored chrome popover (the UI spine's Popover surface), opened only through
+   openChromePop in editor.js. The storage dot's details and the Publish variant roll-up
+   (uio-P-C08) are this same surface -- title, label/value rows, optional note -- never a
+   second floating div. Shadow is the DS popover elevation token. */
+.chrome-pop {
+  position: fixed; z-index: 60; min-width: 200px; max-width: 280px;
+  padding: 10px 12px;
+  background: var(--surface-raised, #262626);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: var(--shadow-popover, 0 8px 24px rgba(0, 0, 0, 0.4));
+  font-size: var(--text-xs); color: var(--text-secondary);
+}
+.chrome-pop__title { font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.chrome-pop__row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.chrome-pop__label { color: var(--text-tertiary); }
+.chrome-pop__val { color: var(--text-primary); font-weight: 500; }
+.chrome-pop__note { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); color: var(--text-tertiary); line-height: 1.4; }
+.chrome-pop__note--fail { color: var(--danger); }
+
+.panel-tabs {
+  display: flex; align-items: center; gap: 2px;
+  height: 40px; padding: 0 8px;
+  border-bottom: 1px solid var(--border-strong);
+  flex: 0 0 auto;
+}
+.ptab {
+  font: inherit; font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary);
+  background: transparent; border: none; cursor: pointer;
+  padding: 6px 8px; border-radius: 5px;
+}
+.ptab:hover { color: var(--text-primary); }
+.ptab.is-active { color: var(--text-primary); font-weight: 600; }
+/* ⚙ settings cog: sits at the far right of the Design/Interact tab row */
+.ptab-cog {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: none; border-radius: 6px;
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+}
+.ptab-cog:hover { color: var(--text-primary); background: var(--surface-hover); }
+.ptab-cog svg { width: 16px; height: 16px; display: block; }
+/* uio-E-C05 (EDIT-09): the panel overflow (⋯) menu button, right-aligned like the old cog. */
+.panel-tabs__overflow {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: none; border-radius: var(--radius-md, 6px);
+  background: transparent; color: var(--icon-idle); cursor: pointer;
+}
+.panel-tabs__overflow[hidden] { display: none; }
+.panel-tabs__overflow:hover { color: var(--icon-strong); background: var(--surface-hover); }
+.panel-tabs__overflow svg { width: 16px; height: 16px; display: block; }
+
+.panel-scroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
+/* uio-O-W1 (OVL-10): a scrolling panel body has to SAY there is more, at the edge where there
+   is more. Content used to be sliced flat by the footer edge with nothing to distinguish "the
+   end" from "keep going". The frame is the positioned host, so the hairline + fade sit exactly
+   on the scroller's own edges rather than the panel's; the classes are toggled from JS
+   (wireScrollEdges) because only the scroll position knows which edge has more behind it. */
+.scroll-frame { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; }
+.scroll-frame > * { flex: 1 1 auto; min-width: 0; }
+.scroll-frame::before, .scroll-frame::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 20px;
+  pointer-events: none; opacity: 0; transition: opacity 0.12s ease; z-index: 2;
+}
+.scroll-frame::before {
+  top: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: linear-gradient(to bottom, var(--surface-panel), transparent);
+}
+.scroll-frame::after {
+  bottom: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(to top, var(--surface-panel), transparent);
+}
+.scroll-frame.has-edge-top::before, .scroll-frame.has-edge-bottom::after { opacity: 1; }
+
+/* SS: stacked, collapsible, split-adjustable left panes (Structure + Blocks + Components) */
+.lpane { display: flex; flex-direction: column; min-height: 34px; overflow: hidden; flex: 6 1 0; }
+.lpane--blocks { flex: 4 1 0; }
+.lpane--components { flex: 3 1 0; }
+.lpane__head {
+  display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px;
+  border-bottom: 1px solid var(--border-strong); flex: 0 0 auto; cursor: pointer; user-select: none;
+}
+.lpane__head:hover .lpane__title { color: var(--text-primary); }
+.lpane__title {
+  flex: 1 1 auto; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.02em; color: var(--text-secondary);
+}
+.lpane__caret {
+  flex: 0 0 auto; width: 10px; height: 10px; position: relative; transition: transform 0.15s;
+}
+.lpane__caret::before {
+  content: ""; position: absolute; left: 1px; top: 0;
+  border-left: 5px solid var(--text-secondary); border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  transform: rotate(90deg); transform-origin: 3px 4px;
+}
+.lpane.is-collapsed { flex: 0 0 auto !important; }
+.lpane.is-collapsed .lpane__body { display: none; }
+.lpane.is-collapsed .lpane__caret { transform: rotate(-90deg); }
+.lpane__body { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+.lpane-split { flex: 0 0 auto; height: 6px; cursor: row-resize; background: transparent; z-index: 2; }
+/* SPEC 7: 3-way left-panel switcher (Structure . Blocks . Source). One section shows at a
+   time; hidden panes drop out entirely. The switcher's segmented control sits at the top. */
+.lpane-switch { flex: 0 0 auto; padding: 8px; border-bottom: 1px solid var(--border-strong); }
+.lpane-switch .prop-toggle-row { margin: 0; }
+.lpane[hidden] { display: none; }
+.lpane__head--sub { cursor: default; }
+.lpane__head--sub .lpane__title { font-size: var(--text-xs); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-tertiary); }
+.lpane--source { flex: 1 1 0; }
+.lpane--source .lpane__body { padding: 8px; }
+.lpane-split:hover, .lpane-split.is-dragging { background: rgba(13, 153, 255, 0.45); }
+
+.panel-section {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.panel-section__title {
+  font-size: var(--text-xs); font-weight: 550; letter-spacing: 0;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+/* Pin the "Pages" header while the outliner list scrolls under it (#tab-structure
+   is the scroll container). Negative margins pull it flush to the section edges so
+   rows disappear fully beneath; matching panel bg masks them. */
+.panel-section__title--sticky {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--surface-panel);
+  margin: -12px -12px 10px; padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+/* pages + components rows (layer-row feel) */
+.page-item {
+  display: flex; align-items: center;
+  height: 30px; padding: 0 8px; border-radius: 5px;
+  font-size: var(--text-sm); color: var(--text-secondary); cursor: pointer;
+}
+.page-item:hover { background: var(--surface-raised); color: var(--text-primary); }
+.page-item.is-active { background: rgba(13, 153, 255, 0.14); color: #cbe8ff; }
+
+.comp-item {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 30px; padding: 0 8px; border-radius: 5px;
+  font-size: var(--text-sm); color: var(--text-primary); cursor: pointer;
+}
+.comp-item:hover { background: var(--surface-raised); }
+.comp-item__name { display: flex; align-items: center; gap: 8px; color: var(--component); }
+.comp-item__name::before {
+  content: ""; width: 9px; height: 9px; transform: rotate(45deg);
+  background: var(--component); border-radius: 1.5px; flex: 0 0 auto;
+}
+.comp-item__count { font-size: var(--text-xs); color: var(--text-tertiary); }

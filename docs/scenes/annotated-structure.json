@@ -1,6 +1,6 @@
 {
   "id": "annotated-structure",
-  "covers": ["src/editor.js", "editor.css", "src/capture-mode.js", "pages-outliner", "annotation-overlay"],
+  "covers": ["src/editor.js", "styles/editor/", "src/capture-mode.js", "pages-outliner", "annotation-overlay"],
   "kind": "still",
   "viewport": { "width": 1440, "height": 900, "dpr": 2 },
   "theme": "dark",

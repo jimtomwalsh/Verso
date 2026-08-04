@@ -1,0 +1,114 @@
+/*
+ * Editor chrome — dense dark editor shell. This styles ONLY the editor UI
+ * (toolbar, panels, canvas surround, property controls). It never touches the
+ * course output: course markup is produced by render() and styled by
+ * src/course.css, so nothing here can leak into an exported SCORM package.
+ *
+ * Palette follows a dense professional dark theme: #2c2c2c panels, #1e1e1e canvas,
+ * #383838 hovers, #444 hairlines, Inter type, and #0d99ff as the single
+ * selection/active accent.
+ */
+
+/* =====================================================   DESIGN SYSTEM TOKENS — source of truth (issue #7, parent #22)
+   The vendored DS token CSS (design-system/tokens/*.css) is the
+   canonical token set for the editor chrome and is imported here
+   verbatim. CSS @import resolves from file://; the editor chrome is
+   never shipped in SCORM, so nothing here reaches an exported course.
+   Invariant: DS chrome tokens live in the editor layer only — never
+   in src/course.css and never read by render().
+   NOTE: @import must precede all other rules (incl. @font-face) per
+   the CSS spec, so these stay at the very top of the file.
+   Fonts are NOT imported from the DS token file: the editor vendors
+   its faces locally via the @font-face rules below, so the chrome
+   never reaches the Google Fonts CDN (air-gap requirement).
+   ============================================================ */
+@import "../../design-system/tokens/colors.css";
+@import "../../design-system/tokens/typography.css";
+@import "../../design-system/tokens/spacing.css";
+@import "../../design-system/tokens/effects.css";
+
+/*
+ * Chrome webfonts — vendored locally so the editor renders in its intended
+ * faces on an air-gapped machine (no Google Fonts CDN). Inter is the UI
+ * workhorse; JetBrains Mono is the code/mono face. These @font-face rules
+ * live in the editor layer ONLY — they are never read by render() and never
+ * ship in a SCORM package. Exo 2 (brand/display + course-content preview face) is
+ * vendored locally too — the editor @font-face's it from the exporter's already-
+ * committed export/fonts/Exo2-*.ttf so the editor never reaches the Google Fonts CDN.
+ */
+@font-face {
+  font-family: "Inter";
+  src: url("../../fonts/Inter-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../../fonts/Inter-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../../fonts/Inter-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../fonts/JetBrainsMono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+/* Exo 2 (brand mark + course-content preview) — vendored locally (reuses the
+   exporter's committed TTFs) so the editor is fully offline with no CDN font call. */
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Exo 2";
+  src: url("../../export/fonts/Exo2-ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* The legacy ui-alias layer (issue #7) is gone: the whole editor chrome now
+   references the vendored Design System tokens (design-system/tokens/*.css)
+   directly. Teardown completed in #21 (parent #22). Do not reintroduce the old
+   ui-alias names — reference the DS token directly. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  background: var(--surface-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }

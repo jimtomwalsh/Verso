@@ -112,7 +112,7 @@ under the gitignored role fails if it is ever staged.
 
 | Role | Entries | Meaning |
 | --- | --- | --- |
-| **Ships** | `index.html` `editor.css` `src/` `export/` `assets/` `fonts/` `serve.command` `course_schema_template.csv` | The product. Present in every install; the app runs from these alone. |
+| **Ships** | `index.html` `styles/` `src/` `export/` `assets/` `fonts/` `serve.command` `course_schema_template.csv` | The product. Present in every install; the app runs from these alone. |
 | **Optional** | `server/` `desktop/` | Real surfaces for one posture each (server-of-one, macOS shell). The app runs without them. |
 | **Dev-only** | `tools/` `scripts/` `tests/` `design-system/` `docs/` `viewer/` `kit.html` `kit-gallery.js` `.github/` | Authoring-time and CI material. Never loaded by the running app, never in a SCORM export. |
 | **Meta** | `README.md` `CONTRIBUTING.md` `LICENSE` `NOTICE` `SECURITY.md` `THIRD-PARTY-NOTICES.md` `SCHEMA-TEMPLATE-GUIDE.md` `roadmap.html` `package.json` `.gitignore` | Repository documentation and the manifest. |
@@ -125,7 +125,7 @@ suite, and there is no `npm install` step, no `node_modules`, no bundler.
 
 ```
 index.html          editor shell (toolbar, panels, canvas)
-editor.css          Verso UI ONLY — never bleeds into course output
+styles/          Verso UI ONLY — never bleeds into course output
 src/
   render.js         PURE render(doc, theme) — the single source of truth
   course.css        course styling (tokens-only) — ships in SCORM
