@@ -6102,6 +6102,10 @@
     renderSettingsBody: renderSettingsBody,
     openBrowser: openBrowser,
     closeBrowser: closeBrowser,
+    // uio-W04: what the where-am-I line says while you are in Source. Bound from source-stage's
+    // expose and provided, because a need() resolves against provide() and never against an expose.
+    activeSourceDocName: VE.bind("activeSourceDocName"),
+    activeSourceProductName: VE.bind("activeSourceProductName"),
     renderSourceStage: renderSourceStage,
     syncCellChip: syncCellChip,
     renderVersionSwitch: renderVersionSwitch,
@@ -6562,6 +6566,13 @@
   window.VersoLibrary.install(VE);   // the shared component library; installs early -- it loads the store
   window.VersoDocuments.install(VE);   // bringing a course into existence
   window.VersoTabs.install(VE);   // the open documents, and which one you are looking at
+  window.VersoFiles.install(VE);   // the Files destination: every document, from both stores
+  // uio-W04: shell.js needs to mount Files when that destination is entered, and a need() resolves
+  // against provide() -- never against another module's expose(). So bind here, provide the
+  // forwarder, and the dispatch happens at call time (kernel.js rule 4).
+  var mountFilesStage = VE.bind("mountFilesStage");
+  var refreshFiles = VE.bind("refreshFiles");
+  VE.provide({ mountFilesStage: mountFilesStage, refreshFiles: refreshFiles });
   window.VersoShell.install(VE);   // the frame around the work: stage, Product, cell
   window.VersoEditing.install(VE);   // what makes the canvas typeable
   window.VersoTextFormat.install(VE);   // inline formatting: the toggle set and both bars that render it

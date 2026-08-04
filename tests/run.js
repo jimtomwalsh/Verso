@@ -10815,6 +10815,130 @@ section("HFDEF header-footer default");
   ok("the delete button rides the row's trailing slot", /trailing: del,/.test(DOCS));
 })();
 
+// ---- uio-W04: the Files destination ---------------------------------------
+// Verso kept its documents in TWO stores that had never met on screen: design documents in the
+// registry, source documents in LibraryStore. "What do I have?" had no answer -- the file browser
+// listed half your work and called it everything. Files merges them into one corpus, and that merge
+// is the part a browser cannot tell you is wrong, so it is pure and exercised here directly.
+section("uio-W04 Files destination");
+(function () {
+  var F;
+  try { F = require(path.join(ROOT, "src/editor/files.js"))._pure; } catch (e) { ok("require files.js", false); return; }
+
+  var registry = {
+    "C-1": { meta: { title: "Alpha course", code: "C-1", productId: "p-a", updatedAt: 500 } },
+    "D-1": { meta: { title: "Alpha deck", code: "D-1", productId: "p-a", updatedAt: 900 }, __geo: "frame" },
+    "G-1": { meta: { title: "Beta guide", code: "G-1", productId: "p-b", updatedAt: 100 }, __geo: "paged" },
+    "U-1": { meta: { title: "Untagged thing", code: "U-1" } }          // no product, no timestamp
+  };
+  var comps = {
+    "topic-master-a": { id: "topic-master-a", kind: "topic", name: "Alpha source", sourceMaster: true, productId: "p-a", updatedAt: 800 },
+    "topic-loose": { id: "topic-loose", kind: "topic", name: "A loose topic", productId: "p-a", updatedAt: 700 },
+    "topic-archived": { id: "topic-archived", kind: "topic", name: "Folded in", sourceMaster: true, archivedInto: "topic-master-a", productId: "p-a" },
+    "cmp-block": { id: "cmp-block", kind: "block", name: "Not a document" }
+  };
+  var products = { "p-a": { id: "p-a", name: "Alpha", groundTruthId: "topic-master-a" }, "p-b": { id: "p-b", name: "Beta" } };
+  var env = { registry: registry, components: comps, products: products,
+              geoOf: function (d) { return d.__geo || "reflow"; } };
+
+  // --- ONE corpus from TWO stores ---
+  var corpus = F.buildCorpus(env);
+  ok("design documents come from the registry", corpus.filter(function (d) { return d.kind === "design"; }).length === 4);
+  ok("source documents come from the library, in the SAME list",
+    corpus.filter(function (d) { return d.kind === "source"; }).length === 1);
+  ok("the source document is the product's reserved master",
+    corpus.filter(function (d) { return d.kind === "source"; })[0].id === "topic-master-a");
+  ok("a loose pre-unification topic is not a document", !corpus.some(function (d) { return d.id === "topic-loose"; }));
+  ok("a topic folded into a master is a chapter, not a document", !corpus.some(function (d) { return d.id === "topic-archived"; }));
+  ok("a library component that is not a topic is not a document", !corpus.some(function (d) { return d.id === "cmp-block"; }));
+  ok("the primary source is flagged from the product's groundTruthId",
+    corpus.filter(function (d) { return d.primary; }).map(function (d) { return d.id; }).join() === "topic-master-a");
+  ok("a design document's type is its geometry",
+    corpus.filter(function (d) { return d.id === "D-1"; })[0].type === "frame" &&
+    corpus.filter(function (d) { return d.id === "G-1"; })[0].type === "paged");
+  ok("a source document's type is source", corpus.filter(function (d) { return d.kind === "source"; })[0].type === "source");
+  ok("an untagged document survives with an empty product, never dropped",
+    corpus.filter(function (d) { return d.id === "U-1"; })[0].productId === "");
+  ok("empty stores are not a crash", F.buildCorpus({}).length === 0 && F.buildCorpus().length === 0);
+
+  // --- the header states the corpus ---
+  var sum = F.corpusSummary(corpus);
+  ok("the count is documents and the products REPRESENTED", sum.documents === 5 && sum.products === 2);
+  ok("an empty corpus summarises to zero", F.corpusSummary([]).documents === 0 && F.corpusSummary([]).products === 0);
+
+  // --- three views over ONE list: same documents every time ---
+  function idsOf(groups) { return groups.reduce(function (a, g) { return a.concat(g.docs.map(function (d) { return d.id; })); }, []).sort(); }
+  var byProduct = F.groupCorpus(corpus, "product", products);
+  var byType = F.groupCorpus(corpus, "type", products);
+  var byRecent = F.groupCorpus(corpus, "recent", products);
+  ok("every grouping holds exactly the same documents",
+    idsOf(byProduct).join() === idsOf(byType).join() && idsOf(byType).join() === idsOf(byRecent).join());
+  ok("no grouping loses or duplicates a document", idsOf(byProduct).length === corpus.length);
+  ok("both source and design documents appear in EVERY view", [byProduct, byType, byRecent].every(function (g) {
+    var all = g.reduce(function (a, x) { return a.concat(x.docs); }, []);
+    return all.some(function (d) { return d.kind === "source"; }) && all.some(function (d) { return d.kind === "design"; });
+  }));
+
+  // --- Product view: bands by name, No product trailing ---
+  ok("product bands are named and sorted", byProduct[0].label === "Alpha" && byProduct[1].label === "Beta");
+  ok("No product trails, always last", byProduct[byProduct.length - 1].label === "No product");
+  ok("it is described as shared material, not as leftovers",
+    /Shared, cross-product material/.test(byProduct[byProduct.length - 1].note || ""));
+  ok("the primary source sorts first in its band", byProduct[0].docs[0].id === "topic-master-a");
+
+  // --- Type view: the four types in a fixed order ---
+  ok("type bands follow the fixed type order",
+    byType.map(function (g) { return g.key; }).join() === "source,reflow,frame,paged");
+  ok("type bands are labelled as documents, not as geometry",
+    byType.map(function (g) { return g.label; }).join() === "Source,Courses,Presentations,Guides");
+
+  // --- Recent view: one flat list, newest first, nothing hidden ---
+  ok("recent is ONE flat list", byRecent.length === 1);
+  ok("newest first", byRecent[0].docs[0].id === "D-1");
+  ok("a document with no timestamp sorts last but is never hidden",
+    byRecent[0].docs[byRecent[0].docs.length - 1].id === "U-1" && byRecent[0].docs.length === corpus.length);
+
+  // --- search ---
+  ok("search matches a title", F.matchesQuery({ title: "Alpha course", id: "C-1" }, "alpha"));
+  ok("search matches an id", F.matchesQuery({ title: "Alpha course", id: "C-1" }, "c-1"));
+  ok("an empty query matches everything", F.matchesQuery({ title: "x", id: "y" }, ""));
+  ok("search is case-insensitive", F.matchesQuery({ title: "ALPHA", id: "" }, "alpha"));
+
+  // --- the view preferences belong to Files alone (uio-W06's guard rail starts here) ---
+  ok("grouping falls back to product", F.normGrouping("nonsense") === "product" && F.normGrouping(null) === "product");
+  ok("list is the default mode", F.normMode("nonsense") === "list" && F.normMode(null) === "list");
+  ok("both preferences are namespaced to Files",
+    F.GROUPING_KEY === "verso.filesGrouping" && F.MODE_KEY === "verso.filesMode");
+  ok("no other destination reads how Files is arranged", ["src/editor/shell.js", "src/editor/tabs.js",
+    "src/editor/source-stage.js", "src/editor/publish.js", "src/editor/home.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return code.indexOf("filesGrouping") === -1 && code.indexOf("filesMode") === -1;
+    }));
+
+  // --- the wiring ---
+  var FILES = src("src/editor/files.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var ED = src("src/editor.js");
+  ok("Files is a destination, built from the shared document row (uio-W02)",
+    /window\.VersoUI\.DocumentRow\(\{/.test(FILES));
+  ok("it uses the compact timestamp a row can hold", /_pure\.compactRelativeTime/.test(FILES));
+  ok("its entry point crosses through provide(), not another module's expose()",
+    /VE\.provide\(\{ mountFilesStage: mountFilesStage/.test(ED));
+  ok("Files installs BEFORE the shell that aliases its entry point",
+    ED.indexOf("window.VersoFiles.install(VE)") < ED.indexOf("window.VersoShell.install(VE)"));
+  ["index.html", "kit.html"].forEach(function (page) {
+    ok(page + " loads files.js", src(page).indexOf("src/editor/files.js") !== -1);
+  });
+  // Two defects one screenshot found that 5,700 assertions could not. Both now guarded.
+  var HOMECSS = src("styles/editor/13-home.css");
+  ok("the header's grouping segments size to their labels, not to a shared width",
+    /\.files__controls \.prop-toggle \{[^}]*flex: 0 0 auto/.test(HOMECSS));
+  var SH = src("src/editor/shell.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("Source's identity line names the SOURCE document, not whatever Edit has open",
+    /__activeStage === "source" && typeof E\.activeSourceDocName === "function"/.test(SH));
+  ok("Source supplies that name from its own state",
+    /function activeSourceDocName\(\)/.test(src("src/editor/source-stage.js")));
+})();
+
 // ---- uio-W03: four destinations, live instances, one where-am-I -----------
 // The rail grows to four and Files leads. Each destination keeps a LIVE INSTANCE -- switching is a
 // swap, not a reload -- and exactly one element in the whole app answers "where am I".
@@ -10897,9 +11021,10 @@ section("uio-W03 four-destination rail");
   ok("the region hides Edit's grid the same way its siblings do",
     /\.workspace--stage-files \.panel,/.test(WS) && /\.workspace--stage-files #canvas-viewport,/.test(WS));
   ok("it is a surface, not a see-through gap", /\.files-stage \{[^}]*background: var\(--surface-canvas\)/.test(WS));
-  ok("entering Files opens today's document browser rather than a dead end",
-    /if \(stage === "files" && typeof openBrowser === "function"\) openBrowser\(\);/.test(SHELL_CODE));
-  ok("leaving Files closes it again", /else if \(typeof E\.closeBrowser === "function"\) E\.closeBrowser\(\);/.test(SHELL_CODE));
+  // uio-W04 replaced W03's bridge: Files is a real destination now, mounted like its siblings.
+  ok("entering Files mounts the Files destination", /if \(stage === "files"\) mountFilesStage\(\);/.test(SHELL_CODE));
+  ok("the old browser overlay never hangs over another destination",
+    /if \(stage !== "files" && typeof E\.closeBrowser === "function"\) E\.closeBrowser\(\);/.test(SHELL_CODE));
 
   // --- launch restores the destination you left ---
   ok("the active destination still persists across a refresh",
