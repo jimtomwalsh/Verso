@@ -473,6 +473,10 @@
   function DocumentTab(props) {
     props = props || {};
     var tab = h("div", "vds-doctab" + (props.active ? " is-active" : ""));
+    // uio-W10: the tab states its document TYPE, the same way DocumentRow does. Source and Edit own
+    // separate strips holding one type each, and a `type` prop that every caller passed but nothing
+    // rendered left that contract with no expression in the DOM at all.
+    if (props.type) tab.setAttribute("data-doc-type", props.type);
     // tab-doctype-glyph: a leading glyph naming the document type (course / presentation /
     // paged), so a Product's course + one-pager + deck stay distinguishable by shape.
     if (props.icon) { var g = h("span", "vds-doctab__glyph"); g.innerHTML = iconSvg(props.icon); if (props.typeLabel) { g.title = props.typeLabel; g.setAttribute("aria-label", props.typeLabel); } tab.appendChild(g); }
@@ -535,6 +539,15 @@
 
     var openLabel = _pure.openStateLabel(props.openIn);
     if (openLabel) row.appendChild(h("span", "vds-docrow__open", openLabel));
+
+    // uio-W16: the RELEASE-STATE column, for the one list where "is this current?" is the question
+    // the row exists to answer. Two states and no third: a document is either as it went out or it
+    // is not, and a middle word would be a hedge the publisher then has to interpret.
+    if (props.release) {
+      row.appendChild(h("span", "vds-docrow__release vds-docrow__release--" +
+        (props.release === "ready" ? "ready" : "review"),
+        props.release === "ready" ? "Ready to release" : "Needs review"));
+    }
 
     if (props.trailing != null) {
       var tr = h("span", "vds-docrow__trailing");

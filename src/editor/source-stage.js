@@ -29,7 +29,8 @@
       "importMenuLabel", "unlinkAllCoursesFromProduct", "deleteProductSource", "deleteProduct", "saveLibrary", "modalSection",
       "makeReply", "modalText", "f04ProductFacts", "panelSection", "snapshotSourceLinkBase", "sourceBaseEditImpact", "showSourceBaseEditModal",
       "finalizeSourceLock", "sourceLinkAlternates", "registry", "applyAltToLocation", "saveRegistry", "decorateSourceLinks",
-      "sourceAltSnippet", "History", "dsSelect", "promptModal", "saveProducts", "selection"
+      "sourceAltSnippet", "History", "dsSelect", "promptModal", "saveProducts", "selection", "colourForName",
+      "renderSourceProductPanel"
     );
     // Aliased once: every one of these is stable (a function declaration, a constant, or an object
     // that is mutated but never reassigned), so the moved body reads exactly as it did.
@@ -48,7 +49,8 @@
         finalizeSourceLock = E.finalizeSourceLock, sourceLinkAlternates = E.sourceLinkAlternates, registry = E.registry,
         applyAltToLocation = E.applyAltToLocation, saveRegistry = E.saveRegistry, decorateSourceLinks = E.decorateSourceLinks,
         sourceAltSnippet = E.sourceAltSnippet, History = E.History, dsSelect = E.dsSelect,
-        promptModal = E.promptModal, saveProducts = E.saveProducts, selection = E.selection;
+        promptModal = E.promptModal, saveProducts = E.saveProducts, selection = E.selection,
+        colourForName = E.colourForName;
 
     // Product Rail (source-stage-nav-article): Source stage left-nav + flowing article.
     // A "topic" is a LibraryStore master with kind:"topic" -- per #68's own note, Ground
@@ -272,7 +274,7 @@
       var U = window.VersoUI;
       // Top row = navigation / authoring actions (New topic, Import).
       var row = h("div", "source-stage__toolbar");
-      if (!sourceMasterFor(activeSourceProductId())) {
+      if (!activeSourceMaster()) {
         row.appendChild(U.IconButton({ icon: "plus", label: "New topic", onClick: newTopicModal }));
       }
       // uio-P-C05 (PUB-13): import is a SOURCE action. This one button now opens the whole inbound
@@ -381,39 +383,77 @@
     // here rather than beside renderSourceStage because uio-W01 made it the FIRST thing consulted
     // when resolving what Source shows -- see activeSourceProductId below.
     var SOURCE_TOPIC_PERSIST_KEY = "verso.sourceTopic";
-    // The Product whose source document the stage shows.
+
+    // WHICH DOCUMENT SOURCE SHOWS (uio-W14).
     //
-    // uio-W01 took away the global Product picker this used to read, and Source's real replacement
-    // -- its own tab strip (uio-W10) and product-optional source documents (uio-W14) -- is several
-    // tickets away. So this is the narrow resolution that carries Source until then, and it is
-    // deliberately narrow: it answers from Source's OWN state rather than borrowing a scope from
-    // the rest of the app.
+    // This used to resolve a PRODUCT and let the product name a master, which meant a source
+    // document with no product could be created and then never opened again -- there was no path in
+    // that did not go through a Product. Glossaries and standards, the material that serves every
+    // product precisely because it belongs to none, were unreachable by construction.
     //
-    // Order: the document the author last had open here (already persisted, and the same key the
-    // stage restores from), then the first Product that has any source content at all, then
-    // whatever Product exists. The stage always lands on a real document instead of an empty rail,
-    // and it no longer writes anything global on the way.
-    function activeSourceProductId() {
+    // So the resolution is document-first now. The product is read OFF the document that resolved,
+    // not the other way round.
+    //
+    // Order: the document the author last had open here (persisted under the same key the stage
+    // restores from, and it may perfectly well carry no product), then the first product that has
+    // any source content, then any shared source document, then whatever product exists so an empty
+    // install still lands somewhere real.
+    function activeSourceDocId() {
       var comps = libComponents() || {};
       try {
         var lastId = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY);
-        var last = lastId && comps[lastId];
-        if (last && last.productId && window.ProductsStore[last.productId]) return last.productId;
+        if (lastId && window.SourceOwnership.isSourceDocument(comps[lastId])) return lastId;
       } catch (e) {}
+      var keys = Object.keys(window.ProductsStore || {});
+      for (var i = 0; i < keys.length; i++) {
+        var m = sourceMasterFor(keys[i]);
+        if (m) return m.id;
+      }
+      var shared = window.SourceOwnership.sharedSourceDocuments(comps);
+      if (shared.length) return shared[0].id;
+      return "";
+    }
+    // The source document the stage shows, product or not. Null when there is genuinely none.
+    function activeSourceMaster() {
+      var comps = libComponents() || {};
+      var id = activeSourceDocId();
+      var c = id && comps[id];
+      if (window.SourceOwnership.isSourceDocument(c)) return c;
+      return null;
+    }
+    // The Product whose source the stage shows -- DERIVED from the open document, and "" when that
+    // document is shared material. Every product-scoped affordance below (variants, the product
+    // actions menu, the lifecycle deletes) reads this and degrades to absent rather than to broken,
+    // because a shared document has no product to act on and saying so is the honest answer.
+    function activeSourceProductId() {
+      var open = activeSourceMaster();
+      if (open) return (open.productId && window.ProductsStore[open.productId]) ? open.productId : "";
+      // Nothing open yet: fall back to a product that has source content, then to any product, so
+      // an empty stage can still offer the onboarding path for one.
       var keys = Object.keys(window.ProductsStore || {});
       for (var i = 0; i < keys.length; i++) {
         if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) return keys[i];
       }
       return keys[0] || "";
     }
-    // Resolve the active Product's unified-doc master, migrating on first entry when the Product
-    // still has loose topics (the one-doc model is the locked v2 design and the migration is
-    // reversible -- see migrateProductToUnifiedDoc). Returns the master topic, or null.
-    function ensureUnifiedDocForActiveProduct() {
-      var pid = activeSourceProductId(); if (!pid) return null;
-      var master = sourceMasterFor(pid);
-      if (!master && unifiableTopicsFor(pid).length) master = migrateProductToUnifiedDoc(pid);
+    // Resolve a Product's unified-doc master, migrating on first entry when the Product still has
+    // loose topics (the one-doc model is the locked v2 design and the migration is reversible --
+    // see migrateProductToUnifiedDoc). Returns the master topic, or null.
+    //
+    // uio-W14 took the global product out of its name: it takes the product it acts on, so nothing
+    // has to have a "the active product" in scope to call it.
+    function ensureUnifiedDocFor(productId) {
+      if (!productId) return null;
+      var master = sourceMasterFor(productId);
+      if (!master && unifiableTopicsFor(productId).length) master = migrateProductToUnifiedDoc(productId);
       return master;
+    }
+    // What the stage opens on: the document that resolved, whether it belongs to a product or is
+    // shared. The product path still migrates loose topics on first entry.
+    function ensureUnifiedDocForActiveProduct() {
+      var open = activeSourceMaster();
+      if (open) return open;
+      return ensureUnifiedDocFor(activeSourceProductId());
     }
     // Scroll the reading column to a node (a chapter or heading key) -- the TOC's click-to-jump.
     function scrollSourceToNode(key) {
@@ -597,7 +637,7 @@
     function renderSourceTopicList() {
       if (typeof document === "undefined") return;
       // Source v2: when the active Product has a unified document, the rail is its one TOC.
-      var master = sourceMasterFor(activeSourceProductId());
+      var master = activeSourceMaster();
       if (master) { renderSourceUnifiedToc(master); return; }
       // No unified document for this Product yet (an empty Product) -> the onboarding toolbar
       // (import / new topic) + a plain, click-to-open list of any still-loose topics. The old
@@ -618,6 +658,9 @@
           label.type = "button";
           label.addEventListener("click", function () {
             if (t.id === __sourceActiveTopicId) return;
+            // uio-W10: a source DOCUMENT opens through the strip, so it gets a tab. A loose topic
+            // (the pre-unification model) is not a document and keeps the plain in-place swap.
+            if (window.SourceOwnership.isSourceDocument(t)) { openSourceDoc(t.id); return; }
             __sourceActiveTopicId = t.id;
             try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, t.id); } catch (e) {} // return to this topic after a refresh
             __sourceActiveVariants = []; // a different topic may have a different variant set
@@ -2582,7 +2625,7 @@
       // cleanly without stealing input focus; the input fills the field so click-to-type still works.
       var search = h("div", "vbrowser__search source-stage__search-field");
       search.innerHTML = window.Icon ? window.Icon("search") : "";
-      var unified = !!sourceMasterFor(activeSourceProductId());
+      var unified = !!activeSourceMaster();
       var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = unified ? "find in document" : "search topics + text";
       input.value = __sourceSearchQuery;
       input.addEventListener("input", function () {
@@ -2668,13 +2711,13 @@
     }
 
     function newTopicModal() {
-      // uio-W01: this used to read the top-bar picker and say "Pick a Product in the top bar first."
-      // There is no top bar picker any more, so it resolves the same way the rest of the stage does
-      // and only stops when there is genuinely no Product to write into.
+      // uio-W01 took away the top-bar picker this used to read. uio-W14 took away the last reason
+      // to refuse: a source document no longer needs a Product. With no Product to write into, this
+      // makes SHARED material -- which is a legitimate document, not a fallback.
       var productId = activeSourceProductId();
-      if (!productId) { window.alert("Create a Product first — a source document belongs to one."); return; }
       promptModal("New Topic", "Name", "", function (name) {
         if (!(name || "").trim()) return;
+        if (!productId) { createSourceDocument(name, ""); renderSourceStage(); return; }
         var topic = createTopic(name, productId, []); // LibraryStore write, not doc -- no pushHistory
         __sourceActiveTopicId = topic.id;
         // new-product first-run: for an empty Product this is the FIRST chapter, so mint the unified
@@ -2685,22 +2728,166 @@
       });
     }
 
+    // uio-W14: MINT A SOURCE DOCUMENT, product-optional.
+    //
+    // This is the mechanism the Files creation actions (uio-W08) call; the Source stage uses it for
+    // the shared case above. It writes the reserved master directly rather than going through the
+    // loose-topic-then-migrate path, because there is nothing to migrate -- a new document has no
+    // prior chapters -- and because a shared document has no Product to run that migration for.
+    //
+    // A product that has no primary yet gets this one: `groundTruthId` is set only when it is empty,
+    // so creating a second source document for a product NEVER silently displaces its primary. That
+    // second document is simply an extra a design document can attach.
+    function createSourceDocument(name, productId) {
+      var pid = (productId && window.ProductsStore[productId]) ? productId : "";
+      var master = createTopic(name || "Untitled source", pid, []);
+      master.sourceMaster = true;
+      if (window.SourceDoc) master.doc = window.SourceDoc.toJSON(window.SourceDoc.create([]));
+      master.updatedAt = Date.now();
+      var product = pid && window.ProductsStore[pid];
+      if (product && !product.groundTruthId) { product.groundTruthId = master.id; saveProducts(); }
+      saveLibrary();
+      __sourceActiveTopicId = master.id;
+      __sourceDocModel = null; __sourceDocModelTopicId = null;
+      try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, master.id); } catch (e) {}
+      return master;
+    }
+
+    // ---- uio-W10: Source's own tab strip -------------------------------------
+    //
+    // SOURCE HAS NEVER HAD A DOCUMENT SWITCHER. It resolved exactly one master from the global
+    // product and showed it, so "have two manuals open and compare them" was not a thing you could
+    // do -- and after uio-W14 made source documents product-optional, a shared glossary had no way
+    // to sit beside the product manual it explains.
+    //
+    // The strip holds ONLY source documents. Edit's holds only design documents. They are two
+    // strips over two stores rather than one strip filtered two ways, because a design document is
+    // a registry entry and a source document is a LibraryStore component, and pretending they are
+    // the same kind of thing is what made the old single strip need a Product filter in the first
+    // place.
+    var OPEN_SOURCE_DOCS_KEY = "authoring.openSourceDocIds";
+    var __openSourceDocIds = null;
+
+    function openSourceDocIds() {
+      if (__openSourceDocIds) return __openSourceDocIds;
+      var saved = [];
+      try { saved = JSON.parse(localStorage.getItem(OPEN_SOURCE_DOCS_KEY) || "[]"); } catch (e) { saved = []; }
+      // Reconciled on read for the same reason Edit's set is at boot: the open set lives in a
+      // separate store from the documents, so deleting one elsewhere leaves the strip holding a key
+      // nothing answers to.
+      __openSourceDocIds = window.VersoProductRail.visibleSourceTabIds(Array.isArray(saved) ? saved : [], libComponents());
+      return __openSourceDocIds;
+    }
+    function saveOpenSourceDocIds() {
+      try { localStorage.setItem(OPEN_SOURCE_DOCS_KEY, JSON.stringify(openSourceDocIds())); } catch (e) {}
+    }
+    // Opening a document adds it to the strip. Idempotent: opening one that is already open makes
+    // it active rather than adding a second tab for it.
+    function openSourceDoc(id) {
+      if (!window.SourceOwnership.isSourceDocument(libComponents()[id])) return;
+      var ids = openSourceDocIds();
+      if (ids.indexOf(id) === -1) { ids.push(id); saveOpenSourceDocIds(); }
+      if (__sourceActiveTopicId === id) return;
+      __sourceActiveTopicId = id;
+      __sourceActiveVariants = [];          // a different document may declare a different variant set
+      __sourceEditingCell = null;           // never carry an in-progress edit across documents
+      __sourceDocModel = null; __sourceDocModelTopicId = null;
+      __sourceUnlocked = false;             // every document opens locked (base prose protected)
+      try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, id); } catch (e) {}
+      renderSourceStage();
+    }
+    function closeSourceTab(id) {
+      var ids = openSourceDocIds();
+      var idx = ids.indexOf(id);
+      if (idx === -1) return;
+      ids.splice(idx, 1);
+      saveOpenSourceDocIds();
+      if (__sourceActiveTopicId === id) {
+        var next = ids[Math.max(0, idx - 1)];
+        // Closing the last tab leaves the strip empty rather than refusing. Source resolves what to
+        // show on the next render, so an empty strip is a state the stage already knows how to be
+        // in -- unlike Edit, where there is always a document on the canvas.
+        if (next) { openSourceDoc(next); return; }
+        __sourceActiveTopicId = null; __sourceDocModel = null; __sourceDocModelTopicId = null;
+        try { localStorage.removeItem(SOURCE_TOPIC_PERSIST_KEY); } catch (e) {}
+      }
+      renderSourceStage();
+    }
+    function renderSourceTabs() {
+      if (typeof document === "undefined") return;
+      var host = document.getElementById("source-tabs"); if (!host) return;
+      var U = window.VersoUI; if (!U || !U.DocumentTab) return;
+      host.innerHTML = "";
+      var comps = libComponents();
+      var ids = window.VersoProductRail.visibleSourceTabIds(openSourceDocIds(), comps);
+      var open = ids.map(function (id) { return comps[id]; });
+      // uio-W11: the same overflow rule Edit's strip follows -- tabs never shrink, the remainder
+      // goes into a `+N more`, and the open document is always among the shown.
+      var split = window.VersoProductRail.tabOverflow(ids, __sourceActiveTopicId);
+      split.shown.map(function (id) { return comps[id]; }).forEach(function (c) {
+        // The per-product colour dot survives from the Edit strip as IDENTITY, keyed on the stable
+        // productId so a rename never shifts the colour. Shared material carries no dot, which is
+        // the honest rendering of "belongs to no product".
+        var pid = c.productId || "";
+        var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
+        host.appendChild(U.DocumentTab({
+          label: c.name || c.id,
+          active: c.id === __sourceActiveTopicId,
+          dot: pid ? colourForName(pid) : null,
+          dotTitle: pid ? ("Product: " + ((prod && prod.name) || pid)) : "No product — shared, cross-product material",
+          icon: U.DOCUMENT_TYPES.source.icon,
+          type: "source",
+          typeLabel: U.DOCUMENT_TYPES.source.label,
+          onSelect: function () { openSourceDoc(c.id); },
+          onClose: function () { closeSourceTab(c.id); }
+        }));
+      });
+      // The strip states what it holds. On Source that is "2 open"; the product count appears only
+      // when the strip actually spans more than one, so the mixed-product fact is stated rather
+      // than left to be inferred from the dots.
+      var tail = h("div", "toolbar-tabs__tail");
+      if (split.hidden.length) {
+        var more = h("button", "toolbar-tabs__more", "+" + split.hidden.length + " more");
+        more.type = "button";
+        more.title = split.hidden.length + " more open source document" + (split.hidden.length === 1 ? "" : "s");
+        more.addEventListener("click", function (e) {
+          var r = e.currentTarget.getBoundingClientRect();
+          showContextMenu(r.left, r.bottom + 4, [{ head: "Also open" }].concat(split.hidden.map(function (id) {
+            return { label: (comps[id] && comps[id].name) || id, onClick: function () { openSourceDoc(id); } };
+          })));
+        });
+        tail.appendChild(more);
+      }
+      // The meta counts EVERYTHING open, not just what fits.
+      var meta = window.VersoProductRail.stripMeta(open);
+      if (meta.open) tail.appendChild(h("span", "source-stage__tabs-meta", meta.label));
+      if (tail.childNodes.length) host.appendChild(tail);
+    }
+
     // Called each time Source becomes the active stage (setStage("source")) -- mounts the
     // search field once, then re-renders the toolbar + topic list + article from current
     // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
     // inside renderSourceTopicList, not mounted separately).
     function renderSourceStage() {
-      // Source v2: the active Product's source is ONE document. Resolve (and materialise on first
-      // entry) its unified master and open it, so the stage shows the document, not a topic list.
+      // Source v2: the source is ONE continuous document. Resolve (and materialise on first entry)
+      // the master to open, so the stage shows the document, not a topic list.
       var master = ensureUnifiedDocForActiveProduct();
       if (master) {
         __sourceActiveTopicId = master.id;
-        __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind if the Product changed
+        __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind if the document changed
         try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, master.id); } catch (e) {}
+        // uio-W10: whatever the stage resolved is, by definition, open. This is what puts the first
+        // tab in the strip on a fresh install without a separate seeding path.
+        var ids = openSourceDocIds();
+        if (ids.indexOf(master.id) === -1) { ids.push(master.id); saveOpenSourceDocIds(); }
       } else if (!__sourceActiveTopicId) {
         // no unified doc yet (no Product / no topics) -> restore the last-open topic on a fresh load
         try { var savedT = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY); if (savedT && libComponents()[savedT]) __sourceActiveTopicId = savedT; } catch (e) {}
       }
+      renderSourceTabs();
+      // uio-W12: what this source document belongs to, above the outline. It reads the open
+      // document; it never narrows the outline beneath it.
+      if (typeof E.renderSourceProductPanel === "function") E.renderSourceProductPanel(activeSourceMaster());
       mountSourceStageSearch();
       renderSourceTopicList();
       renderSourceArticle();
@@ -3192,7 +3379,7 @@
       if (!window.MarkdownImport) { window.alert("Markdown import isn't available (markdown-import.js failed to load)."); return; }
       // Source v2: a Product with a unified source document imports ADDITIVELY (add/update a chapter
       // with a preview), not by spawning fresh topics.
-      if (sourceMasterFor(activeSourceProductId())) {
+      if (activeSourceMaster()) {
         // spec 2d: if the Product declares variants, ask what this file updates first -- Flagship
         // (the base) or one variant (an overlay). This IS the guardrail: you can't reconcile a
         // variant manual into the Flagship base by mistake, because you must choose up front.
@@ -3201,8 +3388,17 @@
         importMarkdownAdditive(); return;
       }
       // uio-W01: same as newTopicModal -- resolved from the stage, not from a picker that is gone.
+      // uio-W14: and no longer refused when there is no Product. An import with nowhere to land
+      // mints SHARED material and lands there additively, which is the same document a glossary or
+      // a standard would be. Refusing would leave the one destination that can import telling you
+      // to go and use a different one first.
       var productId = activeSourceProductId();
-      if (!productId) { window.alert("Create a Product first — an imported source document belongs to one."); return; }
+      if (!productId) {
+        createSourceDocument("Imported source", "");
+        renderSourceStage();
+        importMarkdownModal();
+        return;
+      }
       var declaredVariants = declaredVariantsForProduct(window.ProductsStore || {}, productId);
 
       if (!declaredVariants.length) {
@@ -3298,7 +3494,7 @@
       var comps = libComponents() || {};
       var open = __sourceActiveTopicId && comps[__sourceActiveTopicId];
       if (open && open.name) return open.name;
-      var master = sourceMasterFor(activeSourceProductId());
+      var master = activeSourceMaster();
       return (master && master.name) || "";
     }
     function activeSourceProductName() {
@@ -3314,18 +3510,28 @@
       refreshSourceSelBar: refreshSourceSelBar, renderSourceArticle: renderSourceArticle, renderSourceDocNode: renderSourceDocNode,
       renderSourceStage: renderSourceStage, renderSourceToolbar: renderSourceToolbar, sourceMasterFor: sourceMasterFor,
       sourceToast: sourceToast, unifiableTopicsFor: unifiableTopicsFor, updateSourceDocBar: updateSourceDocBar,
+      // uio-W14: the document-first resolution, and the mechanism that mints a source document with
+      // or without a product. Files' creation actions (uio-W08) and the Product panel (uio-W12)
+      // call these rather than reaching for a product and hoping it names one.
+      activeSourceDocId: activeSourceDocId, activeSourceMaster: activeSourceMaster,
+      ensureUnifiedDocFor: ensureUnifiedDocFor, createSourceDocument: createSourceDocument,
       // The base-edit warning and the two-way jump stayed in editor.js when the stage moved, and
       // they read and wrote this file's state by name -- which in a module is a free identifier
       // that throws the moment its path runs. They ask through these now (arch-P3b-07).
       sourceDocModel: function () { return __sourceDocModel; },
       setSourceDocModel: function (model, topicId) { __sourceDocModel = model; __sourceDocModelTopicId = topicId; },
       sourceActiveTopicId: function () { return __sourceActiveTopicId; },
-      // Opening a topic from elsewhere in the app persists it too, so a refresh returns to it --
-      // the same pair the topic list itself writes.
+      // Opening a document from elsewhere in the app persists it too, so a refresh returns to it.
+      // uio-W10: it also joins Source's strip, so arriving from Files leaves you with a tab you can
+      // come back to rather than a document that silently replaced the last one.
       openSourceTopicId: function (id) {
+        if (window.SourceOwnership.isSourceDocument(libComponents()[id])) { openSourceDoc(id); return; }
         __sourceActiveTopicId = id;
         try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, id); } catch (e) {}
       },
+      // uio-W10: Source's strip, for the destinations that put documents into it.
+      openSourceDoc: openSourceDoc, closeSourceTab: closeSourceTab,
+      openSourceDocIds: openSourceDocIds, renderSourceTabs: renderSourceTabs,
       lockSourceEditing: function () { __sourceUnlocked = false; },
       clearSourceEditSession: function () { __sourceEditSession = null; }
     });

@@ -32,18 +32,17 @@
 
   function install(kernel) {
     var E = kernel.need(
-      "h", "renderSourceStage", "openBrowser", "canvas", "pipelineButtons",
+      "h", "renderSourceStage", "canvas", "pipelineButtons",
       "showContextMenu", "openSettingsModal", "mount", "renderSettingsBody", "pipelineByDirection",
       "publishQueue", "publishOptionsForRow", "publishFormatSummary", "publishFormatRows", "applyLeftSection", "activeLeftSection",
       "mountPublishStage", "openDocIds", "view", "fitAll", "saveRegistry", "registry",
-      "confirmModal", "promptModal", "createProduct", "doc", "closeBrowser", "mountFilesStage",
+      "confirmModal", "promptModal", "createProduct", "doc", "mountFilesStage",
       "activeSourceDocName", "activeSourceProductName"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
     var h = E.h,
         renderSourceStage = E.renderSourceStage,
-        openBrowser = E.openBrowser,
         canvas = E.canvas,
         pipelineButtons = E.pipelineButtons,
         showContextMenu = E.showContextMenu,
@@ -291,7 +290,13 @@
       var pubEl = document.getElementById("stage-publish"); if (pubEl) pubEl.hidden = stage !== "publish";
       // uio-E-C01 (EDIT-07): the doc zones (tabs / doc controls / output) were merged into the
       // single .toolbar and show only in Edit; Source/Publish show the identity zone only.
-      var tb = document.querySelector(".toolbar"); if (tb) tb.classList.toggle("toolbar--edit", stage === "edit");
+      // uio-W10 fb1: Source carries its tab strip in the SAME bar Edit does, so the bar knows which
+      // destination it is dressing rather than being Edit-or-nothing.
+      var tb = document.querySelector(".toolbar");
+      if (tb) {
+        tb.classList.toggle("toolbar--edit", stage === "edit");
+        tb.classList.toggle("toolbar--source", stage === "source");
+      }
       STAGE_IDS.forEach(function (s) {
         var btn = document.getElementById("rail-tab-" + s);
         if (btn) btn.classList.toggle("is-active", s === stage);
@@ -306,13 +311,13 @@
         if (stage === "source") renderSourceStage();
         if (stage === "publish") mountPublishStage();
       }
-      // uio-W04 replaced the bridge that used to open the old overlay here: Files is a destination
-      // of its own now. The overlay survives only for the "landed on Edit with nothing open" case
-      // below, and uio-W09 retires it -- closing it on every other destination change is what stops
-      // it hanging over one.
-      if (stage !== "files" && typeof E.closeBrowser === "function") E.closeBrowser(); // a no-op when closed
-      // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
-      if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
+      // uio-W09: LANDING ON EDIT WITH NOTHING OPEN LANDS FILES. It used to throw the modal browser
+      // over the canvas -- a surface you had to dismiss before you could do anything, hung over a
+      // destination you had just chosen. Files is the destination that answers "what do I have?",
+      // so arriving there is the honest move, and it leaves nothing to close. The overlay itself,
+      // and the closeBrowser call that used to run on every other destination change to stop it
+      // hanging over one, are both gone with it.
+      if (stage === "edit" && !openDocIds.length) { setStage("files"); return; }
       // Put the destination back where the author left it. rAF so it happens after the region is
       // visible and has a scroll height to set.
       var entering = stageScroller(stage);

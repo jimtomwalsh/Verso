@@ -178,7 +178,17 @@ function createBlockStore(dbPath, opts) {
     pages.forEach(function (p) {
       p.blockIds.forEach(function (bid) {
         var br = qGetBlock.get(docId, bid);
-        blocks[bid] = br ? JSON.parse(br.content) : null;
+        var content = br ? JSON.parse(br.content) : null;
+        // uio-W17: THE ROW ID IS THE BLOCK'S IDENTITY, so it is stamped back onto the content on
+        // the way out. `applyChange` writes the patch as the block's whole content (v1 is a coarse
+        // per-block put), so a caller that omits the id strips it from what comes back -- and a
+        // block that has forgotten its own id cannot be anchored to. Comments anchor by that id;
+        // so do source documents' range marks, which is where this surfaced: a marked node came
+        // back id-less, was given a fresh key on assembly, and every mark pointing at the old one
+        // resolved to nothing. Restoring it here fixes it for every caller at once rather than
+        // asking each to remember.
+        if (content && typeof content === "object" && content.id == null) content.id = bid;
+        blocks[bid] = content;
       });
     });
     return assembleDoc(docMeta, pages, blocks);

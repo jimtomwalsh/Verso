@@ -1052,6 +1052,80 @@
   // The persisted form is the authored content only (nodes + marks + history + _seq); the
   // undo/redo stacks are session state, never stored, so setDoc round-trips cleanly and the
   // pure-render invariant holds (nothing editor-only leaks into stored data).
+  // ---- uio-W17: a source document as BLOCK-ADDRESSABLE ROWS -----------------
+  //
+  // THE PROBLEM THIS CLOSES. `saveLibrary()` serialises the ENTIRE LibraryStore as one JSON blob on
+  // every write, so two authors in two DIFFERENT source documents overwrite each other -- each save
+  // rewrites everything. The collaboration suite (block locking model B, presence, the lease reaper,
+  // the unacked buffer) is written against block-addressable design documents and mentions
+  // LibraryStore nowhere, and the workspace model deliberately routes MORE concurrent authors into
+  // source documents. The gap gets worse the moment it ships.
+  //
+  // WHY IT IS CHEAP. Addressability already exists: every node carries a stable `key`, and every
+  // range mark anchors to those keys. Only the persistence GRANULARITY is wrong. So this is a
+  // shape change and nothing else -- a source document presented as the block store's own doc shape,
+  // one row per node, keyed by the key the node already had.
+  //
+  // The mapping is deliberately boring. One page, whose blocks are the nodes in order; the node's
+  // `key` becomes the block `id`, because inventing a second identifier for a thing that already has
+  // one is how two ids drift apart. Everything that is not a node -- version, seq, marks, history --
+  // is document metadata, so a mark's anchors travel with the document rather than with any one row
+  // it points into.
+  //
+  // Model-B locking, presence, the reaper and the unacked buffer then cover source documents with
+  // NO NEW MERGE MODEL: they operate on block rows, and these are block rows.
+  function toBlockDoc(model) {
+    var m = model || {};
+    var meta = {};
+    Object.keys(m).forEach(function (k) {
+      if (k === "nodes" || k === "undo" || k === "redo") return;   // rows, and two session-only stacks
+      meta[k] = clone(m[k]);
+    });
+    meta.kind = "source";      // what this doc IS, so a reader never has to infer it from its shape
+    return {
+      meta: meta,
+      pages: [{ id: "source", blocks: (m.nodes || []).map(function (n) {
+        var b = clone(n);
+        b.id = n.key;          // the key it already had; never a second identifier
+        return b;
+      }) }]
+    };
+  }
+  // The inverse. A doc the block store materialised comes back as the model the editor holds, with
+  // the node keys it went in with -- which is what keeps every mark anchor pointing at the same node
+  // across the storage change.
+  function fromBlockDoc(doc) {
+    var d = doc || {};
+    var meta = d.meta || {};
+    var model = makeModel();
+    Object.keys(meta).forEach(function (k) {
+      if (k === "kind") return;
+      model[k] = clone(meta[k]);
+    });
+    var page = (d.pages || [])[0] || { blocks: [] };
+    model.nodes = (page.blocks || []).map(function (b) {
+      var n = clone(b);
+      // THE ROW ID IS THE IDENTITY, always -- not just when the content happens to have lost its
+      // key. `applyChange` replaces a block's content wholesale, so a caller that writes a patch
+      // without the key strips it from the row. Falling back to ensureKeys there would MINT A NEW
+      // KEY for a node that already had one, and every range mark anchored to the old key would
+      // resolve to nothing. Found by round-tripping a marked document through the real store.
+      if (n.id != null) n.key = n.id;
+      delete n.id;
+      return n;
+    });
+    model.marks = model.marks || [];
+    model.history = model.history || [];
+    model.undo = []; model.redo = [];    // session state, never persisted
+    ensureKeys(model);
+    return model;
+  }
+  // Is this materialised doc a source document? The store holds design documents and source
+  // documents in the same tables, so the reader asks rather than guesses.
+  function isBlockSourceDoc(doc) {
+    return !!(doc && doc.meta && doc.meta.kind === "source");
+  }
+
   function toJSON(model) {
     return { version: model.version || 1, _seq: model._seq || 0, nodes: clone(model.nodes), marks: clone(model.marks), history: clone(model.history || []) };
   }
@@ -1608,6 +1682,7 @@
     splitNode: splitNode, setNodeType: setNodeType, nodesInAnchor: nodesInAnchor,
     snapshot: snapshot, pushUndo: pushUndo, undo: undo, redo: redo, canUndo: canUndo, canRedo: canRedo,
     toJSON: toJSON, fromJSON: fromJSON,
+    toBlockDoc: toBlockDoc, fromBlockDoc: fromBlockDoc, isBlockSourceDoc: isBlockSourceDoc,
     nodeByKey: nodeByKey, markById: markById, NODE_TYPES: NODE_TYPES, MARK_TYPES: MARK_TYPES,
     blocksFromText: blocksFromText, fromSections: fromSections, parseInline: parseInline,
     markStatus: markStatus, markMeta: markMeta, updateMark: updateMark,
@@ -1639,6 +1714,8 @@
     searchText: searchText, fuzzyMatch: fuzzyMatch, findMatches: findMatches, headingKeyForNode: headingKeyForNode,
     toMarkdown: toMarkdown,
     toJSON: toJSON, fromJSON: fromJSON,
+    // uio-W17: the same document, in the block store's own shape.
+    toBlockDoc: toBlockDoc, fromBlockDoc: fromBlockDoc, isBlockSourceDoc: isBlockSourceDoc,
     _pure: _pure
   };
 

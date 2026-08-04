@@ -478,3 +478,45 @@ details[open] .caret {
   background: #4a4a4a; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box;
 }
 .panel-scroll::-webkit-scrollbar-thumb:hover, .canvas::-webkit-scrollbar-thumb:hover { background: #5a5a5a; background-clip: padding-box; }
+
+/* ===== uio-W12: the Product panel — what the open document belongs to =======================
+   An INSPECTOR, in the left panel of both Source and Edit. It reads the open document and tells
+   you about it; nothing here narrows a list anywhere. That distinction is the whole ticket, so the
+   panel carries no toggle, no picker and no chip that could be mistaken for one — every control in
+   it is a link that OPENS something.
+   ========================================================================================== */
+.prodpanel { padding: var(--space-5, 10px) var(--space-6, 12px); display: flex; flex-direction: column; gap: var(--space-3, 6px); }
+.prodpanel__row { display: flex; align-items: baseline; gap: var(--space-4, 8px); min-width: 0; }
+.prodpanel__label { flex: 0 0 84px; font-size: var(--text-2xs, 10px); text-transform: uppercase; letter-spacing: var(--tracking-caps); color: var(--text-tertiary, var(--text-secondary)); }
+.prodpanel__value { flex: 1 1 auto; min-width: 0; font-size: var(--text-xs, 11px); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
+/* Looking at the primary itself, the line points at where you already are — so it says so instead
+   of offering a link back to this document. */
+.prodpanel__value--self { font-style: italic; color: var(--text-secondary); }
+.prodpanel__none { color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+.prodpanel__link {
+  flex: 1 1 auto; min-width: 0; text-align: left; padding: 0; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: var(--text-xs, 11px); color: var(--accent);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.prodpanel__link:hover { text-decoration: underline; }
+.prodpanel__action { flex: 0 0 auto; margin-top: var(--space-1, 2px); }
+.prodpanel__list { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1, 2px); }
+/* The note wraps below rather than eating the title's width: a sibling truncated to "Ae…" so a
+   parenthetical could sit beside it is the wrong thing to have kept. */
+.prodpanel__item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2, 4px); min-width: 0; }
+.prodpanel__item .prodpanel__link { flex: 1 1 100%; }
+.prodpanel__detach { flex: 0 0 auto; padding: 0 var(--space-1, 2px); border: 0; background: none; cursor: pointer; color: var(--text-tertiary, var(--text-secondary)); font-size: var(--text-2xs, 10px); }
+.prodpanel__detach:hover { color: var(--danger, var(--text-primary)); }
+.prodpanel__note { flex: 0 0 auto; font-size: var(--text-2xs, 10px); color: var(--text-tertiary, var(--text-secondary)); }
+.prodpanel__empty { font-size: var(--text-xs, 11px); color: var(--text-tertiary, var(--text-secondary)); font-style: italic; }
+/* UNTAGGED IS A PLAIN FACT, NOT AN ERROR: no red, no alarm glyph. Shared material is something
+   people make on purpose. */
+.prodpanel__untagged { font-size: var(--text-xs, 11px); line-height: 1.5; color: var(--text-secondary); }
+/* The release line is the only coloured thing in the panel, because it is the only thing that is
+   ever news. */
+.prodpanel__release { margin-top: var(--space-2, 4px); font-size: var(--text-xs, 11px); }
+.prodpanel__release--success { color: var(--success, var(--text-secondary)); }
+.prodpanel__release--warning { color: var(--warning, var(--text-secondary)); }
+.lpane__body--product { flex: 0 0 auto; border-bottom: 1px solid var(--border-strong); }
+.source-stage__product { flex: 0 0 auto; border-bottom: 1px solid var(--border-strong); }
+.source-stage__product:empty, .lpane__body--product:empty { display: none; }

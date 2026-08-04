@@ -35,6 +35,7 @@
       "activeLeftSection", "walkBlocks", "setActivePage", "insertBlock", "mintId", "pushHistory",
       "reapplyBlock", "dsModalShell", "registry", "lockSourceEditing", "pushSourceAlternate", "setStage",
       "sourceMasterFor", "renderSourceDocNode", "applyLeftSection", "canvas", "scheduleSave", "modalText",
+      "renderEditProductPanel",
       "modalField", "showContextMenu", "sourceActiveTopicId", "saveRegistry", "flushSourceEditSession", "applySourceLockState",
       "refreshSourceSelBar", "updateSourceDocBar", "setSourceDocModel", "persistSourceDocModel", "clearSourceEditSession", "renderSourceArticle",
       "openSourceTopicId", "openCourseFromBrowser", "blockById", "findPageOfBlock", "focusFrame", "reselectBlockNode",
@@ -88,28 +89,43 @@
     // SPEC 8 (source-link 02): the Edit left-panel Source tab is a read-only, live view of the OPEN
     // document's product source doc -- the same content the author sees in the Source stage, in a
     // narrow reading column, with its own find (SourceDoc.findMatches + cycle) and a TOC
-    // (SourceDoc.outline, click-to-jump + scroll-spy). It keys off the open doc's product
-    // (doc.meta.productId), NOT the rail scope, so it always matches the course in front of you. All
-    // source editing stays in the Source stage (the single-host lesson) -- nothing here is editable.
+    // (SourceDoc.outline, click-to-jump + scroll-spy). It keys off the open DOCUMENT, not the rail
+    // scope, so it always matches the course in front of you. All source editing stays in the Source
+    // stage (the single-host lesson) -- nothing here is editable.
+    //
+    // uio-W14: the document's sources are its product's primary PLUS any extras attached by hand,
+    // resolved through SourceOwnership. So a shared glossary attached to an untagged course shows
+    // here, where before "no product" meant "no source" and the panel simply gave up.
     function renderEditSourcePanel() {
       var host = document.getElementById("tab-source"); if (!host) return;
       host.innerHTML = "";
+      // uio-W12: the Product panel sits ABOVE this reading column, in the same left pane, and is
+      // repainted with it -- both answer questions about the open document, so they must never be
+      // showing two different documents.
+      if (typeof E.renderEditProductPanel === "function") E.renderEditProductPanel();
       var SD = window.SourceDoc, U = window.VersoUI;
-      var productId = (E.doc && E.doc.meta && E.doc.meta.productId) || "";
-      if (!productId) {
-        host.appendChild(h("div", "source-stage__empty", "This document isn't attached to a product. Assign one from its row menu in Files, and its source appears here."));
-        return;
-      }
-      var master = productId ? sourceMasterFor(productId) : null;
+      var owned = window.SourceOwnership.sourcesForDoc(E.doc, libComponents(), window.ProductsStore || {});
+      // The primary is what the panel reads when there is one; an untagged document with an
+      // attached extra reads that instead of nothing. uio-W12's Product panel is where the whole
+      // set is listed and switched between.
+      var master = owned.primary || owned.extras[0] || null;
       if (!master || !master.doc || !SD) {
-        host.appendChild(h("div", "source-stage__empty", "This Product has no source document yet. Build it in the Source stage."));
+        var productId = (E.doc && E.doc.meta && E.doc.meta.productId) || "";
+        host.appendChild(h("div", "source-stage__empty", productId
+          ? "This Product has no source document yet. Build it in the Source stage."
+          // uio-W13: a plain fact, not a defect report. Having no product is a state a document is
+          // legitimately in -- shared material lives there on purpose -- so this says what would
+          // put source here rather than what is wrong.
+          : "No product, and no source attached. Assign a product, or attach a source, in the Product panel above."));
         return;
       }
       var model = SD.fromJSON(master.doc);
       // source-link 03: keep the live master + model + its component id so the Place gesture can add a
       // link mark to the master and persist it (and so the canvas can resolve placements back to it).
+      // The id comes off the RESOLVED master rather than off the product, so an extra is placed
+      // against itself instead of silently against the primary.
       __editSourceMaster = master; __editSourceModel = model;
-      __editSourceMasterId = (window.ProductsStore[productId] && window.ProductsStore[productId].groundTruthId) || null;
+      __editSourceMasterId = master.id || null;
       var wrap = h("div", "edit-source");
 
       // ---- find (reuses SD.findMatches + a small local cycle, mirroring the Source stage). The

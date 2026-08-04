@@ -18,9 +18,13 @@
 // LIST IS THE DEFAULT AND THE SHIPPED ANSWER. Forty products in a card grid is a scrolling problem;
 // four products in a list still reads fine. Card mode exists for visual recall, not as the primary.
 //
-// WHAT THIS FILE DOES NOT OWN. The band headers and the primary-source treatment are uio-W05; the
-// facet rail is uio-W06; open-vs-reveal is uio-W07; creation actions are uio-W08. Files renders
-// bands here with a plain header on purpose, so W05 has one place to make them speak.
+// FACETS ARE A LENS, NEVER A MODE (uio-W06). Type and Product narrow what is listed and change
+// nothing else: the bands keep their identity underneath, the header keeps counting the whole
+// corpus, and clearing every facet returns to exactly the unfiltered view. The selection is a local
+// in this module -- never persisted, never on the kernel -- because a filter state the rest of the
+// app could read is the global Product scope uio-W01 deleted, rebuilt under a friendlier name.
+//
+// WHAT THIS FILE DOES NOT OWN. Open-vs-reveal is uio-W07; creation actions are uio-W08.
 //
 // The pure core -- the corpus, the grouping, the summary -- is DOM-free and exported, because
 // merging two stores into one list is the part that has to be right and the part a browser cannot
@@ -183,12 +187,191 @@
   function normGrouping(g) { return GROUPINGS.indexOf(g) === -1 ? "product" : g; }
   function normMode(m) { return MODES.indexOf(m) === -1 ? "list" : m; }
 
+  // ---- uio-W06: facets, which are a LENS and must never become a mode ------
+  //
+  // This is the ticket most likely to regress into the thing uio-W01 just deleted. The global
+  // Product scope was app state that every destination read: it filtered the Edit tab strip,
+  // filtered Publish, hard-gated Source. A facet rail that persisted, or that anything outside
+  // Files could read, would be that same mechanism wearing a filter's clothes.
+  //
+  // So the guard rails are structural, not a note in a comment:
+  //   - facet state lives in a local in the destination and is NEVER written to storage,
+  //   - it is never exposed on the kernel, so no other module can reach it,
+  //   - and clearing every facet returns to EXACTLY the unfiltered view -- which is true by
+  //     construction here, because applyFacets on an empty selection is the identity function.
+  //
+  // Within a dimension the selections are an OR (Course *or* Guide); across dimensions an AND
+  // (a Course *in* Alpha). That is what "lens" means: narrowing, never switching.
+  var FACET_DIMS = ["type", "product"];
+
+  function normFacets(f) {
+    var out = { type: {}, product: {} };
+    if (!f || typeof f !== "object") return out;
+    FACET_DIMS.forEach(function (dim) {
+      var sel = f[dim];
+      if (!sel || typeof sel !== "object") return;
+      Object.keys(sel).forEach(function (k) { if (sel[k]) out[dim][k] = true; });
+    });
+    return out;
+  }
+  function facetCount(f) {
+    f = normFacets(f);
+    return Object.keys(f.type).length + Object.keys(f.product).length;
+  }
+  // A document's value in a dimension. Product is "" for the No product facet, which is a real
+  // selection -- shared cross-product material is a thing you look for, not an absence.
+  function facetValue(d, dim) { return dim === "type" ? (d && d.type) || "" : (d && d.productId) || ""; }
+
+  // The identity function when nothing is selected. That is the whole acceptance criterion:
+  // clearing every facet returns to exactly the prior view, with no path that rebuilds it
+  // differently.
+  function applyFacets(docs, facets) {
+    var f = normFacets(facets);
+    var dims = FACET_DIMS.filter(function (dim) { return Object.keys(f[dim]).length; });
+    if (!dims.length) return (docs || []).slice();
+    return (docs || []).filter(function (d) {
+      return dims.every(function (dim) { return !!f[dim][facetValue(d, dim)]; });
+    });
+  }
+
+  // Counts for a dimension are computed with every OTHER dimension applied but not that one --
+  // the standard faceted-search rule, and the one that stops a facet you can click from
+  // promising results it cannot deliver. Counting with the dimension applied to itself would
+  // show every unselected row as 0 the moment you picked one.
+  //
+  // Every type is listed even at zero, so the four document types read as a fixed vocabulary
+  // rather than a list that grows as you create things. Products list every product that exists
+  // plus No product.
+  function facetCounts(docs, facets, products) {
+    docs = docs || [];
+    products = products || {};
+    var f = normFacets(facets);
+    function tally(dim) {
+      var others = FACET_DIMS.filter(function (x) { return x !== dim; });
+      var pool = docs.filter(function (d) {
+        return others.every(function (x) {
+          var sel = f[x];
+          return !Object.keys(sel).length || !!sel[facetValue(d, x)];
+        });
+      });
+      var n = {};
+      pool.forEach(function (d) { var v = facetValue(d, dim); n[v] = (n[v] || 0) + 1; });
+      return n;
+    }
+    var tn = tally("type");
+    var pn = tally("product");
+    var productKeys = Object.keys(products).sort(function (a, b) {
+      var na = ((products[a] && products[a].name) || a).toLowerCase();
+      var nb = ((products[b] && products[b].name) || b).toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    // A product with no documents at all is still worth listing -- an empty product is a real
+    // thing you just made, and hiding it reads as the creation having failed.
+    Object.keys(pn).forEach(function (k) { if (k && productKeys.indexOf(k) === -1) productKeys.push(k); });
+    return {
+      type: TYPE_ORDER.map(function (t) {
+        return { dim: "type", key: t, label: TYPE_LABEL[t], count: tn[t] || 0, active: !!f.type[t] };
+      }),
+      product: productKeys.map(function (pid) {
+        return { dim: "product", key: pid, label: (products[pid] && products[pid].name) || pid,
+                 count: pn[pid] || 0, active: !!f.product[pid] };
+      }).concat([{ dim: "product", key: "", label: "No product", count: pn[""] || 0, active: !!f.product[""] }])
+    };
+  }
+
+  // What the dismissible chips above the results say. Named in the same words the rail uses, so
+  // dismissing a chip and unticking its row are visibly the same act.
+  function facetChips(facets, products) {
+    var f = normFacets(facets);
+    products = products || {};
+    var out = [];
+    TYPE_ORDER.forEach(function (t) {
+      if (f.type[t]) out.push({ dim: "type", key: t, label: "Type: " + TYPE_LABEL[t] });
+    });
+    Object.keys(f.product).forEach(function (pid) {
+      out.push({ dim: "product", key: pid,
+                 label: "Product: " + (pid ? ((products[pid] && products[pid].name) || pid) : "No product") });
+    });
+    return out;
+  }
+
+  // THE ONE-TIME SEED, and the reason it is one-time. uio-W01 retired the global Product scope but
+  // kept the last selected Product under a new name, because it is the best guess at the facet
+  // Files should open on. Reading it here is a courtesy on the first launch after the upgrade.
+  //
+  // The key is REMOVED in the same pass, always -- including when the product it names no longer
+  // exists. A seed that survived would be a persisted scope by another route, which is exactly what
+  // this ticket exists not to rebuild.
+  // ---- uio-W07: open vs reveal --------------------------------------------
+  //
+  // A row has to say whether the document is ALREADY OPEN, because the alternative is finding out
+  // by clicking -- and the wrong answer to that click is a second copy of a document you already
+  // had, in a strip you now have to reconcile by hand.
+  //
+  // Where a document is open is a fact about the two strips, not about the document: Edit holds
+  // registry ids, Source holds LibraryStore ids, and neither can hold the other's. So this reads
+  // both open sets and answers with the destination that has it, or "" for closed.
+  function openStateOf(d, openDesignIds, openSourceIds) {
+    if (!d) return "";
+    if (d.kind === "source") return (openSourceIds || []).indexOf(d.id) !== -1 ? "source" : "";
+    return (openDesignIds || []).indexOf(d.id) !== -1 ? "edit" : "";
+  }
+
+  // ---- uio-W08: what a creation form offers -------------------------------
+  //
+  // The empty option reads "None (shared)", never "All products". They look alike and mean opposite
+  // things: one is a filter saying "do not narrow", the other is a CHOICE saying "this belongs to no
+  // product", which is a real and deliberate state for a glossary or a standard. Reusing the filter's
+  // wording here would tell an author they were declining to choose when they were choosing.
+  //
+  // "+ New product…" sits at the bottom so a product can be made from inside the form that needs it,
+  // rather than sending the author away to make one and come back.
+  var NO_PRODUCT_LABEL = "None (shared)";
+  var NEW_PRODUCT_VALUE = "__new";
+  function productChoices(products) {
+    products = products || {};
+    var opts = [{ value: "", label: NO_PRODUCT_LABEL }];
+    Object.keys(products).sort(function (a, b) {
+      var na = ((products[a] && products[a].name) || a).toLowerCase();
+      var nb = ((products[b] && products[b].name) || b).toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    }).forEach(function (id) {
+      opts.push({ value: id, label: (products[id] && products[id].name) || id });
+    });
+    opts.push({ value: NEW_PRODUCT_VALUE, label: "+ New product…" });
+    return opts;
+  }
+  // "Make this the primary source" AUTO-TICKS when the product has no primary yet, because that is
+  // what the author almost always means: the first source document you write for a product is what
+  // it traces back to. It does NOT auto-tick when one exists, because silently displacing a
+  // product's primary is the one thing this checkbox must never do by default.
+  function primaryDefault(products, productId) {
+    if (!productId) return false;              // shared material is nobody's primary
+    var p = (products || {})[productId];
+    return !!p && !p.groundTruthId;
+  }
+
+  var FACET_SEED_KEY = "verso.filesProductFacetSeed";
+  function consumeFacetSeed(storage, products) {
+    if (!storage) return "";
+    var saved = null;
+    try { saved = storage.getItem(FACET_SEED_KEY); } catch (e) { return ""; }
+    try { storage.removeItem(FACET_SEED_KEY); } catch (e) {}
+    if (!saved) return "";
+    return (products && products[saved]) ? saved : "";
+  }
+
   var PURE = {
     GROUPING_KEY: GROUPING_KEY, MODE_KEY: MODE_KEY, GROUPINGS: GROUPINGS, MODES: MODES,
-    TYPE_ORDER: TYPE_ORDER, TYPE_LABEL: TYPE_LABEL,
+    TYPE_ORDER: TYPE_ORDER, TYPE_LABEL: TYPE_LABEL, FACET_DIMS: FACET_DIMS, FACET_SEED_KEY: FACET_SEED_KEY,
     buildCorpus: buildCorpus, corpusSummary: corpusSummary, groupCorpus: groupCorpus,
     matchesQuery: matchesQuery, byRecent: byRecent, byBand: byBand, bandPrimary: bandPrimary,
-    normGrouping: normGrouping, normMode: normMode
+    normGrouping: normGrouping, normMode: normMode,
+    normFacets: normFacets, facetCount: facetCount, applyFacets: applyFacets,
+    facetCounts: facetCounts, facetChips: facetChips, consumeFacetSeed: consumeFacetSeed,
+    openStateOf: openStateOf,
+    productChoices: productChoices, primaryDefault: primaryDefault,
+    NO_PRODUCT_LABEL: NO_PRODUCT_LABEL, NEW_PRODUCT_VALUE: NEW_PRODUCT_VALUE
   };
 
   // ---- the destination -----------------------------------------------------
@@ -197,7 +380,11 @@
     var E = kernel.need(
       "h", "registry", "libComponents", "switchDoc", "openDocIds", "saveOpenDocIds",
       "colourForName", "formatRelativeTime", "showContextMenu", "promoteToProductModal",
-      "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse",
+      "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse", "openSourceTopicId",
+      // uio-W08: the three creation actions. All three live here, and none of them needs a
+      // pre-selected product -- there is no scope left to inherit.
+      "createSourceDocument", "createProduct", "showNewDocDialog", "openSourceDocIds", "storeLocationText",
+      "promptModal", "modalText", "saveProducts",
       "deleteCourse", "tagDocProductStage", "saveRegistry", "dsModalShell", "modalField",
       "confirmModal"
     );
@@ -211,6 +398,11 @@
     var selected = {};
     var grouping = normGrouping(readPref(GROUPING_KEY));
     var mode = normMode(readPref(MODE_KEY));
+    // uio-W06: the facet selection. A LOCAL, deliberately. It is never written to storage and
+    // never exposed on the kernel, because a facet state anything else could read is the global
+    // Product scope uio-W01 deleted, rebuilt.
+    var facets = { type: {}, product: {} };
+    var seedConsumed = false;
 
     function readPref(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
     function writePref(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -228,18 +420,39 @@
     }
 
     // Opening a document means opening it where it belongs: a design document into Edit, a source
-    // document into Source. uio-W07 makes an already-open document REVEAL its tab rather than
-    // opening a second copy; until then this is the plain open.
+    // document into Source.
+    //
+    // uio-W07: AN ALREADY-OPEN DOCUMENT IS REVEALED, NOT DUPLICATED. Both openers are idempotent on
+    // their strip -- a document already in the open set is switched to rather than pushed again --
+    // so "open" and "reveal" are the same call and there is no second path that could disagree with
+    // the first. What reveal adds is scrolling the tab into view: landing a destination whose strip
+    // has scrolled past the tab you just chose leaves you looking for it.
     function openDoc(d) {
       if (!d) return;
       if (d.kind === "source") {
-        if (window.__productRail && window.__productRail.openSourceTopicId) window.__productRail.openSourceTopicId(d.id);
+        // This reached for `window.__productRail.openSourceTopicId`, which is never assigned -- the
+        // hook object carries the browser-verify entry points, not this one. So Files landed Source
+        // and left whatever was already open showing, since uio-W04. It goes through the kernel now,
+        // which is also what puts the document in Source's strip (uio-W10).
+        E.openSourceTopicId(d.id);
         if (window.__leftRail) window.__leftRail.setStage("source");
+        revealTab("#source-tabs", d.id);
         return;
       }
       if (E.openDocIds.indexOf(d.id) === -1) { E.openDocIds.push(d.id); E.saveOpenDocIds(E.openDocIds); }
       E.switchDoc(d.id);
       if (window.__leftRail) window.__leftRail.setStage("edit");
+      revealTab("#toolbar-tabs", d.id);
+    }
+    // Scroll the now-active tab into the strip. Deferred a frame because the destination has only
+    // just been shown, and a strip that is still display:none has no scroll geometry to work with.
+    function revealTab(stripSel, id) {
+      if (typeof document === "undefined") return;
+      setTimeout(function () {
+        var strip = document.querySelector(stripSel); if (!strip) return;
+        var tab = strip.querySelector(".vds-doctab.is-active");
+        if (tab && tab.scrollIntoView) tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }, 0);
     }
 
     function ensureUI() {
@@ -282,13 +495,83 @@
       });
       modeSeg.classList.add("files__mode");
       controls.appendChild(modeSeg);
+      // uio-W08: ONE New control opening the three actions, rather than three buttons competing for
+      // the header. The full three-up set lives in the empty state, where naming every way in is the
+      // whole job of the screen.
+      var newBtn = window.VersoUI.Button({ variant: "primary", size: "sm", label: "New", onClick: newMenu });
+      newBtn.classList.add("files__new");
+      controls.appendChild(newBtn);
       head.appendChild(controls);
       host.appendChild(head);
 
+      // uio-W06: the facet rail sits BESIDE the results, not above them, so it reads as a lens you
+      // are looking through rather than a control that changed the screen. The results keep their
+      // own scroll; the rail does not scroll away from under your hand while you use it.
+      var main = h("div", "files__main");
+      var rail = h("div", "files__facets");
       var body = h("div", "files__body");
-      host.appendChild(body);
-      ui = { host: host, count: count, body: body };
+      main.appendChild(rail);
+      main.appendChild(body);
+      host.appendChild(main);
+      // uio-W09: the retired overlay's footer carried the one line where the app admits out loud
+      // whether the work is in a real folder or in browser storage. It belongs to whichever surface
+      // answers "where are my documents?", and that is this one now.
+      host.appendChild(h("div", "files__store", E.storeLocationText()));
+      ui = { host: host, count: count, body: body, rail: rail };
       return ui;
+    }
+
+    // One facet row: the canonical Checkbox, a name, a count. A CHECKBOX because the selections
+    // within a dimension are an OR and you can hold several -- a radio would say "mode", which is
+    // the one thing this rail must never become.
+    function facetRow(f) {
+      var row = window.VersoUI.Checkbox({
+        checked: !!f.active, label: f.label,
+        onChange: function (on) {
+          if (on) facets[f.dim][f.key] = true; else delete facets[f.dim][f.key];
+          render();
+        }
+      });
+      row.classList.add("files-facet");
+      if (f.active) row.classList.add("is-active");
+      if (!f.count) row.classList.add("is-empty");
+      row.appendChild(h("span", "files-facet__count", String(f.count)));
+      row.title = f.label + " — " + f.count + (f.count === 1 ? " document" : " documents");
+      return row;
+    }
+
+    function renderFacetRail(all) {
+      var counts = facetCounts(all, facets, window.ProductsStore || {});
+      ui.rail.innerHTML = "";
+      [["Type", counts.type], ["Product", counts.product]].forEach(function (pair) {
+        var group = h("div", "files-facets__group");
+        group.appendChild(h("div", "files-facets__group-label", pair[0]));
+        pair[1].forEach(function (f) { group.appendChild(facetRow(f)); });
+        ui.rail.appendChild(group);
+      });
+    }
+
+    // The chips are the same act as the rail's ticks, said again where the results are, because
+    // "why am I seeing only these?" has to be answerable without looking away from the list.
+    function facetChipBar() {
+      var chips = facetChips(facets, window.ProductsStore || {});
+      if (!chips.length) return null;
+      var bar = h("div", "files__chips");
+      chips.forEach(function (c) {
+        var chip = h("button", "files__chip", c.label);
+        chip.type = "button";
+        chip.title = "Remove this filter";
+        chip.appendChild(h("span", "files__chip-x", "✕"));
+        chip.addEventListener("click", function () { delete facets[c.dim][c.key]; render(); });
+        bar.appendChild(chip);
+      });
+      if (chips.length > 1) {
+        bar.appendChild(window.VersoUI.Button({
+          variant: "ghost", size: "sm", label: "Clear all",
+          onClick: function () { facets = { type: {}, product: {} }; render(); }
+        }));
+      }
+      return bar;
     }
 
     // uio-W05: THE BAND HEADER IS THE SPINE OF THE WHOLE MODEL. You must be able to see which
@@ -398,12 +681,153 @@
       return bar;
     }
 
-    function docRow(d, showTypeChip) {
+    // ---- uio-W08: the three creation actions --------------------------------
+    //
+    // ALL THREE LIVE HERE, and none of them needs a pre-selected product. Creation used to inherit
+    // the global scope -- a new document was silently stamped with whatever the top bar happened to
+    // be showing -- and the Source path refused outright when nothing was selected. There is no
+    // scope left to inherit and nothing left to refuse: the author chooses, in the form, including
+    // choosing none.
+
+    // The product row every creation form shares, so the three read the same and a product made in
+    // one is a product made in all. Returns a getter for the chosen id.
+    function productField(body, initial, onProductMade) {
+      var chosen = initial || "";
+      var row = E.modalField(body, "Product");
+      var sel = null;
+      function announce() { if (typeof onProductMade === "function") onProductMade(chosen); }
+      function onChange(v) {
+        // "+ New product…" makes one from inside the form that needs it, rather than sending the
+        // author away to make one and come back to a form they would have to fill in again. Either
+        // way the select is rebuilt, so cancelling puts the previous choice back rather than
+        // leaving the row showing a product that was never created.
+        if (v === NEW_PRODUCT_VALUE) {
+          E.promptModal("New product", "Name", "", function (name) {
+            if ((name || "").trim()) chosen = E.createProduct(name).id;
+            rebuild(); announce();
+          });
+          return;
+        }
+        chosen = v || "";
+        announce();
+      }
+      function rebuild() {
+        var next = window.VersoUI.Select({
+          options: productChoices(window.ProductsStore || {}), value: chosen, onChange: onChange
+        });
+        if (sel) row.replaceChild(next, sel); else row.appendChild(next);
+        sel = next;
+      }
+      rebuild();
+      return { get: function () { return chosen; } };
+    }
+
+    function newSourceDocumentModal() {
+      var primaryTick = null, nameIn = null, product = null;
+      var shell = E.dsModalShell({
+        id: "files-new-source-modal",
+        title: "New source document",
+        subtitle: "The written material a product traces back to. Shared material — a glossary, a standard — belongs to no product on purpose.",
+        primaryLabel: "Create",
+        onPrimary: function () {
+          var name = (nameIn.value || "").trim();
+          if (!name) { window.alert("Give the document a name."); return; }
+          var pid = product.get();
+          var master = E.createSourceDocument(name, pid);
+          // The tick is what sets groundTruthId, so an author who unticks it on a product with no
+          // primary gets a second source document and a product that still has none -- which is a
+          // legitimate thing to want and used to be impossible to express.
+          var p = pid && window.ProductsStore[pid];
+          if (p) {
+            if (primaryTick.checked) p.groundTruthId = master.id;
+            else if (p.groundTruthId === master.id) delete p.groundTruthId;
+            E.saveProducts();
+          }
+          shell.modal.remove();
+          // Files is stale the moment a document is created, and it keeps a live instance
+          // (uio-W03) -- so it is marked for a rebuild on the next entry rather than re-rendered
+          // behind a destination the author is leaving.
+          if (window.__leftRail && window.__leftRail.invalidate) window.__leftRail.invalidate("files");
+          E.openSourceTopicId(master.id);
+          if (window.__leftRail) window.__leftRail.setStage("source");
+        }
+      });
+      nameIn = E.modalText(shell.body, "Name", "", "e.g. Aegis Node Reference");
+      product = productField(shell.body, "", function (pid) { syncPrimary(pid); });
+      var tickRow = E.modalField(shell.body, "Primary source");
+      primaryTick = h("input", "files__tick"); primaryTick.type = "checkbox";
+      var tickLabel = h("label", "files-new__tick");
+      tickLabel.appendChild(primaryTick);
+      tickLabel.appendChild(h("span", null, "Make this the primary source"));
+      tickRow.appendChild(tickLabel);
+      function syncPrimary(pid) {
+        primaryTick.checked = primaryDefault(window.ProductsStore || {}, pid);
+        primaryTick.disabled = !pid;   // shared material is nobody's primary
+      }
+      syncPrimary("");
+    }
+
+    function newProductModal() {
+      E.promptModal("New product", "Name", "", function (name) {
+        if (!(name || "").trim()) return;
+        var p = E.createProduct(name);
+        // Creation RETURNS TO FILES with the new (empty) band in view. It used to land on a
+        // dedicated product page, which was a screen whose only content was the absence of content.
+        if (window.__leftRail) window.__leftRail.setStage("files");
+        render();
+        var band = ui && ui.body.querySelector('[data-band="' + p.id + '"]');
+        if (band && band.scrollIntoView) band.scrollIntoView({ block: "nearest" });
+      });
+    }
+
+    function newMenu(ev) {
+      var r = ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect
+        ? ev.currentTarget.getBoundingClientRect() : { left: 0, bottom: 0 };
+      E.showContextMenu(r.left, r.bottom + 4, [
+        { head: "New" },
+        { label: "Source document…", onClick: newSourceDocumentModal },
+        { label: "Design document…", onClick: function () { E.showNewDocDialog(); } },
+        { sep: true },
+        { label: "Product…", onClick: newProductModal }
+      ]);
+    }
+
+    // uio-W08 §4.7. FIRST RUN NAMES WHAT YOU CAN DO AND OFFERS ALL THREE WAYS TO DO IT. No
+    // destination instructs you to go and use a different one first -- the whole reason Source used
+    // to say "Pick a Product in the top bar" and the top bar no longer exists.
+    function emptyState() {
+      var wrap = h("div", "files-empty");
+      var glyph = h("div", "files-empty__glyph");
+      glyph.innerHTML = window.Icon ? window.Icon("folder") : "";
+      wrap.appendChild(glyph);
+      wrap.appendChild(h("div", "files-empty__title", "Nothing here yet"));
+      wrap.appendChild(h("div", "files-empty__body",
+        "Create a product, a source document, or a design document to get started."));
+      var acts = h("div", "files-empty__actions");
+      acts.appendChild(window.VersoUI.Button({ variant: "primary", size: "sm", label: "New source document", onClick: newSourceDocumentModal }));
+      acts.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", label: "New design document", onClick: function () { E.showNewDocDialog(); } }));
+      acts.appendChild(window.VersoUI.Button({ variant: "secondary", size: "sm", label: "New product", onClick: newProductModal }));
+      wrap.appendChild(acts);
+      return wrap;
+    }
+
+    // What is open right now, read fresh on every render -- so closing the last tab for a document
+    // clears its label in Files without Files having to be told.
+    function openSets() {
+      return {
+        design: E.openDocIds || [],
+        source: (typeof E.openSourceDocIds === "function") ? E.openSourceDocIds() : []
+      };
+    }
+
+    function docRow(d, showTypeChip, open) {
       var prod = d.productId && window.ProductsStore ? window.ProductsStore[d.productId] : null;
       return window.VersoUI.DocumentRow({
         title: d.title,
         type: d.type,
         typeChip: showTypeChip,
+        // uio-W07: the row states whether it is already open, and where.
+        openIn: openStateOf(d, open.design, open.source),
         primary: d.primary,
         dot: d.productId ? E.colourForName(d.productId) : null,
         dotTitle: d.productId ? ("Product: " + ((prod && prod.name) || d.productId)) : null,
@@ -414,8 +838,9 @@
       });
     }
 
-    function docCard(d, showTypeChip) {
-      var card = h("div", "files-card" + (d.primary ? " is-primary" : ""));
+    function docCard(d, showTypeChip, open) {
+      var card = h("div", "files-card" + (d.primary ? " is-primary" : "") +
+        (openStateOf(d, open.design, open.source) ? " is-open" : ""));
       card.setAttribute("data-doc-type", d.type);
       // The same primary treatment the list carries, so switching mode never changes what a
       // document IS -- only how much room it takes.
@@ -428,6 +853,9 @@
       card.appendChild(h("span", "files-card__title", d.title));
       var meta = h("span", "files-card__meta");
       if (showTypeChip) meta.appendChild(h("span", "files-card__chip", T.label));
+      // The same fact the list row states, in the room a card has for it.
+      var openIn = openStateOf(d, open.design, open.source);
+      if (openIn) meta.appendChild(h("span", "files-card__open", window.VersoUI._pure.openStateLabel(openIn)));
       meta.appendChild(h("span", "files-card__when",
         window.VersoUI._pure.compactRelativeTime(d.updatedAt, Date.now())));
       card.appendChild(meta);
@@ -437,29 +865,54 @@
 
     function render() {
       if (!ensureUI()) return;
-      var all = corpus().filter(function (d) { return matchesQuery(d, query); });
-      var sum = corpusSummary(all);
+      // The one-time facet seed from the retired global scope (uio-W01). Consumed on the first
+      // render, when the product store is populated, and the key is removed in the same pass.
+      if (!seedConsumed) {
+        seedConsumed = true;
+        var seed = consumeFacetSeed(typeof localStorage !== "undefined" ? localStorage : null,
+                                    window.ProductsStore || {});
+        if (seed) facets.product[seed] = true;
+      }
+      var searched = corpus().filter(function (d) { return matchesQuery(d, query); });
+      // uio-W06: facets narrow what is LISTED. The header keeps counting the whole searched corpus,
+      // so the number you are filtering down from stays on screen -- a count that shrank with the
+      // filter would leave you unable to tell a narrow lens from an empty library.
+      var all = applyFacets(searched, facets);
+      var sum = corpusSummary(searched);
       ui.count.textContent = sum.documents + (sum.documents === 1 ? " document" : " documents") +
         (sum.products ? (" · " + sum.products + (sum.products === 1 ? " product" : " products")) : "");
+      renderFacetRail(searched);
       ui.body.innerHTML = "";
       ui.body.classList.toggle("files__body--cards", mode === "card");
-      // Drop ticks for documents no longer listed -- deleted, or filtered out by a search. A
-      // selection that outlives what it pointed at is how a bulk action touches the wrong thing.
+      // Drop ticks for documents no longer listed -- deleted, or filtered out by a search or a
+      // facet. A selection that outlives what it pointed at is how a bulk action touches the wrong
+      // thing.
       var visible = {}; all.forEach(function (d) { visible[d.id] = 1; });
       Object.keys(selected).forEach(function (id) { if (!visible[id]) delete selected[id]; });
+      var chips = facetChipBar();
+      if (chips) ui.body.appendChild(chips);
       var bar = bulkBar();
       ui.body.classList.toggle("has-selection", !!bar);
       if (bar) ui.body.appendChild(bar);
 
       if (!all.length) {
-        ui.body.appendChild(h("div", "files__empty",
-          query ? "No document matches that." : "No documents yet."));
+        // A search or a facet that finds nothing is NOT first run: the library is not empty, this
+        // lens is. Offering "create a product to get started" there would answer a question nobody
+        // asked. Only a genuinely empty corpus gets the first-run state.
+        if (facetCount(facets) || query) {
+          ui.body.appendChild(h("div", "files__empty",
+            facetCount(facets) ? "No document matches those filters." : "No document matches that."));
+          return;
+        }
+        ui.body.appendChild(emptyState());
         return;
       }
       // A type chip is redundant in the Type view -- the band above already says it.
       var showTypeChip = grouping !== "type";
+      var open = openSets();
       groupCorpus(all, grouping, window.ProductsStore || {}).forEach(function (g) {
         var band = h("div", "files-band");
+        band.setAttribute("data-band", g.key);
         if (g.label || g.note) band.appendChild(bandHeader(g));
         var list = h("div", mode === "card" ? "files-band__cards" : "files-band__rows");
         g.docs.forEach(function (d) {
@@ -467,7 +920,7 @@
           // role chip already says what type it is, and two chips saying one thing is the noise the
           // type chip is switched off for elsewhere.
           var chip = showTypeChip && !(d.primary && d.type === "source");
-          var el = mode === "card" ? docCard(d, chip) : docRow(d, chip);
+          var el = mode === "card" ? docCard(d, chip, open) : docRow(d, chip, open);
           // uio-W05, the DIVIDER treatment: the primary source is not just first in its band, it is
           // visibly the thing the rest descend from -- an accent left border, a heavier title, and a
           // rule separating it from the design documents beneath. The prototype's subtitle variant

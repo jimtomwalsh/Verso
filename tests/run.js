@@ -303,7 +303,7 @@ section("syntax");
  "src/render.js", "src/render-context.js", "src/editor.js", "src/persist.js", "src/export.js",
  "src/csv.js", "src/schema.js", "src/theme.js", "src/model.js",
  "src/components.js", "src/runtime.js", "src/quiz-runtime.js",
- "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
+ "src/ui-kit.js", "src/markdown-lite.js", "src/source-doc.js", "src/source-marks.js", "src/source-ownership.js", "src/publish-queue.js", "src/publish-presets.js", "src/release-history.js", "src/markdown-import.js", "src/line-diff.js", "src/icons.js", "src/verso-format.js", "src/migration.js", "src/store-native.js",
  "src/store-http.js", "src/sync-client.js", "server/store.js", "server/verso-server.js", "server/index.js", "server/block-store.js",
  "server/sync.js", "server/sync-wire.js", "server/lock-manager.js", "server/lock-reaper.js", "server/envelope.js", "server/presence.js", "server/identity.js", "server/review.js",
  "server/migrations.js", "server/backup.js", "server/fixtures.js"
@@ -3365,32 +3365,64 @@ section("#71 recents");
   ok("tagDocProductStage is null-safe", g.tagDocProductStage(null, "x", "y") === null);
 })();
 
-// ---- SPEC 7: file picker — doc browser grouped by geo (pure) ----
-section("editor-rework file-picker grouping");
+// ---- SPEC 7 -> uio-W09: the picker's geometry grouping, which survives as Files' Type view ----
+// The overlay browser grouped documents by GEOMETRY, because a slide deck and a workbook do not
+// belong in the same row. uio-W09 deleted the overlay; the epic's ledger keeps that grouping, as
+// Files' Type view. So the claim moves rather than being dropped -- these are the same four
+// groups, in the same order, over a corpus that is now BOTH stores rather than half of them.
+section("uio-W09 the picker's grouping survives as Files' Type view");
 (function () {
-  var t = src("src/editor.js");
-  // arch-P3b-07k: a fenced slice must follow its code -- the grouping moved to editor/home.js.
-  var m = src("src/editor/home.js").match(/\/\* @pure-browser-geo-start \*\/([\s\S]*?)\/\* @pure-browser-geo-end \*\//);
-  if (!m) { ok("locate @pure-browser-geo fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { groupDocIdsByGeo: groupDocIdsByGeo, BROWSER_GEO_ORDER: BROWSER_GEO_ORDER };")();
-  var reg = { a: { geo: "reflow" }, b: { geo: "paged" }, c: { geo: "reflow" }, d: { geo: "frame" }, e: { geo: "unknownGeo" } };
-  var geoOf = function (doc) { return doc.geo; };
-  var groups = g.groupDocIdsByGeo(["a", "b", "c", "d", "e"], reg, geoOf);
-  ok("groups appear in canonical geo order (reflow, frame, paged)", groups.map(function (x) { return x.geo; }).join(",") === "reflow,frame,paged");
-  ok("reflow group holds the reflow docs + unknown-geo fallback", groups[0].ids.sort().join(",") === "a,c,e");
-  ok("frame group holds the frame doc", groups[1].ids.join(",") === "d");
-  ok("paged group holds the paged doc", groups[2].ids.join(",") === "b");
-  ok("an empty geo produces no group", g.groupDocIdsByGeo(["b"], reg, geoOf).map(function (x) { return x.geo; }).join(",") === "paged");
-  ok("ids with no registry doc are dropped", g.groupDocIdsByGeo(["a", "ghost"], reg, geoOf)[0].ids.join(",") === "a");
-  ok("null-safe on empty input", g.groupDocIdsByGeo(null, reg, geoOf).length === 0);
-  // the browser is product-scoped + auto-opens on a zero-tab Edit landing
-  // arch-P3b-07k: both claims are about the browser, which is editor/home.js now.
-  // uio-W01 REVERSED this: the browser used to be scoped by the global Product, so a document you
-  // had open could be missing from the browser meant to list everything. It lists everything now.
-  ok("the browser lists every document, filtered only by the search query", /courseMatchesQuery\(registry\[id\], browserQuery\);/.test(src("src/editor/home.js")) &&
-    src("src/editor/home.js").indexOf("docMatchesProductStage") === -1);
-  ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(src("src/editor/shell.js")));
-  ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(src("src/editor/home.js")) && /cell\.interactive \? "Interactive" : "Static"/.test(src("src/editor/home.js")));
+  var F = require(path.join(ROOT, "src/editor/files.js"))._pure;
+  var docs = [
+    { id: "a", type: "reflow", title: "A" }, { id: "b", type: "paged", title: "B" },
+    { id: "c", type: "reflow", title: "C" }, { id: "d", type: "frame", title: "D" },
+    { id: "e", type: "unknownGeo", title: "E" }, { id: "s", type: "source", title: "S" }
+  ];
+  var groups = F.groupCorpus(docs, "type", {});
+  ok("groups appear in canonical order, with Source now leading the geometries",
+    groups.map(function (g) { return g.key; }).join(",") === "source,reflow,frame,paged");
+  ok("the reflow group holds the reflow documents AND the unknown-geometry fallback",
+    groups[1].docs.map(function (d) { return d.id; }).sort().join(",") === "a,c,e");
+  ok("the frame group holds the frame document", groups[2].docs.map(function (d) { return d.id; }).join(",") === "d");
+  ok("the paged group holds the paged one", groups[3].docs.map(function (d) { return d.id; }).join(",") === "b");
+  ok("SOURCE DOCUMENTS HAVE A GROUP AT ALL NOW -- the overlay could never list one",
+    groups[0].docs.map(function (d) { return d.id; }).join(",") === "s");
+  ok("an absent type produces no group", F.groupCorpus([docs[1]], "type", {}).map(function (g) { return g.key; }).join(",") === "paged");
+  ok("null-safe on empty input", F.groupCorpus(null, "type", {}).length === 0);
+
+  // --- the overlay itself, and every route into it ---
+  var HOME = src("src/editor/home.js"), SHELL = src("src/editor/shell.js"), ED = src("src/editor.js");
+  ok("NO OVERLAY BROWSER REMAINS", ["ensureBrowser", "openBrowser", "closeBrowser", "browserIsOpen",
+    "renderBrowserGrid", "buildBrowserCard", "buildBrowserEmpty"].every(function (fn) {
+      return HOME.indexOf("function " + fn + "(") === -1;
+    }));
+  ok("and nothing calls one", ["src/editor.js", "src/editor/shell.js", "src/editor/home.js",
+    "src/editor/files.js", "src/editor/palette.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/\bopenBrowser\b|\bcloseBrowser\b|\bbrowserIsOpen\b/.test(code);
+    }));
+  ok("LANDING ON EDIT WITH NOTHING OPEN LANDS FILES, not a modal over the canvas",
+    /if \(stage === "edit" && !openDocIds\.length\) \{ setStage\("files"\); return; \}/.test(SHELL));
+  ok("the top-bar file-picker button lands Files too",
+    /if \(b\) b\.addEventListener\("click", function \(\) \{\s*if \(window\.__leftRail\) window\.__leftRail\.setStage\("files"\);/.test(HOME));
+  ok("the Escape handler that existed only to close it is gone with it",
+    HOME.indexOf("browserIsOpen()") === -1 &&
+    !/addEventListener\("keydown"/.test(HOME.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+  ok("the browser-verify hook lands the destination rather than opening a surface",
+    /openFiles: function \(\) \{ if \(window\.__leftRail\) window\.__leftRail\.setStage\("files"\); \}/.test(ED));
+  ok("the file MANAGEMENT the overlay hosted survives, because Files' row menu already called it",
+    /function duplicateCourse\(id\)/.test(HOME) && /function renameCourse\(id\)/.test(HOME) &&
+    /function deleteCourse\(id\)/.test(HOME) && /function storeLocationText\(\)/.test(HOME));
+
+  // --- the shared search chrome stays: two live surfaces still use it ---
+  ok("the shared search chrome is kept, because Source and the Edit source panel render it",
+    /\.vbrowser__search \{/.test(src("styles/editor/13-home.css")) &&
+    /vbrowser__search/.test(src("src/editor/source-link.js")) &&
+    /vbrowser__search/.test(src("src/editor.js")));
+  ok("and the overlay's own chrome is deleted rather than left standing",
+    ["\\.vbrowser__grid", "\\.vbrowser-card \\{", "\\.vbrowser-thumb \\{", "\\.vbrowser__foot"].every(function (sel) {
+      return !new RegExp(sel).test(src("styles/editor/13-home.css"));
+    }));
 })();
 
 // ---- SPEC 7: product-filtered tab scope (pure predicate) ----
@@ -3890,15 +3922,27 @@ section("#69 migration cutover");
   // arch-P3b-07k: the per-card menu moved to editor/home.js; the modal's DEFINITION stayed here,
   // so the one-call-site claim now counts one in each file rather than two in one.
   var ehm2 = src("src/editor/home.js");
-  ok("'Promote to Product…' is wired into the file picker's per-card menu, on the card's doc", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm2));
-  ok("promoteToProductModal has ONE UI call site (the per-card menu) + its definition",
-    (ehm2.match(/promoteToProductModal\(/g) || []).length === 1 && (ed.match(/promoteToProductModal\(/g) || []).length === 1);
+  // uio-W13 renamed the verb; the wiring is unchanged.
+  // uio-W09 retired the overlay and its per-card menu with it. THE ACTIONS DID NOT MOVE -- Files'
+  // row menu was built (uio-W04b) calling these very functions, which is why the surface could be
+  // deleted without taking any behaviour with it.
+  ok("the assign action is wired into Files' row menu, on that row's doc", /d\.productId \? "Move to another product…" : "Assign to a product…",\s*\n?\s*onClick: function \(\) \{ E\.promoteToProductModal\(E\.registry\[d\.id\]\); \} \}/.test(src("src/editor/files.js")));
+  // uio-W09 retired the overlay's per-card menu; uio-W12 gave the Product panel an assign action.
+  // Two UI call sites now, both reaching the ONE dialog -- which is the invariant that mattered.
+  ok("promoteToProductModal has one definition, and every caller reaches that one dialog",
+    (ed.match(/promoteToProductModal\(/g) || []).length === 1 &&
+    /E\.promoteToProductModal\(/.test(src("src/editor/files.js")) &&
+    /E\.promoteToProductModal\(/.test(src("src/editor/product-panel.js")));
   var ptmStart = ed.indexOf("function promoteToProductModal(targetDoc)");
   ok("promoteToProductModal found (parameterised by targetDoc)", ptmStart !== -1);
   var ptmBody = ed.slice(ptmStart, ptmStart + 2900);
   ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
   ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Format"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
-  ok("writes ONLY the target doc's meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(td, pid, stage\);[\s\S]{0,800}saveRegistry\(registry\);/.test(ptmBody));
+  // uio-W13 put a "None (shared)" branch between the history push and the tag write: choosing no
+  // product is a real choice that puts the document back into shared material. Both branches still
+  // touch meta only.
+  ok("writes ONLY the target doc's meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);[\s\S]{0,700}tagDocProductStage\(td, pid, stage\);[\s\S]{0,800}saveRegistry\(registry\);/.test(ptmBody));
+  ok("and 'None (shared)' puts it back into shared material rather than being a refusal to choose", /if \(!pid\) \{\s*unlinkDocFromProduct\(td\);/.test(ptmBody));
   // spec 2d bridge: the card's OWN declared variants ride onto the Product. Asserted on `td`,
   // not `doc` -- Promote moved into the file picker's per-card menu, so the open document is
   // not necessarily the one being promoted.
@@ -10995,6 +11039,981 @@ section("uio-W04 Files destination");
     /__activeStage === "source" && typeof E\.activeSourceDocName === "function"/.test(SH));
   ok("Source supplies that name from its own state",
     /function activeSourceDocName\(\)/.test(src("src/editor/source-stage.js")));
+
+  // --- uio-W06: facets are a LENS, never a mode ---------------------------
+  // The ticket most likely to regress into the thing uio-W01 deleted. A facet rail that persisted,
+  // or that anything outside Files could read, would be the global Product scope rebuilt under a
+  // friendlier name. The guard rails are asserted here, not trusted to a comment.
+  function facetIds(docs) { return docs.map(function (d) { return d.id; }).sort().join(); }
+
+  // Clearing every facet returns to EXACTLY the unfiltered view -- the whole acceptance criterion,
+  // and true by construction because an empty selection is the identity function.
+  ok("no facet selected is the identity function",
+    facetIds(F.applyFacets(corpus, {})) === facetIds(corpus) &&
+    facetIds(F.applyFacets(corpus, null)) === facetIds(corpus) &&
+    facetIds(F.applyFacets(corpus, { type: {}, product: {} })) === facetIds(corpus));
+  ok("applying then clearing returns the same list, not a rebuilt one",
+    facetIds(F.applyFacets(F.applyFacets(corpus, { type: { reflow: true } }), {})) ===
+    facetIds(corpus.filter(function (d) { return d.type === "reflow"; })));
+
+  ok("a type facet narrows to that type",
+    facetIds(F.applyFacets(corpus, { type: { source: true } })) === "topic-master-a");
+  ok("selections WITHIN a dimension are an OR",
+    F.applyFacets(corpus, { type: { frame: true, paged: true } }).length === 2);
+  ok("selections ACROSS dimensions are an AND",
+    facetIds(F.applyFacets(corpus, { type: { reflow: true }, product: { "p-a": true } })) === "C-1");
+  ok("No product is a real selection, not an absence",
+    facetIds(F.applyFacets(corpus, { product: { "": true } })) === "U-1");
+  ok("a facet that matches nothing yields an empty list rather than everything",
+    F.applyFacets(corpus, { type: { source: true }, product: { "p-b": true } }).length === 0);
+  ok("junk in the facet state is ignored, not obeyed",
+    facetIds(F.applyFacets(corpus, { type: { reflow: false }, nonsense: { x: true } })) === facetIds(corpus));
+  ok("the selection count is across both dimensions",
+    F.facetCount({ type: { reflow: true }, product: { "p-a": true, "": true } }) === 3 &&
+    F.facetCount({}) === 0 && F.facetCount(null) === 0);
+
+  // --- counts: computed with the OTHER dimensions applied, never with their own ---
+  var C0 = F.facetCounts(corpus, {}, products);
+  ok("every document type is listed, even at zero",
+    C0.type.map(function (t) { return t.key; }).join() === "source,reflow,frame,paged");
+  ok("type counts are live", C0.type.map(function (t) { return t.key + ":" + t.count; }).join() ===
+    "source:1,reflow:2,frame:1,paged:1");
+  ok("products are listed by name with No product trailing",
+    C0.product.map(function (p) { return p.label; }).join() === "Alpha,Beta,No product");
+  ok("product counts are live, and No product counts the untagged",
+    C0.product.map(function (p) { return p.count; }).join() === "3,1,1");
+  var C1 = F.facetCounts(corpus, { type: { reflow: true } }, products);
+  ok("choosing a type re-counts the PRODUCTS beneath it",
+    C1.product.map(function (p) { return p.count; }).join() === "1,0,1");
+  ok("but never re-counts its own dimension, so the other types stay clickable",
+    C1.type.map(function (t) { return t.count; }).join() === C0.type.map(function (t) { return t.count; }).join());
+  ok("the chosen facet is marked active in the rail",
+    C1.type.filter(function (t) { return t.active; }).map(function (t) { return t.key; }).join() === "reflow");
+  ok("a product with no documents at all is still offered",
+    F.facetCounts([], {}, products).product.map(function (p) { return p.label; }).join() === "Alpha,Beta,No product");
+  ok("empty everything is not a crash",
+    F.facetCounts().type.length === 4 && F.facetCounts().product.length === 1);
+
+  // --- the chips say the same thing the rail does ---
+  var chips = F.facetChips({ type: { reflow: true }, product: { "p-a": true, "": true } }, products);
+  ok("a chip is named in the rail's own words",
+    chips.map(function (c) { return c.label; }).sort().join("|") ===
+    "Product: Alpha|Product: No product|Type: Courses");
+  ok("a chip carries what it takes to undo exactly one tick",
+    chips.every(function (c) { return c.dim && typeof c.key === "string"; }));
+  ok("no facets means no chips", F.facetChips({}, products).length === 0);
+
+  // --- the one-time seed from the retired global scope ---
+  function fstore(seed) {
+    var m = Object.assign({}, seed || {});
+    return { data: m, getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+             setItem: function (k, v) { m[k] = String(v); }, removeItem: function (k) { delete m[k]; } };
+  }
+  ok("the seed key is the one uio-W01 hands forward", F.FACET_SEED_KEY === "verso.filesProductFacetSeed");
+  var sd1 = fstore({ "verso.filesProductFacetSeed": "p-a" });
+  ok("the retired scope seeds the Product facet once", F.consumeFacetSeed(sd1, products) === "p-a");
+  ok("and the key is gone in the same pass, so it can never seed twice",
+    sd1.data["verso.filesProductFacetSeed"] === undefined && F.consumeFacetSeed(sd1, products) === "");
+  var sd2 = fstore({ "verso.filesProductFacetSeed": "p-deleted" });
+  ok("a seed naming a product that no longer exists applies nothing, and STILL clears the key",
+    F.consumeFacetSeed(sd2, products) === "" && sd2.data["verso.filesProductFacetSeed"] === undefined);
+  ok("no seed and no store are both quiet", F.consumeFacetSeed(fstore({}), products) === "" && F.consumeFacetSeed(null, products) === "");
+
+  // --- THE GUARD RAILS. This is what stops the lens becoming a scope again. ---
+  ok("the facet selection is a local in the destination, never persisted",
+    /var facets = \{ type: \{\}, product: \{\} \};/.test(FILESRC) &&
+    !/setItem\([^)]*facet/i.test(FILESRC) && FILESRC.indexOf("verso.filesFacet") === -1);
+  ok("Files exposes no way for anything else to read its facets",
+    !/kernel\.expose\(\{[^}]*facet/i.test(FILESRC));
+  ok("no other destination reads Files' facet state", ["src/editor/shell.js", "src/editor/tabs.js",
+    "src/editor/source-stage.js", "src/editor/publish.js", "src/editor/home.js",
+    "src/editor/product-rail.js", "src/editor/documents.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/filesFacet|facetCounts|applyFacets|facetChips/.test(code);
+    }));
+  ok("the seed key is written by the uio-W01 migration and read by nobody but Files",
+    ["src/editor/shell.js", "src/editor/tabs.js", "src/editor/source-stage.js", "src/editor/publish.js",
+     "src/editor/home.js", "src/editor/documents.js"].every(function (f) {
+      return src(f).indexOf("filesProductFacetSeed") === -1;
+    }));
+  ok("the header keeps counting the whole searched corpus, not the faceted slice",
+    /var sum = corpusSummary\(searched\);/.test(FILESRC));
+  ok("the bands keep their identity underneath the lens",
+    /groupCorpus\(all, grouping, window\.ProductsStore \|\| \{\}\)/.test(FILESRC));
+  ok("an empty result says which of the two narrowed it", /No document matches those filters\./.test(FILESRC));
+  ok("a selection does not outlive a facet that hid it",
+    /Object\.keys\(selected\)\.forEach\(function \(id\) \{ if \(!visible\[id\]\) delete selected\[id\]; \}\);/.test(FILESRC));
+
+  // --- the rail's own chrome ---
+  ok("the rail is 200px and sits beside the results, not above them",
+    /\.files__facets \{[^}]*flex: 0 0 200px/.test(HOME2) && /\.files__main \{[^}]*display: flex/.test(HOME2));
+  ok("a facet row is the canonical Checkbox, because within a dimension you can hold several",
+    /function facetRow\(f\) \{\s*var row = window\.VersoUI\.Checkbox\(\{/.test(FILESRC) &&
+    FILESRC.indexOf("files-facet__box") === -1);
+  ok("an empty facet reads quieter rather than disappearing",
+    /\.files-facet\.is-empty/.test(HOME2) && !/\.files-facet\.is-empty[^}]*display: none/.test(HOME2));
+  ok("the chips are accent and dismissible", /\.files__chip \{[^}]*var\(--accent-quiet\)/.test(HOME2) &&
+    /files__chip-x/.test(FILESRC));
+})();
+
+// ---- uio-W17: source documents become block-addressable rows --------------
+// `saveLibrary()` serialises the ENTIRE LibraryStore as one JSON blob on every write, so two authors
+// in two DIFFERENT source documents overwrite each other. The collaboration suite is written against
+// block-addressable design documents and mentions LibraryStore nowhere, and this workspace model
+// deliberately routes MORE concurrent authors into source documents.
+section("uio-W17 source documents as block-addressable rows");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  var model = SD.create([
+    { type: "heading", level: 2, text: "Getting started" },
+    { type: "paragraph", text: "Read this first." },
+    { type: "paragraph", text: "Then read that." }
+  ]);
+  // A range mark anchored to a node key, which is the fidelity this change must not break.
+  var anchorKey = model.nodes[1].key;
+  model.marks = [{ id: "mk-1", type: "link", anchor: { nodeKey: anchorKey, from: 0, to: 4 } }];
+  model.history = [{ at: 1, what: "imported" }];
+
+  // --- the shape ---
+  var bd = SD.toBlockDoc(model);
+  ok("a source document presents as ONE page whose blocks are its nodes",
+    bd.pages.length === 1 && bd.pages[0].blocks.length === 3);
+  ok("THE NODE'S OWN KEY IS THE ROW ID -- never a second identifier for a thing that has one",
+    bd.pages[0].blocks.map(function (b) { return b.id; }).join() ===
+    model.nodes.map(function (n) { return n.key; }).join());
+  ok("what is not a node is document metadata, so a mark travels with the document",
+    bd.meta.marks.length === 1 && bd.meta.version === 1 && bd.meta.history.length === 1);
+  ok("the doc says WHAT IT IS, so a reader never infers it from the shape",
+    bd.meta.kind === "source" && SD.isBlockSourceDoc(bd) === true);
+  ok("a design document is not mistaken for one", SD.isBlockSourceDoc({ meta: {} }) === false &&
+    SD.isBlockSourceDoc(null) === false);
+  ok("the session-only undo stacks are never persisted",
+    !Object.prototype.hasOwnProperty.call(bd.meta, "undo") &&
+    !Object.prototype.hasOwnProperty.call(bd.meta, "redo"));
+
+  // --- the round trip ---
+  var back = SD.fromBlockDoc(bd);
+  ok("the nodes come back identical, keys and all",
+    JSON.stringify(back.nodes) === JSON.stringify(model.nodes));
+  ok("RANGE MARKS SURVIVE WITH THEIR ANCHORS INTACT",
+    back.marks.length === 1 && back.marks[0].anchor.nodeKey === anchorKey &&
+    back.marks[0].anchor.from === 0 && back.marks[0].anchor.to === 4);
+  ok("and the anchor still resolves to the node it named",
+    SD.nodeByKey(back, back.marks[0].anchor.nodeKey).text === "Read this first.");
+  ok("history rides across", back.history.length === 1 && back.history[0].what === "imported");
+  ok("the undo stacks come back empty rather than stale", back.undo.length === 0 && back.redo.length === 0);
+  ok("THE ROW ID IS THE IDENTITY, even when the content lost its key",
+    SD.fromBlockDoc({ meta: {}, pages: [{ blocks: [{ id: "b-9", type: "paragraph", text: "x" }] }] }).nodes[0].key === "b-9" &&
+    SD.fromBlockDoc({ meta: {}, pages: [{ blocks: [{ id: "b-9", key: "stale", type: "paragraph", text: "x" }] }] }).nodes[0].key === "b-9");
+  ok("an empty or absent doc is a model, not a crash",
+    SD.fromBlockDoc({}).nodes.length === 0 && SD.fromBlockDoc().nodes.length === 0);
+  ok("the whole trip is a bijection over the JSON the editor already persists",
+    JSON.stringify(SD.toJSON(SD.fromBlockDoc(SD.toBlockDoc(SD.fromJSON(SD.toJSON(model)))))) ===
+    JSON.stringify(SD.toJSON(model)));
+
+  // --- and now through THE REAL BLOCK STORE, with no new merge model ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> W17 store tests skipped"); return; }
+    var os = require("os");
+    var createBlockStore = require(path.join(ROOT, "server/block-store.js")).createBlockStore;
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-w17-"));
+    var store = createBlockStore(path.join(tmp, "w17.sqlite"));
+
+    store.importDoc("src-alpha", SD.toBlockDoc(model), "ada");
+    var mat = store.materializeDoc("src-alpha");
+    ok("SOURCE DOCUMENTS PERSIST AS PER-NODE ROWS, not one library blob",
+      mat.pages[0].blocks.length === 3 &&
+      store.blockContent("src-alpha", anchorKey) !== null);
+    ok("materialising reassembles the same source document",
+      JSON.stringify(SD.fromBlockDoc(mat).nodes) === JSON.stringify(model.nodes));
+
+    // Two authors, two DIFFERENT source documents. The blob save is exactly what made this fail.
+    var other = SD.create([{ type: "paragraph", text: "Beta prose." }]);
+    store.importDoc("src-beta", SD.toBlockDoc(other), "grace");
+    // applyChange replaces a block's CONTENT wholesale, so a caller sends the whole node.
+    store.applyChange("src-beta", other.nodes[0].key,
+      { id: other.nodes[0].key, key: other.nodes[0].key, type: "paragraph", text: "Beta prose, revised." }, "grace");
+    ok("TWO AUTHORS IN TWO DIFFERENT SOURCE DOCUMENTS CANNOT CLOBBER EACH OTHER",
+      SD.fromBlockDoc(store.materializeDoc("src-alpha")).nodes[1].text === "Read this first." &&
+      SD.fromBlockDoc(store.materializeDoc("src-beta")).nodes[0].text === "Beta prose, revised.");
+
+    // Two authors, DIFFERENT NODES of the same source document.
+    store.applyChange("src-alpha", model.nodes[1].key,
+      { id: model.nodes[1].key, key: model.nodes[1].key, type: "paragraph", text: "Read this first, carefully." }, "ada");
+    // This one deliberately omits the key, the way a careless caller would. The row id is the
+    // identity, so the node keeps it -- and the mark anchored to it keeps resolving.
+    store.applyChange("src-alpha", model.nodes[2].key,
+      { type: "paragraph", text: "Then read that, twice." }, "grace");
+    var both = SD.fromBlockDoc(store.materializeDoc("src-alpha"));
+    ok("TWO AUTHORS ON DIFFERENT NODES OF THE SAME DOCUMENT BOTH LAND THEIR EDITS",
+      both.nodes[1].text === "Read this first, carefully." && both.nodes[2].text === "Then read that, twice.");
+    ok("and the node they did not touch is untouched", both.nodes[0].text === "Getting started");
+    ok("the marks still anchor after both edits, INCLUDING the one whose row lost its key",
+      both.marks[0].anchor.nodeKey === anchorKey && SD.nodeByKey(both, anchorKey) !== null &&
+      both.nodes.map(function (n) { return n.key; }).join() ===
+      model.nodes.map(function (n) { return n.key; }).join());
+
+    // The change log covers them like any other block, which is what "no new code paths" means.
+    var changes = store.changesSince(0, "src-alpha");
+    ok("every edit is in the ONE append-only change log, keyed by the node's own id",
+      changes.length >= 2 && changes.every(function (c) { return !!c.blockId; }) &&
+      changes.some(function (c) { return c.blockId === model.nodes[2].key; }));
+    ok("so locking, presence, the reaper and the unacked buffer need no new merge model -- these ARE block rows",
+      typeof store.blockContent === "function" && store.blockContent("src-alpha", model.nodes[2].key) !== null);
+
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  })();
+
+  // The hardening this found, asserted where it lives: a block whose content forgot its own id
+  // cannot be anchored to, by a source mark or by a comment. The store restores it on the way out.
+  ok("the block store stamps a row's id back onto content that lost it",
+    /if \(content && typeof content === "object" && content\.id == null\) content\.id = bid;/.test(src("server/block-store.js")));
+
+  // The CLIENT cutover -- routing saveLibrary through this instead of the blob -- rides
+  // platform-pivot-03's guarded migration, not a hand-flipped flag. What lands here is the shape and
+  // the proof that the existing store carries it; the flip is a storage migration with its own gate.
+  var SDSRC = src("src/source-doc.js");
+  ok("the shape lives in the model layer, DOM-free and storage-free",
+    /function toBlockDoc\(model\)/.test(SDSRC) && !/localStorage|document\./.test(SDSRC.slice(SDSRC.indexOf("function toBlockDoc"), SDSRC.indexOf("function toJSON"))));
+})();
+
+// ---- uio-W16: Publish de-scoped -- every design document, its own facets ---
+// Publish "was never universal": the global Product scope filtered it, so untagged documents
+// dropped out of a scoped view entirely. uio-W01 took the scope away; this gives Publish facets of
+// its OWN, because a publisher batching a release must not inherit what an author filtered in Files.
+section("uio-W16 Publish de-scoped");
+(function () {
+  var e = src("src/editor.js");
+
+  // --- the guard rail: Publish's facets are Publish's OWN ---
+  ok("Publish holds a second, independent selection",
+    /var __publishFacets = \{ type: \{\}, product: \{\}, needsRelease: false \};/.test(e));
+  ok("IT NEVER READS FILES' FACET STATE, and Files never reads its",
+    !/filesFacet|VersoFiles\._pure\.(applyFacets|facetCounts|facetChips)/.test(e.replace(/\/\*[\s\S]*?\*\//g, "")) &&
+    src("src/editor/files.js").indexOf("__publishFacets") === -1);
+  ok("neither is persisted, so neither can outlive a session as a scope",
+    !/setItem\([^)]*publishFacet/i.test(e) && e.indexOf("verso.publishFacets") === -1);
+
+  // --- source documents are not an output ---
+  // Not by an exclusion rule: they live in LibraryStore and this reads the registry, so there is no
+  // code path by which one could appear.
+  ok("the Publish list is built from the registry alone -- a source document cannot reach it",
+    /function publishPickDocs\(\) \{[\s\S]{0,900}Object\.keys\(registry\)\.forEach/.test(e) &&
+    !/function publishPickDocs\(\) \{[\s\S]{0,900}libComponents\(\)/.test(e));
+  ok("and the type facet offers no Source option, which could only ever return nothing",
+    /var typeKeys = \["reflow", "frame", "paged"\];/.test(e));
+
+  // --- the row ---
+  ok("the title line is the shared document row plus a release-state column",
+    /if \(U && U\.DocumentRow\) \{[\s\S]{0,1000}release: publishNeedsAttention\(d\) \? "review" : "ready"/.test(e));
+  ok("the release column has two states and no hedge between them",
+    /props\.release === "ready" \? "Ready to release" : "Needs review"/.test(src("src/ui-kit.js")));
+  var CTL2 = src("styles/editor/12-controls.css");
+  ok("ready reads in --success and needs-review in --warning",
+    /\.vds-docrow__release--ready \{[^}]*var\(--success/.test(CTL2) &&
+    /\.vds-docrow__release--review \{[^}]*var\(--warning/.test(CTL2));
+  ok("the facts line beneath it survives -- three badges beside a title eat the title",
+    /var meta = h\("div", "publish-pickitem__meta"\);/.test(e) && /f04AlignmentMeter\(facts\.alignment/.test(e));
+})();
+
+// ---- uio-W11: tab overflow -- scroll, then +N more ------------------------
+// A strip that shrinks its tabs to fit trades one problem for a worse one: at twelve open documents
+// every tab is too narrow to read, and you have lost the thing tabs are for.
+section("uio-W11 tab overflow");
+(function () {
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+  function ids(n) { var a = []; for (var i = 1; i <= n; i++) a.push("D-" + i); return a; }
+
+  ok("the threshold is eight", PR.TAB_LIMIT === 8);
+  ok("under the threshold nothing overflows",
+    PR.tabOverflow(ids(8), "D-1").hidden.length === 0 && PR.tabOverflow(ids(8), "D-1").shown.length === 8);
+  ok("past it the remainder moves out of the strip",
+    PR.tabOverflow(ids(12), "D-1").shown.length === 8 && PR.tabOverflow(ids(12), "D-1").hidden.length === 4);
+  ok("no document is lost or duplicated by the split", (function () {
+    var s = PR.tabOverflow(ids(12), "D-1");
+    return s.shown.concat(s.hidden).sort().join() === ids(12).sort().join();
+  })());
+  // A strip that hid the tab you are looking at would be describing somebody else's session.
+  ok("THE ACTIVE DOCUMENT IS ALWAYS SHOWN, even when it falls past the threshold",
+    PR.tabOverflow(ids(12), "D-11").shown.indexOf("D-11") !== -1 &&
+    PR.tabOverflow(ids(12), "D-11").hidden.indexOf("D-11") === -1);
+  ok("swapping it in keeps the tabs in front of it in the order they had",
+    PR.tabOverflow(ids(12), "D-11").shown.slice(0, 7).join() === ids(7).join());
+  ok("and the one it displaced is not lost, only hidden",
+    PR.tabOverflow(ids(12), "D-11").hidden.indexOf("D-8") !== -1);
+  ok("an active id that is not open at all changes nothing",
+    PR.tabOverflow(ids(12), "D-99").shown.join() === ids(8).join());
+  ok("the limit is overridable for a test, and junk falls back to the default",
+    PR.tabOverflow(ids(5), "D-1", 3).shown.length === 3 && PR.tabOverflow(ids(12), "D-1", 0).shown.length === 8);
+  ok("empty and absent are quiet", PR.tabOverflow([], "x").shown.length === 0 && PR.tabOverflow().shown.length === 0);
+
+  // --- the wiring, in BOTH strips ---
+  var TB = src("src/editor/tabs.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var SS = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("Edit's strip splits through the one pure function", /var split = PR\.tabOverflow\(all, E\.activeDocId\);/.test(TB));
+  ok("Source's strip splits through the same one",
+    /var split = window\.VersoProductRail\.tabOverflow\(ids, __sourceActiveTopicId\);/.test(SS));
+  ok("both raise a +N more that names the count",
+    /"\+" \+ hidden\.length \+ " more"/.test(TB) && /"\+" \+ split\.hidden\.length \+ " more"/.test(SS));
+  ok("the dropdown is the canonical menu, not a bespoke popover",
+    /E\.showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Also open" \}\]/.test(TB) &&
+    /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Also open" \}\]/.test(SS));
+  ok("activating a hidden document switches to it, which reveals its tab",
+    /onClick: function \(\) \{ switchDoc\(id\); \}/.test(TB) && /onClick: function \(\) \{ openSourceDoc\(id\); \}/.test(SS));
+
+  // --- A TAB NEVER SHRINKS ---
+  var CTL = src("styles/editor/12-controls.css");
+  ok("the tab has a fixed width and refuses to be squeezed by its flex parent",
+    /\.vds-doctab \{[^}]*flex: 0 0 auto[^}]*width: 168px/.test(CTL));
+  ok("its label is one line, ellipsised -- a wrapped label would grow the strip past its toolbar",
+    /\.vds-doctab__label \{[^}]*white-space: nowrap[^}]*text-overflow: ellipsis/.test(CTL));
+  var OVL = src("styles/editor/10-overlays.css");
+  ok("the strip scrolls rather than wrapping, in both destinations",
+    /\.toolbar-tabs \{[\s\S]{0,500}overflow-x: auto/.test(OVL) &&
+    !/\.toolbar-tabs \{[\s\S]{0,500}flex-wrap: wrap/.test(OVL) &&
+    // Both strips are the same class, so one rule covers both destinations.
+    /<div class="toolbar-tabs" id="source-tabs"/.test(src("index.html")));
+  ok("the +N more is never mistaken for a tab -- it names a count, not a document",
+    /\.toolbar-tabs__more \{[^}]*border: 1px dashed/.test(OVL));
+  // A `+N more` that scrolled away with the tabs would be gone at exactly the moment it matters.
+  ok("the tail pins to the end of the strip rather than scrolling away with the tabs",
+    /\.toolbar-tabs__tail \{[^}]*position: sticky; right: 0/.test(OVL) &&
+    /var tail = h\("div", "toolbar-tabs__tail"\);/.test(TB) && /var tail = h\("div", "toolbar-tabs__tail"\);/.test(SS));
+})();
+
+// ---- uio-W07: open vs reveal, and the open-elsewhere marker ---------------
+// A row that does not say a document is already open leaves you to find out by clicking, and the
+// wrong answer to that click is a second copy of a document you already had, in a strip you then
+// have to reconcile by hand.
+section("uio-W07 open vs reveal");
+(function () {
+  var F = require(path.join(ROOT, "src/editor/files.js"))._pure;
+  var design = { id: "C-1", kind: "design" }, source = { id: "m-1", kind: "source" };
+
+  // --- where a document is open is a fact about the two STRIPS ---
+  ok("a design document open in Edit says so", F.openStateOf(design, ["C-1"], []) === "edit");
+  ok("a source document open in Source says so", F.openStateOf(source, [], ["m-1"]) === "source");
+  ok("a closed document says nothing", F.openStateOf(design, [], []) === "" && F.openStateOf(source, [], []) === "");
+  ok("neither strip can answer for the other -- they hold ids from different stores",
+    F.openStateOf(design, [], ["C-1"]) === "" && F.openStateOf(source, ["m-1"], []) === "");
+  ok("junk is closed, not a crash", F.openStateOf(null, ["C-1"], []) === "" && F.openStateOf(design) === "");
+
+  var FS = src("src/editor/files.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("every Files view states it -- the list row and the card both",
+    /openIn: openStateOf\(d, open\.design, open\.source\)/.test(FS) &&
+    /if \(openIn\) meta\.appendChild\(h\("span", "files-card__open", window\.VersoUI\._pure\.openStateLabel\(openIn\)\)\)/.test(FS));
+  ok("the label comes from the ONE vocabulary the row component publishes",
+    /openStateLabel: function \(openIn\) \{\s*if \(openIn === "edit"\) return "Open in Edit";\s*if \(openIn === "source"\) return "Open in Source";/.test(src("src/ui-kit.js")));
+  ok("the open sets are read fresh on every render, so closing the last tab clears the label",
+    /function openSets\(\) \{[\s\S]{0,300}E\.openSourceDocIds\(\)/.test(FS) && /var open = openSets\(\);/.test(FS));
+
+  // --- REVEAL, NOT DUPLICATE ---
+  // Both openers are idempotent on their strip, so "open" and "reveal" are the same call and there
+  // is no second path that could disagree with the first.
+  ok("opening a design document that is already open switches to it rather than pushing it again",
+    /if \(E\.openDocIds\.indexOf\(d\.id\) === -1\) \{ E\.openDocIds\.push\(d\.id\); E\.saveOpenDocIds\(E\.openDocIds\); \}\s*E\.switchDoc\(d\.id\);/.test(FS));
+  ok("and a source document goes through the strip's own opener, which is idempotent too",
+    /openSourceDoc\(id\)/.test(src("src/editor/source-stage.js")) &&
+    /if \(ids\.indexOf\(id\) === -1\) \{ ids\.push\(id\); saveOpenSourceDocIds\(\); \}/.test(src("src/editor/source-stage.js")));
+  ok("revealing lands the destination that hosts the document's type",
+    /if \(d\.kind === "source"\) \{[\s\S]{0,300}setStage\("source"\)/.test(FS) &&
+    /window\.__leftRail\.setStage\("edit"\);\s*revealTab\("#toolbar-tabs", d\.id\)/.test(FS));
+  ok("and scrolls the tab into the strip, because landing on a strip scrolled past it is no better",
+    /function revealTab\(stripSel, id\)/.test(FS) && /scrollIntoView\(\{ block: "nearest", inline: "nearest" \}\)/.test(FS));
+  ok("deferred a frame, because a strip still hidden has no scroll geometry",
+    /setTimeout\(function \(\) \{\s*var strip = document\.querySelector\(stripSel\)/.test(FS));
+
+  // --- the same marker in the Product panel's sibling list ---
+  ok("a sibling already open elsewhere is marked there too",
+    /openElsewhere: openIds\.indexOf\(id\) !== -1/.test(src("src/editor/product-panel.js")) &&
+    /"\(open elsewhere\)"/.test(src("src/editor/product-panel.js")));
+})();
+
+// ---- uio-W13: the untagged state reads as a fact, not an error ------------
+// The old copy read as a defect report -- "This document isn't attached to a Product. Use
+// Save/Recents → Promote to Product to link it" -- and pointed at a route that was changing. Having
+// no product is a STATE a document is legitimately in: shared material, glossaries and standards
+// used across products, lives there on purpose.
+section("uio-W13 untagged reads as a fact");
+(function () {
+  var PPSRC = src("src/editor/product-panel.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var ED = src("src/editor.js");
+
+  ok("the untagged panel states the fact and says why the state exists",
+    /No product\. This is shared material — glossaries and standards used across products live here on purpose\./.test(PPSRC));
+  ok("NEUTRAL INK, NO WARNING AFFORDANCE",
+    /\.prodpanel__untagged \{[^}]*color: var\(--text-secondary\)/.test(src("styles/editor/07-inspector.css")) &&
+    !/prodpanel__untagged[^}]*--danger|prodpanel__untagged[^}]*--warning/.test(src("styles/editor/07-inspector.css")));
+  ok("the assign action is present and writes the product tag",
+    /linkTo\("Assign a product…", function \(\) \{\s*E\.promoteToProductModal\(E\.registry\[m\.docId\]\)/.test(PPSRC));
+  ok("it opens the SAME picker the creation forms use, including + New product…",
+    /var FP = window\.VersoFiles\._pure;/.test(ED) && /FP\.productChoices\(products\)/.test(ED));
+  ok("and 'None (shared)' can put a document BACK into shared material",
+    /if \(!pid\) \{\s*unlinkDocFromProduct\(td\);/.test(ED));
+
+  // The vocabulary. "Promote" implies the document was in a lesser state and has been raised out of
+  // it, which is the exact reading this ticket removes.
+  ok("the dialog is titled Assign a product, not Promote to Product",
+    /title: "Assign a product",/.test(ED) && /primaryLabel: "Assign",/.test(ED));
+  ok("no surface still offers to PROMOTE a document", ["src/editor/home.js", "src/editor/files.js",
+    "src/editor/product-panel.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return code.indexOf("Promote to Product") === -1;
+    }));
+  ok("the old copy, and the route it pointed at, are gone from the codebase",
+    ["src/editor.js", "src/editor/source-link.js", "src/editor/home.js", "src/editor/files.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/isn't attached to a Product/i.test(code) && code.indexOf("Save/Recents") === -1;
+    }));
+
+  // A PRODUCT-LESS DOCUMENT IS NEVER DESCRIBED AS BROKEN. The words that would do it, ratcheted out
+  // of every string an author reads.
+  ok("no author-facing string calls a product-less document orphaned, unattached or unassigned",
+    ["src/editor/files.js", "src/editor/product-panel.js", "src/editor/source-link.js",
+     "src/editor/source-stage.js", "src/editor/home.js"].every(function (f) {
+      var strings = (src(f).match(/"[^"\n]{12,}"/g) || []).join(" ").toLowerCase();
+      return strings.indexOf("orphan") === -1 && strings.indexOf("unattached") === -1 &&
+             strings.indexOf("unassigned") === -1 && strings.indexOf("not attached") === -1;
+    }));
+  ok("the No product band is described as shared material, not as leftovers",
+    /Shared, cross-product material/.test(src("src/editor/files.js")));
+  ok("the Edit source panel names what would put source here, rather than what is wrong",
+    /No product, and no source attached\. Assign a product, or attach a source, in the Product panel above\./.test(src("src/editor/source-link.js")));
+})();
+
+// ---- uio-W08: three creation actions + the Files empty state --------------
+// Creation used to inherit the global scope -- a new document was silently stamped with whatever
+// the top bar happened to be showing -- and the Source path refused outright when nothing was
+// selected. There is no scope left to inherit and nothing left to refuse.
+section("uio-W08 creation actions + empty state");
+(function () {
+  var F = require(path.join(ROOT, "src/editor/files.js"))._pure;
+  var products = {
+    "p-b": { id: "p-b", name: "Beta" },
+    "p-a": { id: "p-a", name: "Alpha", groundTruthId: "m-alpha" }
+  };
+
+  // --- the product choice every form shares ---
+  var opts = F.productChoices(products);
+  ok("the empty option reads NONE (SHARED), never the filter's 'All products'",
+    opts[0].value === "" && opts[0].label === "None (shared)");
+  ok("products are listed by name between the two ends",
+    opts.slice(1, -1).map(function (o) { return o.label; }).join() === "Alpha,Beta");
+  ok("a product can be made from inside the form that needs it",
+    opts[opts.length - 1].value === "__new" && opts[opts.length - 1].label === "+ New product…");
+  ok("no products yet is still a usable choice, not an empty select",
+    F.productChoices({}).length === 2 && F.productChoices().length === 2);
+
+  // --- "Make this the primary source" ---
+  ok("it AUTO-TICKS for a product with no primary -- the first source you write is what it traces back to",
+    F.primaryDefault(products, "p-b") === true);
+  ok("IT NEVER AUTO-TICKS WHEN ONE EXISTS -- silently displacing a primary is what this must not do",
+    F.primaryDefault(products, "p-a") === false);
+  ok("shared material is nobody's primary", F.primaryDefault(products, "") === false);
+  ok("an unknown product does not auto-tick", F.primaryDefault(products, "p-gone") === false &&
+    F.primaryDefault(null, "p-a") === false);
+
+  // --- the wiring ---
+  var FS = src("src/editor/files.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("all three creation actions live in Files",
+    /label: "Source document…", onClick: newSourceDocumentModal/.test(FS) &&
+    /label: "Design document…", onClick: function \(\) \{ E\.showNewDocDialog\(\); \}/.test(FS) &&
+    /label: "Product…", onClick: newProductModal/.test(FS));
+  ok("none of them needs a pre-selected product", !/Pick a Product/.test(FS) && !/Create a Product first/.test(FS));
+  ok("the tick is what sets groundTruthId, so unticking leaves the product without one",
+    /if \(primaryTick\.checked\) p\.groundTruthId = master\.id;\s*else if \(p\.groundTruthId === master\.id\) delete p\.groundTruthId;/.test(FS));
+  ok("the tick is disabled for shared material rather than silently ignored",
+    /primaryTick\.disabled = !pid;/.test(FS));
+  ok("a new source document opens where it belongs, and marks Files stale rather than re-rendering it",
+    /window\.__leftRail\.invalidate\("files"\)/.test(FS) && /E\.openSourceTopicId\(master\.id\)/.test(FS));
+  ok("creating a product RETURNS TO FILES with its band in view, not to a page of its own",
+    /window\.__leftRail\.setStage\("files"\)/.test(FS) && /querySelector\('\[data-band="' \+ p\.id \+ '"\]'\)/.test(FS));
+  ok("the design-document form offers the SAME choice, from the same builder",
+    /window\.VersoFiles\._pure\.productChoices\(window\.ProductsStore\)/.test(src("src/editor/documents.js")) &&
+    /window\.VersoFiles\._pure\.NEW_PRODUCT_VALUE/.test(src("src/editor/documents.js")));
+
+  // --- the empty state ---
+  ok("first run names what you can do and offers all three ways to do it",
+    /"Nothing here yet"/.test(FS) &&
+    /"Create a product, a source document, or a design document to get started\."/.test(FS) &&
+    /label: "New source document"/.test(FS) && /label: "New design document"/.test(FS) && /label: "New product"/.test(FS));
+  ok("NO DESTINATION INSTRUCTS YOU TO GO AND USE A DIFFERENT ONE FIRST", ["src/editor/files.js",
+    "src/editor/source-stage.js", "src/editor/publish.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/Pick a Product in the top bar/.test(code) && !/Create a Product first/.test(code);
+    }));
+  ok("a search or a facet that finds nothing is NOT first run -- the library is not empty, the lens is",
+    /if \(facetCount\(facets\) \|\| query\) \{[\s\S]{0,300}return;\s*\}\s*ui\.body\.appendChild\(emptyState\(\)\);/.test(FS));
+  var HOME3 = src("styles/editor/13-home.css");
+  ok("the empty state is a screen, not a one-line hint",
+    /\.files-empty \{[^}]*flex-direction: column/.test(HOME3) && /\.files-empty__actions \{/.test(HOME3));
+})();
+
+// ---- uio-W15: documents join the one ⌘K index -----------------------------
+// ⌘K is the only quick-switch and Files is the only browse surface. There is no third finder, so a
+// document that cannot be found here cannot be found by searching at all — which is why documents
+// belong in the SAME index and the SAME ranking as everything else rather than behind a tab.
+section("uio-W15 documents in the palette");
+(function () {
+  var CI;
+  try { CI = require(path.join(ROOT, "src/editor/palette.js")); } catch (e) { ok("require palette.js", false); return; }
+  var PAL = src("src/editor/palette.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  // The pure index and ranking are reachable through the module's own test hook only once booted,
+  // so the shape checks here read the source and the behaviour checks ride the booted editor's
+  // window.__commandIndex (exercised in the browser run).
+  ok("documents are a kind in the one index, ranked with everything else",
+    /var COMMAND_KINDS = \["action", "document", "page", "setting", "guide", "block"\];/.test(PAL));
+  ok("they do not lead the RESTING list -- a palette that opens on forty documents has buried its verbs",
+    PAL.indexOf('"action", "document"') !== -1);
+  ok("every document is indexed, source and design alike, from the SAME corpus Files builds",
+    /window\.VersoFiles && window\.VersoFiles\._pure/.test(PAL) && /F\.buildCorpus\(\{/.test(PAL));
+  ok("a document row carries a product · type sub-line",
+    /sub: d\.productName \? \(d\.productName \+ " · " \+ d\.typeLabel\) : \("No product · " \+ d\.typeLabel\)/.test(PAL));
+  ok("an untagged document says No product rather than showing a bare type",
+    /"No product · " \+ d\.typeLabel/.test(PAL));
+  ok("EVERY DOCUMENT ROW NAMES THE DESTINATION IT WILL LAND IN",
+    /dest: d\.destination === "source" \? "→ Source" : "→ Edit"/.test(PAL));
+  ok("the destination is a property of the TYPE, which is why it can be named before you choose",
+    /destination: d\.kind === "source" \? "source" : "edit"/.test(PAL));
+  ok("a command names itself in the same column, so one list holds both without a separator",
+    /var QJ_KIND_WORD = \{ action: "Command",/.test(PAL) &&
+    /h\("span", "qj-item__dest", it\.dest \|\| QJ_KIND_WORD\[it\.kind\] \|\| ""\)/.test(PAL));
+  ok("a document is findable by its product and its type, not only by its title",
+    /keywords: \[d\.productName, d\.typeLabel\]\.filter\(Boolean\)/.test(PAL));
+  ok("a document row carries its type glyph, and the well keeps every label in one column",
+    /var well = h\("span", "qj-item__glyph"\);/.test(PAL) &&
+    /if \(it\.icon && window\.Icon\) well\.innerHTML = window\.Icon\(it\.icon\);/.test(PAL));
+
+  // --- choosing one: open AND land, in one step ---
+  ok("choosing a document routes through one opener", /if \(entry\.kind === "document"\) \{ openDocumentEntry\(entry\.ref\); return; \}/.test(PAL));
+  ok("a source document lands SOURCE, a design document lands EDIT, with no intermediate screen",
+    /if \(ref\.docKind === "source"\) \{\s*E\.openSourceTopicId\(ref\.id\);\s*setStage\("source"\);/.test(PAL) &&
+    /E\.switchDoc\(ref\.id\);\s*setStage\("edit"\);/.test(PAL));
+  ok("an already-open document is REVEALED, not duplicated",
+    /if \(E\.openDocIds\.indexOf\(ref\.id\) === -1\) \{ E\.openDocIds\.push\(ref\.id\); E\.saveOpenDocIds\(E\.openDocIds\); \}/.test(PAL));
+
+  // --- NO THIRD FINDER ---
+  // The palette is the only quick-switch; Files is the only browse surface. Nothing else may grow a
+  // document search of its own, which is the divergence the DS contract exists to remove.
+  ok("no destination grows a document search of its own", ["src/editor/source-stage.js",
+    "src/editor/publish.js", "src/editor/tabs.js", "src/editor/product-panel.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/buildCorpus|matchesQuery/.test(code);
+    }));
+  ok("only Files and the palette build the corpus", ["src/editor/files.js", "src/editor/palette.js"]
+    .filter(function (f) { return /buildCorpus/.test(src(f)); }).length === 2);
+  var ds = src("design-system/components/overlays/CommandPalette.d.ts");
+  ok("the DS contract states documents are in the index and there is no third finder",
+    /DOCUMENTS LIVE IN THIS INDEX TOO/.test(ds) && /There is no third\s*\n?\s*\*? ?finder/.test(ds));
+  ok("the contract names the trailing column and what it is for", /dest\?: string;/.test(ds));
+  var QJ = src("styles/editor/11-comments.css");
+  ok("the destination column is accented on a document, so it reads as a route rather than a tag",
+    /\.qj-item\[data-kind="document"\] \.qj-item__dest \{[^}]*var\(--accent\)/.test(QJ));
+})();
+
+// ---- uio-W12: the Product panel (contextual, never a filter) --------------
+// Product used to be a global mode. uio-W01 deleted the picker, which was right and left a real
+// question with nowhere to be answered: what does this document belong to, what does it trace back
+// to, what lives alongside it, has it fallen behind. This is an INSPECTOR that answers it -- and
+// the specific failure it must not have is becoming the picker again, so the assertions below are
+// as much about what it CANNOT do as about what it shows.
+section("uio-W12 Product panel");
+(function () {
+  var PP;
+  try { PP = require(path.join(ROOT, "src/editor/product-panel.js"))._pure; }
+  catch (e) { ok("require product-panel.js", false); return; }
+
+  var comps = {
+    "m-alpha": { id: "m-alpha", kind: "topic", sourceMaster: true, name: "Alpha manual", productId: "p-a" },
+    "m-glossary": { id: "m-glossary", kind: "topic", sourceMaster: true, name: "Shared glossary" },
+    "m-gone": { id: "m-gone", kind: "topic", name: "Not a document" }
+  };
+  var products = {
+    "p-a": { id: "p-a", name: "Alpha", groundTruthId: "m-alpha" },
+    "p-new": { id: "p-new", name: "Brand new" }
+  };
+  var registry = {
+    "C-1": { meta: { code: "C-1", title: "Alpha course", productId: "p-a", extraSourceIds: ["m-glossary"] } },
+    "C-2": { meta: { code: "C-2", title: "Alpha deck", productId: "p-a" } },
+    "C-3": { meta: { code: "C-3", title: "Zeta guide", productId: "p-a" } },
+    "C-4": { meta: { code: "C-4", title: "Other product", productId: "p-new" } },
+    "U-1": { meta: { code: "U-1", title: "Untagged" } }
+  };
+  function model(docId, extra) {
+    return PP.panelModel(Object.assign({
+      kind: "design", doc: registry[docId], components: comps, products: products,
+      registry: registry, openDocIds: ["C-1", "C-3"]
+    }, extra || {}));
+  }
+
+  // --- it reads the OPEN document, and nothing else ---
+  var m1 = model("C-1");
+  ok("the panel names the product the open document carries", m1.tagged && m1.productName === "Alpha");
+  ok("the primary source resolves automatically from that tag", m1.primary.id === "m-alpha");
+  ok("extras are the hand-attached sources, listed apart from the primary",
+    m1.extras.map(function (x) { return x.id; }).join() === "m-glossary");
+  ok("siblings are the OTHER documents in the product, never this one",
+    m1.siblings.map(function (s) { return s.id; }).join() === "C-2,C-3");
+  ok("siblings are ordered by title so the list is stable across renders",
+    m1.siblings.map(function (s) { return s.title; }).join() === "Alpha deck,Zeta guide");
+  ok("a sibling already open elsewhere SAYS so, rather than opening a second copy silently",
+    m1.siblings.filter(function (s) { return s.openElsewhere; }).map(function (s) { return s.id; }).join() === "C-3");
+  ok("a document in another product borrows none of this one's relationships",
+    model("C-4").siblings.length === 0 && model("C-4").primary === null);
+
+  // --- the states that are real, and degrade rather than break ---
+  var mu = model("U-1");
+  ok("an untagged document reads as untagged, with no product invented for it",
+    mu.present && !mu.tagged && mu.productName === "" && mu.primary === null);
+  ok("a product with no primary source reports none rather than a blank",
+    model("C-4").tagged && model("C-4").primary === null);
+  ok("no document at all is absent, not a crash", PP.panelModel({ kind: "design" }).present === false);
+  ok("empty stores are not a crash",
+    PP.panelModel({ kind: "design", doc: registry["C-1"] }).present === true);
+
+  // --- Source asks the same question and gets the same shape ---
+  var ms = PP.panelModel({ kind: "source", doc: comps["m-alpha"], components: comps, products: products, registry: registry });
+  ok("Source reads the product off the open source document", ms.tagged && ms.productName === "Alpha");
+  ok("looking at the primary itself, the panel says so instead of linking back to where you are",
+    ms.isPrimary === true);
+  ok("EXTRAS AND SIBLINGS ARE EDIT-ONLY -- a source document IS the source",
+    ms.extras.length === 0 && ms.siblings.length === 0);
+  var msh = PP.panelModel({ kind: "source", doc: comps["m-glossary"], components: comps, products: products });
+  ok("a shared source document reads as untagged, which is a fact and not an error", !msh.tagged);
+
+  // --- the release line: read from the ONE staleness computation, and silent when it has nothing ---
+  ok("in sync reads in the success tone",
+    PP.releaseLine({ state: "current" }).tone === "success" &&
+    PP.releaseLine({ state: "current" }).text === "In sync with source");
+  ok("behind reads in the warning tone, and counts",
+    PP.releaseLine({ state: "drifted", count: 3 }).tone === "warning" &&
+    PP.releaseLine({ state: "drifted", count: 3 }).text === "3 revisions behind source");
+  ok("one revision is singular", PP.releaseLine({ state: "drifted", count: 1 }).text === "1 revision behind source");
+  ok("a document that links no source has nothing to be behind, and says nothing",
+    PP.releaseLine({ state: "unlinked" }) === null);
+  ok("nor does one that has never been published", PP.releaseLine({ state: "unpublished" }) === null);
+  ok("no drift data at all is silent", PP.releaseLine(null) === null && PP.releaseLine() === null);
+  ok("the line rides on the model", model("C-1", { drift: { state: "current" } }).release.tone === "success");
+
+  // --- THE GUARD RAIL: an inspector, never the picker uio-W01 removed ---
+  var PPSRC = src("src/editor/product-panel.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the panel holds no state of its own -- there is nothing in it to persist",
+    !/localStorage/.test(PPSRC) && !/setItem/.test(PPSRC));
+  ok("it never writes a scope any other surface could read",
+    PPSRC.indexOf("activeProduct") === -1 && PPSRC.indexOf("filesProductFacetSeed") === -1);
+  // Every navigation out of this panel goes through one of two openers, both of which LAND a
+  // destination. There is no third path, and in particular nothing that hands a product id to
+  // another surface to narrow itself by -- which is exactly what the retired picker did.
+  ok("every action it offers OPENS something rather than narrowing something",
+    /function openSource\(id\)/.test(PPSRC) && /function openDesign\(id\)/.test(PPSRC) &&
+    !/facet|visibleTabIds|filterTopics|setActiveProduct/i.test(PPSRC));
+  // Found by browser-verifying this panel: `window.__productRail.openSourceTopicId` is never
+  // assigned -- that hook object carries the browser-verify entry points, not this one -- so Files
+  // has landed Source and left whatever was already open showing, since uio-W04. Both callers go
+  // through the kernel now, and a ratchet keeps them there.
+  ok("opening a source document goes through the kernel, not a hook object that never had it",
+    ["src/editor/files.js", "src/editor/product-panel.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return /E\.openSourceTopicId\(/.test(code) && code.indexOf("__productRail.openSourceTopicId") === -1;
+    }));
+  ok("it reads the ONE staleness computation rather than recomputing drift a second way",
+    /E\.f04DocFacts\(doc\.meta\.code\)/.test(PPSRC) && !/lastPublishedGroundTruthVersions/.test(PPSRC));
+  ok("the pure model is DOM-free", !/document\.|innerHTML/.test(PPSRC.slice(0, PPSRC.indexOf("function install"))));
+
+  // --- the wiring: one panel, both destinations ---
+  ok("it renders into a host of its own in each destination's left panel",
+    /id="edit-product-panel"/.test(src("index.html")) && /id="source-product-panel"/.test(src("index.html")));
+  ok("the Edit panel repaints with the reading column, so the two never show different documents",
+    /if \(typeof E\.renderEditProductPanel === "function"\) E\.renderEditProductPanel\(\);/.test(src("src/editor/source-link.js")));
+  ok("the Source panel repaints with the stage, reading the open source document",
+    /E\.renderSourceProductPanel\(activeSourceMaster\(\)\)/.test(src("src/editor/source-stage.js")));
+  ok("both entry points cross through provide(), not another module's expose()",
+    /renderEditProductPanel: VE\.bind\("renderEditProductPanel"\)/.test(src("src/editor.js")) &&
+    /renderSourceProductPanel: VE\.bind\("renderSourceProductPanel"\)/.test(src("src/editor.js")));
+  ok("it installs after tabs.js, whose switchDoc a sibling link uses",
+    src("src/editor.js").indexOf("window.VersoTabs.install(VE)") <
+    src("src/editor.js").indexOf("window.VersoProductPanel.install(VE)"));
+  ["index.html", "kit.html"].forEach(function (page) {
+    ok(page + " loads product-panel.js", src(page).indexOf("src/editor/product-panel.js") !== -1);
+  });
+  var INS = src("styles/editor/07-inspector.css");
+  ok("untagged is styled as a plain fact -- no red, no alarm",
+    /\.prodpanel__untagged \{[^}]*var\(--text-secondary\)/.test(INS) &&
+    !/\.prodpanel__untagged[^}]*danger/.test(INS));
+  ok("the release line is the only coloured thing, because it is the only thing that is ever news",
+    /\.prodpanel__release--success \{[^}]*var\(--success/.test(INS) &&
+    /\.prodpanel__release--warning \{[^}]*var\(--warning/.test(INS));
+})();
+
+// ---- uio-W10: per-destination tab strips, one type each -------------------
+// Source has never had a document switcher: it resolved exactly one master from the global product
+// and showed it, so two manuals open at once was not a thing you could do. Edit's strip, meanwhile,
+// used to be product-FILTERED, which is what made choosing a product silently empty it. Two strips
+// over two stores now, each holding only its own type, neither filtered by anything.
+section("uio-W10 per-destination tab strips");
+(function () {
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+
+  var registry = {
+    "C-1": { meta: { title: "Alpha course", productId: "p-a" } },
+    "C-2": { meta: { title: "Beta course", productId: "p-b" } },
+    "C-3": { meta: { title: "Untagged course" } }
+  };
+  var comps = {
+    "m-a": { id: "m-a", kind: "topic", sourceMaster: true, name: "Alpha manual", productId: "p-a" },
+    "m-shared": { id: "m-shared", kind: "topic", sourceMaster: true, name: "Glossary" },
+    "m-folded": { id: "m-folded", kind: "topic", sourceMaster: true, name: "Folded", archivedInto: "m-a" },
+    "t-loose": { id: "t-loose", kind: "topic", name: "Loose topic", productId: "p-a" }
+  };
+
+  // --- the split: each strip holds only its own type, from its own store ---
+  ok("Edit's strip holds design documents", PR.visibleTabIds(["C-1", "C-2"], registry).join() === "C-1,C-2");
+  ok("Source's strip holds source documents", PR.visibleSourceTabIds(["m-a", "m-shared"], comps).join() === "m-a,m-shared");
+  ok("A SOURCE DOCUMENT CAN NEVER LAND IN EDIT'S STRIP -- different stores, so the id is not there",
+    PR.visibleTabIds(["m-a", "m-shared"], registry).length === 0);
+  ok("and a design document can never land in Source's",
+    PR.visibleSourceTabIds(["C-1", "C-2"], comps).length === 0);
+  ok("a product-LESS source document is held like any other", PR.visibleSourceTabIds(["m-shared"], comps).join() === "m-shared");
+  ok("a chapter folded into a master is not a document and is not held",
+    PR.visibleSourceTabIds(["m-folded"], comps).length === 0);
+  ok("a loose pre-unification topic is not a document either",
+    PR.visibleSourceTabIds(["t-loose"], comps).length === 0);
+  ok("an id with nothing behind it draws nothing, in either strip",
+    PR.visibleSourceTabIds(["m-gone"], comps).length === 0 && PR.visibleTabIds(["C-gone"], registry).length === 0);
+  ok("empty and absent are both quiet",
+    PR.visibleSourceTabIds().length === 0 && PR.visibleSourceTabIds([], null).length === 0);
+
+  // --- nothing FILTERS a strip: documents from different products coexist ---
+  ok("documents from different products coexist in one Edit strip",
+    PR.visibleTabIds(["C-1", "C-2", "C-3"], registry).length === 3);
+
+  // --- the strip states what it holds, and states the mixed-product fact ---
+  ok("one product reads as a plain count", PR.stripMeta([{ productId: "p-a" }, { productId: "p-a" }]).label === "2 open");
+  ok("MORE than one product is STATED, not left to the colour dots",
+    PR.stripMeta([{ productId: "p-a" }, { productId: "p-b" }, { productId: "p-a" }]).label === "3 open · 2 products");
+  ok("untagged documents count as open but name no product",
+    PR.stripMeta([{ productId: "" }, { productId: "" }]).label === "2 open");
+  ok("an untagged document beside two products does not become a third",
+    PR.stripMeta([{ productId: "p-a" }, { productId: "p-b" }, { productId: "" }]).products === 2);
+  ok("one open document reads as one", PR.stripMeta([{ productId: "p-a" }]).label === "1 open");
+  ok("an empty strip has an empty count rather than a crash",
+    PR.stripMeta([]).label === "0 open" && PR.stripMeta().open === 0);
+
+  // --- the wiring ---
+  var SS = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var TB = src("src/editor/tabs.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("Source's open set persists in its OWN key, separate from Edit's",
+    /var OPEN_SOURCE_DOCS_KEY = "authoring\.openSourceDocIds";/.test(SS) &&
+    src("src/editor/storage.js").indexOf("authoring.openSourceDocIds") === -1);
+  ok("it is reconciled on read, because the open set and the documents live in separate stores",
+    /window\.VersoProductRail\.visibleSourceTabIds\(Array\.isArray\(saved\) \? saved : \[\], libComponents\(\)\)/.test(SS));
+  ok("Source renders its own strip from the shared document tab",
+    /function renderSourceTabs\(\)/.test(SS) && /U\.DocumentTab\(\{/.test(SS));
+  ok("whatever Source resolves is, by definition, open -- so the first tab needs no seeding path",
+    /if \(ids\.indexOf\(master\.id\) === -1\) \{ ids\.push\(master\.id\); saveOpenSourceDocIds\(\); \}/.test(SS));
+  ok("opening a document that is already open makes it active rather than adding a second tab",
+    /if \(ids\.indexOf\(id\) === -1\) \{ ids\.push\(id\); saveOpenSourceDocIds\(\); \}\s*if \(__sourceActiveTopicId === id\) return;/.test(SS));
+  ok("switching documents never carries an in-progress edit or a variant set across",
+    /function openSourceDoc\(id\) \{[\s\S]{0,900}__sourceActiveVariants = \[\];[\s\S]{0,200}__sourceEditingCell = null;[\s\S]{0,200}__sourceUnlocked = false;/.test(SS));
+  ok("closing the last Source tab leaves an empty strip rather than refusing",
+    /function closeSourceTab\(id\) \{[\s\S]{0,900}__sourceActiveTopicId = null;/.test(SS) &&
+    !/At least one source/.test(SS));
+  ok("shared material carries no product dot, and says why",
+    /dotTitle: pid \? \("Product: " \+ \(\(prod && prod\.name\) \|\| pid\)\) : "No product — shared, cross-product material"/.test(SS));
+  ok("the strip's tabs are the source type, never a design one",
+    /icon: U\.DOCUMENT_TYPES\.source\.icon/.test(SS) && /type: "source"/.test(SS));
+  // Every caller passed `type` and nothing rendered it, so "one type each" had no expression in the
+  // DOM. It states its type now, the same way DocumentRow does.
+  ok("a document tab states its type, so the one-type-each contract is visible",
+    /if \(props\.type\) tab\.setAttribute\("data-doc-type", props\.type\);/.test(src("src/ui-kit.js")));
+  ok("Source states what its strip holds", /window\.VersoProductRail\.stripMeta\(open\)/.test(SS));
+  // uio-W11 made this count EVERYTHING open rather than only what fits: "8 open" beside a `+4 more`
+  // would be two numbers disagreeing about the same set.
+  ok("Edit states what its strip holds, from the same pure function", /PR\.stripMeta\(all\.map\(/.test(TB));
+  // uio-W10 fb1 (James, on the live app): BOTH strips live in the top bar. Source used to grow a
+  // second strip of its own inside the stage, which meant two different answers to "where do I
+  // switch documents" depending on which destination you were in. One host, one place.
+  ok("Source's strip lives in the toolbar's tabs zone, beside Edit's",
+    /<div class="editor-window__zone editor-window__zone--tabs">[\s\S]{0,600}id="toolbar-tabs"[\s\S]{0,300}id="source-tabs"/.test(src("index.html")));
+  ok("and the stage holds no strip of its own any more",
+    src("index.html").indexOf('class="source-stage__tabs"') === -1);
+  ok("only one strip is shown at a time, and the other is ABSENT rather than empty",
+    /\.toolbar #source-tabs \{ display: none; \}/.test(src("styles/editor/03-workspace.css")) &&
+    /\.toolbar\.toolbar--source #toolbar-tabs,[\s\S]{0,120}display: none;/.test(src("styles/editor/03-workspace.css")));
+  ok("the bar knows which destination it is dressing, rather than being Edit-or-nothing",
+    /tb\.classList\.toggle\("toolbar--source", stage === "source"\)/.test(src("src/editor/shell.js")));
+  var WS = src("styles/editor/03-workspace.css");
+  ok("the destination became a column so the strip spans it",
+    /\.source-stage \{[^}]*flex-direction: column/.test(WS) && /\.source-stage__body \{[^}]*display: flex/.test(WS));
+  var OV = src("styles/editor/10-overlays.css");
+  // They share the metrics by BEING the same class now, rather than by two rules kept in step.
+  ok("the two strips share the tab metrics, so a document reads the same in either",
+    /<div class="toolbar-tabs" id="source-tabs"/.test(src("index.html")) &&
+    /\.toolbar-tabs \{[\s\S]{0,300}align-items: flex-end/.test(OV));
+  ok("the strip meta is quiet and non-interactive in both",
+    /\.toolbar-tabs__meta,\s*\.source-stage__tabs-meta \{/.test(OV));
+})();
+
+// ---- uio-W14: source documents go product-optional; primary + extras ------
+// Source was keyed on Product end to end, and two things fell out of that. A source document with
+// NO product could be created and then never opened again -- every path in went through a Product,
+// so glossaries and standards, the material that serves every product because it belongs to none,
+// were unreachable by construction. And a design document could draw on exactly one source, its
+// product's primary, even though the link marks already carry a masterId that would have resolved
+// either. Ownership is a pure question now, and this is where it is settled.
+section("uio-W14 source ownership");
+(function () {
+  var SO;
+  try { SO = require(path.join(ROOT, "src/source-ownership.js")); }
+  catch (e) { ok("require source-ownership.js", false); return; }
+
+  var comps = {
+    "m-alpha": { id: "m-alpha", kind: "topic", sourceMaster: true, name: "Alpha manual", productId: "p-a", updatedAt: 10 },
+    "m-beta": { id: "m-beta", kind: "topic", sourceMaster: true, name: "Beta manual", productId: "p-b", updatedAt: 20 },
+    "m-glossary": { id: "m-glossary", kind: "topic", sourceMaster: true, name: "Shared glossary", updatedAt: 30 },
+    "m-standards": { id: "m-standards", kind: "topic", sourceMaster: true, name: "House standards", productId: "", updatedAt: 40 },
+    "m-folded": { id: "m-folded", kind: "topic", sourceMaster: true, name: "Folded in", archivedInto: "m-alpha" },
+    "t-loose": { id: "t-loose", kind: "topic", name: "A loose topic", productId: "p-a" },
+    "c-block": { id: "c-block", kind: "block", name: "Not a document" }
+  };
+  var products = {
+    "p-a": { id: "p-a", name: "Alpha", groundTruthId: "m-alpha" },
+    "p-b": { id: "p-b", name: "Beta", groundTruthId: "m-beta" },
+    "p-new": { id: "p-new", name: "Brand new" },                    // no primary yet
+    "p-broken": { id: "p-broken", name: "Broken", groundTruthId: "m-deleted" }  // points at nothing
+  };
+
+  // --- what a source document is ---
+  ok("a reserved master is a source document", SO.isSourceDocument(comps["m-alpha"]));
+  ok("a product-LESS master is a source document too", SO.isSourceDocument(comps["m-glossary"]));
+  ok("a chapter folded into a master is not a document", !SO.isSourceDocument(comps["m-folded"]));
+  ok("a loose topic is not a document", !SO.isSourceDocument(comps["t-loose"]));
+  ok("a library component that is not a topic is not a document", !SO.isSourceDocument(comps["c-block"]));
+  ok("junk is not a document", !SO.isSourceDocument(null) && !SO.isSourceDocument({}) && !SO.isSourceDocument("m-alpha"));
+
+  ok("every source document is listed, product or not",
+    SO.sourceDocuments(comps).map(function (c) { return c.id; }).join() === "m-alpha,m-beta,m-standards,m-glossary");
+  ok("the order is by name, not by store insertion",
+    SO.sourceDocuments(comps).map(function (c) { return c.name; }).join() === "Alpha manual,Beta manual,House standards,Shared glossary");
+  ok("SHARED material is the product-less set, and both spellings of absent count",
+    SO.sharedSourceDocuments(comps).map(function (c) { return c.id; }).join() === "m-standards,m-glossary");
+  ok("empty stores are not a crash", SO.sourceDocuments({}).length === 0 && SO.sourceDocuments().length === 0);
+
+  // --- one primary per product, and a product with none degrades ---
+  ok("a product resolves exactly one primary", SO.primaryFor(comps, products, "p-a").id === "m-alpha");
+  ok("a product with no primary degrades to null, not to an exception",
+    SO.primaryFor(comps, products, "p-new") === null && SO.primaryIdFor(products, "p-new") === "");
+  ok("a groundTruthId pointing at nothing resolves to null rather than half a document",
+    SO.primaryFor(comps, products, "p-broken") === null);
+  ok("a groundTruthId pointing at a folded chapter resolves to null",
+    SO.primaryFor(comps, { x: { groundTruthId: "m-folded" } }, "x") === null);
+  ok("no product at all resolves to null", SO.primaryFor(comps, products, "") === null &&
+    SO.primaryFor(comps, products, "nope") === null);
+  ok("the reverse index answers 'whose primary is this?'",
+    SO.primaryIndex(products)["m-alpha"] === "p-a" && SO.primaryIndex(products)["m-glossary"] === undefined);
+
+  // --- a design document's sources: primary (automatic) + extras (by hand) ---
+  var tagged = { meta: { productId: "p-a", extraSourceIds: ["m-glossary"] } };
+  var untagged = { meta: { extraSourceIds: ["m-glossary", "m-standards"] } };
+  var plain = { meta: { productId: "p-a" } };
+  ok("the primary resolves automatically from the product tag",
+    SO.sourcesForDoc(plain, comps, products).primary.id === "m-alpha" &&
+    SO.sourcesForDoc(plain, comps, products).extras.length === 0);
+  ok("extras are the hand-attached ones, beside the primary",
+    SO.sourcesForDoc(tagged, comps, products).all.map(function (c) { return c.id; }).join() === "m-alpha,m-glossary");
+  ok("an UNTAGGED document can still draw on shared material",
+    SO.sourcesForDoc(untagged, comps, products).all.map(function (c) { return c.id; }).join() === "m-glossary,m-standards");
+  ok("a document with nothing at all resolves to an empty set, not to null",
+    SO.sourcesForDoc({ meta: {} }, comps, products).all.length === 0 &&
+    SO.sourcesForDoc(null, comps, products).all.length === 0);
+  ok("an extra naming the primary is not listed twice",
+    SO.sourcesForDoc({ meta: { productId: "p-a", extraSourceIds: ["m-alpha"] } }, comps, products).all.length === 1);
+  ok("an extra naming something deleted is dropped, leaving one fewer source rather than a hole",
+    SO.sourcesForDoc({ meta: { extraSourceIds: ["m-gone", "m-glossary"] } }, comps, products).all
+      .map(function (c) { return c.id; }).join() === "m-glossary");
+  ok("an extra naming a folded chapter is dropped",
+    SO.sourcesForDoc({ meta: { extraSourceIds: ["m-folded"] } }, comps, products).all.length === 0);
+
+  // --- the field itself, defended at one place because it round-trips through four ---
+  ok("the extras list is normalised: strings, no blanks, no duplicates, order kept",
+    SO.extraSourceIds({ meta: { extraSourceIds: ["a", "", "a", null, 7, "b"] } }).join() === "a,b");
+  ok("a missing or malformed field reads as empty",
+    SO.extraSourceIds({ meta: {} }).length === 0 && SO.extraSourceIds({}).length === 0 &&
+    SO.extraSourceIds({ meta: { extraSourceIds: "a" } }).length === 0 && SO.extraSourceIds().length === 0);
+
+  // --- attaching and detaching, as list arithmetic ---
+  ok("attaching adds one", SO.attachExtra(plain, "m-glossary", comps, products).join() === "m-glossary");
+  ok("attaching the same twice is a no-op", SO.attachExtra(tagged, "m-glossary", comps, products).join() === "m-glossary");
+  ok("THE PRIMARY IS NEVER AN EXTRA -- it is already attached by the product tag",
+    SO.attachExtra(plain, "m-alpha", comps, products).length === 0);
+  ok("attaching something that is not a source document is refused",
+    SO.attachExtra(plain, "t-loose", comps, products).length === 0 &&
+    SO.attachExtra(plain, "m-gone", comps, products).length === 0);
+  ok("detaching removes exactly one", SO.detachExtra(untagged, "m-glossary").join() === "m-standards");
+  ok("detaching what was never attached changes nothing", SO.detachExtra(untagged, "m-nope").join() === "m-glossary,m-standards");
+
+  // A document that never attached an extra must round-trip byte-identical to one from before this
+  // ticket existed, so an empty list is DELETED rather than persisted as [].
+  var d1 = { meta: { productId: "p-a" } };
+  SO.setExtraSourceIds(d1, []);
+  ok("an empty list is deleted, never written as []",
+    !Object.prototype.hasOwnProperty.call(d1.meta, "extraSourceIds") &&
+    JSON.stringify(d1) === JSON.stringify({ meta: { productId: "p-a" } }));
+  SO.setExtraSourceIds(d1, ["m-glossary", "m-glossary", "", "m-standards"]);
+  ok("the write normalises the same way the read does", d1.meta.extraSourceIds.join() === "m-glossary,m-standards");
+  ok("extraSourceIds round-trips through JSON -- the shape save, load and .verso all use",
+    SO.extraSourceIds(JSON.parse(JSON.stringify(d1))).join() === "m-glossary,m-standards");
+  ok("setting on a doc with no meta mints one", SO.setExtraSourceIds({}, ["m-glossary"]).meta.extraSourceIds.join() === "m-glossary");
+
+  // --- A LINK MARK RESOLVING TO AN EXTRA WORKS IDENTICALLY TO ONE ON THE PRIMARY ---
+  // The mark model needs no change: it carries a masterId, and resolution just has a longer list to
+  // look down. This is the assertion that says so.
+  ok("a mark on the primary resolves", SO.resolveLinkedSource("m-alpha", tagged, comps, products).id === "m-alpha");
+  ok("a mark on an EXTRA resolves identically", SO.resolveLinkedSource("m-glossary", tagged, comps, products).id === "m-glossary");
+  ok("a mark on a source this document does not draw on resolves to null",
+    SO.resolveLinkedSource("m-beta", tagged, comps, products) === null);
+  ok("a mark on an extra of an UNTAGGED document resolves",
+    SO.resolveLinkedSource("m-standards", untagged, comps, products).id === "m-standards");
+  ok("no masterId resolves to null", SO.resolveLinkedSource("", tagged, comps, products) === null);
+
+  // --- the wiring: Source resolves a DOCUMENT now, not a product ---
+  var SS = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("Source resolves which DOCUMENT to show, and reads the product off it",
+    /function activeSourceDocId\(\)/.test(SS) && /function activeSourceMaster\(\)/.test(SS) &&
+    /function activeSourceProductId\(\)\s*\{\s*var open = activeSourceMaster\(\);/.test(SS));
+  ok("the remembered document is honoured whether or not it carries a product",
+    /window\.SourceOwnership\.isSourceDocument\(comps\[lastId\]\)/.test(SS));
+  ok("a shared source document is reachable when no product has one",
+    /window\.SourceOwnership\.sharedSourceDocuments\(comps\)/.test(SS));
+  ok("no call site still asks a product for the open master",
+    SS.indexOf("sourceMasterFor(activeSourceProductId())") === -1);
+  ok("the migration entry point lost the global product from its name, and takes one instead",
+    /function ensureUnifiedDocFor\(productId\)/.test(SS));
+  ok("minting a source document is product-OPTIONAL",
+    /function createSourceDocument\(name, productId\)/.test(SS) &&
+    /var pid = \(productId && window\.ProductsStore\[productId\]\) \? productId : "";/.test(SS));
+  ok("a second source document never displaces a product's primary",
+    /if \(product && !product\.groundTruthId\) \{ product\.groundTruthId = master\.id;/.test(SS));
+  ok("Source no longer refuses to create a document because there is no product",
+    SS.indexOf("Create a Product first") === -1);
+  ok("the mechanism is exposed for Files' creation actions and the Product panel",
+    /createSourceDocument: createSourceDocument/.test(SS) && /activeSourceMaster: activeSourceMaster/.test(SS));
+
+  var SL = src("src/editor/source-link.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the Edit source panel resolves through ownership, not through the product alone",
+    /window\.SourceOwnership\.sourcesForDoc\(E\.doc, libComponents\(\), window\.ProductsStore \|\| \{\}\)/.test(SL));
+  ok("it falls back to an attached extra rather than giving up on an untagged document",
+    /var master = owned\.primary \|\| owned\.extras\[0\] \|\| null;/.test(SL));
+  ok("a placement is made against the RESOLVED master, never silently against the primary",
+    /__editSourceMasterId = master\.id \|\| null;/.test(SL));
+  ["index.html", "kit.html"].forEach(function (page) {
+    ok(page + " loads source-ownership.js", src(page).indexOf("src/source-ownership.js") !== -1);
+  });
+  ok("the module is pure: no DOM, no storage, no stores reached for",
+    !/document\.|localStorage|window\.ProductsStore|window\.LibraryStore/.test(src("src/source-ownership.js")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
 })();
 
 // ---- uio-W03: four destinations, live instances, one where-am-I -----------
@@ -11081,8 +12100,12 @@ section("uio-W03 four-destination rail");
   ok("it is a surface, not a see-through gap", /\.files-stage \{[^}]*background: var\(--surface-canvas\)/.test(WS));
   // uio-W04 replaced W03's bridge: Files is a real destination now, mounted like its siblings.
   ok("entering Files mounts the Files destination", /if \(stage === "files"\) mountFilesStage\(\);/.test(SHELL_CODE));
-  ok("the old browser overlay never hangs over another destination",
-    /if \(stage !== "files" && typeof E\.closeBrowser === "function"\) E\.closeBrowser\(\);/.test(SHELL_CODE));
+  // uio-W09: there is no overlay left to hang over anything, so the call that closed it on every
+  // destination change is gone with it. What replaced the one case it served: landing Edit with
+  // nothing open lands FILES.
+  ok("the old browser overlay never hangs over another destination -- it does not exist",
+    SHELL_CODE.indexOf("closeBrowser") === -1 &&
+    /if \(stage === "edit" && !openDocIds\.length\) \{ setStage\("files"\); return; \}/.test(SHELL_CODE));
 
   // --- launch restores the destination you left ---
   ok("the active destination still persists across a refresh",
@@ -11329,15 +12352,24 @@ section("Product Rail: 3-stage rail + product dropdown");
   // retired (recents + Promote/Remove/store-path folded into the file picker).
   ok("pinned bottom rail actions = Settings + Help/Docs; the save-menu popover is retired", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && !/id="save-menu-btn"/.test(idx));
   ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
-  ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(ehm));
-  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(EDITOR_CSS));
+  // uio-W13 renamed the verb: "Assign a product", not "Promote". Promotion implies the document was
+  // in a lesser state, and having no product is a fact about a document rather than a defect in it.
+  // uio-W09: the overlay is gone; Files' row menu carries these.
+  ok("Files' row menu carries the assign verb + conditional Remove-from-product", /d\.productId \? "Move to another product…" : "Assign to a product…"/.test(src("src/editor/files.js")) && /if \(d\.productId\) items\.push\(\{ label: "Remove from product"/.test(src("src/editor/files.js")));
+  // uio-W09: the overlay's footer went with it. The store path is Files' line now -- the one place
+  // the app admits out loud whether the work is in a real folder or in browser storage.
+  ok("the store path is stated in Files", /E\.storeLocationText\(\)/.test(src("src/editor/files.js")) && /\.files__store \{/.test(src("styles/editor/13-home.css")));
   // uio-W01 REVERSED all of this. The picker host, the "+" beside it, the select-then-land flow and
   // the scoped browser were built correctly for a model where Product was a mode. It is a tag now.
   ok("no top-bar product-picker host remains", idx.indexOf('id="product-picker-host"') === -1);
   ok("creating a Product selects nothing, because there is nothing to select", /function newProductPrompt\(onDone\)[\s\S]{0,300}createProduct\(name\);[\s\S]{0,120}onDone\(prod\);/.test(SHELL));
   ok("creating a Product no longer hijacks the stage or opens a browser", !/setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(SHELL));
-  ok("the browser header still carries a 'New Product' action, now just redrawing the grid", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,200}newProductPrompt\(function \(\) \{ renderBrowserGrid\(\); \}\);/.test(ehm));
-  ok("the document browser lists every document, unscoped", /function renderBrowserGrid\(\)[\s\S]{0,700}courseMatchesQuery\(registry\[id\], browserQuery\);/.test(ehm) && ehm.indexOf("docMatchesProductStage") === -1);
+  // uio-W08 gave creation its own home in Files, and uio-W09 deleted the header that used to carry
+  // this one.
+  ok("creating a product is a Files action now", /label: "Product…", onClick: newProductModal/.test(src("src/editor/files.js")));
+  // uio-W09: THE OVERLAY LISTED HALF THE ANSWER -- design documents from the registry, never the
+  // source documents in LibraryStore. Files lists one corpus from both stores, unscoped.
+  ok("the one document list is unscoped and spans BOTH stores", /function buildCorpus\(env\)/.test(src("src/editor/files.js")) && src("src/editor/files.js").indexOf("docMatchesProductStage") === -1);
   ok("a document created from the browser inherits no Product", /var newDocProduct = "";/.test(DOCS) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(DOCS));
   ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
   ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
@@ -11972,7 +13004,7 @@ section("Product Rail: Source stage variant columns");
   ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
   ok("lifecycle: deleteProductSource removes the master + every topic tagged to the Product", /function deleteProductSource\(pid\)[\s\S]{0,400}c\.kind === "topic" && c\.productId === pid[\s\S]{0,200}delete comps\[product\.groundTruthId\]/.test(e));
   ok("lifecycle: deleteProduct clears the source, unlinks its courses, and removes the entry", /function deleteProduct\(pid\)[\s\S]{0,200}deleteProductSource\(pid\);\s*unlinkAllCoursesFromProduct\(pid\);\s*delete window\.ProductsStore\[pid\]/.test(e));
-  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,400}if \(linked\) \{[\s\S]{0,120}"Remove from Product"[\s\S]{0,600}unlinkDocFromProduct\(d\)/.test(ehm));
+  ok("lifecycle: Files' row menu offers Remove from product only for a tagged document", /if \(d\.productId\) items\.push\(\{ label: "Remove from product", onClick: function \(\) \{\s*E\.unlinkDocFromProduct\(E\.registry\[d\.id\]\)/.test(src("src/editor/files.js")));
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
@@ -11996,7 +13028,9 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // /verso-frontend audit 2026-07-27: consolidated into ONE state-reactive toolbar row
   // (renderSourceToolbar, icon-only IconButton), built inside renderSourceTopicList
   // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
-  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,900}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
+  // uio-W10 put Source's own tab strip in front of the search mount; the actions row is still not
+  // mounted separately.
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,1800}renderSourceTabs\(\);[\s\S]{0,300}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(SHELL) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(SHELL));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(es) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(es));
@@ -12010,7 +13044,9 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // LibraryStore write, not a course edit).
   // uio-W01: the gate stays -- a source document belongs to a Product -- but it resolves from the
   // stage's own state instead of a top-bar picker, and says something true now that the bar is gone.
-  ok("newTopicModal resolves its Product from the stage, and only stops when there is none", /function newTopicModal\(\) \{[\s\S]{0,400}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{ window\.alert\("Create a Product first[^"]*"\); return; \}/.test(es));
+  // uio-W14 took away the last reason to refuse: a source document no longer needs a Product, so
+  // "no Product" now makes SHARED material rather than an alert.
+  ok("newTopicModal resolves its Product from the stage, and makes shared material when there is none", /function newTopicModal\(\) \{[\s\S]{0,500}var productId = activeSourceProductId\(\);[\s\S]{0,400}if \(!productId\) \{ createSourceDocument\(name, ""\);/.test(es));
   ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(es));
   var ntmStart = es.indexOf("function newTopicModal()");
   var ntmBody = es.slice(ntmStart, ntmStart + 1200);
@@ -12021,7 +13057,10 @@ section("Product Rail: New Topic / Import from Markdown UI");
 
   // Import from Markdown: same active-Product gate, blocked without a chosen file, and
   // the variant file list is the Product's OWN declared variants (no free-form entry).
-  ok("importMarkdownModal resolves its Product the same way", /function importMarkdownModal\(\) \{[\s\S]{0,1400}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{ window\.alert\("Create a Product first[^"]*"\); return; \}/.test(es));
+  // uio-W14: and it no longer refuses either. An import with nowhere to land mints SHARED material
+  // and lands there additively -- the one destination that can import must never tell you to go and
+  // use a different one first.
+  ok("importMarkdownModal resolves its Product the same way, and makes shared material when there is none", /function importMarkdownModal\(\) \{[\s\S]{0,1800}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{\s*createSourceDocument\("Imported source", ""\);/.test(es));
   ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(es));
   ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(es));
   ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(es));
@@ -12071,7 +13110,7 @@ section("Product Rail: topic bulk-delete, re-import reconcile, provenance");
       && !/function deleteSelectedTopics/.test(e) && !/function moveSelectedTopicsModal/.test(e)
       && !/function topicNeedsReview/.test(e) && !/function structMoveTopic/.test(e) && !/function exitSelectMode/.test(e);
   })());
-  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(es) && /if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(es));
+  ok("the left-rail toolbar is now import (+ new-topic only in the empty-Product onboarding path)", /function renderSourceToolbar\(\) \{[\s\S]{0,1200}icon: "download", label: "Import…/.test(es) && /if \(!activeSourceMaster\(\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"/.test(es));
 
   // Rename-tolerant matching: checkRenamedSource never auto-applies a guess, always
   // confirms with the author first, and covers both "no ambiguity" fast-paths.
@@ -13121,8 +14160,53 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
   var e = src("src/editor.js"), css = EDITOR_CSS;
   var m = e.match(/\/\* @publish-pick-start \*\/([\s\S]*?)\/\* @publish-pick-end \*\//);
   if (!m) { ok("locate @publish-pick fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { publishPickView: publishPickView, publishNeedsAttention: publishNeedsAttention, PUBLISH_SORTS: PUBLISH_SORTS };")();
+  // uio-W16 added publishFacetView + publishScopeLabel to this same fence. They are returned here
+  // rather than animated a second time: the slice ratchet counts `new Function` reconstitutions,
+  // and a second one for the same fence would be the drift it exists to stop.
+  var g = new Function(m[1] + "\nreturn { publishPickView: publishPickView, publishNeedsAttention: publishNeedsAttention, PUBLISH_SORTS: PUBLISH_SORTS, publishFacetView: publishFacetView, publishScopeLabel: publishScopeLabel };")();
   var view = g.publishPickView, needs = g.publishNeedsAttention;
+
+  // ---- uio-W16's pure half, on the same animation ----
+
+  var rows = [
+    { id: "a", title: "Alpha course", productId: "p-a", type: "reflow", drift: 0, lastAt: 3000 },
+    { id: "b", title: "Alpha deck", productId: "p-a", type: "frame", drift: 2, lastAt: 1000 },
+    { id: "c", title: "Beta guide", productId: "p-b", type: "paged", drift: 0, lastAt: 2000 },
+    { id: "d", title: "Shared course", productId: "", type: "reflow", drift: 0, lastAt: 0 }
+  ];
+  function ids(r) { return r.map(function (x) { return x.id; }).sort().join(""); }
+
+  // --- every design document, every product, one list ---
+  ok("no facet selected lists everything, untagged documents included",
+    ids(g.publishFacetView(rows, {})) === "abcd" && ids(g.publishFacetView(rows)) === "abcd");
+  ok("a type facet narrows to that type", ids(g.publishFacetView(rows, { type: { frame: true } })) === "b");
+  ok("selections within a dimension are an OR",
+    ids(g.publishFacetView(rows, { type: { frame: true, paged: true } })) === "bc");
+  ok("a product facet narrows to that product",
+    ids(g.publishFacetView(rows, { product: { "p-a": true } })) === "ab");
+  ok("No product is a real selection", ids(g.publishFacetView(rows, { product: { "": true } })) === "d");
+  ok("across dimensions they are an AND",
+    ids(g.publishFacetView(rows, { type: { reflow: true }, product: { "p-a": true } })) === "a");
+  // Not a facet over a field: the one question a publisher actually asks.
+  ok("Needs release keeps what has drifted or never gone out",
+    ids(g.publishFacetView(rows, { needsRelease: true })) === "bd");
+  ok("clearing every facet returns the whole list",
+    ids(g.publishFacetView(rows, { type: {}, product: {}, needsRelease: false })) === "abcd");
+
+  // --- the header states the corpus, and whether the batch crosses a boundary ---
+  ok("the header names the documents AND the products they span",
+    g.publishScopeLabel(rows) === "4 documents across 2 products");
+  ok("one of each reads singular", g.publishScopeLabel([rows[0]]) === "1 document across 1 product");
+  ok("documents with no product between them name no product count",
+    g.publishScopeLabel([rows[3]]) === "1 document");
+  ok("an empty list is not a crash", g.publishScopeLabel([]) === "0 documents" && g.publishScopeLabel() === "0 documents");
+
+  // --- search, filter and sort still compose over the facets ---
+  ok("facets compose with search rather than replacing it",
+    ids(g.publishPickView(rows, { facets: { product: { "p-a": true } }, query: "deck" })) === "b");
+  ok("and with the needs-attention filter", ids(g.publishPickView(rows, { facets: { type: { reflow: true } }, filter: "attention" })) === "d");
+
+
 
   var rows = [
     { id: "a", title: "Zebra handbook", drift: 0, lastAt: 3000 },
@@ -13150,9 +14234,11 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
   // --- the header states scope + the count of what is SHOWN, from the same array ---
   // uio-W01 took the Product name out of this line -- there is no scope to state. The count is still
   // taken from the rendered list, which is what this ever guarded.
-  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", String\(docs\.length\)\)\)/.test(e));
+  // uio-W16: the count grew into "N documents across M products" -- still taken from the rendered
+  // list, so it still cannot disagree with it.
+  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", publishScopeLabel\(docs\)\)\)/.test(e));
   // uio-F04: the drift number now comes from the shared resolver's fact, not a second staleness call.
-  ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);\s*return \{ id: d\.id, title: d\.title, drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
+  ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);[\s\S]{0,400}drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter,\s*sort: __publishPickSort, facets: __publishFacets \}\)/.test(e));
 
   // --- sort is a MENU, not a cycling button: three orderings a cycle would hide ---
   ok("sort opens the canonical menu with the current ordering ticked", /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Order by" \}\]\.concat\(PUBLISH_SORTS\.map/.test(e) && /active: __publishPickSort === s\.key/.test(e));
@@ -13450,6 +14536,8 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
 
   // --- last published per picker row ---
   // uio-F04 moved this onto the row's shared meta line, beside the fact badges.
+  // uio-W16 moved the phrase into the shared row's own updated column (the uio-W02 anatomy), where
+  // every other list in the app already carries it. It is still on every row.
   ok("each picker row carries its last-published line", /meta\.appendChild\(h\("span", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
   ok("never-published reads as a plain fact, not a warning", /if \(!last\) return "Never published";/.test(e));
   ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));
@@ -14003,12 +15091,12 @@ section("uio-F06 palette wiring + keyboard contract");
   ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(ep6));
   ok("the guide index is fetched once and cached, and degrades to no guide results",
     /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(ep6));
-  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(ep6));
+  ok("the palette states what it indexes", /Find a document, a setting, an action, a page or a guide section/.test(ep6));
   ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(ep6));
   // DS first, per the gate: the canonical set had no palette, so it was added there before it
   // was built here — and the spine settles that it is navigation, not a seventh presentation.
   var ds = src("design-system/components/overlays/CommandPalette.d.ts");
-  ok("the palette has a DS contract", /export function CommandPalette/.test(ds) && /kind: "setting" \| "action" \| "guide" \| "page" \| "block"/.test(ds));
+  ok("the palette has a DS contract", /export function CommandPalette/.test(ds) && /kind: "document" \| "setting" \| "action" \| "guide" \| "page" \| "block"/.test(ds));
   ok("the DS states it is navigation, not a seventh presentation", /NOT a seventh presentation/.test(ds));
   ok("the spine names the palette and its index", /not a seventh presentation/.test(src("design-system/readme.md"))
     && /components\/overlays\/CommandPalette/.test(src("design-system/readme.md")));
@@ -15750,7 +16838,9 @@ section("editor-rework source insert + two-way jump");
   // arch-P3b-07: the stage owns that state, so the jump asks it to open the topic (which persists
   // it for the next refresh) rather than writing the stage's variable from outside.
   ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}openSourceTopicId\(topicId\);[\s\S]{0,120}setStage\("source"\)/.test(SL));
-  ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
+  // uio-W10: a source DOCUMENT now joins Source's strip on the way in, so arriving from Files
+  // leaves a tab you can come back to. A loose topic, which is not a document, keeps the plain swap.
+  ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*if \(window\.SourceOwnership\.isSourceDocument\(libComponents\(\)\[id\]\)\) \{ openSourceDoc\(id\); return; \}\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
 })();
 
 // ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
@@ -15773,13 +16863,18 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
 (function () {
   var SL = src("src/editor/source-link.js");   // arch-P3b-07
   var e = src("src/editor.js"), css = EDITOR_CSS;
-  ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(E\.doc && E\.doc\.meta && E\.doc\.meta\.productId\)/.test(SL));
-  ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
+  // uio-W14 widened this from "the open doc's product" to "the open doc's SOURCES" -- its product's
+  // primary plus any extras attached by hand -- so an untagged course with a shared glossary
+  // attached reads it here instead of being told it has no source.
+  ok("renderEditSourcePanel keys off the OPEN document, not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,900}window\.SourceOwnership\.sourcesForDoc\(E\.doc,/.test(SL));
+  ok("it resolves that document's source and builds a live model from master.doc", /var master = owned\.primary \|\| owned\.extras\[0\] \|\| null;[\s\S]{0,700}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
   // uio-W04b re-pointed the first of these: it used to send the author to "Save/Recents -> Promote
   // to Product", a menu that had already been retired. An empty state that names a route the app no
   // longer has is worse than a blank one.
-  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a product[\s\S]{0,600}This Product has no source document yet/.test(SL));
-  ok("and the route it names actually exists", /Assign one from its row menu in Files/.test(SL));
+  // uio-W13: neither empty state describes the document as broken. "No product" is a fact, and the
+  // line names what would put source here rather than what is wrong.
+  ok("no-source + no-master both render a named empty state, not a blank panel", /This Product has no source document yet[\s\S]{0,600}No product, and no source attached/.test(SL));
+  ok("and the route it names actually exists", /Assign a product, or attach a source, in the Product panel above/.test(SL));
   ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(SL));
   ok("the panel is read-only: its function never sets contentEditable / applySourceLockState", (function () {
     var start = SL.indexOf("function renderEditSourcePanel()");
@@ -17040,9 +18135,12 @@ section("Source/Editor feedback batch (UI wiring guards)");
   // author's saved scope before it had been restored -- cannot happen, because there is no saved
   // scope and the auto-pick writes nothing. What replaces it: Source resolves what it shows from its
   // own last-open document, and the resolution is READ-ONLY.
+  // uio-W14 moved the read up a level: the resolution answers which DOCUMENT is open, and the
+  // product is read off it. The invariant is unchanged -- it reads, and writes nothing global.
   ok("Source's resolution reads the last-open document and writes nothing global", (function () {
-    var body = es.slice(es.indexOf("function activeSourceProductId()"), es.indexOf("function activeSourceProductId()") + 900);
-    return /localStorage\.getItem\(SOURCE_TOPIC_PERSIST_KEY\)/.test(body) &&
+    var start = es.indexOf("function activeSourceDocId()");
+    var body = es.slice(start, es.indexOf("function ensureUnifiedDocFor(productId)"));
+    return start !== -1 && /localStorage\.getItem\(SOURCE_TOPIC_PERSIST_KEY\)/.test(body) &&
            body.indexOf("setActiveProduct") === -1 &&
            body.indexOf("adoptActiveProduct") === -1 &&
            body.indexOf("setItem") === -1;
@@ -17558,7 +18656,7 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
   ok("migration + revert are exposed on __productRail for wiring + browser-verify", /window\.__productRail\.migrateProductToUnifiedDoc = migrateProductToUnifiedDoc;/.test(es) && /window\.__productRail\.revertProductUnifiedDoc = revertProductUnifiedDoc;/.test(es));
 
   // md-import-additive wiring (spec 2c section 4)
-  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(sourceMasterFor\(activeSourceProductId\(\)\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(es));
+  ok("a Product with a unified document imports ADDITIVELY (a preview), not by spawning topics", /if \(activeSourceMaster\(\)\) \{[\s\S]{0,600}importMarkdownAdditive\(\); return;/.test(es));
   ok("spec 2d: a variant-bearing Product asks flagship-vs-variant first (the intent modal is the guardrail)", /var declaredNow = declaredVariantsForProduct\([\s\S]{0,120}if \(declaredNow\.length\) \{ importIntentModal\(declaredNow\); return; \}/.test(es));
   ok("spec 2d: importVariantCombine reconciles + previews before applying the overlay (base untouched)", /var plan = SD\.variantImportPlan\(model, variant, incoming\);[\s\S]{0,600}primaryLabel: "Apply combine"[\s\S]{0,400}SD\.applyVariantImportPlan\(model, plan\);/.test(es));
   ok("spec 2d: the unified article splits into variant columns when variants are shown", /var showCols = topic\.sourceMaster && __sourceActiveVariants\.length > 0;[\s\S]{0,700}renderSourceDocNodeColumns\(topic, n, shown\)/.test(es));
@@ -17575,12 +18673,12 @@ section("Source v2: concatChapters unify topics -> one document (spec 2c)");
 
   // unified-toc wiring (spec 2c section 2): the left rail becomes ONE document TOC.
   ok("the Source stage materialises + opens the Product's one document on entry", /var master = ensureUnifiedDocForActiveProduct\(\);[\s\S]{0,160}__sourceActiveTopicId = master\.id;/.test(es));
-  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = sourceMasterFor\(activeSourceProductId\(\)\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(es));
+  ok("with a unified master, the left rail renders the one-document TOC (not the topic list)", /var master = activeSourceMaster\(\);\s*if \(master\) \{ renderSourceUnifiedToc\(master\); return; \}/.test(es));
   ok("the TOC rows are canonical VersoUI.TreeItem (DSLMS structure/TreeItem), chapters depth 0 + nested headings", /U\.TreeItem\(\{\s*label: ch\.text[\s\S]{0,120}depth: 0,[\s\S]{0,120}expandable: count > 0/.test(es) && /U\.TreeItem\(\{ label: k\.text[\s\S]{0,80}depth: \(k\.level >= 3 \? 2 : 1\)/.test(es));
   ok("a chapter row drags to reorder via SourceDoc.moveChapter (persisted + re-rendered)", /function applySourceChapterMove[\s\S]{0,420}SD\.moveChapter\(model, dragKey, target\)[\s\S]{0,120}persistSourceDocModel\(master, model\);/.test(es));
   ok("B1: the TOC offers one collapse-all / expand-all toggle (list-collapse IconButton, hidden during find)", /if \(!q && expandableKeys\.length && U\.IconButton\)[\s\S]{0,400}icon: "list-collapse"[\s\S]{0,400}__sourceOpenChapters\[k\] = false;/.test(es));
   ok("B2: the dragged chapter row is dimmed via an is-dragging class (cleared on dragend)", /dragstart[\s\S]{0,120}row\.classList\.add\("is-dragging"\)/.test(ep) && /dragend[\s\S]{0,120}row\.classList\.remove\("is-dragging"\)/.test(es));
-  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!sourceMasterFor\(activeSourceProductId\(\)\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(es));
+  ok("the one-doc toolbar keeps ONLY Markdown import (new-topic only when there is no document yet)", /function renderSourceToolbar\(\) \{[\s\S]{0,600}if \(!activeSourceMaster\(\)\) \{\s*row\.appendChild\(U\.IconButton\(\{ icon: "plus", label: "New topic"[\s\S]{0,500}icon: "download", label: "Import…/.test(es));
   ok("the in-article sticky TOC is dropped for a source master (no double-TOC)", /var toc = topic\.sourceMaster \? null : buildSourceToc\(model, host\);/.test(es));
   ok("scroll-spy highlights the current entry in the left-rail TOC rows too", /rail\.querySelectorAll\("\.source-toc__row\[data-toc-key\]"\)/.test(es) && /it\.classList\.toggle\("is-selected", on\)/.test(es));
   ok("the search field prompts 'find in document' under one document", /unified \? "find in document" : "search topics \+ text"/.test(es));
@@ -18390,7 +19488,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 145, SLICE_BUDGET = 17;
+  var FN_BUDGET = 144, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);

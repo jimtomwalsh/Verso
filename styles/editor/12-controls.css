@@ -98,7 +98,11 @@
 .vds-tab.is-on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent, #0d99ff); }
 
 /* --- DocumentTab -------------------------------------------------------- */
-.vds-doctab { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 12px; border-radius: var(--radius-sm, 2px) var(--radius-sm, 2px) 0 0; color: var(--text-secondary); font-size: var(--text-sm, 11px); cursor: pointer; }
+/* uio-W11: A TAB NEVER SHRINKS. A strip that shrinks its tabs to fit trades one problem for a worse
+   one -- at twelve open documents every tab is too narrow to read, and you have lost the thing tabs
+   are for. So the width is fixed, the strip scrolls, and past the threshold the remainder moves into
+   a `+N more`. `flex: 0 0 auto` is what stops the flex parent squeezing it. */
+.vds-doctab { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; width: 168px; height: 32px; padding: 0 8px 0 12px; border-radius: var(--radius-sm, 2px) var(--radius-sm, 2px) 0 0; color: var(--text-secondary); font-size: var(--text-sm, 11px); cursor: pointer; }
 .vds-doctab.is-active { background: var(--surface-canvas); color: var(--text-primary); }
 .vds-doctab__dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; } /* SPEC 7: per-Product colour dot */
 .vds-doctab__glyph { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--icon-idle, #999); } /* tab-doctype-glyph: doc-type marker */
@@ -161,7 +165,9 @@
 .vds-choicecard.is-on { border-color: var(--accent); background: var(--accent-quiet); }
 .vds-choicecard__title { font-size: var(--text-md, 13px); font-weight: 500; color: var(--text-primary); }
 .vds-choicecard__desc { font-size: var(--text-sm, 11px); color: var(--text-tertiary); }
-.vds-doctab__label { background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; }
+/* One line, ellipsised. A label that wrapped would grow the tab's height and push the strip past
+   the 40px toolbar it lives in. */
+.vds-doctab__label { flex: 1 1 auto; min-width: 0; text-align: left; background: transparent; border: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vds-doctab__close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; background: transparent; color: var(--icon-idle, #999); cursor: pointer; border-radius: var(--radius-xs, 2px); opacity: 0; }
 .vds-doctab__close svg { width: 12px; height: 12px; }
 .vds-doctab:hover .vds-doctab__close, .vds-doctab.is-active .vds-doctab__close { opacity: 1; }
@@ -266,3 +272,8 @@
 
 /* --- Icon wrapper ------------------------------------------------------- */
 .vds-icon { display: inline-flex; align-items: center; }
+/* uio-W16: the release-state column. Two states, no third — a document is either as it went out or
+   it is not, and a middle word would be a hedge the publisher then has to interpret. */
+.vds-docrow__release { flex: 0 0 auto; font-size: var(--text-2xs, 10px); white-space: nowrap; }
+.vds-docrow__release--ready { color: var(--success, var(--text-secondary)); }
+.vds-docrow__release--review { color: var(--warning, var(--text-secondary)); }

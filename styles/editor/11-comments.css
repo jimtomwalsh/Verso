@@ -292,7 +292,17 @@ body.is-col-resizing .col-swap-btn { pointer-events: none; opacity: 0 !important
 }
 .qj-item.is-active, .qj-item:hover { background: var(--accent); color: #fff; }
 .qj-item__label { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.qj-item__sub { flex: 0 0 auto; font-size: var(--text-xs); color: var(--text-secondary); }
+.qj-item__sub { flex: 0 1 auto; min-width: 0; font-size: var(--text-xs); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* uio-W15: a glyph well on every row, filled only for documents — so a document reads AS a document
+   in a list it shares with commands, and the labels stay in one column either way. */
+.qj-item__glyph { flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--icon-idle); }
+.qj-item__glyph svg { width: 13px; height: 13px; }
+.qj-item.is-active .qj-item__glyph, .qj-item:hover .qj-item__glyph { color: #fff; }
+/* The trailing column names what choosing the row DOES: the destination a document lands, or the
+   word for the kind of thing it is. */
+.qj-item__dest { flex: 0 0 auto; margin-left: auto; padding-left: var(--space-4, 8px); font-size: var(--text-2xs, 10px); color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; }
+.qj-item[data-kind="document"] .qj-item__dest { color: var(--accent); }
+.qj-item.is-active .qj-item__dest, .qj-item:hover .qj-item__dest { color: rgba(255, 255, 255, 0.75); }
 .qj-item.is-active .qj-item__sub, .qj-item:hover .qj-item__sub { color: rgba(255, 255, 255, 0.75); }
 /* uio-F06: the palette indexes settings, actions, guide sections and the document, so an empty
    result is worth stating plainly rather than leaving a blank box. */

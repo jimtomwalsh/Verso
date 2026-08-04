@@ -63,10 +63,14 @@
       <button class="storage-dot storage-dot--ok" id="storage-dot" title="Storage healthy — click for details" aria-label="Storage health"></button>
     </div>
 
-    <!-- Zone 1 -- tabs / file management (Edit only) -->
+    <!-- Zone 1 -- tabs / file management. uio-W10 fb1: BOTH destinations that hold documents put
+         their strip HERE, in the top bar, rather than Edit using the bar and Source growing a
+         second strip of its own inside the stage. One place answers "which document am I in",
+         whichever destination is answering it. Only one strip is ever shown at a time. -->
     <div class="editor-window__zone editor-window__zone--tabs">
       <button class="tool editor-window__filepicker" id="home-btn" data-lucide="layout-grid" title="Browse all courses"></button>
       <div class="toolbar-tabs" id="toolbar-tabs"></div>
+      <div class="toolbar-tabs" id="source-tabs" role="tablist" aria-label="Open source documents"></div>
     </div>
     <span class="editor-window__sep editor-window__sep--doc" aria-hidden="true"></span>
     <!-- Zone 2 -- document settings + live switches (the "matrix" is the face-up controls) -->
@@ -150,17 +154,22 @@
          than a dead end. This surface sits under it so Edit's canvas is not showing through. -->
     <div class="files-stage" id="stage-files" hidden></div>
     <div class="source-stage" id="stage-source" hidden>
-      <nav class="source-stage__nav" aria-label="Source topics">
-        <div class="source-stage__search" id="source-stage-search"></div>
-        <div class="source-stage__nav-actions" id="source-stage-nav-actions"></div>
-        <div class="source-stage__topics" id="source-topic-list"></div>
-        <!-- uio-S-C05 (SRC-13): product-SCOPE actions (export / unlink / delete) live in a footer
-             strip, pinned to the bottom, away from the New-topic / Import navigation above — so a
-             destructive menu is never one unlabelled click from ordinary navigation. -->
-        <div class="source-stage__nav-footer" id="source-stage-nav-footer"></div>
-      </nav>
-      <div class="source-stage__article" id="source-stage-article"></div>
-      <aside class="source-stage__info" id="source-stage-info" aria-label="Topic info"></aside>
+      <div class="source-stage__body">
+        <nav class="source-stage__nav" aria-label="Source topics">
+          <!-- uio-W12: the same panel, reading the open SOURCE document. Extras and siblings are
+               Edit-only — a source document IS the source. -->
+          <div class="source-stage__product" id="source-product-panel"></div>
+          <div class="source-stage__search" id="source-stage-search"></div>
+          <div class="source-stage__nav-actions" id="source-stage-nav-actions"></div>
+          <div class="source-stage__topics" id="source-topic-list"></div>
+          <!-- uio-S-C05 (SRC-13): product-SCOPE actions (export / unlink / delete) live in a footer
+               strip, pinned to the bottom, away from the New-topic / Import navigation above — so a
+               destructive menu is never one unlabelled click from ordinary navigation. -->
+          <div class="source-stage__nav-footer" id="source-stage-nav-footer"></div>
+        </nav>
+        <div class="source-stage__article" id="source-stage-article"></div>
+        <aside class="source-stage__info" id="source-stage-info" aria-label="Topic info"></aside>
+      </div>
     </div>
 
     <!-- Product Rail Publish stage (Epic 6, T1): left = product-scoped document picker, right = the
@@ -216,6 +225,10 @@
         </div>
       </div>
       <div class="lpane lpane--source" id="lpane-source" data-lsec="source" hidden>
+        <!-- uio-W12: what this document belongs to — product, primary source, extras, siblings and
+             its release state. An inspector reading the OPEN document, never a filter; the read-only
+             source reading column below it is unchanged. -->
+        <div class="lpane__body lpane__body--product" id="edit-product-panel"></div>
         <div class="lpane__body" id="tab-source"></div>
       </div>
       <div class="panel-resizer" id="resizer-left"></div>
@@ -339,6 +352,10 @@
   <!-- Source rewrite (Epic 2b): continuous-document node model + owned undo (DOM-free), and the range-mark painting engine (CSS Custom Highlight over live Ranges). Must load before editor.js, which mounts them in the Source stage. -->
   <script src="src/source-doc.js"></script>
   <script src="src/source-marks.js"></script>
+  <!-- uio-W14: which source documents a piece of work draws on — product-optional source documents,
+       one primary per product, plus hand-attached extras. Pure, DOM-free; must precede editor.js,
+       whose Source stage and Edit source panel resolve through it. -->
+  <script src="src/source-ownership.js"></script>
   <script src="src/publish-queue.js"></script>
   <script src="src/publish-presets.js"></script>
   <script src="src/publish-paths.js"></script>
@@ -372,6 +389,10 @@
   <!-- arch-P3b-07k Home: window.VersoHome — the pre-document course browser, grouped by document geometry, with each card rendering its real first page behind an IntersectionObserver rather than showing a cached image. Must precede editor.js. -->
   <script src="src/editor/home.js"></script>
   <script src="src/editor/files.js"></script>
+  <!-- uio-W12 Product panel: window.VersoProductPanel — what the open document belongs to (product,
+       primary source, extras, siblings, release state), in the left panel of Source and Edit. An
+       inspector, never a filter. Must precede editor.js, which installs it. -->
+  <script src="src/editor/product-panel.js"></script>
   <!-- arch-P3b-07q context menu: window.VersoContextMenu — the right-click menu (build, place, dismiss) and the hit-testing that decides whether a click is on a block, a page, a chapter or the canvas. Joins the overlay layer stack rather than owning Escape. Must precede editor.js. -->
   <script src="src/editor/context-menu.js"></script>
   <!-- arch-P3b-07c modals: window.VersoModals — the canonical .modal-* dialog builders every editor dialog composes from, plus promptModal and confirmModal. Joins the overlay layer stack. Must precede editor.js. -->

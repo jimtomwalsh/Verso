@@ -132,6 +132,10 @@
        so the kit gallery needs them as much as index.html does. (arch-P1 added the render context
        to index.html only, which left this page throwing on load until arch-P3-01 noticed.) -->
   <script src="src/render-context.js"></script>
+  <!-- uio-W14: source ownership (product-optional source documents, one primary, hand-attached
+       extras). Pure and DOM-free; the Source stage and the Edit source panel resolve through it, so
+       the kit page needs it for the same reason index.html does. -->
+  <script src="src/source-ownership.js"></script>
   <!-- arch-P3b-01 editor namespace: window.VersoEditor — the provide/need/expose/bind table a moved region and editor.js reach each other through. Pure wiring. Must precede editor.js, which provides its host surface as it loads. -->
   <script src="src/editor/kernel.js"></script>
   <script src="src/editor/storage.js"></script>
@@ -156,6 +160,10 @@
   <!-- arch-P3b-07k Home: window.VersoHome — the pre-document course browser, grouped by document geometry, with each card rendering its real first page behind an IntersectionObserver rather than showing a cached image. Must precede editor.js. -->
   <script src="src/editor/home.js"></script>
   <script src="src/editor/files.js"></script>
+  <!-- uio-W12 Product panel: window.VersoProductPanel — what the open document belongs to (product,
+       primary source, extras, siblings, release state), in the left panel of Source and Edit. An
+       inspector, never a filter. Must precede editor.js, which installs it. -->
+  <script src="src/editor/product-panel.js"></script>
   <!-- arch-P3b-07q context menu: window.VersoContextMenu — the right-click menu (build, place, dismiss) and the hit-testing that decides whether a click is on a block, a page, a chapter or the canvas. Joins the overlay layer stack rather than owning Escape. Must precede editor.js. -->
   <script src="src/editor/context-menu.js"></script>
   <!-- arch-P3b-07c modals: window.VersoModals — the canonical .modal-* dialog builders every editor dialog composes from, plus promptModal and confirmModal. Joins the overlay layer stack. Must precede editor.js. -->

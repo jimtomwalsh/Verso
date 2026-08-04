@@ -1408,10 +1408,16 @@
     // uio-W01: Publish lists every document. It used to be filtered by the global Product scope,
     // which is why Publish "was never universal" -- untagged documents dropped out of a scoped view
     // entirely. uio-W16 gives Publish its own Product facet, chosen here rather than inherited.
+    //
+    // SOURCE DOCUMENTS ARE NOT LISTED, and not by an exclusion rule: they live in LibraryStore and
+    // this reads the registry, so there is no code path by which one could appear. They are ground
+    // truth, not an output.
     var out = [];
     Object.keys(registry).forEach(function (id) {
       var d = registry[id]; if (!d) return;
-      out.push({ id: id, title: (d.meta && d.meta.title) || id });
+      var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { geo: "reflow" };
+      out.push({ id: id, title: (d.meta && d.meta.title) || id,
+                 productId: (d.meta && d.meta.productId) || "", type: cell.geo || "reflow" });
     });
     out.sort(function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; });
     return out;
@@ -1431,10 +1437,40 @@
   function publishNeedsAttention(row) {
     return !!(row && ((row.drift || 0) > 0 || !row.lastAt));
   }
+  // uio-W16: PUBLISH'S FACETS ARE PUBLISH'S OWN. A publisher batching a release must not inherit
+  // what an author happened to be filtering in Files -- that is the global scope uio-W01 deleted,
+  // reappearing between two people doing different jobs. So this is a second, independent selection
+  // with the same shape and none of the same state.
+  //
+  // Three dimensions: type, product, and "needs release", which is not a facet over a field but the
+  // one question a publisher actually asks -- what is not current.
+  function publishFacetView(rows, facets) {
+    facets = facets || {};
+    var types = facets.type || {}, products = facets.product || {};
+    var anyType = Object.keys(types).some(function (k) { return types[k]; });
+    var anyProduct = Object.keys(products).some(function (k) { return products[k]; });
+    return (rows || []).filter(function (r) {
+      if (!r) return false;
+      if (anyType && !types[r.type || "reflow"]) return false;
+      if (anyProduct && !products[r.productId || ""]) return false;
+      if (facets.needsRelease && !publishNeedsAttention(r)) return false;
+      return true;
+    });
+  }
+  // What the header states: the size of the corpus in front of you, and how many products it spans.
+  // "N documents across M products" rather than a bare count, because a publisher's question is
+  // whether this batch crosses a product boundary.
+  function publishScopeLabel(rows) {
+    var n = (rows || []).length, seen = {}, p = 0;
+    (rows || []).forEach(function (r) { var id = r && r.productId; if (id && !seen[id]) { seen[id] = 1; p++; } });
+    var s = n + (n === 1 ? " document" : " documents");
+    if (p) s += " across " + p + (p === 1 ? " product" : " products");
+    return s;
+  }
   function publishPickView(rows, opts) {
     opts = opts || {};
     var q = String(opts.query == null ? "" : opts.query).trim().toLowerCase();
-    var out = (rows || []).filter(function (r) {
+    var out = publishFacetView(rows || [], opts.facets).filter(function (r) {
       if (!r) return false;
       if (q && String(r.title || "").toLowerCase().indexOf(q) === -1) return false;
       if (opts.filter === "attention" && !publishNeedsAttention(r)) return false;
@@ -1616,6 +1652,9 @@
   // days ago silently hiding documents is worse than retyping it.
   // uio-P-C06: the tick marks live here too — same session-only lifetime, for the same reason.
   var __publishPickQuery = "", __publishPickFilter = "all", __publishPickSort = "title", __publishPickSel = {};
+  // uio-W16: Publish's OWN facet state. Session-local, never persisted, and deliberately not the
+  // object Files uses -- a publisher batching a release should not inherit what an author filtered.
+  var __publishFacets = { type: {}, product: {}, needsRelease: false };
   function publishSortLabel() {
     for (var i = 0; i < PUBLISH_SORTS.length; i++) if (PUBLISH_SORTS[i].key === __publishPickSort) return PUBLISH_SORTS[i].label;
     return PUBLISH_SORTS[0].label;
@@ -1645,17 +1684,84 @@
     return publishPickDocs().map(function (d) {
       var last = RH && RH.lastPublishedFor ? RH.lastPublishedFor(releaseHistory(), d.id) : null;
       var facts = f04DocFacts(d.id, vers);
-      return { id: d.id, title: d.title, drift: facts ? facts.drift.count : 0, lastAt: last ? last.at : 0, facts: facts };
+      // uio-W16: productId and type ride through the decoration -- the facets and the header's
+      // product count both read them off the ROW, and a decoration that dropped them left the
+      // header saying "4 documents" over four documents that span two products.
+      return { id: d.id, title: d.title, productId: d.productId || "", type: d.type || "reflow",
+               drift: facts ? facts.drift.count : 0, lastAt: last ? last.at : 0, facts: facts };
     });
   }
-  // Left pane: a product-scoped list of documents, each with an "Add to queue" action. Plus a
+  // uio-W16: the three facet chips. Each states what it is doing right now -- "All types" until you
+  // narrow it, then the names you picked -- so the list can never be narrowed by something the
+  // screen does not say out loud. Chips, not a rail: Publish's pane is a column, and 200px of facet
+  // rail would leave no room for the documents.
+  function publishFacetChip(label, active, items) {
+    var chip = h("button", "publish-chip publish-pick__facet" + (active ? " is-active" : ""));
+    chip.type = "button";
+    chip.innerHTML = "<span>" + label + "</span>";
+    chip.addEventListener("click", function (ev) {
+      var r = (ev.currentTarget || ev.target).getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, items);
+    });
+    return chip;
+  }
+  function publishFacetBar(rows) {
+    var bar = h("div", "publish-pick__facets");
+    var U = window.VersoUI, T = U && U.DOCUMENT_TYPES;
+    // TYPE. Source is deliberately absent: a source document is ground truth, not an output, and
+    // offering a facet that can only ever return nothing would suggest otherwise.
+    var typeKeys = ["reflow", "frame", "paged"];
+    var typeOn = typeKeys.filter(function (k) { return __publishFacets.type[k]; });
+    bar.appendChild(publishFacetChip(
+      typeOn.length ? typeOn.map(function (k) { return T ? T[k].label : k; }).join(", ") : "All types",
+      typeOn.length > 0,
+      [{ head: "Type" }, { label: "All types", active: !typeOn.length, onClick: function () { __publishFacets.type = {}; renderPublishPick(); } }]
+        .concat(typeKeys.map(function (k) {
+          return { label: T ? T[k].label : k, active: !!__publishFacets.type[k], onClick: function () {
+            if (__publishFacets.type[k]) delete __publishFacets.type[k]; else __publishFacets.type[k] = true;
+            renderPublishPick();
+          } };
+        }))));
+    // PRODUCT. Every product represented in the list, plus No product -- shared material is a real
+    // thing to publish a batch of.
+    var seen = {}, order = [];
+    (rows || []).forEach(function (r) { var id = r.productId || ""; if (!seen[id]) { seen[id] = 1; order.push(id); } });
+    order.sort(function (a, b) {
+      var na = a ? ((window.ProductsStore[a] && window.ProductsStore[a].name) || a).toLowerCase() : "\uffff";
+      var nb = b ? ((window.ProductsStore[b] && window.ProductsStore[b].name) || b).toLowerCase() : "\uffff";
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    var prodOn = order.filter(function (id) { return __publishFacets.product[id]; });
+    function prodName(id) { return id ? ((window.ProductsStore[id] && window.ProductsStore[id].name) || id) : "No product"; }
+    bar.appendChild(publishFacetChip(
+      prodOn.length ? prodOn.map(prodName).join(", ") : "All products",
+      prodOn.length > 0,
+      [{ head: "Product" }, { label: "All products", active: !prodOn.length, onClick: function () { __publishFacets.product = {}; renderPublishPick(); } }]
+        .concat(order.map(function (id) {
+          return { label: prodName(id), active: !!__publishFacets.product[id], onClick: function () {
+            if (__publishFacets.product[id]) delete __publishFacets.product[id]; else __publishFacets.product[id] = true;
+            renderPublishPick();
+          } };
+        }))));
+    // NEEDS RELEASE. Not a facet over a field: the one question a publisher actually asks.
+    var nr = h("button", "publish-chip publish-pick__facet" + (__publishFacets.needsRelease ? " is-active" : ""));
+    nr.type = "button";
+    nr.innerHTML = "<span>Needs release</span>";
+    nr.title = "Only documents whose source has moved, or that have never gone out";
+    nr.addEventListener("click", function () { __publishFacets.needsRelease = !__publishFacets.needsRelease; renderPublishPick(); });
+    bar.appendChild(nr);
+    return bar;
+  }
+
+  // Left pane: every design document, from every product, each with an "Add to queue" action. Plus a
   // shortcut to queue the currently-open document (the fast single-export path -- a queue-of-one).
   function renderPublishPick() {
     var host = document.getElementById("publish-pick"); if (!host) return;
     var U = window.VersoUI;
     host.innerHTML = "";
     var all = publishPickRows();
-    var docs = publishPickView(all, { query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort });
+    var docs = publishPickView(all, { query: __publishPickQuery, filter: __publishPickFilter,
+                                      sort: __publishPickSort, facets: __publishFacets });
     var attention = all.filter(publishNeedsAttention).length;
     // uio-P-C06 (PUB-04): this render READS the selection and never writes it. Search, filter and
     // sort are a lens over the list, so a tick survives all three for the whole session; the footer
@@ -1665,7 +1771,10 @@
     // Header strip: what this list IS (scope + count), and how it is ordered.
     var head = h("div", "publish-pick__head");
     head.appendChild(h("span", "publish-pick__title", "Documents"));
-    head.appendChild(h("span", "publish-pick__scope", String(docs.length)));
+    // uio-W16: "N documents across M products", not a bare count. Publish lists every design
+    // document from every product now, so whether a batch crosses a product boundary is the fact a
+    // publisher needs, and a lone number does not carry it.
+    head.appendChild(h("span", "publish-pick__scope", publishScopeLabel(docs)));
     // Reuses `publish-chip` — this pane's established "compact value that opens a menu" control
     // (the queue row's preset chip). Same job, same look; a second chrome for it would be exactly
     // the piecemeal divergence this overhaul exists to undo.
@@ -1696,6 +1805,7 @@
     });
     search.appendChild(input);
     host.appendChild(search);
+    host.appendChild(publishFacetBar(all));
 
     // "Needs attention" is only offered when something actually needs it — a permanently-empty
     // filter is noise.
@@ -1734,9 +1844,31 @@
         box.title = "Select “" + d.title + "” for queueing";
         row.appendChild(box);
       }
-      row.appendChild(h("span", "publish-pickrow__title", d.title));
+      // uio-W16: the title line is THE SHARED DOCUMENT ROW (uio-W02) plus a release-state column, so
+      // a document reads identically in Files and here. The facts line beneath it -- alignment,
+      // outputs, last published -- is Publish's own and stays: three badges beside a title eat the
+      // title, which is why they were put on a second line in the first place.
       var add = U ? U.IconButton({ icon: "plus", label: "Add “" + d.title + "” to the publish queue", onClick: function () { addDocToPublishQueue(d.id); } }) : h("button", null, "+");
-      row.appendChild(add);
+      if (U && U.DocumentRow) {
+        var prod = d.productId && window.ProductsStore ? window.ProductsStore[d.productId] : null;
+        row.appendChild(U.DocumentRow({
+          title: d.title,
+          type: d.type,
+          // No type chip and no updated column HERE. Publish's pane is a 300px column, and the row
+          // has to carry a release state and a queue action in it; the glyph already names the type,
+          // and "last published" is a phrase, not a stamp, so it reads on the facts line below where
+          // it has the room. Files, which has the width, keeps both.
+          dot: d.productId ? colourForName(d.productId) : null,
+          dotTitle: d.productId ? ("Product: " + ((prod && prod.name) || d.productId)) : null,
+          release: publishNeedsAttention(d) ? "review" : "ready",
+          updated: "",
+          trailing: add,
+          onOpen: function () { addDocToPublishQueue(d.id); }
+        }));
+      } else {
+        row.appendChild(h("span", "publish-pickrow__title", d.title));
+        row.appendChild(add);
+      }
       // uio-P-C03 (PUB-10): "when did this last actually go out, and as what" — the line that
       // decides whether a re-publish is needed at all. Read from the release record, so it can
       // never disagree with the history below.
@@ -2299,20 +2431,27 @@
   var PRODUCT_STAGE_OPTS = [["eLearning", "elearning"], ["Presentations", "presentations"], ["Print docs", "printDocs"]];
   // targetDoc defaults to the active doc (top-bar / header entry points); the file picker's per-card
   // menu passes a specific registry doc so any course can be promoted without opening it first.
+  // uio-W13: "Assign a product", not "Promote to Product". Promotion implies a document was in a
+  // lesser state and has been raised out of it, which is exactly the reading this ticket removes:
+  // having no product is a fact about a document, not a defect in it. Shared material -- glossaries,
+  // standards -- lives there on purpose, and the same dialog can put a document back.
+  //
+  // It offers the SAME choice uio-W08's creation forms do, from the same builder, so "None (shared)"
+  // and "+ New product…" mean the same thing everywhere they appear.
   function promoteToProductModal(targetDoc) {
     var td = targetDoc || doc;
     if (!td) return;
-    var NEW_KEY = "__new__";
+    var FP = window.VersoFiles._pure;
+    var NEW_KEY = FP.NEW_PRODUCT_VALUE;
     var products = window.ProductsStore || {};
-    var productKeys = Object.keys(products);
-    var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
-    var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
+    var pOpts = FP.productChoices(products).map(function (o) { return [o.label, o.value]; });
+    var chosen = (td.meta && td.meta.productId) || "";
     var stage = (td.meta && td.meta.stage) || "elearning";
     var newNameVal = "";
     var shell = dsModalShell({
-      title: "Promote to Product",
-      subtitle: "Tags this course onto a Product + format. Only adds meta — the course's content is never touched.",
-      primaryLabel: "Promote",
+      title: "Assign a product",
+      subtitle: "Tags this document onto a product and a format. Only meta changes — the content is never touched.",
+      primaryLabel: "Assign",
       onPrimary: function () {
         var pid = chosen;
         if (chosen === NEW_KEY) {
@@ -2321,6 +2460,15 @@
           pid = createProduct(name).id;
         }
         pushHistory();
+        // "None (shared)" is a real choice, not a refusal to choose: it puts the document back into
+        // the shared, cross-product material where a glossary belongs.
+        if (!pid) {
+          unlinkDocFromProduct(td);
+          saveRegistry(registry);
+          shell.modal.close();
+          renderTabs();
+          return;
+        }
         tagDocProductStage(td, pid, stage);
         // spec 2d bridge: carry the course's declared variants onto the Product (union) so the
         // Product's variant workflow (import-as-variant, columns) is reachable -- both sides store
@@ -2343,7 +2491,7 @@
     pSel.classList.add("modal-field__control");
     pRow.appendChild(pSel);
     var newNameRow = h("div"); newNameRow.style.display = (chosen === NEW_KEY) ? "" : "none";
-    var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
+    var nameInput = modalText(newNameRow, "New product name", "", "e.g. Radar Line");
     nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
     box.appendChild(newNameRow);
     var sRow = modalField(box, "Format");
@@ -2383,9 +2531,6 @@
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
   // arch-P3b-07k: the course grid, its live-rendered thumbnails, the destructive verbs it offers
   // and the store-location line moved to editor/home.js.
-  var openBrowser = VE.bind("openBrowser");
-  var closeBrowser = VE.bind("closeBrowser");
-  var browserIsOpen = VE.bind("browserIsOpen");
   var duplicateCourse = VE.bind("duplicateCourse");
   var renameCourse = VE.bind("renameCourse");
   var deleteCourse = VE.bind("deleteCourse");
@@ -5638,8 +5783,9 @@
       return n;
     },
     // #73 home / file browser — open the course wall (also the Home top-bar button).
-    openBrowser: function () { openBrowser(); },
-    closeBrowser: function () { closeBrowser(); },
+    // uio-W09: openBrowser/closeBrowser are gone with the overlay they drove. Files is a
+    // destination -- the browser-verify hook lands it the way the app does.
+    openFiles: function () { if (window.__leftRail) window.__leftRail.setStage("files"); },
     // #221 tour builder — open the spatial screen-graph board for a hotspot block
     // (defaults to the first hotspot block in the doc). Mirrors openBrowser.
     openTourBuilder: function (block) {
@@ -6100,8 +6246,6 @@
     publishOptionsForRow: publishOptionsForRow,
     publishQueue: publishQueue,
     renderSettingsBody: renderSettingsBody,
-    openBrowser: openBrowser,
-    closeBrowser: closeBrowser,
     // uio-W04: what the where-am-I line says while you are in Source. Bound from source-stage's
     // expose and provided, because a need() resolves against provide() and never against an expose.
     activeSourceDocName: VE.bind("activeSourceDocName"),
@@ -6485,6 +6629,9 @@
   window.VersoEditor.provide({
     libComponents: libComponents, dsModalShell: dsModalShell, modalField: modalField,
     modalSection: modalSection, f04Badge: f04Badge, f04ProductFacts: f04ProductFacts,
+    // uio-W12: the Product panel's release line reads the ONE staleness computation, rather than
+    // recomputing drift a second way and getting a second answer.
+    f04DocFacts: f04DocFacts,
     layout: layout, view: view, variantNames: variantNames, registry: registry, History: History,
     // Document identity: which existing registry entry an incoming code refers to. Provided from
     // here rather than read off window inside the module, because a module under bare `require`
@@ -6581,6 +6728,24 @@
   var mountFilesStage = VE.bind("mountFilesStage");
   var refreshFiles = VE.bind("refreshFiles");
   VE.provide({ mountFilesStage: mountFilesStage, refreshFiles: refreshFiles });
+  // uio-W12: the Product panel -- what the open document belongs to, in the left panel of both
+  // Source and Edit. An inspector, never a filter: it reads the open document, and every action it
+  // offers OPENS something rather than narrowing something. It installs after tabs.js (whose
+  // switchDoc it uses to reach a sibling) and before the two stages that render it.
+  // uio-W08: Files' three creation actions mint a source document through the Source stage's own
+  // write path, so "start writing" and "import" seed a document the same way. A need() resolves
+  // against provide(), so it is bound and provided here.
+  // uio-W07/W08: Files asks the Source stage what it holds open and mints source documents through
+  // its write path, so "what is open" has one answer and creation has one seeding path.
+  VE.provide({ createSourceDocument: VE.bind("createSourceDocument"),
+               openSourceDocIds: VE.bind("openSourceDocIds"),
+               // uio-W09: the retired overlay's footer line. Files states it now.
+               storeLocationText: storeLocationText });
+  window.VersoProductPanel.install(VE);
+  VE.provide({
+    renderEditProductPanel: VE.bind("renderEditProductPanel"),
+    renderSourceProductPanel: VE.bind("renderSourceProductPanel")
+  });
   window.VersoShell.install(VE);   // the frame around the work: stage, Product, cell
   window.VersoEditing.install(VE);   // what makes the canvas typeable
   window.VersoTextFormat.install(VE);   // inline formatting: the toggle set and both bars that render it
