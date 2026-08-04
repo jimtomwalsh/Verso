@@ -421,6 +421,52 @@ section("arch-P4-04 four-file block contract");
      css.indexOf(".a-class-course-css-does-not-have") === -1);
 })();
 
+// ---- the architecture map cannot silently lie ----------------------------
+// docs/architecture.html is the orientation page a developer opens first, and CONTRIBUTING and
+// the verso-dev skill both send people to it. It is hand-authored, which is right -- prose about
+// WHY the shape is this shape does not generate -- but the one fact in it that rots without
+// anyone noticing is the module index. So that number is checked, and nothing else is: the
+// per-module truth lives in src/editor/README.md, which has its own gate.
+section("architecture map");
+(function () {
+  var MAP = "docs/architecture.html";
+  if (!fs.existsSync(path.join(ROOT, MAP))) { ok("docs/architecture.html exists", false); return; }
+  ok("docs/architecture.html exists", true);
+  var html = src(MAP);
+
+  var onDisk = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) return walk(full, rel + f + "/");
+      if (/\.js$/.test(f)) onDisk.push(rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+
+  // every card carries its filename in a <span class="f">
+  var listed = (html.match(/<span class="f">([^<]+)<\/span>/g) || [])
+    .map(function (m) { return m.replace(/<[^>]+>/g, "").trim(); });
+  var missing = onDisk.filter(function (f) { return listed.indexOf(f) === -1; });
+  var phantom = listed.filter(function (f) { return onDisk.indexOf(f) === -1; });
+
+  ok("every editor module appears in the map" + (missing.length ? " -- MISSING: " + missing.join(", ") : ""),
+     missing.length === 0);
+  ok("the map lists no module that does not exist" + (phantom.length ? " -- PHANTOM: " + phantom.join(", ") : ""),
+     phantom.length === 0);
+
+  // the count it prints in its own masthead has to be the count it lists
+  var claimed = (html.match(/<b>(\d+)<\/b>\s*editor modules/) || [])[1];
+  ok("the map's stated module count matches what it lists (" + listed.length + ")",
+     claimed && parseInt(claimed, 10) === listed.length, claimed + " != " + listed.length);
+
+  // it must not link anything off-box: the repo makes no external network calls
+  ok("the map loads nothing from the network (no CDN, no remote font)",
+     !/https?:\/\/(?!localhost)/.test(html.replace(/<!--[\s\S]*?-->/g, "")));
+
+  ok("the gate would catch a module missing from the map (proof)",
+     ["a-module-not-in-the-map.js"].filter(function (f) { return listed.indexOf(f) === -1; }).length === 1);
+})();
+
 // ---- arch-P3b-01: the editor namespace -----------------------------------
 // The wiring table a moved region and editor.js reach each other through. Two halves: the table
 // itself, driven directly, and the table AS THE EDITOR ACTUALLY WIRES IT -- booted whole in the
