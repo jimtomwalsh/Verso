@@ -6607,7 +6607,10 @@
   // uio-W08: Files' three creation actions mint a source document through the Source stage's own
   // write path, so "start writing" and "import" seed a document the same way. A need() resolves
   // against provide(), so it is bound and provided here.
-  VE.provide({ createSourceDocument: VE.bind("createSourceDocument") });
+  // uio-W07/W08: Files asks the Source stage what it holds open and mints source documents through
+  // its write path, so "what is open" has one answer and creation has one seeding path.
+  VE.provide({ createSourceDocument: VE.bind("createSourceDocument"),
+               openSourceDocIds: VE.bind("openSourceDocIds") });
   window.VersoProductPanel.install(VE);
   VE.provide({
     renderEditProductPanel: VE.bind("renderEditProductPanel"),

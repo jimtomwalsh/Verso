@@ -302,6 +302,21 @@
   // The key is REMOVED in the same pass, always -- including when the product it names no longer
   // exists. A seed that survived would be a persisted scope by another route, which is exactly what
   // this ticket exists not to rebuild.
+  // ---- uio-W07: open vs reveal --------------------------------------------
+  //
+  // A row has to say whether the document is ALREADY OPEN, because the alternative is finding out
+  // by clicking -- and the wrong answer to that click is a second copy of a document you already
+  // had, in a strip you now have to reconcile by hand.
+  //
+  // Where a document is open is a fact about the two strips, not about the document: Edit holds
+  // registry ids, Source holds LibraryStore ids, and neither can hold the other's. So this reads
+  // both open sets and answers with the destination that has it, or "" for closed.
+  function openStateOf(d, openDesignIds, openSourceIds) {
+    if (!d) return "";
+    if (d.kind === "source") return (openSourceIds || []).indexOf(d.id) !== -1 ? "source" : "";
+    return (openDesignIds || []).indexOf(d.id) !== -1 ? "edit" : "";
+  }
+
   // ---- uio-W08: what a creation form offers -------------------------------
   //
   // The empty option reads "None (shared)", never "All products". They look alike and mean opposite
@@ -354,6 +369,7 @@
     normGrouping: normGrouping, normMode: normMode,
     normFacets: normFacets, facetCount: facetCount, applyFacets: applyFacets,
     facetCounts: facetCounts, facetChips: facetChips, consumeFacetSeed: consumeFacetSeed,
+    openStateOf: openStateOf,
     productChoices: productChoices, primaryDefault: primaryDefault,
     NO_PRODUCT_LABEL: NO_PRODUCT_LABEL, NEW_PRODUCT_VALUE: NEW_PRODUCT_VALUE
   };
@@ -367,7 +383,7 @@
       "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse", "openSourceTopicId",
       // uio-W08: the three creation actions. All three live here, and none of them needs a
       // pre-selected product -- there is no scope left to inherit.
-      "createSourceDocument", "createProduct", "showNewDocDialog",
+      "createSourceDocument", "createProduct", "showNewDocDialog", "openSourceDocIds",
       "promptModal", "modalText", "saveProducts",
       "deleteCourse", "tagDocProductStage", "saveRegistry", "dsModalShell", "modalField",
       "confirmModal"
@@ -404,8 +420,13 @@
     }
 
     // Opening a document means opening it where it belongs: a design document into Edit, a source
-    // document into Source. uio-W07 makes an already-open document REVEAL its tab rather than
-    // opening a second copy; until then this is the plain open.
+    // document into Source.
+    //
+    // uio-W07: AN ALREADY-OPEN DOCUMENT IS REVEALED, NOT DUPLICATED. Both openers are idempotent on
+    // their strip -- a document already in the open set is switched to rather than pushed again --
+    // so "open" and "reveal" are the same call and there is no second path that could disagree with
+    // the first. What reveal adds is scrolling the tab into view: landing a destination whose strip
+    // has scrolled past the tab you just chose leaves you looking for it.
     function openDoc(d) {
       if (!d) return;
       if (d.kind === "source") {
@@ -415,11 +436,23 @@
         // which is also what puts the document in Source's strip (uio-W10).
         E.openSourceTopicId(d.id);
         if (window.__leftRail) window.__leftRail.setStage("source");
+        revealTab("#source-tabs", d.id);
         return;
       }
       if (E.openDocIds.indexOf(d.id) === -1) { E.openDocIds.push(d.id); E.saveOpenDocIds(E.openDocIds); }
       E.switchDoc(d.id);
       if (window.__leftRail) window.__leftRail.setStage("edit");
+      revealTab("#toolbar-tabs", d.id);
+    }
+    // Scroll the now-active tab into the strip. Deferred a frame because the destination has only
+    // just been shown, and a strip that is still display:none has no scroll geometry to work with.
+    function revealTab(stripSel, id) {
+      if (typeof document === "undefined") return;
+      setTimeout(function () {
+        var strip = document.querySelector(stripSel); if (!strip) return;
+        var tab = strip.querySelector(".vds-doctab.is-active");
+        if (tab && tab.scrollIntoView) tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }, 0);
     }
 
     function ensureUI() {
@@ -774,12 +807,23 @@
       return wrap;
     }
 
-    function docRow(d, showTypeChip) {
+    // What is open right now, read fresh on every render -- so closing the last tab for a document
+    // clears its label in Files without Files having to be told.
+    function openSets() {
+      return {
+        design: E.openDocIds || [],
+        source: (typeof E.openSourceDocIds === "function") ? E.openSourceDocIds() : []
+      };
+    }
+
+    function docRow(d, showTypeChip, open) {
       var prod = d.productId && window.ProductsStore ? window.ProductsStore[d.productId] : null;
       return window.VersoUI.DocumentRow({
         title: d.title,
         type: d.type,
         typeChip: showTypeChip,
+        // uio-W07: the row states whether it is already open, and where.
+        openIn: openStateOf(d, open.design, open.source),
         primary: d.primary,
         dot: d.productId ? E.colourForName(d.productId) : null,
         dotTitle: d.productId ? ("Product: " + ((prod && prod.name) || d.productId)) : null,
@@ -790,8 +834,9 @@
       });
     }
 
-    function docCard(d, showTypeChip) {
-      var card = h("div", "files-card" + (d.primary ? " is-primary" : ""));
+    function docCard(d, showTypeChip, open) {
+      var card = h("div", "files-card" + (d.primary ? " is-primary" : "") +
+        (openStateOf(d, open.design, open.source) ? " is-open" : ""));
       card.setAttribute("data-doc-type", d.type);
       // The same primary treatment the list carries, so switching mode never changes what a
       // document IS -- only how much room it takes.
@@ -804,6 +849,9 @@
       card.appendChild(h("span", "files-card__title", d.title));
       var meta = h("span", "files-card__meta");
       if (showTypeChip) meta.appendChild(h("span", "files-card__chip", T.label));
+      // The same fact the list row states, in the room a card has for it.
+      var openIn = openStateOf(d, open.design, open.source);
+      if (openIn) meta.appendChild(h("span", "files-card__open", window.VersoUI._pure.openStateLabel(openIn)));
       meta.appendChild(h("span", "files-card__when",
         window.VersoUI._pure.compactRelativeTime(d.updatedAt, Date.now())));
       card.appendChild(meta);
@@ -857,6 +905,7 @@
       }
       // A type chip is redundant in the Type view -- the band above already says it.
       var showTypeChip = grouping !== "type";
+      var open = openSets();
       groupCorpus(all, grouping, window.ProductsStore || {}).forEach(function (g) {
         var band = h("div", "files-band");
         band.setAttribute("data-band", g.key);
@@ -867,7 +916,7 @@
           // role chip already says what type it is, and two chips saying one thing is the noise the
           // type chip is switched off for elsewhere.
           var chip = showTypeChip && !(d.primary && d.type === "source");
-          var el = mode === "card" ? docCard(d, chip) : docRow(d, chip);
+          var el = mode === "card" ? docCard(d, chip, open) : docRow(d, chip, open);
           // uio-W05, the DIVIDER treatment: the primary source is not just first in its band, it is
           // visibly the thing the rest descend from -- an accent left border, a heavier title, and a
           // rule separating it from the design documents beneath. The prototype's subtitle variant

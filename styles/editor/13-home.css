@@ -672,3 +672,9 @@
 .files-new__tick { display: inline-flex; align-items: center; gap: var(--space-3, 6px); font-size: var(--text-xs, 11px); color: var(--text-primary); cursor: pointer; }
 .files-new__tick input { margin: 0; accent-color: var(--accent); visibility: visible; }
 .files-new__tick input:disabled { cursor: default; opacity: 0.5; }
+
+/* uio-W07 -- open vs reveal. A row that does not say a document is already open leaves you to find
+   out by clicking, and the wrong answer to that click is a second copy in a strip you then have to
+   reconcile by hand. Quiet ink: it is a state, not a call to action. */
+.files-card__open { color: var(--accent); }
+.files-card.is-open { border-color: var(--border-input, var(--border-strong)); }

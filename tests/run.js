@@ -11117,6 +11117,54 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W07: open vs reveal, and the open-elsewhere marker ---------------
+// A row that does not say a document is already open leaves you to find out by clicking, and the
+// wrong answer to that click is a second copy of a document you already had, in a strip you then
+// have to reconcile by hand.
+section("uio-W07 open vs reveal");
+(function () {
+  var F = require(path.join(ROOT, "src/editor/files.js"))._pure;
+  var design = { id: "C-1", kind: "design" }, source = { id: "m-1", kind: "source" };
+
+  // --- where a document is open is a fact about the two STRIPS ---
+  ok("a design document open in Edit says so", F.openStateOf(design, ["C-1"], []) === "edit");
+  ok("a source document open in Source says so", F.openStateOf(source, [], ["m-1"]) === "source");
+  ok("a closed document says nothing", F.openStateOf(design, [], []) === "" && F.openStateOf(source, [], []) === "");
+  ok("neither strip can answer for the other -- they hold ids from different stores",
+    F.openStateOf(design, [], ["C-1"]) === "" && F.openStateOf(source, ["m-1"], []) === "");
+  ok("junk is closed, not a crash", F.openStateOf(null, ["C-1"], []) === "" && F.openStateOf(design) === "");
+
+  var FS = src("src/editor/files.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("every Files view states it -- the list row and the card both",
+    /openIn: openStateOf\(d, open\.design, open\.source\)/.test(FS) &&
+    /if \(openIn\) meta\.appendChild\(h\("span", "files-card__open", window\.VersoUI\._pure\.openStateLabel\(openIn\)\)\)/.test(FS));
+  ok("the label comes from the ONE vocabulary the row component publishes",
+    /openStateLabel: function \(openIn\) \{\s*if \(openIn === "edit"\) return "Open in Edit";\s*if \(openIn === "source"\) return "Open in Source";/.test(src("src/ui-kit.js")));
+  ok("the open sets are read fresh on every render, so closing the last tab clears the label",
+    /function openSets\(\) \{[\s\S]{0,300}E\.openSourceDocIds\(\)/.test(FS) && /var open = openSets\(\);/.test(FS));
+
+  // --- REVEAL, NOT DUPLICATE ---
+  // Both openers are idempotent on their strip, so "open" and "reveal" are the same call and there
+  // is no second path that could disagree with the first.
+  ok("opening a design document that is already open switches to it rather than pushing it again",
+    /if \(E\.openDocIds\.indexOf\(d\.id\) === -1\) \{ E\.openDocIds\.push\(d\.id\); E\.saveOpenDocIds\(E\.openDocIds\); \}\s*E\.switchDoc\(d\.id\);/.test(FS));
+  ok("and a source document goes through the strip's own opener, which is idempotent too",
+    /openSourceDoc\(id\)/.test(src("src/editor/source-stage.js")) &&
+    /if \(ids\.indexOf\(id\) === -1\) \{ ids\.push\(id\); saveOpenSourceDocIds\(\); \}/.test(src("src/editor/source-stage.js")));
+  ok("revealing lands the destination that hosts the document's type",
+    /if \(d\.kind === "source"\) \{[\s\S]{0,300}setStage\("source"\)/.test(FS) &&
+    /window\.__leftRail\.setStage\("edit"\);\s*revealTab\("#toolbar-tabs", d\.id\)/.test(FS));
+  ok("and scrolls the tab into the strip, because landing on a strip scrolled past it is no better",
+    /function revealTab\(stripSel, id\)/.test(FS) && /scrollIntoView\(\{ block: "nearest", inline: "nearest" \}\)/.test(FS));
+  ok("deferred a frame, because a strip still hidden has no scroll geometry",
+    /setTimeout\(function \(\) \{\s*var strip = document\.querySelector\(stripSel\)/.test(FS));
+
+  // --- the same marker in the Product panel's sibling list ---
+  ok("a sibling already open elsewhere is marked there too",
+    /openElsewhere: openIds\.indexOf\(id\) !== -1/.test(src("src/editor/product-panel.js")) &&
+    /"\(open elsewhere\)"/.test(src("src/editor/product-panel.js")));
+})();
+
 // ---- uio-W13: the untagged state reads as a fact, not an error ------------
 // The old copy read as a defect report -- "This document isn't attached to a Product. Use
 // Save/Recents → Promote to Product to link it" -- and pointed at a route that was changing. Having
