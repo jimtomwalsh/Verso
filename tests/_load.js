@@ -207,8 +207,19 @@ function load(rel, opts) {
   Object.keys(opts.window || {}).forEach(function (k) { win[k] = opts.window[k]; });
 
   var ctx = vm.createContext(win);
+  // A script the page loads but the repo does not contain is SERVER-GENERATED
+  // (platform-pivot 34's api/bootstrap.js is the one). A browser standalone 404s it and
+  // carries on; so do we, because that 404 IS the standalone posture under test. The
+  // names are recorded rather than swallowed, so a genuine typo in a page's script src
+  // is still catchable -- tests/run.js asserts exactly which files may be absent.
+  win.__missingScripts = [];
   (opts.also || []).concat([rel]).forEach(function (f) {
-    var code = typeof f === "string" ? fs.readFileSync(path.join(ROOT, f), "utf8") : f.code;
+    var code;
+    if (typeof f === "string") {
+      var full = path.join(ROOT, f);
+      if (!fs.existsSync(full)) { win.__missingScripts.push(f); return; }
+      code = fs.readFileSync(full, "utf8");
+    } else code = f.code;
     vm.runInContext(code, ctx, { filename: typeof f === "string" ? f : (f.filename || "<inline>") });
   });
   return win;

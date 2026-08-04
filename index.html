@@ -480,6 +480,8 @@
   <script src="src/editor/structure-ops.js"></script>
   <!-- #68 native-file registry adapter: sets window.__storageAdapter when the Swift bridge is present (inert in a plain browser; used only when authoring.storageBackend == 'file'). Must precede editor.js so the seam can select it at the synchronous boot read. -->
   <script src="src/store-native.js"></script>
+  <!-- platform-pivot 34 server-mode bootstrap: THE ON-RAMP. Served by verso-server (relative, same-origin, never absolute); under IIS+ARR the static host proxies /api/* to Node. It sets window.__versoServerUrl / __versoServerMode / __versoServerAuthRequired and inlines the registry, which is what makes the two scripts below live at all. A classic src-tag load is blocking and ordered, so those globals exist before any reader runs -- that is what satisfies readRegistry()'s synchronous boot contract without the backend rendering a page. STANDALONE: no server -> this 404s -> no globals -> both scripts below stay inert and the browser backend serves everything, exactly as before this file existed. Must precede store-http.js. -->
+  <script src="api/bootstrap.js"></script>
   <!-- platform-pivot 02 HTTP registry adapter (server-of-one): sets window.__storageAdapter when a server URL is injected (window.__versoServerUrl); inert in a plain browser / local shell -> browser backend untouched. Used only when authoring.storageBackend == 'http'. Must precede editor.js. -->
   <script src="src/store-http.js"></script>
   <!-- platform-pivot live-collaboration client (server-of-one): defines window.VersoSync, INERT unless a server URL is injected (window.__versoServerUrl). In local / standalone it never activates -> the editor takes exactly today's branches. Must precede editor.js. -->

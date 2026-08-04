@@ -5,14 +5,17 @@
  * browser storage. Loaded BEFORE editor.js so the seam can select it at boot.
  *
  * INERT BY DEFAULT. It installs window.__storageAdapter (name "http") ONLY when a
- * server URL is present (window.__versoServerUrl, injected in server mode). In a
- * plain browser or the local desktop shell there is no server URL -> nothing installs
- * and the default 'browser' backend is untouched. Mutually exclusive with the native
- * 'file' adapter (store-native.js installs only under the WKWebView bridge).
+ * server URL is present (window.__versoServerUrl, set by GET /api/bootstrap.js --
+ * ticket 34's on-ramp, a blocking classic <script src> that index.html loads immediately
+ * before this file). In a plain browser or the local desktop shell that script 404s, no
+ * server URL exists -> nothing installs and the default 'browser' backend is untouched.
+ * Mutually exclusive with the native 'file' adapter (store-native.js installs only under
+ * the WKWebView bridge).
  *
- * Sync-read contract: readRegistry() must be synchronous (editor reads it at boot),
- * so in server mode the server injects the current registry blob as
- * window.__versoServerRegistryB64 at page load; writeRegistry() updates that in-page
+ * Sync-read contract: readRegistry() must be synchronous (editor reads it at boot), and
+ * a blocking script tag is what makes that possible without the backend rendering a page
+ * (it never does) -- the bootstrap injects the current registry blob as
+ * window.__versoServerRegistryB64 before this file runs; writeRegistry() updates that in-page
  * cache synchronously and POSTs the durable write, surfacing a failed write through
  * the shared save-state (Editor.reportSaveFailure) rather than losing it silently --
  * exactly the store-native.js posture.
@@ -59,9 +62,16 @@
     } catch (e) { return null; }
   }
 
-  // Seed the in-page cache from the server's page-load injection (the on-disk registry).
+  // Seed the in-page cache from the bootstrap script's page-load injection (ticket 34,
+  // GET /api/bootstrap.js -- the on-ramp that sets serverUrl() in the first place).
   var base = serverUrl();
   var cache = b64ToText(window.__versoServerRegistryB64);
+
+  // Signed out of a server we can nonetheless see (ticket 34). The bootstrap route is
+  // served in FRONT of the identity boundary precisely so this state is knowable: it
+  // reports the mode and withholds the data, rather than 401ing into silence.
+  var authRequired = !!window.__versoServerAuthRequired;
+  var SIGNED_OUT = "You are signed out of the Verso server, so nothing can be saved. Sign in, then reload.";
 
   function reportFailure(msg) {
     if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure(msg);
@@ -72,16 +82,32 @@
     name: "http",
     readRegistry: function () { return cache; }, // synchronous (the seam's contract)
     writeRegistry: function (json) {
+      // Signed out: fail HERE, as a value, before touching the in-page cache. The adapter
+      // stays installed on purpose -- withdrawing it would let pickFacetAdapter fall back
+      // to the browser store, and the author would go on editing into localStorage while
+      // believing they were on the shared server. A loud refusal beats a silent strand.
+      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
       cache = json; // in-page truth updates synchronously (optimistic)
       try {
         fetch(apiUrl(base, "registry"), { method: "PUT", body: json, headers: { "Content-Type": "application/json" } })
-          .then(function (r) { return r.ok ? r.json() : { ok: false }; })
-          .then(function (j) { if (!j || !j.ok) reportFailure("Save to the Verso server failed. Export JSON now to avoid losing work."); })
+          .then(function (r) {
+            if (r.status === 401 || r.status === 403) { authRequired = true; return { ok: false, auth: true }; }
+            return r.ok ? r.json() : { ok: false };
+          })
+          .then(function (j) {
+            if (j && j.auth) return reportFailure(SIGNED_OUT);
+            if (!j || !j.ok) reportFailure("Save to the Verso server failed. Export JSON now to avoid losing work.");
+          })
           .catch(function () { reportFailure("Could not reach the Verso server to save. Check your connection; export JSON now to avoid losing work."); });
       } catch (e) { return { ok: false, quota: false, error: e }; }
       return { ok: true }; // optimistic; durable failure surfaces via reportFailure
     }
   };
+
+  // Say it once at boot too, not only on the first save attempt: an author who opens a
+  // signed-out server sees an empty world, and an empty world is indistinguishable from
+  // a fresh one unless something says otherwise.
+  if (authRequired) reportFailure(SIGNED_OUT);
 
   // Async API surface for later phases (transport #08, migration #05). Not wired into
   // the sync media facet yet -- that async rework is Phase 2, not this ticket.
