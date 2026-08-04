@@ -62,10 +62,15 @@
     } catch (e) { return null; }
   }
 
-  // Seed the in-page cache from the bootstrap script's page-load injection (ticket 34,
-  // GET /api/bootstrap.js -- the on-ramp that sets serverUrl() in the first place).
+  // Seed the in-page caches from the bootstrap script's page-load injection (ticket 34,
+  // GET /api/bootstrap.js -- the on-ramp that sets serverUrl() in the first place). One
+  // per facet the StorageBackend declares (platform-pivot 32): before that ticket only
+  // the registry was served here, so on a shared server two authors shared their courses
+  // and each kept a PRIVATE local copy of every source document and every product.
   var base = serverUrl();
   var cache = b64ToText(window.__versoServerRegistryB64);
+  var productsCache = b64ToText(window.__versoServerProductsB64);
+  var libraryCache = b64ToText(window.__versoServerLibraryB64);
 
   // Signed out of a server we can nonetheless see (ticket 34). The bootstrap route is
   // served in FRONT of the identity boundary precisely so this state is knowable: it
@@ -76,6 +81,116 @@
   function reportFailure(msg) {
     if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure(msg);
     if (window.console && console.error) console.error("[store-http] " + msg);
+  }
+
+  // Report a durable write's outcome without duplicating the four branches per facet.
+  function settle(promise, what) {
+    return promise
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) { authRequired = true; return { ok: false, auth: true }; }
+        return r.ok ? r.json() : { ok: false };
+      })
+      .then(function (j) {
+        if (j && j.auth) return reportFailure(SIGNED_OUT);
+        if (!j || !j.ok) reportFailure("Saving " + what + " to the Verso server failed. Export JSON now to avoid losing work.");
+      })
+      .catch(function () { reportFailure("Could not reach the Verso server to save " + what + ". Check your connection; export JSON now to avoid losing work."); });
+  }
+  function putJson(url, body) {
+    return fetch(url, { method: "PUT", body: body, headers: { "Content-Type": "application/json" } });
+  }
+  function postJson(url, obj) {
+    return fetch(url, { method: "POST", body: JSON.stringify(obj), headers: { "Content-Type": "application/json" } });
+  }
+
+  // ---- the library, DECOMPOSED (platform-pivot 32) --------------------------
+  //
+  // THE PROBLEM. saveLibrary() hands this adapter the ENTIRE LibraryStore as one JSON
+  // blob on every write, and source documents live inside it as kind:"topic" masters
+  // carrying a `doc`. Shipping that blob straight to the server would make the library
+  // shared -- and would also mean two authors in two DIFFERENT source documents overwrite
+  // each other, because each save rewrites everything. That is the exact bug uio-W17
+  // called out, and the workspace epic routes MORE concurrent authors into source
+  // documents.
+  //
+  // THE FIX, and where it lives. The caller does not change: it still hands over the
+  // whole blob, because that is the seam's contract and rewriting every call site would
+  // be a far larger change for no gain. The ADAPTER absorbs the granularity -- it diffs
+  // the incoming blob against what it last saw and writes only what actually moved:
+  //
+  //   - a topic's body      -> block-addressable rows under doc id "src:<masterId>",
+  //                            per NODE, using the same toBlockDoc shape W17 proved
+  //   - everything else     -> one components blob under the kv key
+  //
+  // So an author editing topic A appends changes to topic A's rows and touches nothing
+  // of topic B. Model-B block locking, presence and the lease reaper already operate on
+  // block rows, so source documents come under them with no new merge model.
+  function libDocUrl(masterId, op) {
+    return apiUrl(base, "doc", "src:" + masterId) + (op ? "/" + op : "");
+  }
+  // Split a library blob into { shell, topics }: the shell is the blob with every topic's
+  // body removed (small, and what the kv key holds), topics maps id -> source-doc JSON.
+  function splitLibrary(lib) {
+    var shell = { components: {} }, topics = {};
+    var comps = (lib && lib.components) || {};
+    Object.keys(comps).forEach(function (id) {
+      var m = comps[id];
+      if (!m || typeof m !== "object") { shell.components[id] = m; return; }
+      var copy = {}, k;
+      for (k in m) if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
+      if (m.kind === "topic" && m.doc) { topics[id] = m.doc; delete copy.doc; }
+      shell.components[id] = copy;
+    });
+    Object.keys(lib || {}).forEach(function (k) { if (k !== "components") shell[k] = lib[k]; });
+    return { shell: shell, topics: topics };
+  }
+  // Which nodes of a source document changed, given the previous and next persisted JSON?
+  // Returns null when the change is STRUCTURAL (a node added, removed or reordered) --
+  // block-store's applyChange is a content put and explicitly refuses to add blocks, so a
+  // structural change goes through import, which re-decomposes and takes a fresh snapshot.
+  // That is the store's own v1 contract, not a shortcut taken here.
+  function changedNodes(prevJson, nextJson) {
+    var SD = window.SourceDoc;
+    if (!SD || !prevJson) return null;
+    var prev, next;
+    try { prev = SD.fromJSON(prevJson); next = SD.fromJSON(nextJson); } catch (e) { return null; }
+    var pn = prev.nodes || [], nn = next.nodes || [];
+    if (pn.length !== nn.length) return null;
+    var byKey = {}, i;
+    for (i = 0; i < pn.length; i++) {
+      if (pn[i].key !== nn[i].key) return null;   // reorder or re-key -> structural
+      byKey[pn[i].key] = JSON.stringify(pn[i]);
+    }
+    // Metadata that is NOT a node (marks, history, _seq) rides the doc row, which import
+    // owns. A metadata-only change therefore has to go through import too, or a mark
+    // would be written nowhere.
+    var metaMoved = JSON.stringify(SD.toBlockDoc(prev).meta) !== JSON.stringify(SD.toBlockDoc(next).meta);
+    if (metaMoved) return null;
+    var out = [];
+    for (i = 0; i < nn.length; i++) {
+      if (byKey[nn[i].key] !== JSON.stringify(nn[i])) out.push(nn[i]);
+    }
+    return out;
+  }
+  function writeTopic(id, prevJson, nextJson) {
+    var SD = window.SourceDoc;
+    if (!SD) return; // no source-doc module -> the shell blob carried the body; nothing to do
+    var changed = changedNodes(prevJson, nextJson);
+    if (changed && !changed.length) return;        // genuinely unchanged: write nothing
+    if (changed) {
+      // per-NODE puts: this is what stops two authors in different documents -- and in
+      // different paragraphs of the SAME document -- from overwriting one another
+      changed.forEach(function (n) {
+        var block = {}, k;
+        for (k in n) if (Object.prototype.hasOwnProperty.call(n, k)) block[k] = n[k];
+        block.id = n.key;                          // the key it already had; never a second identifier
+        settle(postJson(libDocUrl(id, "change"), { blockId: n.key, patch: block }), "a source document");
+      });
+      return;
+    }
+    var model;
+    try { model = SD.fromJSON(nextJson); } catch (e) { return; }
+    settle(postJson(libDocUrl(id, "import"), { doc: SD.toBlockDoc(model) }), "a source document");
   }
 
   window.__storageAdapter = {
@@ -101,6 +216,45 @@
           .catch(function () { reportFailure("Could not reach the Verso server to save. Check your connection; export JSON now to avoid losing work."); });
       } catch (e) { return { ok: false, quota: false, error: e }; }
       return { ok: true }; // optimistic; durable failure surfaces via reportFailure
+    },
+
+    // --- products (platform-pivot 32) ---
+    // Small and bounded, so it takes the registry's posture exactly: inlined at page
+    // load, served synchronously from the in-page cache, written as one blob.
+    readProducts: function () { return productsCache; },
+    writeProducts: function (json) {
+      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      productsCache = json;
+      try { settle(putJson(apiUrl(base, "kv", "authoring.products"), json), "products"); }
+      catch (e) { return { ok: false, quota: false, error: e }; }
+      return { ok: true };
+    },
+
+    // --- the shared component library, and the source documents inside it ---
+    // Read is synchronous from the cache the bootstrap seeded (the server reassembles the
+    // decomposed form on its way out). Write decomposes -- see splitLibrary/writeTopic.
+    readLibrary: function () { return libraryCache; },
+    writeLibrary: function (json) {
+      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      var next, prev = null;
+      try { next = JSON.parse(json); } catch (e) { return { ok: false, quota: false, error: e }; }
+      try { prev = libraryCache ? JSON.parse(libraryCache) : null; } catch (e) { prev = null; }
+      libraryCache = json;                      // in-page truth updates synchronously
+      try {
+        var nextSplit = splitLibrary(next);
+        var prevSplit = prev ? splitLibrary(prev) : { shell: null, topics: {} };
+        // each source document, per node, only where it moved
+        Object.keys(nextSplit.topics).forEach(function (id) {
+          writeTopic(id, prevSplit.topics[id] || null, nextSplit.topics[id]);
+        });
+        // the rest of the library, as one small blob -- but only when it actually changed,
+        // so an edit inside one source document does not rewrite every author's shell
+        var shellJson = JSON.stringify(nextSplit.shell);
+        if (!prevSplit.shell || JSON.stringify(prevSplit.shell) !== shellJson) {
+          settle(putJson(apiUrl(base, "kv", "authoring.library"), shellJson), "the shared library");
+        }
+      } catch (e) { return { ok: false, quota: false, error: e }; }
+      return { ok: true };
     }
   };
 

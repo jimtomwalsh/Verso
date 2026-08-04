@@ -1461,7 +1461,7 @@ section("platform-pivot 34 server-mode bootstrap");
 
   // --- signed in: the data arrives ---
   var reg = JSON.stringify({ "C-1": { meta: { code: "C-1", title: "Sample" } } });
-  var w = runBootstrap(B({ mode: "server" }, reg, { kind: "user", role: "author", name: "Ada" }));
+  var w = runBootstrap(B({ mode: "server" }, { registry: reg }, { kind: "user", role: "author", name: "Ada" }));
   ok("34: bootstrap is valid, executable JS", typeof w.__versoServerUrl === "string");
   ok("34: server URL is the browser's own origin (survives whatever host IIS presents)", w.__versoServerUrl === "https://verso.internal");
   ok("34: mode is reported", w.__versoServerMode === "server");
@@ -1476,20 +1476,20 @@ section("platform-pivot 34 server-mode bootstrap");
   // This is the ticket's whole point. If a signed-out client learned nothing, store-http
   // would not install, pickFacetAdapter would fall back to the browser store, and the
   // author would edit into localStorage believing they were on the shared server.
-  var wo = runBootstrap(B({ mode: "server" }, reg, null));
+  var wo = runBootstrap(B({ mode: "server" }, { registry: reg }, null));
   ok("34: signed out STILL sets the server URL (never a silent local fallback)", wo.__versoServerUrl === "https://verso.internal");
   ok("34: signed out -> authRequired true", wo.__versoServerAuthRequired === true);
   ok("34: signed out -> no registry leaks", wo.__versoServerRegistryB64 === undefined);
   ok("34: signed out -> no principal leaks", wo.__versoServerPrincipal === undefined);
 
   // --- fresh store: absent, not empty ---
-  var wf = runBootstrap(B({ mode: "local" }, null, { kind: "owner", role: "admin", name: "Owner" }));
+  var wf = runBootstrap(B({ mode: "local" }, {}, { kind: "owner", role: "admin", name: "Owner" }));
   ok("34: local mode reported", wf.__versoServerMode === "local" && wf.__versoServerAuthRequired === false);
   ok("34: a fresh store yields NO registry global (absent is distinguishable from empty)", wf.__versoServerRegistryB64 === undefined);
 
   // --- script-context safety ---
   ok("34: '<' is escaped so the text is safe inside a <script>",
-    B({ mode: "</script><b>" }, null, null).indexOf("</script>") === -1);
+    B({ mode: "</script><b>" }, {}, null).indexOf("</script>") === -1);
 
   // --- index.html wiring (the ordering that makes the sync-read contract work) ---
   var html = src("index.html");
@@ -1583,6 +1583,138 @@ section("platform-pivot 34 server-mode bootstrap");
       try { fs.rmSync(tmp34, { recursive: true, force: true }); } catch (e) {}
     }
   })());
+})();
+
+// ---- platform-pivot 32: the library + products facets ------------------------
+// src/editor/storage.js declares THREE facets; store-http.js implemented ONE. pickFacetAdapter
+// correctly refuses an adapter that cannot serve a facet and falls back to the browser store,
+// so the gap was silent rather than loud: on a shared backend two authors shared their courses
+// and each kept a PRIVATE local copy of every source document and every product.
+//
+// Source documents live inside the library as kind:"topic" masters carrying a `doc`, and
+// saveLibrary() hands over the WHOLE store on every write -- so simply forwarding the blob
+// would have made the library shared and simultaneously let two authors in two different
+// source documents overwrite each other. The adapter decomposes instead.
+section("platform-pivot 32 library + products facets");
+(function () {
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  // --- the facet contract the seam checks ---
+  var g = require(path.join(ROOT, "src/editor/storage.js"));
+  var shSrc = src("src/store-http.js");
+  Object.keys(g.FACETS).forEach(function (facet) {
+    var f = g.FACETS[facet];
+    ok("32: store-http implements the " + facet + " facet (" + f.read + "/" + f.write + ")",
+      new RegExp("\\b" + f.read + ":").test(shSrc) && new RegExp("\\b" + f.write + ":").test(shSrc));
+  });
+
+  // The real selector, with the real adapter interface: every facet must now resolve to
+  // http rather than silently falling back to the browser store.
+  (function () {
+    var httpAdapter = { name: "http" };
+    Object.keys(g.FACETS).forEach(function (facet) {
+      httpAdapter[g.FACETS[facet].read] = function () { return null; };
+      httpAdapter[g.FACETS[facet].write] = function () { return { ok: true }; };
+    });
+    var browser = g.makeMemoryAdapter();
+    Object.keys(g.FACETS).forEach(function (facet) {
+      ok("32: pickFacetAdapter selects http for " + facet + " (was falling back to the browser store)",
+        g.pickFacetAdapter("http", httpAdapter, browser, facet) === httpAdapter);
+    });
+  })();
+
+  // --- the split is faithful, and the body is what moves out ---
+  var model = SD.fromJSON(SD.toJSON(SD.fromBlockDoc({
+    meta: { kind: "source", version: 1 },
+    pages: [{ id: "source", blocks: [
+      { id: "n1", type: "para", text: "first" },
+      { id: "n2", type: "para", text: "second" }
+    ] }]
+  })));
+  var lib = {
+    components: {
+      "cmp-1": { kind: "component", name: "A card" },
+      "top-1": { kind: "topic", name: "A source document", sourceMaster: true, doc: SD.toJSON(model) }
+    }
+  };
+  ok("32: a topic's body round-trips through the block-doc shape byte-for-byte",
+    JSON.stringify(SD.toJSON(SD.fromBlockDoc(SD.toBlockDoc(SD.fromJSON(lib.components["top-1"].doc))))) ===
+    JSON.stringify(lib.components["top-1"].doc));
+
+  // --- the server reassembles what the client decomposed ---
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> facet round-trip skipped"); return; }
+  var createBlockStore = require(path.join(ROOT, "server/block-store.js")).createBlockStore;
+  var createStore = require(path.join(ROOT, "server/store.js")).createStore;
+  (function () {
+    var os = require("os");
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-pp32-"));
+    var dbPath = path.join(tmp, "verso.sqlite");
+    var store = createStore(dbPath), bs = createBlockStore(dbPath);
+    try {
+      // store it the way the adapter does: shell in kv, body as rows
+      var shell = JSON.parse(JSON.stringify(lib));
+      delete shell.components["top-1"].doc;
+      store.setKv("authoring.library", JSON.stringify(shell));
+      bs.importDoc(srv.libraryDocId("top-1"), SD.toBlockDoc(SD.fromJSON(lib.components["top-1"].doc)), "ada");
+
+      var assembled = JSON.parse(srv.assembleLibrary(store, bs));
+      ok("32: the server reassembles the library from its decomposed parts",
+        JSON.stringify(assembled.components["top-1"].doc) === JSON.stringify(lib.components["top-1"].doc));
+      ok("32: non-topic components survive the round trip untouched",
+        assembled.components["cmp-1"].name === "A card");
+      ok("32: the components blob on disk carries NO source body (that is the whole split)",
+        JSON.parse(store.getKv("authoring.library")).components["top-1"].doc === undefined);
+
+      // THE POINT OF THE TICKET: two authors, two different source documents, one library.
+      // Under the old one-blob write, whichever saved second erased the other's work.
+      var other = SD.fromJSON(SD.toJSON(SD.fromBlockDoc({
+        meta: { kind: "source" }, pages: [{ id: "source", blocks: [{ id: "m1", type: "para", text: "grace's" }] }]
+      })));
+      bs.importDoc(srv.libraryDocId("top-2"), SD.toBlockDoc(other), "grace");
+      var shell2 = JSON.parse(store.getKv("authoring.library"));
+      shell2.components["top-2"] = { kind: "topic", name: "Grace's document", sourceMaster: true };
+      store.setKv("authoring.library", JSON.stringify(shell2));
+      // ada now edits ONE node of her own document, per-node, as the adapter does
+      bs.applyChange(srv.libraryDocId("top-1"), "n2", { id: "n2", type: "para", text: "ada edited this" }, "ada");
+
+      var after = JSON.parse(srv.assembleLibrary(store, bs));
+      var adaNodes = SD.fromJSON(after.components["top-1"].doc).nodes;
+      var graceNodes = SD.fromJSON(after.components["top-2"].doc).nodes;
+      ok("32: ada's per-node edit landed", adaNodes[1].text === "ada edited this");
+      ok("32: ada's OTHER node is untouched", adaNodes[0].text === "first");
+      ok("32: grace's separate document survived ada's save (the multi-user hole)", graceNodes[0].text === "grace's");
+      ok("32: and grace's node kept its key, so every mark anchored to it still resolves", graceNodes[0].key === "m1");
+
+      // a topic whose rows are missing keeps whatever body the blob carried, rather than
+      // presenting an empty source document as a real one
+      var shell3 = JSON.parse(store.getKv("authoring.library"));
+      shell3.components["top-3"] = { kind: "topic", name: "Never imported", doc: SD.toJSON(model) };
+      store.setKv("authoring.library", JSON.stringify(shell3));
+      var after3 = JSON.parse(srv.assembleLibrary(store, bs));
+      ok("32: a topic with no rows keeps its blob body (never silently emptied)",
+        SD.fromJSON(after3.components["top-3"].doc).nodes.length === 2);
+    } finally {
+      try { store.close(); } catch (e) {}
+      try { bs.close(); } catch (e) {}
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  })();
+
+  // --- the bootstrap carries all three facets, and withholds all three when signed out ---
+  __async.push(withServer(async function (base) {
+    await (await fetch(base + "/api/kv/authoring.products", { method: "PUT", body: '{"prod-1":{"id":"prod-1","name":"Line"}}' })).json();
+    await (await fetch(base + "/api/registry", { method: "PUT", body: '{"C-1":{"meta":{"code":"C-1"}}}' })).json();
+    await (await fetch(base + "/api/kv/authoring.library", { method: "PUT", body: JSON.stringify({ components: { "cmp-1": { kind: "component", name: "A card" } } }) })).json();
+    var text = await (await fetch(base + "/api/bootstrap.js")).text();
+    var vm32 = require("vm");
+    var win = { location: { origin: base } }; win.window = win;
+    vm32.runInContext(text, vm32.createContext(win), { filename: "api/bootstrap.js" });
+    ok("32: the bootstrap carries products", JSON.parse(Buffer.from(win.__versoServerProductsB64, "base64").toString("utf8"))["prod-1"].name === "Line");
+    ok("32: the bootstrap carries the library", JSON.parse(Buffer.from(win.__versoServerLibraryB64, "base64").toString("utf8")).components["cmp-1"].name === "A card");
+    ok("32: and still carries the registry", typeof win.__versoServerRegistryB64 === "string");
+  }));
 })();
 
 section("platform-pivot 02 server invariants");
