@@ -184,8 +184,12 @@
 /* uio-P-C04: the pane no longer scrolls as one strip — the header, search and filter stay put and
    the LIST scrolls under them. Same fix, same reason, as the queue pane in uio-P-C03: a control that
    scrolls away is a control you stop using. */
+/* uio-W16: 340px, not the left panel's 248px. This pane is a LIST, not a nav rail: its rows now
+   carry a type glyph, a product dot, a title, a release state and a queue action, and at the panel
+   width the title was crushed to "Aegi…" — a document you cannot read the name of is worse than a
+   pane 90px wider. */
 .publish-stage__pick {
-  width: var(--left-w, 280px); flex: 0 0 auto; box-sizing: border-box;
+  width: 340px; flex: 0 0 auto; box-sizing: border-box;
   background: var(--surface-panel); border-right: 1px solid var(--border-strong);
   display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0;
 }
@@ -684,3 +688,17 @@ body.is-arming-source-link #canvas-viewport { cursor: copy; }
   color: var(--accent); font-size: var(--text-sm, 12px); cursor: pointer;
 }
 .source-stage__linked-row:hover { text-decoration: underline; }
+/* uio-W16: Publish's own facet chips. Chips, not a 200px rail — this pane is a column, and a rail
+   would leave no room for the documents it is filtering. Each chip states what it is doing right
+   now, so the list can never be narrowed by something the screen does not say out loud. */
+.publish-pick__facets { display: flex; flex-wrap: wrap; gap: var(--space-2, 4px); padding: var(--space-3, 6px) 0; }
+.publish-pick__facet.is-active { background: var(--accent-quiet); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+/* uio-W16: the shared row inside Publish's 300px column. The title takes the slack and ellipsises;
+   the release state and the queue action keep their width, because a row you cannot act on is not a
+   row. */
+.publish-pickrow .vds-docrow { flex: 1 1 auto; min-width: 0; padding-right: 0; }
+.publish-pickrow .vds-docrow__title { min-width: 0; }
+.publish-pickrow .vds-docrow__updated { display: none; }
+/* The release state keeps its width; the title takes what is left and ellipsises there. */
+.publish-pickrow .vds-docrow__release { flex: 0 0 auto; }
+.publish-pickrow .vds-docrow__trailing { flex: 0 0 auto; }

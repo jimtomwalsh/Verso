@@ -11117,6 +11117,45 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W16: Publish de-scoped -- every design document, its own facets ---
+// Publish "was never universal": the global Product scope filtered it, so untagged documents
+// dropped out of a scoped view entirely. uio-W01 took the scope away; this gives Publish facets of
+// its OWN, because a publisher batching a release must not inherit what an author filtered in Files.
+section("uio-W16 Publish de-scoped");
+(function () {
+  var e = src("src/editor.js");
+
+  // --- the guard rail: Publish's facets are Publish's OWN ---
+  ok("Publish holds a second, independent selection",
+    /var __publishFacets = \{ type: \{\}, product: \{\}, needsRelease: false \};/.test(e));
+  ok("IT NEVER READS FILES' FACET STATE, and Files never reads its",
+    !/filesFacet|VersoFiles\._pure\.(applyFacets|facetCounts|facetChips)/.test(e.replace(/\/\*[\s\S]*?\*\//g, "")) &&
+    src("src/editor/files.js").indexOf("__publishFacets") === -1);
+  ok("neither is persisted, so neither can outlive a session as a scope",
+    !/setItem\([^)]*publishFacet/i.test(e) && e.indexOf("verso.publishFacets") === -1);
+
+  // --- source documents are not an output ---
+  // Not by an exclusion rule: they live in LibraryStore and this reads the registry, so there is no
+  // code path by which one could appear.
+  ok("the Publish list is built from the registry alone -- a source document cannot reach it",
+    /function publishPickDocs\(\) \{[\s\S]{0,900}Object\.keys\(registry\)\.forEach/.test(e) &&
+    !/function publishPickDocs\(\) \{[\s\S]{0,900}libComponents\(\)/.test(e));
+  ok("and the type facet offers no Source option, which could only ever return nothing",
+    /var typeKeys = \["reflow", "frame", "paged"\];/.test(e));
+
+  // --- the row ---
+  ok("the title line is the shared document row plus a release-state column",
+    /if \(U && U\.DocumentRow\) \{[\s\S]{0,1000}release: publishNeedsAttention\(d\) \? "review" : "ready"/.test(e));
+  ok("the release column has two states and no hedge between them",
+    /props\.release === "ready" \? "Ready to release" : "Needs review"/.test(src("src/ui-kit.js")));
+  var CTL2 = src("styles/editor/12-controls.css");
+  ok("ready reads in --success and needs-review in --warning",
+    /\.vds-docrow__release--ready \{[^}]*var\(--success/.test(CTL2) &&
+    /\.vds-docrow__release--review \{[^}]*var\(--warning/.test(CTL2));
+  ok("the facts line beneath it survives -- three badges beside a title eat the title",
+    /var meta = h\("div", "publish-pickitem__meta"\);/.test(e) && /f04AlignmentMeter\(facts\.alignment/.test(e));
+})();
+
 // ---- uio-W11: tab overflow -- scroll, then +N more ------------------------
 // A strip that shrinks its tabs to fit trades one problem for a worse one: at twelve open documents
 // every tab is too narrow to read, and you have lost the thing tabs are for.
@@ -13937,8 +13976,53 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
   var e = src("src/editor.js"), css = EDITOR_CSS;
   var m = e.match(/\/\* @publish-pick-start \*\/([\s\S]*?)\/\* @publish-pick-end \*\//);
   if (!m) { ok("locate @publish-pick fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { publishPickView: publishPickView, publishNeedsAttention: publishNeedsAttention, PUBLISH_SORTS: PUBLISH_SORTS };")();
+  // uio-W16 added publishFacetView + publishScopeLabel to this same fence. They are returned here
+  // rather than animated a second time: the slice ratchet counts `new Function` reconstitutions,
+  // and a second one for the same fence would be the drift it exists to stop.
+  var g = new Function(m[1] + "\nreturn { publishPickView: publishPickView, publishNeedsAttention: publishNeedsAttention, PUBLISH_SORTS: PUBLISH_SORTS, publishFacetView: publishFacetView, publishScopeLabel: publishScopeLabel };")();
   var view = g.publishPickView, needs = g.publishNeedsAttention;
+
+  // ---- uio-W16's pure half, on the same animation ----
+
+  var rows = [
+    { id: "a", title: "Alpha course", productId: "p-a", type: "reflow", drift: 0, lastAt: 3000 },
+    { id: "b", title: "Alpha deck", productId: "p-a", type: "frame", drift: 2, lastAt: 1000 },
+    { id: "c", title: "Beta guide", productId: "p-b", type: "paged", drift: 0, lastAt: 2000 },
+    { id: "d", title: "Shared course", productId: "", type: "reflow", drift: 0, lastAt: 0 }
+  ];
+  function ids(r) { return r.map(function (x) { return x.id; }).sort().join(""); }
+
+  // --- every design document, every product, one list ---
+  ok("no facet selected lists everything, untagged documents included",
+    ids(g.publishFacetView(rows, {})) === "abcd" && ids(g.publishFacetView(rows)) === "abcd");
+  ok("a type facet narrows to that type", ids(g.publishFacetView(rows, { type: { frame: true } })) === "b");
+  ok("selections within a dimension are an OR",
+    ids(g.publishFacetView(rows, { type: { frame: true, paged: true } })) === "bc");
+  ok("a product facet narrows to that product",
+    ids(g.publishFacetView(rows, { product: { "p-a": true } })) === "ab");
+  ok("No product is a real selection", ids(g.publishFacetView(rows, { product: { "": true } })) === "d");
+  ok("across dimensions they are an AND",
+    ids(g.publishFacetView(rows, { type: { reflow: true }, product: { "p-a": true } })) === "a");
+  // Not a facet over a field: the one question a publisher actually asks.
+  ok("Needs release keeps what has drifted or never gone out",
+    ids(g.publishFacetView(rows, { needsRelease: true })) === "bd");
+  ok("clearing every facet returns the whole list",
+    ids(g.publishFacetView(rows, { type: {}, product: {}, needsRelease: false })) === "abcd");
+
+  // --- the header states the corpus, and whether the batch crosses a boundary ---
+  ok("the header names the documents AND the products they span",
+    g.publishScopeLabel(rows) === "4 documents across 2 products");
+  ok("one of each reads singular", g.publishScopeLabel([rows[0]]) === "1 document across 1 product");
+  ok("documents with no product between them name no product count",
+    g.publishScopeLabel([rows[3]]) === "1 document");
+  ok("an empty list is not a crash", g.publishScopeLabel([]) === "0 documents" && g.publishScopeLabel() === "0 documents");
+
+  // --- search, filter and sort still compose over the facets ---
+  ok("facets compose with search rather than replacing it",
+    ids(g.publishPickView(rows, { facets: { product: { "p-a": true } }, query: "deck" })) === "b");
+  ok("and with the needs-attention filter", ids(g.publishPickView(rows, { facets: { type: { reflow: true } }, filter: "attention" })) === "d");
+
+
 
   var rows = [
     { id: "a", title: "Zebra handbook", drift: 0, lastAt: 3000 },
@@ -13966,9 +14050,11 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
   // --- the header states scope + the count of what is SHOWN, from the same array ---
   // uio-W01 took the Product name out of this line -- there is no scope to state. The count is still
   // taken from the rendered list, which is what this ever guarded.
-  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", String\(docs\.length\)\)\)/.test(e));
+  // uio-W16: the count grew into "N documents across M products" -- still taken from the rendered
+  // list, so it still cannot disagree with it.
+  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", publishScopeLabel\(docs\)\)\)/.test(e));
   // uio-F04: the drift number now comes from the shared resolver's fact, not a second staleness call.
-  ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);\s*return \{ id: d\.id, title: d\.title, drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
+  ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);[\s\S]{0,400}drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter,\s*sort: __publishPickSort, facets: __publishFacets \}\)/.test(e));
 
   // --- sort is a MENU, not a cycling button: three orderings a cycle would hide ---
   ok("sort opens the canonical menu with the current ordering ticked", /showContextMenu\(r\.left, r\.bottom \+ 4, \[\{ head: "Order by" \}\]\.concat\(PUBLISH_SORTS\.map/.test(e) && /active: __publishPickSort === s\.key/.test(e));
@@ -14266,6 +14352,8 @@ section("uio-P-C03: release history fills the empty half + last-published per ro
 
   // --- last published per picker row ---
   // uio-F04 moved this onto the row's shared meta line, beside the fact badges.
+  // uio-W16 moved the phrase into the shared row's own updated column (the uio-W02 anatomy), where
+  // every other list in the app already carries it. It is still on every row.
   ok("each picker row carries its last-published line", /meta\.appendChild\(h\("span", "publish-pickitem__last", publishLastLabel\(d\.id\)\)\)/.test(e) && /\.publish-pickitem__last \{/.test(css));
   ok("never-published reads as a plain fact, not a warning", /if \(!last\) return "Never published";/.test(e));
   ok("the line names the date AND the version that went out", /return "Last published " \+ \[when, last\.version\]\.filter\(Boolean\)\.join\(" · "\)/.test(e));

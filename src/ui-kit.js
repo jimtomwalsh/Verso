@@ -540,6 +540,15 @@
     var openLabel = _pure.openStateLabel(props.openIn);
     if (openLabel) row.appendChild(h("span", "vds-docrow__open", openLabel));
 
+    // uio-W16: the RELEASE-STATE column, for the one list where "is this current?" is the question
+    // the row exists to answer. Two states and no third: a document is either as it went out or it
+    // is not, and a middle word would be a hedge the publisher then has to interpret.
+    if (props.release) {
+      row.appendChild(h("span", "vds-docrow__release vds-docrow__release--" +
+        (props.release === "ready" ? "ready" : "review"),
+        props.release === "ready" ? "Ready to release" : "Needs review"));
+    }
+
     if (props.trailing != null) {
       var tr = h("span", "vds-docrow__trailing");
       appendChildren(tr, props.trailing);

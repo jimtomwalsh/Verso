@@ -272,3 +272,8 @@
 
 /* --- Icon wrapper ------------------------------------------------------- */
 .vds-icon { display: inline-flex; align-items: center; }
+/* uio-W16: the release-state column. Two states, no third — a document is either as it went out or
+   it is not, and a middle word would be a hedge the publisher then has to interpret. */
+.vds-docrow__release { flex: 0 0 auto; font-size: var(--text-2xs, 10px); white-space: nowrap; }
+.vds-docrow__release--ready { color: var(--success, var(--text-secondary)); }
+.vds-docrow__release--review { color: var(--warning, var(--text-secondary)); }
