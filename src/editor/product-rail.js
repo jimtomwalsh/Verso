@@ -153,6 +153,40 @@
     return (openIds || []).filter(function (id) { return !!(reg && reg[id]); });
   }
 
+  // uio-W10: THE SPLIT. Source and Edit own SEPARATE strips holding only their own document type,
+  // and the two never mix. Not a filter over one strip -- two strips over two stores, because a
+  // design document is a registry entry and a source document is a LibraryStore component, and a
+  // single strip holding both would have to pretend they are the same kind of thing.
+  //
+  // The Source predicate is the mirror of the one above: an id with nothing behind it draws
+  // nothing. A source document is product-optional (uio-W14), so nothing here asks about a product.
+  function visibleSourceTabIds(openIds, components) {
+    var comps = components || {};
+    return (openIds || []).filter(function (id) {
+      var c = comps[id];
+      return !!(c && c.kind === "topic" && c.sourceMaster && !c.archivedInto);
+    });
+  }
+
+  // What the strip says about itself: `2 open` on Source, `3 open · 2 products` on Edit. THE
+  // MIXED-PRODUCT FACT IS STATED RATHER THAN IMPLIED -- documents from different products coexist
+  // in one strip now, with nothing filtering them, and a strip that spans two products while
+  // saying only "3 open" would leave you to work that out from the colour dots.
+  //
+  // The product count appears only when it is more than one, because "1 product" on a strip that
+  // has never held two is noise on every screen.
+  function stripMeta(items) {
+    var list = items || [];
+    var seen = {}, products = 0;
+    list.forEach(function (i) {
+      var pid = i && i.productId;
+      if (pid && !seen[pid]) { seen[pid] = 1; products++; }
+    });
+    var label = list.length + " open";
+    if (products > 1) label += " · " + products + " products";
+    return { open: list.length, products: products, label: label };
+  }
+
   // ---- the binding ---------------------------------------------------------
   // env = {
   //   storage            localStorage-shaped. Held only to retire the legacy scope key (below);
@@ -420,6 +454,8 @@
     outputsFact: outputsFact,
     alignmentMeterModel: alignmentMeterModel,
     visibleTabIds: visibleTabIds,
+    // uio-W10: the per-destination split, and what a strip says about itself.
+    visibleSourceTabIds: visibleSourceTabIds, stripMeta: stripMeta,
     // uio-W01: the retired scope's migration, exported so tests reach the pure core directly.
     LEGACY_PRODUCT_SCOPE_KEY: LEGACY_PRODUCT_SCOPE_KEY,
     FILES_PRODUCT_FACET_SEED_KEY: FILES_PRODUCT_FACET_SEED_KEY,

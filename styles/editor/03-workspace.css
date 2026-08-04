@@ -350,8 +350,13 @@
    Product) + a flowing article for the selected topic. Same grid-column/hide mechanism
    as .stage-placeholder above, but a row layout (nav + article) instead of a single
    centered block, since this is real content, not a "coming soon" stand-in. */
-.source-stage { display: none; grid-column: 2 / -1; min-height: 0; }
+/* uio-W10 turned this into a COLUMN: Source's own tab strip across the top, then the nav + article
+   + info row beneath it. The strip spans the whole destination rather than sitting inside the nav,
+   because it answers "which document am I in" and the nav answers "where in it" — two questions,
+   two places. */
+.source-stage { display: none; grid-column: 2 / -1; min-height: 0; flex-direction: column; }
 .workspace--stage-source #stage-source.source-stage { display: flex; }
+.source-stage__body { flex: 1 1 auto; min-height: 0; display: flex; }
 .source-stage__nav {
   width: var(--left-w, 240px); flex: 0 0 auto;
   background: var(--surface-panel);

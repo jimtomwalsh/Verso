@@ -117,6 +117,16 @@
         });
         container.appendChild(tab);
       });
+      // uio-W10: THE STRIP STATES WHAT IT HOLDS -- `3 open · 2 products`. Documents from different
+      // products coexist here with nothing filtering them, which is the whole point of uio-W01, and
+      // a strip that spanned two products while saying only "3 open" would leave the reader to work
+      // that out from the colour dots. The product count appears only when the strip really does
+      // span more than one.
+      var meta = PR.stripMeta(shown.map(function (id) {
+        var d = registry[id];
+        return { productId: (d && d.meta && d.meta.productId) || "" };
+      }));
+      if (meta.open) container.appendChild(h("span", "toolbar-tabs__meta", meta.label));
       if (U && U.IconButton) {
         var addBtn = U.IconButton({ icon: "plus", label: "Create or import a document…", size: "md", onClick: showNewDocDialog });
         addBtn.classList.add("toolbar-tabs__add");

@@ -29,7 +29,7 @@
       "importMenuLabel", "unlinkAllCoursesFromProduct", "deleteProductSource", "deleteProduct", "saveLibrary", "modalSection",
       "makeReply", "modalText", "f04ProductFacts", "panelSection", "snapshotSourceLinkBase", "sourceBaseEditImpact", "showSourceBaseEditModal",
       "finalizeSourceLock", "sourceLinkAlternates", "registry", "applyAltToLocation", "saveRegistry", "decorateSourceLinks",
-      "sourceAltSnippet", "History", "dsSelect", "promptModal", "saveProducts", "selection"
+      "sourceAltSnippet", "History", "dsSelect", "promptModal", "saveProducts", "selection", "colourForName"
     );
     // Aliased once: every one of these is stable (a function declaration, a constant, or an object
     // that is mutated but never reassigned), so the moved body reads exactly as it did.
@@ -48,7 +48,8 @@
         finalizeSourceLock = E.finalizeSourceLock, sourceLinkAlternates = E.sourceLinkAlternates, registry = E.registry,
         applyAltToLocation = E.applyAltToLocation, saveRegistry = E.saveRegistry, decorateSourceLinks = E.decorateSourceLinks,
         sourceAltSnippet = E.sourceAltSnippet, History = E.History, dsSelect = E.dsSelect,
-        promptModal = E.promptModal, saveProducts = E.saveProducts, selection = E.selection;
+        promptModal = E.promptModal, saveProducts = E.saveProducts, selection = E.selection,
+        colourForName = E.colourForName;
 
     // Product Rail (source-stage-nav-article): Source stage left-nav + flowing article.
     // A "topic" is a LibraryStore master with kind:"topic" -- per #68's own note, Ground
@@ -656,6 +657,9 @@
           label.type = "button";
           label.addEventListener("click", function () {
             if (t.id === __sourceActiveTopicId) return;
+            // uio-W10: a source DOCUMENT opens through the strip, so it gets a tab. A loose topic
+            // (the pre-unification model) is not a document and keeps the plain in-place swap.
+            if (window.SourceOwnership.isSourceDocument(t)) { openSourceDoc(t.id); return; }
             __sourceActiveTopicId = t.id;
             try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, t.id); } catch (e) {} // return to this topic after a refresh
             __sourceActiveVariants = []; // a different topic may have a different variant set
@@ -2748,22 +2752,120 @@
       return master;
     }
 
+    // ---- uio-W10: Source's own tab strip -------------------------------------
+    //
+    // SOURCE HAS NEVER HAD A DOCUMENT SWITCHER. It resolved exactly one master from the global
+    // product and showed it, so "have two manuals open and compare them" was not a thing you could
+    // do -- and after uio-W14 made source documents product-optional, a shared glossary had no way
+    // to sit beside the product manual it explains.
+    //
+    // The strip holds ONLY source documents. Edit's holds only design documents. They are two
+    // strips over two stores rather than one strip filtered two ways, because a design document is
+    // a registry entry and a source document is a LibraryStore component, and pretending they are
+    // the same kind of thing is what made the old single strip need a Product filter in the first
+    // place.
+    var OPEN_SOURCE_DOCS_KEY = "authoring.openSourceDocIds";
+    var __openSourceDocIds = null;
+
+    function openSourceDocIds() {
+      if (__openSourceDocIds) return __openSourceDocIds;
+      var saved = [];
+      try { saved = JSON.parse(localStorage.getItem(OPEN_SOURCE_DOCS_KEY) || "[]"); } catch (e) { saved = []; }
+      // Reconciled on read for the same reason Edit's set is at boot: the open set lives in a
+      // separate store from the documents, so deleting one elsewhere leaves the strip holding a key
+      // nothing answers to.
+      __openSourceDocIds = window.VersoProductRail.visibleSourceTabIds(Array.isArray(saved) ? saved : [], libComponents());
+      return __openSourceDocIds;
+    }
+    function saveOpenSourceDocIds() {
+      try { localStorage.setItem(OPEN_SOURCE_DOCS_KEY, JSON.stringify(openSourceDocIds())); } catch (e) {}
+    }
+    // Opening a document adds it to the strip. Idempotent: opening one that is already open makes
+    // it active rather than adding a second tab for it.
+    function openSourceDoc(id) {
+      if (!window.SourceOwnership.isSourceDocument(libComponents()[id])) return;
+      var ids = openSourceDocIds();
+      if (ids.indexOf(id) === -1) { ids.push(id); saveOpenSourceDocIds(); }
+      if (__sourceActiveTopicId === id) return;
+      __sourceActiveTopicId = id;
+      __sourceActiveVariants = [];          // a different document may declare a different variant set
+      __sourceEditingCell = null;           // never carry an in-progress edit across documents
+      __sourceDocModel = null; __sourceDocModelTopicId = null;
+      __sourceUnlocked = false;             // every document opens locked (base prose protected)
+      try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, id); } catch (e) {}
+      renderSourceStage();
+    }
+    function closeSourceTab(id) {
+      var ids = openSourceDocIds();
+      var idx = ids.indexOf(id);
+      if (idx === -1) return;
+      ids.splice(idx, 1);
+      saveOpenSourceDocIds();
+      if (__sourceActiveTopicId === id) {
+        var next = ids[Math.max(0, idx - 1)];
+        // Closing the last tab leaves the strip empty rather than refusing. Source resolves what to
+        // show on the next render, so an empty strip is a state the stage already knows how to be
+        // in -- unlike Edit, where there is always a document on the canvas.
+        if (next) { openSourceDoc(next); return; }
+        __sourceActiveTopicId = null; __sourceDocModel = null; __sourceDocModelTopicId = null;
+        try { localStorage.removeItem(SOURCE_TOPIC_PERSIST_KEY); } catch (e) {}
+      }
+      renderSourceStage();
+    }
+    function renderSourceTabs() {
+      if (typeof document === "undefined") return;
+      var host = document.getElementById("source-tabs"); if (!host) return;
+      var U = window.VersoUI; if (!U || !U.DocumentTab) return;
+      host.innerHTML = "";
+      var comps = libComponents();
+      var ids = window.VersoProductRail.visibleSourceTabIds(openSourceDocIds(), comps);
+      var open = ids.map(function (id) { return comps[id]; });
+      open.forEach(function (c) {
+        // The per-product colour dot survives from the Edit strip as IDENTITY, keyed on the stable
+        // productId so a rename never shifts the colour. Shared material carries no dot, which is
+        // the honest rendering of "belongs to no product".
+        var pid = c.productId || "";
+        var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
+        host.appendChild(U.DocumentTab({
+          label: c.name || c.id,
+          active: c.id === __sourceActiveTopicId,
+          dot: pid ? colourForName(pid) : null,
+          dotTitle: pid ? ("Product: " + ((prod && prod.name) || pid)) : "No product — shared, cross-product material",
+          icon: U.DOCUMENT_TYPES.source.icon,
+          type: "source",
+          typeLabel: U.DOCUMENT_TYPES.source.label,
+          onSelect: function () { openSourceDoc(c.id); },
+          onClose: function () { closeSourceTab(c.id); }
+        }));
+      });
+      // The strip states what it holds. On Source that is "2 open"; the product count appears only
+      // when the strip actually spans more than one, so the mixed-product fact is stated rather
+      // than left to be inferred from the dots.
+      var meta = window.VersoProductRail.stripMeta(open);
+      if (meta.open) host.appendChild(h("span", "source-stage__tabs-meta", meta.label));
+    }
+
     // Called each time Source becomes the active stage (setStage("source")) -- mounts the
     // search field once, then re-renders the toolbar + topic list + article from current
     // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
     // inside renderSourceTopicList, not mounted separately).
     function renderSourceStage() {
-      // Source v2: the active Product's source is ONE document. Resolve (and materialise on first
-      // entry) its unified master and open it, so the stage shows the document, not a topic list.
+      // Source v2: the source is ONE continuous document. Resolve (and materialise on first entry)
+      // the master to open, so the stage shows the document, not a topic list.
       var master = ensureUnifiedDocForActiveProduct();
       if (master) {
         __sourceActiveTopicId = master.id;
-        __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind if the Product changed
+        __sourceDocModel = null; __sourceDocModelTopicId = null; // rebind if the document changed
         try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, master.id); } catch (e) {}
+        // uio-W10: whatever the stage resolved is, by definition, open. This is what puts the first
+        // tab in the strip on a fresh install without a separate seeding path.
+        var ids = openSourceDocIds();
+        if (ids.indexOf(master.id) === -1) { ids.push(master.id); saveOpenSourceDocIds(); }
       } else if (!__sourceActiveTopicId) {
         // no unified doc yet (no Product / no topics) -> restore the last-open topic on a fresh load
         try { var savedT = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY); if (savedT && libComponents()[savedT]) __sourceActiveTopicId = savedT; } catch (e) {}
       }
+      renderSourceTabs();
       mountSourceStageSearch();
       renderSourceTopicList();
       renderSourceArticle();
@@ -3397,12 +3499,17 @@
       sourceDocModel: function () { return __sourceDocModel; },
       setSourceDocModel: function (model, topicId) { __sourceDocModel = model; __sourceDocModelTopicId = topicId; },
       sourceActiveTopicId: function () { return __sourceActiveTopicId; },
-      // Opening a topic from elsewhere in the app persists it too, so a refresh returns to it --
-      // the same pair the topic list itself writes.
+      // Opening a document from elsewhere in the app persists it too, so a refresh returns to it.
+      // uio-W10: it also joins Source's strip, so arriving from Files leaves you with a tab you can
+      // come back to rather than a document that silently replaced the last one.
       openSourceTopicId: function (id) {
+        if (window.SourceOwnership.isSourceDocument(libComponents()[id])) { openSourceDoc(id); return; }
         __sourceActiveTopicId = id;
         try { localStorage.setItem(SOURCE_TOPIC_PERSIST_KEY, id); } catch (e) {}
       },
+      // uio-W10: Source's strip, for the destinations that put documents into it.
+      openSourceDoc: openSourceDoc, closeSourceTab: closeSourceTab,
+      openSourceDocIds: openSourceDocIds, renderSourceTabs: renderSourceTabs,
       lockSourceEditing: function () { __sourceUnlocked = false; },
       clearSourceEditSession: function () { __sourceEditSession = null; }
     });

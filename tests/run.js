@@ -11112,6 +11112,102 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W10: per-destination tab strips, one type each -------------------
+// Source has never had a document switcher: it resolved exactly one master from the global product
+// and showed it, so two manuals open at once was not a thing you could do. Edit's strip, meanwhile,
+// used to be product-FILTERED, which is what made choosing a product silently empty it. Two strips
+// over two stores now, each holding only its own type, neither filtered by anything.
+section("uio-W10 per-destination tab strips");
+(function () {
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+
+  var registry = {
+    "C-1": { meta: { title: "Alpha course", productId: "p-a" } },
+    "C-2": { meta: { title: "Beta course", productId: "p-b" } },
+    "C-3": { meta: { title: "Untagged course" } }
+  };
+  var comps = {
+    "m-a": { id: "m-a", kind: "topic", sourceMaster: true, name: "Alpha manual", productId: "p-a" },
+    "m-shared": { id: "m-shared", kind: "topic", sourceMaster: true, name: "Glossary" },
+    "m-folded": { id: "m-folded", kind: "topic", sourceMaster: true, name: "Folded", archivedInto: "m-a" },
+    "t-loose": { id: "t-loose", kind: "topic", name: "Loose topic", productId: "p-a" }
+  };
+
+  // --- the split: each strip holds only its own type, from its own store ---
+  ok("Edit's strip holds design documents", PR.visibleTabIds(["C-1", "C-2"], registry).join() === "C-1,C-2");
+  ok("Source's strip holds source documents", PR.visibleSourceTabIds(["m-a", "m-shared"], comps).join() === "m-a,m-shared");
+  ok("A SOURCE DOCUMENT CAN NEVER LAND IN EDIT'S STRIP -- different stores, so the id is not there",
+    PR.visibleTabIds(["m-a", "m-shared"], registry).length === 0);
+  ok("and a design document can never land in Source's",
+    PR.visibleSourceTabIds(["C-1", "C-2"], comps).length === 0);
+  ok("a product-LESS source document is held like any other", PR.visibleSourceTabIds(["m-shared"], comps).join() === "m-shared");
+  ok("a chapter folded into a master is not a document and is not held",
+    PR.visibleSourceTabIds(["m-folded"], comps).length === 0);
+  ok("a loose pre-unification topic is not a document either",
+    PR.visibleSourceTabIds(["t-loose"], comps).length === 0);
+  ok("an id with nothing behind it draws nothing, in either strip",
+    PR.visibleSourceTabIds(["m-gone"], comps).length === 0 && PR.visibleTabIds(["C-gone"], registry).length === 0);
+  ok("empty and absent are both quiet",
+    PR.visibleSourceTabIds().length === 0 && PR.visibleSourceTabIds([], null).length === 0);
+
+  // --- nothing FILTERS a strip: documents from different products coexist ---
+  ok("documents from different products coexist in one Edit strip",
+    PR.visibleTabIds(["C-1", "C-2", "C-3"], registry).length === 3);
+
+  // --- the strip states what it holds, and states the mixed-product fact ---
+  ok("one product reads as a plain count", PR.stripMeta([{ productId: "p-a" }, { productId: "p-a" }]).label === "2 open");
+  ok("MORE than one product is STATED, not left to the colour dots",
+    PR.stripMeta([{ productId: "p-a" }, { productId: "p-b" }, { productId: "p-a" }]).label === "3 open · 2 products");
+  ok("untagged documents count as open but name no product",
+    PR.stripMeta([{ productId: "" }, { productId: "" }]).label === "2 open");
+  ok("an untagged document beside two products does not become a third",
+    PR.stripMeta([{ productId: "p-a" }, { productId: "p-b" }, { productId: "" }]).products === 2);
+  ok("one open document reads as one", PR.stripMeta([{ productId: "p-a" }]).label === "1 open");
+  ok("an empty strip has an empty count rather than a crash",
+    PR.stripMeta([]).label === "0 open" && PR.stripMeta().open === 0);
+
+  // --- the wiring ---
+  var SS = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var TB = src("src/editor/tabs.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("Source's open set persists in its OWN key, separate from Edit's",
+    /var OPEN_SOURCE_DOCS_KEY = "authoring\.openSourceDocIds";/.test(SS) &&
+    src("src/editor/storage.js").indexOf("authoring.openSourceDocIds") === -1);
+  ok("it is reconciled on read, because the open set and the documents live in separate stores",
+    /window\.VersoProductRail\.visibleSourceTabIds\(Array\.isArray\(saved\) \? saved : \[\], libComponents\(\)\)/.test(SS));
+  ok("Source renders its own strip from the shared document tab",
+    /function renderSourceTabs\(\)/.test(SS) && /U\.DocumentTab\(\{/.test(SS));
+  ok("whatever Source resolves is, by definition, open -- so the first tab needs no seeding path",
+    /if \(ids\.indexOf\(master\.id\) === -1\) \{ ids\.push\(master\.id\); saveOpenSourceDocIds\(\); \}/.test(SS));
+  ok("opening a document that is already open makes it active rather than adding a second tab",
+    /if \(ids\.indexOf\(id\) === -1\) \{ ids\.push\(id\); saveOpenSourceDocIds\(\); \}\s*if \(__sourceActiveTopicId === id\) return;/.test(SS));
+  ok("switching documents never carries an in-progress edit or a variant set across",
+    /function openSourceDoc\(id\) \{[\s\S]{0,900}__sourceActiveVariants = \[\];[\s\S]{0,200}__sourceEditingCell = null;[\s\S]{0,200}__sourceUnlocked = false;/.test(SS));
+  ok("closing the last Source tab leaves an empty strip rather than refusing",
+    /function closeSourceTab\(id\) \{[\s\S]{0,900}__sourceActiveTopicId = null;/.test(SS) &&
+    !/At least one source/.test(SS));
+  ok("shared material carries no product dot, and says why",
+    /dotTitle: pid \? \("Product: " \+ \(\(prod && prod\.name\) \|\| pid\)\) : "No product — shared, cross-product material"/.test(SS));
+  ok("the strip's tabs are the source type, never a design one",
+    /icon: U\.DOCUMENT_TYPES\.source\.icon/.test(SS) && /type: "source"/.test(SS));
+  // Every caller passed `type` and nothing rendered it, so "one type each" had no expression in the
+  // DOM. It states its type now, the same way DocumentRow does.
+  ok("a document tab states its type, so the one-type-each contract is visible",
+    /if \(props\.type\) tab\.setAttribute\("data-doc-type", props\.type\);/.test(src("src/ui-kit.js")));
+  ok("Source states what its strip holds", /window\.VersoProductRail\.stripMeta\(open\)/.test(SS));
+  ok("Edit states what its strip holds, from the same pure function", /PR\.stripMeta\(shown\.map\(/.test(TB));
+  ok("Source's strip has a host of its own in the page, outside the nav",
+    /id="source-tabs"/.test(src("index.html")) &&
+    /<div class="source-stage__tabs"[\s\S]{0,200}<div class="source-stage__body">/.test(src("index.html")));
+  var WS = src("styles/editor/03-workspace.css");
+  ok("the destination became a column so the strip spans it",
+    /\.source-stage \{[^}]*flex-direction: column/.test(WS) && /\.source-stage__body \{[^}]*display: flex/.test(WS));
+  var OV = src("styles/editor/10-overlays.css");
+  ok("the two strips share the tab metrics, so a document reads the same in either",
+    /\.source-stage__tabs \{[^}]*align-items: flex-end/.test(OV) && /\.source-stage__tabs:empty \{ display: none; \}/.test(OV));
+  ok("the strip meta is quiet and non-interactive in both",
+    /\.toolbar-tabs__meta,\s*\.source-stage__tabs-meta \{/.test(OV));
+})();
+
 // ---- uio-W14: source documents go product-optional; primary + extras ------
 // Source was keyed on Product end to end, and two things fell out of that. A source document with
 // NO product could be created and then never opened again -- every path in went through a Product,
@@ -12271,7 +12367,9 @@ section("Product Rail: New Topic / Import from Markdown UI");
   // /verso-frontend audit 2026-07-27: consolidated into ONE state-reactive toolbar row
   // (renderSourceToolbar, icon-only IconButton), built inside renderSourceTopicList
   // (since it needs __sourceSelectModeActive/reviewCount), not a separate one-time mount.
-  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,900}mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
+  // uio-W10 put Source's own tab strip in front of the search mount; the actions row is still not
+  // mounted separately.
+  ok("renderSourceStage() no longer mounts a separate actions row (the toolbar is state-reactive, built in renderSourceTopicList)", /function renderSourceStage\(\) \{[\s\S]{0,1400}renderSourceTabs\(\);\s*mountSourceStageSearch\(\);\s*renderSourceTopicList\(\);/.test(es));
   // refresh-persistence: the active stage + open Source topic survive a reload (bug: refresh snapped back to Edit)
   ok("the active stage persists across a refresh (restored in mountLeftRail, saved in setStage)", /localStorage\.setItem\(STAGE_PERSIST_KEY, stage\)/.test(SHELL) && /if \(isValidStage\(saved\)\) __activeStage = saved;/.test(SHELL));
   ok("the open Source topic persists across a refresh (restored if it still exists)", /localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, t\.id\)/.test(es) && /if \(savedT && libComponents\(\)\[savedT\]\) __sourceActiveTopicId = savedT;/.test(es));
@@ -16030,7 +16128,9 @@ section("editor-rework source insert + two-way jump");
   // arch-P3b-07: the stage owns that state, so the jump asks it to open the topic (which persists
   // it for the next refresh) rather than writing the stage's variable from outside.
   ok("Open in Source opens the Source stage on that topic", /function jumpToSourceTopic\(topicId\)[\s\S]{0,200}openSourceTopicId\(topicId\);[\s\S]{0,120}setStage\("source"\)/.test(SL));
-  ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
+  // uio-W10: a source DOCUMENT now joins Source's strip on the way in, so arriving from Files
+  // leaves a tab you can come back to. A loose topic, which is not a document, keeps the plain swap.
+  ok("opening a topic from elsewhere persists it, so a refresh returns to it", /openSourceTopicId: function \(id\) \{\s*if \(window\.SourceOwnership\.isSourceDocument\(libComponents\(\)\[id\]\)\) \{ openSourceDoc\(id\); return; \}\s*__sourceActiveTopicId = id;\s*try \{ localStorage\.setItem\(SOURCE_TOPIC_PERSIST_KEY, id\); \}/.test(src("src/editor/source-stage.js")));
 })();
 
 // ---- SPEC 7: left-panel 3-way switcher (Structure . Blocks . Source) ----
