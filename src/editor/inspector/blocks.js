@@ -870,37 +870,75 @@
       E.inspector.appendChild(toFooter);
     }
 
+    // ---- INSPECTORS: block type -> its panel (arch-P4-02) ---------------------
+    // This was a seventeen-branch if/else whose every arm ended in `return`, which meant the
+    // ORDER of the arms carried a precedence rule nobody had written down and the fall-through at
+    // the bottom -- the label-only panel a type with no arm gets -- looked like dead code rather
+    // than the deliberate default it is.
+    //
+    // As a table the three shapes are visible side by side. `twoLevel` is the common case: the
+    // type hands a content renderer to the shared two-level shell. `contentless` is a block whose
+    // settings ARE its content, so there is nothing to edit on the canvas. `custom` is the escape
+    // hatch for the two that are neither.
+    //
+    // A type with no row is not an error. It gets the label-only panel plus the universal tail,
+    // which is the right answer for a type whose only settings are appearance -- subheading, quote
+    // and list are all here on purpose. The contract test asserts the table holds no type that
+    // render.js does not know about; it deliberately does NOT require a row per type, because
+    // requiring one would push nine empty rows into this table to satisfy a checker.
+    var INSPECTORS = {
+      quiz:            { kind: "twoLevel",     label: "Quiz",            decl: "CONTENT_PURE_DECL", body: function () { return renderQuizInspector; } },
+      accordion:       { kind: "twoLevel",     label: "Accordion",       decl: "CONTENT_PURE_DECL", body: function () { return renderAccordionInspector; } },
+      cardReveal:      { kind: "twoLevel",     label: "Card reveal",     decl: "CONTENT_PURE_DECL", body: function () { return renderCardRevealInspector; } },
+      cardDeck:        { kind: "twoLevel",     label: "Card deck",       decl: "CONTENT_DECL",      body: function () { return renderCardDeckInspector; } },
+      sequence:        { kind: "twoLevel",     label: "Sequence",        decl: "CONTENT_DECL",      body: function () { return renderSequenceInspector; } },
+      table:           { kind: "twoLevel",     label: "Table",           decl: "CONTENT_DECL",      body: function () { return renderTableInspector; } },
+      // the hotspot panel is a module of its own; the shell takes the block, not the node
+      hotspot:         { kind: "twoLevel",     label: "Image hotspots",  decl: "CONTENT_PURE_DECL", body: function () { return function (n) { renderHotspotInspector(n.__block); }; } },
+      // the three plain text types share one arm; the label is the type, capitalised
+      heading:         { kind: "twoLevel",     label: null,              decl: "CONTENT_DECL",      body: function () { return renderTextContent; } },
+      paragraph:       { kind: "twoLevel",     label: null,              decl: "CONTENT_DECL",      body: function () { return renderTextContent; } },
+      note:            { kind: "twoLevel",     label: null,              decl: "CONTENT_DECL",      body: function () { return renderTextContent; } },
+      spacer:          { kind: "contentless",  label: "Spacer",          body: function () { return renderSpacerBody; } },
+      columns:         { kind: "contentless",  label: "Columns",         body: function () { return renderColumnsBody; } },
+      componentGrid:   { kind: "contentless",  label: "Component grid",  body: function () { return renderComponentGridBody; } },
+      libraryInstance: { kind: "contentless",  label: "Library instance", body: function () { return renderLibraryInstanceBody; } },   // #20: live-linked mirror, content lives in the master
+      checkbox:        { kind: "contentless",  label: "Checkbox",        body: function () { return renderCheckboxBody; } },
+      divider:         { kind: "contentless",  label: "Divider",         body: function () { return function () { E.inspector.appendChild(h("div", "insp-hint", "A horizontal rule — styling follows the course theme.")); }; } },
+      // the two that are neither shape
+      courseNav:       { kind: "custom",       run: function (node) { renderCourseNavInspector(node); } },
+      frame:           { kind: "custom",       run: function (node) { renderFrameOrGroupTwoLevel(node); } },   // container chrome + children
+      group:           { kind: "custom",       run: function (node) { renderFrameOrGroupTwoLevel(node); } },
+      // image is two-level but carries chrome io + handlers the shell needs
+      image:           { kind: "custom",       run: function (node) { renderBlockTwoLevel(node, "Image", IMAGE_PURE_DECL, function (n) { renderImageContent(n.__block); }, imageChromeIo(node.__block), blockChromeHandlers(node.__block)); } }   // #88 stroke
+    };
+    var INSPECTOR_DECLS = { CONTENT_DECL: function () { return CONTENT_DECL; }, CONTENT_PURE_DECL: function () { return CONTENT_PURE_DECL; } };
+
     function renderBlockInspector(node) {
       var block = node.__block;
-      if (block.type === "quiz") { renderBlockTwoLevel(node, "Quiz", CONTENT_PURE_DECL, renderQuizInspector); return; } // SPEC-ui-kit ticket 8: two-level (#160: depth-pure content)
-      if (block.type === "accordion") { renderBlockTwoLevel(node, "Accordion", CONTENT_PURE_DECL, renderAccordionInspector); return; } // SPEC-ui-kit ticket 8: two-level (#161: depth-pure content)
-      if (block.type === "cardReveal") { renderBlockTwoLevel(node, "Card reveal", CONTENT_PURE_DECL, renderCardRevealInspector); return; } // SPEC-ui-kit ticket 8: two-level (#161: depth-pure content)
-      if (block.type === "cardDeck") { renderBlockTwoLevel(node, "Card deck", CONTENT_DECL, renderCardDeckInspector); return; } // paged carousel of full-frame cards
-      if (block.type === "sequence") { renderBlockTwoLevel(node, "Sequence", CONTENT_DECL, renderSequenceInspector); return; } // SPEC-ui-kit ticket 6: two-level
-      if (block.type === "courseNav") { renderCourseNavInspector(node); return; }
-      if (block.type === "hotspot") { renderBlockTwoLevel(node, "Image hotspots", CONTENT_PURE_DECL, function (n) { renderHotspotInspector(n.__block); }); return; } // SPEC-ui-kit ticket 5: two-level (#160: depth-pure content)
-      if (block.type === "frame" || block.type === "group") { renderFrameOrGroupTwoLevel(node); return; } // SPEC-ui-kit ticket 8: two-level (container chrome + children)
-      if (block.type === "image") { renderBlockTwoLevel(node, "Image", IMAGE_PURE_DECL, function (n) { renderImageContent(n.__block); }, imageChromeIo(block), blockChromeHandlers(block)); return; } // SPEC-ui-kit ticket 7: two-level (#88 stroke; #160: depth-pure content)
-      if (block.type === "heading" || block.type === "paragraph" || block.type === "note") { renderBlockTwoLevel(node, block.type.charAt(0).toUpperCase() + block.type.slice(1), CONTENT_DECL, renderTextContent); return; } // SPEC-ui-kit ticket 7: two-level
-      if (block.type === "spacer") { renderContentlessBlock(node, "Spacer", renderSpacerBody); return; } // SPEC-ui-kit ticket 7: content-less
-      if (block.type === "divider") { renderContentlessBlock(node, "Divider", function () { E.inspector.appendChild(h("div", "insp-hint", "A horizontal rule — styling follows the course theme.")); }); return; } // SPEC-ui-kit ticket 7: content-less
-      if (block.type === "columns") { renderContentlessBlock(node, "Columns", renderColumnsBody); return; } // SPEC-ui-kit ticket 8
-      if (block.type === "table") { renderBlockTwoLevel(node, "Table", CONTENT_DECL, renderTableInspector); return; } // #90
-      if (block.type === "componentGrid") { renderContentlessBlock(node, "Component grid", renderComponentGridBody); return; } // SPEC-ui-kit ticket 8
-      if (block.type === "libraryInstance") { renderContentlessBlock(node, "Library instance", renderLibraryInstanceBody); return; } // #20: live-linked mirror, content lives in the master
-      if (block.type === "checkbox") { renderContentlessBlock(node, "Checkbox", renderCheckboxBody); return; } // SPEC-ui-kit ticket 8
+      var row = INSPECTORS[block.type];
+      if (row) {
+        if (row.kind === "custom") { row.run(node); return; }
+        if (row.kind === "twoLevel") {
+          var label = row.label || (block.type.charAt(0).toUpperCase() + block.type.slice(1));
+          renderBlockTwoLevel(node, label, INSPECTOR_DECLS[row.decl](), row.body());
+          return;
+        }
+        renderContentlessBlock(node, row.label, row.body());
+        return;
+      }
+      // No row: the label-only panel. A type whose only settings are appearance ends here and the
+      // universal tail below is the whole panel -- subheading, quote and list all do.
       var head = h("div", "prop-component");
       head.appendChild(h("span", null, blockLabel(block)));
       E.inspector.appendChild(head);
-
-
-
       renderBlockActionsSection(block);
     }
 
     kernel.expose({
       renderBlockInspector: renderBlockInspector, renderEmbedInspector: renderEmbedInspector
     });
+    kernel.provide({ INSPECTORS: INSPECTORS });
   }
 
   window.VersoInspectorBlocks = { install: install };
