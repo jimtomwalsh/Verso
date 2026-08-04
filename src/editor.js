@@ -2299,20 +2299,27 @@
   var PRODUCT_STAGE_OPTS = [["eLearning", "elearning"], ["Presentations", "presentations"], ["Print docs", "printDocs"]];
   // targetDoc defaults to the active doc (top-bar / header entry points); the file picker's per-card
   // menu passes a specific registry doc so any course can be promoted without opening it first.
+  // uio-W13: "Assign a product", not "Promote to Product". Promotion implies a document was in a
+  // lesser state and has been raised out of it, which is exactly the reading this ticket removes:
+  // having no product is a fact about a document, not a defect in it. Shared material -- glossaries,
+  // standards -- lives there on purpose, and the same dialog can put a document back.
+  //
+  // It offers the SAME choice uio-W08's creation forms do, from the same builder, so "None (shared)"
+  // and "+ New product…" mean the same thing everywhere they appear.
   function promoteToProductModal(targetDoc) {
     var td = targetDoc || doc;
     if (!td) return;
-    var NEW_KEY = "__new__";
+    var FP = window.VersoFiles._pure;
+    var NEW_KEY = FP.NEW_PRODUCT_VALUE;
     var products = window.ProductsStore || {};
-    var productKeys = Object.keys(products);
-    var pOpts = [["+ Create a new Product…", NEW_KEY]].concat(productKeys.map(function (k) { return [products[k].name || k, k]; }));
-    var chosen = productKeys.length ? productKeys[0] : NEW_KEY;
+    var pOpts = FP.productChoices(products).map(function (o) { return [o.label, o.value]; });
+    var chosen = (td.meta && td.meta.productId) || "";
     var stage = (td.meta && td.meta.stage) || "elearning";
     var newNameVal = "";
     var shell = dsModalShell({
-      title: "Promote to Product",
-      subtitle: "Tags this course onto a Product + format. Only adds meta — the course's content is never touched.",
-      primaryLabel: "Promote",
+      title: "Assign a product",
+      subtitle: "Tags this document onto a product and a format. Only meta changes — the content is never touched.",
+      primaryLabel: "Assign",
       onPrimary: function () {
         var pid = chosen;
         if (chosen === NEW_KEY) {
@@ -2321,6 +2328,15 @@
           pid = createProduct(name).id;
         }
         pushHistory();
+        // "None (shared)" is a real choice, not a refusal to choose: it puts the document back into
+        // the shared, cross-product material where a glossary belongs.
+        if (!pid) {
+          unlinkDocFromProduct(td);
+          saveRegistry(registry);
+          shell.modal.close();
+          renderTabs();
+          return;
+        }
         tagDocProductStage(td, pid, stage);
         // spec 2d bridge: carry the course's declared variants onto the Product (union) so the
         // Product's variant workflow (import-as-variant, columns) is reachable -- both sides store
@@ -2343,7 +2359,7 @@
     pSel.classList.add("modal-field__control");
     pRow.appendChild(pSel);
     var newNameRow = h("div"); newNameRow.style.display = (chosen === NEW_KEY) ? "" : "none";
-    var nameInput = modalText(newNameRow, "New Product name", "", "e.g. Radar Line");
+    var nameInput = modalText(newNameRow, "New product name", "", "e.g. Radar Line");
     nameInput.addEventListener("input", function () { newNameVal = nameInput.value; });
     box.appendChild(newNameRow);
     var sRow = modalField(box, "Format");

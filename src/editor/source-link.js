@@ -113,7 +113,10 @@
         var productId = (E.doc && E.doc.meta && E.doc.meta.productId) || "";
         host.appendChild(h("div", "source-stage__empty", productId
           ? "This Product has no source document yet. Build it in the Source stage."
-          : "This document isn't attached to a product and has no source attached. Assign a product from its row menu in Files, and its source appears here."));
+          // uio-W13: a plain fact, not a defect report. Having no product is a state a document is
+          // legitimately in -- shared material lives there on purpose -- so this says what would
+          // put source here rather than what is wrong.
+          : "No product, and no source attached. Assign a product, or attach a source, in the Product panel above."));
         return;
       }
       var model = SD.fromJSON(master.doc);

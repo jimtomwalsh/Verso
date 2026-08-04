@@ -196,7 +196,10 @@
         { label: "Duplicate", onClick: function () { duplicateCourse(id); } },
         { label: "Rename…", onClick: function () { renameCourse(id); } },
         { sep: true },
-        { label: "Promote to Product…", onClick: function () { promoteToProductModal(d); } }
+        // uio-W13: "Assign a product", not "Promote". Promotion implies the document was in a
+        // lesser state; having no product is a fact about a document, not a defect in it.
+        { label: d.meta && d.meta.productId ? "Move to another product…" : "Assign a product…",
+          onClick: function () { promoteToProductModal(d); } }
       ];
       if (linked) {
         items.push({ label: "Remove from Product", onClick: function () {

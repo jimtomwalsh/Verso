@@ -3890,7 +3890,8 @@ section("#69 migration cutover");
   // arch-P3b-07k: the per-card menu moved to editor/home.js; the modal's DEFINITION stayed here,
   // so the one-call-site claim now counts one in each file rather than two in one.
   var ehm2 = src("src/editor/home.js");
-  ok("'Promote to Product…' is wired into the file picker's per-card menu, on the card's doc", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm2));
+  // uio-W13 renamed the verb; the wiring is unchanged.
+  ok("the assign action is wired into the file picker's per-card menu, on the card's doc", /label: d\.meta && d\.meta\.productId \? "Move to another product…" : "Assign a product…",\s*\n?\s*onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm2));
   ok("promoteToProductModal has ONE UI call site (the per-card menu) + its definition",
     (ehm2.match(/promoteToProductModal\(/g) || []).length === 1 && (ed.match(/promoteToProductModal\(/g) || []).length === 1);
   var ptmStart = ed.indexOf("function promoteToProductModal(targetDoc)");
@@ -3898,7 +3899,11 @@ section("#69 migration cutover");
   var ptmBody = ed.slice(ptmStart, ptmStart + 2900);
   ok("uses the canonical dsModalShell, not bespoke modal chrome", /var shell = dsModalShell\(\{/.test(ptmBody));
   ok("reuses the modalField + dsSelect pattern (Find & Replace's precedent), not a new control", /modalField\(box, "Product"\)[\s\S]{0,200}dsSelect\(pOpts, chosen/.test(ptmBody) && /modalField\(box, "Format"\)[\s\S]{0,200}dsSelect\(PRODUCT_STAGE_OPTS, stage/.test(ptmBody));
-  ok("writes ONLY the target doc's meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);\s*\n\s*tagDocProductStage\(td, pid, stage\);[\s\S]{0,800}saveRegistry\(registry\);/.test(ptmBody));
+  // uio-W13 put a "None (shared)" branch between the history push and the tag write: choosing no
+  // product is a real choice that puts the document back into shared material. Both branches still
+  // touch meta only.
+  ok("writes ONLY the target doc's meta via tagDocProductStage, then persists -- no content field touched", /pushHistory\(\);[\s\S]{0,700}tagDocProductStage\(td, pid, stage\);[\s\S]{0,800}saveRegistry\(registry\);/.test(ptmBody));
+  ok("and 'None (shared)' puts it back into shared material rather than being a refusal to choose", /if \(!pid\) \{\s*unlinkDocFromProduct\(td\);/.test(ptmBody));
   // spec 2d bridge: the card's OWN declared variants ride onto the Product. Asserted on `td`,
   // not `doc` -- Promote moved into the file picker's per-card menu, so the open document is
   // not necessarily the one being promoted.
@@ -11112,6 +11117,58 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W13: the untagged state reads as a fact, not an error ------------
+// The old copy read as a defect report -- "This document isn't attached to a Product. Use
+// Save/Recents → Promote to Product to link it" -- and pointed at a route that was changing. Having
+// no product is a STATE a document is legitimately in: shared material, glossaries and standards
+// used across products, lives there on purpose.
+section("uio-W13 untagged reads as a fact");
+(function () {
+  var PPSRC = src("src/editor/product-panel.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var ED = src("src/editor.js");
+
+  ok("the untagged panel states the fact and says why the state exists",
+    /No product\. This is shared material — glossaries and standards used across products live here on purpose\./.test(PPSRC));
+  ok("NEUTRAL INK, NO WARNING AFFORDANCE",
+    /\.prodpanel__untagged \{[^}]*color: var\(--text-secondary\)/.test(src("styles/editor/07-inspector.css")) &&
+    !/prodpanel__untagged[^}]*--danger|prodpanel__untagged[^}]*--warning/.test(src("styles/editor/07-inspector.css")));
+  ok("the assign action is present and writes the product tag",
+    /linkTo\("Assign a product…", function \(\) \{\s*E\.promoteToProductModal\(E\.registry\[m\.docId\]\)/.test(PPSRC));
+  ok("it opens the SAME picker the creation forms use, including + New product…",
+    /var FP = window\.VersoFiles\._pure;/.test(ED) && /FP\.productChoices\(products\)/.test(ED));
+  ok("and 'None (shared)' can put a document BACK into shared material",
+    /if \(!pid\) \{\s*unlinkDocFromProduct\(td\);/.test(ED));
+
+  // The vocabulary. "Promote" implies the document was in a lesser state and has been raised out of
+  // it, which is the exact reading this ticket removes.
+  ok("the dialog is titled Assign a product, not Promote to Product",
+    /title: "Assign a product",/.test(ED) && /primaryLabel: "Assign",/.test(ED));
+  ok("no surface still offers to PROMOTE a document", ["src/editor/home.js", "src/editor/files.js",
+    "src/editor/product-panel.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return code.indexOf("Promote to Product") === -1;
+    }));
+  ok("the old copy, and the route it pointed at, are gone from the codebase",
+    ["src/editor.js", "src/editor/source-link.js", "src/editor/home.js", "src/editor/files.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/isn't attached to a Product/i.test(code) && code.indexOf("Save/Recents") === -1;
+    }));
+
+  // A PRODUCT-LESS DOCUMENT IS NEVER DESCRIBED AS BROKEN. The words that would do it, ratcheted out
+  // of every string an author reads.
+  ok("no author-facing string calls a product-less document orphaned, unattached or unassigned",
+    ["src/editor/files.js", "src/editor/product-panel.js", "src/editor/source-link.js",
+     "src/editor/source-stage.js", "src/editor/home.js"].every(function (f) {
+      var strings = (src(f).match(/"[^"\n]{12,}"/g) || []).join(" ").toLowerCase();
+      return strings.indexOf("orphan") === -1 && strings.indexOf("unattached") === -1 &&
+             strings.indexOf("unassigned") === -1 && strings.indexOf("not attached") === -1;
+    }));
+  ok("the No product band is described as shared material, not as leftovers",
+    /Shared, cross-product material/.test(src("src/editor/files.js")));
+  ok("the Edit source panel names what would put source here, rather than what is wrong",
+    /No product, and no source attached\. Assign a product, or attach a source, in the Product panel above\./.test(src("src/editor/source-link.js")));
+})();
+
 // ---- uio-W08: three creation actions + the Files empty state --------------
 // Creation used to inherit the global scope -- a new document was silently stamped with whatever
 // the top bar happened to be showing -- and the Source path refused outright when nothing was
@@ -11965,7 +12022,9 @@ section("Product Rail: 3-stage rail + product dropdown");
   // retired (recents + Promote/Remove/store-path folded into the file picker).
   ok("pinned bottom rail actions = Settings + Help/Docs; the save-menu popover is retired", /id="help-btn"/.test(idx) && /id="rail-settings-btn"/.test(idx) && !/id="save-menu-btn"/.test(idx));
   ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
-  ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(ehm));
+  // uio-W13 renamed the verb: "Assign a product", not "Promote". Promotion implies the document was
+  // in a lesser state, and having no product is a fact about a document rather than a defect in it.
+  ok("the file picker's per-card menu carries the assign verb + conditional Remove-from-Product", /label: d\.meta && d\.meta\.productId \? "Move to another product…" : "Assign a product…"/.test(ehm) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(ehm));
   ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(EDITOR_CSS));
   // uio-W01 REVERSED all of this. The picker host, the "+" beside it, the select-then-land flow and
   // the scoped browser were built correctly for a model where Product was a mode. It is a tag now.
@@ -12608,7 +12667,7 @@ section("Product Rail: Source stage variant columns");
   ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
   ok("lifecycle: deleteProductSource removes the master + every topic tagged to the Product", /function deleteProductSource\(pid\)[\s\S]{0,400}c\.kind === "topic" && c\.productId === pid[\s\S]{0,200}delete comps\[product\.groundTruthId\]/.test(e));
   ok("lifecycle: deleteProduct clears the source, unlinks its courses, and removes the entry", /function deleteProduct\(pid\)[\s\S]{0,200}deleteProductSource\(pid\);\s*unlinkAllCoursesFromProduct\(pid\);\s*delete window\.ProductsStore\[pid\]/.test(e));
-  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,400}if \(linked\) \{[\s\S]{0,120}"Remove from Product"[\s\S]{0,600}unlinkDocFromProduct\(d\)/.test(ehm));
+  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,700}if \(linked\) \{[\s\S]{0,200}"Remove from Product"[\s\S]{0,900}unlinkDocFromProduct\(d\)/.test(ehm));
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
@@ -16426,8 +16485,10 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
   // uio-W04b re-pointed the first of these: it used to send the author to "Save/Recents -> Promote
   // to Product", a menu that had already been retired. An empty state that names a route the app no
   // longer has is worse than a blank one.
-  ok("no-source + no-master both render a named empty state, not a blank panel", /This Product has no source document yet[\s\S]{0,400}This document isn't attached to a product and has no source attached/.test(SL));
-  ok("and the route it names actually exists", /Assign a product from its row menu in Files/.test(SL));
+  // uio-W13: neither empty state describes the document as broken. "No product" is a fact, and the
+  // line names what would put source here rather than what is wrong.
+  ok("no-source + no-master both render a named empty state, not a blank panel", /This Product has no source document yet[\s\S]{0,600}No product, and no source attached/.test(SL));
+  ok("and the route it names actually exists", /Assign a product, or attach a source, in the Product panel above/.test(SL));
   ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(SL));
   ok("the panel is read-only: its function never sets contentEditable / applySourceLockState", (function () {
     var start = SL.indexOf("function renderEditSourcePanel()");
