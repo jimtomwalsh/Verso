@@ -286,6 +286,45 @@ section("syntax");
   if (r.status !== 0) console.error(r.stderr);
 });
 
+// ---- arch-P3b-08: the module map, enforced -------------------------------
+// src/editor/README.md states what lives in each module. A map nobody checks rots: the
+// hand-maintained `node --check` list above had drifted FOUR modules behind this directory before
+// 07a caught it, which meant a syntax error in any of them would have shipped. So the map is a
+// gate. Both directions fail -- a file with no row, and a row naming no file -- because a stale
+// row is the more misleading of the two: it sends a reader to a file that is not there.
+section("arch-P3b-08 module map");
+(function () {
+  var README = path.join(ROOT, "src/editor/README.md");
+  if (!fs.existsSync(README)) { ok("src/editor/README.md exists", false); return; }
+  ok("src/editor/README.md exists", true);
+  var md = fs.readFileSync(README, "utf8");
+  // every module file under src/editor/, relative to that directory
+  var files = [];
+  (function walk(d, rel) {
+    fs.readdirSync(d).sort().forEach(function (f) {
+      var full = path.join(d, f);
+      if (fs.statSync(full).isDirectory()) walk(full, rel + f + "/");
+      else if (/\.js$/.test(f)) files.push(rel + f);
+    });
+  })(path.join(ROOT, "src/editor"), "");
+  // a row is a leading table cell holding a backticked path: | `board/layout.js` | 175 | ... |
+  var rows = (md.match(/^\|\s*`([^`]+\.js)`\s*\|/gm) || []).map(function (m) {
+    return m.replace(/^\|\s*`/, "").replace(/`\s*\|$/, "");
+  });
+  var undocumented = files.filter(function (f) { return rows.indexOf(f) === -1; });
+  var phantom = rows.filter(function (r) { return files.indexOf(r) === -1; });
+  ok("every module in src/editor/ has a README row" + (undocumented.length ? " -- MISSING: " + undocumented.join(", ") : ""),
+     undocumented.length === 0);
+  ok("every README row names a real file" + (phantom.length ? " -- PHANTOM: " + phantom.join(", ") : ""),
+     phantom.length === 0);
+  ok("the map covers every module (" + files.length + " files, " + rows.length + " rows)", files.length === rows.length);
+  // and it proves it can fail
+  ok("the gate would catch an undocumented module (proof)",
+     ["a-module-that-does-not-exist.js"].filter(function (f) { return rows.indexOf(f) === -1; }).length === 1);
+  ok("the gate would catch a phantom row (proof)",
+     ["nope/gone.js"].filter(function (r) { return files.indexOf(r) === -1; }).length === 1);
+})();
+
 // ---- arch-P3b-01: the editor namespace -----------------------------------
 // The wiring table a moved region and editor.js reach each other through. Two halves: the table
 // itself, driven directly, and the table AS THE EDITOR ACTUALLY WIRES IT -- booted whole in the
