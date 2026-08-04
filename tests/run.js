@@ -10953,6 +10953,39 @@ section("uio-W04 Files destination");
   ok("the chip names the ROLE, not a rank", /"Primary source"/.test(src("src/ui-kit.js")) &&
     src("src/ui-kit.js").indexOf('vds-docrow__chip--accent", "Primary")') === -1);
 
+  // --- uio-W04b: assigning an EXISTING document to a product, from Files ---
+  // The gap James found: W02 gave the row an onMenu slot, W04 never wired one, and the only working
+  // path was the overlay uio-W09 retires. No other ticket owned re-tagging an existing document.
+  ok("Files rows carry the canonical row menu", /onMenu: function \(ev\) \{ rowMenu\(d, ev\); \}/.test(FILESRC));
+  ok("the menu reuses the browser's own actions rather than reimplementing them",
+    /E\.promoteToProductModal\(E\.registry\[d\.id\]\)/.test(FILESRC) &&
+    /E\.unlinkDocFromProduct\(E\.registry\[d\.id\]\)/.test(FILESRC) &&
+    /E\.renameCourse\(d\.id\)/.test(FILESRC) && /E\.duplicateCourse\(d\.id\)/.test(FILESRC) &&
+    /E\.deleteCourse\(d\.id\)/.test(FILESRC) && /E\.exportVersoPackage\(E\.registry\[d\.id\]\)/.test(FILESRC));
+  ok("an untagged document is offered assignment, a tagged one a move and a removal",
+    /d\.productId \? "Move to another product…" : "Assign to a product…"/.test(FILESRC) &&
+    /if \(d\.productId\) items\.push\(\{ label: "Remove from product"/.test(FILESRC));
+  // A source document's product is entangled with its product's groundTruthId; W14 owns it.
+  ok("a source document is not offered an action that cannot work correctly yet",
+    /if \(d\.kind === "source"\) \{[\s\S]{0,400}disabled: true/.test(FILESRC));
+  ok("only design documents can be ticked for a bulk action",
+    /if \(mode === "list" && d\.kind === "design"\)/.test(FILESRC));
+  ok("the bulk bar states HOW MANY before you commit",
+    /n \+ \(n === 1 \? " document selected" : " documents selected"\)/.test(FILESRC) &&
+    /ids\.length \+ \(ids\.length === 1 \? " document" : " documents"\) \+ " will be tagged/.test(FILESRC));
+  ok("a selection never outlives what it pointed at",
+    /Object\.keys\(selected\)\.forEach\(function \(id\) \{ if \(!visible\[id\]\) delete selected\[id\]; \}\);/.test(FILESRC));
+  ok("a selection is never persisted across a reload",
+    FILESRC.indexOf("verso.filesSelection") === -1 && !/setItem\([^)]*selected/.test(FILESRC));
+  ok("bulk assign writes through the shared tagger, then saves once",
+    /E\.tagDocProductStage\(doc, chosen, null\)/.test(FILESRC) && /E\.saveRegistry\(E\.registry\)/.test(FILESRC));
+  ok("the three browser actions cross through provide(), not another module's expose()",
+    /renameCourse: VE\.bind\("renameCourse"\)/.test(src("src/editor.js")));
+  ok("no surface still points at the retired save menu", ["src/editor/source-link.js",
+    "docs/guide/18-product-rail-source-stage-early.md"].every(function (f) {
+      return src(f).indexOf("Save/Recents") === -1;
+    }));
+
   // Two defects one screenshot found that 5,700 assertions could not. Both now guarded.
   var HOMECSS = src("styles/editor/13-home.css");
   ok("the header's grouping segments size to their labels, not to a shared width",
@@ -15742,7 +15775,11 @@ section("SPEC 8: source-link 02 — Edit Source tab read-only viewer");
   var e = src("src/editor.js"), css = EDITOR_CSS;
   ok("renderEditSourcePanel keys off the OPEN doc's product (doc.meta.productId), not the rail scope", /function renderEditSourcePanel\(\)[\s\S]{0,400}var productId = \(E\.doc && E\.doc\.meta && E\.doc\.meta\.productId\)/.test(SL));
   ok("it resolves that product's source master (sourceMasterFor) and builds a live model from master.doc", /var master = productId \? sourceMasterFor\(productId\) : null;[\s\S]{0,220}var model = SD\.fromJSON\(master\.doc\);/.test(SL));
-  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a Product[\s\S]{0,600}This Product has no source document yet/.test(SL));
+  // uio-W04b re-pointed the first of these: it used to send the author to "Save/Recents -> Promote
+  // to Product", a menu that had already been retired. An empty state that names a route the app no
+  // longer has is worse than a blank one.
+  ok("no-product + no-master both render a named empty state, not a blank panel", /This document isn't attached to a product[\s\S]{0,600}This Product has no source document yet/.test(SL));
+  ok("and the route it names actually exists", /Assign one from its row menu in Files/.test(SL));
   ok("the reading column projects nodes through the SAME renderSourceDocNode the Source stage uses", /\(model\.nodes \|\| \[\]\)\.forEach\(function \(n\) \{ docCol\.appendChild\(renderSourceDocNode\(n\)\); \}\);/.test(SL));
   ok("the panel is read-only: its function never sets contentEditable / applySourceLockState", (function () {
     var start = SL.indexOf("function renderEditSourcePanel()");

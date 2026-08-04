@@ -6566,6 +6566,14 @@
   window.VersoLibrary.install(VE);   // the shared component library; installs early -- it loads the store
   window.VersoDocuments.install(VE);   // bringing a course into existence
   window.VersoTabs.install(VE);   // the open documents, and which one you are looking at
+  // uio-W04b: Files' row menu reuses the browser's own actions rather than reimplementing them, so
+  // the two places cannot drift apart. home.js EXPOSES them; a need() resolves against provide(),
+  // so they are bound and provided here before Files installs.
+  VE.provide({
+    renameCourse: VE.bind("renameCourse"),
+    duplicateCourse: VE.bind("duplicateCourse"),
+    deleteCourse: VE.bind("deleteCourse")
+  });
   window.VersoFiles.install(VE);   // the Files destination: every document, from both stores
   // uio-W04: shell.js needs to mount Files when that destination is entered, and a need() resolves
   // against provide() -- never against another module's expose(). So bind here, provide the

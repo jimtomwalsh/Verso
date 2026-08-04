@@ -50,7 +50,7 @@ nested underneath. Nothing is thrown away; the original topics are kept, so this
   add, rename, or remove the variants this Product's source carries (Flagship is always the base). It's
   shown even when a Product has none yet, so you can declare the first one. Renaming a variant carries
   its divergences with it; removing one just hides its column (re-add the name to bring it back). If you
-  attach a course that already has variants (Save/Recents → Promote to Product), those variant names are
+  attach a course that already has variants (assign it a product from its row menu in Files), those variant names are
   copied onto the Product automatically.
 - **Bringing in a variant's manual.** If your Product has variants declared, importing asks first
   whether the file updates the **Flagship** (the base) or a **variant**. Choosing a variant runs a

@@ -67,6 +67,15 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   Click any document to open it where it belongs — a source document into **Source**, a design
   document into **Edit**.
 
+  **Assigning a document to a product.** Every document's row has a **⋯** menu (hover it) with
+  **Assign to a product…** — or **Move to another product…** and **Remove from product** if it
+  already has one — plus Rename, Duplicate, Export and Delete. To do several at once, hover a row
+  and tick it, tick the others, then use **Assign to a product…** in the bar that appears; it tells
+  you how many documents it is about to tag before you commit. Tagging only ever writes the tag:
+  your content is never touched.
+
+  Source documents are managed in the Source destination, so their rows offer only **Open**.
+
   **Switching is a swap, not a reload.** Leaving a destination does not close, reset or rebuild it —
   come back and you find the same tabs, the same active document and the same scroll position. Rail
   items deliberately carry no counts or badges: what matters is in the work, not on the rail.

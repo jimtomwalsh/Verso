@@ -196,12 +196,19 @@
   function install(kernel) {
     var E = kernel.need(
       "h", "registry", "libComponents", "switchDoc", "openDocIds", "saveOpenDocIds",
-      "colourForName", "formatRelativeTime"
+      "colourForName", "formatRelativeTime", "showContextMenu", "promoteToProductModal",
+      "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse",
+      "deleteCourse", "tagDocProductStage", "saveRegistry", "dsModalShell", "modalField",
+      "confirmModal"
     );
     var h = E.h;
 
     var ui = null;
     var query = "";
+    // uio-W04b: which documents are ticked for a bulk action. Deliberately NOT persisted -- a
+    // selection is a thing you are doing right now, and finding yesterday's ticks still applied
+    // after a reload is how a destructive bulk action goes wrong.
+    var selected = {};
     var grouping = normGrouping(readPref(GROUPING_KEY));
     var mode = normMode(readPref(MODE_KEY));
 
@@ -314,6 +321,83 @@
       return head;
     }
 
+    // uio-W04b: THE ROW MENU. Files lists every untagged course in its No product band -- exactly
+    // where you would spot them -- and until now had no actions on its rows at all, because W02 gave
+    // the row an onMenu slot and W04 never wired one. The actions mirror the browser's card menu and
+    // REUSE its functions rather than reimplementing them, so the two places cannot drift apart.
+    // The old overlay is retired by uio-W09; this is what carries the actions past it.
+    function rowMenu(d, ev) {
+      var items = [{ head: d.title }];
+      items.push({ label: "Open", onClick: function () { openDoc(d); } });
+      if (d.kind === "source") {
+        // A source document's product is entangled with its product's groundTruthId: reassigning a
+        // primary would break the product it is primary FOR. uio-W14 owns product-optional source
+        // documents. Say so rather than offering an action that misbehaves.
+        items.push({ sep: true });
+        items.push({ label: "Source documents are managed in Source", disabled: true });
+      } else {
+        items.push({ sep: true });
+        items.push({ label: d.productId ? "Move to another product…" : "Assign to a product…",
+                     onClick: function () { E.promoteToProductModal(E.registry[d.id]); } });
+        if (d.productId) items.push({ label: "Remove from product", onClick: function () {
+          E.unlinkDocFromProduct(E.registry[d.id]); E.saveRegistry(E.registry); render();
+        } });
+        items.push({ sep: true });
+        items.push({ label: "Rename…", onClick: function () { E.renameCourse(d.id); } });
+        items.push({ label: "Duplicate", onClick: function () { E.duplicateCourse(d.id); } });
+        items.push({ label: "Export .verso", onClick: function () { E.exportVersoPackage(E.registry[d.id]); } });
+        items.push({ sep: true });
+        items.push({ label: "Delete", danger: true, onClick: function () { E.deleteCourse(d.id); } });
+      }
+      var r = ev && ev.currentTarget && ev.currentTarget.getBoundingClientRect
+        ? ev.currentTarget.getBoundingClientRect() : { right: 0, bottom: 0 };
+      E.showContextMenu(r.right, r.bottom + 4, items);
+    }
+
+    // The bulk bar. James's case is a handful, not forty, so this stays plain: tick rows, the bar
+    // states HOW MANY before you commit, one action writes them all. A bulk action that does not
+    // say what it is about to touch is how the wrong things get moved.
+    function selectedIds() { return Object.keys(selected).filter(function (k) { return selected[k]; }); }
+    function assignSelectedToProduct() {
+      var ids = selectedIds(); if (!ids.length) return;
+      var products = window.ProductsStore || {};
+      var keys = Object.keys(products);
+      if (!keys.length) { E.confirmModal("No products yet", "Create a product first, then assign documents to it.", function () {}); return; }
+      var chosen = keys[0];
+      var shell = E.dsModalShell({
+        id: "files-assign-modal", title: "Assign to a product",
+        subtitle: ids.length + (ids.length === 1 ? " document" : " documents") + " will be tagged. Content is never touched.",
+        primaryLabel: "Assign",
+        onPrimary: function () {
+          ids.forEach(function (id) {
+            var doc = E.registry[id]; if (!doc) return;
+            E.tagDocProductStage(doc, chosen, null);
+          });
+          E.saveRegistry(E.registry);
+          selected = {};
+          shell.modal.remove();
+          render();
+        }
+      });
+      var row = E.modalField(shell.body, "Product");
+      row.appendChild(window.VersoUI.Select({
+        options: keys.map(function (k) { return { value: k, label: (products[k] && products[k].name) || k }; }),
+        value: chosen,
+        onChange: function (v) { chosen = v; }
+      }));
+    }
+    function bulkBar() {
+      var n = selectedIds().length;
+      if (!n) return null;
+      var bar = h("div", "files__bulk");
+      bar.appendChild(h("span", "files__bulk-count", n + (n === 1 ? " document selected" : " documents selected")));
+      var assign = window.VersoUI.Button({ variant: "primary", size: "sm", label: "Assign to a product…", onClick: assignSelectedToProduct });
+      bar.appendChild(assign);
+      var clear = window.VersoUI.Button({ variant: "ghost", size: "sm", label: "Clear", onClick: function () { selected = {}; render(); } });
+      bar.appendChild(clear);
+      return bar;
+    }
+
     function docRow(d, showTypeChip) {
       var prod = d.productId && window.ProductsStore ? window.ProductsStore[d.productId] : null;
       return window.VersoUI.DocumentRow({
@@ -325,7 +409,8 @@
         dotTitle: d.productId ? ("Product: " + ((prod && prod.name) || d.productId)) : null,
         updated: window.VersoUI._pure.compactRelativeTime(d.updatedAt, Date.now()),
         updatedTitle: typeof d.updatedAt === "number" ? E.formatRelativeTime(d.updatedAt, Date.now()) : null,
-        onOpen: function () { openDoc(d); }
+        onOpen: function () { openDoc(d); },
+        onMenu: function (ev) { rowMenu(d, ev); }
       });
     }
 
@@ -358,6 +443,13 @@
         (sum.products ? (" · " + sum.products + (sum.products === 1 ? " product" : " products")) : "");
       ui.body.innerHTML = "";
       ui.body.classList.toggle("files__body--cards", mode === "card");
+      // Drop ticks for documents no longer listed -- deleted, or filtered out by a search. A
+      // selection that outlives what it pointed at is how a bulk action touches the wrong thing.
+      var visible = {}; all.forEach(function (d) { visible[d.id] = 1; });
+      Object.keys(selected).forEach(function (id) { if (!visible[id]) delete selected[id]; });
+      var bar = bulkBar();
+      ui.body.classList.toggle("has-selection", !!bar);
+      if (bar) ui.body.appendChild(bar);
 
       if (!all.length) {
         ui.body.appendChild(h("div", "files__empty",
@@ -381,6 +473,21 @@
           // rule separating it from the design documents beneath. The prototype's subtitle variant
           // is deliberately NOT shipped: at forty products a second line per band is noise.
           if (d.primary) el.classList.add("is-primary-source");
+          // uio-W04b: only design documents can be bulk-assigned. A source document's product is
+          // entangled with its product's groundTruthId -- reassigning a primary would break the
+          // product it is primary FOR -- and uio-W14 owns that, so it gets no tick.
+          if (mode === "list" && d.kind === "design") {
+            var tick = h("input", "files__tick"); tick.type = "checkbox";
+            tick.checked = !!selected[d.id];
+            tick.title = "Select for a bulk action";
+            tick.addEventListener("click", function (ev) { ev.stopPropagation(); });
+            tick.addEventListener("change", function () {
+              if (tick.checked) selected[d.id] = true; else delete selected[d.id];
+              render();
+            });
+            el.insertBefore(tick, el.firstChild);
+            if (selected[d.id]) el.classList.add("is-selected");
+          }
           list.appendChild(el);
         });
         band.appendChild(list);
