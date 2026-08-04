@@ -36,7 +36,8 @@
       "showContextMenu", "openSettingsModal", "mount", "renderSettingsBody", "pipelineByDirection",
       "publishQueue", "publishOptionsForRow", "publishFormatSummary", "publishFormatRows", "applyLeftSection", "activeLeftSection",
       "mountPublishStage", "openDocIds", "view", "fitAll", "saveRegistry", "registry",
-      "confirmModal", "promptModal", "createProduct", "doc", "closeBrowser"
+      "confirmModal", "promptModal", "createProduct", "doc", "closeBrowser", "mountFilesStage",
+      "activeSourceDocName", "activeSourceProductName"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -64,7 +65,8 @@
         registry = E.registry,
         confirmModal = E.confirmModal,
         promptModal = E.promptModal,
-        createProduct = E.createProduct;
+        createProduct = E.createProduct,
+        mountFilesStage = E.mountFilesStage;
 
     function renderPipelineButtons(container) {
       container.innerHTML = "";
@@ -252,6 +254,14 @@
     function syncStageIdentity() {
       if (typeof document === "undefined") return;
       var el = document.getElementById("stage-identity"); if (!el) return;
+      // Each destination names the document IT is showing. Source shows a source document; naming
+      // whichever design document Edit happens to have open would make the line say something
+      // untrue, which is worse than saying nothing (uio-W04, found by opening a source document
+      // from Files and watching a course's title stay in the top bar).
+      if (__activeStage === "source" && typeof E.activeSourceDocName === "function") {
+        el.textContent = stageIdentity("source", E.activeSourceDocName(), E.activeSourceProductName());
+        return;
+      }
       var d = E.doc;
       var pid = d && d.meta && d.meta.productId;
       var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
@@ -292,15 +302,15 @@
       // entry, which is what made returning feel like a reload even though the DOM was still there.
       if (!__stageMounted[stage]) {
         __stageMounted[stage] = true;
+        if (stage === "files") mountFilesStage();
         if (stage === "source") renderSourceStage();
         if (stage === "publish") mountPublishStage();
       }
-      // Files has no destination of its own until uio-W04, so entering it opens the document
-      // browser that does the job today. The region below it is a plain surface rather than Edit's
-      // canvas, so this is a destination you land in and not a dialog over your work. W04 replaces
-      // this call with the real Files destination; W09 retires the overlay entirely.
-      if (stage === "files" && typeof openBrowser === "function") openBrowser();
-      else if (typeof E.closeBrowser === "function") E.closeBrowser(); // a no-op when it is not open
+      // uio-W04 replaced the bridge that used to open the old overlay here: Files is a destination
+      // of its own now. The overlay survives only for the "landed on Edit with nothing open" case
+      // below, and uio-W09 retires it -- closing it on every other destination change is what stops
+      // it hanging over one.
+      if (stage !== "files" && typeof E.closeBrowser === "function") E.closeBrowser(); // a no-op when closed
       // SPEC 7 file-picker: landing on Edit with no open tabs shows the doc browser automatically.
       if (stage === "edit" && !openDocIds.length && typeof openBrowser === "function") openBrowser();
       // Put the destination back where the author left it. rAF so it happens after the region is

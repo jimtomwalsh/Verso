@@ -479,3 +479,72 @@
   background: var(--danger); border-radius: 999px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ==========================================================================
+   uio-W04 -- the Files destination. Not a dialog: a full destination you land
+   in, listing EVERY document from both stores (the registry's design documents
+   and LibraryStore's source documents), which no surface in Verso had ever done.
+
+   Grouping is a switch, not a screen: Product / Type / Recent are three
+   arrangements of one list, with the same row (uio-W02) and the same actions.
+   List is the default and the shipped answer -- forty products in a card grid is
+   a scrolling problem. Card mode is for visual recall.
+
+   The band header is deliberately plain here; uio-W05 gives it its voice (the
+   primary-source line, the brand face) in ONE place rather than three.
+   ========================================================================== */
+.files-stage { flex-direction: column; overflow: hidden; }
+.files__head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-6, 12px); padding: var(--space-6, 12px) var(--space-8, 16px);
+  border-bottom: 1px solid var(--border-strong);
+}
+.files__headline { display: flex; align-items: baseline; gap: var(--space-4, 8px); min-width: 0; }
+.files__title { margin: 0; font-size: var(--text-md, 13px); font-weight: 600; color: var(--text-primary); }
+/* The corpus count. A list with no count leaves you unsure it is showing everything. */
+.files__count { font-size: var(--text-xs, 11px); color: var(--text-secondary); white-space: nowrap; }
+.files__controls { display: flex; align-items: center; gap: var(--space-4, 8px); flex: 0 0 auto; }
+/* The canonical segmented control sizes its segments to share one fixed width, which is right in an
+   inspector row and wrong in a header: "Product" and "Recent" ellipsised to "Pro..." and "Rec...".
+   In a header the segments size to their own labels. */
+.files__controls .prop-toggle { flex: 0 0 auto; padding-left: var(--space-4, 8px); padding-right: var(--space-4, 8px); }
+.files__search { width: 200px; }
+.files__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-4, 8px) var(--space-8, 16px) var(--space-10, 20px); }
+.files__empty { padding: var(--space-10, 20px) 0; color: var(--text-secondary); font-size: var(--text-xs, 11px); text-align: center; }
+
+.files-band { margin-top: var(--space-6, 12px); }
+.files-band:first-child { margin-top: 0; }
+.files-band__head {
+  display: flex; align-items: baseline; gap: var(--space-3, 6px);
+  padding: var(--space-4, 8px) var(--space-4, 8px) var(--space-2, 4px);
+  border-bottom: 1px solid var(--border-strong);
+}
+.files-band__name { font-size: var(--text-sm, 12px); font-weight: 600; color: var(--text-primary); }
+.files-band__note { font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+.files-band__count { margin-left: auto; font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+.files-band__rows { padding: var(--space-1, 2px) 0; }
+
+/* Card mode. Same primary treatment as the list, so switching mode changes how much room a
+   document takes and never what it IS. */
+.files-band__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-4, 8px); padding: var(--space-4, 8px) 0; }
+.files-card {
+  position: relative; display: flex; flex-direction: column; gap: var(--space-2, 4px);
+  padding: var(--space-6, 12px); cursor: pointer;
+  background: var(--surface-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md, 6px); /* borders over shadows: nothing floats while docked */
+}
+.files-card:hover { background: var(--surface-raised, var(--surface-panel)); border-color: var(--border-input, var(--border-strong)); }
+.files-card.is-primary { border-color: var(--accent); }
+.files-card__primary {
+  position: absolute; top: var(--space-2, 4px); right: var(--space-2, 4px);
+  padding: 0 var(--space-2, 4px); border-radius: var(--radius-xs, 2px);
+  background: var(--accent-quiet); color: var(--accent); font-size: var(--text-2xs, 10px);
+}
+.files-card__glyph { display: inline-flex; width: var(--control-md, 24px); height: var(--control-md, 24px); align-items: center; justify-content: center; border-radius: var(--radius-xs, 2px); background: var(--surface-input); color: var(--icon-idle); }
+/* The one colour split that makes written material legible from laid-out material, unread. */
+.files-card__glyph--source { background: var(--accent-quiet); color: var(--accent); }
+.files-card__glyph svg { width: 14px; height: 14px; }
+.files-card__title { font-size: var(--text-xs, 11px); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-card__meta { display: flex; align-items: center; gap: var(--space-2, 4px); font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+.files-card__chip { padding: 0 var(--space-2, 4px); border-radius: var(--radius-xs, 2px); background: var(--surface-input); }
+.files-card__when { margin-left: auto; }

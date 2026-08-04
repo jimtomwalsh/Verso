@@ -46,8 +46,20 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   **Settings** glyphs.
 
   **They are destinations, not steps.** None depends on another: you can write source without ever
-  laying a document out, lay one out without touching source, or publish without either. **Files**
-  is where you browse and manage everything.
+  laying a document out, lay one out without touching source, or publish without either.
+
+  **Files** lists **every document you have** — source documents and design documents together, in
+  one place. Nothing else in Verso ever showed you both. Its header states the size of what you are
+  looking at (*"12 documents · 3 products"*), and a search box filters on title or code.
+
+  Three ways to arrange the same list, chosen with one switch: **Product** (the default — a band per
+  product, its source document first, and a trailing **No product** band for shared cross-product
+  material), **Type** (Source, Courses, Presentations, Guides), and **Recent** (one flat list,
+  newest first). Switching only rearranges: the same documents, the same rows, the same actions.
+
+  **List or cards.** List is the default and works at any size; cards are there for visual recall.
+  Click any document to open it where it belongs — a source document into **Source**, a design
+  document into **Edit**.
 
   **Switching is a swap, not a reload.** Leaving a destination does not close, reset or rebuild it —
   come back and you find the same tabs, the same active document and the same scroll position. Rail

@@ -3290,7 +3290,24 @@
       if (apply) { SD.applyImportPlan(model, plan); persistSourceDocModel(master, model); renderSourceArticle(); renderSourceTopicList(); }
       return { summary: plan.summary, ops: plan.ops.map(function (o) { return { type: o.type, name: o.name, added: o.added, removed: o.removed, kept: o.kept }; }) };
     };
+    // uio-W03/W04: what the ONE where-am-I line should say while you are in Source. It names the
+    // SOURCE document you are reading, not whichever design document Edit happens to have open --
+    // opening a source document from Files and still seeing a course's title in the top bar makes
+    // the line say something untrue.
+    function activeSourceDocName() {
+      var comps = libComponents() || {};
+      var open = __sourceActiveTopicId && comps[__sourceActiveTopicId];
+      if (open && open.name) return open.name;
+      var master = sourceMasterFor(activeSourceProductId());
+      return (master && master.name) || "";
+    }
+    function activeSourceProductName() {
+      var p = window.ProductsStore ? window.ProductsStore[activeSourceProductId()] : null;
+      return (p && p.name) || "";
+    }
+
     kernel.expose({
+      activeSourceDocName: activeSourceDocName, activeSourceProductName: activeSourceProductName,
       // editor.js's __sourceLink browser-verify hook still names this one.
       pushSourceAlternate: pushSourceAlternate,
       applySourceLockState: applySourceLockState, flushSourceEditSession: flushSourceEditSession, persistSourceDocModel: persistSourceDocModel,
