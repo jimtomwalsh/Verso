@@ -29,6 +29,16 @@ can switch back. In a **Static** document the interactive block types (Quiz, Ima
 Web/HTML Embed, Accordion, Card Reveal, and the rest) are hidden from the Blocks library; any
 interactive blocks you already placed are kept, and turning interactivity back on restores them.
 
+**The code is the document's name.** Every document is filed under its **code**, and that code is
+what tabs, the picker and the publish queue all refer to. Two documents cannot share one — and
+codes that differ only in capitalisation (`ACME-101-E` and `ACME-101-e`) count as the same code, so
+Verso will not let you create the second.
+
+**Importing a `.verso` or JSON file.** If the file is a backup of a document you already have,
+Verso says so and asks whether to **Replace** it. Replacing overwrites the copy on this machine
+with the version in the file, and the copy you had is not recovered afterwards — export it first
+if you might want it. If the code is new, the document is added and opened in a new tab.
+
 > **Note.** Your course lives only in this browser. Export a **JSON** backup regularly and
 > before clearing browser data or switching machines (§15).
 

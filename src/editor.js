@@ -1115,8 +1115,30 @@
 
   var registry = getRegistry();
   Object.keys(registry).forEach(function (id) { normalizeDoc(registry[id]); });
+  // One name per document. meta.code is a second copy of the registry key that nothing kept in
+  // step, and a drifted pair is what let a re-imported .verso backup land as a duplicate entry
+  // instead of an overwrite prompt (src/editor/storage.js, "document identity"). Repair on read,
+  // before anything reads either name, and write the repair back so it happens once.
+  var _codeFix = window.VersoStorage.reconcileRegistryCodes(registry);
+  if (_codeFix.repaired.length) {
+    if (window.console && console.warn) console.warn("[registry] re-synced meta.code to the registry key for: " + _codeFix.repaired.join(", "));
+    saveRegistry(registry);
+  }
   var activeDocId = getActiveDocId();
   var openDocIds = getOpenDocIds();
+  // The open-tab set lives in a different store from the registry, so it can name documents that
+  // no longer exist. Such an id renders no tab but still counts as one, and can reach the live-doc
+  // pair-write as `undefined`. Drop it here, and make sure the active id is a real document.
+  var _openFix = window.VersoStorage.reconcileOpenDocIds(openDocIds, registry, activeDocId, window.SAMPLE_DOC.meta.code);
+  if (_openFix.dropped.length) {
+    if (window.console && console.warn) console.warn("[tabs] dropped open-document id(s) with no document: " + _openFix.dropped.join(", "));
+  }
+  if (_openFix.dropped.length || activeDocId !== _openFix.activeId) {
+    openDocIds.length = 0; // mutate in place: modules hold this exact array through the kernel
+    _openFix.ids.forEach(function (id) { openDocIds.push(id); });
+    saveOpenDocIds(openDocIds);
+    if (activeDocId !== _openFix.activeId) { activeDocId = _openFix.activeId; saveActiveDocId(activeDocId); }
+  }
 
   // KKKK: surface any legacy-menu migration flags once, so discarded Course Menu
   // content is reviewed rather than silently lost. One-shot per load.
@@ -6460,6 +6482,11 @@
     libComponents: libComponents, dsModalShell: dsModalShell, modalField: modalField,
     modalSection: modalSection, f04Badge: f04Badge, f04ProductFacts: f04ProductFacts,
     layout: layout, view: view, variantNames: variantNames, registry: registry, History: History,
+    // Document identity: which existing registry entry an incoming code refers to. Provided from
+    // here rather than read off window inside the module, because a module under bare `require`
+    // gets its own window stand-in and would read undefined (see kernel.js, "HOW A REGION REACHES
+    // THIS"). Import is the only caller today; anything else resolving a code should use it too.
+    findRegistryId: window.VersoStorage.findRegistryId,
     getRegistry: getRegistry, saveLibrary: saveLibrary, saveProducts: saveProducts,
     ProductRail: ProductRail, getActiveProduct: getActiveProduct, setActiveProduct: setActiveProduct,
     setProductVariants: setProductVariants, mountProductPicker: mountProductPicker,
