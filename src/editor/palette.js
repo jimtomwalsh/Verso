@@ -26,7 +26,10 @@
       "enterDemo", "openSettingsModal", "openFindReplace", "addPageAfterCurrent", "undo", "redo",
       "fitAll", "zoomTo100", "togglePanels", "getSettingsSections", "blockLabel", "openSettingsSection",
       "focusFrame", "setActivePage", "setSelection", "clearAllMulti", "selectBlock", "popLayer",
-      "pushLayer", "doc"
+      "pushLayer", "doc",
+      // uio-W15: documents join the one index. Opening one lands the destination that hosts its
+      // type, so the palette needs both openers and the two stores the corpus is built from.
+      "registry", "libComponents", "openDocIds", "saveOpenDocIds", "switchDoc", "openSourceTopicId"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is deliberately absent and read through E.
@@ -90,7 +93,10 @@
     };
     // Tie-break order only. It decides what the palette shows before you type, and which kind
     // wins when two entries score identically; it never overrides a better text match.
-    var COMMAND_KINDS = ["action", "page", "setting", "guide", "block"];
+    // uio-W15: documents sit just under actions. They must not lead the RESTING list -- a palette
+    // that opens showing forty documents has buried its verbs -- but a typed document title scores
+    // 100 on the label and wins on merit, which is the ordering that matters.
+    var COMMAND_KINDS = ["action", "document", "page", "setting", "guide", "block"];
     function commandKindBias(kind) {
       var i = COMMAND_KINDS.indexOf(kind);
       return i === -1 ? 0 : (COMMAND_KINDS.length - i);
@@ -118,6 +124,20 @@
       });
       (sources.blocks || []).forEach(function (b) {
         out.push({ kind: "block", label: b.label, sub: b.sub, keywords: [], ref: { pi: b.pi, bi: b.bi } });
+      });
+      // uio-W15: EVERY DOCUMENT, source and design alike, in the SAME index and the same ranking.
+      // ⌘K is the only quick-switch and Files is the only browse surface; there is no third finder,
+      // so a document that cannot be found here cannot be found by searching at all.
+      (sources.documents || []).forEach(function (d) {
+        out.push({ kind: "document", label: d.title,
+          // The sub-line is what tells two documents of the same name apart.
+          sub: d.productName ? (d.productName + " · " + d.typeLabel) : ("No product · " + d.typeLabel),
+          // The destination it will land in, named rather than left to be discovered by choosing.
+          dest: d.destination === "source" ? "→ Source" : "→ Edit",
+          icon: d.icon,
+          // Findable by its product and its type, not only by its title: "aegis deck" should find it.
+          keywords: [d.productName, d.typeLabel].filter(Boolean),
+          ref: { id: d.id, docKind: d.kind } });
       });
       return out;
     }
@@ -207,6 +227,49 @@
         { id: "stagePublish",label: "Go to Publish",                sub: "Stage",    keywords: ["publish stage"], run: function () { setStage("publish"); } }
       ];
     }
+    // uio-W15: the palette's view of the corpus, built from THE SAME pure function Files uses. Two
+    // lists of documents assembled two ways is how a document comes to exist in one place and not
+    // the other, which is the bug Files itself was built to end.
+    function paletteDocuments() {
+      var F = window.VersoFiles && window.VersoFiles._pure; if (!F) return [];
+      var U = window.VersoUI;
+      var products = window.ProductsStore || {};
+      return F.buildCorpus({
+        registry: E.registry,
+        components: E.libComponents(),
+        products: products,
+        geoOf: function (d) {
+          return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d).geo : "reflow";
+        }
+      }).map(function (d) {
+        var T = U && U.DOCUMENT_TYPES ? U.DOCUMENT_TYPES[U._pure.docType(d.type)] : null;
+        var p = d.productId && products[d.productId];
+        return {
+          id: d.id, kind: d.kind, title: d.title,
+          productName: p ? (p.name || d.productId) : "",
+          typeLabel: T ? T.label : "Course",
+          icon: T ? T.icon : "layers",
+          // A source document lands Source; a design document lands Edit. The destination is a
+          // property OF THE TYPE, which is why it can be named on the row before you choose it.
+          destination: d.kind === "source" ? "source" : "edit"
+        };
+      });
+    }
+    // Choosing a document opens it AND lands the destination that hosts its type, in one step, with
+    // no intermediate screen. An already-open document is revealed rather than duplicated: both
+    // openers are idempotent on their strip.
+    function openDocumentEntry(ref) {
+      if (!ref || !ref.id) return;
+      if (ref.docKind === "source") {
+        E.openSourceTopicId(ref.id);
+        setStage("source");
+        return;
+      }
+      if (E.openDocIds.indexOf(ref.id) === -1) { E.openDocIds.push(ref.id); E.saveOpenDocIds(E.openDocIds); }
+      E.switchDoc(ref.id);
+      setStage("edit");
+    }
+
     // The guide lives on disk, so its headings are fetched once on first use and cached. Opened
     // from file:// the fetch fails and the palette simply carries no guide results -- the same
     // graceful degradation the help modal already has.
@@ -229,7 +292,8 @@
         pages.push({ name: p.name, pi: pi });
         (p.blocks || []).forEach(function (b, bi) { blocks.push({ label: blockLabel(b), sub: p.name, pi: pi, bi: bi }); });
       });
-      return { settings: settings, actions: commandActions(), guide: guide || [], pages: pages, blocks: blocks };
+      return { settings: settings, actions: commandActions(), guide: guide || [], pages: pages,
+               blocks: blocks, documents: paletteDocuments() };
     }
     function runCommandEntry(entry) {
       if (!entry) return;
@@ -240,17 +304,21 @@
         return;
       }
       if (entry.kind === "guide") { openHelpModal(entry.ref.id); return; }
+      if (entry.kind === "document") { openDocumentEntry(entry.ref); return; }
       if (entry.kind === "page") { focusFrame(entry.ref.pi); setActivePage(entry.ref.pi); setSelection("page", entry.ref.pi); return; }
       clearAllMulti(); selectBlock(entry.ref.pi, entry.ref.bi);
     }
     // ---- Cmd-K command palette -----------------------------------------------
     var PALETTE_LIMIT = 40; // a palette you scroll is a list; this is a shortlist
+    // What the trailing column says for a result that is not a document. Every kind gets a word so
+    // the column means something on every row rather than being blank on most of them.
+    var QJ_KIND_WORD = { action: "Command", setting: "Setting", guide: "Guide", page: "Page", block: "Block" };
     function openQuickJump() {
       if (document.querySelector(".qj-overlay")) return;
       var overlay = h("div", "qj-overlay");
       var box = h("div", "qj-box");
       var input = h("input", "qj-input"); input.type = "text";
-      input.placeholder = "Find a setting, an action, a page or a guide section…"; input.spellcheck = false;
+      input.placeholder = "Find a document, a setting, an action, a page or a guide section…"; input.spellcheck = false;
       var list = h("div", "qj-list");
       box.appendChild(input); box.appendChild(list); overlay.appendChild(box); document.body.appendChild(overlay);
       var entries = commandEntries(commandSources(__guideIndexCache));
@@ -260,9 +328,20 @@
         if (!filtered.length) { list.appendChild(h("div", "qj-empty", "Nothing matches.")); return; }
         filtered.forEach(function (it, idx) {
           var row = h("div", "qj-item" + (idx === active ? " is-active" : ""));
+          row.setAttribute("data-kind", it.kind);
+          // uio-W15: a glyph well on every row, filled only for documents. Documents and commands
+          // share one list with no separator between them, so the type glyph is what makes a
+          // document legible AS a document at a glance, and the empty well keeps the labels in one
+          // column rather than stepping in and out.
+          var well = h("span", "qj-item__glyph");
+          if (it.icon && window.Icon) well.innerHTML = window.Icon(it.icon);
+          row.appendChild(well);
           row.appendChild(h("span", "qj-item__label", it.label));
           // The result names the category it lives in, so choosing it is never a leap of faith.
           row.appendChild(h("span", "qj-item__sub", it.sub));
+          // THE TRAILING COLUMN NAMES WHAT CHOOSING THIS DOES: which destination a document lands,
+          // and "Command" for a verb. One list, two kinds of result, told apart without a separator.
+          row.appendChild(h("span", "qj-item__dest", it.dest || QJ_KIND_WORD[it.kind] || ""));
           row.addEventListener("mousedown", function (e) { e.preventDefault(); choose(it); });
           list.appendChild(row);
         });

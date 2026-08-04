@@ -11112,6 +11112,69 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W15: documents join the one ⌘K index -----------------------------
+// ⌘K is the only quick-switch and Files is the only browse surface. There is no third finder, so a
+// document that cannot be found here cannot be found by searching at all — which is why documents
+// belong in the SAME index and the SAME ranking as everything else rather than behind a tab.
+section("uio-W15 documents in the palette");
+(function () {
+  var CI;
+  try { CI = require(path.join(ROOT, "src/editor/palette.js")); } catch (e) { ok("require palette.js", false); return; }
+  var PAL = src("src/editor/palette.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  // The pure index and ranking are reachable through the module's own test hook only once booted,
+  // so the shape checks here read the source and the behaviour checks ride the booted editor's
+  // window.__commandIndex (exercised in the browser run).
+  ok("documents are a kind in the one index, ranked with everything else",
+    /var COMMAND_KINDS = \["action", "document", "page", "setting", "guide", "block"\];/.test(PAL));
+  ok("they do not lead the RESTING list -- a palette that opens on forty documents has buried its verbs",
+    PAL.indexOf('"action", "document"') !== -1);
+  ok("every document is indexed, source and design alike, from the SAME corpus Files builds",
+    /window\.VersoFiles && window\.VersoFiles\._pure/.test(PAL) && /F\.buildCorpus\(\{/.test(PAL));
+  ok("a document row carries a product · type sub-line",
+    /sub: d\.productName \? \(d\.productName \+ " · " \+ d\.typeLabel\) : \("No product · " \+ d\.typeLabel\)/.test(PAL));
+  ok("an untagged document says No product rather than showing a bare type",
+    /"No product · " \+ d\.typeLabel/.test(PAL));
+  ok("EVERY DOCUMENT ROW NAMES THE DESTINATION IT WILL LAND IN",
+    /dest: d\.destination === "source" \? "→ Source" : "→ Edit"/.test(PAL));
+  ok("the destination is a property of the TYPE, which is why it can be named before you choose",
+    /destination: d\.kind === "source" \? "source" : "edit"/.test(PAL));
+  ok("a command names itself in the same column, so one list holds both without a separator",
+    /var QJ_KIND_WORD = \{ action: "Command",/.test(PAL) &&
+    /h\("span", "qj-item__dest", it\.dest \|\| QJ_KIND_WORD\[it\.kind\] \|\| ""\)/.test(PAL));
+  ok("a document is findable by its product and its type, not only by its title",
+    /keywords: \[d\.productName, d\.typeLabel\]\.filter\(Boolean\)/.test(PAL));
+  ok("a document row carries its type glyph, and the well keeps every label in one column",
+    /var well = h\("span", "qj-item__glyph"\);/.test(PAL) &&
+    /if \(it\.icon && window\.Icon\) well\.innerHTML = window\.Icon\(it\.icon\);/.test(PAL));
+
+  // --- choosing one: open AND land, in one step ---
+  ok("choosing a document routes through one opener", /if \(entry\.kind === "document"\) \{ openDocumentEntry\(entry\.ref\); return; \}/.test(PAL));
+  ok("a source document lands SOURCE, a design document lands EDIT, with no intermediate screen",
+    /if \(ref\.docKind === "source"\) \{\s*E\.openSourceTopicId\(ref\.id\);\s*setStage\("source"\);/.test(PAL) &&
+    /E\.switchDoc\(ref\.id\);\s*setStage\("edit"\);/.test(PAL));
+  ok("an already-open document is REVEALED, not duplicated",
+    /if \(E\.openDocIds\.indexOf\(ref\.id\) === -1\) \{ E\.openDocIds\.push\(ref\.id\); E\.saveOpenDocIds\(E\.openDocIds\); \}/.test(PAL));
+
+  // --- NO THIRD FINDER ---
+  // The palette is the only quick-switch; Files is the only browse surface. Nothing else may grow a
+  // document search of its own, which is the divergence the DS contract exists to remove.
+  ok("no destination grows a document search of its own", ["src/editor/source-stage.js",
+    "src/editor/publish.js", "src/editor/tabs.js", "src/editor/product-panel.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/buildCorpus|matchesQuery/.test(code);
+    }));
+  ok("only Files and the palette build the corpus", ["src/editor/files.js", "src/editor/palette.js"]
+    .filter(function (f) { return /buildCorpus/.test(src(f)); }).length === 2);
+  var ds = src("design-system/components/overlays/CommandPalette.d.ts");
+  ok("the DS contract states documents are in the index and there is no third finder",
+    /DOCUMENTS LIVE IN THIS INDEX TOO/.test(ds) && /There is no third\s*\n?\s*\*? ?finder/.test(ds));
+  ok("the contract names the trailing column and what it is for", /dest\?: string;/.test(ds));
+  var QJ = src("styles/editor/11-comments.css");
+  ok("the destination column is accented on a document, so it reads as a route rather than a tag",
+    /\.qj-item\[data-kind="document"\] \.qj-item__dest \{[^}]*var\(--accent\)/.test(QJ));
+})();
+
 // ---- uio-W12: the Product panel (contextual, never a filter) --------------
 // Product used to be a global mode. uio-W01 deleted the picker, which was right and left a real
 // question with nowhere to be answered: what does this document belong to, what does it trace back
@@ -14515,12 +14578,12 @@ section("uio-F06 palette wiring + keyboard contract");
   ok("a guide result opens the guide AT its section", /openHelpModal\(entry\.ref\.id\)/.test(ep6));
   ok("the guide index is fetched once and cached, and degrades to no guide results",
     /function loadGuideIndex\(then\)[\s\S]{0,500}__guideIndexCache = \[\]; then\(__guideIndexCache\); \}\)/.test(ep6));
-  ok("the palette states what it indexes", /Find a setting, an action, a page or a guide section/.test(ep6));
+  ok("the palette states what it indexes", /Find a document, a setting, an action, a page or a guide section/.test(ep6));
   ok("the pure core is exposed for the browser check", /window\.__commandIndex = \{/.test(ep6));
   // DS first, per the gate: the canonical set had no palette, so it was added there before it
   // was built here — and the spine settles that it is navigation, not a seventh presentation.
   var ds = src("design-system/components/overlays/CommandPalette.d.ts");
-  ok("the palette has a DS contract", /export function CommandPalette/.test(ds) && /kind: "setting" \| "action" \| "guide" \| "page" \| "block"/.test(ds));
+  ok("the palette has a DS contract", /export function CommandPalette/.test(ds) && /kind: "document" \| "setting" \| "action" \| "guide" \| "page" \| "block"/.test(ds));
   ok("the DS states it is navigation, not a seventh presentation", /NOT a seventh presentation/.test(ds));
   ok("the spine names the palette and its index", /not a seventh presentation/.test(src("design-system/readme.md"))
     && /components\/overlays\/CommandPalette/.test(src("design-system/readme.md")));
