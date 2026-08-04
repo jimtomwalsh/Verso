@@ -1444,6 +1444,59 @@ section("platform-pivot 02 server-of-one");
 // can never quietly become unreachable again.
 section("platform-pivot 34 server-mode bootstrap");
 (function () {
+  // --- index.html wiring (the ordering that makes the sync-read contract work) ---
+  var html = src("index.html");
+  var iBoot = html.indexOf('src="api/bootstrap.js"');
+  var iHttp = html.indexOf('src="src/store-http.js"');
+  ok("34: index.html loads the bootstrap", iBoot > -1);
+  ok("34: bootstrap precedes store-http.js (blocking + ordered -> globals exist before any reader)", iBoot > -1 && iHttp > iBoot);
+  ok("34: the bootstrap src is RELATIVE, never absolute (offline-safe; hygiene gate)",
+    !/<script[^>]+src=["']https?:\/\/[^"']*bootstrap\.js/i.test(html));
+
+  // --- the app must SAY it is on a server ---
+  // Found in this ticket's own verification screenshot: the Files footer read "This browser
+  // (localStorage + IndexedDB)" while every save was going to SQLite on a shared backend.
+  // The one line whose job is to say where the work lives was saying the wrong thing.
+  (function () {
+    var home = src("src/editor/home.js");
+    ok("34: the store-location line handles the http backend", /b === "http"/.test(home));
+    ok("34: it names the server host", /__versoServerUrl/.test(home) && /shared with your team/.test(home));
+    ok("34: signed out says nothing is saving", /signed out, nothing is saving/.test(home));
+  })();
+
+  // --- exactly ONE script may be absent from disk, and this is it ---
+  // The boot harness skips a script the repo does not contain, because that is what a
+  // browser does with a 404 and it IS the standalone posture. That tolerance must not
+  // become cover for a typo'd src, so the absent set is pinned to one name.
+  (function () {
+    var missing = [];
+    ["index.html", "kit.html"].forEach(function (page) {
+      var seen = {};
+      require(path.join(__dirname, "_editor.js")).scripts(page).forEach(function (e) {
+        if (typeof e !== "string" || seen[e]) return;
+        seen[e] = true;
+        if (!fs.existsSync(path.join(ROOT, e))) missing.push(e);
+      });
+    });
+    ok("34: exactly one page script is absent from disk, and it is the server-generated bootstrap",
+      missing.length === 1 && missing[0] === "api/bootstrap.js");
+  })();
+
+  // --- store-http must fail LOUDLY when signed out, never fall back ---
+  var sh = src("src/store-http.js");
+  ok("34: store-http reads __versoServerAuthRequired", /__versoServerAuthRequired/.test(sh));
+  ok("34: signed-out writes return {ok:false} rather than an optimistic ok",
+    /if \(authRequired\) \{ reportFailure\(SIGNED_OUT\); return \{ ok: false/.test(sh));
+  ok("34: a 401/403 on a durable write flips the adapter to the signed-out state",
+    /r\.status === 401 \|\| r\.status === 403/.test(sh));
+
+  // CI pins Node 20, and node:sqlite arrived in 22.5 -- so on CI server/verso-server.js cannot
+  // even be REQUIRED: server/store.js pulls the driver in at module load. Everything above this
+  // line reads source text and needs no server at all, so it runs everywhere; the guard sits
+  // immediately in front of the first require, which is the only thing that cannot survive it.
+  try { require("node:sqlite"); }
+  catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> bootstrap server tests skipped"); return; }
+
   var srv = require(path.join(ROOT, "server/verso-server.js"));
   var B = srv.buildBootstrap;
   // Run the emitted text as real JS against a stand-in window, which is the only honest
@@ -1491,55 +1544,7 @@ section("platform-pivot 34 server-mode bootstrap");
   ok("34: '<' is escaped so the text is safe inside a <script>",
     B({ mode: "</script><b>" }, null, null).indexOf("</script>") === -1);
 
-  // --- index.html wiring (the ordering that makes the sync-read contract work) ---
-  var html = src("index.html");
-  var iBoot = html.indexOf('src="api/bootstrap.js"');
-  var iHttp = html.indexOf('src="src/store-http.js"');
-  ok("34: index.html loads the bootstrap", iBoot > -1);
-  ok("34: bootstrap precedes store-http.js (blocking + ordered -> globals exist before any reader)", iBoot > -1 && iHttp > iBoot);
-  ok("34: the bootstrap src is RELATIVE, never absolute (offline-safe; hygiene gate)",
-    !/<script[^>]+src=["']https?:\/\/[^"']*bootstrap\.js/i.test(html));
-
-  // --- the app must SAY it is on a server ---
-  // Found in this ticket's own verification screenshot: the Files footer read "This browser
-  // (localStorage + IndexedDB)" while every save was going to SQLite on a shared backend.
-  // The one line whose job is to say where the work lives was saying the wrong thing.
-  (function () {
-    var home = src("src/editor/home.js");
-    ok("34: the store-location line handles the http backend", /b === "http"/.test(home));
-    ok("34: it names the server host", /__versoServerUrl/.test(home) && /shared with your team/.test(home));
-    ok("34: signed out says nothing is saving", /signed out, nothing is saving/.test(home));
-  })();
-
-  // --- exactly ONE script may be absent from disk, and this is it ---
-  // The boot harness skips a script the repo does not contain, because that is what a
-  // browser does with a 404 and it IS the standalone posture. That tolerance must not
-  // become cover for a typo'd src, so the absent set is pinned to one name.
-  (function () {
-    var missing = [];
-    ["index.html", "kit.html"].forEach(function (page) {
-      var seen = {};
-      require(path.join(__dirname, "_editor.js")).scripts(page).forEach(function (e) {
-        if (typeof e !== "string" || seen[e]) return;
-        seen[e] = true;
-        if (!fs.existsSync(path.join(ROOT, e))) missing.push(e);
-      });
-    });
-    ok("34: exactly one page script is absent from disk, and it is the server-generated bootstrap",
-      missing.length === 1 && missing[0] === "api/bootstrap.js");
-  })();
-
-  // --- store-http must fail LOUDLY when signed out, never fall back ---
-  var sh = src("src/store-http.js");
-  ok("34: store-http reads __versoServerAuthRequired", /__versoServerAuthRequired/.test(sh));
-  ok("34: signed-out writes return {ok:false} rather than an optimistic ok",
-    /if \(authRequired\) \{ reportFailure\(SIGNED_OUT\); return \{ ok: false/.test(sh));
-  ok("34: a 401/403 on a durable write flips the adapter to the signed-out state",
-    /r\.status === 401 \|\| r\.status === 403/.test(sh));
-
   // --- HTTP: the route itself, against a real running server ---
-  try { require("node:sqlite"); }
-  catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> bootstrap HTTP tests skipped"); return; }
   __async.push(withServer(async function (base) {
     var r = await fetch(base + "/api/bootstrap.js");
     ok("34: GET /api/bootstrap.js -> 200", r.status === 200);
