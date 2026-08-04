@@ -97,7 +97,7 @@
       var SD = window.SourceDoc, U = window.VersoUI;
       var productId = (E.doc && E.doc.meta && E.doc.meta.productId) || "";
       if (!productId) {
-        host.appendChild(h("div", "source-stage__empty", "This document isn't attached to a Product. Use Save/Recents -> Promote to Product to link it, then its source appears here."));
+        host.appendChild(h("div", "source-stage__empty", "This document isn't attached to a product. Assign one from its row menu in Files, and its source appears here."));
         return;
       }
       var master = productId ? sourceMasterFor(productId) : null;

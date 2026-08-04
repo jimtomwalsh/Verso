@@ -573,3 +573,26 @@
 .files-card__meta { display: flex; align-items: center; gap: var(--space-2, 4px); font-size: var(--text-xs, 11px); color: var(--text-secondary); }
 .files-card__chip { padding: 0 var(--space-2, 4px); border-radius: var(--radius-xs, 2px); background: var(--surface-input); }
 .files-card__when { margin-left: auto; }
+
+/* uio-W04b -- assigning existing documents to a product, from Files. The No product band gathers
+   every untagged document in one place, so this is where ticking several and assigning them earns
+   its keep. The bar states the COUNT before you commit: a bulk action that does not say what it is
+   about to touch is how the wrong things get moved. */
+.files__bulk {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: var(--space-4, 8px);
+  margin-bottom: var(--space-4, 8px); padding: var(--space-3, 6px) var(--space-4, 8px);
+  background: var(--accent-quiet); border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 4px);
+}
+.files__bulk-count { flex: 1 1 auto; font-size: var(--text-xs, 11px); color: var(--text-primary); }
+/* The tick rides inside the row's own anatomy rather than being bolted in front of it, and it
+   reveals on hover exactly as the row's ... menu does -- a column of checkboxes down a list you are
+   only reading is clutter. Once anything IS selected they all show, because that is when you are
+   picking a set and hunting for the next hover target would be worse. The discoverable path to
+   assigning ONE document is its row menu; the tick is the accelerator for several. */
+.files__tick { flex: 0 0 auto; margin: 0; accent-color: var(--accent); cursor: pointer; visibility: hidden; }
+.vds-docrow:hover .files__tick,
+.vds-docrow.is-selected .files__tick,
+.files__body.has-selection .files__tick { visibility: visible; }
+.files-band__rows .vds-docrow.is-selected { background: var(--accent-quiet); }
