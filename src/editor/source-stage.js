@@ -24,7 +24,7 @@
     var E = kernel.need(
       "h", "libComponents", "dsModalShell", "line", "f04Badge", "layout",
       "modalField", "variantNames", "clearTreeMarks", "setProductVariants", "jumpToLinkedBlock", "view",
-      "showContextMenu", "mountProductPicker", "confirmModal", "setActiveProduct", "getActiveProduct", "ProductRail",
+      "showContextMenu", "confirmModal",
       "makeComment", "libraryWhereUsedDetail", "getRegistry", "sourceLinkWhereUsed", "pipelineByDirection", "pipelineButtons",
       "importMenuLabel", "unlinkAllCoursesFromProduct", "deleteProductSource", "deleteProduct", "saveLibrary", "modalSection",
       "makeReply", "modalText", "f04ProductFacts", "panelSection", "snapshotSourceLinkBase", "sourceBaseEditImpact", "showSourceBaseEditModal",
@@ -37,8 +37,7 @@
         line = E.line, f04Badge = E.f04Badge, layout = E.layout,
         modalField = E.modalField, variantNames = E.variantNames, clearTreeMarks = E.clearTreeMarks,
         setProductVariants = E.setProductVariants, jumpToLinkedBlock = E.jumpToLinkedBlock, view = E.view,
-        showContextMenu = E.showContextMenu, mountProductPicker = E.mountProductPicker, confirmModal = E.confirmModal,
-        setActiveProduct = E.setActiveProduct, getActiveProduct = E.getActiveProduct, ProductRail = E.ProductRail,
+        showContextMenu = E.showContextMenu, confirmModal = E.confirmModal,
         makeComment = E.makeComment, libraryWhereUsedDetail = E.libraryWhereUsedDetail, getRegistry = E.getRegistry,
         sourceLinkWhereUsed = E.sourceLinkWhereUsed, pipelineByDirection = E.pipelineByDirection, pipelineButtons = E.pipelineButtons,
         importMenuLabel = E.importMenuLabel, unlinkAllCoursesFromProduct = E.unlinkAllCoursesFromProduct, deleteProductSource = E.deleteProductSource,
@@ -324,7 +323,7 @@
           exportProductSourceMarkdown(pid);
         } },
         { label: "Unlink all courses", onClick: function () {
-          var n = unlinkAllCoursesFromProduct(pid); mountProductPicker();
+          var n = unlinkAllCoursesFromProduct(pid);
           window.alert(n ? ("Unlinked " + n + " course" + (n === 1 ? "" : "s") + " from “" + pname + "”.") : "No linked courses to unlink.");
         } },
         { label: "Delete source document", danger: true, onClick: function () {
@@ -361,12 +360,15 @@
       setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
       if (typeof sourceToast === "function") sourceToast("Exported “" + pname + "” source to Markdown.");
     }
-    // After a delete, drop any dangling active-Product/topic state and re-render the stage + picker.
+    // After a delete, drop any dangling topic state and re-render the stage. uio-W01: there is no
+    // global Product to clear and no picker to rebuild -- the stage re-resolves what it shows on the
+    // next render, and the deleted Product's document is simply no longer a candidate. Clearing the
+    // remembered document matters, though: it is the FIRST thing activeSourceProductId consults, so
+    // leaving it pointing at a deleted Product's master would keep resolving to nothing.
     function afterProductLifecycleChange() {
-      setActiveProduct("");
       __sourceActiveTopicId = null; __sourceDocModel = null; __sourceDocModelTopicId = null;
       __sourceActiveVariants = [];
-      mountProductPicker();
+      try { localStorage.removeItem(SOURCE_TOPIC_PERSIST_KEY); } catch (e) {}
       renderSourceStage();
     }
 
@@ -375,21 +377,32 @@
     // whole outline -- chapters (old topics, level-1) with their headings nested -- not a per-topic
     // list. This resolves the Product to show and materialises the one-doc model on first entry.
 
-    // The Product whose source document the stage shows. Prefers the picker's active Product; if
-    // none is set, defaults to the first Product that has source content (a master or topics), so
-    // the stage always lands on a real document instead of an empty rail.
+    // The Source stage's own memory of which document was open, restored across a refresh. It sits
+    // here rather than beside renderSourceStage because uio-W01 made it the FIRST thing consulted
+    // when resolving what Source shows -- see activeSourceProductId below.
+    var SOURCE_TOPIC_PERSIST_KEY = "verso.sourceTopic";
+    // The Product whose source document the stage shows.
+    //
+    // uio-W01 took away the global Product picker this used to read, and Source's real replacement
+    // -- its own tab strip (uio-W10) and product-optional source documents (uio-W14) -- is several
+    // tickets away. So this is the narrow resolution that carries Source until then, and it is
+    // deliberately narrow: it answers from Source's OWN state rather than borrowing a scope from
+    // the rest of the app.
+    //
+    // Order: the document the author last had open here (already persisted, and the same key the
+    // stage restores from), then the first Product that has any source content at all, then
+    // whatever Product exists. The stage always lands on a real document instead of an empty rail,
+    // and it no longer writes anything global on the way.
     function activeSourceProductId() {
-      var pid = getActiveProduct();
-      if (pid && window.ProductsStore[pid]) return pid;
+      var comps = libComponents() || {};
+      try {
+        var lastId = localStorage.getItem(SOURCE_TOPIC_PERSIST_KEY);
+        var last = lastId && comps[lastId];
+        if (last && last.productId && window.ProductsStore[last.productId]) return last.productId;
+      } catch (e) {}
       var keys = Object.keys(window.ProductsStore || {});
       for (var i = 0; i < keys.length; i++) {
-        if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) {
-          // Before the saved scope is restored (boot), auto-pick in memory ONLY -- persisting here would
-          // overwrite the author's saved Product with a default before restoreActiveProduct reads it,
-          // which is exactly the "refresh resets the dropdown" bug.
-          if (ProductRail.hasRestoredActiveProduct()) setActiveProduct(keys[i]); else ProductRail.adoptActiveProduct(keys[i]);
-          return keys[i];
-        }
+        if (sourceMasterFor(keys[i]) || unifiableTopicsFor(keys[i]).length) return keys[i];
       }
       return keys[0] || "";
     }
@@ -592,7 +605,7 @@
       renderSourceToolbar();
       var host = document.getElementById("source-topic-list"); if (!host) return;
       host.innerHTML = "";
-      var topics = filterTopics(libComponents(), getActiveProduct(), __sourceSearchQuery);
+      var topics = filterTopics(libComponents(), activeSourceProductId(), __sourceSearchQuery);
       if (!topics.length) {
         host.appendChild(h("div", "source-stage__empty", "No source document yet — import a Markdown file or add a topic to begin."));
         return;
@@ -2655,8 +2668,11 @@
     }
 
     function newTopicModal() {
-      var productId = getActiveProduct();
-      if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
+      // uio-W01: this used to read the top-bar picker and say "Pick a Product in the top bar first."
+      // There is no top bar picker any more, so it resolves the same way the rest of the stage does
+      // and only stops when there is genuinely no Product to write into.
+      var productId = activeSourceProductId();
+      if (!productId) { window.alert("Create a Product first — a source document belongs to one."); return; }
       promptModal("New Topic", "Name", "", function (name) {
         if (!(name || "").trim()) return;
         var topic = createTopic(name, productId, []); // LibraryStore write, not doc -- no pushHistory
@@ -2673,7 +2689,6 @@
     // search field once, then re-renders the toolbar + topic list + article from current
     // state (the toolbar is now state-reactive -- see renderSourceToolbar -- so it's built
     // inside renderSourceTopicList, not mounted separately).
-    var SOURCE_TOPIC_PERSIST_KEY = "verso.sourceTopic"; // the topic open on the Source stage, restored across a refresh
     function renderSourceStage() {
       // Source v2: the active Product's source is ONE document. Resolve (and materialise on first
       // entry) its unified master and open it, so the stage shows the document, not a topic list.
@@ -3185,8 +3200,9 @@
         if (declaredNow.length) { importIntentModal(declaredNow); return; }
         importMarkdownAdditive(); return;
       }
-      var productId = getActiveProduct();
-      if (!productId) { window.alert("Pick a Product in the top bar first."); return; }
+      // uio-W01: same as newTopicModal -- resolved from the stage, not from a picker that is gone.
+      var productId = activeSourceProductId();
+      if (!productId) { window.alert("Create a Product first — an imported source document belongs to one."); return; }
       var declaredVariants = declaredVariantsForProduct(window.ProductsStore || {}, productId);
 
       if (!declaredVariants.length) {

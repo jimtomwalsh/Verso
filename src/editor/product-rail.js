@@ -142,23 +142,21 @@
     return { indexed: true, pct: fact.pct, tone: BAND_TONE[b.key], value: fact.pct + "%",
       bandLabel: b.label, title: fact.title };
   }
-  // Which open tabs a Product scope shows. An empty scope means "All products" and shows every open
-  // tab that still has a document behind it; an untagged document only ever shows there, since an
-  // untagged document is never silently attributed to a Product.
-  function visibleTabIds(openIds, reg, activeProduct) {
-    var pid = activeProduct || "";
-    return (openIds || []).filter(function (id) {
-      var d = reg && reg[id];
-      if (!d) return false;          // a stale id with no document behind it draws no tab
-      if (!pid) return true;         // All products
-      return !!(d.meta && d.meta.productId === pid);
-    });
+  // Which open tabs the strip shows: all of them. uio-W01 retired the Product scope that used to
+  // filter this, because a filter was doing a mode's job -- switching Product silently emptied the
+  // tab bar, and work was hidden rather than organised. What a strip holds now depends only on what
+  // is open. The one thing still filtered is an id with no document behind it, which draws nothing.
+  //
+  // The function survives the scope's deletion on purpose: uio-W10 splits the strips by document
+  // TYPE, one per destination, and this is where that predicate goes.
+  function visibleTabIds(openIds, reg) {
+    return (openIds || []).filter(function (id) { return !!(reg && reg[id]); });
   }
 
   // ---- the binding ---------------------------------------------------------
   // env = {
-  //   storage            localStorage-shaped, for the persisted Product scope (a per-client UI
-  //                      preference, so deliberately NOT the doc-of-record storage seam)
+  //   storage            localStorage-shaped. Held only to retire the legacy scope key (below);
+  //                      no Product state persists here any more.
   //   docById(id)        a document from the registry
   //   allDocIds()        every document id
   //   walkBlocks(doc,fn) the shared block walker
@@ -169,7 +167,42 @@
   //   whereUsed(masterId)    placements of a source passage
   //   published(docId)       has this document ever gone out (the release log)
   // }
-  var PRODUCT_PERSIST_KEY = "verso.activeProduct";
+  // ---- the retired global scope (uio-W01) -----------------------------------
+  // One global active Product used to live here, persisted under `verso.activeProduct` and read by
+  // every destination. It filtered the Edit tab strip, filtered Publish, hard-gated Source and
+  // filtered a picker that never listed source documents at all. Four consequences, and all four
+  // are why it is gone: a filter was doing a mode's job, work was hidden rather than organised, two
+  // Products at once was impossible, and the mechanism was already obsolete because the Edit source
+  // panel resolves source from the open document's own tag.
+  //
+  // Product is now three things and nothing else: a tag on a document (`meta.productId`), a facet
+  // in Files and Publish, and an inspector in Source and Edit. Never global state.
+  //
+  // THE KEY IS NOT SIMPLY DELETED. Whatever Product the author last had selected is the best guess
+  // at the facet Files should open on, so it is read ONCE and handed forward under a new name, then
+  // the old key is removed and never written again. `uio-W06` (Files facets) is what reads the seed;
+  // until it lands the seed just sits there, which is why this is a migration and not a deletion.
+  var LEGACY_PRODUCT_SCOPE_KEY = "verso.activeProduct";
+  var FILES_PRODUCT_FACET_SEED_KEY = "verso.filesProductFacetSeed";
+  // Pure but for the injected storage. Idempotent: a second boot finds the legacy key absent and
+  // does nothing, and it never overwrites a seed the author has since changed in Files.
+  function consumeLegacyProductScope(storage) {
+    if (!storage) return { seeded: false, id: "" };
+    var saved = null;
+    try { saved = storage.getItem(LEGACY_PRODUCT_SCOPE_KEY); } catch (e) { return { seeded: false, id: "" }; }
+    if (saved === null || saved === undefined) return { seeded: false, id: "" };
+    try { storage.removeItem(LEGACY_PRODUCT_SCOPE_KEY); } catch (e) {}
+    if (!saved) return { seeded: false, id: "" };
+    var already = null;
+    try { already = storage.getItem(FILES_PRODUCT_FACET_SEED_KEY); } catch (e) {}
+    if (already !== null && already !== undefined) return { seeded: false, id: saved };
+    try { storage.setItem(FILES_PRODUCT_FACET_SEED_KEY, saved); } catch (e) { return { seeded: false, id: saved }; }
+    return { seeded: true, id: saved };
+  }
+  function filesProductFacetSeed(storage) {
+    if (!storage) return "";
+    try { return storage.getItem(FILES_PRODUCT_FACET_SEED_KEY) || ""; } catch (e) { return ""; }
+  }
 
   function createProductRail(env) {
     env = env || {};
@@ -184,34 +217,9 @@
     var whereUsed = env.whereUsed || function () { return []; };
     var published = env.published || function () { return false; };
 
-    // --- the Product scope: "" = All products, persisted per client ---
-    var activeProduct = "";
-    var restored = false;
-    function setActiveProduct(id) {
-      activeProduct = id || "";
-      try {
-        if (activeProduct) storage.setItem(PRODUCT_PERSIST_KEY, activeProduct);
-        else storage.removeItem(PRODUCT_PERSIST_KEY);   // "All products" clears the preference
-      } catch (e) {}
-    }
-    function getActiveProduct() { return activeProduct; }
-    // Adopt a scope WITHOUT persisting it. The boot-time auto-pick (first Product that has source)
-    // has to do this: persisting before restoreActiveProduct has read the saved preference would
-    // overwrite the author's choice with a default, which is the "refresh resets the dropdown" bug.
-    function adoptActiveProduct(id) { activeProduct = id || ""; return activeProduct; }
-    function hasRestoredActiveProduct() { return restored; }
-    // Restored once, at first mount, when the Products store is loaded. A stored id whose Product
-    // has since been deleted falls back cleanly to "All products" and clears the stale preference.
-    function restoreActiveProduct() {
-      if (restored) return activeProduct;
-      restored = true;
-      try {
-        var saved = storage.getItem(PRODUCT_PERSIST_KEY);
-        if (saved && productsStore()[saved]) activeProduct = saved;
-        else if (saved) { try { storage.removeItem(PRODUCT_PERSIST_KEY); } catch (e2) {} }
-      } catch (e) {}
-      return activeProduct;
-    }
+    // The Product scope that used to live here is gone -- see LEGACY_PRODUCT_SCOPE_KEY above. The
+    // rail retires it once on this instance's behalf, so the old key cannot outlive the upgrade.
+    var retiredScope = consumeLegacyProductScope(storage);
 
     // --- ground-truth staleness ---
     // A document links approved source through block.sourceLink.masterId; each linked master carries
@@ -327,12 +335,10 @@
     }
 
     return {
-      PERSIST_KEY: PRODUCT_PERSIST_KEY,
-      getActiveProduct: getActiveProduct,
-      setActiveProduct: setActiveProduct,
-      adoptActiveProduct: adoptActiveProduct,
-      hasRestoredActiveProduct: hasRestoredActiveProduct,
-      restoreActiveProduct: restoreActiveProduct,
+      // uio-W01: the retired scope, reported rather than held. `seed` is what Files should open its
+      // Product facet on the first time it runs (uio-W06); "" means the author had no scope set.
+      retiredProductScope: retiredScope,
+      filesProductFacetSeed: function () { return filesProductFacetSeed(storage); },
       linkedMasterIds: linkedMasterIds,
       driftedMasterIds: driftedMasterIds,
       staleCount: staleCount,
@@ -414,6 +420,10 @@
     outputsFact: outputsFact,
     alignmentMeterModel: alignmentMeterModel,
     visibleTabIds: visibleTabIds,
+    // uio-W01: the retired scope's migration, exported so tests reach the pure core directly.
+    LEGACY_PRODUCT_SCOPE_KEY: LEGACY_PRODUCT_SCOPE_KEY,
+    FILES_PRODUCT_FACET_SEED_KEY: FILES_PRODUCT_FACET_SEED_KEY,
+    consumeLegacyProductScope: consumeLegacyProductScope,
     ownerProductTagValue: ownerProductTagValue, stampOwnerProductTag: stampOwnerProductTag,
     addTechnologyTag: addTechnologyTag, removeMasterTag: removeMasterTag,
     matchTagVocabulary: matchTagVocabulary,

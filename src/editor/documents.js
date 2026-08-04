@@ -24,7 +24,7 @@
   function install(kernel) {
     var E = kernel.need(
       "openDocIds", "registry", "confirmModal", "h", "saveOpenDocIds", "saveRegistry",
-      "switchDoc", "getActiveProduct", "modalSection", "modalField", "modalText", "tagDocProductStage",
+      "switchDoc", "modalSection", "modalField", "modalText", "tagDocProductStage",
       "tagDocCell", "clone", "dsModalShell", "bindProjectFolder", "iconBtn", "productSelectOptions",
       "doc", "findRegistryId"
     );
@@ -37,7 +37,6 @@
         saveOpenDocIds = E.saveOpenDocIds,
         saveRegistry = E.saveRegistry,
         switchDoc = E.switchDoc,
-        getActiveProduct = E.getActiveProduct,
         modalSection = E.modalSection,
         modalField = E.modalField,
         modalText = E.modalText,
@@ -241,7 +240,10 @@
       // picker scope) and a matrix-cell preset (defaults to eLearning). Resolved to
       // {geo, interactive} via the doc-type model at create time.
       var DT = window.__docType;
-      var newDocProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+      // uio-W01: this used to inherit the global Product scope, so a new document was silently
+      // stamped with whatever the top bar happened to be showing. There is no scope now; the author
+      // picks the Product here, or leaves it unset. uio-W08 reshapes creation properly.
+      var newDocProduct = "";
       var newDocPreset = "elearning";
       var btnImport = window.VersoUI.Button({ variant: "secondary", label: "Import…", onClick: function () {
         pickCourseFile(function (imported) { importDocToRegistry(imported); modal.remove(); });

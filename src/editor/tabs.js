@@ -10,10 +10,11 @@
 // kept editing it is the single most expensive bug class in this codebase's history, which is why
 // the switch is one function and every consumer goes through it.
 //
-// THE STRIP IS FILTERED, not just rendered. In a Product scope only the courses belonging to that
-// Product show, so the active tab can be filtered out from under you -- `reconcileActiveTabToScope`
-// is what stops that leaving you on a tab nobody can see. The filter itself is
-// `PR.visibleTabIds`, pure and shared with the Product Rail.
+// THE STRIP SHOWS WHAT IS OPEN. It used to be filtered by a global Product scope, which meant
+// choosing a Product could filter the active tab out from under you -- so a repair function existed
+// purely to put a visible document back. uio-W01 retired both. `PR.visibleTabIds` survives as the
+// one predicate for what a strip holds, and uio-W10 is where it grows a document-TYPE split so
+// Source and Edit can own separate strips.
 //
 // It came out from under a banner titled "Product Rail: tag vocabulary", which described the 46
 // lines above it and nothing here.
@@ -25,7 +26,7 @@
 
   function install(kernel) {
     var E = kernel.need(
-      "openDocIds", "getActiveProduct", "h", "showNewDocDialog", "activateDoc", "mount",
+      "openDocIds", "h", "showNewDocDialog", "activateDoc", "mount",
       "connectBackupFolder", "PR", "colourForName", "saveOpenDocIds", "stampDocOpenedAt", "renderVariantSwitch",
       "renderVersionSwitch", "syncCellChip", "registry", "setActiveVariant", "setActiveVersion", "activeDocId",
       "doc", "activeVariant", "activeVersion"
@@ -33,7 +34,6 @@
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
     var openDocIds = E.openDocIds,
-        getActiveProduct = E.getActiveProduct,
         h = E.h,
         showNewDocDialog = E.showNewDocDialog,
         activateDoc = E.activateDoc,
@@ -54,12 +54,12 @@
     // is the DS IconButton (Lucide plus). Re-skin only — the switch/close/new-doc
     // handlers are unchanged. A legacy chip fallback keeps the bar working if the
     // control library is ever absent.
-    // SPEC 7 (product-filtered tabs): the global product picker scopes the visible tabs. A tab
-    // shows when its doc matches the active product ("" = All products -> every open tab). An
-    // untagged doc has no productId, so it only ever shows under All products -- the same rule
-    // Product Rail uses everywhere else (an untagged doc is never silently attributed to a
-    // filter). PURE (no DOM) so tests/run.js exercises the predicate headlessly.
-    function visibleTabIds(openIds, reg, activeProduct) { return PR.visibleTabIds(openIds, reg, activeProduct); }
+    // uio-W01: the strip shows what is open. It used to be filtered by the global Product picker,
+    // which meant choosing a Product silently emptied the tab bar -- work hidden rather than
+    // organised, and the reason a whole repair function (`reconcileActiveTabToScope`) had to exist
+    // to put the active document back. Both are gone. The only id that draws nothing is one with no
+    // document behind it. PURE (no DOM) so tests/run.js exercises the predicate headlessly.
+    function visibleTabIds(openIds, reg) { return PR.visibleTabIds(openIds, reg); }
 
     // tab-doctype-glyph: map a document's geometry cell -> {glyph, label} for the tab's leading
     // doc-type marker. Keyed on geo (the doc-type spine the file-picker already groups by), so the
@@ -74,8 +74,7 @@
       if (!container) return;
       container.innerHTML = "";
       var U = window.VersoUI;
-      var activeProduct = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
-      var shown = visibleTabIds(openDocIds, registry, activeProduct);
+      var shown = visibleTabIds(openDocIds, registry);
       shown.forEach(function (id) {
         var d = registry[id];
         if (!d) return;
@@ -163,19 +162,14 @@
       syncCellChip(); // SPEC 7: reflect the new doc's matrix cell in the header chip
     }
 
-    // SPEC 7: after the product picker changes, re-scope the tab strip. If the active doc fell
-    // out of scope and other tabs are visible, activate the first visible one (switchDoc rebuilds
-    // the strip + canvas). If NOTHING is in scope, leave the active doc as-is and just redraw the
-    // (now empty-but-for-＋) strip -- the file-picker is how the author opens one in that product.
-    function reconcileActiveTabToScope() {
-      var shown = visibleTabIds(openDocIds, registry, (typeof getActiveProduct === "function") ? getActiveProduct() : "");
-      if (shown.length && shown.indexOf(E.activeDocId) === -1) { switchDoc(shown[0]); return; }
-      renderTabs();
-    }
+    // `reconcileActiveTabToScope` lived here and is gone with uio-W01. Its whole job was undoing
+    // the product filter's damage: when the scope changed and the active document fell out of it,
+    // something had to put a visible document back in front of the author. Nothing can filter the
+    // active document out from under you any more, so there is nothing to reconcile.
 
     kernel.expose({
       visibleTabIds: visibleTabIds, renderTabs: renderTabs, closeTab: closeTab,
-      switchDoc: switchDoc, reconcileActiveTabToScope: reconcileActiveTabToScope
+      switchDoc: switchDoc
     });
   }
 

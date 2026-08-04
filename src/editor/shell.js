@@ -17,9 +17,10 @@
 // square is shown and changed. Changing it re-renders, which is why `applyCellChange` is one
 // function rather than two setters that could disagree.
 //
-// The Product picker is the third scope. Changing Product re-scopes the tab strip, which can
-// filter the active document out from under you; `reconcileActiveTabToScope` in tabs.js is what
-// handles that, and this file calls it rather than reimplementing it.
+// THE PRODUCT PICKER WAS THE THIRD SCOPE, AND IT IS GONE (uio-W01). Changing Product used to
+// re-scope the tab strip, which could filter the active document out from under you -- so this file
+// called a repair function to put it back. Product is a tag, a facet and an inspector now; nothing
+// here scopes anything, and the repair function went with the scope that needed it.
 //
 // It came out from under a banner titled "Project auto-backup", whose actual backup writer left in
 // 07d. What was left under that banner was this, and it is not data-safety at all.
@@ -31,16 +32,15 @@
 
   function install(kernel) {
     var E = kernel.need(
-      "ProductRail", "h", "renderSourceStage", "openBrowser", "canvas", "pipelineButtons",
-      "showContextMenu", "openSettingsModal", "mount", "renderSettingsBody", "reconcileActiveTabToScope", "pipelineByDirection",
+      "h", "renderSourceStage", "openBrowser", "canvas", "pipelineButtons",
+      "showContextMenu", "openSettingsModal", "mount", "renderSettingsBody", "pipelineByDirection",
       "publishQueue", "publishOptionsForRow", "publishFormatSummary", "publishFormatRows", "applyLeftSection", "activeLeftSection",
       "mountPublishStage", "openDocIds", "view", "fitAll", "saveRegistry", "registry",
       "confirmModal", "promptModal", "createProduct", "doc"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
-    var ProductRail = E.ProductRail,
-        h = E.h,
+    var h = E.h,
         renderSourceStage = E.renderSourceStage,
         openBrowser = E.openBrowser,
         canvas = E.canvas,
@@ -49,7 +49,6 @@
         openSettingsModal = E.openSettingsModal,
         mount = E.mount,
         renderSettingsBody = E.renderSettingsBody,
-        reconcileActiveTabToScope = E.reconcileActiveTabToScope,
         pipelineByDirection = E.pipelineByDirection,
         publishQueue = E.publishQueue,
         publishOptionsForRow = E.publishOptionsForRow,
@@ -321,51 +320,29 @@
       b.addEventListener("click", function () { openSettingsModal("project"); });
     }
 
-    // Persistent top-bar product context (Product Rail): "" = All products. Persisted across
-    // refresh (mirrors STAGE_PERSIST_KEY) so a chosen product scope survives a reload on every
-    // stage; every stage reads it through window.__productRail.getActiveProduct().
-    function setActiveProduct(id) { ProductRail.setActiveProduct(id); }
-    function getActiveProduct() { return ProductRail.getActiveProduct(); }
-    function restoreActiveProduct() { ProductRail.restoreActiveProduct(); }
-    function mountProductPicker() {
-      if (typeof document === "undefined") return;
-      restoreActiveProduct(); // first mount = boot; restore the persisted scope before building the Select
-      var host = document.getElementById("product-picker-host"); if (!host) return;
-      host.innerHTML = "";
-      var U = window.VersoUI; if (!U || !U.Select) return;
-      host.appendChild(U.Select({
-        options: productSelectOptions(window.ProductsStore),
-        value: ProductRail.getActiveProduct(),
-        onChange: function (v) { setActiveProduct(v); renderSourceStage(); reconcileActiveTabToScope(); } // re-resolve the Product's document + re-scope the Edit tabs
-      }));
-      // new-product-button: a "+" beside the picker creates an empty Product from scratch (the only
-      // other path, Promote to Product, tags an already-open course -- it can't make a net-new one).
-      if (U.IconButton) {
-        var addBtn = U.IconButton({ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt });
-        addBtn.classList.add("product-picker__add");
-        host.appendChild(addBtn);
-      }
-    }
-    // Create an empty Product from a single-field name modal, then select it (scope switches to it).
-    // First-document creation is handled by the editor's empty-state file picker once the scope is set.
-    function newProductPrompt() {
+    // THE TOP-BAR PRODUCT PICKER IS GONE (uio-W01). It held one global active Product, persisted
+    // across refresh, that every destination read and filtered itself by. Choosing a Product in it
+    // silently emptied the Edit tab strip, hid Publish rows, and gated Source behind an alert. A
+    // filter was doing a mode's job. Product is a tag, a facet and an inspector now -- never a mode
+    // the author is inside, and never one value shared between destinations.
+    //
+    // What replaced each consumer: tab strips show what is open (`visibleTabIds`, split by document
+    // TYPE in uio-W10); the document browser is unscoped until Files replaces it (uio-W04); Publish
+    // gets its own facets (uio-W16); Source resolves its own document (source-stage.js,
+    // `activeSourceProductId`) until it gains a real switcher in uio-W10/W14; and creating a
+    // document no longer inherits a scope (uio-W08). `verso.activeProduct` is read once on upgrade
+    // and retired -- see product-rail.js, "the retired global scope".
+
+    // Create an empty Product from a single-field name modal. It no longer selects anything,
+    // because there is nothing to select: a new Product is empty until a document is tagged with
+    // it. `onDone` lets the caller refresh whatever surface it was opened from.
+    function newProductPrompt(onDone) {
       promptModal("New product", "Product name", "", function (v) {
         var name = (v || "").trim(); if (!name) return;
         var prod = createProduct(name); if (!prod) return;
-        setActiveProduct(prod.id);
-        mountProductPicker();          // rebuild the dropdown with the new Product selected
-        // new-product-empty-landing: land on the Edit-stage document browser, empty (no documents are
-        // tagged to the new Product yet), rather than a bespoke per-stage prompt. Creating a document
-        // from that empty browser pre-stamps it with this Product (showNewDocDialog reads the scope).
-        setStage("edit");
-        reconcileActiveTabToScope();   // re-scope the Edit tabs to the new (empty) Product
-        renderSourceStage();           // keep the Source stage's own doc bound for when it's opened
-        openBrowser();                 // the empty document browser for the new Product
+        if (typeof onDone === "function") onDone(prod);
       });
     }
-    window.__productRail.getActiveProduct = getActiveProduct;
-    window.__productRail.setActiveProduct = setActiveProduct;
-    window.__productRail.mountProductPicker = mountProductPicker; // boot hook
 
     kernel.expose({
       renderPipelineButtons: renderPipelineButtons, renderToolbarPipeline: renderToolbarPipeline, publishQueueFormat: publishQueueFormat,
@@ -373,8 +350,7 @@
       stageWorkspaceClass: stageWorkspaceClass, productSelectOptions: productSelectOptions, setStage: setStage,
       activeStage: activeStage, mountLeftRail: mountLeftRail, currentCell: currentCell,
       applyCellChange: applyCellChange, setCellInteractive: setCellInteractive, setCellGeo: setCellGeo,
-      syncCellChip: syncCellChip, mountDocSettingsBtn: mountDocSettingsBtn, setActiveProduct: setActiveProduct,
-      getActiveProduct: getActiveProduct, restoreActiveProduct: restoreActiveProduct, mountProductPicker: mountProductPicker,
+      syncCellChip: syncCellChip, mountDocSettingsBtn: mountDocSettingsBtn,
       newProductPrompt: newProductPrompt
     });
     // Constants the rest of the chrome reads as DATA. They cannot cross as bound forwarders,

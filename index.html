@@ -50,11 +50,12 @@
   <header class="toolbar" id="toolbar">
     <div class="toolbar__group toolbar__group--left">
       <span class="toolbar__brand" aria-hidden="true">Verso<span class="toolbar__brand-dot">.</span></span>
-      <!-- Product Rail: persistent product context for all three rail stages (Source/Edit/
-           Publish). Populated from window.ProductsStore + "All products" by mountProductPicker()
-           (a VersoUI.Select instance — see the editor script). -->
-      <div class="product-picker" id="product-picker-host" title="Active product — filters Source, Edit and Publish"></div>
-      <!-- #92b storage-health dot, now beside the product name (uio-E-C01): green healthy /
+      <!-- uio-W01: the persistent Product picker stood here and is gone. It held one global active
+           Product that every stage filtered itself by, which meant choosing one silently emptied the
+           tab strip and hid Publish rows. Product is a tag, a facet and an inspector now. uio-W03
+           puts the single where-am-I identity line in this spot. -->
+      <!-- #92b storage-health dot, beside the wordmark now that the product picker is gone
+           (uio-E-C01, uio-W01): green healthy /
            amber getting full / red near-quota or a save failure. Click opens a popover
            (backend, quota %, course weight). Collab-presence avatars insert themselves before it. -->
       <button class="storage-dot storage-dot--ok" id="storage-dot" title="Storage healthy — click for details" aria-label="Storage health"></button>
