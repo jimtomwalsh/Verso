@@ -11156,6 +11156,128 @@ section("uio-W04 Files destination");
     /files__chip-x/.test(FILESRC));
 })();
 
+// ---- uio-W17: source documents become block-addressable rows --------------
+// `saveLibrary()` serialises the ENTIRE LibraryStore as one JSON blob on every write, so two authors
+// in two DIFFERENT source documents overwrite each other. The collaboration suite is written against
+// block-addressable design documents and mentions LibraryStore nowhere, and this workspace model
+// deliberately routes MORE concurrent authors into source documents.
+section("uio-W17 source documents as block-addressable rows");
+(function () {
+  var SD = require(path.join(ROOT, "src/source-doc.js"));
+
+  var model = SD.create([
+    { type: "heading", level: 2, text: "Getting started" },
+    { type: "paragraph", text: "Read this first." },
+    { type: "paragraph", text: "Then read that." }
+  ]);
+  // A range mark anchored to a node key, which is the fidelity this change must not break.
+  var anchorKey = model.nodes[1].key;
+  model.marks = [{ id: "mk-1", type: "link", anchor: { nodeKey: anchorKey, from: 0, to: 4 } }];
+  model.history = [{ at: 1, what: "imported" }];
+
+  // --- the shape ---
+  var bd = SD.toBlockDoc(model);
+  ok("a source document presents as ONE page whose blocks are its nodes",
+    bd.pages.length === 1 && bd.pages[0].blocks.length === 3);
+  ok("THE NODE'S OWN KEY IS THE ROW ID -- never a second identifier for a thing that has one",
+    bd.pages[0].blocks.map(function (b) { return b.id; }).join() ===
+    model.nodes.map(function (n) { return n.key; }).join());
+  ok("what is not a node is document metadata, so a mark travels with the document",
+    bd.meta.marks.length === 1 && bd.meta.version === 1 && bd.meta.history.length === 1);
+  ok("the doc says WHAT IT IS, so a reader never infers it from the shape",
+    bd.meta.kind === "source" && SD.isBlockSourceDoc(bd) === true);
+  ok("a design document is not mistaken for one", SD.isBlockSourceDoc({ meta: {} }) === false &&
+    SD.isBlockSourceDoc(null) === false);
+  ok("the session-only undo stacks are never persisted",
+    !Object.prototype.hasOwnProperty.call(bd.meta, "undo") &&
+    !Object.prototype.hasOwnProperty.call(bd.meta, "redo"));
+
+  // --- the round trip ---
+  var back = SD.fromBlockDoc(bd);
+  ok("the nodes come back identical, keys and all",
+    JSON.stringify(back.nodes) === JSON.stringify(model.nodes));
+  ok("RANGE MARKS SURVIVE WITH THEIR ANCHORS INTACT",
+    back.marks.length === 1 && back.marks[0].anchor.nodeKey === anchorKey &&
+    back.marks[0].anchor.from === 0 && back.marks[0].anchor.to === 4);
+  ok("and the anchor still resolves to the node it named",
+    SD.nodeByKey(back, back.marks[0].anchor.nodeKey).text === "Read this first.");
+  ok("history rides across", back.history.length === 1 && back.history[0].what === "imported");
+  ok("the undo stacks come back empty rather than stale", back.undo.length === 0 && back.redo.length === 0);
+  ok("THE ROW ID IS THE IDENTITY, even when the content lost its key",
+    SD.fromBlockDoc({ meta: {}, pages: [{ blocks: [{ id: "b-9", type: "paragraph", text: "x" }] }] }).nodes[0].key === "b-9" &&
+    SD.fromBlockDoc({ meta: {}, pages: [{ blocks: [{ id: "b-9", key: "stale", type: "paragraph", text: "x" }] }] }).nodes[0].key === "b-9");
+  ok("an empty or absent doc is a model, not a crash",
+    SD.fromBlockDoc({}).nodes.length === 0 && SD.fromBlockDoc().nodes.length === 0);
+  ok("the whole trip is a bijection over the JSON the editor already persists",
+    JSON.stringify(SD.toJSON(SD.fromBlockDoc(SD.toBlockDoc(SD.fromJSON(SD.toJSON(model)))))) ===
+    JSON.stringify(SD.toJSON(model)));
+
+  // --- and now through THE REAL BLOCK STORE, with no new merge model ---
+  (function () {
+    try { require("node:sqlite"); } catch (e) { warn("node:sqlite unavailable -> W17 store tests skipped"); return; }
+    var os = require("os");
+    var createBlockStore = require(path.join(ROOT, "server/block-store.js")).createBlockStore;
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), "verso-w17-"));
+    var store = createBlockStore(path.join(tmp, "w17.sqlite"));
+
+    store.importDoc("src-alpha", SD.toBlockDoc(model), "ada");
+    var mat = store.materializeDoc("src-alpha");
+    ok("SOURCE DOCUMENTS PERSIST AS PER-NODE ROWS, not one library blob",
+      mat.pages[0].blocks.length === 3 &&
+      store.blockContent("src-alpha", anchorKey) !== null);
+    ok("materialising reassembles the same source document",
+      JSON.stringify(SD.fromBlockDoc(mat).nodes) === JSON.stringify(model.nodes));
+
+    // Two authors, two DIFFERENT source documents. The blob save is exactly what made this fail.
+    var other = SD.create([{ type: "paragraph", text: "Beta prose." }]);
+    store.importDoc("src-beta", SD.toBlockDoc(other), "grace");
+    // applyChange replaces a block's CONTENT wholesale, so a caller sends the whole node.
+    store.applyChange("src-beta", other.nodes[0].key,
+      { id: other.nodes[0].key, key: other.nodes[0].key, type: "paragraph", text: "Beta prose, revised." }, "grace");
+    ok("TWO AUTHORS IN TWO DIFFERENT SOURCE DOCUMENTS CANNOT CLOBBER EACH OTHER",
+      SD.fromBlockDoc(store.materializeDoc("src-alpha")).nodes[1].text === "Read this first." &&
+      SD.fromBlockDoc(store.materializeDoc("src-beta")).nodes[0].text === "Beta prose, revised.");
+
+    // Two authors, DIFFERENT NODES of the same source document.
+    store.applyChange("src-alpha", model.nodes[1].key,
+      { id: model.nodes[1].key, key: model.nodes[1].key, type: "paragraph", text: "Read this first, carefully." }, "ada");
+    // This one deliberately omits the key, the way a careless caller would. The row id is the
+    // identity, so the node keeps it -- and the mark anchored to it keeps resolving.
+    store.applyChange("src-alpha", model.nodes[2].key,
+      { type: "paragraph", text: "Then read that, twice." }, "grace");
+    var both = SD.fromBlockDoc(store.materializeDoc("src-alpha"));
+    ok("TWO AUTHORS ON DIFFERENT NODES OF THE SAME DOCUMENT BOTH LAND THEIR EDITS",
+      both.nodes[1].text === "Read this first, carefully." && both.nodes[2].text === "Then read that, twice.");
+    ok("and the node they did not touch is untouched", both.nodes[0].text === "Getting started");
+    ok("the marks still anchor after both edits, INCLUDING the one whose row lost its key",
+      both.marks[0].anchor.nodeKey === anchorKey && SD.nodeByKey(both, anchorKey) !== null &&
+      both.nodes.map(function (n) { return n.key; }).join() ===
+      model.nodes.map(function (n) { return n.key; }).join());
+
+    // The change log covers them like any other block, which is what "no new code paths" means.
+    var changes = store.changesSince(0, "src-alpha");
+    ok("every edit is in the ONE append-only change log, keyed by the node's own id",
+      changes.length >= 2 && changes.every(function (c) { return !!c.blockId; }) &&
+      changes.some(function (c) { return c.blockId === model.nodes[2].key; }));
+    ok("so locking, presence, the reaper and the unacked buffer need no new merge model -- these ARE block rows",
+      typeof store.blockContent === "function" && store.blockContent("src-alpha", model.nodes[2].key) !== null);
+
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  })();
+
+  // The hardening this found, asserted where it lives: a block whose content forgot its own id
+  // cannot be anchored to, by a source mark or by a comment. The store restores it on the way out.
+  ok("the block store stamps a row's id back onto content that lost it",
+    /if \(content && typeof content === "object" && content\.id == null\) content\.id = bid;/.test(src("server/block-store.js")));
+
+  // The CLIENT cutover -- routing saveLibrary through this instead of the blob -- rides
+  // platform-pivot-03's guarded migration, not a hand-flipped flag. What lands here is the shape and
+  // the proof that the existing store carries it; the flip is a storage migration with its own gate.
+  var SDSRC = src("src/source-doc.js");
+  ok("the shape lives in the model layer, DOM-free and storage-free",
+    /function toBlockDoc\(model\)/.test(SDSRC) && !/localStorage|document\./.test(SDSRC.slice(SDSRC.indexOf("function toBlockDoc"), SDSRC.indexOf("function toJSON"))));
+})();
+
 // ---- uio-W16: Publish de-scoped -- every design document, its own facets ---
 // Publish "was never universal": the global Product scope filtered it, so untagged documents
 // dropped out of a scoped view entirely. uio-W01 took the scope away; this gives Publish facets of
