@@ -104,6 +104,51 @@
 .vds-doctab__glyph { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--icon-idle, #999); } /* tab-doctype-glyph: doc-type marker */
 .vds-doctab__glyph svg { width: 14px; height: 14px; }
 .vds-doctab.is-active .vds-doctab__glyph { color: var(--icon-strong, var(--text-primary)); }
+/* uio-W02 DocumentRow: ONE document row for every list — Files, Publish, the pickers, the palette.
+   Height is --row-height-doc (32px), NOT --row-height (28px): that token is the inspector row, a
+   different species (label column + one control, a value you set). This is a click target.
+   Contract: design-system/components/browser/DocumentRow.d.ts. */
+.vds-docrow {
+  display: flex; align-items: center; gap: 6px;
+  height: var(--row-height-doc, 32px); padding: 0 8px;
+  border-radius: var(--radius-sm, 4px); cursor: pointer;
+  color: var(--text-primary); font-size: var(--text-xs, 11px);
+}
+.vds-docrow:hover { background: rgba(255, 255, 255, 0.06); }
+.vds-docrow.is-active { background: var(--accent-quiet); }
+/* The type well. Its COLOUR is what reads at a glance, not its glyph: source documents are written
+   material, the other three are laid-out material, and that is the split worth seeing instantly. */
+.vds-docrow__well {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-md, 24px); height: var(--control-md, 24px);
+  border-radius: var(--radius-xs, 2px);
+  background: var(--surface-input); color: var(--icon-idle, #999);
+}
+.vds-docrow__well--source { background: var(--accent-quiet); color: var(--accent); }
+.vds-docrow__well svg { width: 14px; height: 14px; }
+.vds-docrow__dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; } /* per-Product marker, as on the tab */
+.vds-docrow__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Chips are square-ish, never pills — nothing is pill-rounded but toggles and count badges. */
+.vds-docrow__chip {
+  flex: 0 0 auto; padding: 0 4px; border-radius: var(--radius-xs, 2px);
+  background: var(--surface-input); color: var(--text-secondary);
+}
+.vds-docrow__chip--accent { background: var(--accent-quiet); color: var(--accent); }
+/* Open-state states a fact about the document; it is not a control, so it is plain text. */
+.vds-docrow__open { flex: 0 0 auto; color: var(--text-secondary); }
+.vds-docrow__trailing { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+/* Compact time ("11mo"), right-aligned in a fixed column so the dates form a clean edge. */
+.vds-docrow__updated { flex: 0 0 64px; text-align: right; color: var(--text-secondary); }
+.vds-docrow__menu {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--control-md, 24px); height: var(--control-md, 24px); padding: 0;
+  border: 0; background: none; color: var(--icon-idle, #999); cursor: pointer;
+  border-radius: var(--radius-xs, 2px); visibility: hidden;
+}
+.vds-docrow:hover .vds-docrow__menu { visibility: visible; }
+.vds-docrow__menu:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-primary); }
+.vds-docrow__menu svg { width: 14px; height: 14px; }
+
 /* SPEC 7 ChoiceCards: a single-select grid of preset/mode cards (create flow, cell switcher). */
 .vds-choicecards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .vds-choicecard {

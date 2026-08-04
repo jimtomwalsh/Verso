@@ -10,7 +10,7 @@ export interface CardGridProps {
 export interface BrowserEmptyStateProps {
   title?: string;
   hint?: string;
-  /** Optional primary action node (e.g. a "New course" Button). */
+  /** Optional primary action node (e.g. a "New document" Button). */
   action?: React.ReactNode;
   style?: React.CSSProperties;
 }

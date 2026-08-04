@@ -10804,10 +10804,114 @@ section("HFDEF header-footer default");
     /headerFooter: headerFooterFromDefault\(getHeaderFooterDefault\(\), title\) \|\| \{/.test(DOCS));
   ok("saveHeaderFooterDefault bakes the logo asset ref to a data URI", /a\.dataUrl\) clean\.header\.logo = a\.dataUrl;/.test(DOCS));
 
-  // saved-course rows have a confirm-gated delete (trash) that removes from the registry
-  ok("new-doc saved-course row has a trash delete button", /var del = iconBtn\("trash", "Delete this saved course", true\);/.test(DOCS));
-  ok("delete is confirm-gated + removes the course from the registry + refreshes the list",
-    /confirmModal\("Delete course\?"[\s\S]{0,340}delete registry\[id\];\s*saveRegistry\(registry\);[\s\S]{0,220}modal\.remove\(\); showNewDocDialog\(\);/.test(DOCS));
+  // saved-document rows have a confirm-gated delete (trash) that removes from the registry.
+  // uio-W02: the row is now the shared DocumentRow and the delete rides in its `trailing` slot,
+  // so it sits inside the row's anatomy rather than being appended after it. The noun is Document.
+  ok("new-doc saved-document row has a trash delete button", /var del = iconBtn\("trash", "Delete this saved document", true\);/.test(DOCS));
+  ok("delete is confirm-gated + removes the document from the registry + refreshes the list",
+    /confirmModal\("Delete document\?"[\s\S]{0,340}delete registry\[id\];\s*saveRegistry\(registry\);[\s\S]{0,220}modal\.remove\(\); showNewDocDialog\(\);/.test(DOCS));
+  ok("the picker list is built from the shared document row, not a hand-rolled one",
+    /list\.appendChild\(window\.VersoUI\.DocumentRow\(\{/.test(DOCS) && DOCS.indexOf('h("div", "modal-list__item")') === -1);
+  ok("the delete button rides the row's trailing slot", /trailing: del,/.test(DOCS));
+})();
+
+// ---- uio-W02: one noun, four type glyphs, one document row ----------------
+// A document is a Document. Four TYPES of one thing -- source, course, presentation, guide -- and
+// "Course" is a type label, never the generic. The glyph vocabulary has ONE definition, shared by
+// the top-bar tab and every list, because two maps are two chances for a glyph to come to mean
+// different things in different panels.
+section("uio-W02 document row + type vocabulary");
+(function () {
+  var U;
+  try { U = require(path.join(ROOT, "src/ui-kit.js")); } catch (e) { ok("require src/ui-kit.js", false); return; }
+  var P = U._pure, T = U.DOCUMENT_TYPES;
+
+  // --- four types, fixed, with the colour split that makes them legible unread ---
+  ok("exactly four document types", Object.keys(T).length === 4);
+  ok("the four are source, reflow, frame, paged",
+    ["source", "reflow", "frame", "paged"].every(function (k) { return !!T[k]; }));
+  ok("each type fixes a glyph and a label",
+    Object.keys(T).every(function (k) { return !!T[k].icon && !!T[k].label; }));
+  ok("the type LABELS are the spec's four", T.source.label === "Source" && T.reflow.label === "Course" &&
+    T.frame.label === "Presentation" && T.paged.label === "Guide");
+  ok("no two types share a glyph", (function () {
+    var seen = {}; return Object.keys(T).every(function (k) {
+      if (seen[T[k].icon]) return false; seen[T[k].icon] = 1; return true;
+    });
+  })());
+  // The whole point of the colour split: source is written material, the rest is laid out.
+  ok("source gets its own icon well; every design type shares the neutral one",
+    T.source.well === "source" && T.reflow.well === "design" && T.frame.well === "design" && T.paged.well === "design");
+
+  // --- resolving a type: a document is never a blank well ---
+  ok("a known type resolves to itself", P.docType("paged") === "paged" && P.docType("source") === "source");
+  ok("an unknown type falls back to a course rather than nothing", P.docType("bogus") === "reflow");
+  ok("a missing type falls back too", P.docType(undefined) === "reflow" && P.docType(null) === "reflow");
+  ok("a prototype key is not a document type", P.docType("constructor") === "reflow");
+
+  // --- open-state: a fact, stated only when true ---
+  ok("open in Edit says so", P.openStateLabel("edit") === "Open in Edit");
+  ok("open in Source says so", P.openStateLabel("source") === "Open in Source");
+  ok("a document that is not open says nothing at all", P.openStateLabel(null) === null && P.openStateLabel("") === null);
+
+  // --- compact time: the long form does not fit a row and would ellipsise in every line ---
+  var now = 1700000000000, MIN = 60000, HR = 60 * MIN, DAY = 24 * HR;
+  ok("no timestamp reads as an em dash, never as blank", P.compactRelativeTime(null, now) === "—" &&
+    P.compactRelativeTime(undefined, now) === "—");
+  ok("seconds read as just now", P.compactRelativeTime(now - 10000, now) === "just now");
+  ok("minutes", P.compactRelativeTime(now - 5 * MIN, now) === "5m");
+  ok("hours", P.compactRelativeTime(now - 5 * HR, now) === "5h");
+  ok("days", P.compactRelativeTime(now - 3 * DAY, now) === "3d");
+  ok("weeks", P.compactRelativeTime(now - 14 * DAY, now) === "2w");
+  ok("months", P.compactRelativeTime(now - 200 * DAY, now) === "6mo");
+  ok("years", P.compactRelativeTime(now - 800 * DAY, now) === "2y");
+  ok("a future timestamp clamps rather than going negative", P.compactRelativeTime(now + 99999, now) === "just now");
+  // Every output has to fit the 64px column. At 11px Inter that is ~9 characters.
+  ok("no compact form is wider than the column can hold", [null, now - 10000, now - 59 * MIN,
+    now - 23 * HR, now - 6 * DAY, now - 27 * DAY, now - 300 * DAY, now - 4000 * DAY].every(function (ts) {
+      return P.compactRelativeTime(ts, now).length <= 9;
+    }));
+
+  // --- ONE vocabulary: the tab reads the same map the row does ---
+  var TABS = src("src/editor/tabs.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the tab no longer declares its own glyph map", TABS.indexOf("TAB_DOCTYPE_GLYPH") === -1);
+  ok("the tab reads the shared vocabulary", /U\.DOCUMENT_TYPES/.test(TABS));
+
+  // --- the row is built to the token, not to a magic number ---
+  var CSS = src("styles/editor/12-controls.css");
+  ok("the row's height is the named document-row token", /\.vds-docrow \{[^}]*--row-height-doc/.test(CSS));
+  ok("the document-row token is declared in the DS, the one source of truth",
+    /--row-height-doc:\s*32px/.test(src("design-system/tokens/spacing.css")));
+  ok("it is NOT the inspector row token, which is a different species",
+    !/\.vds-docrow \{[^}]*var\(--row-height[,)]/.test(CSS));
+  ok("source's well is the accent-quiet one", /\.vds-docrow__well--source[^}]*--accent-quiet/.test(CSS));
+
+  // --- the DS carries the contract, and stopped calling every document a course ---
+  ok("the row has a DS contract", /export function DocumentRow/.test(src("design-system/components/browser/DocumentRow.d.ts")));
+  ok("the contract names the four types",
+    /"source" \| "reflow" \| "frame" \| "paged"/.test(src("design-system/components/browser/DocumentRow.d.ts")));
+  ["design-system/components/browser/CourseCard.d.ts", "design-system/components/browser/CardGrid.d.ts",
+   "design-system/components/browser/RecentsMenuRow.d.ts", "design-system/components/navigation/DocumentTab.d.ts"].forEach(function (f) {
+    ok(f.split("/").pop() + " no longer calls a document a course",
+      !/\b[Cc]ourse (title|code|tab|name)\b/.test(src(f)) && !/One recent course|Open the course|per-course/.test(src(f)));
+  });
+
+  // --- the noun, in the app ---
+  var DOCSRC = src("src/editor/documents.js"), TABSRC = src("src/editor/tabs.js");
+  ok("the tab strip talks about documents", /At least one document tab must remain open/.test(TABSRC) &&
+    /Create or import a document/.test(TABSRC));
+  ok("the new-document dialog talks about documents", /Open a saved document/.test(DOCSRC) &&
+    /New document/.test(DOCSRC) && /A document with code/.test(DOCSRC));
+  // The create fields make ANY of the four types -- the preset picker above them offers a
+  // presentation and a guide -- so they name a document. Caught by looking at the real dialog,
+  // not by the suite: a string test passes whatever noun the string happens to hold.
+  ok("the create fields name a document, not a course",
+    /modalText\(box, "Document title"/.test(DOCSRC) && /modalText\(box, "Document code"/.test(DOCSRC));
+  ok("no chrome surface labels a field 'Course title' or 'Course code'",
+    ["src/editor/documents.js", "src/editor/home.js", "src/editor.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return code.indexOf('"Course title"') === -1 && code.indexOf('"Course code"') === -1;
+    }));
 })();
 
 // ---- ui-kit (#10): DS canonical control set — pure logic + wiring guards ----

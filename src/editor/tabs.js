@@ -61,14 +61,15 @@
     // document behind it. PURE (no DOM) so tests/run.js exercises the predicate headlessly.
     function visibleTabIds(openIds, reg) { return PR.visibleTabIds(openIds, reg); }
 
-    // tab-doctype-glyph: map a document's geometry cell -> {glyph, label} for the tab's leading
-    // doc-type marker. Keyed on geo (the doc-type spine the file-picker already groups by), so the
-    // tab glyph and the browser grouping read as one vocabulary.
-    var TAB_DOCTYPE_GLYPH = {
-      reflow: { icon: "layers", label: "Course" },
-      frame: { icon: "monitor", label: "Presentation" },
-      paged: { icon: "file-text", label: "Paged / print document" }
-    };
+    // uio-W02: the tab's doc-type glyph comes from THE document-type vocabulary
+    // (`VersoUI.DOCUMENT_TYPES`), the same map every document list reads. It used to be declared
+    // here as well, which is how a glyph comes to mean one thing in the strip and another in a
+    // list -- two maps, two chances to drift. One definition, two consumers.
+    function docTypeGlyph(geo) {
+      var U = window.VersoUI, T = U && U.DOCUMENT_TYPES;
+      if (!T) return { icon: "layers", label: "Course" }; // the kit is absent only in the legacy fallback
+      return T[(U._pure ? U._pure.docType(geo) : geo)] || T.reflow;
+    }
     function renderTabs() {
       var container = document.getElementById("toolbar-tabs");
       if (!container) return;
@@ -88,7 +89,7 @@
         var prod = pid && window.ProductsStore ? window.ProductsStore[pid] : null;
         var dotTitle = pid ? ("Product: " + ((prod && prod.name) || pid)) : null;
         var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { geo: "reflow" };
-        var dt = TAB_DOCTYPE_GLYPH[cell.geo] || TAB_DOCTYPE_GLYPH.reflow;
+        var dt = docTypeGlyph(cell.geo);
         if (U && U.DocumentTab) {
           container.appendChild(U.DocumentTab({
             label: title,
@@ -96,6 +97,7 @@
             dot: dotColour,
             dotTitle: dotTitle,
             icon: dt.icon,
+            type: (window.VersoUI && window.VersoUI._pure) ? window.VersoUI._pure.docType(cell.geo) : "reflow",
             typeLabel: dt.label,
             onSelect: function () { switchDoc(id); },
             onClose: function () { closeTab(id); }
@@ -116,13 +118,13 @@
         container.appendChild(tab);
       });
       if (U && U.IconButton) {
-        var addBtn = U.IconButton({ icon: "plus", label: "Create or import a course…", size: "md", onClick: showNewDocDialog });
+        var addBtn = U.IconButton({ icon: "plus", label: "Create or import a document…", size: "md", onClick: showNewDocDialog });
         addBtn.classList.add("toolbar-tabs__add");
         container.appendChild(addBtn);
         return;
       }
       var add = h("span", "toolbar-tabs__add", "+");
-      add.title = "Create or import a course...";
+      add.title = "Create or import a document...";
       add.addEventListener("click", showNewDocDialog);
       container.appendChild(add);
     }
@@ -131,7 +133,7 @@
       var idx = openDocIds.indexOf(id);
       if (idx === -1) return;
       if (openDocIds.length <= 1) {
-        alert("At least one course tab must remain open.");
+        alert("At least one document tab must remain open.");
         return;
       }
       openDocIds.splice(idx, 1);
