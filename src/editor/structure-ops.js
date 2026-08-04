@@ -29,10 +29,16 @@
       "setSelection", "pushHistory", "mount", "setActivePage", "remintIds", "clone",
       "reapplyStructural", "libComponents", "walkPageBlocks", "reselectBlockNode", "confirmModal", "focusFrame",
       "findPageOfBlock", "firstCopyOf", "promptModal", "saveLibrary", "resolveComponentDef", "stripSplitSuffix",
-      "renumberSplitFamily", "setCurrentPage", "doc", "currentPage", "frameDescs", "selection"
+      "renumberSplitFamily", "setCurrentPage", "doc", "currentPage", "frameDescs", "selection",
+      "clearSelection", "findBlockParent", "hotspotOwnerOf", "cleanupColumns", "setHotspotEditId"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
+    var clearSelection = E.clearSelection,
+        findBlockParent = E.findBlockParent,
+        hotspotOwnerOf = E.hotspotOwnerOf,
+        cleanupColumns = E.cleanupColumns,
+        setHotspotEditId = E.setHotspotEditId;
     var setSelection = E.setSelection,
         pushHistory = E.pushHistory,
         mount = E.mount,
@@ -418,13 +424,47 @@
       }
     }
 
+
+    // ---- delete a block, wherever it lives (arch-P3b-07vis) ----------------------
+    // The one delete every surface routes through: the outliner, the context menu, the block
+    // action bar, the hotspot inspector, clipboard cut and the tour board. It resolves the block
+    // across the WHOLE page tree rather than the top level, because getBlockPageIndexAndIndex only
+    // sees top-level blocks and a block inside a columns row was once undeletable. The collapse
+    // pass after the splice is what stops a two-column row that lost a column from surviving as an
+    // orphan single-column container. It arrived under a "variant model mutations" banner and has
+    // nothing to do with variants; it is a structural verb, and this is where they live.
+    function deleteBlockByRef(block) {
+      // Resolve across the whole page tree (top-level, columns children, group
+      // children) -- getBlockPageIndexAndIndex only sees top-level blocks, so a
+      // block inside a columns row was previously undeletable. After removal, run
+      // the collapse pass so a columns row reduced to one column unwraps to a plain
+      // block (no orphan single-column containers).
+      var loc = null;
+      for (var pi = 0; pi < E.doc.pages.length; pi++) {
+        var res = findBlockParent(E.doc.pages[pi].blocks, block);
+        if (res) { loc = res; break; }
+      }
+      if (!loc) return;
+      // If the block lives in a hotspot card, keep that card open after the delete
+      // (selection would otherwise clear -> the popover snaps shut to the image).
+      var hsOwner = hotspotOwnerOf(block);
+      pushHistory();
+      loc.parentArray.splice(loc.index, 1);
+      E.doc.pages.forEach(function (page) { cleanupColumns(page.blocks); });
+      // `pi` from the resolve loop above = the page the block lived on (loop broke there).
+      // Hotspot-card deletes keep the delicate popover-reveal path on a full mount.
+      if (hsOwner) { setHotspotEditId(hsOwner.hs.id); clearSelection(); mount(); reselectBlockNode(hsOwner.block, "block"); }
+      else { clearSelection(); reapplyStructural(pi); } // PERF: one page, not the world
+    }
+
     kernel.expose({
       getBlockPageIndexAndIndex: getBlockPageIndexAndIndex, getSelectionTypeForBlock: getSelectionTypeForBlock, duplicateBlock: duplicateBlock,
       clearBlockContent: clearBlockContent, convertTextListBlockType: convertTextListBlockType, clearBlockContentAction: clearBlockContentAction,
       duplicatePage: duplicatePage, savePageAsLibraryMaster: savePageAsLibraryMaster, insertPageFromLibrary: insertPageFromLibrary,
       detachPageLibraryInstance: detachPageLibraryInstance, hasMergeableNext: hasMergeableNext, mergePageWithNext: mergePageWithNext,
       eachCourseNav: eachCourseNav, footerCourseNav: footerCourseNav, canSplitAtBlock: canSplitAtBlock,
-      splitPageAtBlock: splitPageAtBlock, moveBlock: moveBlock
+      splitPageAtBlock: splitPageAtBlock, moveBlock: moveBlock,
+      deleteBlockByRef: deleteBlockByRef
     });
     // Constants the rest of the chrome reads as DATA. They cannot cross as bound forwarders,
     // because bind() returns a function.

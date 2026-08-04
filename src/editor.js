@@ -4655,39 +4655,10 @@
   // nothing selected -> document/page context: canvas background + a collapsible
   // Theme section (set-and-forget, so it twirls closed by default).
   var pipelineButtons = [];
-  function buildPipelineBody(c) {
-    // Export SCORM / Import CSV / JSON backup now live in the TOP BAR (D6: primary Export +
-    // ⋯ overflow) — retired from here. This panel keeps only the review-folder workflow.
-    c.appendChild(h("div", "insp-hint", "Export & import moved to the top bar (the Export button + ⋯ menu). This section handles the review-folder workflow."));
-    // §12 Viewer V1: publish a FROZEN review snapshot (.versopub.json) — the doc with
-    // all block cids, comments stripped — that the standalone Verso Viewer opens so
-    // reviewers can drop comments anchored to this exact version.
-    c.appendChild(h("div", "insp-hint", "Publish a frozen snapshot into the shared review folder; reviewers comment in the Verso Viewer and their notes return to the same folder. Once connected, new comments auto-ingest on launch + every minute — the button below re-checks now / reconnects the folder."));
-    var pubBtn = h("button", "prop-btn", "Publish to Viewer…");
-    pubBtn.addEventListener("click", publishToViewer);
-    c.appendChild(pubBtn);
-    var ingBtn = h("button", "prop-btn", "Check for reviews now…");
-    ingBtn.addEventListener("click", ingestReviewsFromFolder);
-    c.appendChild(ingBtn);
-  }
-  // §12 Viewer: a chosen exchange-folder handle (File System Access), remembered for
-  // the session so publish + ingest reuse it. Not persisted (a fresh session re-picks).
-  // §12 Viewer: the shared exchange-folder handle (File System Access). PERSISTED in
-  // IndexedDB (FileSystemHandles are structured-cloneable) so the connection survives
-  // a refresh/restart and reviews can auto-ingest on load + on a poll. The browser may
-  // still require ONE user gesture to re-authorise after a full restart — handled by
-  // degrading to a manual re-pick when silent permission isn't granted.
-  var reviewDirHandle = null;
-  var reviewPollTimer = null;
-  function reviewIdb() {
-    return new Promise(function (res, rej) {
-      var r = indexedDB.open("verso-review", 1);
-      r.onupgradeneeded = function () { r.result.createObjectStore("h"); };
-      r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); };
-    });
-  }
-  async function saveReviewDir(handle) { try { var db = await reviewIdb(); await new Promise(function (res, rej) { var tx = db.transaction("h", "readwrite"); tx.objectStore("h").put(handle, "dir"); tx.oncomplete = res; tx.onerror = function () { rej(tx.error); }; }); } catch (e) {} }
-  async function loadReviewDir() { try { var db = await reviewIdb(); return await new Promise(function (res) { var tx = db.transaction("h", "readonly"); var g = tx.objectStore("h").get("dir"); g.onsuccess = function () { res(g.result || null); }; g.onerror = function () { res(null); }; }); } catch (e) { return null; } }
+  // dirPermission stayed. It is not the review exchange's -- the backup writer, the publish save
+  // paths and the review folder all ask the same question of a File System Access handle, and the
+  // silent mode exists for all three boot paths. A shared nine-line helper three regions read stays
+  // in the host until there is somewhere for File System Access plumbing to live.
   // check/ask permission on a handle. silent=true never prompts (boot/poll path).
   async function dirPermission(handle, silent) {
     if (!handle || !handle.queryPermission) return "granted"; // older impls: assume ok
@@ -4697,139 +4668,16 @@
     if (silent) return p; // "prompt"/"denied" — don't nag on load
     try { return await handle.requestPermission(opts); } catch (e) { return "denied"; }
   }
-  // Get a usable folder handle: in-memory > persisted (with a gesture-driven re-grant)
-  // > pick a new one. Persists the pick so it's remembered next launch.
-  async function ensureReviewFolder() {
-    if (reviewDirHandle && (await dirPermission(reviewDirHandle, false)) === "granted") return reviewDirHandle;
-    var saved = await loadReviewDir();
-    if (saved && (await dirPermission(saved, false)) === "granted") { reviewDirHandle = saved; startReviewPoll(); return reviewDirHandle; }
-    if (!window.showDirectoryPicker) return null;
-    try { reviewDirHandle = await window.showDirectoryPicker({ mode: "readwrite" }); await saveReviewDir(reviewDirHandle); startReviewPoll(); return reviewDirHandle; }
-    catch (e) { return null; }
-  }
-  function snapshotBlob(versionOverride) {
-    var frozen = JSON.parse(JSON.stringify(doc));
-    delete frozen.comments; // reviewers add their own; cids already present (normalizeDoc)
-    // §12a: bake every AssetStore "asset:<id>" ref (images, per-mode sources, embeds,
-    // header logo, glossary) into a self-contained base64 data-URI so the frozen snapshot
-    // renders standalone in the Verso Viewer, which has NO AssetStore. Same base64 path as
-    // export (NOT editorAssetResolve, whose blob: URLs don't travel to another machine);
-    // the clone is throwaway so there's nothing to restore.
-    if (window.resolveMedia && window.AssetStore) {
-      window.resolveMedia(frozen, function (id) {
-        var a = window.AssetStore.get(id);
-        return a ? a.dataUrl : window.AssetStore.placeholder;
-      });
-    }
-    var course = doc.code || doc.id || "course";
-    var version = versionOverride || doc.version || (new Date().toISOString().slice(0, 10));
-    var snap = { type: "verso-pub", schema: 1, course: course, version: version, publishedAt: Date.now(), doc: frozen };
-    var name = "verso-" + String(course).replace(/[^\w.-]+/g, "_") + "-" + String(version).replace(/[^\w.-]+/g, "_") + ".versopub.json";
-    return { name: name, text: JSON.stringify(snap) };
-  }
-  // Freeze the current doc into a review snapshot. Writes straight to the shared
-  // review folder (File System Access) when available; falls back to a download.
-  // `versionOverride` lets the SCORM export tag the review file with the SAME version.
-  async function publishToViewer(versionOverride, quiet) {
-    var f = snapshotBlob(versionOverride);
-    var dir = await ensureReviewFolder();
-    if (dir) {
-      try {
-        var fh = await dir.getFileHandle(f.name, { create: true });
-        var w = await fh.createWritable(); await w.write(f.text); await w.close();
-        if (!quiet) window.alert("Published " + f.name + " to the review folder.");
-        return { name: f.name, to: "folder" };
-      } catch (e) { /* fall through to download */ }
-    }
-    var blob = new Blob([f.text], { type: "application/json" });
-    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = f.name;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-    return { name: f.name, to: "download" };
-  }
-  // Scan a folder handle for reviewer sidecars (review-*.json) and merge them all
-  // (conflict-free). Returns { added, updated, files }. Pure of UI so both the manual
-  // button and the auto/poll path reuse it.
-  async function scanAndMerge(dir) {
-    var added = 0, updated = 0, files = 0;
-    for await (var entry of dir.values()) {
-      if (entry.kind !== "file" || !/^review-.*\.json$/i.test(entry.name)) continue;
-      try {
-        var file = await entry.getFile();
-        var parsed = JSON.parse(await file.text());
-        var list = Array.isArray(parsed) ? parsed : (parsed && parsed.comments);
-        if (!Array.isArray(list)) continue;
-        var r = mergeComments(list); added += r.added; updated += r.updated; files++;
-      } catch (e) { /* skip a bad file */ }
-    }
-    return { added: added, updated: updated, files: files };
-  }
-  // Manual ingest (button): picks/authorises the folder if needed, then reports.
-  async function ingestReviewsFromFolder() {
-    var dir = await ensureReviewFolder();
-    if (!dir) { window.alert("Folder access needs Edge/Chrome opened locally. Use the comment panel's Import… as a fallback."); return; }
-    var r;
-    try { pushHistory(); r = await scanAndMerge(dir); }
-    catch (e) { window.alert("Could not read the folder: " + e.message); return; }
-    scheduleSave(); renderCommentPins(); refreshCommentPanel();
-    window.alert("Ingested " + r.files + " review file(s): " + r.added + " new comments, " + r.updated + " updated.");
-  }
-  // Silent auto-ingest (boot + poll): only touches the doc / notifies when something
-  // NEW actually arrived, so it never nags. Never prompts for permission.
-  async function autoIngestReviews() {
-    var dir = reviewDirHandle || await loadReviewDir();
-    if (!dir) return;
-    if ((await dirPermission(dir, true)) !== "granted") return; // wait for a gesture-driven re-grant
-    reviewDirHandle = dir;
-    var before = (doc.comments || []).length;
-    var r;
-    try { r = await scanAndMerge(dir); } catch (e) { return; }
-    if (r.added > 0 || r.updated > 0) {
-      scheduleSave(); renderCommentPins(); refreshCommentPanel();
-      if (r.added > 0) reviewToast(r.added + " new review comment" + (r.added > 1 ? "s" : "") + " arrived");
-    }
-    void before;
-  }
-  function startReviewPoll() {
-    if (reviewPollTimer) return;
-    // OneDrive sync + FSA: a 60s poll is plenty; guarded by silent permission.
-    reviewPollTimer = setInterval(function () { autoIngestReviews(); }, 60000);
-  }
-  function stopReviewPoll() { if (reviewPollTimer) { clearInterval(reviewPollTimer); reviewPollTimer = null; } }
-  // Power (#179): pause background work when the window is occluded / minimised so macOS App
-  // Nap can engage (a laptop energy win in the packaged WKWebView app). WebKit fires
-  // visibilitychange on occlusion. We pause the two forever-timers -- autosave (flushed first
-  // by its governor) + the review poll -- and drop the world's GPU-layer promotion; all resume
-  // on return. `_reviewPollWasOn` remembers whether the poll was actually running so we don't
-  // start it on a course that never had folder permission. Editor chrome only.
-  var _reviewPollWasOn = false;
-  document.addEventListener("visibilitychange", function () {
-    if (document.hidden) {
-      _reviewPollWasOn = !!reviewPollTimer;
-      if (window.__autosaveGov) window.__autosaveGov.pause();
-      stopReviewPoll();
-      if (world) world.style.willChange = "auto"; // release the compositor layer while unseen
-    } else {
-      if (window.__autosaveGov) window.__autosaveGov.resume();
-      if (_reviewPollWasOn) startReviewPoll();
-      if (world) world.style.willChange = ""; // restore the CSS-driven promotion (transform)
-    }
-  });
-  function reviewToast(msg) {
-    var t = h("div", "review-toast", msg);
-    document.body.appendChild(t);
-    setTimeout(function () { t.classList.add("is-out"); }, 3600);
-    setTimeout(function () { if (t.parentNode) t.remove(); }, 4200);
-  }
-  // Boot: reconnect the saved folder + auto-ingest if the browser still grants it
-  // silently; otherwise stay quiet until the next Ingest click re-authorises.
-  async function initReviewAutoIngest() {
-    if (!window.showDirectoryPicker) return;
-    var saved = await loadReviewDir(); if (!saved) return;
-    if ((await dirPermission(saved, true)) === "granted") { reviewDirHandle = saved; startReviewPoll(); autoIngestReviews(); }
-  }
-  window.__setReviewDir = function (d) { reviewDirHandle = d; }; // test hook
-  window.__autoIngestReviews = autoIngestReviews; // test hook
+  // arch-P3b-07review: the reviewer round trip -- the frozen .versopub.json snapshot, the shared
+  // exchange folder and its persisted handle, the one-minute poll and the ingest that merges
+  // returning notes -- moved to editor/review-exchange.js. It sat under a banner reading "Canonical
+  // panel primitives", whose actual primitives left in 07b and 07prim2; this was the rest of it,
+  // and it is not a control set. comments.js still owns what a merge MEANS; this owns the folder.
+  var buildPipelineBody = VE.bind("buildPipelineBody");
+  var publishToViewer = VE.bind("publishToViewer");
+  var ingestReviewsFromFolder = VE.bind("ingestReviewsFromFolder");
+  var initReviewAutoIngest = VE.bind("initReviewAutoIngest");
+
 
   // ---- Project auto-backup (P0 data-safety) --------
   // arch-P3b-07d: the durable-copy writer moved to editor/backup.js. It read only five names from
@@ -5018,311 +4866,22 @@
   // ...continues in fonts.js (arch-P3b-07).
 
 
-  // #170/#158: ONE canonical, config-driven formatting toggle-bar builder, shared by the
-  // block inspector's field editor AND the Course Copy Editor -- replacing their two
-  // bespoke prop-toggle-row "biu" rows. Behaviour is unchanged (inline execCommand for
-  // B/I/U/Link, active state via queryCommandState/an anchor check); only the surfaces
-  // now share one implementation. `io` decouples the bar from which surface it's in:
-  //   io.getNode() -> the current contentEditable element to focus/act on (or null/undefined
-  //                   when nothing is active -- the bar simply no-ops on click)
-  //   io.onChange() -> called after a toggle mutates content; the caller owns persistence
-  //                    (inspector: obj[field] = sanitizeFieldHtml(...) + renderModelView();
-  //                    copy editor: commitCopyRow(...))
-  // Config-driven so a future kind (e.g. the List ticket's block-level toggle) is a new
-  // branch here, not a new bar -- today "inline-exec" (B/I/U), "link", and "list-block"
-  // (#170/#33: a whole block-TYPE conversion, not an inline execCommand list) exist.
-  var FORMAT_TOGGLES = [
-    { kind: "inline-exec", label: "B", cmd: "bold", title: "Bold (selected text)" },
-    { kind: "inline-exec", label: "I", cmd: "italic", title: "Italic (selected text)" },
-    { kind: "inline-exec", label: "U", cmd: "underline", title: "Underline (selected text)" },
-    { kind: "link" },
-    { kind: "list-block" }
-  ];
-  function formatCmdOn(cmd) { try { return document.queryCommandState(cmd); } catch (e) { return false; } }
-  function formatSelectionAnchor() {
-    var sel = window.getSelection(); if (!sel || !sel.rangeCount) return null;
-    var c = sel.getRangeAt(0).commonAncestorContainer;
-    c = c.nodeType === 1 ? c : c.parentNode;
-    return (c && c.closest) ? c.closest("a[href]") : null;
-  }
-  // ---- Above-selection floating format bar on the Edit canvas (floating-format-bar-to-edit-canvas) ----
-  // The same above-the-selection glyph bar idiom the Source stage uses (buildSourceSelBar), brought to
-  // the main Edit canvas. It appears on a non-collapsed text selection inside an editable [data-edit]
-  // field with the inline format actions -- bold / italic / underline, the SAME inline-exec set as the
-  // inspector's FORMAT_TOGGLES (one config, two surfaces). Clicking runs execCommand, which fires the
-  // field's own input -> writeModel commit (identical to typing), so there is no separate write path.
-  // Editor chrome only; never in the shipped course. Positioned fixed above the selection.
-  /* @canvas-fmtbar-start */
-  var FMTBAR_GLYPH = { bold: "bold", italic: "italic", underline: "underline" };
-  var __canvasFmtBar = null;
-  // The editable canvas text field a DOM point sits in, or null (a live contentEditable [data-edit]).
-  function canvasEditableFieldOf(node) {
-    var el = (node && node.nodeType === 3) ? node.parentNode : node;
-    var f = (el && el.closest) ? el.closest("[data-edit].is-editable") : null;
-    return (f && f.getAttribute("contenteditable") === "true") ? f : null;
-  }
-  function hideCanvasFmtBar() { if (__canvasFmtBar) { __canvasFmtBar.remove(); __canvasFmtBar = null; } }
-  function syncCanvasFmtBarActive(bar) {
-    Array.prototype.forEach.call(bar.querySelectorAll("[data-cmd]"), function (b) {
-      var on = false; try { on = document.queryCommandState(b.getAttribute("data-cmd")); } catch (e) {}
-      b.classList.toggle("is-active", on);
-    });
-  }
-  function ensureCanvasFmtBar() {
-    if (__canvasFmtBar) return __canvasFmtBar;
-    var bar = h("div", "canvas-fmtbar"); bar.setAttribute("data-canvas-fmtbar", "1");
-    FORMAT_TOGGLES.filter(function (t) { return t.kind === "inline-exec"; }).forEach(function (t) {
-      var b = h("button", "canvas-fmtbar__btn"); b.type = "button"; b.title = t.title;
-      b.setAttribute("data-cmd", t.cmd);
-      var glyph = FMTBAR_GLYPH[t.cmd];
-      if (glyph && window.Icon) b.innerHTML = window.Icon(glyph); else b.textContent = t.label;
-      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's selection
-      b.addEventListener("click", function () { document.execCommand(t.cmd, false, null); syncCanvasFmtBarActive(bar); });
-      bar.appendChild(b);
-    });
-    document.body.appendChild(bar);
-    __canvasFmtBar = bar; return bar;
-  }
-  // Shows/positions the bar for a text selection in a canvas field; hides it otherwise. The Source
-  // stage's own selbar owns [data-node] selections, so this only ever binds to [data-edit] fields --
-  // the two never collide.
-  function onCanvasSelectionChange() {
-    if (typeof document === "undefined") return;
-    var sel = window.getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed) { hideCanvasFmtBar(); return; }
-    var r = sel.getRangeAt(0);
-    if (!canvasEditableFieldOf(r.commonAncestorContainer)) { hideCanvasFmtBar(); return; }
-    var rect = r.getBoundingClientRect();
-    if (!rect || !rect.width) { hideCanvasFmtBar(); return; }
-    var bar = ensureCanvasFmtBar();
-    syncCanvasFmtBarActive(bar);
-    bar.style.left = (rect.left + rect.width / 2) + "px";
-    bar.style.top = rect.top + "px"; // a CSS transform centres + lifts it above the selection
-  }
-  /* @canvas-fmtbar-end */
-  function buildFormatToggleBar(io) {
-    var bar = h("div", "prop-toggle-row");
-    var execBtns = [];
-    var listBtn = null;
-    FORMAT_TOGGLES.forEach(function (t) {
-      if (t.kind === "inline-exec") {
-        var b = h("button", "prop-toggle" + (formatCmdOn(t.cmd) ? " is-on" : ""), t.label);
-        if (t.title) b.title = t.title;
-        b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the field's text selection
-        b.addEventListener("click", function () {
-          var node = io.getNode(); if (!node) return;
-          node.focus();
-          document.execCommand(t.cmd, false, null);
-          io.onChange();
-          b.classList.toggle("is-on", formatCmdOn(t.cmd));
-        });
-        bar.appendChild(b);
-        execBtns.push({ el: b, cmd: t.cmd });
-      } else if (t.kind === "link") {
-        // Inline hyperlink: link the selected text to an external URL (opens in a new tab).
-        // createLink doesn't set target, so post-add target=_blank + rel; the <a> round-trips
-        // render + export (sanitizeFieldHtml keeps href/target/rel). Empty URL removes the link.
-        var linkB = h("button", "prop-toggle" + (formatSelectionAnchor() ? " is-on" : ""), "Link");
-        linkB.title = "Link the selected text to an external URL (opens in a new tab)";
-        linkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-        linkB.addEventListener("click", function () {
-          var node = io.getNode(); if (!node) return;
-          var a = formatSelectionAnchor(), sel = window.getSelection();
-          if (!a && (!sel || sel.isCollapsed)) { window.alert("Select some text first, then click Link."); return; }
-          // Save the text selection — the modal steals focus, so restore the Range before execCommand.
-          var savedRange = (sel && sel.rangeCount) ? sel.getRangeAt(0).cloneRange() : null;
-          promptModal("Link", "URL (opens in a new tab; leave blank to remove)", a ? a.getAttribute("href") : "https://", function (url) {
-            var n2 = io.getNode(); if (!n2) return;
-            n2.focus();
-            if (savedRange) { var s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(savedRange); }
-            url = (url || "").trim();
-            if (!url) { document.execCommand("unlink", false, null); }
-            else {
-              document.execCommand("createLink", false, url);
-              Array.prototype.forEach.call(n2.querySelectorAll("a[href]"), function (el) { el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener noreferrer"); });
-            }
-            io.onChange();
-          });
-        });
-        bar.appendChild(linkB);
-        var unlinkB = iconBtn("unlink", "Remove the link");
-        unlinkB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-        unlinkB.addEventListener("click", function () { var n3 = io.getNode(); if (!n3) return; n3.focus(); document.execCommand("unlink", false, null); io.onChange(); });
-        bar.appendChild(unlinkB);
-      } else if (t.kind === "list-block") {
-        // #170/#33: converts the WHOLE block to/from the dedicated "list" type (on-state
-        // reads block.type, not queryCommandState). Not every surface/field supports this
-        // (e.g. a quiz sub-field can't become a top-level list block), so the button is
-        // hidden -- not just disabled -- when io.isListToggleable() says no. A persisting
-        // bar (copy editor) re-derives visibility on every bar.refresh(), since which row
-        // is focused changes without the bar itself being rebuilt.
-        if (!io.isListToggleable || !io.isListBlock || !io.toggleListBlock) return;
-        var listB = h("button", "prop-toggle prop-toggle--icon");
-        listB.type = "button";
-        listB.title = "List — converts this block to/from a bulleted list";
-        listB.innerHTML = Icon("list");
-        listB.addEventListener("mousedown", function (e) { e.preventDefault(); });
-        listB.addEventListener("click", function () { io.toggleListBlock(); });
-        bar.appendChild(listB);
-        listBtn = listB;
-      }
-    });
-    // Resync every inline-exec button's active state against the CURRENT selection, plus
-    // the list-block toggle's visibility/state -- callers that persist across re-focus
-    // (the copy editor's format bar, built once) use this instead of rebuilding; a surface
-    // that rebuilds the bar every render still gets a correct initial state (called below).
-    bar.refresh = function () {
-      var active = !!io.getNode();
-      execBtns.forEach(function (o) { o.el.classList.toggle("is-on", active && formatCmdOn(o.cmd)); });
-      if (listBtn) {
-        var canList = !!(io.isListToggleable && io.isListToggleable());
-        listBtn.hidden = !canList;
-        if (canList) listBtn.classList.toggle("is-on", !!(io.isListBlock && io.isListBlock()));
-      }
-    };
-    bar.refresh();
-    return bar;
-  }
-  window.__buildFormatToggleBar = buildFormatToggleBar; // headless test hook
+  // arch-P3b-07fmt: inline text formatting -- the FORMAT_TOGGLES set, the shared toggle bar three
+  // panels mount, and the floating bar that follows a selection on the Edit canvas -- moved to
+  // editor/text-format.js. One model with two surfaces; splitting them would have left the config in
+  // one file and both its only consumers in another.
+  var buildFormatToggleBar = VE.bind("buildFormatToggleBar");
+  var onCanvasSelectionChange = VE.bind("onCanvasSelectionChange");
+  var hideCanvasFmtBar = VE.bind("hideCanvasFmtBar");
 
-  // Panel System v2 (James 2026-07-08): the generalised custom listbox. Same shape as
-  // buildFontPicker (a button + popup, exposes `.value` get/set, fires 'change' on pick)
-  // but each option can carry a live PREVIEW instead of a bare word — a CSS style applied
-  // to the row+button (e.g. render a text-style name IN that style) and/or preview HTML
-  // (e.g. the actual bullet glyph). Reuses the .font-picker chrome so styling stays shared.
-  // options: [value, label, meta?]  meta = { style?: cssText, html?: rowInnerHTML,
-  // btnHtml?: buttonInnerHTML (falls back to html) }.
-  function customSelect(current, options, onPick, opts) {
-    opts = opts || {};
-    var wrap = h("div", "font-picker custom-select");
-    var btn = h("button", "font-picker__btn prop-select"); btn.type = "button";
-    var pop = h("div", "font-picker__pop"); pop.hidden = true;
-    var val = current == null ? "" : String(current);
-    function find(v) { for (var i = 0; i < options.length; i++) { if (String(options[i][0]) === String(v)) return options[i]; } return null; }
-    function paintBtn() {
-      var o = find(val) || options[0] || ["", opts.placeholder || ""];
-      var meta = o[2] || {};
-      btn.style.cssText = ""; // clear any prior preview style
-      if (meta.btnHtml || meta.html) btn.innerHTML = meta.btnHtml || meta.html; else btn.textContent = o[1];
-      if (meta.style) btn.style.cssText = meta.style;
-    }
-    options.forEach(function (o) {
-      var meta = o[2] || {};
-      var row = h("div", "font-picker__opt" + (String(o[0]) === val ? " is-active" : ""));
-      if (meta.html) row.innerHTML = meta.html; else row.textContent = o[1];
-      if (meta.style) row.style.cssText = meta.style;
-      row.addEventListener("click", function () {
-        val = String(o[0]); paintBtn();
-        Array.prototype.forEach.call(pop.children, function (c) { c.classList.remove("is-active"); });
-        row.classList.add("is-active");
-        close(); onPick(o[0]);
-        try { wrap.dispatchEvent(new Event("change")); } catch (_) {}
-      });
-      pop.appendChild(row);
-    });
-    function onDoc(e) { if (!wrap.contains(e.target)) close(); }
-    function onEsc(e) { if (e.key === "Escape") close(); }
-    function open() { pop.hidden = false; btn.classList.add("is-open"); setTimeout(function () { document.addEventListener("mousedown", onDoc); }, 0); document.addEventListener("keydown", onEsc); }
-    function close() { pop.hidden = true; btn.classList.remove("is-open"); document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onEsc); }
-    btn.addEventListener("click", function () { pop.hidden ? open() : close(); });
-    wrap.appendChild(btn); wrap.appendChild(pop);
-    paintBtn();
-    Object.defineProperty(wrap, "value", { get: function () { return val; }, set: function (v) { val = v == null ? "" : String(v); paintBtn(); } });
-    return wrap;
-  }
-  window.__customSelect = customSelect; // headless test hook
-  // Drop-in for selectRow that renders a customSelect (with previews) instead of a native
-  // <select>. Same signature + pushHistory-on-pick behaviour, appended to `inspector`.
-  function customSelectRow(label, options, current, onchange, opts) {
-    inspector.appendChild(h("div", "insp-row__label insp-row__label--stacked", label));
-    var cs = customSelect(current, options, function (v) { pushHistory(); onchange(v); }, opts);
-    inspector.appendChild(cs);
-    return cs;
-  }
 
-  // Panel System v2 (D4) — the ONE reusable Type control body. Renders font/weight/size/
-  // colour(colorField)/line-height/tracking/word-spacing/case/indent/alignment onto `model`,
-  // calling onChange() after each edit. Mounted IDENTICALLY in the field inspector AND the
-  // Edit-Text-Style dialog. `model` fields: font,weight,size,lineHeight,letterSpacing,
-  // wordSpacing,textTransform,textIndent,align,color,colorToken,colorLight,colorDark.
-  // opts (field-inspector only): { fieldNode, applyWeightToSelection(weight, range) }.
-  // When present, the Weight control is SELECTION-AWARE — highlighted text is weighted
-  // inline (a font-weight span) and the whole-field model.weight is left untouched; with
-  // no live selection it sets model.weight as before. The Edit-Text-Style dialog passes no
-  // opts (there is no live text there), so its Weight stays whole-model. #99/#44 follow-up:
-  // this collapses the old twin whole-field + selection weight controls into one.
-  function typeCluster(container, model, onChange, opts) {
-    onChange = onChange || function () {};
-    container.appendChild(h("div", "insp-row__label insp-row__label--stacked", "Font"));
-    var fp = buildFontPicker(model.font || "", function (v) { model.font = v; onChange(); });
-    container.appendChild(fp);
-    container.appendChild(attachFontWarn(fp));
-    // Size + Weight
-    var size = iconField("A", { value: model.size == null ? "" : model.size, unit: "px", placeholder: "auto", step: 1, min: 1, max: 200, datalist: "dl-font-size", noHistory: true, title: "Font size",
-      onchange: function (v) { var n = parseInt(v, 10); model.size = isNaN(n) ? undefined : n; onChange(); } }).wrap;
-    // Selection-aware (field inspector): opening the <select> steals focus + collapses the
-    // selection, so capture the live field range on mousedown (same trick the Link button uses).
-    var savedWtRange = null;
-    var wt = dsSelect([["Weight", ""], ["Regular", "400"], ["Medium", "500"], ["Semibold", "600"], ["Bold", "700"], ["Extra", "800"]], model.weight || "", function (weight) {
-      if (savedWtRange && opts && opts.applyWeightToSelection) {
-        var range = savedWtRange; savedWtRange = null;
-        if (!weight) return; // empty on a live selection = no-op (don't clear the whole field)
-        if (opts.applyWeightToSelection(weight, range)) return; // weighted the selection inline
-      }
-      model.weight = weight; onChange(); // no selection -> whole field (or the style draft)
-    });
-    if (opts && opts.fieldNode) {
-      wt.addEventListener("mousedown", function () {
-        var sel = window.getSelection();
-        var r = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
-        savedWtRange = (r && !r.collapsed && opts.fieldNode.contains(r.commonAncestorContainer)) ? r.cloneRange() : null;
-      });
-    }
-    container.appendChild(twoUp(size, wt));
-    // Colour — the unified colorField (token XOR hex XOR per-mode).
-    function tcVal() { return model.colorToken ? { token: model.colorToken } : (model.colorLight || model.colorDark ? { light: model.colorLight, dark: model.colorDark } : (model.color != null ? { hex: model.color } : null)); }
-    colorField("Colour", tcVal(), function (v) {
-      delete model.color; delete model.colorToken; delete model.colorLight; delete model.colorDark;
-      if (v && v.token) model.colorToken = v.token;
-      else if (v && (v.light || v.dark)) { model.colorLight = v.light; model.colorDark = v.dark; }
-      else if (v && v.hex) model.color = v.hex;
-      onChange();
-    }, container);
-    // Line-height + tracking
-    container.appendChild(twoUp(
-      iconField(Icon("line-height"), { value: model.lineHeight == null ? "" : model.lineHeight, placeholder: "1.5", step: 0.05, min: 0.5, max: 3, datalist: "dl-line-height", noHistory: true, title: "Line height",
-        onchange: function (v) { model.lineHeight = (v ? v : undefined); onChange(); } }).wrap,
-      iconField(Icon("letter-spacing"), { value: model.letterSpacing == null ? "" : model.letterSpacing, unit: "px", placeholder: "0", step: 0.1, min: -10, max: 50, datalist: "dl-letter-spacing", noHistory: true, title: "Letter spacing",
-        onchange: function (v) { var n = parseFloat(v); model.letterSpacing = isNaN(n) ? undefined : n; onChange(); } }).wrap));
-    // Word-spacing + first-line indent
-    container.appendChild(twoUp(
-      iconField(Icon("word-spacing"), { value: model.wordSpacing == null ? "" : model.wordSpacing, unit: "px", placeholder: "0", step: 0.5, min: -20, max: 100, datalist: "dl-gap", noHistory: true, title: "Word spacing",
-        onchange: function (v) { var n = parseFloat(v); model.wordSpacing = isNaN(n) ? undefined : n; onChange(); } }).wrap,
-      iconField(Icon("indent-increase"), { value: model.textIndent == null ? "" : model.textIndent, unit: "px", placeholder: "0", step: 2, min: 0, max: 200, datalist: "dl-gap", noHistory: true, title: "First-line indent",
-        onchange: function (v) { var n = parseInt(v, 10); model.textIndent = isNaN(n) ? undefined : n; onChange(); } }).wrap));
-    // Case + Alignment (icon segments)
-    segmentedLive("Case", [["None", ""], ["UPPER", "uppercase"], ["lower", "lowercase"], ["Title", "capitalize"]],
-      function (val) { return (model.textTransform || "") === val; },
-      function (val) { model.textTransform = val || undefined; onChange(); }, container, true);
-    segmentedIconLive("Align", [[Icon("align-left"), "left", "Left"], [Icon("align-center"), "center", "Center"], [Icon("align-right"), "right", "Right"], [Icon("align-justify"), "justify", "Justify"]],
-      function (val) { return (model.align || "left") === val; },
-      function (val) { model.align = val; onChange(); }, container, true);
-  }
-  window.__typeCluster = typeCluster; // test hook
-
-  // Builds the "not embeddable" warning note for a font <select> and keeps it in
-  // sync with the current value. Returns the note node; the caller places it just
-  // under the picker. Hidden while the choice is safe; shown (flex) otherwise.
-  function attachFontWarn(selectEl) {
-    var note = h("div", "font-embed-warn");
-    var ic = h("span", "font-embed-warn__icon", "!"); ic.setAttribute("aria-hidden", "true");
-    note.appendChild(ic);
-    note.appendChild(h("span", "font-embed-warn__text", "Not in the embeddable set - may not render on an offline/air-gapped machine unless embedded at export."));
-    function sync() { note.style.display = isEmbeddableFont(selectEl.value) ? "none" : "flex"; }
-    selectEl.addEventListener("change", sync);
-    sync();
-    return note;
-  }
+  // arch-P3b-07prim2: the generalised custom listbox, its labelled row, the Type cluster and the
+  // font-embed warning moved to editor/inspector/primitives.js, joining the rest of the canonical
+  // control set. 07b left them behind because they sat under the format-bar banner rather than the
+  // primitives one; the banner was wrong about them, as it has been about every other region.
+  var customSelectRow = VE.bind("customSelectRow");
+  var typeCluster = VE.bind("typeCluster");
+  var attachFontWarn = VE.bind("attachFontWarn");
   // ---- Scope + inheritance (uio-F03 — the UI spine's five-rung ladder) -------------
   // arch-P3b-07b: the ladder, its resolver and the row anatomy moved to
   // editor/inspector/primitives.js. The scope TALLY moved with them -- this file used to hold the
@@ -6597,55 +6156,17 @@
   // ...continues in variants.js (arch-P3b-07).
 
 
-  function isHiddenIn(node, variant) { var vv = node.variantVis; return !!(vv && vv.hide && vv.hide.indexOf(variant) !== -1); }
-  function toggleHiddenIn(node, variant) {
-    pushHistory();
-    var vv = node.variantVis || (node.variantVis = {});
-    vv.hide = vv.hide || [];
-    var i = vv.hide.indexOf(variant);
-    if (i === -1) vv.hide.push(variant); else vv.hide.splice(i, 1);
-    if (!vv.hide.length) delete vv.hide;
-    if (node.variantVis && !node.variantVis.hide && !node.variantVis.only) delete node.variantVis;
-    mount();
-  }
-  // #207: the SAME show/hide-per-key pattern for the software-version axis (node.versionVis).
-  // In an editable version the selected node is a display clone, so tag its BASE node (__vbase).
-  function versionBaseNode(node) { return (node && node.__vbase) || node; }
-  function isHiddenInVersion(node, version) { var vv = versionBaseNode(node).versionVis; return !!(vv && vv.hide && vv.hide.indexOf(version) !== -1); }
-  function toggleHiddenInVersion(node, version) {
-    pushHistory();
-    var b = versionBaseNode(node);
-    var vv = b.versionVis || (b.versionVis = {});
-    vv.hide = vv.hide || [];
-    var i = vv.hide.indexOf(version);
-    if (i === -1) vv.hide.push(version); else vv.hide.splice(i, 1);
-    if (!vv.hide.length) delete vv.hide;
-    if (b.versionVis && !b.versionVis.hide && !b.versionVis.only) delete b.versionVis;
-    mount();
-  }
-  function deleteBlockByRef(block) {
-    // Resolve across the whole page tree (top-level, columns children, group
-    // children) -- getBlockPageIndexAndIndex only sees top-level blocks, so a
-    // block inside a columns row was previously undeletable. After removal, run
-    // the collapse pass so a columns row reduced to one column unwraps to a plain
-    // block (no orphan single-column containers).
-    var loc = null;
-    for (var pi = 0; pi < doc.pages.length; pi++) {
-      var res = findBlockParent(doc.pages[pi].blocks, block);
-      if (res) { loc = res; break; }
-    }
-    if (!loc) return;
-    // If the block lives in a hotspot card, keep that card open after the delete
-    // (selection would otherwise clear -> the popover snaps shut to the image).
-    var hsOwner = hotspotOwnerOf(block);
-    pushHistory();
-    loc.parentArray.splice(loc.index, 1);
-    doc.pages.forEach(function (page) { cleanupColumns(page.blocks); });
-    // `pi` from the resolve loop above = the page the block lived on (loop broke there).
-    // Hotspot-card deletes keep the delicate popover-reveal path on a full mount.
-    if (hsOwner) { setHotspotEditId(hsOwner.hs.id); clearSelection(); mount(); reselectBlockNode(hsOwner.block, "block"); }
-    else { clearSelection(); reapplyStructural(pi); } // PERF: one page, not the world
-  }
+  // arch-P3b-07vis: the last of the "variant model mutations" banner, which was two concerns.
+  // Per-key visibility on both axes -- isHiddenIn / toggleHiddenIn and their software-version
+  // twins, plus the versionBaseNode unwrap they share -- went to editor/variants.js, which
+  // already owns both axes. deleteBlockByRef went to editor/structure-ops.js: it is a structural
+  // verb that six surfaces route through, and it was never about variants at all.
+  var isHiddenIn = VE.bind("isHiddenIn");
+  var toggleHiddenIn = VE.bind("toggleHiddenIn");
+  var versionBaseNode = VE.bind("versionBaseNode");
+  var isHiddenInVersion = VE.bind("isHiddenInVersion");
+  var toggleHiddenInVersion = VE.bind("toggleHiddenInVersion");
+  var deleteBlockByRef = VE.bind("deleteBlockByRef");
 
   // ...continues in variants.js (arch-P3b-07).
 
@@ -6776,6 +6297,13 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    setHotspotEditId: setHotspotEditId,
+    hotspotOwnerOf: hotspotOwnerOf,
+    dirPermission: dirPermission,
+    refreshCommentPanel: refreshCommentPanel,
+    mergeComments: mergeComments,
+    isEmbeddableFont: isEmbeddableFont,
+    colorField: colorField,
     buildActions: buildActions,
     blockChromeIo: blockChromeIo,
     renderContainerChrome: renderContainerChrome,
@@ -7235,6 +6763,7 @@
   window.VersoSourceLink.install(VE);   // copy that stays joined to its source
   window.VersoSettingsSheet.install(VE);   // the settings sheet and the one Escape contract
   window.VersoComments.install(VE);   // review comments and the presence chrome
+  window.VersoReviewExchange.install(VE);   // the reviewer round trip: publish a snapshot, ingest what comes back
   window.VersoOutliner.install(VE);   // the document seen as a list
   window.VersoClipboard.install(VE);   // the verbs that act on a selection
   window.VersoShortcuts.install(VE);   // one place that says what every key does
@@ -7248,6 +6777,7 @@
   window.VersoTabs.install(VE);   // the open documents, and which one you are looking at
   window.VersoShell.install(VE);   // the frame around the work: stage, Product, cell
   window.VersoEditing.install(VE);   // what makes the canvas typeable
+  window.VersoTextFormat.install(VE);   // inline formatting: the toggle set and both bars that render it
   window.VersoActions.install(VE);   // what a learner's click does
   window.VersoInspectorBlocks.install(VE);   // which panel a selected block gets
   window.VersoInspectorParts.install(VE);   // the panels for a field and a component-grid instance

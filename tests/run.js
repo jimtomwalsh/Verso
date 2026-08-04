@@ -5545,7 +5545,7 @@ section("theme-aware style colour");
   ok("MM: justify emits text-align:justify", n8.style.textAlign === "justify");
   ok("MM: word-spacing emits px", n8.style.wordSpacing === "4px");
   ok("MM: unset word-spacing -> empty", n7.style.wordSpacing === "");
-  ok("Edit-style dialog offers a Justify align option", /\[Icon\("align-right"\), "right", "Right"\], \[Icon\("align-justify"\), "justify", "Justify"\]/.test(src("src/editor.js")));
+  ok("Edit-style dialog offers a Justify align option", /\[Icon\("align-right"\), "right", "Right"\], \[Icon\("align-justify"\), "justify", "Justify"\]/.test(src("src/editor/inspector/primitives.js")));   // arch-P3b-07prim2: the dialog mounts typeCluster, and the options are typeCluster's
   ok("Edit-style dialog saves word-spacing", /if \(draft\.wordSpacing == null \|\| isNaN\(draft\.wordSpacing\)\) delete s\.wordSpacing; else s\.wordSpacing = draft\.wordSpacing/.test(THEME));
   // resolveBlockStyle: a per-block override of ONE colour form drops the named style's OTHER form
   ok("resolveBlockStyle: hex override drops the style's token", /if \(ov\.color != null && ov\.color !== ""\) delete merged\.colorToken/.test(rtxt));
@@ -5555,7 +5555,7 @@ section("theme-aware style colour");
   ok("Edit-style dialog saves colorToken (token clears hex)", /s\.colorToken = draft\.colorToken; delete s\.color/.test(THEME));
   ok("Edit-style dialog offers theme-token options", /COLOUR_TOKENS = \[\["Ink", "ink"\]/.test(etxt));
   ok("specimen seeds theme vars so a token resolves in preview", /applyTheme\(specimen, activeTheme\(\)\); window\.applyTextStyle\(specimen, draft\)/.test(THEME));
-  ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(etxt) && /"First-line indent"/.test(etxt));
+  ok("MM: Edit-style dialog exposes a Case control + Indent field", /segmentedLive\("Case"/.test(src("src/editor/inspector/primitives.js")) && /"First-line indent"/.test(src("src/editor/inspector/primitives.js")));   // arch-P3b-07prim2: both are typeCluster rows
   ok("MM: Edit-style dialog saves textTransform + textIndent", /s\.textTransform = draft\.textTransform;[\s\S]*?s\.textIndent = draft\.textIndent/.test(THEME));
   // body paragraphs default to full ink (matching .body-list), not ink-soft — else a
   // colourless text style leaves paragraphs a shade lighter than lists (James's mismatch).
@@ -6747,9 +6747,13 @@ section("inline links");
   var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var e = src("src/editor.js");
   var css = src("src/course.css");
-  ok("text inspector has a Link button using createLink", /var linkB = h\("button"[\s\S]*?execCommand\("createLink", false, url\)/.test(e));
-  ok("created anchor gets target=_blank + rel=noopener", /setAttribute\("target", "_blank"\); el\.setAttribute\("rel", "noopener noreferrer"\)/.test(e));
-  ok("empty URL removes the link (unlink)", /if \(!url\) \{ document\.execCommand\("unlink", false, null\)/.test(e));
+  // arch-P3b-07fmt: the Link button belongs to the shared format bar (editor/text-format.js), which the
+  // text inspector mounts. The claim was always about that bar; it only read against editor.js
+  // because the bar and the inspector sat in one file.
+  var FMT = src("src/editor/text-format.js");
+  ok("the shared format bar has a Link button using createLink", /var linkB = h\("button"[\s\S]*?execCommand\("createLink", false, url\)/.test(FMT));
+  ok("created anchor gets target=_blank + rel=noopener", /setAttribute\("target", "_blank"\); el\.setAttribute\("rel", "noopener noreferrer"\)/.test(FMT));
+  ok("empty URL removes the link (unlink)", /if \(!url\) \{ document\.execCommand\("unlink", false, null\)/.test(FMT));
   ok("link/BIU commits are sanitised so the drag-handle can't ride in", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\)/.test(PARTS));
   ok("theme-aware link style (accent + underline, excludes nav buttons)", /\.page a:not\(\.nav-button\):not\(\.course-nav__btn\) \{[\s\S]*?color: var\(--color-accent\);[\s\S]*?text-decoration: underline/.test(css));
 })();
@@ -7384,8 +7388,10 @@ section("richer bullet lists");
   // #170/#33: List is a single toggle BUTTON in the shared B/I/U/Link/List bar, whose
   // on-state reads block.type (not queryCommandState) and whose click CONVERTS the whole
   // block to/from the dedicated "list" type (was a switchEl, then an inline execCommand).
-  ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(e) && !/switchRow\("List",/.test(e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(e));
-  ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(e));
+  // arch-P3b-07fmt: the List button is one kind in the shared format bar (editor/text-format.js).
+  var FMT = src("src/editor/text-format.js");
+  ok("editor List is a single toggle button (no doubled ul/ol pair, no leftover switch)", /var listB = h\("button", "prop-toggle prop-toggle--icon"/.test(FMT) && !/switchRow\("List",/.test(FMT + e) && !/\["• List", "insertUnorderedList"\], \["1\. List", "insertOrderedList"\]/.test(FMT + e));
+  ok("editor List toggle preserves the field selection (mousedown preventDefault, like B/I/U)", /listB\.addEventListener\("mousedown", function \(e\) \{ e\.preventDefault\(\); \}\);/.test(FMT));
   ok("editor list marker controls render when the field root is a list", /if \(rootIsList\) \{\s*\n\s*var _typeBody = E\.inspector; E\.setInspector\(panelSection\(_typeBody, "List"\)\);[\s\S]*?customSelectRow\("Bullet style"/.test(src("src/editor/inspector/parts.js")));
   // #31: a root-<ul>/<ol> field (quiz Chapter-summary, list block) is inherently a list —
   // marker settings always show for it; the TYPE-conversion toggle only shows for a
@@ -7400,7 +7406,7 @@ section("richer bullet lists");
   ok("editor Tab nests when caret in a list", /if \(e\.key === "Tab" && caretInList\(node\)\)/.test(EDIT));
   ok("editor Bullet style rides on obj.listMarker", /customSelectRow\("Bullet style", markerOpts, \(obj\.listMarker \|\| "disc"\)/.test(PARTS));
   ok("editor Bullet style options preview the marker glyph", /MARK_GLYPH\s*=\s*\{[\s\S]*?markerOpts\s*=\s*MARKERS\.map/.test(PARTS));
-  ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
+  ok("customSelect exposes .value get\/set + change event", /function customSelect\([\s\S]*?dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(src("src/editor/inspector/primitives.js")));
   // ⚙ settings modal (System / Project tabs) — James 2026-07-08
   ok("side-rail-cleanup: the rail cog opens SYSTEM settings (project/doc settings open from the header)", /getElementById\("rail-settings-btn"\)[\s\S]{0,500}openSettingsModal\("system"\)/.test(SHELL));
   var ecss = src("editor.css");
@@ -7491,12 +7497,12 @@ section("list discoverability + spacing");
   var PARTS = src("src/editor/inspector/parts.js");   // arch-P3b-07parts
   var SOPS = src("src/editor/structure-ops.js");   // arch-P3b-07w
   var e = src("src/editor.js");
-  ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(e));
+  ok("line/letter spacing live in the field inspector's typeCluster (v2)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")) && /Icon\("line-height"\)[\s\S]*?model\.lineHeight/.test(src("src/editor/inspector/primitives.js")));
   ok("Advanced text disclosure removed", !/disclosure\("textAdvanced"/.test(e));
   // #170/#33: the List toggle folds into the shared inline-format bar as a whole
   // block-TYPE conversion (not an inline execCommand list); the sub("List") header now
   // heads only the marker-settings section, shown when the field root is a list.
-  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(e) && /convertTextListBlockType\(obj\)/.test(PARTS));
+  ok("List toggle is a shared-bar 'list-block' kind that converts the block type", /\{ kind: "list-block" \}/.test(src("src/editor/text-format.js")) && /convertTextListBlockType\(obj\)/.test(PARTS));
   ok("List marker section is gated on rootIsList and is its own canonical section", /if \(rootIsList\) \{\s*\n\s*var _typeBody = E\.inspector; E\.setInspector\(panelSection\(_typeBody, "List"\)\);/.test(src("src/editor/inspector/parts.js")));
   ok("paragraph<->list block-type conversion exists (round-trips via __priorTextType)", /function convertTextListBlockType\(block\)/.test(SOPS) && /block\.__priorTextType/.test(SOPS));
   ok("caretInList helper drives list gestures", /function caretInList\(fieldNode\)/.test(PARTS));
@@ -7542,13 +7548,13 @@ section("font preview picker");
   ok("render exposes fontStackFor (known stack or quoted family)", /window\.fontStackFor = function \(name\) \{ return name \? \(FONT_STACKS\[name\] \|\| \("'" \+ name \+ "', sans-serif"\)\) : ""; \}/.test(r));
   // the picker renders each option in its own font + exposes .value + fires change (attachFontWarn stays compatible)
   ok("buildFontPicker renders each option in its own font", /function buildFontPicker\(current, onPick\)[\s\S]*?row\.style\.fontFamily = stackFor\(v\)/.test(FONTS));
-  ok("picker exposes .value + dispatches change", /Object\.defineProperty\(wrap, "value"[\s\S]*?wrap\.dispatchEvent\(new Event\("change"\)\)/.test(e) || /wrap\.dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(e));
+  ok("picker exposes .value + dispatches change", /Object\.defineProperty\(wrap, "value"[\s\S]*?wrap\.dispatchEvent\(new Event\("change"\)\)/.test(FONTS) || /wrap\.dispatchEvent\(new Event\("change"\)\)[\s\S]*?Object\.defineProperty\(wrap, "value"/.test(FONTS));
   // all 3 plain <select> font pickers replaced by the shared component
   // arch-P3b-07/07f: the three pickers now sit in three files -- two inspectors here, the Theme
   // panel's in theme.js -- so the claim counts across the chrome rather than within one file.
   // arch-P3b-07n/07: the three pickers now sit in three files again -- the nav-button one moved
   // with the actions panel, the header/footer one stayed, the Theme panel has its own.
-  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js") + src("src/editor/actions.js") + src("src/editor/header-footer.js")).match(/[^_.]buildFontPicker\(/g) || [];
+  var pickerSites = (src("src/editor.js") + src("src/editor/theme.js") + src("src/editor/actions.js") + src("src/editor/header-footer.js") + src("src/editor/inspector/primitives.js")).match(/[^_.]buildFontPicker\(/g) || [];
   ok("all 3 font selects use buildFontPicker", pickerSites.length >= 3);
   ok("no plain <select> font list remains", !/h\("select"[\s\S]{0,80}FONT_LIST\.map/.test(e));
   ok("picker CSS: popup listbox present", /\.font-picker__pop \{[\s\S]*?position: absolute/.test(css) && /\.font-picker__opt \{/.test(css));
@@ -8436,7 +8442,8 @@ section("background-pause power governor (#179)");
     /window\.__autosaveGov = \{/.test(p) && /pause: function \(\) \{ if \(_autosaveTimer\) \{ autosave\(\);/.test(p));
   ok("pause FLUSHES (calls autosave) before clearing the interval -- no lost edit",
     /pause: function \(\)[\s\S]*?autosave\(\);[\s\S]*?clearInterval\(_autosaveTimer\)/.test(p));
-  var e = src("src/editor.js");
+  // arch-P3b-07review: the visibilitychange governor moved with the review poll it pauses.
+  var e = src("src/editor/review-exchange.js");
   ok("editor pauses both polls + drops will-change when document.hidden",
     /visibilitychange[\s\S]*?document\.hidden[\s\S]*?__autosaveGov\.pause\(\)[\s\S]*?stopReviewPoll\(\)[\s\S]*?willChange = "auto"/.test(e));
   ok("editor resumes autosave + (conditionally) the review poll + restores will-change on return",
@@ -9068,7 +9075,9 @@ section("note callout container");
 // ---- §12 Verso Viewer: V1 publish snapshot + the standalone app -----------
 section("Verso Viewer (V1 + app)");
 (function () {
-  var t = src("src/editor.js");
+  // arch-P3b-07review: the publish snapshot, the folder handle, the poll and the ingest are
+  // editor/review-exchange.js now. The Viewer app itself is unchanged.
+  var t = src("src/editor/review-exchange.js");
   ok("snapshot freezes a verso-pub with comments stripped", /function snapshotBlob\(versionOverride\)[\s\S]*?delete frozen\.comments[\s\S]*?type: "verso-pub"/.test(t));
   // §12a: the frozen snapshot bakes AssetStore refs into self-contained base64 (the Viewer has no AssetStore)
   ok("snapshot resolves asset refs into base64 data-URIs (renders standalone in the Viewer)", /function snapshotBlob\(versionOverride\)[\s\S]*?window\.resolveMedia\(frozen, function \(id\) \{\s*var a = window\.AssetStore\.get\(id\);\s*return a \? a\.dataUrl : window\.AssetStore\.placeholder;/.test(t));
@@ -9077,7 +9086,7 @@ section("Verso Viewer (V1 + app)");
   ok("export defaultOptions has reviewFile", /defaultOptions[\s\S]*?reviewFile: false/.test(ex));
   ok("export modal offers the review-file toggle", /toggle\("Also publish review file", "reviewFile"\)/.test(ex));
   ok("export emits the review snapshot when toggled (same version)", /function alsoPublishReview[\s\S]*?window\.Editor\.publishReviewFile\(opts\.version\)/.test(ex));
-  ok("editor exposes publishReviewFile on window.Editor", /publishReviewFile: function \(version\) \{ return publishToViewer\(version, true\); \}/.test(t));
+  ok("editor exposes publishReviewFile on window.Editor", /publishReviewFile: function \(version\) \{ return publishToViewer\(version, true\); \}/.test(src("src/editor.js")));   // the window.Editor seam is the host's, not the module's
   ok("Publish writes to the review folder (FSA) with a download fallback", /async function publishToViewer[\s\S]*?ensureReviewFolder\(\)[\s\S]*?getFileHandle\(f\.name[\s\S]*?createWritable/.test(t));
   ok("scanAndMerge reads review-*.json + merges (conflict-free)", /async function scanAndMerge\(dir\)[\s\S]*?review-.*\\\.json[\s\S]*?mergeComments\(list\)/.test(t));
   ok("folder handle is persisted in IndexedDB (survives restart)", /function saveReviewDir[\s\S]*?objectStore\("h"\)\.put\(handle, "dir"\)/.test(t) && /function loadReviewDir/.test(t));
@@ -9355,7 +9364,7 @@ section("panel system v2 — layout engine");
   ok("modals: Enter submits on the element; Escape is the layer stack's", /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); primary\.click\(\); \}/.test(emd)
     && /pushLayer\("modal", function \(\) \{ modal\.close\(\); \}\)/.test(emd));
   ok("every modal dismissal path pops the layer exactly once", /modal\.close = function \(\) \{ popLayer\("modal"\); modal\.close = _close; if \(_close\) _close\.call\(modal\); \}/.test(emd));
-  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(WORLD) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(e) && /confirmModal\("Remove component"/.test(LIB));
+  ok("chapter/page/font/style/link/library sites use the modals (not window.prompt/confirm)", /promptModal\("New chapter"/.test(e) && /promptModal\("Rename chapter"/.test(WORLD) && /confirmModal\("Delete page"/.test(e) && /promptModal\("Link"/.test(src("src/editor/text-format.js")) && /confirmModal\("Remove component"/.test(LIB));
   // arch-P3b-07lib: the one survivor is the library import-merge, and it left with the library.
   // The claim is the same and stronger stated across both files: exactly one raw dialog, and
   // editor.js itself now has none.
@@ -9391,9 +9400,9 @@ section("panel system v2 — layout engine");
   ok("colorField has eyedropper (reuses eyeDropperAvailable/pickScreenColor)", /if \(eyeDropperAvailable\(\)\) \{ var ed[\s\S]*?pickScreenColor\(\)/.test(ecol));
   ok("recents persisted to localStorage (max 8)", /function colorRecents\(add\)[\s\S]*?verso\.colorRecents[\s\S]*?\.slice\(0, 8\)/.test(ecol));
   // Phase 2b: the reusable typeCluster (D4) — one Type control body writing to a model
-  ok("typeCluster renders font(buildFontPicker) + colorField + type controls", /function typeCluster\(container, model, onChange, opts\)[\s\S]*?buildFontPicker\(model\.font[\s\S]*?colorField\("Colour", tcVal\(\)/.test(e));
-  ok("typeCluster colour adapter maps token/hex/per-mode onto the model", /if \(v && v\.token\) model\.colorToken = v\.token;[\s\S]*?else if \(v && \(v\.light \|\| v\.dark\)\) \{ model\.colorLight = v\.light; model\.colorDark = v\.dark; \}[\s\S]*?else if \(v && v\.hex\) model\.color = v\.hex;/.test(e));
-  ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(e));
+  ok("typeCluster renders font(buildFontPicker) + colorField + type controls", /function typeCluster\(container, model, onChange, opts\)[\s\S]*?buildFontPicker\(model\.font[\s\S]*?colorField\("Colour", tcVal\(\)/.test(src("src/editor/inspector/primitives.js")));
+  ok("typeCluster colour adapter maps token/hex/per-mode onto the model", /if \(v && v\.token\) model\.colorToken = v\.token;[\s\S]*?else if \(v && \(v\.light \|\| v\.dark\)\) \{ model\.colorLight = v\.light; model\.colorDark = v\.dark; \}[\s\S]*?else if \(v && v\.hex\) model\.color = v\.hex;/.test(src("src/editor/inspector/primitives.js")));
+  ok("typeCluster has size/weight/leading/tracking/word-sp/indent/case/justify-align", /model\.size = isNaN[\s\S]*?model\.weight = weight[\s\S]*?model\.lineHeight[\s\S]*?model\.letterSpacing[\s\S]*?model\.wordSpacing[\s\S]*?model\.textIndent[\s\S]*?model\.textTransform[\s\S]*?Icon\("align-justify"\), "justify"/.test(src("src/editor/inspector/primitives.js")));
   // Phase 2c: the SAME typeCluster mounted in BOTH the field inspector and the style dialog
   ok("field inspector mounts typeCluster (reference adopter)", /typeCluster\(E\.inspector, s, apply/.test(src("src/editor/inspector/parts.js")));
   ok("Edit-Text-Style dialog mounts the SAME typeCluster", /typeCluster\(box, draft, syncSpecimen\)/.test(THEME));
@@ -9514,9 +9523,9 @@ section("hotspot per-card size");
     return !!owner && owner.block === hotspot && owner.hs === marker &&
       HS.ownerOf([{ blocks: [hotspot] }], { type: "orphan" }, walk) === null;
   })());
-  ok("editor: deleting a card child keeps the card open (reselect owner hotspot block)", /var hsOwner = hotspotOwnerOf\(block\);[\s\S]{0,520}if \(hsOwner\) \{ setHotspotEditId\(hsOwner\.hs\.id\); clearSelection\(\); mount\(\); reselectBlockNode\(hsOwner\.block, "block"\); \}/.test(e));
+  ok("editor: deleting a card child keeps the card open (reselect owner hotspot block)", /var hsOwner = hotspotOwnerOf\(block\);[\s\S]{0,520}if \(hsOwner\) \{ setHotspotEditId\(hsOwner\.hs\.id\); clearSelection\(\); mount\(\); reselectBlockNode\(hsOwner\.block, "block"\); \}/.test(src("src/editor/structure-ops.js")));   // arch-P3b-07vis: deleteBlockByRef is a structural verb
   // PERF: a plain (non-hotspot) block delete rebuilds only its page, not the world.
-  ok("editor: plain block delete uses reapplyStructural(pi), not mount", /else \{ clearSelection\(\); reapplyStructural\(pi\); \}/.test(e));
+  ok("editor: plain block delete uses reapplyStructural(pi), not mount", /else \{ clearSelection\(\); reapplyStructural\(pi\); \}/.test(src("src/editor/structure-ops.js")));
 })();
 
 // ---- FR: Find & replace pure core + variant routing ----------------------
@@ -13371,8 +13380,8 @@ section("uio-P-C02: Publish button — accent only when runnable, reason when di
   ok("enableEditing gate keys off canvasEditable() (version = editable flagship UNLESS collaborating)", (e.match(/if \(canvasEditable\(\)\) enableEditing\(world\);/g) || []).length >= 2);
   ok("writeModel captures into versionOverrides via __vbase when editing a version", /if \(versionEditable\(\) && obj && obj\.__vbase\) setVersionOverrideField\(obj\.__vbase, activeVersion, field, value\);\s*else obj\[field\] = value;/.test(e));
   ok("capture is undoable — the input handler snapshots before writeModel", /History\.pushOnce\(\);[\s\S]{0,200}writeModel\(node,/.test(EDIT));
-  ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(e));
-  ok("version tagging targets the BASE node (__vbase) not the display clone", /function versionBaseNode\(node\) \{ return \(node && node\.__vbase\) \|\| node; \}/.test(e));
+  ok("versionVis show/hide tagging mirrors the variant Hide-in family", /function toggleHiddenInVersion\(node, version\)[\s\S]*?b\.versionVis/.test(src("src/editor/variants.js")));   // arch-P3b-07vis: both axes' visibility lives with both axes
+  ok("version tagging targets the BASE node (__vbase) not the display clone", /function versionBaseNode\(node\) \{ return \(node && node\.__vbase\) \|\| node; \}/.test(src("src/editor/variants.js")));
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   ok("block context menu adds a Software version show/hide section", /var versAll = versionNames\(\);[\s\S]{0,700}toggleHiddenInVersion\(host, v\)/.test(src("src/editor/context-menu.js")));
   ok("FIX 2: editing a version disables inert block controls with a reason", /function applyVersionEditGuard\(\)[\s\S]*?is-version-readonly-panel[\s\S]*?version-edit-notice/.test(e));
@@ -13808,12 +13817,16 @@ section("inline weight on selection");
   ok("caret-color still stripped but font-weight kept", /font-weight:600/.test(san('<span style="caret-color:#fff;font-weight:600" data-rich="1">x</span>')) === true && san('<span style="caret-color:#fff;font-weight:600" data-rich="1">x</span>').indexOf("caret-color") === -1);
   // wiring: ONE selection-aware Weight control (the old separate "Weight (selection)" row
   // is merged away) — highlighted text is weighted inline, no selection sets the whole field.
-  ok("wiring: no separate 'Weight (selection)' row (merged into the type-cluster Weight)", t.indexOf('"Weight (selection)"') === -1 && /\["Semibold", "600"\]/.test(t));
-  ok("wiring: selection-aware only when a fieldNode is passed (style dialog stays whole-model)", /if \(opts && opts\.fieldNode\)/.test(t) && /applyWeightToSelection: function \(weight, range\)/.test(t + src("src/editor/inspector/parts.js")));
+  // arch-P3b-07prim2: the type-cluster Weight select is typeCluster's, and typeCluster is
+  // inspector/primitives.js now. These five claims were never about editor.js; they only read
+  // against it because the cluster and the sanitizer happened to share the file.
+  var TC = src("src/editor/inspector/primitives.js");
+  ok("wiring: no separate 'Weight (selection)' row (merged into the type-cluster Weight)", TC.indexOf('"Weight (selection)"') === -1 && /\["Semibold", "600"\]/.test(TC));
+  ok("wiring: selection-aware only when a fieldNode is passed (style dialog stays whole-model)", /if \(opts && opts\.fieldNode\)/.test(TC) && /applyWeightToSelection: function \(weight, range\)/.test(TC + src("src/editor/inspector/parts.js")));
   ok("wiring: wraps selection in a font-weight span", /span\.style\.fontWeight = weight;[\s\S]{0,160}r\.surroundContents\(span\)/.test(t + src("src/editor/inspector/parts.js")));
-  ok("wiring: captures the field range on the Weight select mousedown", /wt\.addEventListener\("mousedown"[\s\S]{0,300}cloneRange\(\)/.test(t));
-  ok("wiring: empty weight on a live selection is a no-op (does not clear the whole field)", /if \(!weight\) return; \/\/ empty on a live selection/.test(t));
-  ok("wiring: no live selection falls back to whole-field / model weight", /model\.weight = weight; onChange\(\); \/\/ no selection/.test(t));
+  ok("wiring: captures the field range on the Weight select mousedown", /wt\.addEventListener\("mousedown"[\s\S]{0,300}cloneRange\(\)/.test(TC));
+  ok("wiring: empty weight on a live selection is a no-op (does not clear the whole field)", /if \(!weight\) return; \/\/ empty on a live selection/.test(TC));
+  ok("wiring: no live selection falls back to whole-field / model weight", /model\.weight = weight; onChange\(\); \/\/ no selection/.test(TC));
   ok("wiring: selection commit routes through sanitizeFieldHtml (editor == export)", /obj\[field\] = sanitizeFieldHtml\(node\.innerHTML\); renderModelView\(\); scheduleSave\(\);\s*return true;/.test(t + src("src/editor/inspector/parts.js")));
 })();
 
@@ -13873,14 +13886,16 @@ section("chrome invariant: file picker + Read view are contained, not full-scree
 section("#170/#158 shared formatting toggle-bar");
 (function () {
   var e = src("src/editor.js");
-  var body = slice(e, "function buildFormatToggleBar(io)", "window.__buildFormatToggleBar = buildFormatToggleBar;");
+  // arch-P3b-07fmt: the toggle set, the shared bar and the canvas bar are editor/text-format.js now.
+  var FMT = src("src/editor/text-format.js");
+  var body = slice(FMT, "function buildFormatToggleBar(io)", "window.__buildFormatToggleBar = buildFormatToggleBar;");
   ok("buildFormatToggleBar found", body.indexOf("var bar = h(\"div\", \"prop-toggle-row\");") !== -1);
-  ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(e));
-  ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(e));
+  ok("config-driven: a FORMAT_TOGGLES list with a `kind` field per descriptor", /FORMAT_TOGGLES = \[[\s\S]{0,50}\{ kind: "inline-exec"/.test(FMT));
+  ok("renders B/I/U (inline-exec) + Link -- the ticket's exact set", /label: "B", cmd: "bold"[\s\S]*?label: "I", cmd: "italic"[\s\S]*?label: "U", cmd: "underline"[\s\S]*?\{ kind: "link" \}/.test(FMT));
   ok("inline-exec toggle calls io.getNode()/document.execCommand/io.onChange (behaviour unchanged)", /var node = io\.getNode\(\); if \(!node\) return;\s*\n\s*node\.focus\(\);\s*\n\s*document\.execCommand\(t\.cmd, false, null\);\s*\n\s*io\.onChange\(\);/.test(body));
   ok("Link uses the SAME createLink\\/unlink + target=_blank mechanic as before", /document\.execCommand\("createLink", false, url\)[\s\S]{0,250}setAttribute\("target", "_blank"\)/.test(body));
   ok("bar.refresh() resyncs is-on state against the CURRENT selection (for a bar that persists across re-focus)", /bar\.refresh = function \(\) \{/.test(body));
-  ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(e));
+  ok("exposed as a headless test hook, same pattern as buildFontPicker", /window\.__buildFormatToggleBar = buildFormatToggleBar;/.test(FMT));
 
   // WIRING: both surfaces now call the ONE shared builder -- no duplicate bespoke bar.
   // arch-P3b-07parts: the field inspector is editor/inspector/parts.js now.
@@ -13897,10 +13912,10 @@ section("#170/#158 shared formatting toggle-bar");
   ok("copy editor's format bar uses the SAME shared builder", /var biu = buildFormatToggleBar\(\{/.test(cfBody));
   ok("no duplicate bespoke B/I/U row remains in the copy editor", cfBody.indexOf('[["B", "bold"], ["I", "italic"], ["U", "underline"]]') === -1);
   // exactly one config-driven toggle list in the whole file (no second duplicate copy).
-  ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (e.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1);
+  ok("FORMAT_TOGGLES is declared exactly once (single source of the toggle set)", (FMT.match(/var FORMAT_TOGGLES = \[/g) || []).length === 1 && e.indexOf("var FORMAT_TOGGLES = [") === -1);
   // floating-format-bar-to-edit-canvas: an above-selection floating B/I/U bar on the Edit canvas,
   // reusing FORMAT_TOGGLES' inline-exec set (one config, two surfaces) + the field's own input->commit.
-  var fb = slice(e, "/* @canvas-fmtbar-start */", "/* @canvas-fmtbar-end */");
+  var fb = slice(FMT, "/* @canvas-fmtbar-start */", "/* @canvas-fmtbar-end */");
   ok("floating bar reuses the inline-exec FORMAT_TOGGLES (shared config, glyph icons)", /FORMAT_TOGGLES\.filter\(function \(t\) \{ return t\.kind === "inline-exec"; \}\)/.test(fb) && /FMTBAR_GLYPH = \{ bold: "bold", italic: "italic", underline: "underline" \}/.test(fb));
   ok("clicking runs execCommand (no separate write path -- fires the field's own input->writeModel)", /document\.execCommand\(t\.cmd, false, null\); syncCanvasFmtBarActive\(bar\)/.test(fb) && fb.indexOf("writeModel") === -1);
   ok("the bar binds ONLY to a live editable [data-edit] canvas field (never the Source [data-node] selbar)", /function canvasEditableFieldOf\(node\)[\s\S]{0,200}closest\("\[data-edit\]\.is-editable"\)[\s\S]{0,120}getAttribute\("contenteditable"\) === "true"/.test(fb));
