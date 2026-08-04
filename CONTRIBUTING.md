@@ -54,6 +54,11 @@ build to it (see `design-system/readme.md`).
 
 ## Where things live
 
+**Start with [`docs/architecture.html`](docs/architecture.html)** — open it in a browser. It is the
+orientation map: the one law drawn out, a router for common tasks ("add a block", "change a panel",
+"move code out of editor.js"), the layers, the four block registries, and a filterable index of
+every module. Read it before grepping.
+
 `src/editor.js` was 26,000 lines; it is ~6,700 of wiring plus **56 modules under `src/editor/`**.
 **`src/editor/README.md` is the map** — one row per module, what it holds and what state it owns.
 A suite gate fails if a module has no row or a row names no file, so it cannot rot. Read it before
