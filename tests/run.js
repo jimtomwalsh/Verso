@@ -3385,7 +3385,10 @@ section("editor-rework file-picker grouping");
   ok("null-safe on empty input", g.groupDocIdsByGeo(null, reg, geoOf).length === 0);
   // the browser is product-scoped + auto-opens on a zero-tab Edit landing
   // arch-P3b-07k: both claims are about the browser, which is editor/home.js now.
-  ok("the browser filters by the product scope (docMatchesProductStage)", /courseMatchesQuery\(registry\[id\], browserQuery\) && docMatchesProductStage\(registry\[id\], scope, null\)/.test(src("src/editor/home.js")));
+  // uio-W01 REVERSED this: the browser used to be scoped by the global Product, so a document you
+  // had open could be missing from the browser meant to list everything. It lists everything now.
+  ok("the browser lists every document, filtered only by the search query", /courseMatchesQuery\(registry\[id\], browserQuery\);/.test(src("src/editor/home.js")) &&
+    src("src/editor/home.js").indexOf("docMatchesProductStage") === -1);
   ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(src("src/editor/shell.js")));
   ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(src("src/editor/home.js")) && /cell\.interactive \? "Interactive" : "Static"/.test(src("src/editor/home.js")));
 })();
@@ -3453,10 +3456,16 @@ section("editor-rework matrix doc-type");
   ok("tagDocCell is null-safe", g.tagDocCell(null, "paged", true) === null);
 })();
 
-// ---- SPEC 7: product-filtered tab scope (pure predicate) ----
-section("editor-rework tab scope");
+// ---- uio-W01: the tab strip shows what is open (pure predicate) ----
+// This section used to assert the opposite: that a Product scope filtered the strip, so choosing
+// prod-a hid every prod-b tab and every untagged document. That was the bug, not the feature --
+// switching Product silently emptied the tab bar, and a whole repair function existed to put the
+// active document back afterwards. The assertions are REPLACED rather than deleted, so the reversal
+// is on the record and nobody rebuilds the filter from a gap in the suite.
+section("uio-W01 tab strip holds what is open");
 (function () {
-  var g = { visibleTabIds: require(path.join(ROOT, "src/editor/product-rail.js")).visibleTabIds };
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+  var g = { visibleTabIds: PR.visibleTabIds };
   var reg = {
     a: { meta: { title: "A", productId: "prod-a" } },
     b: { meta: { title: "B", productId: "prod-b" } },
@@ -3464,14 +3473,66 @@ section("editor-rework tab scope");
     leg: { meta: { title: "Legacy" } } // untagged
   };
   var open = ["a", "b", "a2", "leg"];
-  ok("All products ('') shows every open tab", g.visibleTabIds(open, reg, "").join(",") === "a,b,a2,leg");
-  ok("All products (null) shows every open tab", g.visibleTabIds(open, reg, null).join(",") === "a,b,a2,leg");
-  ok("prod-a scope shows only prod-a tabs", g.visibleTabIds(open, reg, "prod-a").join(",") === "a,a2");
-  ok("prod-b scope shows only prod-b tabs", g.visibleTabIds(open, reg, "prod-b").join(",") === "b");
-  ok("an untagged doc never shows under a specific product", g.visibleTabIds(open, reg, "prod-a").indexOf("leg") === -1);
-  ok("a scope with no open tabs -> empty", g.visibleTabIds(open, reg, "prod-c").length === 0);
-  ok("ids with no registry entry are dropped", g.visibleTabIds(["a", "ghost"], reg, "").join(",") === "a");
-  ok("null-safe on empty inputs", g.visibleTabIds(null, reg, "").length === 0 && g.visibleTabIds(open, null, "").length === 0);
+  ok("every open document draws a tab", g.visibleTabIds(open, reg).join(",") === "a,b,a2,leg");
+  ok("documents from different Products coexist in one strip", g.visibleTabIds(open, reg).indexOf("a") !== -1 && g.visibleTabIds(open, reg).indexOf("b") !== -1);
+  ok("an untagged document is a document like any other", g.visibleTabIds(open, reg).indexOf("leg") !== -1);
+  ok("nothing the caller can pass filters the strip down", g.visibleTabIds(open, reg, "prod-a").join(",") === "a,b,a2,leg");
+  ok("ids with no registry entry are dropped", g.visibleTabIds(["a", "ghost"], reg).join(",") === "a");
+  ok("null-safe on empty inputs", g.visibleTabIds(null, reg).length === 0 && g.visibleTabIds(open, null).length === 0);
+  // The scope itself is gone from the module, not merely unread.
+  ok("the rail exposes no global Product scope", typeof PR.create({ storage: null }).getActiveProduct === "undefined" &&
+    typeof PR.create({ storage: null }).setActiveProduct === "undefined");
+})();
+
+// ---- uio-W01: retiring `verso.activeProduct` -----------------------------
+// The key is not simply deleted. Whatever Product the author last had selected is the best guess at
+// the facet Files should open on, so it is read once, handed forward under a new name, and the old
+// key removed. uio-W06 is what reads the seed.
+section("uio-W01 legacy scope retirement");
+(function () {
+  var PR = require(path.join(ROOT, "src/editor/product-rail.js"));
+  function store(seed) {
+    var m = Object.assign({}, seed || {});
+    return { data: m,
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+      setItem: function (k, v) { m[k] = String(v); },
+      removeItem: function (k) { delete m[k]; } };
+  }
+  var LEG = PR.LEGACY_PRODUCT_SCOPE_KEY, SEED = PR.FILES_PRODUCT_FACET_SEED_KEY;
+  ok("the two keys are named, not spelled inline", LEG === "verso.activeProduct" && SEED === "verso.filesProductFacetSeed");
+
+  var s1 = store({ "verso.activeProduct": "prod-a" });
+  var r1 = PR.consumeLegacyProductScope(s1);
+  ok("a saved scope becomes the Files facet seed", r1.seeded === true && r1.id === "prod-a" && s1.data[SEED] === "prod-a");
+  ok("the legacy key is removed in the same pass", s1.data[LEG] === undefined);
+  var r1b = PR.consumeLegacyProductScope(s1);
+  ok("a second boot finds it absent and does nothing", r1b.seeded === false && s1.data[SEED] === "prod-a");
+
+  var s2 = store({ "verso.activeProduct": "", });
+  var r2 = PR.consumeLegacyProductScope(s2);
+  ok("'All products' seeds nothing but still clears the key", r2.seeded === false && s2.data[LEG] === undefined && s2.data[SEED] === undefined);
+
+  var s3 = store({ "verso.activeProduct": "prod-a", "verso.filesProductFacetSeed": "prod-chosen" });
+  PR.consumeLegacyProductScope(s3);
+  ok("a seed the author already changed is never overwritten", s3.data[SEED] === "prod-chosen" && s3.data[LEG] === undefined);
+
+  ok("no store at all is not a crash", PR.consumeLegacyProductScope(null).seeded === false);
+  ok("creating the rail is what retires it", PR.create({ storage: store({ "verso.activeProduct": "prod-z" }) }).retiredProductScope.id === "prod-z");
+
+  // The ratchet: nothing may write the retired key again.
+  ["src/editor.js", "src/editor/product-rail.js", "src/editor/shell.js", "src/editor/tabs.js",
+   "src/editor/home.js", "src/editor/source-stage.js", "src/editor/publish.js", "src/editor/documents.js"].forEach(function (f) {
+    var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    ok(f + " never writes verso.activeProduct", !/setItem\s*\(\s*[^)]*verso\.activeProduct/.test(code));
+  });
+  // And no module may reach for a global active Product by any of its old names.
+  ["src/editor.js", "src/editor/shell.js", "src/editor/tabs.js", "src/editor/home.js",
+   "src/editor/source-stage.js", "src/editor/publish.js", "src/editor/documents.js"].forEach(function (f) {
+    var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    ok(f + " reads no global active Product", !/\b(getActiveProduct|setActiveProduct|restoreActiveProduct|mountProductPicker)\b/.test(code));
+  });
+  ok("the top-bar picker host is gone from the page", src("index.html").indexOf('id="product-picker-host"') === -1);
+  ok("its stylesheet rules went with it", src("styles/editor/04-source-stage.css").indexOf(".product-picker {") === -1);
 })();
 
 // ---- SPEC 7: static fallback — interactive-block palette filter (pure) ----
@@ -3842,7 +3903,9 @@ section("#69 migration cutover");
   // not `doc` -- Promote moved into the file picker's per-card menu, so the open document is
   // not necessarily the one being promoted.
   ok("spec 2d bridge: Promote carries the card's doc.variants onto the Product (union) so its variant workflow is reachable", /td\.variants && td\.variants\.length[\s\S]{0,400}setProductVariants\(pid, merged\)/.test(ptmBody));
-  ok("A1: onPrimary dismisses the modal (shell.modal.close) + refreshes the product context (mountProductPicker)", /saveRegistry\(registry\);\s*\n\s*shell\.modal\.close\(\);\s*\n\s*mountProductPicker\(\);/.test(ptmBody));
+  // uio-W01: there is no product picker to refresh. Promoting a document changes its Product tag,
+  // and the tab's Product dot is the thing on screen that has to catch up.
+  ok("A1: onPrimary dismisses the modal (shell.modal.close) + redraws the tabs", /saveRegistry\(registry\);\s*\n\s*shell\.modal\.close\(\);\s*\n\s*renderTabs\(\);/.test(ptmBody));
   ok("'+ Create a new Product…' path calls createProduct, not a raw ProductsStore write", /if \(chosen === NEW_KEY\) \{[\s\S]{0,150}pid = createProduct\(name\)\.id;/.test(ptmBody));
   // WIRING: the guarded menu item -- DS confirmModal, registered ONLY with the native store.
   ok("migrate prompt uses the DS confirmModal (not bespoke chrome)", /function migrateToFileBackendPrompt\(\)[\s\S]{0,200}confirmModal\("Migrate to file storage"/.test(AS));
@@ -10852,25 +10915,20 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("productSelectOptions handles an empty/missing store", g.productSelectOptions({}).length === 1 && g.productSelectOptions(undefined).length === 1);
   ok("productSelectOptions falls back to id when a product has no name", g.productSelectOptions({ x: {} })[1].label === "x");
 
-  // product-scope-persist: the active product survives a refresh (mirrors STAGE_PERSIST_KEY).
-  // arch-P3-05: the scope is the module's state, so these run it.
-  ok("setActiveProduct persists to verso.activeProduct (removes the pref on 'All products')", (function () {
+  // product-scope-persist REVERSED by uio-W01. The active Product used to persist across a refresh
+  // and be restored on first mount, which is exactly what made it a mode. The rail holds no scope
+  // now: see section "uio-W01 legacy scope retirement" for the migration that retires the key.
+  ok("the rail no longer holds, persists or restores a Product scope", (function () {
     var H = railHarness({ products: { "prod-a": { id: "prod-a" } } });
-    H.rail.setActiveProduct("prod-a");
-    var stored = H.storage["verso.activeProduct"] === "prod-a";
-    H.rail.setActiveProduct("");
-    return stored && H.storage["verso.activeProduct"] === undefined && H.rail.getActiveProduct() === "";
+    return typeof H.rail.setActiveProduct === "undefined" &&
+           typeof H.rail.getActiveProduct === "undefined" &&
+           typeof H.rail.restoreActiveProduct === "undefined" &&
+           typeof H.rail.adoptActiveProduct === "undefined";
   })());
-  ok("restoreActiveProduct validates the stored id against ProductsStore + clears a stale one", (function () {
-    var good = railHarness({ products: { "prod-a": { id: "prod-a" } } });
-    good.storage["verso.activeProduct"] = "prod-a";
-    var kept = good.rail.restoreActiveProduct() === "prod-a";
-    var stale = railHarness({ products: { "prod-b": { id: "prod-b" } } });
-    stale.storage["verso.activeProduct"] = "prod-gone";
-    var dropped = stale.rail.restoreActiveProduct() === "" && stale.storage["verso.activeProduct"] === undefined;
-    return kept && dropped;
+  ok("what it holds instead is the retired scope, reported once for Files to seed from", (function () {
+    var H = railHarness({ products: { "prod-a": { id: "prod-a" } } });
+    return H.rail.retiredProductScope && typeof H.rail.filesProductFacetSeed === "function";
   })());
-  ok("mountProductPicker restores the persisted scope on first mount (boot)", /function mountProductPicker\(\)[\s\S]{0,120}restoreActiveProduct\(\);/.test(SHELL));
 
   // index.html wiring: exactly 3 rail segments (Source/Edit/Publish free-form, no
   // gating), Edit active by default (preserves today's boot-straight-into-canvas
@@ -10885,16 +10943,14 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
   ok("the file picker's per-card menu carries Promote + conditional Remove-from-Product", /\{ label: "Promote to Product…", onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(ehm));
   ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(EDITOR_CSS));
-  ok("top-bar product-picker host present, next to the brand", idx.indexOf('id="product-picker-host"') > -1 && idx.indexOf('id="product-picker-host"') < idx.indexOf('id="home-btn"'));
-  // new-product-button: a "+" beside the picker creates an empty Product from scratch and selects it.
-  ok("mountProductPicker adds a '+' New product IconButton beside the Select", /U\.IconButton\(\{ icon: "plus", label: "New product", size: "sm", title: "New product", onClick: newProductPrompt \}\)/.test(SHELL) && /function mountProductPicker/.test(SHELL));
-  ok("newProductPrompt creates a Product then selects it (create + setActiveProduct + rebuild)", /function newProductPrompt\(\)[\s\S]{0,260}createProduct\(name\);[\s\S]{0,120}setActiveProduct\(prod\.id\);[\s\S]{0,80}mountProductPicker\(\);/.test(SHELL));
-  // new-product-empty-landing: '+ New Product' lands on the Edit-stage document browser (empty for a
-  // Product with zero docs, since renderBrowserGrid filters by the active product scope).
-  ok("newProductPrompt lands on the Edit-stage document browser (setStage edit + openBrowser)", /function newProductPrompt\(\)[\s\S]{0,900}setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(SHELL));
-  ok("the browser header carries a 'New Product' action wired to newProductPrompt", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,120}newProductPrompt\(\);/.test(ehm));
-  ok("the document browser is scoped to the active product (empty state for a zero-doc Product)", /function renderBrowserGrid\(\)[\s\S]{0,400}getActiveProduct\(\)[\s\S]{0,300}docMatchesProductStage\(registry\[id\], scope, null\)/.test(ehm));
-  ok("a document created from the browser pre-stamps the active Product (createBlankDoc gets its id)", /var newDocProduct = \(typeof getActiveProduct === "function"\) \? getActiveProduct\(\) : "";/.test(DOCS) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(DOCS));
+  // uio-W01 REVERSED all of this. The picker host, the "+" beside it, the select-then-land flow and
+  // the scoped browser were built correctly for a model where Product was a mode. It is a tag now.
+  ok("no top-bar product-picker host remains", idx.indexOf('id="product-picker-host"') === -1);
+  ok("creating a Product selects nothing, because there is nothing to select", /function newProductPrompt\(onDone\)[\s\S]{0,300}createProduct\(name\);[\s\S]{0,120}onDone\(prod\);/.test(SHELL));
+  ok("creating a Product no longer hijacks the stage or opens a browser", !/setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(SHELL));
+  ok("the browser header still carries a 'New Product' action, now just redrawing the grid", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,200}newProductPrompt\(function \(\) \{ renderBrowserGrid\(\); \}\);/.test(ehm));
+  ok("the document browser lists every document, unscoped", /function renderBrowserGrid\(\)[\s\S]{0,700}courseMatchesQuery\(registry\[id\], browserQuery\);/.test(ehm) && ehm.indexOf("docMatchesProductStage") === -1);
+  ok("a document created from the browser inherits no Product", /var newDocProduct = "";/.test(DOCS) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(DOCS));
   ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
   ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
 
@@ -10904,9 +10960,12 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("setStage() toggles is-active across all 3 rail-tab buttons", /STAGE_IDS\.forEach\(function \(s\) \{\s*var btn = document\.getElementById\("rail-tab-" \+ s\);/.test(SHELL));
   ok("setStage() shows/hides both placeholder regions", /document\.getElementById\("stage-source"\); if \(srcEl\) srcEl\.hidden = stage !== "source";/.test(SHELL) && /document\.getElementById\("stage-publish"\); if \(pubEl\) pubEl\.hidden = stage !== "publish";/.test(SHELL));
   ok("mountLeftRail() reconciles to __activeStage on mount (single source of truth)", /setStage\(__activeStage\);/.test(SHELL));
-  ok("mountProductPicker() builds a VersoUI.Select from ProductsStore", /U\.Select\(\{\s*options: productSelectOptions\(window\.ProductsStore\)/.test(SHELL));
-  ok("boot mounts the product picker alongside the left rail", /mountLeftRail\(\);[\s\S]{0,160}mountProductPicker\(\);/.test(e));
-  ok("__productRail exposes the shared product-context getter/setter (read by every stage)", /window\.__productRail\.getActiveProduct = getActiveProduct;/.test(SHELL) && /window\.__productRail\.setActiveProduct = setActiveProduct;/.test(SHELL));
+  // The shared product-context getter/setter every stage read is gone with the scope (uio-W01).
+  ok("boot mounts the left rail and no product picker", /mountLeftRail\(\);/.test(e) && e.indexOf("mountProductPicker") === -1);
+  ok("__productRail exposes no shared product context", !/window\.__productRail\.getActiveProduct/.test(SHELL) && !/window\.__productRail\.setActiveProduct/.test(SHELL));
+  // productSelectOptions survives: uio-W08/W12 still need a Product list to CHOOSE from. What went
+  // is the one global value it used to be bound to.
+  ok("a Product list is still buildable, just not bound to a global scope", /function productSelectOptions\(store\)/.test(SHELL));
 
   // Chrome-only invariant: none of this leaks into the learner-facing render/export path.
   var renderJs = src("src/render.js");
@@ -11006,7 +11065,18 @@ section("Product Rail: Source stage nav + article");
   // Wiring: setStage("source") triggers a render; the topic list re-renders on both
   // search input and the shared product-context change (Epic 1's dropdown).
   ok("setStage() renders the Source stage on activation", /if \(stage === "source"\) renderSourceStage\(\);/.test(SHELL));
-  ok("mountProductPicker()'s onChange re-renders the Source stage (re-resolves the Product's one document)", /onChange: function \(v\) \{ setActiveProduct\(v\); renderSourceStage\(\); reconcileActiveTabToScope\(\); \}/.test(SHELL));
+  // uio-W01 retired the picker whose onChange this pinned, and `reconcileActiveTabToScope` with it:
+  // nothing can filter the active document out from under you, so nothing has to put it back.
+  // Comments stripped: both files DESCRIBE what was removed, which is the point of the comment.
+  var SHELL_CODE = SHELL.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  var SRCSTAGE_CODE = src("src/editor/source-stage.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("the shell mounts no product picker and reconciles no scope", SHELL_CODE.indexOf("mountProductPicker") === -1 &&
+    SHELL_CODE.indexOf("reconcileActiveTabToScope") === -1);
+  ok("Source resolves its own document instead of borrowing a global scope",
+    /function activeSourceProductId\(\)/.test(src("src/editor/source-stage.js")) &&
+    /localStorage\.getItem\(SOURCE_TOPIC_PERSIST_KEY\)/.test(src("src/editor/source-stage.js")));
+  ok("Source no longer tells the author to pick a Product in a top bar that is gone",
+    SRCSTAGE_CODE.indexOf("Pick a Product in the top bar first") === -1);
   ok("search field re-renders the topic list live (input event, not a submit step)", /input\.addEventListener\("input", function \(\) \{\s*__sourceSearchQuery = input\.value;\s*renderSourceTopicList\(\);/.test(es));
   ok("search field reuses the established .vbrowser__search sibling, not a generic TextField", /h\("div", "vbrowser__search source-stage__search-field"\)/.test(es));
   // (facet SegmentedControl + per-section MarkdownLite column rendering retired with the section-cells path)
@@ -11550,10 +11620,12 @@ section("Product Rail: New Topic / Import from Markdown UI");
 
   // New Topic: blocked without an active Product; never touches doc/pushHistory (it's a
   // LibraryStore write, not a course edit).
-  ok("newTopicModal is blocked when no Product is active", /function newTopicModal\(\) \{\s*var productId = getActiveProduct\(\);\s*if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(es));
+  // uio-W01: the gate stays -- a source document belongs to a Product -- but it resolves from the
+  // stage's own state instead of a top-bar picker, and says something true now that the bar is gone.
+  ok("newTopicModal resolves its Product from the stage, and only stops when there is none", /function newTopicModal\(\) \{[\s\S]{0,400}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{ window\.alert\("Create a Product first[^"]*"\); return; \}/.test(es));
   ok("newTopicModal reuses the canonical promptModal, not a bespoke dialog", /promptModal\("New Topic", "Name", "", function \(name\)/.test(es));
   var ntmStart = es.indexOf("function newTopicModal()");
-  var ntmBody = es.slice(ntmStart, ntmStart + 900);
+  var ntmBody = es.slice(ntmStart, ntmStart + 1200);
   ok("newTopicModal never calls pushHistory() (LibraryStore write, not a doc edit)", ntmBody.indexOf("pushHistory()") === -1);
   // new-product first-run: "start writing" mints the unified master immediately (via renderSourceStage
   // -> ensureUnifiedDocForActiveProduct), matching the import path, instead of leaving a loose topic.
@@ -11561,7 +11633,7 @@ section("Product Rail: New Topic / Import from Markdown UI");
 
   // Import from Markdown: same active-Product gate, blocked without a chosen file, and
   // the variant file list is the Product's OWN declared variants (no free-form entry).
-  ok("importMarkdownModal is blocked when no Product is active", /function importMarkdownModal\(\) \{[\s\S]{0,1100}if \(!productId\) \{ window\.alert\("Pick a Product in the top bar first\."\); return; \}/.test(es));
+  ok("importMarkdownModal resolves its Product the same way", /function importMarkdownModal\(\) \{[\s\S]{0,1400}var productId = activeSourceProductId\(\);\s*if \(!productId\) \{ window\.alert\("Create a Product first[^"]*"\); return; \}/.test(es));
   ok("import is blocked until a primary file is chosen", /if \(!primaryFile\) \{ window\.alert\("Choose the manual file first\."\); return; \}/.test(es));
   ok("variant file rows come from declaredVariantsForProduct, not free-form name entry", /declaredVariants\.forEach\(function \(v\) \{\s*var vRow = modalField\(box, v \+ " \(optional\)"\);/.test(es));
   ok("only files the author actually chose are read (no attempt to read an unset variant slot)", /var variantNames = Object\.keys\(variantFiles\)\.filter\(function \(v\) \{ return variantFiles\[v\]; \}\);/.test(es));
@@ -12688,7 +12760,9 @@ section("uio-P-C04: picker scope + count + search + sort + needs-attention");
   ok("a junk row set degrades to empty, not a throw", view(null, {}).length === 0 && view([null], {}).length === 0);
 
   // --- the header states scope + the count of what is SHOWN, from the same array ---
-  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", \[pname, String\(docs\.length\)\]\.filter\(Boolean\)\.join\(" · "\)\)\)/.test(e));
+  // uio-W01 took the Product name out of this line -- there is no scope to state. The count is still
+  // taken from the rendered list, which is what this ever guarded.
+  ok("the count is taken from the rendered list, so it can't disagree with it", /head\.appendChild\(h\("span", "publish-pick__scope", String\(docs\.length\)\)\)/.test(e));
   // uio-F04: the drift number now comes from the shared resolver's fact, not a second staleness call.
   ok("rows are decorated with drift + lastAt, then run through the pure view", /var facts = f04DocFacts\(d\.id, vers\);\s*return \{ id: d\.id, title: d\.title, drift: facts \? facts\.drift\.count : 0, lastAt: last \? last\.at : 0, facts: facts \}/.test(e) && /publishPickView\(all, \{ query: __publishPickQuery, filter: __publishPickFilter, sort: __publishPickSort \}\)/.test(e));
 
@@ -16570,17 +16644,16 @@ section("Source/Editor feedback batch (UI wiring guards)");
   ok("collapse-all is appended to the shared source toolbar row", /querySelector\("#source-stage-nav-actions \.source-stage__toolbar"\)[\s\S]{0,120}toolbarRow\.appendChild\(collapseBtn\)/.test(es));
   // Issue 3: an empty source text block gets a <br> so an Enter-split new line is visible.
   ok("empty source block renders a <br> so it is not zero-height", /if \(!text\) \{ el\.appendChild\(document\.createElement\("br"\)\); return; \}/.test(es));
-  // Issue 4: an auto-picked Product is NOT persisted before the saved scope is restored.
-  // arch-P3-05: adopting a scope in memory is now a named operation, not an assignment to a
-  // closure variable -- and the module keeps the "don't persist before restore" rule itself.
-  ok("auto-pick does not clobber the saved Product before restore", (function () {
-    var wired = /if \(ProductRail\.hasRestoredActiveProduct\(\)\) setActiveProduct\(keys\[i\]\); else ProductRail\.adoptActiveProduct\(keys\[i\]\)/.test(es);
-    var H = railHarness({ products: { "prod-saved": { id: "prod-saved" }, "prod-auto": { id: "prod-auto" } } });
-    H.storage["verso.activeProduct"] = "prod-saved";
-    H.rail.adoptActiveProduct("prod-auto");                       // the boot-time auto-pick
-    var notPersisted = H.storage["verso.activeProduct"] === "prod-saved";
-    var restoredToSaved = H.rail.restoreActiveProduct() === "prod-saved";
-    return wired && notPersisted && restoredToSaved;
+  // Issue 4 is MOOT after uio-W01. The bug it guarded -- a boot-time auto-pick persisting over the
+  // author's saved scope before it had been restored -- cannot happen, because there is no saved
+  // scope and the auto-pick writes nothing. What replaces it: Source resolves what it shows from its
+  // own last-open document, and the resolution is READ-ONLY.
+  ok("Source's resolution reads the last-open document and writes nothing global", (function () {
+    var body = es.slice(es.indexOf("function activeSourceProductId()"), es.indexOf("function activeSourceProductId()") + 900);
+    return /localStorage\.getItem\(SOURCE_TOPIC_PERSIST_KEY\)/.test(body) &&
+           body.indexOf("setActiveProduct") === -1 &&
+           body.indexOf("adoptActiveProduct") === -1 &&
+           body.indexOf("setItem") === -1;
   })());
   // Editor: entering Edit reframes the canvas once it is actually visible.
   ok("entering Edit frames the canvas the first time it is visible", /stage === "edit" && !__framedWhileVisible[\s\S]{0,500}view\.ready = false; fitAll\(\); __framedWhileVisible = true/.test(SHELL));

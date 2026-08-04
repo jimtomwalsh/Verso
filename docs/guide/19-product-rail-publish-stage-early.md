@@ -4,8 +4,9 @@ The **Publish** rail tab is a **persistent publish queue** — like a render que
 documents you want to package, then run them all with one button; the queue is saved, so it survives
 a refresh and a stage-switch.
 
-- **Left — pick documents.** A list of your documents, scoped to the Product chosen in the top bar
-  (all documents when no Product is selected). Click **+** on a row to add it to the queue, or use
+- **Left — pick documents.** A list of **every** document. It used to be scoped to a product chosen
+  in the top bar, which meant untagged documents dropped out of the list entirely; there is no such
+  scope now. Click **+** on a row to add it to the queue, or use
   **Add current document** at the top to queue the document you have open. A solo export is just a
   queue of one.
 - **Send straight from the editor.** You don't have to switch stages first: the **send** glyph in the
@@ -22,7 +23,7 @@ a refresh and a stage-switch.
   what you're about to get. The name comes from the exporter itself, so what the row promises is what
   lands. Once a row has run, its status carries the real result and the prediction steps aside.
 - **Set one folder for the whole Product.** In the Publish head, **Set publish folder** picks one
-  folder for the Product you have selected. Every queued row then inherits it and nests itself into
+  folder for the product your queued rows share. Every queued row then inherits it and nests itself into
   `Product / document-variant`, so a whole-family publish costs one folder pick rather than one per
   row. Until you set it, rows say **Downloads** and packages go to your browser's downloads folder —
   nothing is written anywhere you didn't choose. The folder is remembered between visits.

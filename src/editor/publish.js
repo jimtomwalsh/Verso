@@ -116,7 +116,6 @@
   //   exporter()     the SCORM exporter (defaults to window.SCORMExport)
   //   docById(id)    a document from the registry
   //   productById(id) a Product container (for its display name)
-  //   activeProduct() the rail's Product scope, "" when none
   //   activeDocId()   the open document's id
   //   outputsFact(variants)   the SAME fact the outputs chip states
   //   masterVersions(doc)     source-version stamps this package is built against
@@ -137,7 +136,9 @@
     var exporter = env.exporter || function () { return window.SCORMExport; };
     var docById = env.docById || function () { return null; };
     var productById = env.productById || function () { return null; };
-    var activeProduct = env.activeProduct || function () { return ""; };
+    // uio-W01: env.activeProduct is gone -- Publish was never universal because it filtered by
+    // the global scope. A row now takes its Product from the document it publishes, and
+    // nothing else. uio-W16 gives Publish its own facets.
     var activeDocId = env.activeDocId || function () { return null; };
     var outputsFact = env.outputsFact || function () { return { count: 1, variants: [] }; };
     var masterVersions = env.masterVersions || function () { return {}; };
@@ -177,7 +178,7 @@
     // the tree it belongs to rather than the one that happens to be on screen.
     function pathCtx(row, variant) {
       var d = docById(row && row.docId) || {}, meta = d.meta || {};
-      var pid = meta.productId || activeProduct() || "";
+      var pid = meta.productId || "";
       var prod = pid && productById(pid);
       return { productId: pid, productName: (prod && prod.name) || "", docId: row && row.docId,
                docCode: meta.code || (row && row.docId), variant: variant || null };
@@ -218,12 +219,12 @@
         { replace: !!row.replaceVersion, suggest: X && X.suggestVersion });
       return out;
     }
-    // Which Product the head's folder chip is setting. The rail's scope when one is chosen;
-    // otherwise the Product the queued rows agree on, and failing that the open document's. A queue
-    // spanning several Products has no single root to state, so it resolves to null and the chip
-    // says so rather than naming one Product's folder and quietly writing it to another's.
+    // Which Product the head's folder chip is setting: the Product the queued rows agree on, and
+    // failing that the open document's. A queue spanning several Products has no single root to
+    // state, so it resolves to null and the chip says so rather than naming one Product's folder and
+    // quietly writing it to another's. uio-W01 removed the fourth answer this used to try first --
+    // the global scope, which could name a Product no row in the queue belonged to.
     function rootScope() {
-      var active = activeProduct(); if (active) return active;
       var seen = {};
       if (PQ()) (queue().rows || []).forEach(function (r) {
         var d = docById(r.docId), p = d && d.meta && d.meta.productId;
@@ -336,7 +337,7 @@
       }).then(function () {
         // ONE immutable record for everything that published together.
         if (runEntries.length && RH()) {
-          RH().append(history(), { productId: activeProduct(), createdAt: now(), entries: runEntries });
+          RH().append(history(), { productId: "", createdAt: now(), entries: runEntries });
           save("history", RH);
         }
         save("queue", PQ); repaint();

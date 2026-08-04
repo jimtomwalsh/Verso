@@ -1236,6 +1236,13 @@
       return !!(RH && RH.lastPublishedFor && RH.lastPublishedFor(releaseHistory(), docId));
     }
   });
+  // uio-W01: creating the rail retires `verso.activeProduct` -- read once, handed forward as the
+  // seed for the Files Product facet (uio-W06), then removed and never written again. Reported
+  // here so an upgrade is visible in the console rather than being a silent key deletion.
+  if (ProductRail.retiredProductScope && ProductRail.retiredProductScope.id && window.console && console.log) {
+    console.log("[products] retired the global Product scope; '" + ProductRail.retiredProductScope.id +
+      "' is kept as the Files Product-facet seed" + (ProductRail.retiredProductScope.seeded ? "" : " (a seed already existed)"));
+  }
 
   // ---- Publish orchestration -> src/editor/publish.js (arch-P3-03) -----------------------------
   // The four stores (queue / paths / presets / release history), the plan every row expands into,
@@ -1248,7 +1255,6 @@
     store: Store,                                            // the same durable k/v the registry rides
     docById: function (id) { return registry[id]; },
     productById: function (id) { return window.ProductsStore && window.ProductsStore[id]; },
-    activeProduct: function () { return getActiveProduct(); },
     activeDocId: function () { return activeDocId; },
     outputsFact: function (variants) { return f04OutputsFact(variants); },
     masterVersions: function (d) {
@@ -1399,10 +1405,12 @@
   // The documents the picker offers: every registry doc, scoped to the active Product when one is
   // set (untagged docs drop out of a Product-scoped view), sorted by title. docId = the registry key.
   function publishPickDocs() {
-    var pid = getActiveProduct(), out = [];
+    // uio-W01: Publish lists every document. It used to be filtered by the global Product scope,
+    // which is why Publish "was never universal" -- untagged documents dropped out of a scoped view
+    // entirely. uio-W16 gives Publish its own Product facet, chosen here rather than inherited.
+    var out = [];
     Object.keys(registry).forEach(function (id) {
       var d = registry[id]; if (!d) return;
-      if (pid && !docMatchesProductStage(d, pid, null)) return;
       out.push({ id: id, title: (d.meta && d.meta.title) || id });
     });
     out.sort(function (a, b) { return a.title.toLowerCase() < b.title.toLowerCase() ? -1 : 1; });
@@ -1657,8 +1665,7 @@
     // Header strip: what this list IS (scope + count), and how it is ordered.
     var head = h("div", "publish-pick__head");
     head.appendChild(h("span", "publish-pick__title", "Documents"));
-    var prod = getActiveProduct(), pname = prod && window.ProductsStore && window.ProductsStore[prod] ? window.ProductsStore[prod].name : "";
-    head.appendChild(h("span", "publish-pick__scope", [pname, String(docs.length)].filter(Boolean).join(" · ")));
+    head.appendChild(h("span", "publish-pick__scope", String(docs.length)));
     // Reuses `publish-chip` — this pane's established "compact value that opens a menu" control
     // (the queue row's preset chip). Same job, same look; a second chrome for it would be exactly
     // the piecemeal divergence this overhaul exists to undo.
@@ -1708,9 +1715,7 @@
     }
     var list = h("div", "publish-picklist");
     if (!docs.length) {
-      list.appendChild(h("div", "publish-empty", all.length
-        ? "No document matches that."
-        : ("No documents" + (getActiveProduct() ? " in this Product" : "") + " yet.")));
+      list.appendChild(h("div", "publish-empty", all.length ? "No document matches that." : "No documents yet."));
     }
     docs.forEach(function (d) {
       var row = h("div", "publish-pickrow");
@@ -2329,7 +2334,7 @@
         }
         saveRegistry(registry);
         shell.modal.close();
-        mountProductPicker(); // refresh the top-bar product context so the new/changed Product shows
+        renderTabs(); // uio-W01: no picker to refresh; the tab's Product dot is what changed
       }
     });
     var box = shell.body;
@@ -2373,7 +2378,6 @@
   var renderTabs = VE.bind("renderTabs");
   var closeTab = VE.bind("closeTab");
   var switchDoc = VE.bind("switchDoc");
-  var reconcileActiveTabToScope = VE.bind("reconcileActiveTabToScope");
 
 
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
@@ -4536,10 +4540,6 @@
   var setCellGeo = VE.bind("setCellGeo");
   var syncCellChip = VE.bind("syncCellChip");
   var mountDocSettingsBtn = VE.bind("mountDocSettingsBtn");
-  var setActiveProduct = VE.bind("setActiveProduct");
-  var getActiveProduct = VE.bind("getActiveProduct");
-  var restoreActiveProduct = VE.bind("restoreActiveProduct");
-  var mountProductPicker = VE.bind("mountProductPicker");
   var newProductPrompt = VE.bind("newProductPrompt");
   // Constants, read back from their owner right after it installs (see the bottom of this file).
   var CELL_GEO_LABEL, STAGE_IDS;
@@ -6099,7 +6099,6 @@
     publishFormatSummary: publishFormatSummary,
     publishOptionsForRow: publishOptionsForRow,
     publishQueue: publishQueue,
-    reconcileActiveTabToScope: reconcileActiveTabToScope,
     renderSettingsBody: renderSettingsBody,
     openBrowser: openBrowser,
     renderSourceStage: renderSourceStage,
@@ -6488,8 +6487,8 @@
     // THIS"). Import is the only caller today; anything else resolving a code should use it too.
     findRegistryId: window.VersoStorage.findRegistryId,
     getRegistry: getRegistry, saveLibrary: saveLibrary, saveProducts: saveProducts,
-    ProductRail: ProductRail, getActiveProduct: getActiveProduct, setActiveProduct: setActiveProduct,
-    setProductVariants: setProductVariants, mountProductPicker: mountProductPicker,
+    ProductRail: ProductRail,
+    setProductVariants: setProductVariants,
     deleteProduct: deleteProduct, deleteProductSource: deleteProductSource,
     unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct,
     pipelineByDirection: pipelineByDirection, pipelineButtons: pipelineButtons,
@@ -6636,7 +6635,6 @@
   // geometry/interactivity moved INTO its modal -- the "Document type" settings section)
   mountLeftRail(); // #89: wire the left rail (pinned actions + nav tabs)
   mountPanelOverflow(); // uio-E-C05 (EDIT-09): wire the inspector panel's ⋯ overflow menu
-  mountProductPicker(); // Product Rail: top-bar product dropdown (Source/Edit/Publish shared context)
   mountStorageDot(); // #92b: wire the storage-health dot + quota probe
   mountStagingBanner(); // flag a staging Pages deploy so it's never mistaken for production
   refreshCourseWeight(); // §308: initial course-weight readout

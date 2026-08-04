@@ -95,8 +95,10 @@ a Product, **Delete source document** (clears the whole continuous document but 
 **Delete Product** (removes the Product entirely, including its source and the tag on any linked
 course). The deletes ask for confirmation and can't be undone.
 
-**Populating the Source wiki.** Switch to the **Source** rail tab, pick a Product from the top bar,
-then use the icon toolbar above the topic list (hover any icon for its name):
+**Populating the Source wiki.** Switch to the **Source** rail tab, then use the icon toolbar above
+the topic list (hover any icon for its name). Source opens the document you had open there last,
+and falls back to the first product that has source content — you no longer pick a product from the
+top bar to get there, because there is no picker. A proper document switcher for Source is coming.
 
 - **New topic** — creates a blank topic you write directly, the same click-to-edit way as a
   course's text blocks: click a heading or body to edit it, click away to save. Editing a body

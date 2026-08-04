@@ -6,17 +6,19 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
 ![The Structure panel: the outliner of chapters and pages, with the Blocks palette below.](docs/assets/structure-panel.webp "The Structure panel — the outliner of chapters and pages.")
 
 - **Top bar.** One bar carries everything, left to right. **Identity** (always shown): the **Verso**
-  mark, the **product picker** (sets the active product across Source, Edit and Publish — and
-  **scopes the open tabs** to that product; "All products" shows every open tab; your choice is
-  **remembered across refresh**), a **＋** to **create a new product** from scratch, and the
-  **storage-health dot** beside it. Creating a product (either the **＋** here or **New Product** in
-  the document browser) makes it the active product and drops you on its **document browser** —
-  empty, since nothing is tagged to it yet; any course you create from there is tagged to the new
-  product automatically.
+  mark and the **storage-health dot**.
+
+  **Product is a tag, not a mode.** There is no product picker and no "active product". A document
+  carries a product or carries none, and nothing is hidden either way: every open document has a
+  tab, the document browser lists everything, and Publish offers everything. You tag a document with
+  a product when you create it or from its card menu, and the tab's **colour dot** is how you read
+  that tag at a glance. **New Product** in the document browser creates an empty one — it does not
+  switch you into anything, because there is nothing to switch into; tag a document with it and the
+  product has content.
   The rest of the bar appears **only in the Edit stage** and covers the document you're editing, in
   three zones split by faint dividers. **Tabs:** the **file-picker** (▤, browse all courses — a
   browser **grouped by document type**, colour-coded, each card showing its product,
-  interactive/static and whether it's open; it respects the product scope and opens automatically
+  interactive/static and whether it's open; it lists every course and opens automatically
   when no course is open) and the **open-course tabs**. Each tab carries a **doc-type glyph** (course,
   presentation, or paged/print document) so a Product's course, one-pager and deck stay
   distinguishable at a glance, plus a **per-product colour dot** (hover it to see which Product).
@@ -45,7 +47,7 @@ Verso has three panes: **Structure/Blocks/Components** (left), the **Canvas** (c
   source**: the same source document you'd see in the Source stage, in a narrow reading column,
   with a **search box** (type to find, Enter / Shift+Enter to cycle matches) and a **table of
   contents** that jumps to a chapter and tracks where you're reading. It keys off the document you
-  have open (its product), not the product picker, so it always matches the course in front of you.
+  have open (its product), so it always matches the course in front of you.
   It's read-only — all source editing stays in the Source stage. The panel remembers which section
   you last used.
   **Placing linked copy.** Select any passage in this panel (a phrase, or a heading through a

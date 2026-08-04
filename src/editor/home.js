@@ -22,9 +22,9 @@
   function install(kernel) {
     var E = kernel.need(
       "h", "saveRegistry", "iconBtn", "saveOpenDocIds", "stampDocUpdatedAt", "confirmModal",
-      "showNewDocDialog", "getActiveProduct", "editorAssetResolve", "activeTheme", "formatRelativeTime", "switchDoc",
+      "showNewDocDialog", "editorAssetResolve", "activeTheme", "formatRelativeTime", "switchDoc",
       "promptModal", "clone", "activateDoc", "mount", "promoteToProductModal", "unlinkDocFromProduct",
-      "mountProductPicker", "exportVersoPackage", "showContextMenu", "courseMatchesQuery", "docMatchesProductStage", "recentsCompare",
+      "exportVersoPackage", "showContextMenu", "courseMatchesQuery", "recentsCompare",
       "pickCourseFile", "importDocToRegistry", "newProductPrompt", "storageBackend", "renderTabs", "registry",
       "openDocIds", "activeDocId"
     );
@@ -37,7 +37,6 @@
         stampDocUpdatedAt = E.stampDocUpdatedAt,
         confirmModal = E.confirmModal,
         showNewDocDialog = E.showNewDocDialog,
-        getActiveProduct = E.getActiveProduct,
         editorAssetResolve = E.editorAssetResolve,
         activeTheme = E.activeTheme,
         formatRelativeTime = E.formatRelativeTime,
@@ -48,11 +47,9 @@
         mount = E.mount,
         promoteToProductModal = E.promoteToProductModal,
         unlinkDocFromProduct = E.unlinkDocFromProduct,
-        mountProductPicker = E.mountProductPicker,
         exportVersoPackage = E.exportVersoPackage,
         showContextMenu = E.showContextMenu,
         courseMatchesQuery = E.courseMatchesQuery,
-        docMatchesProductStage = E.docMatchesProductStage,
         recentsCompare = E.recentsCompare,
         pickCourseFile = E.pickCourseFile,
         importDocToRegistry = E.importDocToRegistry,
@@ -204,7 +201,7 @@
       if (linked) {
         items.push({ label: "Remove from Product", onClick: function () {
           var pname = (window.ProductsStore[linkedPid].name) || "this Product";
-          confirmModal("Remove from Product?", "Unlinks “" + ((d.meta && d.meta.title) || id) + "” from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(d); mountProductPicker(); renderBrowserGrid(); }, { okLabel: "Remove", danger: true });
+          confirmModal("Remove from Product?", "Unlinks “" + ((d.meta && d.meta.title) || id) + "” from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(d); renderBrowserGrid(); }, { okLabel: "Remove", danger: true });
         } });
       }
       items.push({ sep: true });
@@ -266,10 +263,12 @@
     function renderBrowserGrid() {
       if (!browserUI) return;
       var grid = browserUI.grid; grid.innerHTML = "";
-      // Respect the global product scope (like the tabs) + the search query.
-      var scope = (typeof getActiveProduct === "function") ? getActiveProduct() : "";
+      // uio-W01: the grid used to be scoped by the global Product, so a document you had open could
+      // be missing from the browser that is supposed to list everything. It lists everything now,
+      // filtered only by the search query. This is a temporary unscope, not a redesign -- uio-W04
+      // replaces this whole overlay with the Files destination, where Product is a facet you choose.
       var ids = Object.keys(registry).filter(function (id) {
-        return courseMatchesQuery(registry[id], browserQuery) && docMatchesProductStage(registry[id], scope, null);
+        return courseMatchesQuery(registry[id], browserQuery);
       });
       ids.sort(function (x, y) { return recentsCompare(registry[x], registry[y]); });
       if (!ids.length) { grid.appendChild(buildBrowserEmpty()); return; }
@@ -308,10 +307,11 @@
         pickCourseFile(function (imported) { importDocToRegistry(imported); closeBrowser(); });
       });
       bar.appendChild(importBtn);
-      // new-product-empty-landing: create a Product straight from the browser header. newProductPrompt
-      // sets it as the active scope and re-opens this browser onto its (empty) grid.
+      // Create a Product straight from the browser header. uio-W01: it no longer switches a scope
+      // (there is none) -- a new Product is simply empty until a document is tagged with it, so the
+      // grid just redraws.
       var newProdBtn = h("button", "vbrowser__btn", "New Product");
-      newProdBtn.addEventListener("click", function () { newProductPrompt(); });
+      newProdBtn.addEventListener("click", function () { newProductPrompt(function () { renderBrowserGrid(); }); });
       bar.appendChild(newProdBtn);
       var newBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "New course");
       newBtn.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
