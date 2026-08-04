@@ -2669,6 +2669,11 @@
   // arch-P3b-07: the in-app user guide -- the Markdown renderer, the modal, its contents list and
   // the figure handling -- moved to editor/help.js. It sat under the theme banner.
   var openHelpModal = VE.bind("openHelpModal");
+  // arch-P5-03: the guide is docs/guide/*.md, and help.js owns the one loader that joins them in
+  // the declared order. The palette needs the same text for its heading index -- and needs it
+  // through the host surface, because need() resolves against provide(), never against what
+  // another module exposes.
+  var loadGuide = VE.bind("loadGuide");
 
   // ...continues in theme.js (arch-P3b-07).
 
@@ -6297,6 +6302,7 @@
   // arch-P3b-07p: what the Cmd-K palette reads. Most of these are the COMMANDS it dispatches to.
   window.VersoEditor.provide({
     // @p07-provide
+    loadGuide: loadGuide,
     setHotspotEditId: setHotspotEditId,
     hotspotOwnerOf: hotspotOwnerOf,
     dirPermission: dirPermission,

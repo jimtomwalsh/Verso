@@ -1,0 +1,82 @@
+[
+ {
+  "file": "00-introduction.md",
+  "is": "what Verso is, and how this guide is arranged"
+ },
+ {
+  "file": "01-quick-start.md",
+  "is": "1. Quick start"
+ },
+ {
+  "file": "02-opening-the-app.md",
+  "is": "2. Opening the app"
+ },
+ {
+  "file": "03-the-workspace.md",
+  "is": "3. The workspace"
+ },
+ {
+  "file": "04-core-concepts.md",
+  "is": "4. Core concepts"
+ },
+ {
+  "file": "05-pages-chapters.md",
+  "is": "5. Pages & chapters"
+ },
+ {
+  "file": "06-adding-editing-blocks.md",
+  "is": "6. Adding & editing blocks"
+ },
+ {
+  "file": "07-block-catalogue.md",
+  "is": "7. Block catalogue"
+ },
+ {
+  "file": "08-image-hotspots-software-tours.md",
+  "is": "8. Image hotspots & software tours"
+ },
+ {
+  "file": "09-theming-design.md",
+  "is": "9. Theming & design"
+ },
+ {
+  "file": "10-variants.md",
+  "is": "10. Variants"
+ },
+ {
+  "file": "11-importing-from-a-spreadsheet-csv.md",
+  "is": "11. Importing from a spreadsheet (CSV)"
+ },
+ {
+  "file": "12-preview-demo-mode.md",
+  "is": "12. Preview (Demo mode)"
+ },
+ {
+  "file": "13-review-comments-verso-viewer.md",
+  "is": "13. Review & comments (Verso Viewer)"
+ },
+ {
+  "file": "14-collaborating-in-server-mode.md",
+  "is": "14. Collaborating in server mode"
+ },
+ {
+  "file": "15-publishing-to-scorm.md",
+  "is": "15. Publishing to SCORM"
+ },
+ {
+  "file": "16-keyboard-shortcuts.md",
+  "is": "16. Keyboard shortcuts"
+ },
+ {
+  "file": "17-troubleshooting-tips.md",
+  "is": "17. Troubleshooting & tips"
+ },
+ {
+  "file": "18-product-rail-source-stage-early.md",
+  "is": "18. Product Rail: Source stage (early)"
+ },
+ {
+  "file": "19-product-rail-publish-stage-early.md",
+  "is": "19. Product Rail: Publish stage (early)"
+ }
+]

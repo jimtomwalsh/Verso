@@ -39,6 +39,14 @@ function courseCss() {
   return order.map(function (o) { return src("styles/course/" + o.file); }).join("\n");
 }
 var COURSE_CSS = courseCss();
+// arch-P5-03: docs/USER-GUIDE.md is docs/guide/*.md now, joined in the order it declares -- the
+// same concatenation help.js's loadGuide() performs, so a heading the suite finds is a heading the
+// in-app guide shows.
+function guideMd() {
+  var order = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/guide/order.json"), "utf8"));
+  return order.map(function (o) { return src("docs/guide/" + o.file); }).join("\n");
+}
+var GUIDE = guideMd();
 // arch-P2: the behavioural test seam. LOAD.load(rel, opts) runs one of the app's classic scripts
 // in a node:vm context with a stub window/document and returns what it published -- for the files
 // a plain `require` cannot reach (DOM at load, or an activation gate that must be seeded first).
@@ -350,6 +358,56 @@ section("arch-P5-01 split chrome stylesheet");
      ["b.css", "a.css"].join("|") !== ["a.css", "b.css"].join("|"));
   ok("the gate would catch an undeclared stylesheet (proof)",
      ["99-not-declared.css"].filter(function (f) { return declared.indexOf(f) === -1; }).length === 1);
+})();
+
+// ---- arch-P5-03: the split user guide -------------------------------------
+// docs/USER-GUIDE.md was 1,138 lines and 84 of the last 200 commits. It is twenty files under
+// docs/guide/ now, one per section plus the introduction, joined in the order it declares.
+//
+// TWO readers consume it -- the in-app help modal and the Cmd-K heading index -- and they go
+// through ONE loader on purpose. Two concatenations that could disagree would let the palette offer
+// a heading the guide does not show, which is worse than either being wrong on its own.
+section("arch-P5-03 split user guide");
+(function () {
+  var order = JSON.parse(src("docs/guide/order.json"));
+  var declared = order.map(function (o) { return o.file; });
+  var onDisk = fs.readdirSync(path.join(ROOT, "docs/guide"))
+    .filter(function (f) { return /\.md$/.test(f); }).sort();
+
+  var undeclared = onDisk.filter(function (f) { return declared.indexOf(f) === -1; });
+  var phantom = declared.filter(function (f) { return onDisk.indexOf(f) === -1; });
+  ok("every guide section is in order.json" + (undeclared.length ? " -- MISSING: " + undeclared.join(", ") : ""),
+     undeclared.length === 0);
+  ok("every order.json entry names a real section" + (phantom.length ? " -- PHANTOM: " + phantom.join(", ") : ""),
+     phantom.length === 0);
+  ok("the old monolith is gone", !fs.existsSync(path.join(ROOT, "docs/USER-GUIDE.md")));
+
+  // ORDER matters here for a different reason than CSS: the guide is read top to bottom, its
+  // heading numbers run 1..19, and the Cmd-K index lists them in file order.
+  var numbered = declared.filter(function (f) { return /^\d\d-/.test(f); });
+  ok("sections are ordered by their leading number, and the declared order agrees",
+     numbered.join("|") === numbered.slice().sort().join("|"));
+  ok("the joined guide still reads as one document (## headings run 1..19 in order)",
+     (GUIDE.match(/^## (\d+)\./gm) || []).map(function (m) { return parseInt(m.slice(3), 10); })
+       .every(function (n, i, a) { return i === 0 || n === a[i - 1] + 1; }));
+
+  // ONE loader, reached through the host surface
+  var HELP = src("src/editor/help.js"), PAL = src("src/editor/palette.js");
+  ok("help.js owns the loader and reads the declared order",
+     /function loadGuide\(\)/.test(HELP) && /fetch\("docs\/guide\/order\.json"/.test(HELP)
+     && /parts\.join\("\\n"\)/.test(HELP));
+  ok("the palette uses that SAME loader rather than fetching the guide itself",
+     /E\.loadGuide\(\)/.test(PAL) && PAL.indexOf('fetch("docs/') === -1);
+  ok("the loader crosses through the host surface, not module-to-module",
+     /var loadGuide = VE\.bind\("loadGuide"\)/.test(src("src/editor.js"))
+     && /loadGuide: loadGuide,/.test(src("src/editor.js")));
+
+  // docs-maintain reads the same order, so block coverage is over the whole guide as before
+  ok("tools/docs-maintain.js reads the declared order, not one file",
+     /docs\/guide\/order\.json/.test(src("tools/docs-maintain.js")));
+
+  ok("the gate would catch an undeclared section (proof)",
+     ["99-not-declared.md"].filter(function (f) { return declared.indexOf(f) === -1; }).length === 1);
 })();
 
 // ---- arch-P5-02: the split COURSE stylesheet, which ships ------------------
@@ -2593,7 +2651,7 @@ section("#81 Help markdown renderer");
   var ed = src("src/editor/help.js"), e = src("src/editor.js");
   ok("#81 help-btn wired to openHelpModal", /getElementById\("help-btn"\)[\s\S]{0,80}openHelpModal/.test(ed));
   ok("#81 no stale window.open to USER-GUIDE.md", ed.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1 && e.indexOf("window.open(\"docs/USER-GUIDE.md\"") === -1);
-  ok("#81 help modal fetches the guide", /fetch\("docs\/USER-GUIDE\.md"/.test(ed));
+  ok("#81 help modal loads the guide through the one shared loader", /loadGuide\(\)\s*\n\s*\.then\(function \(md\) \{/.test(ed) && /fetch\("docs\/guide\/order\.json"/.test(ed));   // arch-P5-03
 })();
 
 // ---- #8: two-pane docs reader — sidebar TOC + search built from the guide's headings ----
@@ -2627,7 +2685,7 @@ section("#8 docs auto-maintenance");
 (function () {
   var dm = require(path.join(ROOT, "tools/docs-maintain.js"));
   // arch-P3b-07h: the palette moved to src/editor/assets.js with the tab it feeds.
-  var ed = src("src/editor/assets.js"), guide = src("docs/USER-GUIDE.md");
+  var ed = src("src/editor/assets.js"), guide = GUIDE;
   var blocks = dm.extractLibrary(ed);
   ok("#8 maintain: parses the block palette from source (>= 20)", blocks.length >= 20 && blocks.every(function (b) { return b.group && b.label; }));
   var cov = dm.blockCoverage(ed, guide);
@@ -2730,7 +2788,7 @@ section("#27 docs capture scene DSL");
   ok("#27 shipped structure-panel scene is valid", dc.validateScene(shipped).ok === true);
   ok("#27 runner loads SAMPLE_DOC only, never reads a stored doc (export-control)", src("tools/docs-capture.js").indexOf("window.SAMPLE_DOC") !== -1 && src("tools/docs-capture.js").indexOf("localStorage.getItem") === -1 && src("tools/docs-capture.js").indexOf("getDoc()") === -1);
   // the shipped still figure is wired into the guide + the committed asset exists
-  ok("#27 USER-GUIDE references the committed still", src("docs/USER-GUIDE.md").indexOf("docs/assets/structure-panel.webp") !== -1);
+  ok("#27 USER-GUIDE references the committed still", GUIDE.indexOf("docs/assets/structure-panel.webp") !== -1);
   ok("#27 committed still exists + within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/structure-panel.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
 })();
 
@@ -2785,7 +2843,7 @@ section("#28 animated-WebP muxer + motion");
   ok("#28 committed motion within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/outliner-navigate.webp")).size <= dc.MOTION_BUDGET; } catch (e) { return false; } })());
   ok("#28 committed poster within still budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/outliner-navigate-still.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
   ok("#28 committed motion is a real animated WebP (VP8X+ANIM+2 ANMF)", (function () { try { var m = readBuf("docs/assets/outliner-navigate.webp"); var c = parseChunks(m); return c[0].fourcc === "VP8X" && c.some(function (x) { return x.fourcc === "ANIM"; }) && c.filter(function (x) { return x.fourcc === "ANMF"; }).length === 2; } catch (e) { return false; } })());
-  ok("#28 USER-GUIDE references the motion figure + poster", src("docs/USER-GUIDE.md").indexOf("docs/assets/outliner-navigate.webp") !== -1 && src("docs/USER-GUIDE.md").indexOf("poster=docs/assets/outliner-navigate-still.webp") !== -1);
+  ok("#28 USER-GUIDE references the motion figure + poster", GUIDE.indexOf("docs/assets/outliner-navigate.webp") !== -1 && GUIDE.indexOf("poster=docs/assets/outliner-navigate-still.webp") !== -1);
   ok("#28 webp-anim.js logged in THIRD-PARTY-NOTICES audit", src("THIRD-PARTY-NOTICES.md").indexOf("tools/webp-anim.js") !== -1);
 })();
 
@@ -2873,7 +2931,7 @@ section("#29 annotation overlay");
   ok("#29 annotated motion scene valid", dc.validateScene(JSON.parse(src("docs/scenes/annotated-navigate.json"))).ok === true);
   ok("#29 annotated still committed within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/annotated-structure.webp")).size <= dc.STILL_BUDGET; } catch (e) { return false; } })());
   ok("#29 annotated motion committed within budget", (function () { try { return fs.statSync(path.join(ROOT, "docs/assets/annotated-navigate.webp")).size <= dc.MOTION_BUDGET; } catch (e) { return false; } })());
-  ok("#29 USER-GUIDE references both annotated figures", src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-structure.webp") !== -1 && src("docs/USER-GUIDE.md").indexOf("docs/assets/annotated-navigate.webp") !== -1);
+  ok("#29 USER-GUIDE references both annotated figures", GUIDE.indexOf("docs/assets/annotated-structure.webp") !== -1 && GUIDE.indexOf("docs/assets/annotated-navigate.webp") !== -1);
 })();
 
 // ---- #30: staleness coverage mapping --------------------------------------------------
@@ -2931,7 +2989,7 @@ section("#30 staleness coverage");
 section("#91 docs anti-drift — block catalogue coverage");
 (function () {
   var e = src("src/editor.js");
-  var guide = src("docs/USER-GUIDE.md");
+  var guide = GUIDE;
   // Extract ONLY top-level LIBRARY entries — each begins `{ group: "..", icon: "..", label: ".." `
   // (nested labels inside make() bodies, e.g. the checkbox default / quiz retry, are skipped).
   // arch-P3b-07h: the palette moved to src/editor/assets.js.
