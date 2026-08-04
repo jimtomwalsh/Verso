@@ -1602,7 +1602,10 @@ section("platform-pivot 34 server-mode bootstrap");
 // source documents overwrite each other. The adapter decomposes instead.
 section("platform-pivot 32 library + products facets");
 (function () {
-  var srv = require(path.join(ROOT, "server/verso-server.js"));
+  // server/verso-server.js is required only AFTER the node:sqlite guard below: it pulls
+  // server/store.js in, which loads the driver at module scope, so on a Node without it
+  // the require itself throws before any guard can catch anything. Everything down to
+  // that point needs no server -- it reads source text and the two pure modules.
   var SD = require(path.join(ROOT, "src/source-doc.js"));
 
   // --- the facet contract the seam checks ---
@@ -1650,6 +1653,7 @@ section("platform-pivot 32 library + products facets");
   // --- the server reassembles what the client decomposed ---
   try { require("node:sqlite"); }
   catch (e) { warn("node:sqlite unavailable (Node < 22.5) -> facet round-trip skipped"); return; }
+  var srv = require(path.join(ROOT, "server/verso-server.js"));
   var createBlockStore = require(path.join(ROOT, "server/block-store.js")).createBlockStore;
   var createStore = require(path.join(ROOT, "server/store.js")).createStore;
   (function () {
