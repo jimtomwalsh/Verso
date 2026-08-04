@@ -3365,32 +3365,64 @@ section("#71 recents");
   ok("tagDocProductStage is null-safe", g.tagDocProductStage(null, "x", "y") === null);
 })();
 
-// ---- SPEC 7: file picker — doc browser grouped by geo (pure) ----
-section("editor-rework file-picker grouping");
+// ---- SPEC 7 -> uio-W09: the picker's geometry grouping, which survives as Files' Type view ----
+// The overlay browser grouped documents by GEOMETRY, because a slide deck and a workbook do not
+// belong in the same row. uio-W09 deleted the overlay; the epic's ledger keeps that grouping, as
+// Files' Type view. So the claim moves rather than being dropped -- these are the same four
+// groups, in the same order, over a corpus that is now BOTH stores rather than half of them.
+section("uio-W09 the picker's grouping survives as Files' Type view");
 (function () {
-  var t = src("src/editor.js");
-  // arch-P3b-07k: a fenced slice must follow its code -- the grouping moved to editor/home.js.
-  var m = src("src/editor/home.js").match(/\/\* @pure-browser-geo-start \*\/([\s\S]*?)\/\* @pure-browser-geo-end \*\//);
-  if (!m) { ok("locate @pure-browser-geo fence", false); return; }
-  var g = new Function(m[1] + "\nreturn { groupDocIdsByGeo: groupDocIdsByGeo, BROWSER_GEO_ORDER: BROWSER_GEO_ORDER };")();
-  var reg = { a: { geo: "reflow" }, b: { geo: "paged" }, c: { geo: "reflow" }, d: { geo: "frame" }, e: { geo: "unknownGeo" } };
-  var geoOf = function (doc) { return doc.geo; };
-  var groups = g.groupDocIdsByGeo(["a", "b", "c", "d", "e"], reg, geoOf);
-  ok("groups appear in canonical geo order (reflow, frame, paged)", groups.map(function (x) { return x.geo; }).join(",") === "reflow,frame,paged");
-  ok("reflow group holds the reflow docs + unknown-geo fallback", groups[0].ids.sort().join(",") === "a,c,e");
-  ok("frame group holds the frame doc", groups[1].ids.join(",") === "d");
-  ok("paged group holds the paged doc", groups[2].ids.join(",") === "b");
-  ok("an empty geo produces no group", g.groupDocIdsByGeo(["b"], reg, geoOf).map(function (x) { return x.geo; }).join(",") === "paged");
-  ok("ids with no registry doc are dropped", g.groupDocIdsByGeo(["a", "ghost"], reg, geoOf)[0].ids.join(",") === "a");
-  ok("null-safe on empty input", g.groupDocIdsByGeo(null, reg, geoOf).length === 0);
-  // the browser is product-scoped + auto-opens on a zero-tab Edit landing
-  // arch-P3b-07k: both claims are about the browser, which is editor/home.js now.
-  // uio-W01 REVERSED this: the browser used to be scoped by the global Product, so a document you
-  // had open could be missing from the browser meant to list everything. It lists everything now.
-  ok("the browser lists every document, filtered only by the search query", /courseMatchesQuery\(registry\[id\], browserQuery\);/.test(src("src/editor/home.js")) &&
-    src("src/editor/home.js").indexOf("docMatchesProductStage") === -1);
-  ok("landing on Edit with no tabs auto-opens the browser", /if \(stage === "edit" && !openDocIds\.length && typeof openBrowser === "function"\) openBrowser\(\);/.test(src("src/editor/shell.js")));
-  ok("cards carry a static/interactive + open-state badge", /vbrowser-card__badge--open"[^)]*"Open"/.test(src("src/editor/home.js")) && /cell\.interactive \? "Interactive" : "Static"/.test(src("src/editor/home.js")));
+  var F = require(path.join(ROOT, "src/editor/files.js"))._pure;
+  var docs = [
+    { id: "a", type: "reflow", title: "A" }, { id: "b", type: "paged", title: "B" },
+    { id: "c", type: "reflow", title: "C" }, { id: "d", type: "frame", title: "D" },
+    { id: "e", type: "unknownGeo", title: "E" }, { id: "s", type: "source", title: "S" }
+  ];
+  var groups = F.groupCorpus(docs, "type", {});
+  ok("groups appear in canonical order, with Source now leading the geometries",
+    groups.map(function (g) { return g.key; }).join(",") === "source,reflow,frame,paged");
+  ok("the reflow group holds the reflow documents AND the unknown-geometry fallback",
+    groups[1].docs.map(function (d) { return d.id; }).sort().join(",") === "a,c,e");
+  ok("the frame group holds the frame document", groups[2].docs.map(function (d) { return d.id; }).join(",") === "d");
+  ok("the paged group holds the paged one", groups[3].docs.map(function (d) { return d.id; }).join(",") === "b");
+  ok("SOURCE DOCUMENTS HAVE A GROUP AT ALL NOW -- the overlay could never list one",
+    groups[0].docs.map(function (d) { return d.id; }).join(",") === "s");
+  ok("an absent type produces no group", F.groupCorpus([docs[1]], "type", {}).map(function (g) { return g.key; }).join(",") === "paged");
+  ok("null-safe on empty input", F.groupCorpus(null, "type", {}).length === 0);
+
+  // --- the overlay itself, and every route into it ---
+  var HOME = src("src/editor/home.js"), SHELL = src("src/editor/shell.js"), ED = src("src/editor.js");
+  ok("NO OVERLAY BROWSER REMAINS", ["ensureBrowser", "openBrowser", "closeBrowser", "browserIsOpen",
+    "renderBrowserGrid", "buildBrowserCard", "buildBrowserEmpty"].every(function (fn) {
+      return HOME.indexOf("function " + fn + "(") === -1;
+    }));
+  ok("and nothing calls one", ["src/editor.js", "src/editor/shell.js", "src/editor/home.js",
+    "src/editor/files.js", "src/editor/palette.js"].every(function (f) {
+      var code = src(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+      return !/\bopenBrowser\b|\bcloseBrowser\b|\bbrowserIsOpen\b/.test(code);
+    }));
+  ok("LANDING ON EDIT WITH NOTHING OPEN LANDS FILES, not a modal over the canvas",
+    /if \(stage === "edit" && !openDocIds\.length\) \{ setStage\("files"\); return; \}/.test(SHELL));
+  ok("the top-bar file-picker button lands Files too",
+    /if \(b\) b\.addEventListener\("click", function \(\) \{\s*if \(window\.__leftRail\) window\.__leftRail\.setStage\("files"\);/.test(HOME));
+  ok("the Escape handler that existed only to close it is gone with it",
+    HOME.indexOf("browserIsOpen()") === -1 &&
+    !/addEventListener\("keydown"/.test(HOME.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")));
+  ok("the browser-verify hook lands the destination rather than opening a surface",
+    /openFiles: function \(\) \{ if \(window\.__leftRail\) window\.__leftRail\.setStage\("files"\); \}/.test(ED));
+  ok("the file MANAGEMENT the overlay hosted survives, because Files' row menu already called it",
+    /function duplicateCourse\(id\)/.test(HOME) && /function renameCourse\(id\)/.test(HOME) &&
+    /function deleteCourse\(id\)/.test(HOME) && /function storeLocationText\(\)/.test(HOME));
+
+  // --- the shared search chrome stays: two live surfaces still use it ---
+  ok("the shared search chrome is kept, because Source and the Edit source panel render it",
+    /\.vbrowser__search \{/.test(src("styles/editor/13-home.css")) &&
+    /vbrowser__search/.test(src("src/editor/source-link.js")) &&
+    /vbrowser__search/.test(src("src/editor.js")));
+  ok("and the overlay's own chrome is deleted rather than left standing",
+    ["\\.vbrowser__grid", "\\.vbrowser-card \\{", "\\.vbrowser-thumb \\{", "\\.vbrowser__foot"].every(function (sel) {
+      return !new RegExp(sel).test(src("styles/editor/13-home.css"));
+    }));
 })();
 
 // ---- SPEC 7: product-filtered tab scope (pure predicate) ----
@@ -3891,9 +3923,16 @@ section("#69 migration cutover");
   // so the one-call-site claim now counts one in each file rather than two in one.
   var ehm2 = src("src/editor/home.js");
   // uio-W13 renamed the verb; the wiring is unchanged.
-  ok("the assign action is wired into the file picker's per-card menu, on the card's doc", /label: d\.meta && d\.meta\.productId \? "Move to another product…" : "Assign a product…",\s*\n?\s*onClick: function \(\) \{ promoteToProductModal\(d\); \} \}/.test(ehm2));
-  ok("promoteToProductModal has ONE UI call site (the per-card menu) + its definition",
-    (ehm2.match(/promoteToProductModal\(/g) || []).length === 1 && (ed.match(/promoteToProductModal\(/g) || []).length === 1);
+  // uio-W09 retired the overlay and its per-card menu with it. THE ACTIONS DID NOT MOVE -- Files'
+  // row menu was built (uio-W04b) calling these very functions, which is why the surface could be
+  // deleted without taking any behaviour with it.
+  ok("the assign action is wired into Files' row menu, on that row's doc", /d\.productId \? "Move to another product…" : "Assign to a product…",\s*\n?\s*onClick: function \(\) \{ E\.promoteToProductModal\(E\.registry\[d\.id\]\); \} \}/.test(src("src/editor/files.js")));
+  // uio-W09 retired the overlay's per-card menu; uio-W12 gave the Product panel an assign action.
+  // Two UI call sites now, both reaching the ONE dialog -- which is the invariant that mattered.
+  ok("promoteToProductModal has one definition, and every caller reaches that one dialog",
+    (ed.match(/promoteToProductModal\(/g) || []).length === 1 &&
+    /E\.promoteToProductModal\(/.test(src("src/editor/files.js")) &&
+    /E\.promoteToProductModal\(/.test(src("src/editor/product-panel.js")));
   var ptmStart = ed.indexOf("function promoteToProductModal(targetDoc)");
   ok("promoteToProductModal found (parameterised by targetDoc)", ptmStart !== -1);
   var ptmBody = ed.slice(ptmStart, ptmStart + 2900);
@@ -11939,8 +11978,12 @@ section("uio-W03 four-destination rail");
   ok("it is a surface, not a see-through gap", /\.files-stage \{[^}]*background: var\(--surface-canvas\)/.test(WS));
   // uio-W04 replaced W03's bridge: Files is a real destination now, mounted like its siblings.
   ok("entering Files mounts the Files destination", /if \(stage === "files"\) mountFilesStage\(\);/.test(SHELL_CODE));
-  ok("the old browser overlay never hangs over another destination",
-    /if \(stage !== "files" && typeof E\.closeBrowser === "function"\) E\.closeBrowser\(\);/.test(SHELL_CODE));
+  // uio-W09: there is no overlay left to hang over anything, so the call that closed it on every
+  // destination change is gone with it. What replaced the one case it served: landing Edit with
+  // nothing open lands FILES.
+  ok("the old browser overlay never hangs over another destination -- it does not exist",
+    SHELL_CODE.indexOf("closeBrowser") === -1 &&
+    /if \(stage === "edit" && !openDocIds\.length\) \{ setStage\("files"\); return; \}/.test(SHELL_CODE));
 
   // --- launch restores the destination you left ---
   ok("the active destination still persists across a refresh",
@@ -12189,15 +12232,22 @@ section("Product Rail: 3-stage rail + product dropdown");
   ok("the save-menu popover + its Editor hooks are gone (openSaveMenu retired)", !/function openSaveMenu\(/.test(e) && !/openSaveMenu:/.test(e));
   // uio-W13 renamed the verb: "Assign a product", not "Promote". Promotion implies the document was
   // in a lesser state, and having no product is a fact about a document rather than a defect in it.
-  ok("the file picker's per-card menu carries the assign verb + conditional Remove-from-Product", /label: d\.meta && d\.meta\.productId \? "Move to another product…" : "Assign a product…"/.test(ehm) && /if \(linked\) \{[\s\S]{0,80}items\.push\(\{ label: "Remove from Product"/.test(ehm));
-  ok("the file picker footer shows the store path (folded in from the save-menu)", /vbrowser__foot[\s\S]{0,200}storeLocationText\(\)/.test(ehm) && /\.vbrowser__foot/.test(EDITOR_CSS));
+  // uio-W09: the overlay is gone; Files' row menu carries these.
+  ok("Files' row menu carries the assign verb + conditional Remove-from-product", /d\.productId \? "Move to another product…" : "Assign to a product…"/.test(src("src/editor/files.js")) && /if \(d\.productId\) items\.push\(\{ label: "Remove from product"/.test(src("src/editor/files.js")));
+  // uio-W09: the overlay's footer went with it. The store path is Files' line now -- the one place
+  // the app admits out loud whether the work is in a real folder or in browser storage.
+  ok("the store path is stated in Files", /E\.storeLocationText\(\)/.test(src("src/editor/files.js")) && /\.files__store \{/.test(src("styles/editor/13-home.css")));
   // uio-W01 REVERSED all of this. The picker host, the "+" beside it, the select-then-land flow and
   // the scoped browser were built correctly for a model where Product was a mode. It is a tag now.
   ok("no top-bar product-picker host remains", idx.indexOf('id="product-picker-host"') === -1);
   ok("creating a Product selects nothing, because there is nothing to select", /function newProductPrompt\(onDone\)[\s\S]{0,300}createProduct\(name\);[\s\S]{0,120}onDone\(prod\);/.test(SHELL));
   ok("creating a Product no longer hijacks the stage or opens a browser", !/setStage\("edit"\);[\s\S]{0,300}openBrowser\(\);/.test(SHELL));
-  ok("the browser header still carries a 'New Product' action, now just redrawing the grid", /var newProdBtn = h\("button", "vbrowser__btn", "New Product"\);[\s\S]{0,200}newProductPrompt\(function \(\) \{ renderBrowserGrid\(\); \}\);/.test(ehm));
-  ok("the document browser lists every document, unscoped", /function renderBrowserGrid\(\)[\s\S]{0,700}courseMatchesQuery\(registry\[id\], browserQuery\);/.test(ehm) && ehm.indexOf("docMatchesProductStage") === -1);
+  // uio-W08 gave creation its own home in Files, and uio-W09 deleted the header that used to carry
+  // this one.
+  ok("creating a product is a Files action now", /label: "Product…", onClick: newProductModal/.test(src("src/editor/files.js")));
+  // uio-W09: THE OVERLAY LISTED HALF THE ANSWER -- design documents from the registry, never the
+  // source documents in LibraryStore. Files lists one corpus from both stores, unscoped.
+  ok("the one document list is unscoped and spans BOTH stores", /function buildCorpus\(env\)/.test(src("src/editor/files.js")) && src("src/editor/files.js").indexOf("docMatchesProductStage") === -1);
   ok("a document created from the browser inherits no Product", /var newDocProduct = "";/.test(DOCS) && /createBlankDoc\(title, code, \{ productId: newDocProduct/.test(DOCS));
   ok("Source/Publish placeholder regions present, hidden by default", /id="stage-source" hidden/.test(idx) && /id="stage-publish" hidden/.test(idx));
   ok("workspace carries the id setStage() targets", /<main class="workspace" id="workspace">/.test(idx));
@@ -12832,7 +12882,7 @@ section("Product Rail: Source stage variant columns");
   ok("lifecycle: __productRail exposes unlink + delete-source + delete-Product", /unlinkDocFromProduct: unlinkDocFromProduct, unlinkAllCoursesFromProduct: unlinkAllCoursesFromProduct, deleteProductSource: deleteProductSource, deleteProduct: deleteProduct/.test(e));
   ok("lifecycle: deleteProductSource removes the master + every topic tagged to the Product", /function deleteProductSource\(pid\)[\s\S]{0,400}c\.kind === "topic" && c\.productId === pid[\s\S]{0,200}delete comps\[product\.groundTruthId\]/.test(e));
   ok("lifecycle: deleteProduct clears the source, unlinks its courses, and removes the entry", /function deleteProduct\(pid\)[\s\S]{0,200}deleteProductSource\(pid\);\s*unlinkAllCoursesFromProduct\(pid\);\s*delete window\.ProductsStore\[pid\]/.test(e));
-  ok("lifecycle: the file picker's per-card menu offers Remove from Product only for a linked course", /var linked = !!\(linkedPid && window\.ProductsStore && window\.ProductsStore\[linkedPid\]\);[\s\S]{0,700}if \(linked\) \{[\s\S]{0,200}"Remove from Product"[\s\S]{0,900}unlinkDocFromProduct\(d\)/.test(ehm));
+  ok("lifecycle: Files' row menu offers Remove from product only for a tagged document", /if \(d\.productId\) items\.push\(\{ label: "Remove from product", onClick: function \(\) \{\s*E\.unlinkDocFromProduct\(E\.registry\[d\.id\]\)/.test(src("src/editor/files.js")));
 
   // Chrome-only invariant.
   var renderJs = src("src/render.js");
@@ -19316,7 +19366,7 @@ section("arch-P2 slice ratchet");
 (function () {
   var suite = src("tests/run.js");
   // Built from strings so the ratchet's own patterns are not counted by the ratchet.
-  var FN_BUDGET = 145, SLICE_BUDGET = 17;
+  var FN_BUDGET = 144, SLICE_BUDGET = 17;
   var fnCount = (suite.match(new RegExp("new Function" + "\\(", "g")) || []).length;
   var sliceCount = (suite.match(new RegExp("(^|[^.\\w])" + "slice" + "\\(", "g")) || []).length;
   ok("source-reconstituting `new Function` calls do not rise (" + fnCount + " of " + FN_BUDGET + ")", fnCount <= FN_BUDGET);

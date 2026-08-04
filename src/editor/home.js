@@ -26,7 +26,7 @@
       "promptModal", "clone", "activateDoc", "mount", "promoteToProductModal", "unlinkDocFromProduct",
       "exportVersoPackage", "showContextMenu", "courseMatchesQuery", "recentsCompare",
       "pickCourseFile", "importDocToRegistry", "newProductPrompt", "storageBackend", "renderTabs", "registry",
-      "openDocIds", "activeDocId"
+      "openDocIds", "activeDocId", "refreshFiles"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is deliberately absent and read through E.
@@ -59,82 +59,29 @@
         registry = E.registry,
         openDocIds = E.openDocIds;
 
-    // ---- #73 Home / file browser ("local-first, no cloud") -------------------
-    // A full-screen overlay OVER the editor (editor-first: the app still boots into
-    // the editor; a top-bar Home button opens this). A grid of course cards — each a
-    // live scaled-DOM page-1 thumbnail + title + code + last-edited — sorted by
-    // recents (recentsCompare) and filtered by a title/code search box. Clicking a
-    // card opens the course via the same switchDoc path the tabs use, so the browser
-    // and tabs stay in sync. Editor chrome only: nothing here renders/exports.
-    var browserUI = null, browserQuery = "", thumbObserver = null;
-    var THUMB_DESIGN_W = 1024; // render page 1 at a desktop width, then scale the node to the card
-
-    function renderCourseThumb(d) {
-      var frame = h("div", "vbrowser-thumb");
-      frame.__renderThumb = function () {
-        if (frame.__rendered) return; frame.__rendered = true;
-        if (!d || !d.pages || !d.pages.length) { frame.classList.add("is-empty"); frame.innerHTML = Icon("file"); return; }
-        var node = null;
-        try {
-          var restore = (window.resolveMedia && window.AssetStore) ? window.resolveMedia(d, editorAssetResolve) : null;
-          try { node = window.render(d, activeTheme()); } finally { if (restore) restore(); }
-        } catch (e) { node = null; }
-        if (!node) { frame.classList.add("is-empty"); frame.innerHTML = Icon("file"); return; }
-        var holder = h("div", "vbrowser-thumb__holder");
-        holder.style.width = THUMB_DESIGN_W + "px";
-        holder.appendChild(node);
-        frame.appendChild(holder);
-        requestAnimationFrame(function () {
-          var fw = frame.clientWidth || 220;
-          holder.style.transform = "scale(" + (fw / THUMB_DESIGN_W) + ")";
-        });
-      };
-      return frame;
-    }
-
-    function buildBrowserCard(id, d) {
-      var card = h("div", "vbrowser-card" + (id === E.activeDocId ? " is-active" : ""));
-      var thumb = renderCourseThumb(d);
-      var body = h("div", "vbrowser-card__body");
-      var main = h("div", "vbrowser-card__main");
-      var titleEl = h("div", "vbrowser-card__title", (d.meta && d.meta.title) || id);
-      titleEl.title = titleEl.textContent;
-      var meta = h("div", "vbrowser-card__meta");
-      meta.appendChild(h("span", "vbrowser-card__code", (d.meta && d.meta.code) || id));
-      meta.appendChild(h("span", "vbrowser-card__sep", "·"));
-      meta.appendChild(h("span", "vbrowser-card__when", formatRelativeTime(d.meta && d.meta.updatedAt, Date.now())));
-      main.appendChild(titleEl); main.appendChild(meta);
-      // SPEC 7: a badge row — Product (if tagged), interactive/static, and an open-state mark.
-      var cell = (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d) : { interactive: true };
-      var pid = d.meta && d.meta.productId;
-      var pname = (pid && window.ProductsStore && window.ProductsStore[pid]) ? window.ProductsStore[pid].name : null;
-      var badges = h("div", "vbrowser-card__badges");
-      if (pname) badges.appendChild(h("span", "vbrowser-card__badge", pname));
-      badges.appendChild(h("span", "vbrowser-card__badge", cell.interactive ? "Interactive" : "Static"));
-      if (id === E.activeDocId || openDocIds.indexOf(id) !== -1) badges.appendChild(h("span", "vbrowser-card__badge vbrowser-card__badge--open", "Open"));
-      main.appendChild(badges);
-      var menuBtn = iconBtn("more-horizontal", "Course actions"); menuBtn.classList.add("vbrowser-card__menu");
-      menuBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        var r = menuBtn.getBoundingClientRect();
-        showCourseMenu(r.left, r.bottom + 4, id);
-      });
-      body.appendChild(main); body.appendChild(menuBtn);
-      card.appendChild(thumb); card.appendChild(body);
-      card.__thumb = thumb; card.__docId = id;
-      card.addEventListener("click", function () { openCourseFromBrowser(id); });
-      return card;
-    }
+    // uio-W09: THE OVERLAY IS GONE. #73's full-screen modal browser -- the card grid, its live
+    // page-1 thumbnails, its search, its per-card menu and its footer -- is deleted, not kept in
+    // parallel with Files. Two surfaces answering "where are my documents?" is the divergence this
+    // whole epic exists to end, and the overlay only ever listed HALF the answer: design documents
+    // from the registry, never the source documents in LibraryStore.
+    //
+    // Everything it did has a home. The grid is the Files destination; the search is Files' own
+    // field and ⌘K; the per-card menu is Files' row menu, which reuses the very functions below so
+    // the two could never drift; the empty state is Files' first run; the footer's store path is
+    // read by Files.
+    //
+    // What stays here is the file MANAGEMENT the overlay happened to host: duplicate, rename,
+    // delete, open, and the one place the app admits out loud where the work is stored.
 
     function openCourseFromBrowser(id) {
       if (!registry[id]) return;
       if (openDocIds.indexOf(id) === -1) { openDocIds.push(id); saveOpenDocIds(openDocIds); renderTabs(); }
-      closeBrowser();
       if (id !== E.activeDocId) switchDoc(id);
     }
 
-    // #74 card actions — all reuse the existing single-source logic (registry +
-    // saveRegistry choke point), just wrapped behind the browser's cards/menu.
+    // Card actions — all reuse the existing single-source logic (registry + saveRegistry choke
+    // point). Files' row menu calls exactly these, which is why retiring the overlay took no
+    // behaviour with it.
     function uniqueCopyCode(baseCode) {
       var base = (baseCode || "COURSE") + "-copy", code = base, n = 1;
       while (registry[code]) { n++; code = base + "-" + n; }
@@ -182,188 +129,25 @@
           saveOpenDocIds(openDocIds);
           saveRegistry(registry);
           renderTabs();
-          renderBrowserGrid();
+          if (typeof E.refreshFiles === "function") E.refreshFiles();
         }, { danger: true, okLabel: "Delete" });
     }
-    function showCourseMenu(x, y, id) {
-      var d = registry[id]; if (!d) return;
-      // side-rail-cleanup slice 2: Promote / Remove-from-Product folded in from the retired save-menu, so
-      // the file picker is the one home for file actions. Remove only shows when the course is tagged.
-      var linkedPid = d.meta && d.meta.productId;
-      var linked = !!(linkedPid && window.ProductsStore && window.ProductsStore[linkedPid]);
-      var items = [
-        { label: "Open", onClick: function () { openCourseFromBrowser(id); } },
-        { label: "Duplicate", onClick: function () { duplicateCourse(id); } },
-        { label: "Rename…", onClick: function () { renameCourse(id); } },
-        { sep: true },
-        // uio-W13: "Assign a product", not "Promote". Promotion implies the document was in a
-        // lesser state; having no product is a fact about a document, not a defect in it.
-        { label: d.meta && d.meta.productId ? "Move to another product…" : "Assign a product…",
-          onClick: function () { promoteToProductModal(d); } }
-      ];
-      if (linked) {
-        items.push({ label: "Remove from Product", onClick: function () {
-          var pname = (window.ProductsStore[linkedPid].name) || "this Product";
-          confirmModal("Remove from Product?", "Unlinks “" + ((d.meta && d.meta.title) || id) + "” from “" + pname + "”. The course and its content stay -- only the Product tag is removed.", function () { unlinkDocFromProduct(d); renderBrowserGrid(); }, { okLabel: "Remove", danger: true });
-        } });
-      }
-      items.push({ sep: true });
-      items.push({ label: "Export .verso", onClick: function () { exportVersoPackage(registry[id]); } });
-      items.push({ sep: true });
-      items.push({ label: "Delete", danger: true, onClick: function () { deleteCourse(id); } });
-      showContextMenu(x, y, items);
-    }
 
-    function buildBrowserEmpty() {
-      var wrap = h("div", "vbrowser-empty");
-      var querying = !!browserQuery;
-      wrap.appendChild(h("div", "vbrowser-empty__title", querying ? "No matching courses" : "No courses yet"));
-      wrap.appendChild(h("div", "vbrowser-empty__hint",
-        querying ? "No course title or code matches your search." : "Create a new course or import a .verso to get started."));
-      if (!querying) {
-        var b = h("button", "vbrowser__btn vbrowser__btn--primary", "New document");
-        b.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
-        wrap.appendChild(b);
-      }
-      return wrap;
-    }
 
-    function observeThumbs(cards) {
-      if (thumbObserver) { thumbObserver.disconnect(); thumbObserver = null; }
-      if (typeof IntersectionObserver === "undefined" || !browserUI) {
-        cards.forEach(function (c) { if (c.__thumb) c.__thumb.__renderThumb(); });
-        return;
-      }
-      thumbObserver = new IntersectionObserver(function (entries) {
-        entries.forEach(function (en) {
-          if (en.isIntersecting && en.target.__thumb) { en.target.__thumb.__renderThumb(); thumbObserver.unobserve(en.target); }
-        });
-      }, { root: browserUI.grid, rootMargin: "300px" });
-      cards.forEach(function (c) { thumbObserver.observe(c); });
-    }
 
-    // SPEC 7 file-picker: the doc browser groups documents BY DOC TYPE (geometry cell), each group
-    // colour-coded. Grouping is pure (takes a geoOf resolver) so tests/run.js exercises it headlessly.
-    var BROWSER_GEO = {
-      reflow: { label: "Reflow", colour: "#0d99ff" },
-      frame:  { label: "Fixed frame", colour: "#9747ff" },
-      paged:  { label: "Paged", colour: "#14ae5c" }
-    };
-    /* @pure-browser-geo-start */
-    var BROWSER_GEO_ORDER = ["reflow", "frame", "paged"];
-    function groupDocIdsByGeo(ids, reg, geoOf) {
-      var by = { reflow: [], frame: [], paged: [] };
-      (ids || []).forEach(function (id) {
-        var d = reg && reg[id]; if (!d) return;
-        var geo = geoOf ? geoOf(d) : "reflow";
-        if (!by[geo]) geo = "reflow"; // unknown geo groups under reflow
-        by[geo].push(id);
-      });
-      return BROWSER_GEO_ORDER.filter(function (g) { return by[g].length; })
-        .map(function (g) { return { geo: g, ids: by[g] }; });
-    }
-    /* @pure-browser-geo-end */
-    function renderBrowserGrid() {
-      if (!browserUI) return;
-      var grid = browserUI.grid; grid.innerHTML = "";
-      // uio-W01: the grid used to be scoped by the global Product, so a document you had open could
-      // be missing from the browser that is supposed to list everything. It lists everything now,
-      // filtered only by the search query. This is a temporary unscope, not a redesign -- uio-W04
-      // replaces this whole overlay with the Files destination, where Product is a facet you choose.
-      var ids = Object.keys(registry).filter(function (id) {
-        return courseMatchesQuery(registry[id], browserQuery);
-      });
-      ids.sort(function (x, y) { return recentsCompare(registry[x], registry[y]); });
-      if (!ids.length) { grid.appendChild(buildBrowserEmpty()); return; }
-      var groups = groupDocIdsByGeo(ids, registry, function (d) {
-        return (window.__docType && window.__docType.docCell) ? window.__docType.docCell(d).geo : "reflow";
-      });
-      var allCards = [];
-      groups.forEach(function (grp) {
-        var gm = BROWSER_GEO[grp.geo] || BROWSER_GEO.reflow;
-        var head = h("div", "vbrowser__group");
-        var dot = h("span", "vbrowser__group-dot"); dot.style.background = gm.colour; head.appendChild(dot);
-        head.appendChild(h("span", "vbrowser__group-title", gm.label));
-        head.appendChild(h("span", "vbrowser__group-count", String(grp.ids.length)));
-        grid.appendChild(head);
-        var inner = h("div", "vbrowser__grid-inner");
-        grp.ids.forEach(function (id) { var c = buildBrowserCard(id, registry[id]); inner.appendChild(c); allCards.push(c); });
-        grid.appendChild(inner);
-      });
-      observeThumbs(allCards);
-    }
-
-    function ensureBrowser() {
-      if (browserUI) return browserUI;
-      var overlay = h("div", "vbrowser"); overlay.id = "vbrowser"; overlay.hidden = true;
-      var bar = h("div", "vbrowser__bar");
-      bar.appendChild(h("div", "vbrowser__title", "Courses"));
-      var search = h("label", "vbrowser__search");
-      search.innerHTML = Icon("search");
-      var input = h("input", "vbrowser__search-input"); input.type = "text"; input.placeholder = "search courses";
-      input.addEventListener("input", function () { browserQuery = input.value; renderBrowserGrid(); });
-      search.appendChild(input);
-      bar.appendChild(search);
-      var spacer = h("div", "vbrowser__spacer"); bar.appendChild(spacer);
-      var importBtn = h("button", "vbrowser__btn", "Import");
-      importBtn.addEventListener("click", function () {
-        pickCourseFile(function (imported) { importDocToRegistry(imported); closeBrowser(); });
-      });
-      bar.appendChild(importBtn);
-      // Create a Product straight from the browser header. uio-W01: it no longer switches a scope
-      // (there is none) -- a new Product is simply empty until a document is tagged with it, so the
-      // grid just redraws.
-      var newProdBtn = h("button", "vbrowser__btn", "New Product");
-      newProdBtn.addEventListener("click", function () { newProductPrompt(function () { renderBrowserGrid(); }); });
-      bar.appendChild(newProdBtn);
-      var newBtn = h("button", "vbrowser__btn vbrowser__btn--primary", "New document");
-      newBtn.addEventListener("click", function () { closeBrowser(); showNewDocDialog(); });
-      bar.appendChild(newBtn);
-      var closeBtn = iconBtn("x", "Close (Esc)"); closeBtn.classList.add("vbrowser__close");
-      closeBtn.addEventListener("click", closeBrowser);
-      bar.appendChild(closeBtn);
-      var grid = h("div", "vbrowser__grid");
-      // side-rail-cleanup slice 2: the "where are my files" store path, folded in from the retired
-      // save-menu, so the picker carries every file affordance the popover used to.
-      var foot = h("div", "vbrowser__foot");
-      foot.appendChild(h("span", "vbrowser__foot-label", "Files stored in"));
-      foot.appendChild(h("span", "vbrowser__foot-path", storeLocationText()));
-      overlay.appendChild(bar); overlay.appendChild(grid); overlay.appendChild(foot);
-      document.body.appendChild(overlay);
-      browserUI = { overlay: overlay, grid: grid, input: input, foot: foot };
-      return browserUI;
-    }
-
-    function openBrowser() {
-      ensureBrowser();
-      browserQuery = ""; browserUI.input.value = "";
-      browserUI.overlay.hidden = false;
-      document.body.classList.add("vbrowser-open");
-      renderBrowserGrid();
-      setTimeout(function () { try { browserUI.input.focus(); } catch (_) {} }, 0);
-    }
-    function closeBrowser() {
-      if (!browserUI) return;
-      browserUI.overlay.hidden = true;
-      document.body.classList.remove("vbrowser-open");
-      if (thumbObserver) { thumbObserver.disconnect(); thumbObserver = null; }
-    }
-    function browserIsOpen() { return !!(browserUI && !browserUI.overlay.hidden); }
-
+    // uio-W09: the top-bar file-picker button lands FILES. It used to open the overlay, and an
+    // Escape handler existed purely to close it -- both gone with the surface they served. Files is
+    // a destination, so it is reached the way every destination is.
     (function wireHome() {
       var b = document.getElementById("home-btn");
-      if (b) b.addEventListener("click", openBrowser);
-      document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" && browserIsOpen()) { e.preventDefault(); closeBrowser(); }
+      if (b) b.addEventListener("click", function () {
+        if (window.__leftRail) window.__leftRail.setStage("files");
       });
     })();
 
     // ---- File store location -------------------------------------------------
-    // side-rail-cleanup slice 2: the #75 rail save/recents popover is RETIRED. Its recents were a
-    // subset of the file picker's grid; its actions (Save-as-copy = Duplicate, Open = Import,
-    // Promote / Remove-from-Product, and this store path) now all live in the picker (ensureBrowser
-    // + showCourseMenu), so the picker is the one home for file management. storeLocationText survives
-    // -- the picker footer reads it for the "where are my files" line.
+    // The one place the app admits out loud whether the work is in a real folder or in browser
+    // storage. The retired overlay's footer read it; Files reads it now.
     function storeLocationText() {
       return storageBackend() === "file"
         ? "~/Library/Application Support/Verso/store"
@@ -371,7 +155,6 @@
     }
 
     kernel.expose({
-      openBrowser: openBrowser, closeBrowser: closeBrowser, browserIsOpen: browserIsOpen,
       duplicateCourse: duplicateCourse, renameCourse: renameCourse, deleteCourse: deleteCourse,
       openCourseFromBrowser: openCourseFromBrowser, storeLocationText: storeLocationText
     });

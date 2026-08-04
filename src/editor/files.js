@@ -383,7 +383,7 @@
       "unlinkDocFromProduct", "exportVersoPackage", "renameCourse", "duplicateCourse", "openSourceTopicId",
       // uio-W08: the three creation actions. All three live here, and none of them needs a
       // pre-selected product -- there is no scope left to inherit.
-      "createSourceDocument", "createProduct", "showNewDocDialog", "openSourceDocIds",
+      "createSourceDocument", "createProduct", "showNewDocDialog", "openSourceDocIds", "storeLocationText",
       "promptModal", "modalText", "saveProducts",
       "deleteCourse", "tagDocProductStage", "saveRegistry", "dsModalShell", "modalField",
       "confirmModal"
@@ -513,6 +513,10 @@
       main.appendChild(rail);
       main.appendChild(body);
       host.appendChild(main);
+      // uio-W09: the retired overlay's footer carried the one line where the app admits out loud
+      // whether the work is in a real folder or in browser storage. It belongs to whichever surface
+      // answers "where are my documents?", and that is this one now.
+      host.appendChild(h("div", "files__store", E.storeLocationText()));
       ui = { host: host, count: count, body: body, rail: rail };
       return ui;
     }

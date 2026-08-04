@@ -2531,9 +2531,6 @@
   // ---- #73 Home / file browser ("local-first, no cloud") -------------------
   // arch-P3b-07k: the course grid, its live-rendered thumbnails, the destructive verbs it offers
   // and the store-location line moved to editor/home.js.
-  var openBrowser = VE.bind("openBrowser");
-  var closeBrowser = VE.bind("closeBrowser");
-  var browserIsOpen = VE.bind("browserIsOpen");
   var duplicateCourse = VE.bind("duplicateCourse");
   var renameCourse = VE.bind("renameCourse");
   var deleteCourse = VE.bind("deleteCourse");
@@ -5786,8 +5783,9 @@
       return n;
     },
     // #73 home / file browser — open the course wall (also the Home top-bar button).
-    openBrowser: function () { openBrowser(); },
-    closeBrowser: function () { closeBrowser(); },
+    // uio-W09: openBrowser/closeBrowser are gone with the overlay they drove. Files is a
+    // destination -- the browser-verify hook lands it the way the app does.
+    openFiles: function () { if (window.__leftRail) window.__leftRail.setStage("files"); },
     // #221 tour builder — open the spatial screen-graph board for a hotspot block
     // (defaults to the first hotspot block in the doc). Mirrors openBrowser.
     openTourBuilder: function (block) {
@@ -6248,8 +6246,6 @@
     publishOptionsForRow: publishOptionsForRow,
     publishQueue: publishQueue,
     renderSettingsBody: renderSettingsBody,
-    openBrowser: openBrowser,
-    closeBrowser: closeBrowser,
     // uio-W04: what the where-am-I line says while you are in Source. Bound from source-stage's
     // expose and provided, because a need() resolves against provide() and never against an expose.
     activeSourceDocName: VE.bind("activeSourceDocName"),
@@ -6742,7 +6738,9 @@
   // uio-W07/W08: Files asks the Source stage what it holds open and mints source documents through
   // its write path, so "what is open" has one answer and creation has one seeding path.
   VE.provide({ createSourceDocument: VE.bind("createSourceDocument"),
-               openSourceDocIds: VE.bind("openSourceDocIds") });
+               openSourceDocIds: VE.bind("openSourceDocIds"),
+               // uio-W09: the retired overlay's footer line. Files states it now.
+               storeLocationText: storeLocationText });
   window.VersoProductPanel.install(VE);
   VE.provide({
     renderEditProductPanel: VE.bind("renderEditProductPanel"),
