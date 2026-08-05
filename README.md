@@ -75,6 +75,8 @@ Double-click `index.html`, or serve it for a clean HTTP origin:
 
 ```bash
 ./serve.command        # python3 -m http.server 8123 → http://localhost:8123
+./serve-server.command # dev only: the same files PLUS the Node backend, in server mode, so the
+                       # sign-in / account / people / cutover surfaces are reachable without IIS
 ```
 
 No install. No bundler. Classic `<script>` tags exposing globals.
@@ -114,7 +116,7 @@ under the gitignored role fails if it is ever staged.
 | --- | --- | --- |
 | **Ships** | `index.html` `styles/` `src/` `export/` `assets/` `fonts/` `serve.command` `course_schema_template.csv` | The product. Present in every install; the app runs from these alone. |
 | **Optional** | `server/` `desktop/` | Real surfaces for one posture each (server-of-one, macOS shell). The app runs without them. |
-| **Dev-only** | `tools/` `scripts/` `tests/` `design-system/` `docs/` `viewer/` `kit.html` `kit-gallery.js` `.github/` | Authoring-time and CI material. Never loaded by the running app, never in a SCORM export. |
+| **Dev-only** | `tools/` `scripts/` `tests/` `design-system/` `docs/` `viewer/` `kit.html` `kit-gallery.js` `serve-server.command` `.github/` | Authoring-time and CI material. Never loaded by the running app, never in a SCORM export. |
 | **Meta** | `README.md` `CONTRIBUTING.md` `LICENSE` `NOTICE` `SECURITY.md` `THIRD-PARTY-NOTICES.md` `SCHEMA-TEMPLATE-GUIDE.md` `roadmap.html` `package.json` `.gitignore` | Repository documentation and the manifest. |
 | **Gitignored** | `workbench/` | Prototypes, spikes, design specs, audits — working material that must not sit next to shipping code. Local only. |
 

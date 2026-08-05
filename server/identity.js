@@ -424,11 +424,15 @@ function createIdentity(opts) {
 
   // The always-on break-glass local admin (ticket 18): created at first-run, hashed
   // on-prem, persists even when SSO is configured -> the never-locked-out floor.
-  function ensureBreakGlass(email, password) {
+  // `name` is what first run collected. It used to be hard-coded to "Break-glass admin", which
+  // meant the wizard asked an admin for their name and then threw it away -- and the account menu
+  // greeted them as "Break-glass admin" forever. The account is still MARKED break-glass by its
+  // flag; that was never the name's job.
+  function ensureBreakGlass(email, password, name) {
     var u = qGetUserByEmail.get(email);
     if (u) return u;
     var id = uid();
-    qInsUser.run(id, email, "Break-glass admin", legacyNameFor(BOOTSTRAP_ROLE_ID), hashPassword(password), 1, now());
+    qInsUser.run(id, email, name || "Break-glass admin", legacyNameFor(BOOTSTRAP_ROLE_ID), hashPassword(password), 1, now());
     qInsAssign.run(id, BOOTSTRAP_ROLE_ID, null, now());
     return qGetUserById.get(id);
   }

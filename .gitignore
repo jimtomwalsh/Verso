@@ -63,3 +63,6 @@ verso-comments*.json
 # Non-shipping scratch: prototypes, spikes, design specs, audits, restructure notes.
 # See the repository-boundary table in README.md: workbench/ is the one gitignored role.
 workbench/
+
+# local server-mode dev data (scripts/serve-server.js) -- never committed
+_server-data/

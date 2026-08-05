@@ -27,7 +27,13 @@
    the fixed right-group controls get pushed off-screen. */
 .toolbar__group--left { flex: 0 0 auto; min-width: 0; }
 .toolbar__group--center { flex: 1 1 auto; justify-content: center; }
-.toolbar__group--right { flex: 0 0 auto; gap: 6px; }
+/* Pinned right by its OWN margin, not by a sibling that grows. The right group used to be
+   pushed over only by the zones inside the left group, and those render in Edit and Source
+   alone -- so in Files and Publish nothing grew and the account avatar sat next to the
+   wordmark. (.toolbar__group--center below is styled but never rendered anywhere, so it was
+   never doing this job either.) margin-left:auto is inert when something else does grow, so
+   Edit and Source are unchanged. */
+.toolbar__group--right { flex: 0 0 auto; gap: 6px; margin-left: auto; }
 
 /* #12 — DS brand mark (Exo 2 display face), accent full stop. */
 .toolbar__brand {

@@ -50,6 +50,10 @@
     breakGlassLink: "Use the local admin account",
     breakGlassWhy: "For emergencies — works even when {org}'s sign-in service is down.",
     wrongPassword: "That password doesn't match. Try again, or continue with {org} sign-in above.",
+    // On a local-accounts deployment there IS no SSO path, so the sentence above would point at
+    // a button that does not exist. The spec's line is for the break-glass case, which by
+    // definition means SSO is configured.
+    wrongPasswordNoSso: "That password doesn't match. Try again.",
     localOnlyLede: "Verso is running on your organisation's server. Sign in with your Verso account.",
     signingIn: "Signing in…",
     back: "Back"
@@ -88,7 +92,7 @@
     if (vm.ssoDisabled) vm.message = { tone: "warn", title: COPY.idpDownTitle, body: interpolate(COPY.idpDown, org) };
     // A credentials error never overwrites the outage notice: the outage is the bigger fact,
     // and it is the one that explains why they are on the local form at all.
-    if (view.error === "credentials" && !vm.ssoDisabled) vm.message = { tone: "error", title: null, body: interpolate(COPY.wrongPassword, org) };
+    if (view.error === "credentials" && !vm.ssoDisabled) vm.message = { tone: "error", title: null, body: interpolate(hasSso ? COPY.wrongPassword : COPY.wrongPasswordNoSso, org) };
     else if (view.error && view.error !== "credentials" && !vm.ssoDisabled) vm.message = { tone: "error", title: null, body: String(view.error) };
     return vm;
   }
@@ -277,7 +281,7 @@
     return /^\\\\/.test(v) || /^[a-z]+:\/\//i.test(v) || /^\/\//.test(v);
   }
   function firstRunPayload(data) {
-    var out = { adminEmail: data.adminEmail, adminPassword: data.adminPassword, organisationName: data.organisationName || null };
+    var out = { adminEmail: data.adminEmail, adminPassword: data.adminPassword, adminName: data.adminName || null, organisationName: data.organisationName || null };
     if (data.method === "oidc") out.oidc = { issuer: data.issuer, clientId: data.clientId, clientSecret: data.clientSecret, redirectUri: data.redirectUri || null };
     return out;
   }

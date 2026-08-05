@@ -62,8 +62,10 @@ var ROLES = {
   // Real surfaces for one posture each. The app runs without them.
   optional: ["server/", "desktop/"],
   // Authoring-time and CI material. Never loaded by the running app.
+  // serve-server.command is dev, not ships: it starts the Node backend so the server-mode
+  // surfaces are reachable without IIS. serve.command is a plain static server and ships.
   dev: ["tools/", "scripts/", "tests/", "design-system/", "docs/", "viewer/",
-        "kit.html", "kit-gallery.js", ".github/"],
+        "kit.html", "kit-gallery.js", "serve-server.command", ".github/"],
   // Repository documentation and the manifest.
   meta: ["README.md", "CONTRIBUTING.md", "LICENSE", "NOTICE", "SECURITY.md",
          "THIRD-PARTY-NOTICES.md", "SCHEMA-TEMPLATE-GUIDE.md", "roadmap.html",
