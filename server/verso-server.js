@@ -350,7 +350,7 @@ function makeHandler(store, config, blockStore, sync, identity, review, rung, op
         if (!body.adminEmail || !body.adminPassword) return sendJson(res, 400, { ok: false, error: "the local admin account needs an email and a password" });
         // The break-glass admin is created FIRST, so that even if a later step of first-run
         // fails the server is reachable rather than stranded with no way in.
-        identity.ensureBreakGlass(body.adminEmail, body.adminPassword);
+        identity.ensureBreakGlass(body.adminEmail, body.adminPassword, body.adminName);
         if (body.organisationName) { config.organisationName = String(body.organisationName); }
         if (body.oidc && body.oidc.issuer) { config.auth = Object.assign({}, config.auth, { rung: "oidc", oidc: body.oidc, organisationName: config.organisationName }); }
         if (opsState.log) opsState.log.auth("first-run", { email: body.adminEmail, rung: (config.auth && config.auth.rung) || "local" });

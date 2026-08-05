@@ -3248,6 +3248,11 @@ section("platform-pivot 31 IT install + first run + monitoring");
   ok("31: and the data-folder field re-renders live, so the inline refusal can actually appear",
     /field\("Folder", "dataDir", "text", "D:\\\\Verso\\\\data", true\)/.test(src("src/sign-in.js")) &&
     /if \(live\) \{ var pos = tf\.input\.selectionStart; render\(\);/.test(src("src/sign-in.js")));
+  // First run asks for the admin's name; hard-coding "Break-glass admin" over it meant the
+  // account menu greeted them by a label forever. The account is marked by its FLAG, not its name.
+  ok("31: the admin's name reaches the server rather than being asked for and discarded",
+    SI.firstRunPayload({ adminEmail: "a", adminPassword: "b", adminName: "James", method: "local" }).adminName === "James" &&
+    /ensureBreakGlass\(body\.adminEmail, body\.adminPassword, body\.adminName\)/.test(src("server/verso-server.js")));
   ok("31: the payload only carries OIDC config when OIDC was chosen",
     SI.firstRunPayload({ adminEmail: "a", adminPassword: "b", method: "local" }).oidc === undefined &&
     !!SI.firstRunPayload({ adminEmail: "a", adminPassword: "b", method: "oidc", issuer: "i" }).oidc);
@@ -3968,7 +3973,14 @@ section("platform-pivot 19 auth rungs");
       wrong.message.body === "That password doesn't match. Try again, or continue with Northwind sign-in above.");
     ok("19: the account form is reached from the break-glass link, not shown by default", wrong.showLocalForm === true);
 
-    var localOnly = SI.viewModel({ org: null, sso: false }, {});
+    // A local-accounts deployment has no SSO button, so the break-glass wording would point at
+  // something that is not on the screen. Found by walking the flow on a real local server.
+  var localWrong = SI.viewModel({ org: "Northwind", sso: false }, { error: "credentials" });
+  ok("19: with no SSO configured, a wrong password does not point at a sign-in path that does not exist",
+    localWrong.message.body === "That password doesn't match. Try again." &&
+    !/Northwind|above/.test(localWrong.message.body));
+
+  var localOnly = SI.viewModel({ org: null, sso: false }, {});
     ok("19: a local-accounts server shows the account form as the whole surface", localOnly.showLocalForm === true && localOnly.hasSso === false);
     ok("19: ...and never as 'break-glass', because there is nothing to break out of", localOnly.localIsBreakGlass === false);
     ok("19: a server with no SSO is never shown an outage", localOnly.ssoDisabled === false && localOnly.message === null);
