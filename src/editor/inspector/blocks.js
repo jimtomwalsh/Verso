@@ -467,7 +467,7 @@
               del.addEventListener("click", function () { pushHistory(); q.categories.splice(ci, 1); refresh(); });
               row.appendChild(del); body.appendChild(row);
             });
-            var addCat = h("button", "prop-btn", "+ Add group");
+            var addCat = h("button", "prop-btn", "Add group");
             addCat.addEventListener("click", function () { pushHistory(); q.categories = q.categories || []; q.categories.push({ id: "c" + Date.now(), label: "New group" }); refresh(); });
             body.appendChild(addCat);
 
@@ -482,7 +482,7 @@
               del.addEventListener("click", function () { pushHistory(); q.cards.splice(ci, 1); refresh(); });
               row.appendChild(del); body.appendChild(row);
             });
-            var addCard = h("button", "prop-btn", "+ Add card");
+            var addCard = h("button", "prop-btn", "Add card");
             addCard.addEventListener("click", function () { pushHistory(); q.cards = q.cards || []; var first = (q.categories && q.categories[0] && q.categories[0].id) || ""; q.cards.push({ text: "New card", categoryId: first }); refresh(); });
             body.appendChild(addCard);
             body.appendChild(h("div", "insp-hint", "Group names and card text are edited on the canvas; assign each card to its correct group here."));
@@ -499,7 +499,7 @@
               row.appendChild(del);
               body.appendChild(row);
             });
-            var addOpt = h("button", "prop-btn", "+ Add option");
+            var addOpt = h("button", "prop-btn", "Add option");
             addOpt.addEventListener("click", function () { pushHistory(); q.options = q.options || []; q.options.push({ text: "New option", correct: false }); refresh(); });
             body.appendChild(addOpt);
             body.appendChild(h("div", "insp-hint", type === "fillBlank" ? "Sentence (before/after the blank), chip text and feedback are edited on the canvas." : "Prompt, option text and feedback are edited on the canvas."));
@@ -514,7 +514,7 @@
           body.appendChild(actions);
         }));
       });
-      var addQ = h("button", "prop-btn prop-btn--accent", "+ Add question");
+      var addQ = h("button", "prop-btn", "Add question");
       addQ.addEventListener("click", function () { pushHistory(); block.questions.push({ id: "q" + Date.now(), type: "multipleChoice", methodLabel: "Select the answer", prompt: "New question?", options: [{ text: "Correct answer", correct: true }, { text: "Wrong answer", correct: false }], feedbackCorrect: "<strong>Correct.</strong>", feedbackIncorrect: "Not quite." }); refresh(); });
       E.inspector.appendChild(addQ);
       } finally { E.setInspector(_qins); }
@@ -581,7 +581,7 @@
       sectionGroup("Content", "Sections", function (secBody) {
         var _ins = E.inspector; E.setInspector(secBody);
         try {
-          var addSec = h("button", "prop-btn prop-btn--accent", "+ Add section");
+          var addSec = h("button", "prop-btn", "Add section");
           addSec.addEventListener("click", function () {
             pushHistory();
             block.items.push({ title: "New section", children: [{ type: "paragraph", text: "Section content." }] });
@@ -591,7 +591,7 @@
           block.items.forEach(function (item, i) {
             fieldRow("Section " + (i + 1), item.title, function (v) { item.title = v; refresh(); }, "Section title");
             var row = h("div", "insp-row");
-            var addB = h("button", "prop-toggle", "+ block"); addB.type = "button"; addB.title = "Add a text block to this section";
+            var addB = h("button", "prop-toggle", "Add block"); addB.type = "button"; addB.title = "Add a text block to this section";
             addB.addEventListener("click", function () { pushHistory(); item.children = item.children || []; item.children.push({ type: "paragraph", text: "Section content." }); refresh(); });
             var delB = h("button", "prop-toggle", "Delete"); delB.type = "button"; delB.title = "Delete this section";
             delB.addEventListener("click", function () { pushHistory(); block.items.splice(i, 1); refresh(); });
@@ -819,7 +819,7 @@
       sectionGroup("Content", "Cards", function (secBody) {
         var _ins = E.inspector; E.setInspector(secBody);
         try {
-        var addCard = h("button", "prop-btn prop-btn--accent", "+ Add card");
+        var addCard = h("button", "prop-btn", "Add card");
         addCard.addEventListener("click", function () {
           pushHistory();
           var fresh = { children: [{ type: "heading", text: "Card " + (block.items.length + 1) }, { type: "paragraph", text: "Hidden detail." }] };
@@ -834,13 +834,13 @@
           // Add-block escape hatch per face (mirrors the accordion "+ block"): keeps an
           // emptied face reachable — canvas drag/drop needs at least one block to target.
           if (rs === "flip") {
-            var addF = h("button", "prop-toggle", "+ front"); addF.type = "button"; addF.title = "Add a text block to this card's front (Side 1)";
+            var addF = h("button", "prop-toggle", "Add front"); addF.type = "button"; addF.title = "Add a text block to this card's front (Side 1)";
             addF.addEventListener("click", function () { pushHistory(); item.front = Array.isArray(item.front) ? item.front : []; item.front.push({ type: "paragraph", text: "Front content." }); refresh(); });
-            var addBk = h("button", "prop-toggle", "+ back"); addBk.type = "button"; addBk.title = "Add a text block to this card's back (Side 2)";
+            var addBk = h("button", "prop-toggle", "Add back"); addBk.type = "button"; addBk.title = "Add a text block to this card's back (Side 2)";
             addBk.addEventListener("click", function () { pushHistory(); item.children = item.children || []; item.children.push({ type: "paragraph", text: "Back content." }); refresh(); });
             row.appendChild(addF); row.appendChild(addBk);
           } else {
-            var addB = h("button", "prop-toggle", "+ block"); addB.type = "button"; addB.title = "Add a text block to this card";
+            var addB = h("button", "prop-toggle", "Add block"); addB.type = "button"; addB.title = "Add a text block to this card";
             addB.addEventListener("click", function () { pushHistory(); item.children = item.children || []; item.children.push({ type: "paragraph", text: "Card content." }); refresh(); });
             row.appendChild(addB);
           }

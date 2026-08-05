@@ -573,7 +573,7 @@
       sectionGroup("Content", "Screens", function (_ssb) {
       var _sins = E.inspector; E.setInspector(_ssb);
       try {
-      var addScr = h("button", "prop-btn prop-btn--accent", "+ Add screen");
+      var addScr = h("button", "prop-btn", "Add screen");
       addScr.addEventListener("click", function () {
         pushHistory();
         var sid = "scr-" + Math.random().toString(36).slice(2, 8);
@@ -622,7 +622,7 @@
       sectionGroup("Content", "Hotspots", function (_hsb) {
       var _hins = E.inspector; E.setInspector(_hsb);
       try {
-      var addHs = h("button", "prop-btn prop-btn--accent", "+ Add hotspot");
+      var addHs = h("button", "prop-btn", "Add hotspot");
       addHs.addEventListener("click", function () {
         pushHistory();
         // #216: a new Marker on the CURRENT screen (seed shared with the board click-to-drop,

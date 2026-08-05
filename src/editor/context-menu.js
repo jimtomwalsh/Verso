@@ -18,7 +18,7 @@
 
   function install(kernel) {
     var E = kernel.need(
-      "h", "pasteClipboard", "previewVariant", "newVariantPrompt", "reselectBlockNode", "popLayer", "pushLayer",
+      "h", "pasteClipboard", "previewVariant", "newVariantPrompt", "reselectBlockNode", "popLayer", "pushLayer", "MOD_KEY",
       "openSettingsSection", "canvas", "variantNames", "moveBlock", "reapplyBlock", "duplicateBlock",
       "copySelection", "copyBlockStyle", "pasteBlockStyle", "ungroupBlock", "saveBlockAsComponent", "clearBlockContentAction",
       "canSplitAtBlock", "splitPageAtBlock", "deleteBlockByRef", "isHiddenIn", "toggleHiddenIn", "versionNames",
@@ -29,6 +29,7 @@
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
+    var MOD_KEY = E.MOD_KEY;
     var h = E.h,
         pasteClipboard = E.pasteClipboard,
         previewVariant = E.previewVariant,
@@ -86,6 +87,14 @@
         ".ctx-item--disabled{color:#8a8a8a;cursor:default;}" +
         ".ctx-item--disabled:hover{background:transparent;color:#8a8a8a;}" +
         ".ctx-item__hint{margin-left:auto;padding-left:14px;font-size:11px;color:#8a8a8a;}" +
+        // uio-OVL-12: the icon slot is fixed-width and reserved for the whole menu, so labels line
+        // up whether or not a given row has a glyph. The shortcut sits hard right in tertiary ink.
+        ".ctx-item__icon{flex:0 0 16px;width:16px;height:16px;margin-right:var(--space-3);display:inline-flex;align-items:center;justify-content:center;color:var(--text-tertiary);}" +
+        ".ctx-item__icon svg{width:14px;height:14px;}" +
+        ".ctx-item:hover .ctx-item__icon{color:currentColor;}" +
+        ".ctx-item__label{min-width:0;overflow:hidden;text-overflow:ellipsis;}" +
+        ".ctx-item__shortcut{margin-left:auto;padding-left:20px;font-size:var(--text-xs);color:var(--text-tertiary);font-variant-numeric:tabular-nums;}" +
+        ".ctx-item:hover .ctx-item__shortcut{color:currentColor;opacity:.75;}" +
         ".ctx-sep{height:1px;background:#3a3a3a;margin:5px 8px;}" +
         ".ctx-head{padding:8px 12px 4px;font-size:11px;font-weight:600;letter-spacing:0;color:#8a8a8a;}" +
         // uio-O-W2 (OVL-13): submenus. The parent row keeps a trailing chevron; the panel sits to
@@ -150,15 +159,32 @@
     // one row you can ignore. Submenus are display-only nesting -- they never introduce a second
     // dismissal or a second Escape owner; the whole tree closes with its root.
     function buildCtxMenuEl(items, isSub) {
-      var m = h("div", "ctx-menu" + (isSub ? " ctx-menu--sub" : ""));
+      var anyIcon = (items || []).some(function (it) { return it && it.icon; });
+      var m = h("div", "ctx-menu" + (isSub ? " ctx-menu--sub" : "") + (anyIcon ? " ctx-menu--icons" : ""));
       items.forEach(function (it) {
         if (!it) return;
         if (it.sep) { m.appendChild(h("div", "ctx-sep")); return; }
         if (it.head) { m.appendChild(h("div", "ctx-head", it.head)); return; }
         // uio-P-C05: `disabled` + `hint` complete the DS ContextMenu contract — an entry can be listed
         // as unavailable, with a trailing state word ("Soon"), instead of being hidden or renamed.
-        var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""), it.label);
+        var el = h("div", "ctx-item" + (it.danger ? " ctx-item--danger" : "") + (it.active ? " ctx-item--active" : "") + (it.disabled ? " ctx-item--disabled" : ""));
+        // uio-OVL-12: icon + shortcut, the two slots the DS ContextMenu contract has declared all
+        // along while the renderer drew a bare label. The contract being AHEAD of the code is the
+        // wrong way round -- a menu built to the DS could not show what the DS said it could.
+        //
+        // THE ICON SLOT IS RESERVED FOR THE WHOLE MENU, not per entry: a glyph on some rows and
+        // nothing on others ragged the labels into two columns, which is worse than no glyphs at
+        // all. `anyIcon` is decided once, above, from the whole list.
+        if (anyIcon) {
+          var g = h("span", "ctx-item__icon");
+          if (it.icon && window.Icon) g.innerHTML = window.Icon(it.icon);
+          el.appendChild(g);
+        }
+        el.appendChild(h("span", "ctx-item__label", it.label));
         if (it.hint) el.appendChild(h("span", "ctx-item__hint", it.hint));
+        // The shortcut is a HINT, never a control: it states the key that already works, so a menu
+        // teaches the keyboard instead of competing with it.
+        if (it.shortcut) el.appendChild(h("span", "ctx-item__shortcut", it.shortcut));
         if (it.submenu && it.submenu.length) {
           el.classList.add("ctx-item--parent");
           el.appendChild(h("span", "ctx-item__chev", "›"));
@@ -220,26 +246,29 @@
       var host = (target && target.instance) || block;
       var vs = variantNames();
       if (block) {
-        items.push({ label: "Duplicate", onClick: function () { duplicateBlock(block); } });
-        items.push({ label: "Copy", onClick: function () { copySelection(); } });
+        // uio-OVL-12: every verb here carries the glyph the toolbar already uses for it and the
+        // key that already works. Neither is new behaviour — the menu stops being the one surface
+        // that describes an action without showing you the faster way to do it.
+        items.push({ label: "Duplicate", icon: "copy", shortcut: MOD_KEY + "D", onClick: function () { duplicateBlock(block); } });
+        items.push({ label: "Copy", icon: "copy", shortcut: MOD_KEY + "C", onClick: function () { copySelection(); } });
         if (E.clipboard.length) {
-          items.push({ label: "Paste", onClick: function () { pasteClipboard(); } });
-          items.push({ label: "Paste without formatting", onClick: function () { pasteClipboard(true); } });
+          items.push({ label: "Paste", icon: "download", shortcut: MOD_KEY + "V", onClick: function () { pasteClipboard(); } });
+          items.push({ label: "Paste without formatting", icon: "download", onClick: function () { pasteClipboard(true); } });
         }
-        items.push({ label: "Copy style", onClick: function () { copyBlockStyle(block); } });
-        if (E.styleClipboard) items.push({ label: "Paste style", onClick: function () { pasteBlockStyle(block); } });
-        items.push({ label: "Move up", onClick: function () { moveBlock(block, -1); } });
-        items.push({ label: "Move down", onClick: function () { moveBlock(block, 1); } });
-        if (block.type === "group") items.push({ label: "Ungroup", onClick: function () { ungroupBlock(block); } });
-        items.push({ label: "Save as component…", onClick: function () { saveBlockAsComponent(block); } });
+        items.push({ label: "Copy style", icon: "sparkles", onClick: function () { copyBlockStyle(block); } });
+        if (E.styleClipboard) items.push({ label: "Paste style", icon: "sparkles", onClick: function () { pasteBlockStyle(block); } });
+        items.push({ label: "Move up", icon: "arrow-up", shortcut: "↑", onClick: function () { moveBlock(block, -1); } });
+        items.push({ label: "Move down", icon: "arrow-down", shortcut: "↓", onClick: function () { moveBlock(block, 1); } });
+        if (block.type === "group") items.push({ label: "Ungroup", icon: "group", shortcut: MOD_KEY + "\u21e7G", onClick: function () { ungroupBlock(block); } });
+        items.push({ label: "Save as component…", icon: "component", onClick: function () { saveBlockAsComponent(block); } });
         // #174: reset the block subtree to a blank skeleton (parity with the outliner menu).
-        items.push({ label: "Clear content", onClick: function () { clearBlockContentAction([block]); } });
+        items.push({ label: "Clear content", icon: "eraser", onClick: function () { clearBlockContentAction([block]); } });
         if (canSplitAtBlock(block)) {
           items.push({ sep: true });
-          items.push({ label: "Split page here", onClick: function () { splitPageAtBlock(block); } });
+          items.push({ label: "Split page here", icon: "scissors", onClick: function () { splitPageAtBlock(block); } });
         }
         items.push({ sep: true });
-        items.push({ label: "Delete", danger: true, onClick: function () { deleteBlockByRef(block); } });
+        items.push({ label: "Delete", icon: "trash-2", shortcut: "Del", danger: true, onClick: function () { deleteBlockByRef(block); } });
       }
       items.push({ sep: true });
       // uio-O-W2 (OVL-13): these three groups used to be headings with a row per variant, and the
@@ -256,9 +285,9 @@
         });
         variantSub.push({ sep: true });
         variantSub.push({ label: "New variant…", onClick: function () { newVariantPrompt(); } });
-        items.push({ label: "Variants", submenu: variantSub });
+        items.push({ label: "Variants", icon: "layers", submenu: variantSub });
       } else {
-        items.push({ label: "Add variant…", onClick: function () { newVariantPrompt(); } });
+        items.push({ label: "Add variant…", icon: "layers", onClick: function () { newVariantPrompt(); } });
       }
       // #207: software-version show/hide tagging (mirrors the variant "Hide in <x>" family).
       // Only when the course has versions; while editing a version the toggle for THAT version
@@ -266,7 +295,7 @@
       var versAll = versionNames();
       if (versAll.length) {
         var ordered = E.activeVersion ? [E.activeVersion].concat(versAll.filter(function (v) { return v !== E.activeVersion; })) : versAll;
-        items.push({ label: "Software versions", submenu: ordered.map(function (v) {
+        items.push({ label: "Software versions", icon: "history", submenu: ordered.map(function (v) {
           return { label: (isHiddenInVersion(host, v) ? "✓ " : "") + "Hide in " + v + (v === E.activeVersion ? " (current)" : ""), onClick: function () { toggleHiddenInVersion(host, v); } };
         }) });
       }
@@ -281,11 +310,11 @@
           } });
           if (own) imgSub.push({ label: "Remove " + v + " version", danger: true, onClick: function () { pushHistory(); setImgVariantSrc(block, v, null); reapplyBlock(block); reselectBlockNode(block, "block"); } });
         });
-        items.push({ label: "Variant images", submenu: imgSub });
+        items.push({ label: "Variant images", icon: "image", submenu: imgSub });
       }
       if (block) {
         items.push({ sep: true });
-        items.push({ label: "Block settings", hint: "Inspector", onClick: function () { revealBlockSettings(block); } });
+        items.push({ label: "Block settings", icon: "sliders-horizontal", hint: "Inspector", onClick: function () { revealBlockSettings(block); } });
       }
       return items;
     }

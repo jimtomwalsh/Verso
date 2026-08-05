@@ -177,17 +177,12 @@
    which emits .insp-row--toggle; this rule keeps the DS control library's SwitchRow aligned.) */
 .switch-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; min-height: var(--row-height); }
 .switch-row__label { font-size: var(--text-xs); color: var(--text-secondary); }
-.eye-btn {
-  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
-  width: 28px; height: 22px; padding: 0; color: var(--text-primary); cursor: pointer;
-  background: none; border: 1px solid transparent; border-radius: 6px;
-}
-.eye-btn:hover { background: var(--surface-raised); border-color: var(--border-strong); }
-.eye-btn.is-off { color: var(--text-tertiary); }
-.eye-btn svg { width: 16px; height: 16px; }
-
-/* icon-segmented mode choice (e.g. alignment) — square icon cells */
-.prop-toggle-row--icon .prop-toggle--icon { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; padding: 5px 0; }
+/* icon-segmented mode choice (e.g. alignment) — square icon cells.
+   uio-OVL-11: these used to be `flex: 1 1 0`, which stretched a three-icon Align control across
+   the whole pane — about 620px at a wide panel, for three glyphs. A segment sizes to its CONTENT
+   at the DS's default control height (--control-md), like every other control in the set. */
+.prop-toggle-row--icon { justify-content: flex-start; }
+.prop-toggle-row--icon .prop-toggle--icon { flex: 0 0 auto; min-width: var(--control-md, 24px); height: var(--control-md, 24px); display: inline-flex; align-items: center; justify-content: center; padding: 0 var(--space-2, 4px); }
 /* #9: the List toggle is an icon prop-toggle inside the (non-icon) B/I/U/Link bar — centre its glyph */
 .prop-toggle-row .prop-toggle--icon { display: inline-flex; align-items: center; justify-content: center; }
 .prop-toggle--icon svg { width: 16px; height: 16px; }

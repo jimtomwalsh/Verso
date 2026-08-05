@@ -8,7 +8,7 @@
 // It arrives as four regions of editor.js that were never adjacent but were always one concern:
 //
 //   1. the scrub + datalist plumbing every numeric row shares (`makeScrubbable`, `ensureDatalists`)
-//   2. the binary and segmented controls (`switchEl` / `switchRow` / `eyeRow` / `segmentedIconLive`
+//   2. the binary and segmented controls (`switchEl` / `switchRow` / `segmentedIconLive`
 //      / `subDisclosure`) and the summary strings a collapsed section shows
 //   3. the SCOPE LADDER -- System, Product, Course, Page, Block -- and the row anatomy that renders
 //      an inherited or overridden value in one visual language (`settingsRow` / `crossRefRow` /
@@ -206,14 +206,10 @@
     }
     // Visibility control = an EYE glyph (open / slashed). `visibleGet/Set` in terms of
     // VISIBLE (true = shown); the caller maps to whatever underlying flag it uses.
-    function eyeRow(labelText, visibleGet, visibleSet, target) {
-      var vis = !!visibleGet();
-      var b = h("button", "eye-btn" + (vis ? "" : " is-off")); b.type = "button";
-      b.title = vis ? "Visible — click to hide" : "Hidden — click to show";
-      b.innerHTML = vis ? Icon("eye") : Icon("eye-off");
-      b.addEventListener("click", function () { pushHistory(); visibleSet(!vis); });
-      settingsRow({ label: labelText, variant: "insp-row--toggle", controlAlign: "end", host: target || E.inspector, control: b });
-    }
+    // uio-OVL-11 RETIRED eyeRow. It was a crossed-eye icon button meaning exactly what switchRow
+    // means — shown or hidden — and its one remaining caller (the footer Disclaimer) sat in a pane
+    // where every other boolean was a switch. A second control for one meaning is how an author
+    // learns that a pane's own grammar cannot be trusted; the canonical set is smaller for it.
     // Icon-segmented single-choice (mode-choice, e.g. alignment). options =
     // [[iconSvg, value, title], ...]. Word segments are only for choices with no clear icon.
     function segmentedIconLive(labelText, options, isCurrent, onPick, target, noHistory) {
@@ -1325,7 +1321,7 @@
 
     kernel.expose({
       ensureDatalists: ensureDatalists, makeScrubbable: makeScrubbable,
-      switchEl: switchEl, switchRow: switchRow, eyeRow: eyeRow,
+      switchEl: switchEl, switchRow: switchRow,
       segmentedIconLive: segmentedIconLive, subDisclosure: subDisclosure,
       sectionSummary: sectionSummary, headerFooterSummary: headerFooterSummary,
       nestOverridden: nestOverridden, nestReset: nestReset,

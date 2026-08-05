@@ -9355,7 +9355,7 @@ section("copy/paste style");
   ok("copyBlockStyle lifts only presentation keys from STYLE_KEYS", /"box"/.test(_sk) && /"styleRef"/.test(_sk) && /"colorMap"/.test(_sk) && /function copyBlockStyle\(block\)[\s\S]*?STYLE_KEYS\.forEach\(function \(k\) \{ if \(block\[k\] !== undefined\) out\[k\] = clone\(block\[k\]\)/.test(CLIP));
   ok("STYLE_KEYS excludes content/identity", !/STYLE_KEYS = \[[^\]]*"(text|html|src|children|items|type|id|questions)"/.test(e));
   ok("pasteBlockStyle writes the clipboard keys onto the target + mounts", /function pasteBlockStyle\(block\)[\s\S]*?Object\.keys\(styleClipboard\)\.forEach\(function \(k\) \{ block\[k\] = clone\(styleClipboard\[k\]\); \}\);[\s\S]*?mount\(\)/.test(CLIP));
-  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style", onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(ecm) && /if \(E\.styleClipboard\) items\.push\(\{ label: "Paste style", onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(ecm));
+  ok("context menu has Copy style + Paste style (Paste only when a style is copied)", /label: "Copy style",[^}]*onClick: function \(\) \{ copyBlockStyle\(block\); \}/.test(ecm) && /if \(E\.styleClipboard\) items\.push\(\{ label: "Paste style", [^}]*onClick: function \(\) \{ pasteBlockStyle\(block\); \}/.test(ecm));
 })();
 
 section("ctx copy/paste");
@@ -9365,11 +9365,11 @@ section("ctx copy/paste");
   // arch-P3b-07q: the context menu moved to src/editor/context-menu.js.
   var ecm = src("src/editor/context-menu.js");
   var e = src("src/editor.js");
-  ok("block context menu has Copy", /items\.push\(\{ label: "Copy", onClick: function \(\) \{ copySelection\(\); \} \}\)/.test(ecm));
-  ok("block menu offers Paste when the clipboard has blocks", /if \(E\.clipboard\.length\) \{\s*\n\s*items\.push\(\{ label: "Paste", onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(ecm));
-  ok("empty-canvas menu offers Paste when the clipboard has blocks", /if \(E\.clipboard\.length\) \{ items\.push\(\{ label: "Paste", onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(ecm));
+  ok("block context menu has Copy", /items\.push\(\{ label: "Copy", [^}]*onClick: function \(\) \{ copySelection\(\); \} \}\)/.test(ecm));
+  ok("block menu offers Paste when the clipboard has blocks", /if \(E\.clipboard\.length\) \{\s*\n\s*items\.push\(\{ label: "Paste", [^}]*onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(ecm));
+  ok("empty-canvas menu offers Paste when the clipboard has blocks", /if \(E\.clipboard\.length\) \{ items\.push\(\{ label: "Paste", [^}]*onClick: function \(\) \{ pasteClipboard\(\); \} \}\);/.test(ecm));
   // §84 paste-without-formatting
-  ok("both menus offer Paste without formatting", (ecm.match(/label: "Paste without formatting", onClick: function \(\) \{ pasteClipboard\(true\); \}/g) || []).length >= 2);
+  ok("both menus offer Paste without formatting", (ecm.match(/label: "Paste without formatting",[^}]*onClick: function \(\) \{ pasteClipboard\(true\); \}/g) || []).length >= 2);
   ok("Cmd+Shift+V passes the strip flag to pasteClipboard", /if \(pasteClipboard\(e\.shiftKey\)\) e\.preventDefault\(\)/.test(KEYS));
   ok("pasteClipboard strips formatting when asked", /clipboard\.map\(function \(b\) \{ var c = remintIds\(clone\(b\)\); if \(strip\) stripFormattingDeep\(c\)/.test(CLIP));
   // stripFormattingDeep: clears style/styleRef + inline formatting, keeps structural tags, skips embeds
@@ -9906,7 +9906,7 @@ section("clear content #174");
 
   // wiring guards: exposed on both surfaces + gated
   ok("#174 outliner context menu offers 'Clear content'", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(multi \? E\.multiSel\.slice\(\) : block\); \}/.test(OUT));
-  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content", onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(ecm));
+  ok("#174 canvas right-click menu offers 'Clear content' (parity)", /label: "Clear content",[^}]*onClick: function \(\) \{ clearBlockContentAction\(\[block\]\); \}/.test(ecm));
   ok("#174 canvas block toolbar (showBlockToolbar) has the eraser Clear content button", /iconBtn\("eraser", "Clear content \(keep structure\)"\)[\s\S]{0,120}clearBlockContentAction\(\[block\]\)/.test(BA));
   // container/two-level blocks (accordion/columns/group/image/quiz...) render the toolbar via
   // renderContainerChrome's acts[] — the eraser must be there too (shared handlers.clearContent).
@@ -11546,9 +11546,13 @@ section("panel-standards");
   var t = src("src/editor.js");
   // arch-P3b-07b: the canonical primitives are the module's job now, so that is where they must be.
   var ep = src("src/editor/inspector/primitives.js");
-  ["function subDisclosure", "function switchEl", "function switchRow", "function eyeRow",
+  // uio-OVL-11 RETIRED eyeRow: it meant exactly what switchRow means, and a second control for one
+  // meaning is the divergence the overhaul exists to remove. The canonical set is smaller by one.
+  ["function subDisclosure", "function switchEl", "function switchRow",
    "function segmentedIconLive", "function nestOverridden", "function nestReset"
   ].forEach(function (sig) { ok("primitive present: " + sig, ep.indexOf(sig) !== -1); });
+  ok("eyeRow is gone, and nothing quietly rebuilt it", ep.indexOf("function eyeRow") === -1 &&
+    !/h\("button", "eye-btn"/.test(ep + t) && (src("src/editor/header-footer.js") + t).indexOf("eyeRow(") === -1);
   // open-state persisted (decision 2)
   ok("openSections persisted to localStorage", /authoring\.panels-open/.test(t) && /function saveOpenSections/.test(t));
   // Header & Footer is converted: switch + icon-align + eye, NO word-boolean segments.
@@ -11564,7 +11568,8 @@ section("panel-standards");
     /function hfSectionOpts\(isHeader\)[\s\S]{0,700}toggle:[\s\S]{0,200}summary:[\s\S]{0,120}overridden:[\s\S]{0,120}onReset:/.test(src("src/editor/header-footer.js")));
   ok("HF: switch rows (Underline/Top rule/Pin)", /switchRow\("Underline"/.test(region) && /switchRow\("Top rule"/.test(region) && /switchRow\("Pin to top"/.test(region));
   ok("HF: alignment as icon segments", /segmentedIconLive\("Align"/.test(region));
-  ok("HF: disclaimer as eye", /eyeRow\("Disclaimer"/.test(region));
+  // uio-OVL-11: the Disclaimer was the LAST eyeRow, in a pane where every other boolean is a switch.
+  ok("HF: disclaimer as a switch, like every other boolean beside it", /switchRow\("Disclaimer"/.test(region) && !/eyeRow\(/.test(region));
   ok("HF: no [Off|On] word booleans", !/\["Off"/.test(region) && !/\["On"/.test(region));
   ok("HF: no Show/Hide word booleans", !/\["Show"/.test(region) && !/\["Hide"/.test(region));
   // Slice 3: HARD-FAIL on any word-boolean segmented option app-wide. A generic on/off
@@ -12569,10 +12574,11 @@ section("uio-F01 shared settings row anatomy");
   // The one shared-row primitive exists and is test-exposed.
   ok("settingsRow primitive defined", /function settingsRow\(opts\)/.test(ep));
   ok("settingsRow exposed for tests (window.__settingsRow)", /window\.__settingsRow\s*=\s*settingsRow/.test(ep));
-  // fieldRow / switchRow / eyeRow route through it — no hand-rolled row wrapper.
+  // fieldRow / switchRow route through it — no hand-rolled row wrapper.
   ok("fieldRow routes through settingsRow", /function fieldRow\([\s\S]{0,900}?settingsRow\(/.test(ep));
   ok("switchRow uses the shared row (toggle variant)", /function switchRow\([\s\S]{0,400}?insp-row--toggle/.test(ep));
-  ok("eyeRow uses the shared row (toggle variant)", /function eyeRow\([\s\S]{0,900}?insp-row--toggle/.test(ep));
+  // eyeRow used to be checked here too; uio-OVL-11 retired it rather than keeping two controls
+  // for one meaning, so switchRow is the only toggle-variant row left to hold to the anatomy.
   ok("no editor.js helper builds the divergent switch-row wrapper", e.indexOf('h("div", "switch-row")') === -1);
   // One tokenized fixed label column, shared with the DS FieldRow contract.
   ok("DS defines the shared label-width token (--field-label-w: 76px)", /--field-label-w:\s*76px/.test(tokens));
@@ -16363,7 +16369,7 @@ section("uio-O-W1: overlay vocabulary (save contract, cross-references, one menu
   ok("door 1 - the canvas right-click renders that list", /items = items\.concat\(blockMenuItems\(target\.type === "block" \? target : \{ instance: target\.instance \}\)\)/.test(ecm));
   ok("door 2 - the inspector header's overflow renders the SAME list", /showContextMenu\(r\.right, r\.bottom \+ 4, blockMenuItems\(\{ block: block \}\)\)/.test(e));
   ok("the overflow is the canonical menu glyph and says what it opens", /insp-crumbs__more"\);[\s\S]{0,200}Icon\("more-horizontal"\)[\s\S]{0,120}"Block actions"/.test(e));
-  ok("the menu's foot names its way back into the inspector", /label: "Block settings", hint: "Inspector", onClick: function \(\) \{ revealBlockSettings\(block\); \}/.test(ecm));
+  ok("the menu's foot names its way back into the inspector", /label: "Block settings",[^}]*hint: "Inspector", onClick: function \(\) \{ revealBlockSettings\(block\); \}/.test(ecm));
   ok("that route really opens the block's own settings", /function revealBlockSettings\(block\)[\s\S]{0,240}E\.setEnteredBlock\(block\);[\s\S]{0,140}reselectBlockNode\(block, "block"\)/.test(ecm));
   ok("the overflow is styled once, beside the breadcrumb", /\.insp-crumbs__more \{/.test(css));
 
@@ -16728,13 +16734,14 @@ section("uio-O-W2 menu submenus + no empty sections (OVL-13)");
   ok("a submenu flips left when it would run off the window, measured not guessed",
     /var r = sub\.getBoundingClientRect\(\);\s*\n\s*if \(r\.right > window\.innerWidth - 8\) sub\.classList\.add\("is-flipped"\);/.test(ecm));
   ok("the variant family is ONE row with a submenu, and New variant sits at its foot",
-    /items\.push\(\{ label: "Variants", submenu: variantSub \}\);/.test(ecm)
+    /items\.push\(\{ label: "Variants",[^}]*submenu: variantSub \}\);/.test(ecm)
     && /variantSub\.push\(\{ label: "New variant…"/.test(ecm));
   ok("with no variants the whole family is one ordinary row, not a heading saying it is empty",
-    /\} else \{\s*\n\s*items\.push\(\{ label: "Add variant…", onClick: function \(\) \{ newVariantPrompt\(\); \} \}\);/.test(ecm)
+    /\} else \{\s*\n\s*items\.push\(\{ label: "Add variant…",[^}]*onClick: function \(\) \{ newVariantPrompt\(\); \} \}\);/.test(ecm)
     && !/head: vs\.length \? "Variants"/.test(e));
   ok("software versions and variant images collapse the same way",
-    /items\.push\(\{ label: "Software versions", submenu:/.test(ecm) && /items\.push\(\{ label: "Variant images", submenu: imgSub \}\);/.test(ecm));
+    /items\.push\(\{ label: "Software versions",[^}]*submenu:/.test(ecm) && /items\.push\(\{ label: "Variant images",[^}]*submenu: imgSub \}\);/.test(ecm));
+  // uio-OVL-16 widened this from the one entry it named to EVERY button in the chrome.
   ok("the '+' create prefix is gone everywhere — menu verbs are plain", !/\+ New variant/.test(e));
   ok("the DS carries the submenu entry and the never-empty rule",
     /submenu\?: MenuEntry\[\];/.test(src("design-system/components/overlays/ContextMenu.d.ts"))
@@ -17243,6 +17250,70 @@ section("uio-F03 scope + inheritance model");
 // deliberately left out until there was data behind it. The thing under test is that Source
 // STATES the classification rather than computing a second version of it, and that the fourth
 // type does not borrow a third type's colour or its code path.
+// uio-OVL-11/12/16 (GH #201). The overhaul plan recorded these three as "absorbed by uio-F01".
+// Building uio-O-W1 checked that against the code and none of them were; this is the ticket that
+// actually closes them, and the ratchets below are what stop each from coming back.
+section("uio-OVL-11/12/16 overlay vocabulary (GH #201)");
+(function () {
+  var ep = src("src/editor/inspector/primitives.js");
+  var hf = src("src/editor/header-footer.js");
+  var cm = src("src/editor/context-menu.js");
+  var css = EDITOR_CSS;
+  var CHROME = ["src/editor.js"].concat((function () {
+    var acc = [];
+    (function walk(d) {
+      fs.readdirSync(d).forEach(function (f) {
+        var full = path.join(d, f);
+        if (fs.statSync(full).isDirectory()) walk(full);
+        else if (/\.js$/.test(f)) acc.push(fs.readFileSync(full, "utf8"));
+      });
+    })(path.join(ROOT, "src/editor"));
+    return acc;
+  })()).join("\n");
+
+  // --- OVL-11: one control per meaning, and a segment sized to its content ---
+  ok("the Disclaimer is a switch like every boolean beside it", /switchRow\("Disclaimer"/.test(hf));
+  ok("eyeRow is retired, and its chrome went with it",
+    ep.indexOf("function eyeRow") === -1 && CHROME.indexOf("eyeRow(") === -1 && !/\.eye-btn \{/.test(css));
+  // The Align control used to be `flex: 1 1 0`, which spent ~620px of a wide pane on three glyphs.
+  ok("an icon segment sizes to its content at the DS control height, never stretched",
+    /\.prop-toggle-row--icon \.prop-toggle--icon \{ flex: 0 0 auto; min-width: var\(--control-md/.test(css) &&
+    !/\.prop-toggle-row--icon \.prop-toggle--icon \{ flex: 1 1 0/.test(css));
+
+  // --- OVL-12: the renderer catches up with its own contract ---
+  var DTS = src("design-system/components/overlays/ContextMenu.d.ts");
+  ok("the DS declares icon + shortcut", /icon\?: string;/.test(DTS) && /shortcut\?: string;/.test(DTS));
+  ok("and the renderer now draws both", /if \(it\.icon && window\.Icon\) g\.innerHTML = window\.Icon\(it\.icon\);/.test(cm) &&
+    /if \(it\.shortcut\) el\.appendChild\(h\("span", "ctx-item__shortcut", it\.shortcut\)\);/.test(cm));
+  // A glyph on some rows and nothing on others ragged the labels into two columns, which is worse
+  // than no glyphs at all. The slot is decided once for the whole menu.
+  ok("the icon slot is reserved per MENU, not per entry",
+    /var anyIcon = \(items \|\| \[\]\)\.some\(function \(it\) \{ return it && it\.icon; \}\);/.test(cm) &&
+    /if \(anyIcon\) \{/.test(cm));
+  ok("the shortcut prints one spelling of the modifier, from the shared MOD_KEY", /var MOD_KEY = E\.MOD_KEY;/.test(cm) &&
+    !/"\u2318" \+/.test(cm.replace(/MOD_KEY/g, "")));
+  ok("every menu glyph is one the repo actually vendors", (function () {
+    var icons = src("src/icons.js");
+    return (cm.match(/icon: "([a-z0-9-]+)"/g) || []).every(function (m) {
+      return icons.indexOf('"' + m.slice('icon: "'.length, -1) + '":') !== -1;
+    });
+  })());
+
+  // --- OVL-16: one style for one verb ---
+  ok("no button wears a \"+ \" create prefix", !/h\("button", "prop-(btn|toggle)[^"]*", "\+ /.test(CHROME));
+  ok("an add is a plain secondary button, never the accent", (function () {
+    var accentAdds = CHROME.match(/prop-btn--accent", "(Add |[A-Za-z]+ (screen|hotspot|card|option|question|section|group))/g) || [];
+    return accentAdds.length === 0;
+  })());
+  // #cbe8ff on a ghost button read as DISABLED — the worst thing a primary action can look like.
+  // (The same value is fine as INK ON a blue fill, which is where it still legitimately appears.)
+  ok("the accent button uses the accent token, not a pale wash that reads as disabled",
+    /\.prop-btn--accent \{ color: var\(--accent\); \}/.test(css) &&
+    !/\.prop-btn--accent \{[^}]*#cbe8ff/.test(css));
+  ok("the canonical inline add is still the section-header + glyph",
+    /var add = h\("button", "prop-add"\); add\.type = "button";\s*\n\s*add\.innerHTML = Icon\("plus"\);/.test(ep));
+})();
+
 section("uio-S-C06 restricted mark + classification badges");
 (function () {
   var SD, C;
@@ -19166,8 +19237,8 @@ section("left-panel Components reorg");
   // (canvas frame-label + outliner), mirroring the existing Inspector buttons.
   // arch-P3b-07q: the canvas door moved; the outliner's stayed. Two doors, counted across both.
   // arch-P3b-07i: the outliner door moved again, to editor/outliner.js.
-  var saveAsComponentCount = (src("src/editor/outliner.js").match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length +
-                             (src("src/editor/context-menu.js").match(/label: "Save as component…", onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length;
+  var saveAsComponentCount = (src("src/editor/outliner.js").match(/label: "Save as component…",[^}]*onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length +
+                             (src("src/editor/context-menu.js").match(/label: "Save as component…",[^}]*onClick: function \(\) \{ saveBlockAsComponent\(/g) || []).length;
   ok("\"Save as component…\" wired on both single-block context menus (canvas + outliner)", saveAsComponentCount === 2);
   var savePageCount = (src("src/editor/outliner.js").match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length +
                        (src("src/editor/world.js").match(/label: "Save page to library…", onClick: function \(\) \{ savePageAsLibraryMaster\(pi\); \}/g) || []).length;
