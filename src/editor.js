@@ -4640,7 +4640,6 @@
 
   var switchEl = VE.bind("switchEl");
   var switchRow = VE.bind("switchRow");
-  var eyeRow = VE.bind("eyeRow");
   var segmentedIconLive = VE.bind("segmentedIconLive");
   var subDisclosure = VE.bind("subDisclosure");
   var sectionSummary = VE.bind("sectionSummary");
@@ -6567,7 +6566,6 @@
     stripToText: stripToText,
     resolveComponentDef: resolveComponentDef,
     persistLayout: persistLayout,
-    eyeRow: eyeRow,
     clearHeaderFooterDefault: clearHeaderFooterDefault,
     saveHeaderFooterDefault: saveHeaderFooterDefault,
     getHeaderFooterDefault: getHeaderFooterDefault,
@@ -6853,7 +6851,7 @@
   window.__kit = {
     Icon: Icon, ICON_ALIAS: ICON_ALIAS, h: h,
     panelSection: panelSection, propHeader: propHeader, optionalRow: optionalRow, repeatedList: repeatedList, renderContainerChrome: renderContainerChrome, CONTAINER_IO_KEYS: CONTAINER_IO_KEYS, breadcrumb: breadcrumb, disclosure: disclosure, subDisclosure: subDisclosure,
-    switchRow: switchRow, eyeRow: eyeRow, segmentedIconLive: segmentedIconLive,
+    switchRow: switchRow, segmentedIconLive: segmentedIconLive,
     fieldRow: fieldRow, iconField: iconField, twoUp: twoUp,
     selectRow: selectRow, customSelectRow: customSelectRow,
     colourControl: colourControl, colorField: colorField, segmentedLive: segmentedLive,

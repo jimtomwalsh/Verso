@@ -324,7 +324,7 @@
         buildTargetPicker(block, c, "Source element", "source");
         selectRow("Is", IS_OPTIONS, c.is || "visited", function (v) { c.is = v; mount(); interactReselect(block); });
       });
-      var addCond = h("button", "prop-btn", "+ Add condition (all of)");
+      var addCond = h("button", "prop-btn", "Add condition (all of)");
       addCond.addEventListener("click", function () { pushHistory(); addGateCondition(g); mount(); interactReselect(block); });
       E.inspector.appendChild(addCond);
 

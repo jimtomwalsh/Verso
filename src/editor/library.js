@@ -324,7 +324,7 @@
       });
       c.appendChild(list);
 
-      var btn = h("button", "prop-btn prop-btn--accent", "+ Define custom component");
+      var btn = h("button", "prop-btn", "Define custom component…");
       btn.style.marginTop = "10px";
       btn.addEventListener("click", showDefineComponentDialog);
       c.appendChild(btn);

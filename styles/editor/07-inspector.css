@@ -66,7 +66,7 @@
    Shows only on keyboard focus (:focus-visible); scoped to chrome control classes, so it
    never touches the learner-facing course preview (which is styled by course.css). */
 .vds-btn:focus-visible, .vds-iconbtn:focus-visible, .prop-text:focus-visible,
-.prop-field__input:focus-visible, .prop-add:focus-visible, .eye-btn:focus-visible,
+.prop-field__input:focus-visible, .prop-add:focus-visible,
 .uiswitch:focus-visible, .insp-row__overflow:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
@@ -457,7 +457,10 @@
 .prop-btn:disabled { color: var(--text-tertiary); cursor: default; }
 .prop-btn:disabled:hover { border-color: transparent; background: var(--surface-raised); }
 .prop-btn--danger { color: var(--danger); }
-.prop-btn--accent { color: #cbe8ff; }
+/* uio-OVL-16: was #cbe8ff — a pale wash that read as DISABLED on a ghost button, which is the
+   worst thing a primary action can look like. It is the accent token now, and it marks a
+   surface's ONE primary action. An "add" is not one: those are plain .prop-btn. */
+.prop-btn--accent { color: var(--accent); }
 .prop-actions { display: flex; gap: 6px; }
 .prop-actions .prop-btn { text-align: center; }
 

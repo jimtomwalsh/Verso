@@ -624,7 +624,7 @@
       });
       sSaved.appendChild(slist);
 
-      var addStyleBtn = h("button", "prop-btn prop-btn--accent", "+ Add Text Style");
+      var addStyleBtn = h("button", "prop-btn", "Add text style");
       addStyleBtn.style.marginTop = "10px";
       addStyleBtn.addEventListener("click", showAddTextStyleDialog);
       sSaved.appendChild(addStyleBtn);

@@ -31,7 +31,7 @@
       "pageDisplayName", "reapplyLayout", "scheduleSave", "pokeHeaderFooterLive", "blockLabel", "crossRefRow",
       "openSettingsSection", "subDisclosure", "resolveScoped", "gateScopeChain", "onOffLabel", "dsSelect",
       "HEADER_STYLE_KEYS", "FOOTER_STYLE_KEYS", "headerFooterSummary", "getHeaderFooterDefault", "saveHeaderFooterDefault", "clearHeaderFooterDefault",
-      "assetRef", "segmentedLive", "eyeRow", "persistLayout", "doc"
+      "assetRef", "segmentedLive", "persistLayout", "doc"
     );
     // The stable half: declarations editor.js never reassigns, aliased once so the moved body
     // reads exactly as it did. Anything LIVE is absent on purpose and read through E.
@@ -73,7 +73,6 @@
         clearHeaderFooterDefault = E.clearHeaderFooterDefault,
         assetRef = E.assetRef,
         segmentedLive = E.segmentedLive,
-        eyeRow = E.eyeRow,
         persistLayout = E.persistLayout;
 
     // reapplyHeaderFooter so the canvas updates while the panel keeps focus. iconField
@@ -131,13 +130,13 @@
           function (v) { return (child.align || "start") === v; },
           function (v) { if (v === "start") delete child.align; else child.align = v; reapplyHeaderFooter(); }, host);
       });
-      var addToggle = h("button", "prop-btn", "+ Light/dark toggle");
+      var addToggle = h("button", "prop-btn", "Add light/dark toggle");
       addToggle.addEventListener("click", function () {
         pushHistory();
         config.children.push({ type: "modeToggle", label: "Light / Dark" });
         openSections.headerFooter = true; mount();
       });
-      var addText = h("button", "prop-btn", "+ Text element");
+      var addText = h("button", "prop-btn", "Add text element");
       addText.addEventListener("click", function () {
         pushHistory();
         config.children.push({ type: "note", text: "New text" });
@@ -146,7 +145,7 @@
       host.appendChild(addToggle); host.appendChild(addText);
       // Footer-only: the learner navigation bar (prev / progress / next).
       if (isFooter && !config.children.some(function (ch) { return ch.type === "courseNav"; })) {
-        var addNav = h("button", "prop-btn", "+ Learner nav bar");
+        var addNav = h("button", "prop-btn", "Add learner nav bar");
         addNav.addEventListener("click", function () {
           pushHistory();
           config.children.push(makeCourseNav());
@@ -367,7 +366,7 @@
           host.appendChild(pr);
         });
       });
-      var addSec = h("button", "prop-btn", "+ Section");
+      var addSec = h("button", "prop-btn", "Add section");
       addSec.addEventListener("click", function () {
         pushHistory();
         child.sections.push({ id: "s" + (child.sections.length + 1), label: "New section", pageIds: [] });
@@ -490,7 +489,9 @@
       }
       // Disclaimer (content) — VVVV(3): show/hide the export-control line; HHHH: its gap.
       host = panelSection(h0, "Disclaimer");
-      eyeRow("Disclaimer", function () { return ft.hideText !== true; }, function (visible) { ft.hideText = !visible; reapplyHeaderFooter(); renderInspector(); }, host);
+      // uio-OVL-11: was an eyeRow — a crossed-eye icon button — while every comparable boolean in
+      // this same pane is a switchRow. Two controls, one meaning, and the eye was the odd one.
+      switchRow("Disclaimer", function () { return ft.hideText !== true; }, function (v) { ft.hideText = !v; reapplyHeaderFooter(); renderInspector(); }, host);
       if (!ft.hideText) {
         host.appendChild(iconField(Icon("padding"), { value: ft.textGap, unit: "px", placeholder: "8", step: 2, min: 0, max: 120, datalist: "dl-gap", title: "Space above the disclaimer (gap from the nav)",
           onchange: function (v) { var n = parseInt(v, 10); if (isNaN(n)) delete ft.textGap; else ft.textGap = n; reapplyHeaderFooter(); } }).wrap);
