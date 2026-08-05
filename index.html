@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="styles/editor/13-home.css">   <!-- the course browser -->
   <link rel="stylesheet" href="styles/editor/14-collab.css">   <!-- live-collaboration presence chrome -->
   <link rel="stylesheet" href="styles/editor/15-sign-in.css">   <!-- the server-mode sign-in surface -->
+  <link rel="stylesheet" href="styles/editor/16-session.css">   <!-- the signed-out session banner and its canvas chip -->
   <!-- arch-P5-02: src/course.css was 2,104 lines. It is styles/course/*.css now, in the order
        declared by styles/course/order.json. The SCORM exporter reads that same list and inlines them
        into one course.css, so the shipped package is byte-identical. No build step. -->
@@ -487,6 +488,8 @@
   <script src="src/store-http.js"></script>
   <!-- platform-pivot 19 sign-in surface: window.VersoSignIn -- renders ONLY when the bootstrap says the server needs authentication (window.__versoServerAuthRequired). Inert in a plain browser / local shell. Must follow store-http.js so the bootstrap globals are set. -->
   <script src="src/sign-in.js"></script>
+  <!-- platform-pivot 38 signed-out state: window.VersoSession -- the banner + canvas chip that stop the app pretending to save once a session expires. Server mode only; installs nothing locally. Must follow store-http.js, which reports into it. -->
+  <script src="src/session-state.js"></script>
   <!-- platform-pivot live-collaboration client (server-of-one): defines window.VersoSync, INERT unless a server URL is injected (window.__versoServerUrl). In local / standalone it never activates -> the editor takes exactly today's branches. Must precede editor.js. -->
   <script src="src/sync-client.js"></script>
   <!-- #69 clobber-proof cutover: defines window.Migration (save-suppression guard + backup builder + migrate-then-flip core) so editor.js's save choke points can be neutered across a backend switch and Editor.migrateToFileBackend can drive the guarded cutover. Must precede editor.js. -->

@@ -82,6 +82,20 @@
     if (window.Editor && window.Editor.reportSaveFailure) window.Editor.reportSaveFailure(msg);
     if (window.console && console.error) console.error("[store-http] " + msg);
   }
+  // Being signed out is not the same failure as a full disk or an unreachable server, and it
+  // gets its own chrome (platform-pivot 38): a persistent banner plus a canvas chip, because
+  // the author is still typing and every keystroke is going nowhere. Two distinct signals --
+  // "your session went away" and "a save was actually refused just now" -- because the second
+  // states a loss that has already happened and must never be demoted back to the first.
+  function reportSignedOut(refused) {
+    var s = window.__versoSession;
+    if (s) { if (refused) s.saveRefused(); else s.authRequired(); }
+    reportFailure(SIGNED_OUT);
+  }
+  // Called by the session banner once it has watched a sign-in succeed, so the adapter stops
+  // refusing writes in the same beat the banner says saving has resumed. Without this the
+  // banner would be telling the truth about the server and a lie about this tab.
+  window.__versoHttpAuthRestored = function () { authRequired = false; };
 
   // Report a durable write's outcome without duplicating the four branches per facet.
   function settle(promise, what) {
@@ -91,7 +105,7 @@
         return r.ok ? r.json() : { ok: false };
       })
       .then(function (j) {
-        if (j && j.auth) return reportFailure(SIGNED_OUT);
+        if (j && j.auth) return reportSignedOut(true);   // a durable write was REFUSED
         if (!j || !j.ok) reportFailure("Saving " + what + " to the Verso server failed. Export JSON now to avoid losing work.");
       })
       .catch(function () { reportFailure("Could not reach the Verso server to save " + what + ". Check your connection; export JSON now to avoid losing work."); });
@@ -201,7 +215,7 @@
       // stays installed on purpose -- withdrawing it would let pickFacetAdapter fall back
       // to the browser store, and the author would go on editing into localStorage while
       // believing they were on the shared server. A loud refusal beats a silent strand.
-      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
       cache = json; // in-page truth updates synchronously (optimistic)
       try {
         fetch(apiUrl(base, "registry"), { method: "PUT", body: json, headers: { "Content-Type": "application/json" } })
@@ -210,7 +224,7 @@
             return r.ok ? r.json() : { ok: false };
           })
           .then(function (j) {
-            if (j && j.auth) return reportFailure(SIGNED_OUT);
+            if (j && j.auth) return reportSignedOut(true);   // a durable write was REFUSED
             if (!j || !j.ok) reportFailure("Save to the Verso server failed. Export JSON now to avoid losing work.");
           })
           .catch(function () { reportFailure("Could not reach the Verso server to save. Check your connection; export JSON now to avoid losing work."); });
@@ -223,7 +237,7 @@
     // load, served synchronously from the in-page cache, written as one blob.
     readProducts: function () { return productsCache; },
     writeProducts: function (json) {
-      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
       productsCache = json;
       try { settle(putJson(apiUrl(base, "kv", "authoring.products"), json), "products"); }
       catch (e) { return { ok: false, quota: false, error: e }; }
@@ -235,7 +249,7 @@
     // decomposed form on its way out). Write decomposes -- see splitLibrary/writeTopic.
     readLibrary: function () { return libraryCache; },
     writeLibrary: function (json) {
-      if (authRequired) { reportFailure(SIGNED_OUT); return { ok: false, quota: false, authRequired: true }; }
+      if (authRequired) { reportSignedOut(true); return { ok: false, quota: false, authRequired: true }; }
       var next, prev = null;
       try { next = JSON.parse(json); } catch (e) { return { ok: false, quota: false, error: e }; }
       try { prev = libraryCache ? JSON.parse(libraryCache) : null; } catch (e) { prev = null; }
@@ -261,7 +275,7 @@
   // Say it once at boot too, not only on the first save attempt: an author who opens a
   // signed-out server sees an empty world, and an empty world is indistinguishable from
   // a fresh one unless something says otherwise.
-  if (authRequired) reportFailure(SIGNED_OUT);
+  if (authRequired) reportSignedOut(false);
 
   // Async API surface for later phases (transport #08, migration #05). Not wired into
   // the sync media facet yet -- that async rework is Phase 2, not this ticket.

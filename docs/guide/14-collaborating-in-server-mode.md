@@ -10,6 +10,11 @@ applies only in server mode.**
   accounts with their own passwords; your IT admin sets which. If the message says the sign-in
   service can't be reached, that isn't your password — wait and try again, or use the local admin
   account link if you have those credentials.
+- **If your session expires while you're working.** A banner appears under the toolbar and a
+  **Not saving** chip sits on the canvas. Your work stays on screen and you can still read and
+  copy it — but nothing you type from that point is being saved, and this tab only keeps it
+  until you reload. Use **Sign in** in the banner: it opens a separate window so this tab keeps
+  your edit, and once you're back the banner confirms saving has resumed.
 - **See who's here.** Avatars of everyone in the course show in the top bar, each in that
   person's colour (the same colour their comments use). A solid ring means they're editing; a
   hollow ring means they're just viewing, and a small flag shows where a colleague is looking.

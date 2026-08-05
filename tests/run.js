@@ -1485,8 +1485,13 @@ section("platform-pivot 34 server-mode bootstrap");
   // --- store-http must fail LOUDLY when signed out, never fall back ---
   var sh = src("src/store-http.js");
   ok("34: store-http reads __versoServerAuthRequired", /__versoServerAuthRequired/.test(sh));
+  // The claim is that a signed-out write REFUSES and SAYS SO -- not which function it says it
+  // through. platform-pivot 38 routed the saying-so into the session banner, so pinning the old
+  // call text would have failed a change that kept the behaviour exactly.
   ok("34: signed-out writes return {ok:false} rather than an optimistic ok",
-    /if \(authRequired\) \{ reportFailure\(SIGNED_OUT\); return \{ ok: false/.test(sh));
+    /if \(authRequired\) \{ reportSignedOut\(true\); return \{ ok: false/.test(sh));
+  ok("34: and every facet's writer carries that same guard",
+    (sh.match(/if \(authRequired\) \{ reportSignedOut\(true\); return \{ ok: false/g) || []).length >= 3);
   ok("34: a 401/403 on a durable write flips the adapter to the signed-out state",
     /r\.status === 401 \|\| r\.status === 403/.test(sh));
 
@@ -2986,6 +2991,93 @@ section("platform-pivot 17/18/20 identity");
     try { idn.close(); } catch (e) {}
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
+})();
+
+// ---- platform-pivot 38: the signed-out state inside the app -------------------
+// The highest-stakes surface in the identity set, because it is the only one whose failure
+// mode is an author typing into a void. The tests that matter are the ratchet (a refusal can
+// never be demoted back to a warning) and the promise the copy makes (this tab keeps your
+// edit, so signing back in must not reload it).
+section("platform-pivot 38 signed-out state");
+(function () {
+  var SS = require(path.join(ROOT, "src/session-state.js")).VersoSession;
+
+  // --- installs only where there is a session to lose ---
+  ok("38: nothing installs locally", SS.shouldInstall({}) === false);
+  ok("38: nor against a local bundled backend", SS.shouldInstall({ __versoServerUrl: "http://x", __versoServerMode: "local" }) === false);
+  ok("38: it installs in server mode", SS.shouldInstall({ __versoServerUrl: "http://x", __versoServerMode: "server" }) === true);
+
+  // --- the state machine ---
+  ok("38: an expiry moves an active session to the warning", SS.nextState("active", "authRequired") === "expired");
+  ok("38: a refused save is its own, sharper state", SS.nextState("expired", "saveRefused") === "refused");
+  // THE RATCHET. A second 401 lands a moment after the refusal; demoting the message back to
+  // "you might lose work" after it already HAS been lost is the one thing this must not do.
+  ok("38: once a save has been refused, a later expiry cannot demote the message",
+    SS.nextState("refused", "authRequired") === "refused");
+  ok("38: signing back in cancels the alarm from either state",
+    SS.nextState("expired", "signedIn") === "restored" && SS.nextState("refused", "signedIn") === "restored");
+  ok("38: and recovery returns to normal, not to the warning", SS.nextState("restored", "dismissRestored") === "active");
+  ok("38: an unknown event changes nothing", SS.nextState("refused", "sneeze") === "refused");
+
+  // --- the copy is the specification ---
+  ok("38: an active session shows nothing at all", SS.viewFor("active") === null);
+  var exp = SS.viewFor("expired");
+  ok("38: the expiry copy is verbatim",
+    exp.title === "Your session expired" &&
+    exp.body === "Nothing you type from here is being saved. Sign in to keep working.");
+  var ref = SS.viewFor("refused");
+  ok("38: the refusal copy is verbatim -- the loss, the window and the action in one line",
+    ref.title === "That change wasn't saved" &&
+    ref.body === "You're signed out, so nothing you type is being saved. This tab keeps your edit until you reload — sign in now to keep it.");
+  var res = SS.viewFor("restored");
+  ok("38: the recovery copy actively says nothing was lost, verbatim",
+    res.title === "Signed back in" &&
+    res.body === "Saving has resumed — nothing from the last few minutes was lost.");
+  ok("38: the three tones are warning / danger / success, in that order of escalation",
+    exp.tone === "warn" && ref.tone === "danger" && res.tone === "success");
+
+  // --- the canvas chip ---
+  ok("38: the chip is on exactly while saving is off",
+    exp.chip === "Not saving" && ref.chip === "Not saving");
+  ok("38: and OFF during recovery, so it cannot contradict the banner beside it", res.chip === null);
+  ok("38: the sign-in action is offered while signed out, and withdrawn once back in",
+    exp.action === "Sign in" && ref.action === "Sign in" && res.action === null);
+
+  // --- what it will and will not do to the canvas ---
+  // Comments are stripped first: this file DESCRIBES what it refuses to do ("no scrim, no
+  // inset overlay"), which is the point of the comment and would otherwise fail its own gate.
+  var css = src("styles/editor/16-session.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok("38: the banner never covers the canvas -- no scrim, no full-viewport inset",
+    !/inset:\s*0/.test(css) && !/scrim/i.test(css) && !/position:\s*fixed;\s*inset/.test(css));
+  ok("38: the chip cannot get in the way of the work", /pointer-events:\s*none/.test(css));
+  // In the layout, not over it -- a fixed banner lands on whatever the stage happens to be
+  // showing at that height, which is how the Files-header collision was found.
+  ok("38: it is a flex child in the shell, not a floating overlay",
+    /flex:\s*0 0 auto/.test(css) && !/position:\s*fixed/.test(css.slice(css.indexOf("#session-banner"), css.indexOf("#session-chip"))));
+  ok("38: and it is inserted before the workspace, so the canvas shifts down rather than being covered",
+    /insertBefore\(banner, ws\)/.test(src("src/session-state.js")));
+  ok("38: semantic role tokens only, never the raw grey ramp", !/var\(--gray-/.test(css));
+  var js = src("src/session-state.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  ok("38: nothing here disables or blanks the canvas",
+    !/pointer-events:\s*none/.test(js) && !/contentEditable\s*=\s*false/.test(js) && !/\.disabled\s*=\s*true/.test(js.replace(/__action\.disabled[^\n]*/g, "")));
+  // The copy promises the tab keeps the edit until reload. A sign-in that reloads would break
+  // that promise in the act of keeping it, so the banner opens a separate window and polls.
+  ok("38: signing back in opens a separate window and does NOT reload this tab",
+    /openWindow/.test(js) && !/location\.reload/.test(js));
+  ok("38: and it tells the storage adapter before it claims saving has resumed",
+    js.indexOf("__versoHttpAuthRestored") < js.indexOf('to("signedIn")'));
+
+  // --- the wiring into store-http ---
+  var sh = src("src/store-http.js");
+  ok("38: store-http reports a REFUSED write as a refusal, not a warning", /reportSignedOut\(true\)/.test(sh));
+  ok("38: and arriving signed-out as an expiry, since nothing has been lost yet", /reportSignedOut\(false\)/.test(sh));
+  ok("38: the adapter stops refusing once the banner has seen a real sign-in",
+    /window\.__versoHttpAuthRestored = function \(\) \{ authRequired = false; \}/.test(sh));
+  ok("38: it is loaded after store-http, which reports into it",
+    src("index.html").indexOf("src/store-http.js") < src("index.html").indexOf("src/session-state.js"));
+  ok("38: its stylesheet is declared, ordered and linked on both pages",
+    /16-session\.css/.test(src("styles/editor/order.json")) &&
+    /16-session\.css/.test(src("index.html")) && /16-session\.css/.test(src("kit.html")));
 })();
 
 // ---- platform-pivot 19: the corporate authentication rungs --------------------
