@@ -5839,6 +5839,15 @@
     // #69: the sanctioned, backup-gated browser->file cutover (never flip the flag by
     // hand). Dep-injectable for the test harness; live path needs the native bridge.
     migrateToFileBackend: migrateToFileBackend,
+    // "Reset Workspace" (persist.js's toolbar button) writes through the storage seam
+    // rather than clearing localStorage keys by hand, so it works the same on the file
+    // and http backends -- where the old hand-clear reset nothing (platform-pivot 07).
+    // The default workspace is the sample course, which is this file's to name.
+    resetWorkspace: function () {
+      var seedRegistry = {};
+      seedRegistry[window.SAMPLE_DOC.meta.code] = window.SAMPLE_DOC;
+      return Store.resetWorkspace({ registry: seedRegistry });
+    },
     // Let sibling pipeline modules (persist.js autosave) surface a save failure
     // in the shared indicator instead of swallowing it (XX).
     reportSaveFailure: function (msg) {

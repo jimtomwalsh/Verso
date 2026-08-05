@@ -129,7 +129,7 @@ function createSyncRoutes(hub, config, resolvePrincipal) {
   var polls = {}; // clientId -> LongPollTransport
   function nameOf(p) { return (p && (p.name || p.email || p.principal)) || null; }
   function lpFor(clientId, principal) {
-    return polls[clientId] || (polls[clientId] = (function () { var t = LongPollTransport(); hub.connect(t, nameOf(principal), principal && principal.role); return t; })());
+    return polls[clientId] || (polls[clientId] = (function () { var t = LongPollTransport(); hub.connect(t, nameOf(principal), principal && principal.role, principal && principal.capabilities); return t; })());
   }
   return {
     dormant: false,
@@ -144,7 +144,7 @@ function createSyncRoutes(hub, config, resolvePrincipal) {
         "Upgrade: websocket\r\nConnection: Upgrade\r\n" +
         "Sec-WebSocket-Accept: " + wsAccept(key) + "\r\n\r\n"
       );
-      hub.connect(WsTransport(socket), nameOf(principal), principal.role);
+      hub.connect(WsTransport(socket), nameOf(principal), principal.role, principal.capabilities);
     },
     // principal is resolved by verso-server (from the same boundary) and passed in; a null
     // principal is rejected before any envelope reaches the hub.

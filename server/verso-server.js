@@ -200,6 +200,10 @@ function capFor(rest, method) {
   if (/^doc\/[^/]+\/comments/.test(rest)) return read ? "view" : "comment";
   if (/^doc\/[^/]+\/links/.test(rest)) return "issueLinks";
   if (/^doc\/[^/]+\/restore/.test(rest)) return "promote"; // admin-only file-checkpoint restore
+  // roles + people (platform-pivot 37): READING them needs manageUsers too. The list is not
+  // secret, but it names every account on the server, and only the person who can change it
+  // has a reason to see it.
+  if (/^(roles|users)(\/|$)/.test(rest)) return "manageUsers";
   return read ? "view" : "edit";
 }
 
@@ -355,6 +359,33 @@ function makeHandler(store, config, blockStore, sync, identity, review, rung) {
       if (!identity.principalCan(principal, cap, scope)) {
         return sendJson(res, 403, { ok: false, error: "not permitted (" + cap + ")", role: principal.role });
       }
+    }
+
+    // --- roles + people (platform-pivot 37) ------------------------------------
+    // The composition surface pp-21 renders. Every route returns the module's own
+    // { ok, error } value rather than translating it: the refusals carry the reason the
+    // panel has to show (which invariant, how many holders), and re-wording them here is
+    // how a UI ends up explaining a rule the server did not actually apply.
+    if (identity && (rest === "roles" || rest.indexOf("roles/") === 0 || rest === "users" || rest.indexOf("users/") === 0)) {
+      var seg = rest.split("/").map(decodeURIComponent);
+      var refuse = function (r) { return sendJson(res, r.ok ? 200 : (/not permitted/.test(r.error || "") ? 403 : 409), r); };
+      if (rest === "roles" && method === "GET") return sendJson(res, 200, identity.listRoles(principal));
+      if (rest === "roles" && method === "POST") return withJsonBody(req, res, function (body) {
+        return refuse(identity.createRole(principal, { name: body.name, capabilities: body.capabilities }));
+      });
+      if (rest === "roles/default" && method === "PUT") return withJsonBody(req, res, function (body) {
+        return refuse(identity.setDefaultRole(principal, body.roleId));
+      });
+      if (seg[0] === "roles" && seg.length === 2 && method === "PATCH") return withJsonBody(req, res, function (body) {
+        return refuse(identity.updateRole(principal, seg[1], { name: body.name, capabilities: body.capabilities }));
+      });
+      if (seg[0] === "roles" && seg.length === 2 && method === "DELETE") return refuse(identity.deleteRole(principal, seg[1]));
+      if (rest === "users" && method === "GET") return sendJson(res, 200, identity.listUsers(principal));
+      if (seg[0] === "users" && seg.length === 3 && seg[2] === "role" && method === "PUT") return withJsonBody(req, res, function (body) {
+        return refuse(identity.assignRole(principal, seg[1], body.roleId, null));
+      });
+      if (seg[0] === "users" && seg.length === 2 && method === "DELETE") return refuse(identity.removeUser(principal, seg[1]));
+      return sendJson(res, 405, { ok: false, error: "method not allowed" });
     }
 
     // --- registry (doc-of-record; blob-level v1) ---
