@@ -214,6 +214,13 @@ In this mode:
   "plain-language"). A span can carry several, and most spans carry none. Selecting a span that has
   an alternate opens its card at the top of the right panel, showing the **base vs the alternate**,
   a status dot, and Edit / Delete.
+- **A classified document says so before you read it.** When a document's classification is
+  anything other than the least restrictive, a banner sits above the prose naming the level. Folded,
+  it still carries the three things you need before sending anything: whether it may leave the
+  organisation, who may read it, and whether it is waiting on a sign-off — plus where the level came
+  from. Open it for the full rule set, with **blocked** and **due** marked on the two rules that
+  stop something. In Read mode it fades rather than disappearing: you still need to know. An
+  unrestricted document shows no banner at all.
 - **The rail switches between Outline and Marks.** One column, two views: **Outline** is how you
   move around the document, **Marks** is the list of everything annotated in it. The Marks tab
   carries its count, so you can see there is something to answer without switching to find out.

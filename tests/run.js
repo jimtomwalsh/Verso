@@ -17289,6 +17289,69 @@ section("uio-F03 scope + inheritance model");
 // uio-S-M05 (SRC-12): "no downstream consequence is visible while writing". Source exists to
 // protect the documents downstream of it, and the one screen where the approved source is
 // maintained said nothing about how exposed it is.
+// uio-S-M06 (2.2b): a restricted PASSAGE says so on the passage (uio-S-C06); a restricted DOCUMENT
+// has to say so before you read a word of it, because "may this leave" is a fact about the whole
+// thing. The Source half of uio-F07's document-level surface.
+section("uio-S-M06 the document says what it is classified as");
+(function () {
+  var C, SD;
+  try { C = require(path.join(ROOT, "src/classification.js")); SD = require(path.join(ROOT, "src/source-doc.js")); }
+  catch (e) { ok("require classification + source-doc", false); return; }
+  var es = src("src/editor/source-stage.js");
+  var css = EDITOR_CSS;
+
+  // It resolves at the DOCUMENT rung of the same ladder, not a second one.
+  ok("it resolves at the document rung of uio-F07's ladder",
+    /E\.resolveScoped\(E\.classificationChain\(spec\), C\.CLASSIFICATION_PROP,\s*\n\s*\{ at: "course", choose: C\.mostRestrictive\(levels\) \}\)/.test(es));
+  ok("the spec is the Product and the document, and nothing below",
+    /var spec = E\.classificationSpec\(\{\s*\n\s*product: \(pid && window\.ProductsStore\) \? window\.ProductsStore\[pid\] : null,\s*\n\s*doc: topic\s*\n\s*\}\);/.test(es));
+  ok("the rule rows come from the SAME shaper the passage card uses", /SD\.restrictionView\(\{ id: "doc", type: "restricted" \}, res, levels, rules\)/.test(es));
+
+  // A banner on every document is wallpaper, and wallpaper is what you stop seeing.
+  ok("an unrestricted document says nothing at all",
+    /if \(rank === floor && rules && rules\.external === C\.EXTERNAL_ALLOWED\) return null;/.test(es));
+  ok("no levels, or nothing resolving, also draws nothing",
+    /if \(!levels\.length\) return null;/.test(es) && /if \(!res\.found\) return null;/.test(es));
+
+  // COLLAPSED IT STILL SPEAKS: a banner you must open to learn you are handling controlled
+  // material is not a banner.
+  ok("the collapsed line carries may-it-leave, who-reads-it, and any sign-off, in that order", (function () {
+    var fn = es.slice(es.indexOf("function classBannerSummary(rules, res)"), es.indexOf("// spec 2d: the Source-stage variant bar"));
+    return /May leave" : "Withheld externally"/.test(fn) &&
+      /readable internally" : "named readers only"/.test(fn) &&
+      /if \(rules\.approverCapability\) bits\.push\("sign-off required"\);/.test(fn);
+  })());
+  ok("an inherited level names where it came from", /if \(res && !res\.overridden && res\.scopeLabel\) bits\.push\("from " \+ res\.scopeLabel\);/.test(es));
+
+  // The two rules that STOP something are tagged, rather than left to be inferred from a sentence.
+  ok("blocked and due are tags on the rules that stop something",
+    /source-classbanner__tag--blocked", "blocked"/.test(es) && /source-classbanner__tag--due", "due"/.test(es));
+  ok("and only on those two rules",
+    /if \(r\.key === "external" && rules\.external !== C\.EXTERNAL_ALLOWED\)/.test(es) &&
+    /if \(r\.key === "approverCapability" && rules\.approverCapability\)/.test(es));
+
+  // Read mode de-emphasises rather than hiding it: a reader still needs to know.
+  ok("Read mode quiets the banner instead of removing it",
+    /\(__sourceMode === "read" \? " is-quiet" : ""\)/.test(es) &&
+    /\.source-classbanner\.is-quiet \{ background: transparent; border-color: var\(--border-subtle\); opacity: 0\.75; \}/.test(css));
+  // The banner reads the mode at BUILD time and a mode change does not rebuild the article, so the
+  // one place that applies the mode to the document's presentation has to apply this too. Caught
+  // in the browser: switching to Read left the banner shouting through a document being read.
+  ok("a mode change re-quiets it without rebuilding the article",
+    /var banner = col && col\.querySelector\("\[data-source-classbanner\]"\);\s*\n\s*if \(banner\) banner\.classList\.toggle\("is-quiet", __sourceMode === "read"\);/.test(es));
+  ok("it never becomes display:none in any mode", !/\.source-classbanner[^{]*\{[^}]*display: none/.test(css));
+
+  // It sits ABOVE everything the document contains, and above the variant bar.
+  ok("it is the first thing in the column, above the variant bar", (function () {
+    var i = es.indexOf('var cbar = buildSourceClassificationBanner(topic)');
+    var j = es.indexOf('var vbar = buildSourceVariantBar(topic)');
+    return i > 0 && j > i;
+  })());
+  ok("View classification routes to the panel that owns the value", /onClick: function \(\) \{ revealSourceProductPanel\(\); \}/.test(es));
+  ok("every tone is a DS token", /\.source-classbanner \{[^}]*border: 1px solid var\(--warning\)/.test(css) &&
+    /\.source-classbanner--danger \{ border-color: var\(--danger\)/.test(css));
+})();
+
 section("uio-S-M05 downstream consequence, visible while writing");
 (function () {
   var es = src("src/editor/source-stage.js");
