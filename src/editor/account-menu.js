@@ -107,7 +107,11 @@
         });
         out.classList.add("account-pop__out");
         pop.appendChild(out);
-      }, { align: "right", cls: "account-pop" });
+        // Left-aligned to the anchor, which is what openChromePop does by default and what
+        // clamps into the viewport. A "right" alignment measures from the window edge, and the
+        // avatar sits beside the wordmark rather than at the far right -- which put the whole
+        // popover off the left of the screen. Caught in the browser, not by the suite.
+      }, { cls: "account-pop" });
     }
 
     // The avatar lives with the presence cluster in the toolbar's right group, so "who is here"

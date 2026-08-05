@@ -10,6 +10,10 @@ applies only in server mode.**
   accounts with their own passwords; your IT admin sets which. If the message says the sign-in
   service can't be reached, that isn't your password — wait and try again, or use the local admin
   account link if you have those credentials.
+- **Which account am I on?** Your initials sit in the top bar; click them for your name, email,
+  role and how you signed in, and to sign out. If you signed in with the **local admin account**
+  — the emergency one — the avatar is outlined in red and the menu says so at the top, so an
+  admin who used it during an outage can see they never signed back out.
 - **If your session expires while you're working.** A banner appears under the toolbar and a
   **Not saving** chip sits on the canvas. Your work stays on screen and you can still read and
   copy it — but nothing you type from that point is being saved, and this tab only keeps it
