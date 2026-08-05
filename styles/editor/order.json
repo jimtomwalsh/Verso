@@ -66,5 +66,9 @@
  {
   "file": "17-admin.css",
   "is": "the people-and-roles admin surface"
+ },
+ {
+  "file": "18-cutover.css",
+  "is": "the move-to-server cutover run"
  }
 ]

@@ -10,6 +10,12 @@ applies only in server mode.**
   accounts with their own passwords; your IT admin sets which. If the message says the sign-in
   service can't be reached, that isn't your password — wait and try again, or use the local admin
   account link if you have those credentials.
+- **Moving your work onto the server (admins only, once).** If your courses are still stored in
+  this browser, a **server** button appears on the left rail. It always makes you **run a
+  rehearsal** first, which proves the whole path — backup, server write, read-back — without
+  moving anything. Only then does it offer the real move. It downloads a backup file: **keep it**,
+  because a browser can't confirm a download reached your disk. If any step stops, nothing is
+  changed and your work stays exactly where it was. Once the move succeeds the button disappears.
 - **Managing people (admins only).** If your role can manage users, a **People** button appears
   on the left rail. It opens a full screen listing everyone on the server — search it, page
   through it, and use a row's **⋯** to change someone's role or remove them. Below the list,

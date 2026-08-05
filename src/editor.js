@@ -6124,7 +6124,11 @@
     // focus return, anchoring and the flip-above-when-there-is-no-room case. A second
     // popover implementation is how two popovers end up dismissing differently.
     openChromePop: openChromePop,
-    closeChromePop: closeChromePop
+    closeChromePop: closeChromePop,
+    // The storage seam itself (platform-pivot 36 needs backend() and the one commitBackend).
+    // Provided rather than re-created: a second createStore() would be a second view of which
+    // backend is live, and the cutover is exactly the moment those two must not disagree.
+    Store: Store
   });
   // doc and selection are REPLACED, not mutated -- a doc swap (setDoc, undo, a collab frame)
   // rebinds `doc` wholesale, and every click rebinds `selection`. They go through getters so a
@@ -6739,6 +6743,7 @@
   window.VersoFiles.install(VE);   // the Files destination: every document, from both stores
   window.VersoAccountMenu.install(VE);   // which account am I signed in as -- server mode only
   window.VersoAdminUsers.install(VE);   // people and roles, for whoever can manage them
+  window.VersoCutover.install(VE);   // the guarded one-way move of this machine's work to the server
   // uio-W04: shell.js needs to mount Files when that destination is entered, and a need() resolves
   // against provide() -- never against another module's expose(). So bind here, provide the
   // forwarder, and the dispatch happens at call time (kernel.js rule 4).

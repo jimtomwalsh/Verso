@@ -1,0 +1,48 @@
+/* 18-cutover.css -- moving this machine's work to the server (platform-pivot 36).
+ *
+ * A MODAL, which the spine reserves for a destructive confirm or a BLOCKING RUN. This is the
+ * second: the engine is synchronous and one-way, and there is nothing useful to do on the
+ * canvas while it runs. Everything else here is layout on the canonical modal shell.
+ *
+ * The stage list is the only new chrome, and it earns its place: the engine already returns
+ * which stage it stopped at, so showing the stages is what turns "it failed" into "it stopped
+ * while writing to the server, and nothing changed".
+ */
+
+.cutover__lede { margin: 0 0 var(--space-6); font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--text-secondary); }
+/* Stated plainly rather than implied by a tick: a browser cannot confirm a download landed. */
+.cutover__keep {
+  margin: 0 0 var(--space-8); padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-md); background: var(--mark-note-wash); border: 1px solid var(--warning);
+  font-size: var(--text-xs); line-height: var(--leading-normal);
+}
+.cutover__stages { list-style: none; margin: 0 0 var(--space-6); padding: 0; }
+.cutover__stage {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) 0; font-size: var(--text-sm); color: var(--text-secondary);
+}
+.cutover__stage::before {
+  content: ""; flex: 0 0 auto; width: 8px; height: 8px; border-radius: var(--radius-full);
+  background: var(--border-strong);
+}
+.cutover__stage--ok { color: var(--text-primary); }
+.cutover__stage--ok::before { background: var(--success); }
+.cutover__stage--failed { color: var(--text-primary); }
+.cutover__stage--failed::before { background: var(--danger); }
+/* A stage that never started reads as unrun, not as passed -- the difference matters when an
+   admin is working out how far it got. */
+.cutover__stage--skipped { color: var(--text-disabled); }
+.cutover__stage--skipped::before { background: transparent; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+
+.cutover__note { margin: 0; font-size: var(--text-sm); line-height: var(--leading-normal); color: var(--text-secondary); }
+.cutover__note--ok { color: var(--text-primary); }
+.cutover__note--fail {
+  padding: var(--space-5) var(--space-6); border-radius: var(--radius-md);
+  background: var(--danger-quiet); border: 1px solid var(--danger); color: var(--text-primary);
+}
+.cutover__log {
+  margin: var(--space-6) 0 0; max-height: 140px; overflow: auto;
+  padding: var(--space-5); border-radius: var(--radius-sm);
+  background: var(--surface-input); border: 1px solid var(--border-subtle);
+  font: var(--type-mono); color: var(--text-tertiary); white-space: pre-wrap;
+}

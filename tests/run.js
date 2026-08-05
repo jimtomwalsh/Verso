@@ -3091,6 +3091,88 @@ section("platform-pivot 17/18/20 identity");
   }
 })();
 
+// ---- platform-pivot 36: the cutover UI -----------------------------------------
+// platform-pivot-33 built and PROVED the engine, then deliberately wired nothing to it. This is
+// the entry point, done once, carefully. The tests that matter are the two refusals: the real
+// cutover is unreachable until a rehearsal has passed, and a failure must read as safe.
+section("platform-pivot 36 cutover UI");
+(function () {
+  var CO = require(path.join(ROOT, "src/editor/cutover.js")).VersoCutover;
+  var js = src("src/editor/cutover.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  // --- offered only where it can do something ---
+  var can = ["view", "edit", "serverConfig"];
+  ok("36: offered to a serverConfig holder on a browser store, with a server to move to",
+    CO.shouldOffer({ serverUrl: "http://s", backend: "browser", capabilities: can }) === true);
+  ok("36: NOT to an ordinary author -- this is admin-only",
+    CO.shouldOffer({ serverUrl: "http://s", backend: "browser", capabilities: ["view", "edit", "publish"] }) === false);
+  ok("36: not once the work already lives on the server",
+    CO.shouldOffer({ serverUrl: "http://s", backend: "http", capabilities: can }) === false);
+  ok("36: and never in a local install, where there is nothing to move to",
+    CO.shouldOffer({ backend: "browser", capabilities: can }) === false);
+
+  // --- the stage marks: what ran, what stopped it, what never started ---
+  var all = CO.stageMarks({ ok: true, stage: "done" });
+  ok("36: a clean run marks every stage", all.length === 6 && all.every(function (m) { return m.state === "ok"; }));
+  ok("36: and the stages are the ENGINE's own names, in its order",
+    all.map(function (m) { return m.id; }).join() === "read,backup,deliver,stash,write,verify");
+  var mid = CO.stageMarks({ ok: false, stage: "stash" });
+  ok("36: a failure marks the stages that ran", mid[0].state === "ok" && mid[1].state === "ok" && mid[2].state === "ok");
+  ok("36: names the one that stopped it", mid[3].state === "failed" && mid[3].id === "stash");
+  // "skipped" and "ok" must look different: an admin working out how far it got needs to tell
+  // a stage that passed from one that never started.
+  ok("36: and shows the rest as never started, not as passed", mid[4].state === "skipped" && mid[5].state === "skipped");
+  ok("36: a first-stage failure marks nothing as passed",
+    CO.stageMarks({ ok: false, stage: "read" }).filter(function (m) { return m.state === "ok"; }).length === 0);
+
+  // --- a refusal reads as safe ---
+  var msg = CO.failMessage({ ok: false, stage: "write", error: "the server said no" });
+  ok("36: the failure copy LEADS with what did not happen",
+    msg.indexOf("Nothing was changed. Your work is still on this machine, exactly as it was.") === 0);
+  ok("36: then names the stage in the author's words, not the engine's id", /writing your work to the server/i.test(msg));
+  ok("36: and passes the server's own reason on", /the server said no/.test(msg));
+  ok("36: a success is not a failure message", CO.failMessage({ ok: true }) === null);
+
+  // --- the two hard rules ---
+  // Two independent guards, and the claim rests on both: the one button asks for a REAL run only
+  // once a rehearsal has passed, and start() refuses one anyway. Stated as behaviour rather than
+  // as a literal handler, because the handler changed once already (see the double-fire note in
+  // cutover.js) and the guarantee did not.
+  ok("36: the real cutover is unreachable until a rehearsal has passed",
+    /if \(real && !dryPassed\) return;/.test(js) && /start\(dryPassed\)/.test(js));
+  ok("36: and the button has exactly ONE click handler, so the two meanings cannot both fire",
+    (js.match(/shell\.primary\.addEventListener\("click"/g) || []).length === 1 && !/onPrimary:/.test(js));
+  ok("36: the first run offered is the rehearsal, and it commits nothing",
+    /primaryLabel: COPY\.dryRun/.test(js) && /run\(!real,/.test(js));
+  ok("36: commitBackend stays the ONE writer of the flag -- this calls it and never touches the key",
+    /E\.Store\.commitBackend\("http"\)/.test(js) && !/setItem\s*\([^)]*authoring\.storageBackend/.test(js));
+  ok("36: and it is only called after a REAL run reports ok",
+    js.indexOf("commitBackend") > js.indexOf("if (!real)"));
+
+  // --- the backup limit is stated, not implied ---
+  ok("36: the screen says a browser cannot confirm the download landed",
+    /cannot confirm a download reached your disk/.test(CO.COPY.keepBackup));
+  ok("36: and it is shown on the run screen, not buried in a log", /cutover__keep/.test(js));
+
+  // --- the surface ---
+  var css = src("styles/editor/18-cutover.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok("36: it is the canonical modal shell, not a bespoke dialog",
+    /kernel\.bind\("dsModalShell"\)/.test(js) && !/position:\s*fixed;\s*inset:\s*0/.test(css));
+  ok("36: semantic role tokens only", !/var\(--gray-/.test(css));
+  ok("36: a skipped stage is visually distinct from a passed one",
+    /\.cutover__stage--skipped/.test(css) && /\.cutover__stage--ok::before/.test(css));
+
+  // --- wiring ---
+  ok("36: the module is installed and loaded on both pages",
+    /window\.VersoCutover\.install\(VE\)/.test(src("src/editor.js")) &&
+    /editor\/cutover\.js/.test(src("index.html")) && /editor\/cutover\.js/.test(src("kit.html")));
+  ok("36: it drives the ENGINE rather than reimplementing the stages",
+    /window\.Migration\.runToServer\(/.test(js) && !/verifyClientBackup|buildClientBackup/.test(js));
+  ok("36: its stylesheet is declared, ordered and linked on both pages",
+    /18-cutover\.css/.test(src("styles/editor/order.json")) &&
+    /18-cutover\.css/.test(src("index.html")) && /18-cutover\.css/.test(src("kit.html")));
+})();
+
 // ---- platform-pivot 21: people and roles ---------------------------------------
 // The rule that shapes every test here: THE SERVER DECIDES, THIS RENDERS. Both guardrail
 // warnings and the never-locked-out refusal are computed by platform-pivot-37 and arrive with
