@@ -27,6 +27,7 @@
   <link rel="stylesheet" href="styles/editor/14-collab.css">   <!-- live-collaboration presence chrome -->
   <link rel="stylesheet" href="styles/editor/15-sign-in.css">   <!-- the server-mode sign-in surface -->
   <link rel="stylesheet" href="styles/editor/16-session.css">   <!-- the signed-out session banner and its canvas chip -->
+  <link rel="stylesheet" href="styles/editor/17-admin.css">   <!-- the people-and-roles admin surface -->
   <!-- arch-P5-02: src/course.css was 2,104 lines. It is styles/course/*.css now, in the order
        declared by styles/course/order.json. The SCORM exporter reads that same list and inlines them
        into one course.css, so the shipped package is byte-identical. No build step. -->
@@ -393,6 +394,8 @@
   <script src="src/editor/files.js"></script>
   <!-- platform-pivot 39 account menu: window.VersoAccountMenu -- the toolbar avatar and its popover, the only place a person can confirm WHICH account they are using. Server mode only; a local install grows no avatar. -->
   <script src="src/editor/account-menu.js"></script>
+  <!-- platform-pivot 21 people + roles: window.VersoAdminUsers -- its own full surface, offered only to a holder of manageUsers (asked for, never read off the page). Server mode only. -->
+  <script src="src/editor/admin-users.js"></script>
   <!-- uio-W12 Product panel: window.VersoProductPanel — what the open document belongs to (product,
        primary source, extras, siblings, release state), in the left panel of Source and Edit. An
        inspector, never a filter. Must precede editor.js, which installs it. -->

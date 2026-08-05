@@ -62,5 +62,9 @@
  {
   "file": "16-session.css",
   "is": "the signed-out session banner and its canvas chip"
+ },
+ {
+  "file": "17-admin.css",
+  "is": "the people-and-roles admin surface"
  }
 ]

@@ -71,6 +71,7 @@ long tail of substrate that three or more surfaces read — `selection`, `world`
 | `storage.js` | 314 | every durable read and write the editor makes. |
 | `backup.js` | 214 | the durable copy on disk. |
 | `home.js` | 379 | the course browser. |
+| `admin-users.js` | 300 | people and roles: the full admin surface, its inline row editor and the capability tick-boxes. Server mode, manageUsers only. |
 | `account-menu.js` | 145 | the toolbar avatar and its popover: which account am I signed in as, and a visible marker when it is the break-glass admin. Server mode only. |
 | `files.js` | 361 | the Files destination: every document from BOTH stores, three groupings, list and cards. Owns the Files view preferences. |
 | `product-panel.js` | 279 | what the open document belongs to: product, primary source, extras, siblings, release state. An inspector in the left panel of Source and Edit — never a filter. |

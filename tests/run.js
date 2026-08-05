@@ -3091,6 +3091,105 @@ section("platform-pivot 17/18/20 identity");
   }
 })();
 
+// ---- platform-pivot 21: people and roles ---------------------------------------
+// The rule that shapes every test here: THE SERVER DECIDES, THIS RENDERS. Both guardrail
+// warnings and the never-locked-out refusal are computed by platform-pivot-37 and arrive with
+// the data. A UI that re-derives them is a UI that will one day explain a rule the server did
+// not apply -- telling an admin their change was fine when it was refused, or the reverse.
+section("platform-pivot 21 people and roles");
+(function () {
+  var AU = require(path.join(ROOT, "src/editor/admin-users.js")).VersoAdminUsers;
+
+  // --- who is offered it: asked for, never assumed ---
+  ok("21: not offered without the capability",
+    AU.shouldOffer({ kind: "user", capabilities: ["view", "edit", "publish"] }) === false);
+  ok("21: offered to a holder of manageUsers",
+    AU.shouldOffer({ kind: "user", capabilities: ["view", "manageUsers"] }) === true);
+  ok("21: never to a guest", AU.shouldOffer({ kind: "guest", capabilities: ["manageUsers"] }) === false);
+  ok("21: never in local mode -- there is no principal at all", AU.shouldOffer(null) === false);
+  var js = src("src/editor/admin-users.js").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  ok("21: the capability is fetched from /auth/me, not read off the page",
+    /\/auth\/me/.test(js) && !/__versoServerPrincipal[\s\S]{0,40}capabilit/.test(js));
+
+  // --- the empty state explains rather than showing a table of one ---
+  var solo = [{ id: "u1", name: "Boss", email: "b@x", role: "Admin" }];
+  ok("21: only the installing admin -> the empty state", AU.isEmptyState(solo, "u1") === true);
+  ok("21: the break-glass account does not count as company", AU.isEmptyState(solo.concat([{ id: "u0", name: "BG", breakGlass: true }]), "u1") === true);
+  ok("21: a second real person ends it", AU.isEmptyState(solo.concat([{ id: "u2", name: "Ada" }]), "u1") === false);
+  ok("21: and the empty copy is verbatim",
+    AU.COPY.emptyTitle === "You're the only account so far" &&
+    AU.COPY.emptyBody === "Add the people who'll be authoring alongside you.");
+
+  // --- at scale: search, count, pagination ---
+  var many = [];
+  for (var i = 0; i < 240; i++) many.push({ id: "u" + i, name: "Person " + i, email: "p" + i + "@x.invalid", role: i % 3 ? "Author" : "Reviewer" });
+  ok("21: search matches name, email or role",
+    AU.filterPeople(many, "Person 7").length >= 1 &&
+    AU.filterPeople(many, "p12@").length === 1 &&
+    AU.filterPeople(many, "reviewer").length === 80);
+  ok("21: an empty query is everyone", AU.filterPeople(many, "  ").length === 240);
+  var pg = AU.paginate(many, 1);
+  ok("21: the list paginates and reports the true total", pg.rows.length === AU.PAGE_SIZE && pg.total === 240 && pg.pages === 10);
+  ok("21: a page beyond the end clamps rather than showing nothing", AU.paginate(many, 99).page === 10);
+  ok("21: and so does a page before the start", AU.paginate(many, 0).page === 1);
+  ok("21: one short page is still one page", AU.paginate(many.slice(0, 3), 1).pages === 1);
+
+  // --- guests are shown, never as rows ---
+  ok("21: the guest line is verbatim",
+    AU.COPY.guests === "Guests hold a link, not an account — they can view and comment on one document each.");
+  ok("21: and they are a note, not a row in the people list",
+    /verso-admin__guests/.test(js) && !/guests[\s\S]{0,200}personRow/.test(js));
+
+  // --- the refusal comes FROM the server ---
+  var refusal = AU.refusalFor({ ok: false, invariant: "lastCapabilityHolder", error: "..." }, "Ada Lovelace");
+  ok("21: the last-holder refusal renders, with its title verbatim", refusal.title === "Someone must be able to manage this server");
+  ok("21: the body is capability-first and names the person, verbatim",
+    refusal.body === "Ada Lovelace is the only person who can manage users and server configuration. At least one must remain, so nobody is ever locked out of sign-in, users, and configuration. Nothing was changed.");
+  ok("21: it confirms nothing changed, and names the way out",
+    /Nothing was changed\./.test(refusal.body) &&
+    refusal.wayOut === "To change this person's role, first give someone else a role that can manage users and server configuration.");
+  ok("21: it never names a role TITLE, which a rename would falsify", !/admin/i.test(refusal.title + refusal.body + refusal.wayOut));
+  ok("21: an ordinary error is NOT dressed up as the invariant",
+    AU.refusalFor({ ok: false, error: "this role still has 2 people in it" }, "X") === null);
+  ok("21: and a success is not a refusal", AU.refusalFor({ ok: true }, "X") === null);
+  ok("21: the UI does not re-derive the invariant -- it reads what the server sent",
+    /res\.invariant !== "lastCapabilityHolder"/.test(js) &&
+    !/manageUsers[\s\S]{0,80}serverConfig[\s\S]{0,80}(filter|every|length)/.test(js));
+
+  // --- the warnings are rendered, not computed ---
+  ok("21: guardrail warnings are read off the role the server returned",
+    /\(r\.warnings \|\| \[\]\)\.forEach/.test(js) && !/serverConfigSpread/.test(js) && !/can't do anything yet/.test(js));
+
+  // --- titles are data ---
+  ok("21: no seeded role title is hard-coded anywhere in the surface",
+    !/"admin"|"author"|"reviewer"|"viewer"/i.test(js.replace(/manageUsers|serverConfig/g, "")));
+  ok("21: the capability tick-boxes come from the server's vocabulary",
+    /state\.caps\.forEach/.test(js) && /capabilities: list/.test(js));
+
+  // --- it is a place you go, not a decision you answer ---
+  var css = src("styles/editor/17-admin.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  ok("21: a full surface -- and NOT a modal: no scrim", /position:\s*fixed;\s*inset:\s*0/.test(css) && !/scrim/.test(css));
+  ok("21: it is not a right-docked sheet either", !/--panel-sheet-width/.test(css));
+  ok("21: semantic role tokens only", !/var\(--gray-/.test(css));
+  ok("21: every control is canonical -- no hand-rolled button, input, select or checkbox",
+    /UI\(\)\.Button\(/.test(js) && /UI\(\)\.TextField\(/.test(js) && /UI\(\)\.Select\(/.test(js) && /UI\(\)\.Checkbox\(/.test(js) &&
+    !/<button|createElement\("button"\)/.test(js));
+  ok("21: a rename commits on blur, not per keystroke",
+    /addEventListener\("blur"/.test(js) && !/onChange: function \(v\) \{ [\s\S]{0,40}PATCH/.test(js));
+  ok("21: removal is a destructive confirm, which is what the spine reserves a modal for",
+    /danger: true, okLabel: "Remove"/.test(js));
+
+  // --- wiring ---
+  ok("21: it needs `h` through provide, and reaches the modals through bind",
+    /kernel\.need\("h"\)/.test(js) && /kernel\.bind\("confirmModal"\)/.test(js) && /kernel\.bind\("promptModal"\)/.test(js));
+  ok("21: installed, and loaded on both pages",
+    /window\.VersoAdminUsers\.install\(VE\)/.test(src("src/editor.js")) &&
+    /editor\/admin-users\.js/.test(src("index.html")) && /editor\/admin-users\.js/.test(src("kit.html")));
+  ok("21: its stylesheet is declared, ordered and linked on both pages",
+    /17-admin\.css/.test(src("styles/editor/order.json")) &&
+    /17-admin\.css/.test(src("index.html")) && /17-admin\.css/.test(src("kit.html")));
+})();
+
 // ---- platform-pivot 39: the account menu + break-glass marking -----------------
 // Small surface, one job: it is the only place a person can confirm WHICH account they are
 // using. The case it exists for is an IT admin who signed in on the emergency account during

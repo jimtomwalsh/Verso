@@ -10,6 +10,13 @@ applies only in server mode.**
   accounts with their own passwords; your IT admin sets which. If the message says the sign-in
   service can't be reached, that isn't your password — wait and try again, or use the local admin
   account link if you have those credentials.
+- **Managing people (admins only).** If your role can manage users, a **People** button appears
+  on the left rail. It opens a full screen listing everyone on the server — search it, page
+  through it, and use a row's **⋯** to change someone's role or remove them. Below the list,
+  **Roles** is where you name your own roles and tick which capabilities each one holds; renaming
+  a role changes nothing about what it can do. Verso refuses any change that would leave nobody
+  able to manage users and server configuration, and tells you so without changing anything.
+  Guests aren't listed — they hold a link, not an account.
 - **Which account am I on?** Your initials sit in the top bar; click them for your name, email,
   role and how you signed in, and to sign out. If you signed in with the **local admin account**
   — the emergency one — the avatar is outlined in red and the menu says so at the top, so an

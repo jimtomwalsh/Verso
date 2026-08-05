@@ -6738,6 +6738,7 @@
   });
   window.VersoFiles.install(VE);   // the Files destination: every document, from both stores
   window.VersoAccountMenu.install(VE);   // which account am I signed in as -- server mode only
+  window.VersoAdminUsers.install(VE);   // people and roles, for whoever can manage them
   // uio-W04: shell.js needs to mount Files when that destination is entered, and a need() resolves
   // against provide() -- never against another module's expose(). So bind here, provide the
   // forwarder, and the dispatch happens at call time (kernel.js rule 4).
