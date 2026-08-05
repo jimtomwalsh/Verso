@@ -163,9 +163,19 @@ document** — like the manual it came from. Open a topic and click **Switch to 
 
 In this mode:
 
-- **The source is locked by default.** The signed-off prose is protected — a bar docked at the
-  bottom-centre shows a padlock; click it to **unlock** and edit the base text, click again to
-  lock. Trying to type while locked shows a brief reminder instead of changing anything.
+- **Three modes: Read, Review, Edit.** The switch sits in the top bar, beside the document's other
+  controls, and a chip next to it names what the mode locks.
+  - **Read** — the document as it reads. Marks hidden, prose locked.
+  - **Review** — annotate freely; the base prose stays locked. This is where a document opens.
+  - **Edit** — the signed-off prose is editable. The chip turns red, because this is the only mode
+    that puts approved wording at risk.
+
+  Leaving Edit locks the prose, with everything that involves: if your edit changed wording other
+  documents link to, you get the same warning you always did. Trying to type while locked shows a
+  brief reminder instead of changing anything. Clicking a mark while reading moves you to Review,
+  since a mark you cannot see is not much use. Verso remembers the mode between sessions, but never
+  reopens a document in Edit — coming back to unlocked prose you did not mean to unlock is a way to
+  lose work, not a convenience.
 - **You can always annotate, even when locked.** Select any text and a small toolbar appears above
   it. **Add an alternate** (another way to say the same thing, for a particular course or
   audience), **Comment**, or **Mark as restricted** — all three are available whether or not the

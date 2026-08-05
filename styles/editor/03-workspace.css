@@ -63,6 +63,14 @@
 .editor-window__sep { flex: 0 0 auto; width: 1px; align-self: center; height: 22px; background: var(--border-subtle); margin: 0 4px; }
 .editor-window__spacer { flex: 1 1 auto; }
 .editor-window__axes { display: flex; align-items: center; gap: 4px; }
+/* uio-S-M01: Source's three modes and the chip that names what each one locks. Zone 2 holds a
+   document's own live switches, so the mode sits beside the variant axes. Source only — the whole
+   zone is hidden on the other stages by .toolbar--source. */
+.editor-window__srcmode { display: none; align-items: center; gap: var(--space-2, 4px); }
+.toolbar--source .editor-window__srcmode { display: flex; }
+/* The chip is a read-only status fact, so it is the canonical quiet Badge — no bespoke chip. This
+   only stops it wrapping in a bar that is 40px tall. */
+.editor-window__srcmode .vds-badge { flex: 0 0 auto; white-space: nowrap; }
 /* SPEC 7 matrix-cell chip: shows geometry . interactivity; opens the cell menu. */
 .editor-window__cell {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;

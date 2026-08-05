@@ -17253,6 +17253,69 @@ section("uio-F03 scope + inheritance model");
 // uio-OVL-11/12/16 (GH #201). The overhaul plan recorded these three as "absorbed by uio-F01".
 // Building uio-O-W1 checked that against the code and none of them were; this is the ticket that
 // actually closes them, and the ratchets below are what stop each from coming back.
+// uio-S-M01 (SRC-04/14): Source had two independent booleans — prose-unlocked and marks-shown —
+// which between them describe four states, one of which is a trap: editing the signed-off prose
+// with the annotations hidden. Naming the three real modes removes it by construction, and moves
+// the control off a pill floating over the prose into the top bar where a document's other live
+// switches already are.
+section("uio-S-M01 three modes, one source of truth");
+(function () {
+  var es = src("src/editor/source-stage.js");
+  var sl = src("src/editor/source-link.js");
+  var css = EDITOR_CSS;
+  var html = src("index.html");
+
+  ok("three modes, named", /var SOURCE_MODES = \["read", "review", "edit"\];/.test(es));
+  // The two booleans stay as the names ~40 call sites use, but they are DERIVED — nothing outside
+  // setSourceMode/restoreSourceMode may assign them, or the trap comes back.
+  ok("marks-shown is derived from the mode, never set independently", (function () {
+    var assigns = (es.match(/__sourceShowMarks = /g) || []).length;
+    return /__sourceShowMarks = next !== "read";/.test(es) && /__sourceShowMarks = v !== "read";/.test(es) &&
+      /__sourceShowMarks = true;/.test(es) && assigns === 4;   // the declaration + the three in setSourceMode / restoreSourceMode / doc-switch
+  })());
+  ok("the impossible pairing is unreachable: no path sets unlocked with marks hidden",
+    !/__sourceUnlocked = true[\s\S]{0,200}__sourceShowMarks = false/.test(es));
+  ok("each mode states what it locks, in the author's words", (function () {
+    return /read:\s*\{ label: "Read",\s*chip: "Reading — marks hidden"/.test(es) &&
+      /review: \{ label: "Review", chip: "Prose locked · marks live"/.test(es) &&
+      /edit:\s*\{ label: "Edit",\s*chip: "Prose unlocked",\s*tone: "danger"/.test(es);
+  })());
+  ok("a mode change announces itself", /if \(!opts\.silent && was !== next\) sourceToast\(SOURCE_MODE_META\[next\]\.toast\);/.test(es));
+
+  // Leaving Edit is still a LOCK, with everything a lock does — the linked-passage impact warning
+  // and the History commit collapse. So the mode lands in the callback, not before.
+  ok("leaving Edit runs the full lock path and lands the mode only once it completes",
+    /if \(was === "edit"\) \{[\s\S]{0,400}setSourceUnlocked\(false, \{ onLocked: land \}\);/.test(es) &&
+    /if \(typeof opts\.onLocked === "function"\) opts\.onLocked\(\);/.test(sl));
+  // Cancelling the impact modal REVERTS and locks, so the mode has to land there too — otherwise
+  // the switch reads Edit over a document that is no longer editable.
+  ok("cancelling the impact modal also lands the mode, because a revert also locks",
+    /revertSourceEditSession\(topic\); if \(typeof opts\.onLocked === "function"\) opts\.onLocked\(\);/.test(sl));
+
+  // Edit is not a preference. Coming back to a document with its signed-off prose already
+  // unlocked is a hazard, not a restored view.
+  ok("the mode persists, but Edit never survives a reload",
+    /if \(SOURCE_MODES\.indexOf\(v\) === -1 \|\| v === "edit"\) v = "review";/.test(es));
+  ok("switching document drops out of Edit", /__sourceUnlocked = false; __sourceMode = "review"; __sourceShowMarks = true;/.test(es));
+
+  // The control moved OFF the floating pill and into zone 2, where a document's other live
+  // switches are. The pill keeps verbs; it stops carrying statements about what the document is.
+  ok("the switch lives in the top bar's document zone", /<div class="editor-window__srcmode" id="source-mode-switch"><\/div>/.test(html) &&
+    /var host = document\.getElementById\("source-mode-switch"\); if \(!host\) return;/.test(es));
+  ok("it is the canonical SegmentedControl, not a hand-rolled set of buttons",
+    /U\.SegmentedControl\(\{\s*\n?\s*size: "sm",\s*\n?\s*options: SOURCE_MODES\.map/.test(es));
+  ok("the zone is Source-only", /\.toolbar--source \.editor-window__srcmode \{ display: flex; \}/.test(css) &&
+    /\.editor-window__srcmode \{ display: none;/.test(css));
+  // The chip is a read-only status FACT, and the spine draws facts as the canonical quiet Badge —
+  // never a bespoke chip. Only Edit takes a non-neutral tone; a colour on all three says nothing.
+  ok("the chip is the canonical quiet Badge, not a bespoke chip",
+    /U\.Badge\(\{ tone: meta\.tone, size: "sm", quiet: true, children: meta\.chip \}\)/.test(es) &&
+    !/srcmode__chip--/.test(es + css));
+  ok("only Edit takes a non-neutral tone", /read:\s*\{ label: "Read",[^}]*tone: "neutral"/.test(es) &&
+    /review: \{ label: "Review",[^}]*tone: "neutral"/.test(es) && /edit:\s*\{ label: "Edit",[^}]*tone: "danger"/.test(es));
+  ok("nothing is open means no mode to be in", /if \(!activeSourceMaster\(\)\) return;\s*\n\s*\/\/ nothing open: no mode to be in|if \(!activeSourceMaster\(\)\) return;   \/\/ nothing open: no mode to be in/.test(es));
+})();
+
 section("uio-OVL-11/12/16 overlay vocabulary (GH #201)");
 (function () {
   var ep = src("src/editor/inspector/primitives.js");
@@ -19423,7 +19486,7 @@ section("SPEC 8: source-link 09 — base-edit warning + fork");
 
   var e = src("src/editor.js");
   ok("the warning fires at LOCK (unlock snapshots, lock computes impact + shows the modal)", /snapshotSourceLinkBase\(\); \/\/ 09[\s\S]{0,400}var impact = sourceBaseEditImpact\(\);\s*if \(impact\.affected\.length && window\.VersoUI[\s\S]{0,80}showSourceBaseEditModal\(topic, impact, opts\); return; \}/.test(es));
-  ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]{0,500}onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(SL) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(SL));
+  ok("the modal offers Update all (primary) / Keep as-is fork (extra) / Cancel edit (revert)", /primaryLabel: "Update all"[\s\S]{0,120}cancelLabel: "Cancel edit"[\s\S]*onClose: function \(\) \{ if \(resolved\) return; revertSourceEditSession\(topic\)/.test(SL) && /label: "Keep as-is \(fork\)", onClick[\s\S]{0,80}forkAffectedToAlternate\(impact\)/.test(SL));
   ok("fork freezes each edited mark's OLD wording as an alternate + pins every affected location", /function forkAffectedToAlternate\(impact\)[\s\S]{0,600}alt: oldText, tag: "Frozen"[\s\S]{0,120}applyAltToLocation\(reg, loc, alt\.id\)[\s\S]{0,200}saveRegistry\(reg\)/.test(SL));
   ok("cancel reverts the model to the pre-edit snapshot", /function revertSourceEditSession\(topic\)[\s\S]{0,200}SD\.fromJSON\(__sourcePreEditModelJson\)/.test(SL));
 })();
@@ -20110,8 +20173,14 @@ section("Source rewrite: lock-toolbars wiring (Epic 2b)");
   ok("a Backspace/Delete at a block boundary merges paragraphs through replaceRange", /back && caretOff === 0 && idx > 0[\s\S]{0,240}SD\.replaceRange\(model, \{ nodeKey: prev\.key/.test(es));
 
   // doc-level bar (bottom-centre): lock + marks only
-  ok("doc-bar has a lock toggle (glyph swaps lock/lock-open) via the DS IconButton", /icon: __sourceUnlocked \? "lock-open" : "lock"/.test(es));
-  ok("doc-bar has a marks show/hide toggle (eye/eye-off)", /icon: __sourceShowMarks \? "eye" : "eye-off"/.test(es));
+  // uio-S-M01 RETIRED both from this bar. They were the two halves of the MODE, drawn as separate
+  // switches floating over the prose, and between them they could reach a state the three named
+  // modes make unreachable (editing the base with the marks hidden). The bar keeps insert verbs
+  // and the panel toggle; the mode is one control in the top bar.
+  ok("the doc-bar no longer carries the lock or the marks eye", !/icon: __sourceUnlocked \? "lock-open" : "lock"/.test(es) &&
+    !/icon: __sourceShowMarks \? "eye" : "eye-off"/.test(es));
+  ok("the bar still carries the insert verbs and the panel toggle", /label: "Insert an image after the current block"/.test(es) &&
+    /label: "Insert a table after the current block"/.test(es) && /label: __sourceInfoOpen \? "Hide the details panel"/.test(es));
 
   // contextual selection bar: rich-text unlocked-only; alternate + comment always; NO create-link
   ok("selection bar shows rich-text controls only when unlocked", /\.source-selbar__rt"\)\.forEach\(function \(b\) \{ b\.style\.display = __sourceUnlocked \? "" : "none"; \}\)/.test(es));
@@ -20332,7 +20401,10 @@ section("Source rewrite: History timeline (hybrid granularity, Epic 2b)");
   ok("prose edits buffer per unlock->lock cycle (recordSourceEdit on the input path)", /recordSourceEdit\(res && res\.edit\)/.test(es) && /function beginSourceEditSession\(\) \{ __sourceEditSession = \{ edits: \[\] \}; \}/.test(es));
   ok("locking flushes the buffer into ONE commit entry via summarizeEdits", /function flushSourceEditSession\(topic, opts\)[\s\S]{0,400}SD\.summarizeEdits\(s\.edits\)/.test(es) && /type: "commit", charsAdded:/.test(es));
   ok("the commit why-note is optional + skippable (Skip / Escape still commits)", /function sourceCommitNoteModal\(onCommit\)[\s\S]{0,700}onClose: function \(\) \{ if \(done\) return; done = true; onCommit\(""\); \}/.test(es));
-  ok("the lock toggle routes through one begin/flush entry point (setSourceUnlocked)", /function setSourceUnlocked\(v, opts\)/.test(es) && /onClick: function \(\) \{ setSourceUnlocked\(!__sourceUnlocked\); \}/.test(es));
+  // Still ONE begin/flush entry point; uio-S-M01 only changed who calls it — the mode switch
+  // rather than a lock toggle. Leaving Edit for either locked mode runs the same lock path.
+  ok("the lock still routes through one begin/flush entry point (setSourceUnlocked)", /function setSourceUnlocked\(v, opts\)/.test(es) &&
+    /setSourceUnlocked\(false, \{ onLocked: land \}\);/.test(es) && /if \(next === "edit"\) \{ setSourceUnlocked\(true\); land\(\); return; \}/.test(es));
   ok("creating an alternate logs a discrete alternate-created entry", /type: "alternate-created", markId: mk\.id/.test(es));
   ok("the timeline MERGES import events (topic.history) with doc events (model.history)", /var imports = \(topic\.history \|\| \[\]\)\.map/.test(es) && /historyEntryView\(e\)/.test(es) && /var rows = imports\.concat\(docRows\)/.test(es));
   ok("the merged rows sort newest-first across both streams", /rows\.sort\(function \(a, b\) \{ return \(b\.ts \|\| 0\) - \(a\.ts \|\| 0\); \}\)/.test(es));
